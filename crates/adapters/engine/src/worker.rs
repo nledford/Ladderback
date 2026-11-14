@@ -394,9 +394,10 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
 }
 
 /// How long a backup stopped while it archives, by SIGTERM or by its
-/// deadline, may wind down before the worker exits anyway. The daemon's
-/// grace period (10 s by default) ends it sooner; this bounds a worker whose
-/// daemon is gone.
+/// deadline, may wind down before the worker exits anyway. This bounds a
+/// worker whose daemon is gone; the daemon's grace period (`STOP_GRACE`,
+/// 35 s) is longer, so a stopped worker ends here, not on the daemon's
+/// SIGKILL (decision 50).
 pub(crate) const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
 
 /// How long the worker waits for a line being written before it ends the

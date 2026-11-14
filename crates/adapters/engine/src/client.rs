@@ -67,7 +67,9 @@ pub(crate) const MAX_CACHE_SLOTS: u32 = 64;
 /// it.
 ///
 /// Stopping a job sends SIGTERM to the worker alone and, after a grace
-/// period, SIGKILL to the group. While the stop waits, what the worker still
+/// period ([`STOP_GRACE`] unless [`WorkerEngine::with_stop_grace`] says
+/// otherwise), SIGKILL to the group. [`Workers::stop`] stops every job so
+/// when the daemon stops. While the stop waits, what the worker still
 /// writes is read and dropped, so a backup winding down is never held by a
 /// full event pipe. Dropping a [`RunningJob`] before its result kills the
 /// worker at once; after the result, the worker gets a grace period to
@@ -96,7 +98,16 @@ pub struct WorkerEngine {
     start_timeout: Duration,
     exit_timeout: Duration,
     slots: Arc<CacheSlots>,
+    /// Whether the daemon is stopping; each running job holds a receiver
+    /// until its worker has exited.
+    stopping: Arc<watch::Sender<bool>>,
 }
+
+/// How long a stopped worker gets between SIGTERM and SIGKILL, unless
+/// [`WorkerEngine::with_stop_grace`] says otherwise: past the worker's own
+/// wind-down limit, so a backup stopped while it archives can save the
+/// index of the packs it wrote (decisions 50 and 55, #321).
+pub const STOP_GRACE: Duration = Duration::from_secs(35);
 
 impl WorkerEngine {
     pub fn new(
@@ -108,11 +119,12 @@ impl WorkerEngine {
             args: args.into_iter().map(Into::into).collect(),
             environment: None,
             cache_root: None,
-            stop_grace: Duration::from_secs(10),
+            stop_grace: STOP_GRACE,
             watchdog_interval: Duration::from_secs(5),
             start_timeout: START_TIMEOUT,
             exit_timeout: EXIT_TIMEOUT,
             slots: Arc::new(CacheSlots::default()),
+            stopping: Arc::new(watch::channel(false).0),
         }
     }
 
@@ -125,7 +137,8 @@ impl WorkerEngine {
         self
     }
 
-    /// How long [`JobControl::stop`] waits after SIGTERM before SIGKILL.
+    /// How long [`JobControl::stop`] and [`Workers::stop`] wait after SIGTERM
+    /// before SIGKILL: [`STOP_GRACE`] unless this says otherwise.
     #[must_use]
     pub fn with_stop_grace(mut self, grace: Duration) -> Self {
         self.stop_grace = grace;
@@ -211,25 +224,51 @@ impl WorkerEngine {
 /// The workers of one [`WorkerEngine`], which the daemon stops when it
 /// stops.
 #[derive(Clone, Debug)]
-pub struct Workers {}
+pub struct Workers {
+    stopping: Arc<watch::Sender<bool>>,
+}
 
 impl WorkerEngine {
     /// The handle that stops every worker this engine runs.
     pub fn workers(&self) -> Workers {
-        todo!()
+        Workers {
+            stopping: Arc::clone(&self.stopping),
+        }
     }
 }
 
 impl Workers {
-    /// Stops every worker running, and returns once each has exited.
-    pub async fn stop(&self) {
-        todo!()
+    /// Stops every worker running as [`JobControl::stop`] stops one, SIGTERM
+    /// and SIGKILL after the grace, and returns once each has exited. The
+    /// stop is asked for at the call, not when the answer is first polled,
+    /// so the daemon can let go of the jobs straight after and a worker let
+    /// go of so still gets its SIGTERM and its grace. The events of a job
+    /// stopped so never end: what runs it ends with the daemon, and records
+    /// no end (decision 92). A job asked for from then on is never started
+    /// nor answered: nothing would be left to stop it.
+    pub fn stop(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.stopping.send_replace(true);
+        let stopping = Arc::clone(&self.stopping);
+        async move { stopping.closed().await }
     }
 }
 
 #[async_trait]
 impl Engine for WorkerEngine {
     async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+        // Held until the worker has exited, so a stop of the workers waits
+        // for it; taken before anything starts, so a stop asked for meanwhile
+        // reaches it.
+        let stopping = self.stopping.subscribe();
+        if *stopping.borrow() {
+            // No worker, which nothing would be left to stop, and no answer:
+            // a refusal would end the operation, announce it and run its
+            // hooks, where the daemon's stop records it and announces nothing
+            // (decision 92). The run ends with the daemon, and keeps no stop
+            // of the workers waiting.
+            drop(stopping);
+            return std::future::pending().await;
+        }
         let slot = match (&self.cache_root, repository_id(&job)) {
             (Some(root), Some(id)) => {
                 let (slots, root, id) = (Arc::clone(&self.slots), root.clone(), id.clone());
@@ -326,11 +365,22 @@ impl Engine for WorkerEngine {
 
         let (commands, command_rx) = mpsc::unbounded_channel();
         let (exited_tx, exited) = watch::channel(None);
+        let stopped = Arc::new(AtomicBool::new(false));
+        let daemon_stopped = Arc::new(AtomicBool::new(false));
+        let pipe = EventPipe {
+            stdout: Arc::new(Mutex::new(stdout)),
+            stopped: Arc::clone(&stopped),
+        };
         tokio::spawn(supervise(
             child,
             command_rx,
             exited_tx,
             self.stop_grace,
+            DaemonStop {
+                asked: stopping,
+                pipe: ForStop(pipe.clone()),
+                stopped: Arc::clone(&daemon_stopped),
+            },
             slot,
         ));
         tokio::spawn(forward_stderr(
@@ -338,17 +388,13 @@ impl Engine for WorkerEngine {
             exited.clone(),
             redactor.clone(),
         ));
-        let stopped = Arc::new(AtomicBool::new(false));
-        let pipe = EventPipe {
-            stdout: Arc::new(Mutex::new(stdout)),
-            stopped: Arc::clone(&stopped),
-        };
         let reading = Reading {
             stdout: BufReader::new(ForEvents(pipe.clone())),
             line: Vec::new(),
             exited: exited.clone(),
             commands: commands.clone(),
             stopped: Arc::clone(&stopped),
+            daemon_stopped,
             done: false,
             drain_until: None,
             redactor,
@@ -388,12 +434,22 @@ enum Order {
 /// The exit code of a worker that ended: `None` when a signal ended it.
 type Exited = Option<Option<i32>>;
 
+/// What a job needs to be stopped with the daemon's workers: whether that
+/// was asked for, which it holds until its worker has exited, the worker's
+/// stdout, and what tells the job's events that the daemon stopped it.
+struct DaemonStop {
+    asked: watch::Receiver<bool>,
+    pipe: ForStop,
+    stopped: Arc<AtomicBool>,
+}
+
 /// Owns the worker process, and the cache slot it uses, until it exits.
 async fn supervise(
     mut child: Child,
     commands: mpsc::UnboundedReceiver<Order>,
     exited: watch::Sender<Exited>,
     grace: Duration,
+    mut daemon_stop: DaemonStop,
     _slot: Option<CacheSlot>,
 ) {
     let mut commands = Some(commands);
@@ -412,6 +468,11 @@ async fn supervise(
             }
         };
         tokio::select! {
+            // In this order: a stop of the daemon's workers wins over the job
+            // let go of in the same instant, as the daemon's stop lets go of
+            // every run once it has asked, so the worker still gets its
+            // SIGTERM and its grace rather than being killed.
+            biased;
             exit = &mut gone, if unreaped_exit => match exit {
                 WorkerExit::Unreaped => break reap(&mut child, leader, true).await,
                 WorkerExit::Reaped => break reap(&mut child, leader, false).await,
@@ -420,6 +481,11 @@ async fn supervise(
             status = child.wait(), if !unreaped_exit => {
                 signal_group(leader, Signal::Kill);
                 break status;
+            }
+            () = stop_asked(&mut daemon_stop.asked) => {
+                // Before the events end, so they see who ended them.
+                daemon_stop.stopped.store(true, Ordering::SeqCst);
+                break terminate_draining(&mut child, grace, &mut daemon_stop.pipe).await;
             }
             command = next_command(&mut commands) => match command {
                 Some(Order::Stop) => break terminate(&mut child, grace).await,
@@ -442,6 +508,35 @@ async fn next_command(commands: &mut Option<mpsc::UnboundedReceiver<Order>>) -> 
     match commands {
         Some(commands) => commands.recv().await,
         None => std::future::pending().await,
+    }
+}
+
+/// Returns once the daemon is stopping; never when no one can stop it.
+async fn stop_asked(stopping: &mut watch::Receiver<bool>) {
+    if stopping.wait_for(|stop| *stop).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// Stops the worker as [`Control::stop`] does, for the daemon's stop of its
+/// workers: the job's events end here, and what the worker writes until it
+/// exits is read and dropped while [`terminate`] waits, so a backup winding
+/// down is never held by a full pipe.
+async fn terminate_draining(
+    child: &mut Child,
+    grace: Duration,
+    pipe: &mut ForStop,
+) -> std::io::Result<std::process::ExitStatus> {
+    pipe.0.stopped.store(true, Ordering::SeqCst);
+    let ended = terminate(child, grace);
+    tokio::pin!(ended);
+    let mut dropped = tokio::io::sink();
+    tokio::select! {
+        biased;
+        status = &mut ended => status,
+        // A pipe that ends or fails first leaves the wait for the exit,
+        // which the grace bounds.
+        _ = tokio::io::copy(pipe, &mut dropped) => ended.await,
     }
 }
 
@@ -726,6 +821,9 @@ struct Reading {
     exited: watch::Receiver<Exited>,
     commands: mpsc::UnboundedSender<Order>,
     stopped: Arc<AtomicBool>,
+    /// Whether the daemon's stop of its workers stopped the job, not its
+    /// control.
+    daemon_stopped: Arc<AtomicBool>,
     done: bool,
     /// When the output of a worker that has exited is no longer waited for.
     drain_until: Option<tokio::time::Instant>,
@@ -849,7 +947,7 @@ impl Reading {
             self.line.clear();
             let read = self.read_next_line().await;
             if self.stopped.load(Ordering::SeqCst) {
-                return None;
+                return self.stopped_end().await;
             }
             match read {
                 Ok(Line::Complete) => self.first_line_by = None,
@@ -952,6 +1050,19 @@ impl Reading {
         }
     }
 
+    /// The end of the events of a job that was stopped. A cancel ends them
+    /// without a failure, as ever. The daemon's stop of its workers never
+    /// ends them: it comes once the operation log has closed, and what runs
+    /// the job, which would record and announce the end it read and run the
+    /// hooks of one, ends with the daemon instead, so the run ends
+    /// `daemon-stopped` at the next start (decision 92).
+    async fn stopped_end(self) -> Option<(EngineEvent, Self)> {
+        if self.daemon_stopped.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        None
+    }
+
     /// The worker closed stdout without a result: it crashed, was killed, its
     /// deadline watchdog stopped it, or it lives on. Its exit is waited for
     /// the exit timeout and no longer: a worker still there then is killed,
@@ -973,7 +1084,7 @@ impl Reading {
             }
         };
         if self.stopped.load(Ordering::SeqCst) {
-            return None;
+            return self.stopped_end().await;
         }
         let reason = match exit {
             Some(Some(exit_code::DEADLINE_PASSED)) => FailureReason::DeadlinePassed,
@@ -2267,7 +2378,7 @@ mod tests {
     /// has exited, never end: what runs the job then neither records nor
     /// announces an end, nor runs a hook for one, after the operation log
     /// has closed, and the run ends `daemon-stopped` at the next start
-    /// (decision 91).
+    /// (decision 92).
     async fn assert_events_never_end(events: &mut stream::BoxStream<'static, EngineEvent>) {
         let next = tokio::time::timeout(Duration::from_millis(300), events.next()).await;
         assert!(
