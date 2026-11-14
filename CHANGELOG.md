@@ -7,6 +7,28 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/nledford/Ladderback/compare/v0.3.0...v0.3.1) - 2026-11-14
+
+### Before you upgrade
+
+- **Installing from source now needs Node.js 26 or newer.** `scripts/install.sh` refuses an older Node.js and says which version it found; install Node.js 26 first (on Debian and Ubuntu, from NodeSource). Linux means 64-bit x86_64 or aarch64 with glibc 2.35 or newer.
+- **Linux release archives:** each release now attaches x86_64 and aarch64 archives and a `SHA256SUMS` file. The install guide's "Download a release (Linux)" section shows how to check and install one.
+- **Stops:** an orderly stop (a restart, a reboot, `systemctl stop`) is now recorded as a daemon shutdown and isn't announced, and the daemon is down within 65 s. A crash or power cut is still announced when the daemon starts again.
+
+### Added
+
+- Publish the Linux release archives with checksums ([#599](https://github.com/nledford/Ladderback/pull/599))
+
+### Fixed
+
+- Notify of an operation the daemon stopped during when it starts again ([#588](https://github.com/nledford/Ladderback/pull/588))
+- Name a warning's codes in notifications and title ntfy messages in words ([#591](https://github.com/nledford/Ladderback/pull/591))
+- Install trunk from its checked prebuilt release instead of building it ([#586](https://github.com/nledford/Ladderback/pull/586))
+- Hint at lingering only when it is off, and log secret-file warnings met before a failing secret ([#595](https://github.com/nledford/Ladderback/pull/595))
+- Require Node.js 26 and bound the installer's downloads ([#596](https://github.com/nledford/Ladderback/pull/596))
+- Link the header's product name to the start page ([#597](https://github.com/nledford/Ladderback/pull/597))
+- Stop the daemon within 65 s and let a stopped backup wind down ([#589](https://github.com/nledford/Ladderback/pull/589))
+
 ## [0.3.0](https://github.com/nledford/Ladderback/compare/v0.2.0...v0.3.0) - 2026-11-14
 
 Fixes and polish from running 0.2.0 every day on real machines: Linux servers, a Mac and a Raspberry Pi. Ladderback installs with one command; a repository can be reached at several locations, chosen by the network you are on; the Operations page says which step a run is in and why one failed; refusals name the password or credential that was refused; and the header names the running build. There is still no restore: use the `rustic` CLI, and try a restore before relying on the backups. Restore comes in 0.4.
