@@ -3,7 +3,9 @@
 #   the workspace version and CHANGELOG.md from the Conventional Commits since
 #   the last tag.
 # - Merging that PR to main makes the next push run tag `vX.Y.Z` and create
-#   the GitHub release. Pushes without a release PR merge release nothing.
+#   the GitHub release, then build the Linux archives of that commit
+#   (release-builds.yml) and attach them with a SHA256SUMS file (§16,
+#   decision 54). Pushes without a release PR merge release nothing.
 name: Release
 
 on:
@@ -14,16 +16,18 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
   release-pr:
     name: Open or update the release PR
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    # One release-plz run at a time. On these two jobs, not the workflow, so
+    # a release's hour of builds doesn't hold back the next push or the
+    # release PR: GitHub keeps one waiting run per group and drops older ones.
+    concurrency:
+      group: release
+      cancel-in-progress: false
     # RELEASE_PLZ_TOKEN is a secret of the `release` environment, whose only
     # deployment branch is main. An environment secret reaches only a job
     # that names the environment and runs from a branch it allows, so a
@@ -51,17 +55,88 @@ jobs:
     if: github.event_name == 'push' && github.repository == 'nledford/Ladderback'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    concurrency:
+      group: release
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       - run: rustup toolchain install
-      - uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
+      - id: release-plz
+        uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The tag of the release just made, for the archives; none when this
+      # push released nothing.
+      - id: tag
+        if: steps.release-plz.outputs.releases_created == 'true'
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          tag=$(jq -r '.[] | select(.package_name == "ladderback") | .tag' <<<"$RELEASES")
+          if [ -z "$tag" ]; then echo "::error::release-plz released no ladderback tag: $RELEASES"; exit 1; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # The release's Linux archives: the same builds and smoke test as the
+  # nightly run, of the tag just made, whose version the binary must say. macOS is built too, but its
+  # archive isn't published until it can be signed (decision 71).
+  builds:
+    name: Release builds
+    needs: release
+    if: needs.release.outputs.tag != ''
+    permissions:
+      contents: read
+      # Asked for by release-builds.yml's nightly report job, which a release
+      # run skips; a called workflow's jobs may ask for no more than this.
+      issues: write
+    uses: $/.github/workflows/release-builds.yml
+    with:
+      macos-optional: true
+      tag: ${{ needs.release.outputs.tag }}
+
+  # A job of its own, so only it, which runs none of the build's code, can
+  # write to the release. Either archive missing fails it.
+  publish:
+    name: Attach the Linux archives to the release
+    needs: [release, builds]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      actions: read # to download this run's artifacts
+      contents: write # to upload the release's assets; no checkout
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      # Two names, so each artifact gets a folder of its own: both hold a
+      # release-build-manifest.json, and gh won't overwrite a file.
+      - name: Download the archives
+        run: gh run download "$GITHUB_RUN_ID" --name ladderback-x86_64-unknown-linux-gnu --name ladderback-aarch64-unknown-linux-gnu --dir artifacts
+      # Each archive against the checksum its build wrote, then one SHA256SUMS
+      # for both, which `sha256sum -c` checks after a download. A missing
+      # archive fails here: gh downloads the names it finds without a word
+      # about the others.
+      - name: Write SHA256SUMS
+        run: |
+          mkdir assets
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            (cd "artifacts/ladderback-$target" && sha256sum -c "ladderback-$target.tar.xz.sha256")
+            mv "artifacts/ladderback-$target/ladderback-$target.tar.xz" assets/
+          done
+          cd assets
+          sha256sum ladderback-x86_64-unknown-linux-gnu.tar.xz ladderback-aarch64-unknown-linux-gnu.tar.xz > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      # --clobber, so rerunning a failed run attaches them again.
+      - name: Attach them to the release
+        working-directory: assets
+        run: gh release upload "$TAG" --clobber ladderback-x86_64-unknown-linux-gnu.tar.xz ladderback-aarch64-unknown-linux-gnu.tar.xz SHA256SUMS
