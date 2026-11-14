@@ -148,6 +148,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [85](decisions/85-a-server-s-refusal-of-the-credentials.md) | How a REST server's refusal of the credentials is told |
 | [86](decisions/86-trying-a-repositorys-locations-at-the-same-time.md) | Trying a repository's locations at the same time |
 | [87](decisions/87-listening-on-the-network-with-sign-in-off.md) | Listening on the network with sign-in off |
+| [88](decisions/88-hub-and-agent-version-compatibility.md) | How far hub and agent versions may differ |
 
 ## 17. Open questions
 
@@ -159,4 +160,4 @@ To be answered by experiments in M1a to M3 rather than by decision:
 
 To be decided in M4a, when hub and agents first talk:
 
-4. How far may hub and agent versions differ? The likely rule is that a hub speaks the `/sync/v1` protocol of its own release line and the one before, so the hub upgrades first (§12.1).
+4. How far may hub and agent versions differ? **Decided** in [decision 88](decisions/88-hub-and-agent-version-compatibility.md).
