@@ -101,6 +101,14 @@ Feature: Repositories over HTTP
     And the daemon lists the repository "demo" at the location, its password in the file
     And the daemon lists the repository "demo" with no warnings
 
+  Scenario: A password file other users can read is used, and the daemon's log says so by its path and mode
+    Given an initialised repository
+    And the client's password is in a file other users can read
+    When the client tests the repository
+    Then the answer has status 200 and the repository's ID
+    And the daemon's log warns that other users can read the password file, of mode "0644"
+    And the daemon's log never holds the password
+
   Scenario: Initialising a new local repository gives it an ID and saves nothing
     Given an empty repository location
     When the client initialises the repository

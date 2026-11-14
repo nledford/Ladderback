@@ -830,3 +830,22 @@ async fn configured_names_match_whatever_their_case() {
         assert_ne!(response.status(), StatusCode::FORBIDDEN, "{host}");
     }
 }
+
+/// Each allowed name a proxy reaches the daemon by is named, in order; a
+/// loopback name or address is not one (#398).
+#[test]
+fn the_proxied_hosts_are_the_allowed_names_beyond_loopback() {
+    let hosts: Vec<String> = [
+        "localhost",
+        "backup.example",
+        "127.0.0.1",
+        "[::1]",
+        "192.168.1.5",
+        "LOCALHOST",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    assert_eq!(proxied_hosts(&hosts), ["backup.example", "192.168.1.5"]);
+    assert!(proxied_hosts(&["localhost".to_owned()]).is_empty());
+    assert!(proxied_hosts(&[]).is_empty());
+}

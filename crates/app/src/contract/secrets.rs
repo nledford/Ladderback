@@ -287,7 +287,7 @@ async fn a_file_others_can_read_comes_with_a_warning(harness: &dyn SecretsHarnes
             resolve(harness, &file(&path, FileRead::FirstLine)).await,
             Ok(Resolved {
                 value: SecretValue::new("hunter2"),
-                warnings: vec![SecretWarning::FileReadableByOthers { path }],
+                warnings: vec![SecretWarning::FileReadableByOthers { path, mode }],
             }),
             "mode {mode:o}"
         );
@@ -318,7 +318,7 @@ async fn the_credentials_directory_is_trusted(harness: &dyn SecretsHarness) {
         resolve(harness, &file(&path, FileRead::FirstLine)).await,
         Ok(Resolved {
             value: SecretValue::new("hunter2"),
-            warnings: vec![SecretWarning::FileReadableByOthers { path }],
+            warnings: vec![SecretWarning::FileReadableByOthers { path, mode: 0o644 }],
         })
     );
     harness.set_env("CREDENTIALS_DIRECTORY", "");
@@ -346,7 +346,10 @@ async fn a_link_out_of_the_credentials_directory_is_not_trusted(harness: &dyn Se
         resolve(harness, &file(&leaving, FileRead::FirstLine)).await,
         Ok(Resolved {
             value: SecretValue::new("hunter2"),
-            warnings: vec![SecretWarning::FileReadableByOthers { path: leaving }],
+            warnings: vec![SecretWarning::FileReadableByOthers {
+                path: leaving,
+                mode: 0o644,
+            }],
         }),
         "a link to a file outside it"
     );

@@ -53,7 +53,7 @@ use domain::planning::{
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
-    SecretValue, Template,
+    SecretValue, SecretWarning, Template,
 };
 use domain::{AgentId, OperationId, PlanId, RepositoryId};
 use engine::{Recorded, RemovedKind, WorkerEngine};
@@ -562,7 +562,10 @@ async fn state_over(
     // connection, a creation and the record of an opened repository's ID
     // (§6.1, decision 57).
     let writes = Arc::new(ConfigWrites::default());
-    let resolve = Arc::new(ResolveRepository::new(Arc::new(SystemSecrets::default())));
+    let resolve = Arc::new(
+        ResolveRepository::new(Arc::new(SystemSecrets::default()))
+            .telling(Arc::new(log_secret_warning)),
+    );
     // The choice of a location comes first (decision 80): a job opens the
     // location it chose, and the record of an opened repository's ID
     // (decision 81) sees that job, never a probe.
@@ -660,7 +663,8 @@ async fn notify_over(
         store,
         Arc::new(SystemSecrets::default()),
         Arc::new(notifier),
-    );
+    )
+    .telling(Arc::new(log_secret_warning));
     // Subscribed before any run can start, so no news is missed.
     let news = bus.subscribe().await;
     let localizer = localizer();
@@ -1088,10 +1092,7 @@ impl Publish {
             E::Warning(warning) => Some(UiEvent::OperationWarning {
                 operation: self.operation.clone(),
                 code: warning_code(warning.kind),
-                args: warning
-                    .item
-                    .as_ref()
-                    .map_or_default(|item| vec![MsgArg::Text(item.clone())]),
+                args: warning_args(warning),
             }),
             // The engine's start comes before the run's write that says the
             // operation is running, and its end before the run's ending hooks
@@ -1135,13 +1136,14 @@ struct PlanRunner {
 }
 
 impl PlanRunner {
-    /// The backup job of plan `id` and the hooks around it, as `config`
-    /// stands now: a rewrite between runs is picked up.
+    /// The backup job of plan `id`, the hooks around it and what reading its
+    /// secrets told, as `config` stands now: a rewrite between runs is
+    /// picked up.
     async fn backup_of(
         &self,
         config: &domain::planning::AgentConfig,
         id: &PlanId,
-    ) -> Result<(Job, HookSetup), Unbuilt> {
+    ) -> Result<BuiltBackup, Unbuilt> {
         let plan = config
             .plan(id)
             .ok_or(Unbuilt::Refused(StartError::UnknownPlan))?;
@@ -1191,7 +1193,15 @@ impl PlanRunner {
             plan_id: plan.id.clone(),
             repository_alias: plan.repository.clone(),
         };
-        Ok((job, setup))
+        Ok(BuiltBackup {
+            job,
+            setup,
+            warnings: resolved
+                .warnings
+                .iter()
+                .map(SecretWarning::warning)
+                .collect(),
+        })
     }
 
     /// The use case that runs a backup with `setup`'s hooks.
@@ -1231,7 +1241,11 @@ impl PlanRunner {
                 StartError::Unavailable { code, args, detail }
             }))
         })?;
-        let (job, setup) = self.backup_of(&config, id).await?;
+        let BuiltBackup {
+            job,
+            setup,
+            warnings,
+        } = self.backup_of(&config, id).await?;
         let place = place.unwrap_or_else(|| self.queue.push(id, config.agent().concurrency));
         // A UUIDv7: the log orders by ID, so the newest run is the highest.
         let operation = OperationId::from_uuid(Uuid::now_v7());
@@ -1245,7 +1259,10 @@ impl PlanRunner {
         let registry = Arc::clone(&self.registry);
         let ends = self.ends.clone();
         tokio::spawn(async move {
-            let queued = use_case.queue(operation, trigger, job).await;
+            let queued = use_case
+                .queue(operation, trigger, job)
+                .await
+                .with_warnings(warnings);
             let _ = recorded.send(());
             // Nothing waits on the run: it reports through the event bus. It
             // waits in the log as queued until its turn comes.
@@ -1258,6 +1275,15 @@ impl PlanRunner {
         let _ = wait_for_log.await;
         Ok(operation)
     }
+}
+
+/// A plan's backup as [`PlanRunner::backup_of`] builds it.
+struct BuiltBackup {
+    job: Job,
+    setup: HookSetup,
+    /// What reading the repository's secrets told (#386), which the run
+    /// carries from its start.
+    warnings: Vec<domain::execution::Warning>,
 }
 
 /// Why a plan's backup couldn't be built, so its run doesn't start.
@@ -1399,7 +1425,7 @@ impl PlanRuns for PlanRunner {
                 Ok(config) => self
                     .backup_of(&config, &plan)
                     .await
-                    .map(|(job, setup)| (job, setup, plan, config.agent().concurrency)),
+                    .map(|built| (built, plan, config.agent().concurrency)),
                 Err(error) => Err(Unbuilt::Refused(config_unusable(
                     error,
                     |code, args, detail| StartError::Unavailable { code, args, detail },
@@ -1439,17 +1465,28 @@ impl PlanRuns for PlanRunner {
             }
             other => other.map_err(|error| start_refused(&error.into_start_error())),
         };
-        let built = built.and_then(|(job, setup, plan, limit)| {
+        let built = built.and_then(|(built, plan, limit)| {
             // The plan may have moved to another repository since the
             // queue's own read: it isn't run there under a record of the old.
-            if operation.target().is_on(job.target().repository.as_ref()) {
-                Ok((job, setup, plan, limit))
+            if operation
+                .target()
+                .is_on(built.job.target().repository.as_ref())
+            {
+                Ok((built, plan, limit))
             } else {
                 Err("its plan now backs up to another repository".to_owned())
             }
         });
         match built {
-            Ok((job, setup, plan, limit)) => {
+            Ok((
+                BuiltBackup {
+                    job,
+                    setup,
+                    warnings,
+                },
+                plan,
+                limit,
+            )) => {
                 // Oldest first, as the queue hands them on: each waits for
                 // its turn like any other backup (§5).
                 let place = self.queue.push(&plan, limit);
@@ -1458,7 +1495,8 @@ impl PlanRuns for PlanRunner {
                 let registry = Arc::clone(&self.registry);
                 let ends = self.ends.clone();
                 tokio::spawn(async move {
-                    let queued = app::execution::Queued::resumed(operation, job);
+                    let queued =
+                        app::execution::Queued::resumed(operation, job).with_warnings(warnings);
                     let finished = use_case.run_in_turn(queued, place, cancel).await;
                     registry.finish(&id);
                     log_ended(&finished);
@@ -1735,8 +1773,9 @@ fn operation_of(text: &str) -> Option<OperationId> {
 }
 
 /// One log record as the history page shows it, or `None` when it holds
-/// something no page could show. The page carries the status; the warning
-/// codes come with the detail, where the kept warnings are.
+/// something no page could show. The page carries the status and each
+/// warning's code once, from the kept warnings (#508); the warnings
+/// themselves come with the detail.
 fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
     let failure = match &record.status {
         OperationStatus::Failed { reason } => Some(failure(reason)),
@@ -1754,7 +1793,11 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
         record.queued_at.to_string(),
         record.started_at.map(|at| at.to_string()),
         record.finished_at.map(|at| at.to_string()),
-        Vec::new(),
+        record
+            .warning_kinds
+            .iter()
+            .map(|kind| warning_code(*kind))
+            .collect(),
         failure,
         record
             .result
@@ -1854,7 +1897,27 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::CheckError => WarningCode::CheckError,
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
         WarningKind::LocationSkipped => WarningCode::LocationSkipped,
+        WarningKind::SecretFileReadable => WarningCode::SecretFileReadable,
         WarningKind::Other => WarningCode::Unknown,
+    }
+}
+
+/// The arguments a warning's message takes, as the page gets them: a
+/// readable secret file's path and mode (#386), otherwise the item the
+/// warning names, if any.
+fn warning_args(warning: &domain::execution::Warning) -> Vec<MsgArg> {
+    match warning.kind {
+        WarningKind::SecretFileReadable => warning
+            .item
+            .iter()
+            .cloned()
+            .chain([warning.detail.clone()])
+            .map(MsgArg::Text)
+            .collect(),
+        _ => warning
+            .item
+            .as_ref()
+            .map_or_default(|item| vec![MsgArg::Text(item.clone())]),
     }
 }
 
@@ -2264,7 +2327,8 @@ impl Catalog for ConfigCatalog {
         let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
         let listing = ListSnapshots::new(
             Arc::clone(&self.engine),
-            ResolveRepository::new(Arc::new(SystemSecrets::default())),
+            ResolveRepository::new(Arc::new(SystemSecrets::default()))
+                .telling(Arc::new(log_secret_warning)),
         )
         .list(OperationId::from_uuid(Uuid::now_v7()), &alias, repository)
         .await;
@@ -2732,6 +2796,22 @@ fn unavailable(
 fn exists(settings: &RepositorySettings) -> RepositoriesError {
     RepositoriesError::Exists {
         location: redacted_location(settings, &settings.repository),
+    }
+}
+
+/// Says in the daemon's log what reading a set of secrets warned of: a file
+/// other users can read, by its path, masked of the secrets read with it,
+/// and its mode, never the secret (#386, I4). Each job, snapshot listing
+/// and notification that reads secrets tells it; a re-read that only masks
+/// a refusal doesn't (§10.2).
+fn log_secret_warning(warning: &SecretWarning) {
+    match warning {
+        SecretWarning::FileReadableByOthers { path, mode } => log::warn!(
+            "{:?}: other users of this machine can read the secret file {path} \
+             (permissions {mode:04o}); run `chmod 600` on it so that only its \
+             owner can read it",
+            WarningCode::SecretFileReadable
+        ),
     }
 }
 
@@ -3327,6 +3407,7 @@ mod tests {
             started_at: Some(at(10)),
             finished_at: Some(at(70)),
             warning_count: 0,
+            warning_kinds: Vec::new(),
             result,
             repository_alias: alias.map(|alias| RepositoryAlias::parse(alias).expect("an alias")),
             locations: None,
@@ -3356,6 +3437,22 @@ mod tests {
         // A row logged before the alias was kept names none.
         let old = logged(OperationKind::Check, None, None);
         assert_eq!(summary(&old).expect("a row").repository, None);
+    }
+
+    /// The page names an operation's warnings by their codes, each once,
+    /// as the log keeps their kinds (#508).
+    #[test]
+    fn a_row_names_its_warnings_by_code() {
+        let mut warned = logged(OperationKind::Backup, None, None);
+        warned.status = OperationStatus::SucceededWithWarnings;
+        warned.warning_count = 3;
+        warned.warning_kinds = vec![WarningKind::SourceUnreadable, WarningKind::CheckWarning];
+        assert_eq!(
+            summary(&warned)
+                .expect("a row the page can show")
+                .warning_codes,
+            [WarningCode::SourceUnreadable, WarningCode::CheckWarning]
+        );
     }
 
     #[test]
@@ -4264,6 +4361,55 @@ mod tests {
         // EACCES, the OS's reason, as the OS words it.
         let reason = std::io::Error::from_raw_os_error(13).to_string();
         assert!(line.contains(&reason), "{line}");
+    }
+
+    /// A secret read from a file other users can read is said in the
+    /// daemon's log, by the file's path masked of the secrets read with it
+    /// and its mode, never the secret (#386, I4).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_file_others_can_read_is_logged_by_its_masked_path_and_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        captured_log::capture();
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        // The folder is named as the secret is, by chance.
+        let folder = scratch.path().join("demo-secret-value");
+        std::fs::create_dir(&folder).expect("the folder");
+        let path = folder.join("nas-password");
+        std::fs::write(&path, b"demo-secret-value\n").expect("the password file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("the file's mode");
+        let scratch_path = scratch.path().to_str().expect("a scratch path is text");
+        let resolved = ResolveRepository::new(Arc::new(SystemSecrets::default()))
+            .telling(Arc::new(log_secret_warning))
+            .resolve(&demo_settings(SecretRef::File {
+                path: path.to_str().expect("a scratch path is text").to_owned(),
+                read: FileRead::FirstLine,
+            }))
+            .await
+            .expect("the file is read");
+        assert_eq!(
+            resolved.access.password,
+            SecretValue::new("demo-secret-value")
+        );
+        let shown = format!("{scratch_path}/***/nas-password");
+        let said: Vec<_> = captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains(&shown))
+            .collect();
+        let [(level, line)] = said.as_slice() else {
+            panic!("one line names the file: {said:?}");
+        };
+        assert_eq!(*level, log::Level::Warn);
+        assert!(line.contains("SecretFileReadable"), "{line}");
+        assert!(line.contains("0644"), "{line}");
+        assert!(
+            !captured_log::lines()
+                .iter()
+                .any(|(_, line)| line.contains("demo-secret-value")),
+            "the secret is in the log"
+        );
     }
 
     #[test]
@@ -7545,6 +7691,33 @@ mod tests {
                 })
             );
         }
+    }
+
+    /// A secret file others can read reaches the page with the two
+    /// arguments its message takes: the file's path and its mode (#386).
+    #[test]
+    fn a_readable_secret_file_reaches_the_page_by_its_path_and_mode() {
+        let mut publish = Publish {
+            operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
+            progress: LiveProgress::new(),
+        };
+        let found = EngineEvent::Warning(domain::execution::Warning {
+            kind: WarningKind::SecretFileReadable,
+            item: Some("/home/demo/nas-password".to_owned()),
+            during: "secret".to_owned(),
+            detail: "0644".to_owned(),
+        });
+        let Some(UiEvent::OperationWarning { code, args, .. }) = publish.ui(&found) else {
+            panic!("the warning reaches the page");
+        };
+        assert_eq!(code, WarningCode::SecretFileReadable);
+        assert_eq!(
+            args,
+            [
+                MsgArg::Text("/home/demo/nas-password".to_owned()),
+                MsgArg::Text("0644".to_owned()),
+            ]
+        );
     }
 }
 

@@ -238,6 +238,10 @@ fn run_daemon(
         ),
         (http_adapter::Exposure::Network, false) | (http_adapter::Exposure::Loopback, true) => {}
     }
+    let proxied: Vec<String> = http_adapter::proxied_hosts(&hosts)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -278,6 +282,18 @@ fn run_daemon(
             }
         };
         let bound = listener.local_addr();
+        // With sign-in off on loopback, a host name beyond it is one a
+        // reverse proxy brings people in by: each is said, as the network
+        // is (§10.1, decision 87).
+        if exposure == http_adapter::Exposure::Loopback && !sign_in_on {
+            for host in &proxied {
+                say(
+                    localizer,
+                    msg::CLI_WARN_SIGN_IN_OFF_BEHIND_PROXY,
+                    &[("host", text(host))],
+                )?;
+            }
+        }
         if exposure == http_adapter::Exposure::Network && !sign_in_on {
             let address = bound.as_ref().map_or(listen, |addr| *addr);
             say(

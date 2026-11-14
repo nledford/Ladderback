@@ -115,6 +115,12 @@ fn write_config(agent: &mut Agent) {
     // refuses a password written in the configuration.
     let password = agent.scratch().join("password");
     fs::write(&password, super::backup_steps::PASSWORD).expect("the password file");
+    // A password file only its owner can read, as a person keeps one.
+    fs::set_permissions(
+        &password,
+        <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
+    )
+    .expect("the password file's mode");
     let mut text = format!(
         "schema = 1\n\n[repositories.{alias}]\n{}repository-id = {}\npassword-file = {}\nmaintenance = \"local\"\n",
         location_table(agent, first),

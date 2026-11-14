@@ -302,6 +302,10 @@ pub enum WarningCode {
     /// `silent`, `refused`, `not-a-repository` or `password-not-accepted`.
     /// Never an address or a network's name.
     LocationSkipped,
+    /// A secret was read from a file other users of the machine can read
+    /// (#386). The arguments are `path`, the file's path, and `mode`, its
+    /// permission bits in octal (`0644`). Never the secret (I4).
+    SecretFileReadable,
     /// A location of a repository sends its credentials where whoever
     /// answers at its address can read them (decision 80, §10.6). The
     /// arguments are `position`, the location's, from 1; `cause`:
@@ -928,6 +932,18 @@ impl WarningCode {
                 },
                 ArgSpec {
                     name: "hosts",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::SecretFileReadable => &[
+                ArgSpec {
+                    name: "path",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "mode",
                     kind: ArgKind::Text,
                     optional: false,
                 },
@@ -2869,7 +2885,9 @@ pub struct OperationSummaryDto {
     pub queued_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
-    /// Every warning the operation recorded, by code, newest last.
+    /// The codes of the operation's warnings, each code once, from the kept
+    /// warnings (the first ten thousand), in the order the first of each
+    /// was recorded (#508). The operation's detail lists the warnings.
     pub warning_codes: Vec<WarningCode>,
     /// Set when the operation failed.
     pub failure_code: Option<ErrorCode>,

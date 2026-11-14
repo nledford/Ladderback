@@ -111,6 +111,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
 code_messages!(WARNINGS, warning_message, WarningCode {
     SourceUnreadable => msg::WARNING_SOURCE_UNREADABLE,
     LocationSkipped => msg::WARNING_LOCATION_SKIPPED,
+    SecretFileReadable => msg::WARNING_SECRET_FILE_READABLE,
     LocationPlainHttpCredentials => msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
     LocationEveryRuled => msg::WARNING_LOCATION_EVERY_RULED,
     LocationLastRuledNoRetry => msg::WARNING_LOCATION_LAST_RULED_NO_RETRY,

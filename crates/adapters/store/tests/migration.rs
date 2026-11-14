@@ -133,6 +133,7 @@ fn demoted(n: u128, kind: OperationKind) -> OperationRecord {
         started_at: Some(at(10)),
         finished_at: None,
         warning_count: 0,
+        warning_kinds: Vec::new(),
         result: None,
         repository_alias: None,
         locations: None,

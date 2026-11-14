@@ -632,9 +632,9 @@ fn failure_hides(agent: &mut Agent, value: String) {
 
 #[then(expr = "the resolution warns once that others can read the file {string}")]
 fn warns_once(agent: &mut Agent, path: String) {
-    let expected = SecretWarning::FileReadableByOthers { path };
     let warnings = &agent.secrets.resolved().warnings;
-    assert_eq!(warnings.iter().filter(|w| **w == expected).count(), 1);
+    let named = |w: &&SecretWarning| matches!(w, SecretWarning::FileReadableByOthers { path: at, .. } if *at == path);
+    assert_eq!(warnings.iter().filter(named).count(), 1);
     assert_eq!(warnings.len(), 1, "{warnings:?}");
 }
 

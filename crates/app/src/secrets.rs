@@ -25,7 +25,8 @@ pub struct ResolvedRepository {
     /// was seen, and where its settings came from. [`ResolveRepository::resolve_saved`]
     /// sets both from the entry it resolves.
     pub access: RepositoryAccess,
-    /// What the user should know about how the secrets were read, each once.
+    /// What the user should know about how the secrets were read, each once,
+    /// with every path masked of the repository's secrets (I4).
     pub warnings: Vec<SecretWarning>,
 }
 
@@ -227,11 +228,49 @@ fn template_error_place(error: &TemplateError) -> Option<usize> {
 #[derive(Clone)]
 pub struct ResolveRepository {
     resolver: Arc<dyn SecretResolver>,
+    told: Option<SecretWarnings>,
 }
+
+/// Told each warning that reading a set of secrets gave, once the set is
+/// read, with its path masked of those secrets (I4): the daemon says it in
+/// its log, an operation's read or not (§10.2, #386).
+pub type SecretWarnings = Arc<dyn Fn(&SecretWarning) + Send + Sync>;
 
 impl ResolveRepository {
     pub fn new(resolver: Arc<dyn SecretResolver>) -> Self {
-        Self { resolver }
+        Self {
+            resolver,
+            told: None,
+        }
+    }
+
+    /// Tells `told` each warning a resolution gives.
+    #[must_use]
+    pub fn telling(self, told: SecretWarnings) -> Self {
+        Self {
+            told: Some(told),
+            ..self
+        }
+    }
+
+    /// `warnings` masked of the secrets `access` holds (I4), each told.
+    fn warnings(
+        &self,
+        warnings: &[SecretWarning],
+        access: &RepositoryAccess,
+    ) -> Vec<SecretWarning> {
+        if warnings.is_empty() {
+            return Vec::new();
+        }
+        let redactor = access.redactor();
+        let warnings: Vec<SecretWarning> = warnings
+            .iter()
+            .map(|warning| warning.masked(&redactor))
+            .collect();
+        if let Some(told) = &self.told {
+            warnings.iter().for_each(|warning| told(warning));
+        }
+        warnings
     }
 
     /// Each distinct reference is read once, so a value can't change between
@@ -247,7 +286,7 @@ impl ResolveRepository {
         refuse_too_many_credentials(settings)?;
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
         let password = run.password(&settings.password).await?;
-        Self::resolve_rest(run, settings, password)
+        self.resolve_rest(run, settings, password)
             .await
             .map(|(resolved, _)| resolved)
     }
@@ -273,7 +312,7 @@ impl ResolveRepository {
                 field: Field::Password,
                 cause: too_much_to_mask(too_much),
             })?;
-        let (resolved, values) = Self::resolve_rest(run, settings, password.clone()).await?;
+        let (resolved, values) = self.resolve_rest(run, settings, password.clone()).await?;
         read.values = values;
         Ok(resolved)
     }
@@ -281,6 +320,7 @@ impl ResolveRepository {
     /// The rest of `settings`, past the password, resolved by `run`, with
     /// every reference `run` has read by the end.
     async fn resolve_rest(
+        &self,
         mut run: Run<'_>,
         settings: &RepositorySettings,
         password: SecretValue,
@@ -299,19 +339,20 @@ impl ResolveRepository {
         let options_cold = run
             .expand_all(&settings.options_cold, Field::OptionCold)
             .await?;
+        let access = RepositoryAccess {
+            repository,
+            repo_hot,
+            password,
+            options,
+            options_hot,
+            options_cold,
+            secrets: run.secrets,
+            id: None,
+            entry: None,
+        };
         let resolved = ResolvedRepository {
-            access: RepositoryAccess {
-                repository,
-                repo_hot,
-                password,
-                options,
-                options_hot,
-                options_cold,
-                secrets: run.secrets,
-                id: None,
-                entry: None,
-            },
-            warnings: run.warnings,
+            warnings: self.warnings(&run.warnings, &access),
+            access,
         };
         Ok((resolved, run.values))
     }
@@ -360,19 +401,20 @@ impl ResolveRepository {
     ) -> Result<ResolvedRepository, ResolveError> {
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
         let password = run.password(password).await?;
+        let access = RepositoryAccess {
+            repository: String::new(),
+            repo_hot: None,
+            password,
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+            secrets: Vec::new(),
+            id: None,
+            entry: None,
+        };
         Ok(ResolvedRepository {
-            access: RepositoryAccess {
-                repository: String::new(),
-                repo_hot: None,
-                password,
-                options: BTreeMap::new(),
-                options_hot: BTreeMap::new(),
-                options_cold: BTreeMap::new(),
-                secrets: Vec::new(),
-                id: None,
-                entry: None,
-            },
-            warnings: run.warnings,
+            warnings: self.warnings(&run.warnings, &access),
+            access,
         })
     }
 }
@@ -919,5 +961,61 @@ mod tests {
                 limit: 262_144,
             }
         );
+    }
+
+    /// A file other users can read is named by its path masked of the
+    /// repository's secrets, in the resolution and to whoever is told
+    /// (I4, #386): the whole repository's when it is resolved at once, the
+    /// password's when it alone is.
+    #[tokio::test]
+    async fn a_readable_files_path_is_masked_of_the_repositorys_secrets() {
+        use std::sync::Mutex;
+
+        use domain::secrets::FileRead;
+
+        use crate::fakes::FakeSecrets;
+
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/alice/nas-password", b"bob\n", 0o644);
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::clone(&told);
+        let resolve = ResolveRepository::new(store).telling(Arc::new(move |warning| {
+            heard.lock().expect("the list").push(warning.clone());
+        }));
+        let password = SecretRef::File {
+            path: "/home/alice/nas-password".to_owned(),
+            read: FileRead::FirstLine,
+        };
+        let settings = RepositorySettings {
+            repository: "/srv/backups".to_owned(),
+            repo_hot: None,
+            password: password.clone(),
+            options: BTreeMap::from([("secret_access_key".to_owned(), "alice".to_owned())]),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        };
+        let masked = |path: &str| SecretWarning::FileReadableByOthers {
+            path: path.to_owned(),
+            mode: 0o644,
+        };
+
+        let resolved = resolve.resolve(&settings).await.expect("it resolves");
+        assert_eq!(resolved.warnings, [masked("/home/***/nas-password")]);
+        assert_eq!(
+            *told.lock().expect("the list"),
+            [masked("/home/***/nas-password")]
+        );
+
+        // The password alone masks only itself.
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/bob/nas-password", b"bob\n", 0o644);
+        let resolved = ResolveRepository::new(store)
+            .resolve_password(&SecretRef::File {
+                path: "/home/bob/nas-password".to_owned(),
+                read: FileRead::FirstLine,
+            })
+            .await
+            .expect("it resolves");
+        assert_eq!(resolved.warnings, [masked("/home/***/nas-password")]);
     }
 }

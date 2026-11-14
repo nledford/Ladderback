@@ -9,7 +9,10 @@
 //! - `X-Content-Type-Options: nosniff` makes a browser take a response for
 //!   the type it says;
 //! - `Referrer-Policy: no-referrer` keeps the UI's addresses, which name
-//!   repositories and plans, out of any request a link or an asset makes.
+//!   repositories and plans, out of any request a link or an asset makes;
+//! - `Cache-Control: no-store` on every answer of the API, a refusal's
+//!   included, so no caching proxy in front keeps one person's answer, a
+//!   session's included, and gives it to another (#397).
 //!
 //! There is no `Strict-Transport-Security`: the daemon serves plain HTTP on
 //! loopback, and a browser that kept the header would refuse plain HTTP to
@@ -17,7 +20,9 @@
 
 use axum::extract::Request;
 use axum::http::HeaderValue;
-use axum::http::header::{CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+};
 use axum::middleware::Next;
 use axum::response::Response;
 use base64::Engine;
@@ -100,8 +105,12 @@ fn find_ignoring_case(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// Adds the headers to a response, whatever answered it. The entry page
 /// carries its own policy, which this leaves as it is.
 pub(crate) async fn add(request: Request, next: Next) -> Response {
+    let api = request.uri().path().starts_with("/api/");
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
+    if api {
+        headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     headers

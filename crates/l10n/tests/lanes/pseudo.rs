@@ -167,6 +167,10 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             msg::CLI_WARN_NETWORK_SIGN_IN_OFF,
             &["ladderback set-password"],
         ),
+        (
+            msg::CLI_WARN_SIGN_IN_OFF_BEHIND_PROXY,
+            &["ladderback set-password"],
+        ),
         (msg::UI_SIGN_IN_OFF_NETWORK, &["ladderback set-password"]),
         (
             msg::CLI_REFUSE_NO_ALLOWED_HOST,
@@ -197,10 +201,12 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
             &["http-cacert"],
         ),
+        (msg::WARNING_SECRET_FILE_READABLE, &["chmod 600"]),
     ];
     let args = [
         ("address", text("192.168.1.5:9898")),
         ("name", text("nas.example.com:9898")),
+        ("host", text("nas.example.com")),
         ("alias", text("demo")),
         ("path", text("/demo/data/admin-password")),
         ("detail", text("permission denied")),
@@ -208,6 +214,7 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
         ("cause", text("plain-http")),
         ("rule", text("network")),
         ("locations", text("several")),
+        ("mode", text("0644")),
     ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);

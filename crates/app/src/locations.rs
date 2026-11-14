@@ -26,7 +26,7 @@ use domain::execution::locations::{
 use domain::planning::{
     ExposedCredentials, LOCATION_PROBE_SECONDS, Location, MAX_RECORDED_ADDRESS_BYTES, RuleVerdict,
 };
-use domain::secrets::{SecretValue, SourceName};
+use domain::secrets::{SecretValue, SecretWarning, SourceName};
 use domain::{OperationId, RepositoryAlias, RepositoryId, SignedDuration};
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
@@ -75,6 +75,9 @@ pub struct Located {
     /// location, which is opened as it always was, with no probe, once its
     /// rule, if it has one, holds.
     pub record: Option<LocationsRecord>,
+    /// What reading the secrets of each location the choice tried told,
+    /// each once (#386): the job's operation carries them.
+    pub warnings: Vec<SecretWarning>,
 }
 
 /// An [`Engine`] that chooses, before a job that opens a repository reached
@@ -138,6 +141,7 @@ impl ChooseLocation {
             return Ok(Located {
                 access,
                 record: None,
+                warnings: Vec::new(),
             });
         };
         if !saved.entry.has_several_locations() {
@@ -159,6 +163,7 @@ impl ChooseLocation {
                 Ok(Located {
                     access,
                     record: None,
+                    warnings: Vec::new(),
                 })
             } else {
                 Err((FailureReason::NoLocationRuleHolds, None))
@@ -170,7 +175,7 @@ impl ChooseLocation {
         let Some(expected) = saved.entry.id.clone() else {
             return Err((FailureReason::NoLocationUsable, None));
         };
-        let (record, chosen) = self
+        let (record, chosen, warnings) = self
             .try_each(
                 op,
                 &saved,
@@ -193,6 +198,7 @@ impl ChooseLocation {
                     ..location
                 },
                 record: Some(record),
+                warnings,
             }),
             None => Err((failure(&record), Some(record))),
         }
@@ -239,7 +245,7 @@ impl ChooseLocation {
             .access
             .password;
         let phase = Arc::new(Mutex::new(Phase::Probing(Vec::new())));
-        let (record, _) = self
+        let (record, _, _) = self
             .try_each(
                 op,
                 saved,
@@ -265,8 +271,9 @@ impl ChooseLocation {
     /// the repository when its ID is `expected` (any ID when `None`). With
     /// [`Reach::FirstUsed`] the ones after the first usable one are
     /// `not-tried`, and every probe still running then is stopped; no probe
-    /// runs on once this returns. Answers every location's outcome and the
-    /// first usable one's access, or the reason the whole choice fails
+    /// runs on once this returns. Answers every location's outcome, the
+    /// first usable one's access and what reading the secrets of each
+    /// location tried told, each once, or the reason the whole choice fails
     /// (secrets past what the daemon masks, met in a location's turn).
     async fn try_each(
         &self,
@@ -276,7 +283,14 @@ impl ChooseLocation {
         expected: Option<&RepositoryId>,
         reach: Reach,
         phase: &Probing,
-    ) -> Result<(LocationsRecord, Option<RepositoryAccess>), FailureReason> {
+    ) -> Result<
+        (
+            LocationsRecord,
+            Option<RepositoryAccess>,
+            Vec<SecretWarning>,
+        ),
+        FailureReason,
+    > {
         let SavedEntry { alias, entry } = saved;
         let rules = entry.location_rules();
         let mut reading = LinkReading::new(Arc::clone(&self.link));
@@ -326,6 +340,7 @@ impl ChooseLocation {
         let walked = async {
             let mut tried = Vec::with_capacity(settings.len());
             let mut chosen = None;
+            let mut warnings: Vec<SecretWarning> = Vec::new();
             for (((index, location), verdict), position) in
                 settings.iter().enumerate().zip(verdicts).zip(1u8..)
             {
@@ -358,6 +373,11 @@ impl ChooseLocation {
                             outcome
                         }
                         Ok(resolution) => {
+                            for warning in resolution.warnings {
+                                if !warnings.contains(&warning) {
+                                    warnings.push(warning);
+                                }
+                            }
                             let location = resolution.access;
                             if let Some(cause) =
                                 ExposedCredentials::of_location(&location_of(&location))
@@ -408,7 +428,7 @@ impl ChooseLocation {
                     source,
                 });
             }
-            Ok((LocationsRecord { locations: tried }, chosen))
+            Ok((LocationsRecord { locations: tried }, chosen, warnings))
         }
         .await;
         probes.stop().await;
@@ -792,7 +812,11 @@ impl Engine for ChooseLocation {
             ) {
                 return futures::stream::empty().boxed();
             }
-            let Located { access, record } = match located {
+            let Located {
+                access,
+                record,
+                warnings,
+            } = match located {
                 Ok(located) => located,
                 Err((reason, record)) => {
                     let located = record.map(EngineEvent::Located);
@@ -831,7 +855,9 @@ impl Engine for ChooseLocation {
                     control.stop().await;
                     futures::stream::empty().boxed()
                 }
-                None => futures::stream::iter(located).chain(events).boxed(),
+                None => futures::stream::iter(located)
+                    .chain(warn_once_started(events, warnings))
+                    .boxed(),
             }
         })
         .flatten()
@@ -841,6 +867,32 @@ impl Engine for ChooseLocation {
             control: Box::new(Handover(phase)),
         })
     }
+}
+
+/// `events` with what reading the secrets of the locations told (#386) said
+/// right after the job's start: a run takes a warning only once it runs
+/// (§4.4), so said earlier it would break the run's protocol. A job that
+/// fails before it starts says none; the daemon's log still has them.
+fn warn_once_started(
+    events: futures::stream::BoxStream<'static, EngineEvent>,
+    warnings: Vec<SecretWarning>,
+) -> futures::stream::BoxStream<'static, EngineEvent> {
+    let mut warnings = Some(warnings);
+    events
+        .flat_map(move |event| {
+            let said = if matches!(event, EngineEvent::Started { .. }) {
+                warnings.take().unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            futures::stream::iter(
+                std::iter::once(event).chain(
+                    said.into_iter()
+                        .map(|warning| EngineEvent::Warning(warning.warning())),
+                ),
+            )
+        })
+        .boxed()
 }
 
 #[cfg(test)]
@@ -1576,5 +1628,76 @@ mod tests {
         assert_eq!(opened.id, Some(RepositoryId::parse(ID).expect("an ID")));
         assert!(entry.is_some());
         assert_eq!(opened.entry, entry);
+    }
+
+    /// Probes as [`Holds`] does; any other job starts and says nothing more.
+    struct Starts;
+
+    #[async_trait]
+    impl Engine for Starts {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            if let Job::Probe(_) = job {
+                return Holds::default().run(op, job).await;
+            }
+            Ok(RunningJob {
+                events: futures::stream::iter([EngineEvent::Started {
+                    index_read_at: Timestamp::UNIX_EPOCH,
+                    repository: None,
+                }])
+                .boxed(),
+                control: Box::new(Gone),
+            })
+        }
+    }
+
+    /// A secret the choice read from a file other users can read comes out
+    /// of the job as a warning, by the file's path and mode, right after the
+    /// job starts, the first moment a run takes one; so the operation that
+    /// used it carries it (#386).
+    #[tokio::test]
+    async fn a_secret_file_others_can_read_that_the_choice_read_comes_out_as_a_warning() {
+        let fake = FakeSecrets::default();
+        fake.set_env("NAS_PASSWORD", "demo-password");
+        fake.write_file("/home/demo/lan-key", b"demo-key\n", 0o644);
+        let resolve = ResolveRepository::new(Arc::new(fake));
+        let access = nas(
+            &resolve,
+            first("/srv/lan", &[("password", "${file:/home/demo/lan-key}")]),
+        )
+        .await;
+        let choose = ChooseLocation::new(
+            Arc::new(Starts),
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(|_| {}),
+        );
+        let RunningJob { events, .. } = choose
+            .run(op(), Job::Ls(access))
+            .now_or_never()
+            .expect("the choice ends at once")
+            .expect("the job starts");
+        let events: Vec<EngineEvent> = events
+            .collect::<Vec<_>>()
+            .now_or_never()
+            .expect("the job's events end at once")
+            .into_iter()
+            .filter(|event| !matches!(event, EngineEvent::Located(_)))
+            .collect();
+        assert_eq!(
+            events,
+            [
+                EngineEvent::Started {
+                    index_read_at: Timestamp::UNIX_EPOCH,
+                    repository: None,
+                },
+                EngineEvent::Warning(domain::execution::Warning {
+                    kind: domain::execution::WarningKind::SecretFileReadable,
+                    item: Some("/home/demo/lan-key".to_owned()),
+                    during: "secret".to_owned(),
+                    detail: "0644".to_owned(),
+                }),
+            ]
+        );
     }
 }

@@ -219,6 +219,17 @@ pub fn startup_rule(
     }
 }
 
+/// The allowed host names that aren't loopback: the names a proxy reaches
+/// the daemon by. With sign-in off, anyone who can reach one through the
+/// proxy can use the daemon, so it says so for each (§10.1, #398).
+pub fn proxied_hosts(allowed_hosts: &[String]) -> Vec<&str> {
+    allowed_hosts
+        .iter()
+        .map(String::as_str)
+        .filter(|host| !is_loopback_host(host))
+        .collect()
+}
+
 /// Who can reach the daemon at the address it listens on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Exposure {

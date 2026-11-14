@@ -243,6 +243,12 @@ error-invalid-cursor = { -brand-name } could not continue the history from { $cu
 warning-source-unreadable = { -brand-name } could not read this item, so it was left out of the snapshot. Check that the user { -brand-name } runs as can read it, or exclude it from the plan.
     .with-detail = { -brand-name } could not read this item, so it was left out of the snapshot ({ $detail }). Check that the user { -brand-name } runs as can read it, or exclude it from the plan.
 
+# A secret was read from a file other users of this machine can read.
+# $path (text): the file's path.
+# $mode (text): the file's permissions in octal, such as 0644.
+# The command is typed as it is: keep it a string literal.
+warning-secret-file-readable = Other users of this machine can read the secret file { $path } (permissions { $mode }). Run { "chmod 600" } on it so that only its owner can read it.
+
 # A hook command around the operation failed where its `on-failure` said to go on.
 # $phase (text): which hook list it ran from: before, after, failed or finally.
 # $exit_code (text): the hook's exit status, or `none` when it timed out or could not be started.

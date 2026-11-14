@@ -102,7 +102,10 @@ impl OperationsState {
             UiEvent::OperationWarning {
                 operation, code, ..
             } => {
-                if let Some(row) = self.live_row_mut(operation) {
+                // The row names each kind once, as the history does (#508).
+                if let Some(row) = self.live_row_mut(operation)
+                    && !row.summary.warning_codes.contains(code)
+                {
                     row.summary.warning_codes.push(*code);
                 }
             }
@@ -269,21 +272,15 @@ fn keeps(held: &str, read: &str) -> bool {
     held > read || (held == read && held < TERMINAL)
 }
 
-/// The warnings of `history` with those of `held`, the warnings of a row the
-/// page holds, that `history` lacks. A warning has no identity on the wire
-/// but its code and how many of that code came before it, so each time
-/// `held` has a code more often than `history` is one `history` lacks. The
-/// history's come first, in the order they were recorded; those only the
-/// events told follow, as they were heard.
+/// The warning codes of `history` with those of `held`, the codes of a row
+/// the page holds, that `history` lacks: each code once, as the history
+/// names them (#508). The history's come first, in the order their first
+/// warnings were recorded; those only the events told follow, as they were
+/// heard.
 fn add_missing(mut history: Vec<WarningCode>, held: Vec<WarningCode>) -> Vec<WarningCode> {
-    let mut unmatched: HashMap<WarningCode, usize> = HashMap::new();
-    for code in &history {
-        *unmatched.entry(*code).or_default() += 1;
-    }
     for code in held {
-        match unmatched.get_mut(&code) {
-            Some(count) if *count > 0 => *count -= 1,
-            _ => history.push(code),
+        if !history.contains(&code) {
+            history.push(code);
         }
     }
     history
@@ -1091,23 +1088,40 @@ mod tests {
             [WarningCode::HookWarning, WarningCode::SourceUnreadable],
             "a second read adds nothing the row has"
         );
-        // A second unreadable source is a warning of its own: a history that
-        // has one of the two leaves the row both.
+    }
+
+    /// The row names each kind of warning once, as the history page does
+    /// (#508): a second warning of a kind the row names adds nothing, heard
+    /// or read.
+    #[test]
+    fn a_row_names_each_kind_of_warning_once() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        let unreadable = UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        };
         state.apply(&unreadable);
+        state.apply(&unreadable);
+        assert_eq!(
+            state.rows[0].summary.warning_codes,
+            [WarningCode::SourceUnreadable]
+        );
+        // A row held from before, with the code twice, and a history that
+        // names it once: the row names it once.
+        state.rows[0].summary.warning_codes =
+            vec![WarningCode::SourceUnreadable, WarningCode::SourceUnreadable];
         state.merge(page(
             vec![warned(
                 summary(FIRST, "running", true, false),
-                &[WarningCode::HookWarning, WarningCode::SourceUnreadable],
+                &[WarningCode::SourceUnreadable],
             )],
             None,
         ));
         assert_eq!(
             state.rows[0].summary.warning_codes,
-            [
-                WarningCode::HookWarning,
-                WarningCode::SourceUnreadable,
-                WarningCode::SourceUnreadable
-            ]
+            [WarningCode::SourceUnreadable]
         );
     }
 

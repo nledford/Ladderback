@@ -6,6 +6,7 @@ use std::path::{Component, Path};
 
 use super::source::{SourceName, first_line};
 use super::{MAX_SECRET_BYTES, Redactor, SecretValue};
+use crate::execution::{Warning, WarningKind};
 
 /// A secret that couldn't be read. It names the source, so a job's failure
 /// can say which reference is at fault, and never holds a value.
@@ -97,12 +98,43 @@ impl Problem {
     }
 }
 
-/// A secret that was read, with something the user should know.
+/// A secret that was read, with something the user should know. It names
+/// where the secret was read, never the secret (I4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SecretWarning {
     /// Other users of the machine can read the file (group or world read
-    /// permission).
-    FileReadableByOthers { path: String },
+    /// permission). `mode` is the file's permission bits (`0o644`), without
+    /// its type.
+    FileReadableByOthers { path: String, mode: u32 },
+}
+
+impl SecretWarning {
+    /// The warning an operation that read this secret carries, so its
+    /// history says so (#386): `item` is the path and `detail` the mode in
+    /// octal, as `chmod` takes it (`0644`).
+    pub fn warning(&self) -> Warning {
+        match self {
+            Self::FileReadableByOthers { path, mode } => Warning {
+                kind: WarningKind::SecretFileReadable,
+                item: Some(path.clone()),
+                during: "secret".to_owned(),
+                detail: format!("{mode:04o}"),
+            },
+        }
+    }
+
+    /// This warning with its path masked by `redactor` (I4): a path is the
+    /// configuration's text, which can hold a secret of the repository by
+    /// chance, so it is shown as a refusal shows where a secret was looked
+    /// for.
+    pub fn masked(&self, redactor: &Redactor) -> Self {
+        match self {
+            Self::FileReadableByOthers { path, mode } => Self::FileReadableByOthers {
+                path: redactor.redact(path),
+                mode: *mode,
+            },
+        }
+    }
 }
 
 /// The secret that a source gave as `bytes`. Every source that reads bytes
@@ -237,6 +269,7 @@ pub fn file_warning(
     (exposed && !is_runtime_secret(path, credentials_directory, resolve)).then(|| {
         SecretWarning::FileReadableByOthers {
             path: path.to_owned(),
+            mode: mode & 0o777,
         }
     })
 }
@@ -304,7 +337,8 @@ mod tests {
         assert_eq!(
             file_warning(path, 0o644, None, same),
             Some(SecretWarning::FileReadableByOthers {
-                path: path.to_owned()
+                path: path.to_owned(),
+                mode: 0o644,
             })
         );
         // Group read alone, world read alone.
@@ -314,6 +348,63 @@ mod tests {
         assert!(warns(path, 0o004, None));
         // The type bits of a real `st_mode` don't matter.
         assert!(warns(path, 0o100_644, None));
+    }
+
+    /// The warning names the permission bits a `chmod` sets, not the type
+    /// bits of a real `st_mode` (#386).
+    #[test]
+    fn the_warning_names_the_files_permission_bits_alone() {
+        let path = "/home/demo/secrets/nas";
+        for (st_mode, mode) in [(0o100_644, 0o644), (0o100_640, 0o640), (0o104_604, 0o604)] {
+            assert_eq!(
+                file_warning(path, st_mode, None, same),
+                Some(SecretWarning::FileReadableByOthers {
+                    path: path.to_owned(),
+                    mode,
+                }),
+                "{st_mode:o}"
+            );
+        }
+    }
+
+    /// An operation that read the file carries the warning by its path and
+    /// mode, as `chmod` writes it, and nothing else (#386, I4).
+    #[test]
+    fn an_operation_carries_a_readable_file_by_its_path_and_mode() {
+        let readable = |mode| SecretWarning::FileReadableByOthers {
+            path: "/home/demo/secrets/nas".to_owned(),
+            mode,
+        };
+        assert_eq!(
+            readable(0o644).warning(),
+            Warning {
+                kind: WarningKind::SecretFileReadable,
+                item: Some("/home/demo/secrets/nas".to_owned()),
+                during: "secret".to_owned(),
+                detail: "0644".to_owned(),
+            }
+        );
+        assert_eq!(readable(0o004).warning().detail, "0004");
+        assert_eq!(readable(0o777).warning().detail, "0777");
+    }
+
+    /// A warning's path is masked of the secrets it was read with, and its
+    /// mode kept (I4).
+    #[test]
+    fn a_warnings_path_is_masked_of_the_secrets_read_with_it() {
+        let secret = SecretValue::new("alice");
+        let warning = SecretWarning::FileReadableByOthers {
+            path: "/home/alice/nas-password".to_owned(),
+            mode: 0o644,
+        };
+        assert_eq!(
+            warning.masked(&Redactor::new([&secret])),
+            SecretWarning::FileReadableByOthers {
+                path: "/home/***/nas-password".to_owned(),
+                mode: 0o644,
+            }
+        );
+        assert_eq!(warning.masked(&Redactor::new([])), warning);
     }
 
     #[test]
@@ -567,7 +658,8 @@ mod tests {
         assert_eq!(
             file_warning(path, 0o644, None, linked(&links)),
             Some(SecretWarning::FileReadableByOthers {
-                path: path.to_owned()
+                path: path.to_owned(),
+                mode: 0o644,
             })
         );
         // The credentials directory is no different.

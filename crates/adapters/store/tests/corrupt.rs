@@ -541,6 +541,7 @@ fn expected_good_record() -> OperationRecord {
         started_at: Some(at(10)),
         finished_at: Some(at(70)),
         warning_count: 0,
+        warning_kinds: Vec::new(),
         // The raw row keeps no bytes processed, as an earlier build wrote it.
         result: Some(EngineResult::Backup(BackupSummary {
             parent: None,
@@ -702,12 +703,17 @@ async fn a_warning_row_with_a_field_missing_is_reported_as_corrupt() {
         let report = corrupt(store.get(id(BAD)).await, column);
         assert!(report.contains(column), "{column}: {report}");
         assert!(report.contains(&id_text(BAD)), "{column}: {report}");
-        // The listing doesn't read warnings.
-        let page = store
-            .list(&HistoryQuery::default())
-            .await
-            .expect("listing works");
-        assert_eq!(page.operations.len(), 1, "{column}");
+        // The listing reads each warning's code, and nothing else of it
+        // (#508): a code it can't read is reported, as the detail reports
+        // it, never left out of the page.
+        let page = store.list(&HistoryQuery::default()).await;
+        if column == "code" {
+            let report = corrupt(page, column);
+            assert!(report.contains(&id_text(BAD)), "{column}: {report}");
+        } else {
+            let page = page.expect("listing works");
+            assert_eq!(page.operations.len(), 1, "{column}");
+        }
     }
 }
 

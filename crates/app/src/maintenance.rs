@@ -44,10 +44,11 @@ use crate::ports::{
     RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
     SourcesError, Start, StoreError,
 };
-use crate::secrets::{ResolveError, ResolveRepository};
+use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{FailureReason, Operation, OperationKind, Trigger, Warning, WarningKind};
+use domain::secrets::SecretWarning;
 
 /// The `keep-delete` a manual prune uses when nothing else says: six days,
 /// just under the weekly interval a prune is expected to run on (§7.3).
@@ -193,6 +194,9 @@ pub struct MaintenanceAssessment {
     job: Job,
     partition: Option<Partition>,
     other_hosts: OtherHosts,
+    /// What reading the repository's secrets told (#386): the run carries
+    /// them from its start.
+    secret_warnings: Vec<Warning>,
 }
 
 impl MaintenanceAssessment {
@@ -463,7 +467,7 @@ impl RunMaintenance {
         // Only reads run before the slot is taken, and none before this
         // agent is found to maintain the repository.
         let config = self.maintained(alias).await?;
-        let access = self.identified(op, &config, alias).await?;
+        let (access, secret_warnings) = self.identified(op, &config, alias).await?;
 
         let (other_hosts, partition, job) = match kind {
             MaintenanceKind::Forget => {
@@ -529,6 +533,7 @@ impl RunMaintenance {
             job,
             partition,
             other_hosts,
+            secret_warnings,
         })
     }
 
@@ -554,6 +559,7 @@ impl RunMaintenance {
             job,
             partition,
             other_hosts,
+            secret_warnings,
         } = assessment;
         let mut operation = Operation::queue(
             id,
@@ -570,10 +576,14 @@ impl RunMaintenance {
         operation
             .start(self.clock.now())
             .expect("a queued operation starts");
+        // Stored with the running row, so the run says them from the start:
+        // how its secrets were read first, then the other hosts.
+        for warning in secret_warnings {
+            let _ = operation.record_warning(warning);
+        }
         if let Some(warning) =
             other_hosts_during(job.kind()).and_then(|during| other_hosts.warning(during))
         {
-            // Stored with the running row, so the run says it from the start.
             let _ = operation.record_warning(warning);
         }
         match self.store.try_start(&operation).await {
@@ -639,7 +649,7 @@ impl RunMaintenance {
             MaintenanceKind::Prune => {
                 // Opened as the prune opens it, so through the cache.
                 let config = self.maintained(alias).await?;
-                let access = self.identified(op, &config, alias).await?;
+                let (access, _) = self.identified(op, &config, alias).await?;
                 let other_hosts = self.listed_other_hosts(op, &config, alias, &access).await?;
                 let keep_delete = default_keep_delete();
                 let job = Job::PrunePlan(PruneJob {
@@ -775,28 +785,39 @@ impl RunMaintenance {
         config: &AgentConfig,
         alias: &RepositoryAlias,
     ) -> Result<RepositoryAccess, MaintenanceError> {
+        Ok(self.resolved(config, alias).await?.access)
+    }
+
+    /// As [`open`](Self::open), with what reading the secrets told.
+    async fn resolved(
+        &self,
+        config: &AgentConfig,
+        alias: &RepositoryAlias,
+    ) -> Result<ResolvedRepository, MaintenanceError> {
         let repository = config
             .repository(alias)
             .ok_or(MaintenanceError::UnknownRepository)?;
-        Ok(self
-            .resolve
+        self.resolve
             .resolve_saved(alias, repository)
             .await
-            .map_err(MaintenanceError::Resolve)?
-            .access)
+            .map_err(MaintenanceError::Resolve)
     }
 
     /// As [`open`](Self::open), with the access naming the repository's ID,
     /// as a run opens it: the ID names the repository in the log, which is
     /// what I7 holds it by, and the engine gives a job the repository's
-    /// cache by it. A read reports it.
+    /// cache by it. A read reports it. Comes with what reading the secrets
+    /// told, which a run carries (#386).
     async fn identified(
         &self,
         op: OperationId,
         config: &AgentConfig,
         alias: &RepositoryAlias,
-    ) -> Result<RepositoryAccess, MaintenanceError> {
-        let mut access = self.open(config, alias).await?;
+    ) -> Result<(RepositoryAccess, Vec<Warning>), MaintenanceError> {
+        let ResolvedRepository {
+            mut access,
+            warnings,
+        } = self.resolved(config, alias).await?;
         let id = identify(
             self.engine.as_ref(),
             self.clock.as_ref(),
@@ -805,7 +826,10 @@ impl RunMaintenance {
         )
         .await?;
         access.id = Some(id);
-        Ok(access)
+        Ok((
+            access,
+            warnings.iter().map(SecretWarning::warning).collect(),
+        ))
     }
 
     /// The repository's snapshots partitioned by who owns them, from one
@@ -2259,5 +2283,124 @@ mod cancel_tests {
             panic!("one merged result");
         };
         assert_eq!(summary.removed.len(), 2 * MAX_JOB_IDS + 1);
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "fakes")]
+mod secret_tests {
+    #![allow(clippy::expect_used, reason = "test code")]
+
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use domain::planning::{
+        AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
+    };
+    use domain::secrets::{FileRead, SecretRef};
+    use domain::{AgentId, OperationId, RepositoryId, Timestamp, Uuid};
+    use futures::stream;
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore,
+        InMemoryOperationStore,
+    };
+    use crate::ports::JobControl;
+
+    struct Gone;
+
+    #[async_trait]
+    impl JobControl for Gone {
+        async fn stop(&mut self) {}
+    }
+
+    /// An engine that names the repository it is asked to identify.
+    struct Identifies;
+
+    #[async_trait]
+    impl Engine for Identifies {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            let Job::Identify(_) = job else {
+                return Err(EngineError::StartTimedOut);
+            };
+            let id = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+            Ok(RunningJob {
+                events: stream::iter([EngineEvent::Succeeded(EngineResult::Repository { id })])
+                    .boxed(),
+                control: Box::new(Gone),
+            })
+        }
+    }
+
+    /// A run whose repository's password came from a file other users can
+    /// read carries it as a warning from its start, by the file's path and
+    /// mode (#386).
+    #[tokio::test]
+    async fn a_run_whose_password_file_others_can_read_carries_the_warning() {
+        let path = "/home/demo/demo-password";
+        let secrets = FakeSecrets::default();
+        secrets.write_file(path, b"correct-horse\n", 0o644);
+        let alias = RepositoryAlias::parse("demo").expect("an alias");
+        let repository = RepositoryConfig {
+            locations: Default::default(),
+            id: None,
+            settings: RepositorySettings {
+                repository: "/srv/demo/repo".to_owned(),
+                repo_hot: None,
+                password: SecretRef::File {
+                    path: path.to_owned(),
+                    read: FileRead::FirstLine,
+                },
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+            },
+            maintenance: Maintenance::Local,
+            group_by: GroupBy::default(),
+            hooks: Hooks::default(),
+        };
+        let config = AgentConfig::new(
+            AgentSettings::default(),
+            Hooks::default(),
+            BTreeMap::from([(alias.clone(), repository)]),
+            Vec::new(),
+        )
+        .expect("a valid configuration");
+        let configs = InMemoryConfigStore::new();
+        configs
+            .save(&config)
+            .await
+            .expect("the configuration saves");
+        let use_case = RunMaintenance::new(
+            Arc::new(Identifies),
+            Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH)),
+            Arc::new(InMemoryOperationStore::new()),
+            ResolveRepository::new(Arc::new(secrets)),
+            Arc::new(FakeRetention),
+            Arc::new(configs),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        );
+        let assessment = use_case
+            .assess(
+                OperationId::from_uuid(Uuid::from_u128(1)),
+                &alias,
+                MaintenanceKind::Check,
+            )
+            .await
+            .expect("the check is assessed");
+        let prepared = use_case.start(assessment).await.expect("the check starts");
+        assert_eq!(
+            prepared.operation().warnings(),
+            [Warning {
+                kind: WarningKind::SecretFileReadable,
+                item: Some(path.to_owned()),
+                during: "secret".to_owned(),
+                detail: "0644".to_owned(),
+            }]
+        );
     }
 }

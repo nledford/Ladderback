@@ -16,6 +16,7 @@ Backrest binds to localhost by default and lets authentication be turned off; op
 4. **Every page says so.** The session route's answer gains `exposure: "network"` when the daemon listens beyond loopback (left out on loopback, so every existing answer is unchanged, §12.1). With sign-in off on the network, the web UI shows `ui-sign-in-off-network` at the top of every page, not only the start page: a person who opens a deep link must see it too. On loopback the start page keeps its note that anyone on this machine can use Ladderback. The UI reads the session once per load, as it does for the standing; if that read fails the page shows neither note until it is reloaded, the same limit the loopback note has.
 5. **With sign-in on, nothing changes**: the plain-HTTP warning stays a log record, as decision 70 has it.
 6. **The tests bind `0.0.0.0:0`.** It is beyond loopback by the rule, every runner has it, and port 0 picks a free port, so no scenario needs a `skip!`; requests reach the socket through `127.0.0.1` with an explicit `Host` header, which is what the request checks read.
+7. **Behind a proxy, the same line per name (#398, 2026-11-14).** With sign-in off on loopback, an `--allowed-host` that is not a loopback name is one a reverse proxy can bring anyone to the daemon by. The daemon says, on stderr as in point 3, one `cli-warn-sign-in-off-behind-proxy` line for each such name, after it binds; the log line that anyone on this machine can use Ladderback stays.
 
 ## Risk that remains
 

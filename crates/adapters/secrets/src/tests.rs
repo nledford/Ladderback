@@ -1999,7 +1999,7 @@ async fn a_link_out_of_the_credentials_directory_is_warned_about() {
         let resolved = secrets.resolve(&file(&path)).await.unwrap();
         assert_eq!(
             resolved.warnings,
-            [SecretWarning::FileReadableByOthers { path }],
+            [SecretWarning::FileReadableByOthers { path, mode: 0o644 }],
             "{name}"
         );
     }

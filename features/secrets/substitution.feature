@@ -772,11 +772,11 @@ Feature: Secret references in a repository's settings
 
     Scenario Outline: A link out of where the runtime sets permissions gives a warning
       Given the environment variable "CREDENTIALS_DIRECTORY" is "/run/credentials/demo.service"
-      And the file "/home/demo/token" with mode 644 holds "demo-token"
+      And the file "/home/demo/token" with mode 644 holds "token-value"
       And the file "<path>" is a link to "/home/demo/token"
       And the option "token" is "${file:<path>}"
       When the repository is resolved
-      Then the resolved option "token" is "demo-token"
+      Then the resolved option "token" is "token-value"
       And the resolution warns once that others can read the file "<path>"
 
       Examples:

@@ -42,6 +42,12 @@ Feature: Operation outcome
     And the history lists 10000 warnings for the operation
     And the history counts 10005 warnings for the operation
 
+  Scenario: The history page names each kind of warning an operation recorded, once
+    Given the engine will report an unreadable file, a check warning and another unreadable file
+    When the agent runs the operation
+    Then the operation ends as succeeded with warnings
+    And the history page names the operation's warnings "source-unreadable" and "check-warning", in the order they came
+
   Scenario Outline: A warning's text past the cap is cut and marked
     Given the engine will report an unreadable file whose <field> is 100000 characters long
     When the agent runs the operation

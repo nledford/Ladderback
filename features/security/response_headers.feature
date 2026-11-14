@@ -55,3 +55,25 @@ Feature: Security response headers
       Given a "GET" request for "/"
       When the request is sent
       Then the response has no "Strict-Transport-Security" header
+
+  Rule: No cache keeps an answer of the API
+    A caching reverse proxy in front could otherwise keep one person's
+    answer, a session's included, and give it to another.
+
+    Scenario Outline: The answer for <what> is never stored
+      Given a "GET" request for "<path>"
+      When the request is sent
+      Then the response has the header "Cache-Control" with the value "no-store"
+
+      Examples:
+        | what                 | path            |
+        | the session          | /api/v1/session |
+        | the plans            | /api/v1/plans   |
+        | an unknown API route | /api/v1/nope    |
+
+    Scenario: A refused API request's answer is never stored
+      Given a "GET" request for "/api/v1/session"
+      And the request has the header "Host: evil.example:{port}"
+      When the request is sent
+      Then the request is refused with status 403 and the error code "host-not-allowed"
+      And the response has the header "Cache-Control" with the value "no-store"

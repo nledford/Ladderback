@@ -498,6 +498,56 @@ fn api_password_in_a_missing_file(agent: &mut Agent) {
     agent.repositories.api_password_file = Some(path);
 }
 
+/// The password file at mode 0644, whatever the umask: its owner writes it,
+/// and everyone else can read it.
+#[given("the client's password is in a file other users can read")]
+fn api_password_in_a_readable_file(agent: &mut Agent) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = agent.scratch().join("password.txt");
+    fs::write(&path, PASSWORD).expect("the password file");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("the file's mode");
+    agent.repositories.api_password_file = Some(path);
+}
+
+/// The daemon logs the warning before it answers, and the thread that drains
+/// its log may be a moment behind: the line is looked for until it comes,
+/// for at most 5 s.
+#[then(
+    expr = "the daemon's log warns that other users can read the password file, of mode {string}"
+)]
+async fn daemon_warns_readable_password_file(agent: &mut Agent, mode: String) {
+    let path = agent
+        .repositories
+        .api_password_file
+        .clone()
+        .expect("the password is in a file");
+    let path = path.to_str().expect("a scratch path is text").to_owned();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let log = agent.events.whole_log();
+        let warned = log.lines().any(|line| {
+            line.contains("WARN")
+                && line.contains("SecretFileReadable")
+                && line.contains(&path)
+                && line.contains(&mode)
+        });
+        if warned {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no warning that others can read {path} (mode {mode}) in: {log}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+#[then("the daemon's log never holds the password")]
+fn daemon_log_never_holds_the_password(agent: &mut Agent) {
+    let log = agent.events.whole_log();
+    assert!(!log.contains(PASSWORD), "the password is in the log: {log}");
+}
+
 #[given("the client's repository is at another, empty location")]
 fn api_other_empty_location(agent: &mut Agent) {
     let other = agent.scratch().join("other-repo");

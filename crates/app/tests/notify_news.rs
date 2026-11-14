@@ -6,8 +6,8 @@
 //! waits, and tells every start and end in the order they came.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use api::{UiEvent, WarningCode};
 use app::announce::{end_of, start_of};
@@ -20,13 +20,13 @@ use app::ports::{
 use async_trait::async_trait;
 use domain::execution::{FailureReason, Operation, OperationKind, Target, Trigger};
 use domain::notifications::{
-    Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
+    Auth, Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
 };
 use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, Plan, RepositoryConfig,
     RepositorySettings, Source,
 };
-use domain::secrets::SecretRef;
+use domain::secrets::{FileRead, SecretRef, SecretWarning};
 use domain::{OperationId, PlanId, RepositoryAlias, Timestamp, Uuid};
 use tokio::sync::watch;
 
@@ -77,6 +77,18 @@ fn plan() -> PlanId {
 /// The configuration: the plan "home", and a rule "ops" that sends its
 /// backups' starts and failures to the webhook "ops".
 fn config() -> AgentConfig {
+    config_sending_to(
+        Channel::new(
+            ChannelKind::Webhook,
+            SecretRef::Env("DEMO_OPS_URL".to_owned()),
+            None,
+        )
+        .expect("a channel"),
+    )
+}
+
+/// [`config`], its channel "ops" being `ops`.
+fn config_sending_to(ops: Channel) -> AgentConfig {
     let repository = RepositoryConfig {
         locations: Default::default(),
         id: None,
@@ -95,15 +107,7 @@ fn config() -> AgentConfig {
     let source = Source::parse("/home/demo/home").expect("a source");
     let channel = ChannelName::parse("ops").expect("a channel name");
     let notifications = Notifications::new(
-        BTreeMap::from([(
-            channel.clone(),
-            Channel::new(
-                ChannelKind::Webhook,
-                SecretRef::Env("DEMO_OPS_URL".to_owned()),
-                None,
-            )
-            .expect("a channel"),
-        )]),
+        BTreeMap::from([(channel.clone(), ops)]),
         BTreeMap::from([(
             RuleName::parse("ops").expect("a rule name"),
             Rule::new(
@@ -211,5 +215,87 @@ async fn an_end_that_comes_while_a_channel_is_slow_is_told_after_any_number_of_w
             (EventKind::BackupStarted, first.id()),
             (EventKind::BackupFailed, second.id()),
         ]
+    );
+}
+
+/// A channel's secret read from a file other users can read is told by the
+/// file's path, masked of every secret the delivery read (I4, #386), and
+/// told too when a later secret of the channel can't be read.
+#[tokio::test]
+async fn a_channels_readable_secret_file_is_told_by_its_masked_path() {
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let notify = |channel: Channel, secrets: FakeSecrets| {
+        let store = InMemoryConfigStore::new();
+        let heard = Arc::clone(&told);
+        async move {
+            store
+                .save(&config_sending_to(channel))
+                .await
+                .expect("saved");
+            let operations = Arc::new(InMemoryOperationStore::new());
+            operations
+                .save(&backup(1, t(0)), None)
+                .await
+                .expect("the log takes it");
+            Notify::new(
+                Arc::new(store),
+                operations,
+                Arc::new(secrets),
+                Arc::new(RecordingNotifier::new()),
+            )
+            .telling(Arc::new(move |warning| {
+                heard.lock().expect("the list").push(warning.clone());
+            }))
+        }
+    };
+    let readable = |path: &str| SecretWarning::FileReadableByOthers {
+        path: path.to_owned(),
+        mode: 0o644,
+    };
+    let file = |path: &str| SecretRef::File {
+        path: path.to_owned(),
+        read: FileRead::FirstLine,
+    };
+
+    // The token's file is named as the token is, by chance.
+    let secrets = FakeSecrets::new();
+    secrets.set_env("DEMO_OPS_URL", "http://127.0.0.1/ops");
+    secrets.write_file("/home/demo/tokens/demo-token", b"demo-token\n", 0o644);
+    let channel = Channel::new(
+        ChannelKind::Webhook,
+        SecretRef::Env("DEMO_OPS_URL".to_owned()),
+        Some(Auth::Bearer(file("/home/demo/tokens/demo-token"))),
+    )
+    .expect("a channel");
+    let reports = notify(channel, secrets)
+        .await
+        .tell(start_of(&backup(1, t(0)), None).expect("news of a start"))
+        .await;
+    assert_eq!(reports, []);
+    assert_eq!(
+        *told.lock().expect("the list"),
+        [readable("/home/demo/tokens/***")]
+    );
+
+    // The URL's file is read, and the token can't be.
+    told.lock().expect("the list").clear();
+    let secrets = FakeSecrets::new();
+    secrets.write_file("/home/demo/ops-url", b"http://127.0.0.1/ops\n", 0o644);
+    let channel = Channel::new(
+        ChannelKind::Webhook,
+        file("/home/demo/ops-url"),
+        Some(Auth::Bearer(SecretRef::Env(
+            "DEMO_MISSING_TOKEN".to_owned(),
+        ))),
+    )
+    .expect("a channel");
+    let reports = notify(channel, secrets)
+        .await
+        .tell(start_of(&backup(1, t(0)), None).expect("news of a start"))
+        .await;
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!(
+        *told.lock().expect("the list"),
+        [readable("/home/demo/ops-url")]
     );
 }

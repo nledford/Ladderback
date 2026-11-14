@@ -229,8 +229,25 @@ pub enum WarningKind {
     /// and `detail` the outcome's code; never an address or a network's
     /// name.
     LocationSkipped,
+    /// A secret the operation read came from a file other users of the
+    /// machine can read (#386). `item` is the file's path, `during` is
+    /// `secret` and `detail` the file's mode in octal (`0644`); never the
+    /// secret (I4).
+    SecretFileReadable,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
+}
+
+/// The kinds of `warnings`, each once, in the order the first of each came:
+/// what the history names an operation's warnings by (#508).
+pub fn warning_kinds(warnings: &[Warning]) -> Vec<WarningKind> {
+    let mut kinds = Vec::new();
+    for warning in warnings {
+        if !kinds.contains(&warning.kind) {
+            kinds.push(warning.kind);
+        }
+    }
+    kinds
 }
 
 /// What was attempted when a lifecycle transition was refused.
@@ -533,15 +550,26 @@ impl Operation {
     }
 
     /// Counts `warning` and keeps a cut copy of it while there is room
-    /// ([`Self::record_warning`]).
+    /// ([`Self::record_warning`]). An operation names a readable secret file
+    /// once, however many of its reads met it (#386): such a warning for a
+    /// path already kept is neither kept nor counted again.
     fn keep(&mut self, warning: Warning) {
+        let item = warning.item.map(cut_warning_text);
+        if warning.kind == WarningKind::SecretFileReadable
+            && self
+                .warnings
+                .iter()
+                .any(|kept| kept.kind == warning.kind && kept.item == item)
+        {
+            return;
+        }
         self.warning_count = self.warning_count.saturating_add(1);
         if self.warnings.len() < MAX_STORED_WARNINGS {
             // Every field is named, so a text field added to `Warning` must
             // be given its cut, or left whole on purpose, to compile.
             self.warnings.push(Warning {
                 kind: warning.kind,
-                item: warning.item.map(cut_warning_text),
+                item,
                 during: cut_warning_text(warning.during),
                 detail: cut_warning_text(warning.detail),
             });
@@ -645,6 +673,63 @@ mod tests {
             during: "backup".to_owned(),
             detail: "permission denied".to_owned(),
         }
+    }
+
+    /// The history names each kind once, in the order its first warning
+    /// came, however many of it there are (#508).
+    #[test]
+    fn an_operations_warnings_are_named_by_kind_each_once_in_the_order_they_came() {
+        let check = Warning {
+            kind: WarningKind::CheckWarning,
+            item: None,
+            during: "check".to_owned(),
+            detail: "pack not referenced in index".to_owned(),
+        };
+        let warnings = [
+            unreadable("/home/demo/a"),
+            check.clone(),
+            unreadable("/home/demo/b"),
+            check,
+            unreadable("/home/demo/c"),
+        ];
+        assert_eq!(
+            warning_kinds(&warnings),
+            [WarningKind::SourceUnreadable, WarningKind::CheckWarning]
+        );
+        assert_eq!(warning_kinds(&[]), Vec::new());
+    }
+
+    /// An operation names a readable secret file once, however many of its
+    /// reads met it: at its start and again in its choice of location
+    /// (#386). Another file, or another kind of warning on the same path,
+    /// is still said.
+    #[test]
+    fn an_operation_names_a_readable_secret_file_once() {
+        let readable = |path: &str| Warning {
+            kind: WarningKind::SecretFileReadable,
+            item: Some(path.to_owned()),
+            during: "secret".to_owned(),
+            detail: "0644".to_owned(),
+        };
+        let mut op = queued();
+        op.attach_warning(readable("/home/demo/nas-password"))
+            .unwrap();
+        op.start(t(10)).unwrap();
+        op.record_warning(readable("/home/demo/nas-password"))
+            .unwrap();
+        op.record_warning(readable("/home/demo/lan-key")).unwrap();
+        op.record_warning(unreadable("/home/demo/nas-password"))
+            .unwrap();
+        op.record_warning(readable("/home/demo/lan-key")).unwrap();
+        assert_eq!(
+            op.warnings(),
+            [
+                readable("/home/demo/nas-password"),
+                readable("/home/demo/lan-key"),
+                unreadable("/home/demo/nas-password"),
+            ]
+        );
+        assert_eq!(op.warning_count(), 3);
     }
 
     fn failed() -> OperationStatus {
