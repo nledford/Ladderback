@@ -9,7 +9,10 @@
 //! <unit>`; `launchctl` with `print`, `enable`, `bootstrap` and `bootout` in
 //! the `gui/<uid>` domain. They answer what the real ones answer to a call
 //! that can't succeed: an `enable` of a missing file, a `bootstrap` of a
-//! service already running, a `bootout` of one that isn't.
+//! service already running, a `bootout` of one that isn't. Told to, the
+//! `launchctl` keeps an agent it booted out for a while, as the real one
+//! does while the agent's program is still stopping
+//! ([`FakeServiceManagers::stop_slowly`]).
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -55,7 +58,16 @@ esac
 
 const LAUNCHCTL: &str = r#"case "$1" in
   print)
-    [ -f "$state/runs-${2##*/}" ] || { echo "Could not find service \"${2##*/}\" in domain for user gui" >&2; exit 113; } ;;
+    label=${2##*/}
+    if [ -f "$state/stopping-$label" ]; then
+      read -r left < "$state/stopping-$label"
+      if [ "$left" -gt 0 ]; then
+        printf '%s\n' "$((left - 1))" > "$state/stopping-$label"
+      else
+        /bin/rm -f "$state/stopping-$label" "$state/runs-$label"
+      fi
+    fi
+    [ -f "$state/runs-$label" ] || { echo "Could not find service \"$label\" in domain for user gui" >&2; exit 113; } ;;
   enable) ;;
   bootstrap)
     [ -f "$3" ] || { echo "Bootstrap failed: 2: No such file or directory" >&2; exit 2; }
@@ -64,7 +76,11 @@ const LAUNCHCTL: &str = r#"case "$1" in
     : > "$state/runs-$label" ;;
   bootout)
     [ -f "$state/runs-${2##*/}" ] || { echo "Boot-out failed: 3: No such process" >&2; exit 3; }
-    /bin/rm -f "$state/runs-${2##*/}" ;;
+    if [ -f "$state/stop-slowly" ]; then
+      /bin/cp "$state/stop-slowly" "$state/stopping-${2##*/}"
+    else
+      /bin/rm -f "$state/runs-${2##*/}"
+    fi ;;
   *) echo "unknown command $1" >&2; exit 64 ;;
 esac
 "#;
@@ -156,5 +172,18 @@ impl FakeServiceManagers {
     /// When the state folder can't be written.
     pub fn hang(&self) {
         fs::write(self.state().join("hang"), "").expect("the hang");
+    }
+
+    /// Makes each `bootout` from now on return while the agent is still
+    /// stopping, as launchd's does: launchd keeps the agent for the next
+    /// `checks` calls of `print`, which find it loaded, and refuses a
+    /// `bootstrap` of its label meanwhile ("Bootstrap failed: 5:
+    /// Input/output error"). The call after those finds it gone.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn stop_slowly(&self, checks: u32) {
+        fs::write(self.state().join("stop-slowly"), format!("{checks}\n")).expect("the slow stop");
     }
 }
