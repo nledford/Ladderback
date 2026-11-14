@@ -37,7 +37,7 @@ mod set_password;
 #[derive(Parser)]
 #[command(
     name = "ladderback",
-    version,
+    version = build_info::SHOWN.as_str(),
     about = "Self-hosted backup manager for rustic"
 )]
 struct Cli {
@@ -172,7 +172,7 @@ fn main() -> ExitCode {
 
 fn serve(listen: SocketAddr, allowed_hosts: Vec<String>, plain: bool) -> ExitCode {
     logging::install(plain);
-    log::info!("ladderback {} starting", env!("CARGO_PKG_VERSION"));
+    log::info!("ladderback {} starting", *build_info::SHOWN);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     finish(&localizer, run_daemon(&localizer, listen, allowed_hosts))
 }

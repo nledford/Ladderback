@@ -30,7 +30,7 @@ pub struct Found {
 
 /// Whether `text` is a commit hash, whole or short: 7 to 64 hex digits.
 pub fn is_commit(text: &str) -> bool {
-    todo!()
+    (7..=64).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// The build of `version` from the package folder `package`: the commit a
@@ -44,14 +44,45 @@ pub fn found(
     named: Option<&str>,
     checkout: Option<&Checkout<'_>>,
 ) -> Found {
-    todo!()
+    if let Some(named) = named.filter(|named| is_commit(named)) {
+        return Found {
+            commit: Some(named.to_ascii_lowercase()),
+            dirty: false,
+            release: false,
+        };
+    }
+    let unknown = Found {
+        commit: None,
+        dirty: false,
+        release: false,
+    };
+    let Some(checkout) = checkout else {
+        return unknown;
+    };
+    let head = checkout.head.trim();
+    if Path::new(checkout.top.trim()) != package || !is_commit(head) {
+        return unknown;
+    }
+    let tag = format!("v{version}");
+    Found {
+        commit: Some(head.to_ascii_lowercase()),
+        dirty: !checkout.changes.trim().is_empty(),
+        release: checkout.tags.lines().any(|line| line.trim() == tag),
+    }
 }
 
 /// The build script's instructions that hand `found` to the program, as
 /// `LADDERBACK_BUILT_COMMIT` (empty when unknown), `LADDERBACK_BUILT_DIRTY`
 /// and `LADDERBACK_BUILT_RELEASE` (`true` or `false`).
 pub fn instructions(found: &Found) -> [String; 3] {
-    todo!()
+    [
+        format!(
+            "cargo:rustc-env=LADDERBACK_BUILT_COMMIT={}",
+            found.commit.as_deref().unwrap_or_default()
+        ),
+        format!("cargo:rustc-env=LADDERBACK_BUILT_DIRTY={}", found.dirty),
+        format!("cargo:rustc-env=LADDERBACK_BUILT_RELEASE={}", found.release),
+    ]
 }
 
 #[cfg(test)]
