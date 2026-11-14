@@ -388,6 +388,34 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
     }
 }
 
+/// A good token is judged alone even beside a live session and its CSRF
+/// token: the session doesn't open what the token may not (decision 93).
+#[tokio::test]
+async fn a_good_token_beside_a_live_session_still_cannot_use_a_session_only_route() {
+    let daemon = Daemon::new();
+    let (cookie, csrf) = daemon.signed_in().await;
+    let token = daemon
+        .token(&[Scope::Read, Scope::Run, Scope::Preview, Scope::Propose])
+        .await;
+    let both = [
+        ("authorization", token.as_str()),
+        ("cookie", cookie.as_str()),
+        ("x-csrf-token", csrf.as_str()),
+    ];
+    for request in [
+        get("/api/v1/tokens", &both),
+        post(
+            "/api/v1/tokens",
+            &both,
+            r#"{"label":"x","scopes":["read"]}"#,
+        ),
+        delete("/api/v1/tokens/abcdefghijkl", &both),
+        post("/api/v1/repositories/home/maintenance", &both, "{}"),
+    ] {
+        assert_needs(&daemon, request, "session").await;
+    }
+}
+
 #[tokio::test]
 async fn a_wrong_token_is_refused_and_the_session_cookie_beside_it_does_not_help() {
     let daemon = Daemon::new();
