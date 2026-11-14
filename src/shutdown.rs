@@ -2,7 +2,28 @@
 //! within a bound of its own and within what is left of the stop's limit,
 //! so no step can keep the daemon from exiting.
 
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
+
+use crate::composition::LOG_CLOSE_BOUND;
+
+/// How long the requests still open are waited for. A request is answered
+/// in far less; one still open after this is one a client never finishes.
+pub(crate) const REQUESTS_BOUND: Duration = Duration::from_secs(5);
+
+/// How long the workers are waited for: the grace a stopped worker gets
+/// before SIGKILL, and some to reap it.
+pub(crate) const WORKERS_BOUND: Duration = Duration::from_secs(engine::STOP_GRACE.as_secs() + 5);
+
+/// The stop's limit: the sum of the steps' bounds, so each step gets all of
+/// its own whatever the others took. The tasks get what is left.
+pub(crate) const LIMIT: Duration = Duration::from_secs(
+    REQUESTS_BOUND.as_secs() + LOG_CLOSE_BOUND.as_secs() + WORKERS_BOUND.as_secs(),
+);
+
+// The service manager waits longer before it kills the daemon, so it never
+// cuts a stop short.
+const _: () = assert!(LIMIT.as_secs() < platform::service::KILL_AFTER.as_secs());
 
 /// One step of the stop, as the log names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,6 +36,28 @@ pub(crate) enum Step {
     Workers,
     /// What the daemon's tasks were still doing.
     Tasks,
+}
+
+impl Step {
+    /// The step's name in the log.
+    fn name(self) -> &'static str {
+        match self {
+            Self::OpenRequests => "open requests",
+            Self::OperationLog => "operation log",
+            Self::Workers => "workers",
+            Self::Tasks => "tasks",
+        }
+    }
+
+    /// What giving the step up leaves.
+    fn given_up(self) -> &'static str {
+        match self {
+            Self::OpenRequests => "the requests still open end with the daemon",
+            Self::OperationLog => "an operation it was still recording is ended at the next start",
+            Self::Workers => "a worker still running is killed with the daemon",
+            Self::Tasks => "what they were still doing is left behind with the daemon",
+        }
+    }
 }
 
 /// A stop under way: when it began, its limit, and how long each step was
@@ -35,37 +78,74 @@ struct Waited {
 impl Stopping {
     /// A stop that begins now and has `limit` in all.
     pub(crate) fn new(limit: Duration) -> Self {
-        let _ = limit;
-        todo!()
+        Self {
+            began: Instant::now(),
+            limit,
+            waited: Vec::with_capacity(4),
+        }
     }
 
     /// Waits for `work`, `step` of the stop, for `bound` at most and no
-    /// longer than what is left of the limit. `None` when it was given up.
+    /// longer than what is left of the limit. `None` when it was given up,
+    /// which the log says.
     pub(crate) async fn wait<T>(
         &mut self,
         step: Step,
         bound: Duration,
         work: impl Future<Output = T>,
     ) -> Option<T> {
-        let _ = (step, bound, work);
-        todo!()
+        let began = Instant::now();
+        let ended = tokio::time::timeout(bound.min(self.left()), work)
+            .await
+            .ok();
+        self.waited(step, began.elapsed(), ended.is_some());
+        ended
     }
 
     /// What is left of the limit.
     pub(crate) fn left(&self) -> Duration {
-        todo!()
+        self.limit.saturating_sub(self.began.elapsed())
     }
 
-    /// Records that `step` was waited for `took`, and whether it ended.
+    /// Records that `step` was waited for `took`, and whether it ended; the
+    /// log says when it didn't.
     pub(crate) fn waited(&mut self, step: Step, took: Duration, ended: bool) {
-        let _ = (step, took, ended);
-        todo!()
+        if !ended {
+            log::warn!(
+                "stopping: gave up waiting for the {} after {:.1} s: {}",
+                step.name(),
+                took.as_secs_f64(),
+                step.given_up()
+            );
+        }
+        self.waited.push(Waited { step, took, ended });
+    }
+
+    /// Logs the line a stop ends with: how long it took, and each step. At
+    /// WARN when a step was given up.
+    pub(crate) fn finish(&self) {
+        let said = self.said(self.began.elapsed());
+        if self.waited.iter().all(|waited| waited.ended) {
+            log::info!("{said}");
+        } else {
+            log::warn!("{said}");
+        }
     }
 
     /// The line the log ends a stop with, for a stop that took `took`.
     fn said(&self, took: Duration) -> String {
-        let _ = took;
-        todo!()
+        let mut said = format!("stopped after {:.1} s:", took.as_secs_f64());
+        for (at, waited) in self.waited.iter().enumerate() {
+            let _ = write!(
+                said,
+                "{} {} {:.1} s{}",
+                if at == 0 { "" } else { "," },
+                waited.step.name(),
+                waited.took.as_secs_f64(),
+                if waited.ended { "" } else { " (gave up)" }
+            );
+        }
+        said
     }
 }
 

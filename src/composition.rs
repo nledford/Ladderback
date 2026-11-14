@@ -256,15 +256,17 @@ fn location_kind(rclone: bool) -> MsgArg {
 }
 
 /// What `serve` runs: the router's state, the operation log it writes, the
-/// hold on the data folder that keeps every other process off it, and the
-/// work it does with no request: the queue left from before it started and
-/// the scheduler. The caller closes the log once it has stopped serving, and
-/// keeps the lock until the daemon is gone (§9).
+/// hold on the data folder that keeps every other process off it, the work
+/// it does with no request (the queue left from before it started and the
+/// scheduler), and its workers. The caller closes the log once it has
+/// stopped serving, then stops the workers, and keeps the lock until the
+/// daemon is gone (§4.2, §9).
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
     pub(crate) log: OperationLog,
     pub(crate) lock: DataDirLock,
     pub(crate) background: Background,
+    pub(crate) workers: engine::Workers,
 }
 
 /// What the conditions before a scheduled run ask the machine (§5): what
@@ -381,7 +383,7 @@ async fn resume_queued(
 /// them; one that hasn't by then is stalled (a disk that stopped
 /// answering), and the daemon stops without it rather than hold up the
 /// service manager, which would kill it anyway.
-const LOG_CLOSE_BOUND: std::time::Duration =
+pub(crate) const LOG_CLOSE_BOUND: std::time::Duration =
     std::time::Duration::from_secs(app::log_write::SAVE_BOUND.as_secs().unsigned_abs());
 
 /// The operation log the daemon writes, which it closes before it lets go
@@ -399,6 +401,13 @@ impl OperationLog {
     /// next start, as after a crash.
     pub(crate) async fn close(&self) {
         close_within(self.store.close(), &self.database, LOG_CLOSE_BOUND).await;
+    }
+
+    /// Closes the log once the calls in flight have ended, however long
+    /// that takes: for the daemon's stop, which bounds it as one of its
+    /// steps (`shutdown`).
+    pub(crate) async fn close_unbounded(&self) {
+        self.store.close().await;
     }
 }
 
@@ -504,11 +513,12 @@ async fn daemon_at(
     )
     .await
     {
-        Ok((state, background)) => Ok(Daemon {
+        Ok((state, background, workers)) => Ok(Daemon {
             state,
             log,
             lock,
             background,
+            workers,
         }),
         Err(refused) => {
             log.close().await;
@@ -517,9 +527,9 @@ async fn daemon_at(
     }
 }
 
-/// The router's state over the operation log `log`, and the work the daemon
-/// does with no request, once it has ended what an earlier run left
-/// running, or why the daemon cannot serve. The workers' cache folder is
+/// The router's state over the operation log `log`, the work the daemon
+/// does with no request and its workers, once it has ended what an earlier
+/// run left running, or why the daemon cannot serve. The workers' cache folder is
 /// tidied first, keeping the caches of the repositories `recorded` names.
 async fn state_over(
     config: Arc<dyn ConfigStore>,
@@ -528,7 +538,7 @@ async fn state_over(
     recorded: Recorded,
     log: &OperationLog,
     conditions: RunConditions,
-) -> Result<(AppState, Background), Refused> {
+) -> Result<(AppState, Background, engine::Workers), Refused> {
     let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
     let schedules: Arc<dyn ScheduleStore> = Arc::<SqliteStore>::clone(&log.store);
     // The bus and the notification rules come first, so that recovery can
@@ -577,6 +587,7 @@ async fn state_over(
         tidy_workers_cache(&dir, recorded).await;
         workers = workers.with_cache_root(dir);
     }
+    let stopping = workers.workers();
     // One lock for every write of the configuration the daemon makes: a
     // connection, a creation and the record of an opened repository's ID
     // (§6.1, decision 57).
@@ -657,6 +668,7 @@ async fn state_over(
             build: crate::build_info::running(),
         },
         background,
+        stopping,
     ))
 }
 
