@@ -21,7 +21,7 @@ Without a manager, each machine runs rustic from its own cron job or timer. Fail
 - **Scriptable by AI agents.** `ladderback mcp` is an MCP server over stdio. It drives a running instance, or a headless session of its own, through read, run and preview tools. It can't restore or delete. It will be able to propose a backup setup, which changes nothing until a person confirms it in the web UI.
 - **One self-contained program.** It runs headless on servers and as a user service on desktops and laptops, with the web UI built in. It is accessible (WCAG 2.2 AA) and localization-ready.
 
-Ladderback supports **Linux and macOS**. Windows is out of scope.
+Ladderback supports **Linux and macOS**. Windows is out of scope. It runs inside WSL2 as a Linux install, for files inside WSL, but it isn't a way to back up Windows: WSL stops when idle, so scheduled backups don't run unless something keeps it running, and files under `/mnt/c` are read without shadow copies or Windows metadata (ACLs, attributes, alternate data streams), so open files may fail and a restore to Windows loses that metadata.
 
 ## Ladderback or Backrest?
 
@@ -199,6 +199,8 @@ Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewr
 ## Contributing
 
 Ladderback is built for its author's own machines first and published for other rustic users, without support promises. Issues and discussion about the design are welcome. Development is behaviour-first and test-first; see [docs/design/development.md §13](docs/design/development.md#13-development-method) for the method and [AGENTS.md](AGENTS.md) for the working rules.
+
+**Help test it.** Some setups haven't been tried on a real machine yet: other Linux distributions and desktops, keyrings, ARM, headless servers, Wi-Fi rules, WSL2. Each [issue labeled `needs real-world test`](https://github.com/nledford/Ladderback/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22needs%20real-world%20test%22) lists the steps and what to report; use a scratch repository and a made-up password.
 
 ### Developing on Fedora
 
