@@ -600,6 +600,68 @@ async fn a_manager_that_does_not_answer_is_stopped_at_the_limit() {
     );
 }
 
+/// What `loginctl` is asked: whether this user lingers (#546).
+fn linger_check() -> String {
+    format!(
+        "loginctl show-user {} -p Linger",
+        nix::unistd::getuid().as_raw()
+    )
+}
+
+#[tokio::test]
+async fn a_user_who_lingers_is_not_told_how_to_keep_the_service_running() {
+    let faked = Faked::new(Which::Systemd);
+    faked.fakes.linger();
+    assert!(!faked.service.should_hint_lingering().await);
+    assert_eq!(faked.fakes.commands(), [linger_check()]);
+}
+
+#[tokio::test]
+async fn a_user_who_does_not_linger_is_told_how_to_keep_the_service_running() {
+    let faked = Faked::new(Which::Systemd);
+    assert!(faked.service.should_hint_lingering().await);
+    assert_eq!(faked.fakes.commands(), [linger_check()]);
+}
+
+/// A check that can't say whether the user lingers tells, as every install
+/// did before the check: better a hint the user doesn't need than a service
+/// that stops at logout unannounced.
+#[tokio::test]
+async fn a_linger_check_that_fails_still_tells_how_to_keep_the_service_running() {
+    let refused = Faked::new(Which::Systemd);
+    refused.fakes.linger();
+    refused
+        .fakes
+        .refuse_linger_check("Failed to get user: User ID 1000 is not logged in or lingering");
+    assert!(refused.service.should_hint_lingering().await, "refused");
+    assert_eq!(refused.fakes.commands(), [linger_check()]);
+
+    let mut missing = Faked::new(Which::Systemd);
+    let empty = missing.scratch.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    missing.service.environment = Environment::keeping([(os("PATH"), empty.into_os_string())]);
+    assert!(
+        missing.service.should_hint_lingering().await,
+        "not on the PATH"
+    );
+
+    let silent = Faked::new(Which::Systemd);
+    silent.fakes.linger();
+    silent.fakes.hang();
+    let service = silent
+        .service
+        .clone()
+        .with_limit(Duration::from_millis(500));
+    assert!(service.should_hint_lingering().await, "no answer");
+}
+
+#[tokio::test]
+async fn launchd_has_no_lingering_to_tell_of() {
+    let faked = Faked::new(Which::Launchd);
+    assert!(!faked.service.should_hint_lingering().await);
+    assert_eq!(faked.fakes.commands(), Vec::<String>::new());
+}
+
 #[tokio::test]
 async fn the_manager_never_sees_a_secret_of_the_environment() {
     for which in [Which::Systemd, Which::Launchd] {

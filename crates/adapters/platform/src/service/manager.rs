@@ -1,12 +1,12 @@
-//! Runs the manager's program: `systemctl` or `launchctl`, found on the
-//! `PATH` it is given, with argv only and an environment of its own.
+//! Runs the manager's program: `systemctl`, `launchctl` or `loginctl`, found
+//! on the `PATH` it is given, with argv only and an environment of its own.
 
 use std::ffi::{OsStr, OsString};
 use std::process::Stdio;
 use std::time::Duration;
 
 use app::ports::ServiceProblem;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
 /// The variables the manager's program is run with: what it needs to find
@@ -30,7 +30,8 @@ const KEPT: [&str; 8] = [
     "LC_MESSAGES",
 ];
 
-/// The most of the manager's standard error a refusal keeps.
+/// The most of the manager's standard output, or of its standard error, a
+/// call keeps.
 const MAX_SAID: u64 = 4096;
 
 impl Environment {
@@ -51,13 +52,12 @@ impl Environment {
 
 /// How one call of the manager ended.
 pub(super) enum Ended {
-    Succeeded,
+    /// It ended with 0, printing `out` on its standard output, perhaps cut
+    /// short.
+    Succeeded { out: String },
     /// It ended with an error, with exit code `code` (none when a signal
     /// ended it), saying `said`.
-    Failed {
-        code: Option<i32>,
-        said: String,
-    },
+    Failed { code: Option<i32>, said: String },
 }
 
 /// Runs `program args`, with `environment` only, and waits at most `limit`.
@@ -78,7 +78,7 @@ pub(super) async fn run(
         .env_clear()
         .envs(environment.kept().iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     // Through the spawn gate: no other start inherits the pipe, and the
@@ -90,23 +90,20 @@ pub(super) async fn run(
             command: command_line.clone(),
             detail: error.to_string(),
         })?;
+    let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let finished = async {
-        let mut said = Vec::new();
-        if let Some(mut stderr) = stderr {
-            let _ = (&mut stderr).take(MAX_SAID).read_to_end(&mut said).await;
-            // The rest is not kept, but read, so the program never waits on
-            // a full pipe.
-            let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
-        }
-        (said, child.wait().await)
+        // Both at once: a program that fills one pipe while the other is
+        // read would wait forever.
+        let (out, said) = tokio::join!(kept(stdout), kept(stderr));
+        (out, said, child.wait().await)
     };
     let silent = || ServiceProblem::ManagerSilent {
         command: command_line.clone(),
         seconds: limit.as_secs(),
     };
     // On a timeout the child is dropped, which kills it.
-    let (said, status) = tokio::time::timeout(limit, finished)
+    let (out, said, status) = tokio::time::timeout(limit, finished)
         .await
         .map_err(|_| silent())?;
     let status = match status {
@@ -121,12 +118,25 @@ pub(super) async fn run(
         }
     };
     if status.success() {
-        return Ok(Ended::Succeeded);
+        return Ok(Ended::Succeeded {
+            out: String::from_utf8_lossy(&out).into_owned(),
+        });
     }
     Ok(Ended::Failed {
         code: status.code(),
         said: String::from_utf8_lossy(&said).trim().to_owned(),
     })
+}
+
+/// The first [`MAX_SAID`] bytes of `pipe`. The rest is not kept, but read,
+/// so the program never waits on a full pipe.
+async fn kept(pipe: Option<impl AsyncRead + Unpin>) -> Vec<u8> {
+    let mut kept = Vec::new();
+    if let Some(mut pipe) = pipe {
+        let _ = (&mut pipe).take(MAX_SAID).read_to_end(&mut kept).await;
+        let _ = tokio::io::copy(&mut pipe, &mut tokio::io::sink()).await;
+    }
+    kept
 }
 
 /// The command line as a person would type it.

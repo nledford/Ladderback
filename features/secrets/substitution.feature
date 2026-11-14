@@ -737,6 +737,18 @@ Feature: Secret references in a repository's settings
       When the repository is resolved
       Then the resolution warns once that others can read the file "/home/demo/password"
 
+    Scenario: A file read before a secret that can't be read is still warned of
+      The job fails on the missing file, and the daemon's log still says
+      that others can read the password file: whoever looks into the
+      failure learns of both (§10.2).
+
+      Given the file "/home/demo/password" with mode 644 holds "demo-password"
+      And the repository's password is in the file "/home/demo/password"
+      And the cold option "token" is "${file:/home/demo/missing-token}"
+      When the repository is resolved
+      Then the resolution fails for the field "options-cold.token"
+      And the log is told once that others can read the file "/home/demo/password"
+
     Scenario: A file only its owner can read gives no warning
       Given the file "/home/demo/token" with mode 600 holds "demo-token"
       And the option "token" is "${file:/home/demo/token}"

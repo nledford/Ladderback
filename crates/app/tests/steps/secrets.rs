@@ -2,7 +2,7 @@
 //! over a `FakeSecrets` store held by the world's `secrets` field.
 
 use std::assert_matches;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use app::execution::RunOperation;
 use app::fakes::{FakeSecrets, Script};
@@ -21,11 +21,13 @@ use domain::{OperationId, PlanId, Uuid};
 
 use super::Agent;
 
-/// The store, the settings being built, and what resolving them gave.
+/// The store, the settings being built, what resolving them gave, and the
+/// warnings the resolution told, as the daemon's log hears them.
 pub struct SecretsWorld {
     store: Arc<FakeSecrets>,
     settings: RepositorySettings,
     outcome: Option<Result<ResolvedRepository, ResolveError>>,
+    told: Arc<Mutex<Vec<SecretWarning>>>,
 }
 
 impl Default for SecretsWorld {
@@ -41,6 +43,7 @@ impl Default for SecretsWorld {
                 options_cold: Default::default(),
             },
             outcome: None,
+            told: Arc::default(),
         }
     }
 }
@@ -394,7 +397,13 @@ fn password_in_keyring(agent: &mut Agent, entry: String) {
 
 #[when("the repository is resolved")]
 async fn resolve(agent: &mut Agent) {
-    let use_case = ResolveRepository::new(agent.secrets.store.clone());
+    let told = Arc::clone(&agent.secrets.told);
+    let use_case =
+        ResolveRepository::new(agent.secrets.store.clone()).telling(Arc::new(move |warning| {
+            told.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(warning.clone());
+        }));
     agent.secrets.outcome = Some(use_case.resolve(&agent.secrets.settings).await);
 }
 
@@ -641,6 +650,21 @@ fn warns_once(agent: &mut Agent, path: String) {
 #[then("the resolution warns about nothing")]
 fn warns_about_nothing(agent: &mut Agent) {
     assert_eq!(agent.secrets.resolved().warnings, []);
+}
+
+#[then(expr = "the log is told once that others can read the file {string}")]
+fn log_told_once(agent: &mut Agent, path: String) {
+    let told = agent
+        .secrets
+        .told
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    assert_matches!(
+        told.as_slice(),
+        [SecretWarning::FileReadableByOthers { path: at, .. }] if *at == path,
+        "{told:?}"
+    );
 }
 
 #[then(expr = "the variable {string} was read {int} time(s)")]

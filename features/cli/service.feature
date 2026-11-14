@@ -24,6 +24,20 @@ Feature: Install the agent as a service
       And the service file runs this program's "serve"
       And the service runs
       And standard output says "installed the service"
+      And standard output says how to keep the service running while logged out
+
+    Scenario: A user who lingers isn't told how to linger
+      On Linux a user's services stop with the user's last session unless
+      the user lingers (operations §12): `install-service` says how to
+      linger only when `loginctl` doesn't say the user does already, or
+      can't say (#546). A launchd agent on macOS runs without lingering, and
+      nothing about it is said there, so the check is Linux's alone.
+
+      Given the user lingers
+      When the owner runs "install-service"
+      Then the command exits with status 0
+      And the service runs
+      And standard output never says how to linger
 
     Scenario: A program run by a package manager's link is named by the link
       A package manager such as Homebrew installs the program in a folder of

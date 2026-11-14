@@ -80,6 +80,11 @@ fn manager_refuses(agent: &mut Agent, words: String) {
     managers(agent).refuse(&words);
 }
 
+#[given("the user lingers")]
+fn user_lingers(agent: &mut Agent) {
+    managers(agent).linger();
+}
+
 /// The link a package manager puts on the `PATH`, under the scenario's
 /// scratch.
 fn package_link(agent: &Agent) -> PathBuf {
@@ -227,5 +232,36 @@ fn stdout_says(agent: &mut Agent, text: String) {
     assert!(
         stdout.contains(&text),
         "standard output {stdout:?} doesn't say {text:?}"
+    );
+}
+
+/// What the hint at lingering names, in every language.
+const LINGER_HINT: &str = "loginctl enable-linger";
+
+/// Why a lingering step checks nothing on macOS: a launchd agent runs while
+/// its user is logged out without lingering, so nothing about it is said.
+const NO_LINGERING: &str = "lingering is systemd's: a launchd install never says how to linger";
+
+#[then("standard output says how to keep the service running while logged out")]
+fn stdout_says_how_to_linger(agent: &mut Agent) {
+    if cfg!(target_os = "macos") {
+        testkit::skip!("{NO_LINGERING}");
+    }
+    let stdout = &ran(agent).stdout;
+    assert!(
+        stdout.contains(LINGER_HINT),
+        "standard output {stdout:?} doesn't say {LINGER_HINT:?}"
+    );
+}
+
+#[then("standard output never says how to linger")]
+fn stdout_never_says_how_to_linger(agent: &mut Agent) {
+    if cfg!(target_os = "macos") {
+        testkit::skip!("{NO_LINGERING}");
+    }
+    let stdout = &ran(agent).stdout;
+    assert!(
+        !stdout.contains(LINGER_HINT),
+        "standard output {stdout:?} says {LINGER_HINT:?}"
     );
 }

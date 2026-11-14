@@ -11,8 +11,8 @@ use domain::execution::refusal::SettingRefusal;
 use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_location};
 use domain::secrets::{
     MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Problem,
-    Redactor, Reference, SecretError, SecretRef, SecretValue, SecretWarning, SourceName, Template,
-    TemplateError, TooMuchToMask, has_reference, too_many_rclone_credentials,
+    Redactor, Reference, RepositorySecrets, SecretError, SecretRef, SecretValue, SecretWarning,
+    SourceName, Template, TemplateError, TooMuchToMask, has_reference, too_many_rclone_credentials,
 };
 
 use crate::ports::{RepositoryAccess, SavedEntry, SecretResolver};
@@ -253,16 +253,17 @@ impl ResolveRepository {
         }
     }
 
-    /// `warnings` masked of the secrets `access` holds (I4), each told.
+    /// `warnings` masked through `redactor` (I4), each told. The redactor is
+    /// built only when there is a warning to mask.
     fn warnings(
         &self,
         warnings: &[SecretWarning],
-        access: &RepositoryAccess,
+        redactor: impl FnOnce() -> Redactor,
     ) -> Vec<SecretWarning> {
         if warnings.is_empty() {
             return Vec::new();
         }
-        let redactor = access.redactor();
+        let redactor = redactor();
         let warnings: Vec<SecretWarning> = warnings
             .iter()
             .map(|warning| warning.masked(&redactor))
@@ -271,6 +272,33 @@ impl ResolveRepository {
             warnings.iter().for_each(|warning| told(warning));
         }
         warnings
+    }
+
+    /// What `run` resolved of `settings`, with the warnings its reads gave
+    /// masked and told: of the secrets the access holds, as a job masks its
+    /// texts. A resolution that failed tells them too, so a file met before
+    /// the failing secret still reaches the log (§10.2, #539), masked of the
+    /// secrets read before the failure and of the settings' own
+    /// ([`Run::failure_redactor`]).
+    fn finish(
+        &self,
+        run: &Run<'_>,
+        settings: &RepositorySettings,
+        access: Result<RepositoryAccess, ResolveError>,
+    ) -> Result<ResolvedRepository, ResolveError> {
+        match access {
+            Ok(access) => Ok(ResolvedRepository {
+                warnings: self.warnings(&run.warnings, || access.redactor()),
+                access,
+            }),
+            Err(error) => {
+                if !run.warnings.is_empty() {
+                    let redactor = run.failure_redactor(settings);
+                    self.warnings(&run.warnings, || redactor);
+                }
+                Err(error)
+            }
+        }
     }
 
     /// Each distinct reference is read once, so a value can't change between
@@ -285,10 +313,11 @@ impl ResolveRepository {
         refuse_references_in_arguments(settings)?;
         refuse_too_many_credentials(settings)?;
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
-        let password = run.password(&settings.password).await?;
-        self.resolve_rest(run, settings, password)
-            .await
-            .map(|(resolved, _)| resolved)
+        let access = match run.password(&settings.password).await {
+            Ok(password) => run.access(settings, password).await,
+            Err(error) => Err(error),
+        };
+        self.finish(&run, settings, access)
     }
 
     /// Resolves one location of a repository reached at several, when it is
@@ -306,55 +335,19 @@ impl ResolveRepository {
         refuse_references_in_arguments(settings)?;
         refuse_too_many_credentials(settings)?;
         let mut run = Run::new(self.resolver.as_ref(), read.values.clone());
+        run.password = Some(password.clone());
         run.masked
             .secret(password)
             .map_err(|too_much| ResolveError {
                 field: Field::Password,
                 cause: too_much_to_mask(too_much),
             })?;
-        let (resolved, values) = self.resolve_rest(run, settings, password.clone()).await?;
-        read.values = values;
-        Ok(resolved)
-    }
-
-    /// The rest of `settings`, past the password, resolved by `run`, with
-    /// every reference `run` has read by the end.
-    async fn resolve_rest(
-        &self,
-        mut run: Run<'_>,
-        settings: &RepositorySettings,
-        password: SecretValue,
-    ) -> Result<(ResolvedRepository, BTreeMap<Reference, SecretValue>), ResolveError> {
-        let repository = run
-            .location(Field::Repository, &settings.repository)
-            .await?;
-        let repo_hot = match &settings.repo_hot {
-            Some(text) => Some(run.location(Field::RepoHot, text).await?),
-            None => None,
-        };
-        let options = run.expand_all(&settings.options, Field::Option).await?;
-        let options_hot = run
-            .expand_all(&settings.options_hot, Field::OptionHot)
-            .await?;
-        let options_cold = run
-            .expand_all(&settings.options_cold, Field::OptionCold)
-            .await?;
-        let access = RepositoryAccess {
-            repository,
-            repo_hot,
-            password,
-            options,
-            options_hot,
-            options_cold,
-            secrets: run.secrets,
-            id: None,
-            entry: None,
-        };
-        let resolved = ResolvedRepository {
-            warnings: self.warnings(&run.warnings, &access),
-            access,
-        };
-        Ok((resolved, run.values))
+        let access = run.access(settings, password.clone()).await;
+        // What this location read is kept even when it fails, so the next
+        // location doesn't read a file again and warn of it twice.
+        let resolved = self.finish(&run, settings, access);
+        read.values = run.values;
+        resolved
     }
 
     /// Resolves the settings of the configuration's entry `entry`, saved
@@ -399,6 +392,10 @@ impl ResolveRepository {
         &self,
         password: &SecretRef,
     ) -> Result<ResolvedRepository, ResolveError> {
+        // A password alone is never more than a redactor masks (the
+        // assertion below), so one that fails was never read and gave no
+        // warning to tell.
+        const _: () = assert!(MAX_SECRET_BYTES < MAX_MASKED_BYTES);
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
         let password = run.password(password).await?;
         let access = RepositoryAccess {
@@ -413,7 +410,7 @@ impl ResolveRepository {
             entry: None,
         };
         Ok(ResolvedRepository {
-            warnings: self.warnings(&run.warnings, &access),
+            warnings: self.warnings(&run.warnings, || access.redactor()),
             access,
         })
     }
@@ -539,6 +536,8 @@ struct Run<'a> {
     secrets: Vec<SecretValue>,
     warnings: Vec<SecretWarning>,
     masked: MaskedSecrets,
+    /// The password, once read or given.
+    password: Option<SecretValue>,
 }
 
 impl<'a> Run<'a> {
@@ -550,6 +549,7 @@ impl<'a> Run<'a> {
             secrets: Vec::new(),
             warnings: Vec::new(),
             masked: MaskedSecrets::default(),
+            password: None,
         }
     }
 
@@ -564,10 +564,69 @@ impl<'a> Run<'a> {
             .await
             .map_err(|error| fail(Cause::Unresolved(error)))?;
         self.warn(resolved.warnings);
+        self.password = Some(resolved.value.clone());
         self.masked
             .secret(&resolved.value)
             .map_err(|too_much| fail(too_much_to_mask(too_much)))?;
         Ok(resolved.value)
+    }
+
+    /// The rest of `settings`, past the password, resolved: the access a job
+    /// opens the repository with.
+    async fn access(
+        &mut self,
+        settings: &RepositorySettings,
+        password: SecretValue,
+    ) -> Result<RepositoryAccess, ResolveError> {
+        let repository = self
+            .location(Field::Repository, &settings.repository)
+            .await?;
+        let repo_hot = match &settings.repo_hot {
+            Some(text) => Some(self.location(Field::RepoHot, text).await?),
+            None => None,
+        };
+        let options = self.expand_all(&settings.options, Field::Option).await?;
+        let options_hot = self
+            .expand_all(&settings.options_hot, Field::OptionHot)
+            .await?;
+        let options_cold = self
+            .expand_all(&settings.options_cold, Field::OptionCold)
+            .await?;
+        Ok(RepositoryAccess {
+            repository,
+            repo_hot,
+            password,
+            options,
+            options_hot,
+            options_cold,
+            secrets: std::mem::take(&mut self.secrets),
+            id: None,
+            entry: None,
+        })
+    }
+
+    /// What masks the warnings of a resolution of `settings` that failed:
+    /// the secrets it read, and what the settings hold as the configuration
+    /// writes them (an inline credential, a password in a URL), as
+    /// [`Redactor::for_repository`] masks them for a resolution that
+    /// succeeds. The resolution stopped at its first fault, and the secrets
+    /// after it are not read for the masking: masking a log line never runs
+    /// a command or asks the keychain, and a failed lookup stays fast (the
+    /// maintainer's decision on #539). A path that happens to hold the value
+    /// of one of them is left as it is (§10.2). Secrets past what a redactor
+    /// masks make it mask every warning whole.
+    fn failure_redactor(&self, settings: &RepositorySettings) -> Redactor {
+        let read: Vec<SecretValue> = self.values.values().cloned().collect();
+        let unread = SecretValue::new("");
+        Redactor::for_repository(RepositorySecrets {
+            repository: &settings.repository,
+            repo_hot: settings.repo_hot.as_deref(),
+            password: self.password.as_ref().unwrap_or(&unread),
+            options: &settings.options,
+            options_hot: &settings.options_hot,
+            options_cold: &settings.options_cold,
+            resolved: &read,
+        })
     }
 
     /// A location with its references in, and its secrets counted.
@@ -1017,5 +1076,161 @@ mod tests {
             .await
             .expect("it resolves");
         assert_eq!(resolved.warnings, [masked("/home/***/nas-password")]);
+    }
+
+    /// A resolution that fails still tells the warnings the files it read
+    /// before the failing secret gave, masked as a resolution that succeeds
+    /// masks them: of the secrets read and the settings' own (I4, §10.2,
+    /// #539). The failure is returned as before.
+    #[tokio::test]
+    async fn a_failing_resolution_tells_the_warnings_met_before_it_masked() {
+        use std::sync::Mutex;
+
+        use domain::secrets::FileRead;
+
+        use crate::fakes::FakeSecrets;
+
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/alice/nas-password", b"bob\n", 0o644);
+        store.write_file("/srv/bob/token", b"carol", 0o644);
+        store.write_file("/srv/carol/flags", b"-v", 0o644);
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::clone(&told);
+        let resolve = ResolveRepository::new(store).telling(Arc::new(move |warning| {
+            heard.lock().expect("the list").push(warning.clone());
+        }));
+        let settings = RepositorySettings {
+            repository: "/srv/backups".to_owned(),
+            repo_hot: None,
+            password: SecretRef::File {
+                path: "/home/alice/nas-password".to_owned(),
+                read: FileRead::FirstLine,
+            },
+            options: BTreeMap::from([
+                ("secret_access_key".to_owned(), "alice".to_owned()),
+                ("token".to_owned(), "${file:/srv/bob/token}".to_owned()),
+            ]),
+            options_hot: BTreeMap::from([(
+                "flags".to_owned(),
+                "${file:/srv/carol/flags}".to_owned(),
+            )]),
+            options_cold: BTreeMap::from([("late".to_owned(), "${file:/srv/missing}".to_owned())]),
+        };
+        let masked = |path: &str| SecretWarning::FileReadableByOthers {
+            path: path.to_owned(),
+            mode: 0o644,
+        };
+
+        let error = resolve.resolve(&settings).await.expect_err("it fails");
+        assert_eq!(error.field, Field::OptionCold("late".to_owned()));
+        assert_eq!(
+            *told.lock().expect("the list"),
+            [
+                masked("/home/***/nas-password"),
+                masked("/srv/***/token"),
+                masked("/srv/***/flags"),
+            ]
+        );
+
+        // A location of a repository reached at several, whose password
+        // was read before it.
+        told.lock().expect("the list").clear();
+        let location = RepositorySettings {
+            password: SecretRef::Inline(SecretValue::new("bob")),
+            ..settings
+        };
+        let error = resolve
+            .resolve_location(
+                &location,
+                &SecretValue::new("bob"),
+                &mut JobReferences::default(),
+            )
+            .await
+            .expect_err("it fails");
+        assert_eq!(error.field, Field::OptionCold("late".to_owned()));
+        assert_eq!(
+            *told.lock().expect("the list"),
+            [masked("/srv/***/token"), masked("/srv/***/flags")]
+        );
+    }
+
+    /// A failing resolution that tells its warnings asks for no secret after
+    /// the failing one: they are masked of what was read and of the
+    /// settings' own alone, so masking a log line never runs a command or
+    /// asks the keychain, and a failed lookup stays fast (#539).
+    #[tokio::test]
+    async fn a_failing_resolution_asks_for_no_secret_after_the_failing_one() {
+        use std::sync::Mutex;
+
+        use domain::secrets::FileRead;
+
+        use crate::fakes::FakeSecrets;
+
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/alice/pw", b"hunter2\n", 0o644);
+        store.write_file("/home/alice/c", b"zzz9", 0o644);
+        store.set_env("KEY", "s3cr3t");
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::clone(&told);
+        let resolve = ResolveRepository::new(Arc::clone(&store) as Arc<dyn SecretResolver>)
+            .telling(Arc::new(move |warning| {
+                heard.lock().expect("the list").push(warning.clone());
+            }));
+        let settings = RepositorySettings {
+            repository: "/srv/backups".to_owned(),
+            repo_hot: None,
+            password: SecretRef::File {
+                path: "/home/alice/pw".to_owned(),
+                read: FileRead::FirstLine,
+            },
+            options: BTreeMap::from([("a".to_owned(), "${file:/srv/missing}".to_owned())]),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::from([("b".to_owned(), "${KEY}".to_owned())]),
+        };
+        let warned = |path: &str| SecretWarning::FileReadableByOthers {
+            path: path.to_owned(),
+            mode: 0o644,
+        };
+        let file = |path: &str| SecretRef::File {
+            path: path.to_owned(),
+            read: FileRead::Whole,
+        };
+
+        resolve.resolve(&settings).await.expect_err("it fails");
+        assert_eq!(*told.lock().expect("the list"), [warned("/home/alice/pw")]);
+        assert_eq!(
+            store.reads(),
+            [
+                SecretRef::File {
+                    path: "/home/alice/pw".to_owned(),
+                    read: FileRead::FirstLine,
+                },
+                file("/srv/missing"),
+            ]
+        );
+
+        // A location of a repository reached at several, whose password
+        // was read before it.
+        told.lock().expect("the list").clear();
+        let before = store.reads().len();
+        let location = RepositorySettings {
+            password: SecretRef::Inline(SecretValue::new("hunter2")),
+            options: BTreeMap::from([("c".to_owned(), "${file:/home/alice/c}".to_owned())]),
+            options_hot: BTreeMap::from([("a".to_owned(), "${file:/srv/missing}".to_owned())]),
+            ..settings
+        };
+        resolve
+            .resolve_location(
+                &location,
+                &SecretValue::new("hunter2"),
+                &mut JobReferences::default(),
+            )
+            .await
+            .expect_err("it fails");
+        assert_eq!(*told.lock().expect("the list"), [warned("/home/alice/c")]);
+        assert_eq!(
+            store.reads()[before..],
+            [file("/home/alice/c"), file("/srv/missing")]
+        );
     }
 }
