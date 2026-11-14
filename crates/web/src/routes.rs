@@ -20,10 +20,10 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::{
     Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
-    hand_focus_when_gone, sentence_view,
+    address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
 };
 use crate::live::{reply, say};
-use crate::operations::{self, Name};
+use crate::operations::{self, Name, Said};
 use crate::pause::{self, Ends, Pausable};
 use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
@@ -40,6 +40,11 @@ use crate::{page, text};
 
 /// The `id` of the notice, on every page, that sign-in is off on the network.
 pub(crate) const SIGN_IN_OFF_NETWORK_ID: &str = "sign-in-off-network";
+
+/// The `id` of every page's `<h1>`, which a table that lists what the page is
+/// about takes its name from, rather than a caption that says the heading
+/// again under it (#431).
+pub(crate) const PAGE_HEADING_ID: &str = "page-heading";
 
 /// The `<h1>` of a page, with `tabindex="-1"` so that focus can move to it.
 /// When a reader navigates to the page it takes focus as it is shown
@@ -61,7 +66,7 @@ pub(crate) fn PageHeading(children: Children) -> impl IntoView {
         }
     });
     view! {
-        <h1 node_ref=heading tabindex="-1" aria-describedby=described_by>
+        <h1 id=PAGE_HEADING_ID node_ref=heading tabindex="-1" aria-describedby=described_by>
             {children()}
         </h1>
     }
@@ -307,7 +312,6 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let start_localizer = Arc::clone(&localizer);
-    let caption = text(&localizer, msg::UI_OPERATIONS_CAPTION);
     let (operation_column, status_column, started_column, result_column, actions_column) = (
         text(&localizer, msg::UI_COLUMN_OPERATION),
         text(&localizer, msg::UI_COLUMN_STATUS),
@@ -559,69 +563,72 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
                 Shown::Table => {
                     view! {
-                        <table class="operations">
-                            <caption class="text-muted">{caption.clone()}</caption>
-                            <thead>
-                                <tr>
-                                    <th scope="col">{operation_column.clone()}</th>
-                                    <th scope="col">{status_column.clone()}</th>
-                                    <th
-                                        scope="col"
-                                        aria-sort=move || match sort.get() {
-                                            SortOrder::OldestFirst => "ascending",
-                                            _ => "descending",
+                        // The frame is what the columns' widths are measured
+                        // against: a table can't be its own container.
+                        <div class="table-frame">
+                            <table class="operations" aria-labelledby=PAGE_HEADING_ID>
+                                <thead>
+                                    <tr>
+                                        <th scope="col">{operation_column.clone()}</th>
+                                        <th scope="col">{status_column.clone()}</th>
+                                        <th
+                                            scope="col"
+                                            aria-sort=move || match sort.get() {
+                                                SortOrder::OldestFirst => "ascending",
+                                                _ => "descending",
+                                            }
+                                        >
+                                            // Its sort button's first press is the newest
+                                            // first: the history is already the daemon's
+                                            // newest first, so the sort's own orders follow.
+                                            <span class="sort-header">
+                                                {started_column.clone()}
+                                                <button
+                                                    type="button"
+                                                    on:click=move |_| {
+                                                        let next = match sort.get_untracked() {
+                                                            SortOrder::History | SortOrder::OldestFirst => {
+                                                                SortOrder::NewestFirst
+                                                            }
+                                                            SortOrder::NewestFirst => SortOrder::OldestFirst,
+                                                        };
+                                                        sort.set(next);
+                                                        reply(
+                                                            Politeness::Polite,
+                                                            match next {
+                                                                SortOrder::OldestFirst => &oldest,
+                                                                _ => &newest,
+                                                            },
+                                                        );
+                                                    }
+                                                >
+                                                    {sort_label.clone()}
+                                                </button>
+                                            </span>
+                                        </th>
+                                        <th scope="col">{result_column.clone()}</th>
+                                        <th scope="col">{actions_column.clone()}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <For
+                                        each=move || order.get()
+                                        key=|id| id.clone()
+                                        children=move |id| {
+                                            row_view(
+                                                rows_localizer.clone(),
+                                                rows_connection.clone(),
+                                                page,
+                                                cancelled,
+                                                id,
+                                                error,
+                                                rows_zone.clone(),
+                                            )
                                         }
-                                    >
-                                        // Its sort button's first press is the newest
-                                        // first: the history is already the daemon's
-                                        // newest first, so the sort's own orders follow.
-                                        <span class="sort-header">
-                                            {started_column.clone()}
-                                            <button
-                                                type="button"
-                                                on:click=move |_| {
-                                                    let next = match sort.get_untracked() {
-                                                        SortOrder::History | SortOrder::OldestFirst => {
-                                                            SortOrder::NewestFirst
-                                                        }
-                                                        SortOrder::NewestFirst => SortOrder::OldestFirst,
-                                                    };
-                                                    sort.set(next);
-                                                    reply(
-                                                        Politeness::Polite,
-                                                        match next {
-                                                            SortOrder::OldestFirst => &oldest,
-                                                            _ => &newest,
-                                                        },
-                                                    );
-                                                }
-                                            >
-                                                {sort_label.clone()}
-                                            </button>
-                                        </span>
-                                    </th>
-                                    <th scope="col">{result_column.clone()}</th>
-                                    <th scope="col">{actions_column.clone()}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <For
-                                    each=move || order.get()
-                                    key=|id| id.clone()
-                                    children=move |id| {
-                                        row_view(
-                                            rows_localizer.clone(),
-                                            rows_connection.clone(),
-                                            page,
-                                            cancelled,
-                                            id,
-                                            error,
-                                            rows_zone.clone(),
-                                        )
-                                    }
-                                />
-                            </tbody>
-                        </table>
+                                    />
+                                </tbody>
+                            </table>
+                        </div>
                     }
                         .into_any()
                 }
@@ -663,6 +670,10 @@ fn row_view(
 ) -> impl IntoView {
     // Its refusals are worded in the same language as the rest of it.
     let error_localizer = Arc::clone(&localizer);
+    // A Cancel button shows "Cancel" and is named for its run: the Actions
+    // column has room for one word, and the name begins with what the button
+    // shows (WCAG 2.5.3) (#430).
+    let cancel_shown = text(&localizer, msg::UI_CANCEL);
     // What an operation is and where it ran do not change, so its name, its
     // Cancel button's label and its progress bar's name are worded once.
     let (name, cancel_label, progress_label) = untrack(|| {
@@ -771,23 +782,37 @@ fn row_view(
                 started.get()
             }>{move || instant(&localizer, &started.get(), zone.as_ref())}</td>
             <td>
+                // Why it failed, then what it did; one item alone as it is,
+                // two or more as a list (#430).
                 {move || {
-                    let reason = failure.get();
-                    let facts = result.get();
-                    (reason.is_some() || !facts.is_empty())
-                        .then(|| {
-                            let reason = reason
-                                .map(|sentence| view! { <li>{sentence_view(sentence)}</li> });
-                            let items = facts
+                    let reason = failure
+                        .get()
+                        .map(|sentence| cell_sentence_view(sentence).into_any());
+                    let facts = result
+                        .with(|facts| {
+                            facts
                                 .iter()
                                 .map(|fact| {
-                                    view! {
-                                        <li>{text_with(&result_localizer, fact.id, &fact.args)}</li>
-                                    }
+                                    runs_view(&text_with(&result_localizer, fact.id, &fact.args))
+                                        .into_any()
                                 })
-                                .collect_view();
-                            view! { <ul>{reason}{items}</ul> }
-                        })
+                                .collect::<Vec<_>>()
+                        });
+                    match Said::of(reason.into_iter().chain(facts).collect()) {
+                        Said::Nothing => ().into_any(),
+                        Said::One(item) => item,
+                        Said::List(items) => {
+                            view! {
+                                <ul>
+                                    {items
+                                        .into_iter()
+                                        .map(|item| view! { <li>{item}</li> })
+                                        .collect_view()}
+                                </ul>
+                            }
+                                .into_any()
+                        }
+                    }
                 }}
             </td>
             <td>
@@ -809,6 +834,7 @@ fn row_view(
                                 <button
                                     node_ref=button
                                     type="button"
+                                    aria-label=cancel_label.clone()
                                     on:click=move |_| {
                                         let error_localizer = Arc::clone(&error_localizer);
                                         let Connection { base, visit } = connection.clone();
@@ -856,7 +882,7 @@ fn row_view(
                                         });
                                     }
                                 >
-                                    {cancel_label.clone()}
+                                    {cancel_shown.clone()}
                                 </button>
                             }
                         })
@@ -1225,7 +1251,6 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     let body = text(&localizer, msg::UI_REPOSITORIES_BODY);
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
-    let caption = text(&localizer, msg::UI_REPOSITORIES_CAPTION);
     let (name_column, location_column, password_column, actions_column) = (
         text(&localizer, msg::UI_COLUMN_NAME),
         text(&localizer, msg::UI_COLUMN_LOCATION),
@@ -1383,23 +1408,26 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                         let localizer = Arc::clone(&list_localizer);
                         let base = base.get_value();
                         view! {
-                            <table class="repositories">
-                                <caption class="text-muted">{caption.clone()}</caption>
-                                <thead>
-                                    <tr>
-                                        <th scope="col">{name_column.clone()}</th>
-                                        <th scope="col">{location_column.clone()}</th>
-                                        <th scope="col">{password_column.clone()}</th>
-                                        <th scope="col">{actions_column.clone()}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {rows
-                                        .into_iter()
-                                        .map(|row| repository_row(&localizer, &base, creates, row))
-                                        .collect_view()}
-                                </tbody>
-                            </table>
+                            // The frame is what the Location column's widest
+                            // address is measured against.
+                            <div class="table-frame">
+                                <table class="repositories" aria-labelledby=PAGE_HEADING_ID>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">{name_column.clone()}</th>
+                                            <th scope="col">{location_column.clone()}</th>
+                                            <th scope="col">{password_column.clone()}</th>
+                                            <th scope="col">{actions_column.clone()}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {rows
+                                            .into_iter()
+                                            .map(|row| repository_row(&localizer, &base, creates, row))
+                                            .collect_view()}
+                                    </tbody>
+                                </table>
+                            </div>
                         }
                             .into_any()
                     }
@@ -1538,20 +1566,20 @@ fn repository_row(
         locations_list(localizer, &row.alias, row.locations, tested).into_any()
     } else {
         view! {
-            <div>{row.repository}</div>
-            {hot.map(|hot| view! { <div>{hot}</div> })}
+            <div class="address">{address_view(&row.repository)}</div>
+            {hot.map(|hot| view! { <div>{runs_view(&hot)}</div> })}
         }
         .into_any()
     };
     view! {
         <tr>
             <th scope="row">{row.alias}</th>
-            <td class="path">{place}</td>
-            <td class="path">
-                <div>{password}</div>
+            <td class="location">{place}</td>
+            <td class="password">
+                <div>{runs_view(&password)}</div>
                 {notes
                     .into_iter()
-                    .map(|note| view! { <div class="text-muted">{note}</div> })
+                    .map(|note| view! { <div class="text-muted">{runs_view(&note)}</div> })
                     .collect_view()}
             </td>
             <td>{test} {create}</td>
@@ -1611,14 +1639,17 @@ fn locations_list(
             view! {
                 <li>
                     <div>{heading}</div>
-                    <div>{location.repository}</div>
-                    {hot.map(|hot| view! { <div>{hot}</div> })}
+                    <div class="address">{address_view(&location.repository)}</div>
+                    {hot.map(|hot| view! { <div>{runs_view(&hot)}</div> })}
                     {options
                         .into_iter()
-                        .map(|option| view! { <div class="text-muted">{option}</div> })
+                        .map(|option| view! { <div class="text-muted">{runs_view(&option)}</div> })
                         .collect_view()}
-                    {rule.into_iter().map(|said| view! { <div>{said}</div> }).collect_view()}
-                    {move || found().map(|found| view! { <div>{found}</div> })}
+                    {rule
+                        .into_iter()
+                        .map(|said| view! { <div>{runs_view(&said)}</div> })
+                        .collect_view()}
+                    {move || found().map(|found| view! { <div>{runs_view(&found)}</div> })}
                 </li>
             }
         })
@@ -1637,8 +1668,12 @@ fn test_in_row(
     alias: &str,
     tested: RwSignal<Option<Vec<LocationTriedDto>>>,
 ) -> impl IntoView + use<> {
+    // It shows "Test" and is named for its row: the column beside the
+    // addresses has room for one word, and the name begins with what the
+    // button shows (WCAG 2.5.3) (#482).
     let (id, args) = test_locations_label(alias);
     let label = text_with(localizer, id, &args);
+    let shown = text(localizer, msg::UI_REPOSITORY_TEST);
     let url = format!("{base}{}", test_locations_path(alias));
     let alias = alias.to_owned();
     let localizer = Arc::clone(localizer);
@@ -1686,8 +1721,8 @@ fn test_in_row(
         });
     };
     view! {
-        <button type="button" on:click=test>
-            {label}
+        <button type="button" class="whole-words" aria-label=label on:click=test>
+            {shown}
         </button>
         {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
     }

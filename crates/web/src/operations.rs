@@ -87,6 +87,27 @@ pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
     facts
 }
 
+/// What a row's Result cell holds (#430): nothing; one item, said as a
+/// sentence; or two or more, said as a list, one an item. A list of one is
+/// heard as a list and draws a marker that sets nothing apart.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Said<T> {
+    Nothing,
+    One(T),
+    List(Vec<T>),
+}
+
+impl<T> Said<T> {
+    /// `items`, in their order, as the cell says them.
+    pub(crate) fn of(mut items: Vec<T>) -> Self {
+        match items.len() {
+            0 => Self::Nothing,
+            1 => items.pop().map_or(Self::Nothing, Self::One),
+            _ => Self::List(items),
+        }
+    }
+}
+
 /// Why `operation` failed, as its Result cell says it before any fact: its
 /// failure in the catalog's words, with the engine's own marked as English;
 /// none for a run that didn't fail.
@@ -722,5 +743,35 @@ mod tests {
         assert_eq!(english_of("check", "succeeded"), "Check finished.");
         assert_eq!(english_of("prune", "failed"), "Prune failed.");
         assert_eq!(english_of("backup", "cancelled"), "Backup cancelled.");
+    }
+}
+
+#[cfg(test)]
+mod said {
+    use super::Said;
+
+    #[test]
+    fn a_cell_with_nothing_to_say_says_nothing() {
+        assert_eq!(Said::<&str>::of(Vec::new()), Said::Nothing);
+    }
+
+    #[test]
+    fn one_item_alone_is_said_as_it_is_not_as_a_list_of_one() {
+        assert_eq!(
+            Said::of(vec!["The operation failed."]),
+            Said::One("The operation failed.")
+        );
+    }
+
+    #[test]
+    fn two_items_or_more_are_a_list_in_their_order() {
+        assert_eq!(
+            Said::of(vec!["The operation failed.", "Used location 2 of 2"]),
+            Said::List(vec!["The operation failed.", "Used location 2 of 2"])
+        );
+        assert_eq!(
+            Said::of(vec!["Snapshot ba5cc73e", "3 files", "Took 1 second"]),
+            Said::List(vec!["Snapshot ba5cc73e", "3 files", "Took 1 second"])
+        );
     }
 }

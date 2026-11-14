@@ -88,7 +88,8 @@ export class ScriptedDaemon {
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
-   *  left out. */
+   *  left out. A failed one carries its failure as the daemon's wire has it:
+   *  a code and its arguments; a succeeded one may carry its result. */
   addBackup(
     plan: string,
     status: string,
@@ -96,7 +97,15 @@ export class ScriptedDaemon {
       queuedAt,
       startedAt = null,
       finishedAt = null,
-    }: { queuedAt: string; startedAt?: string | null; finishedAt?: string | null },
+      failure,
+      result = null,
+    }: {
+      queuedAt: string;
+      startedAt?: string | null;
+      finishedAt?: string | null;
+      failure?: { code: string; args?: Record<string, { type: string; value: unknown }> };
+      result?: Record<string, unknown> | null;
+    },
   ): void {
     this.#operations.unshift({
       id: `018f0000-0000-7000-8000-${String(this.#operations.length + 1).padStart(12, "0")}`,
@@ -107,8 +116,9 @@ export class ScriptedDaemon {
       "started-at": startedAt,
       "finished-at": finishedAt,
       "warning-codes": [],
-      "failure-code": null,
-      result: null,
+      "failure-code": failure?.code ?? null,
+      ...(failure === undefined ? {} : { failure }),
+      result,
     });
   }
 

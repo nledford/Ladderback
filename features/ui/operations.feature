@@ -43,9 +43,69 @@ Feature: Each row of the Operations page names its operation and says what it di
     And a backup of the plan "home" has failed
     When I open the address "/operations"
     Then the row "home" of the table "Operations" shows "Failed" in its "Status" column
-    And the row "home" of the table "Operations" lists "The operation failed:" in its "Result" column
+    And the row "home" of the table "Operations" shows "The operation failed:" in its "Result" column
     And the row "home" of the table "Operations" gives the engine's own words in English in its "Result" column
     And the row "home" of the table "Operations" doesn't show "canary-not-a-secret" in its "Result" column
+    And the page has no accessibility violations
+
+  # The table takes its name from the page's heading, which says what the
+  # rows are, so the name is shown and heard once, not again as a caption
+  # under the heading (#431).
+  Scenario: The Operations table is named by the page's heading, which it doesn't repeat
+    Given the daemon reports two finished backups of "demo-home"
+    When I open the address "/operations"
+    Then the table "Operations" has 2 rows
+    And the main content shows "Operations" once, as its heading
+    And the page has no accessibility violations
+
+  # The Result column has the room the other columns leave: each of those is
+  # as wide as what it holds needs, Actions as wide as a Cancel button, so a
+  # reason reads in a few lines rather than in a column of words. A name, a
+  # path or an address in it stays whole on a line that has room for it and
+  # moves to the next line whole rather than breaking at a hyphen. A reason
+  # alone is a sentence; a list is for two or more items, one an item (#430).
+  Scenario: A failed backup's one reason is a sentence with the room it needs, its path whole
+    Given the daemon reports a backup of "demo-home" that failed because it could not read "/srv/backups/home-laptop.password"
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/operations"
+    Then the table "Operations" has 1 rows
+    And the column "Result" of the table "Operations" is wider than each of the others
+    And the row "demo-home" of the table "Operations" says "could not read" in its "Result" column, not as a list
+    And the row "demo-home" of the table "Operations" keeps "/srv/backups/home-laptop.password" on one line in its "Result" column
+    And the page has no accessibility violations
+
+  # A running run's Cancel button says "Cancel" and is named for its run, so
+  # it takes one line in the Actions column beside the Result column (#430).
+  Scenario: A running backup's Cancel button takes one line on a wide screen
+    Given the daemon reports a running backup of "demo-home"
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/operations"
+    Then the table "Operations" has a row "demo-home" that shows "Running"
+    And the button "Cancel demo-home" shows "Cancel", which its name begins with
+    And the button "Cancel demo-home" sits on one line
+    And the page has no accessibility violations
+
+  # Once a run has ended its Actions cell is empty, and the Result column
+  # beside it has the room for each fact on a line of its own (#430).
+  Scenario: A finished backup's facts each read on one line on a wide screen
+    Given the daemon reports a finished backup of "demo-home" that went through 152.1 GiB
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/operations"
+    Then the table "Operations" has 1 rows
+    And the row "demo-home" of the table "Operations" lists "152.1 GiB processed" in its "Result" column
+    And the row "demo-home" of the table "Operations" lists each item on one line in its "Result" column
+    And the page has no accessibility violations
+
+  Scenario: A failed backup's reason fits its cell on a small screen with larger text
+    Given the daemon reports a backup of "demo-home" that failed because it could not read "/srv/backups/home-laptop.password"
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the address "/operations"
+    Then the table "Operations" has 1 rows
+    And the row "demo-home" of the table "Operations" says "could not read" in its "Result" column, not as a list
+    And the page doesn't scroll sideways
+    And nothing in the table "Operations" runs outside its cell
+    And no text is clipped
     And the page has no accessibility violations
 
   # A backup learns its size only once rustic has walked the whole source,

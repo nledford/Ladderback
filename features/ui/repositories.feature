@@ -37,6 +37,86 @@ Feature: Repositories page
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
 
+  # The table takes its name from the page's heading, not from a caption that
+  # says it again under the heading (#431).
+  Scenario: The repositories table is named by the page's heading, which it doesn't repeat
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/repositories"
+    Then the table "Repositories" has a row "demo" that shows "Kept in the configuration file"
+    And the main content shows "Repositories" once, as its heading
+    And the page has no accessibility violations
+
+  # On a wide screen the Location column is as wide as its longest address
+  # needs, so the address sits on one line, and the Password column has the
+  # room the other columns leave: at least a quarter of the table, so where
+  # a password comes from, and a warning about it, read as sentences. A path
+  # in it, such as the file a password is read from, moves to the next line
+  # whole rather than breaking inside a word ("exampl" / "e.password"). A
+  # fixed share left Location half empty beside a Password column squeezed
+  # to a fifth (#482).
+  Scenario: On a wide screen a location's address sits on one line and the Password column keeps its room
+    Given a daemon whose repository "nas" has the locations "sftp:me@nas.home.lan:/srv/data/repo/pc/main" and "rest:https://backup.example.org/laptop" and its password in the file "/etc/ladderback/example.password"
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/repositories"
+    Then the repository "nas" lists 2 locations
+    And the address "sftp:me@nas.home.lan:/srv/data/repo/pc/main" of the repository "nas" sits on one line
+    And the row "nas" of the table "Repositories" keeps each part of "/etc/ladderback/example.password" whole in its "Password" column
+    And the column "Password" of the table "Repositories" takes at least a quarter of the table's width
+    And the header "Actions" of the table "Repositories" keeps its words whole
+    And the button "Test the locations of nas" shows "Test", which its name begins with
+    And the button "Test the locations of nas" sits on one line
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
+
+  # On a small screen a location's address breaks after a separator, a
+  # slash, a dot, an at sign or a colon before a letter, as a reader splits
+  # an address, and inside a part of it only when that part is longer than a
+  # line, as it is in a narrow column with large text. A repository with
+  # several locations has one Test button, which says "Test" and is named for
+  # its repository, so it takes one line beside the addresses (#482).
+  Scenario Outline: A location's address breaks only after a separator on a small screen
+    Given a daemon whose repository "nas" has the locations "sftp:me@nas.home.lan:/srv/data/repo/pc/main" and "rest:https://backup.example.org/laptop" and its password in the file "/etc/ladderback/example.password"
+    And a viewport of <width> by <height> pixels
+    And the reader sets the text size to <size> percent
+    When I open the address "/repositories"
+    Then the repository "nas" lists 2 locations
+    And the address "sftp:me@nas.home.lan:/srv/data/repo/pc/main" of the repository "nas" <breaks>
+    And the button "Test the locations of nas" shows "Test", which its name begins with
+    And the button "Test the locations of nas" sits on one line
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
+
+    Examples:
+      | width | height | size | breaks                                         |
+      | 320   | 256    | 100  | breaks only after a separator, each part whole |
+      | 320   | 256    | 200  | breaks only after a separator                  |
+
+  # A Test's results, a line under each address, don't widen Location: the
+  # columns stay where they were and Password keeps its quarter, and an
+  # address capped below its length still breaks only between parts, its box
+  # as wide as the line it sits on (#482).
+  Scenario Outline: The Repositories table keeps its columns when a Test's results arrive
+    Given a daemon whose repository "nas" has the locations "/srv/a" and "<address>" and its password in the file "/etc/ladderback/example.password"
+    And a viewport of <width> by 800 pixels
+    When I open the address "/repositories"
+    Then the repository "nas" lists 2 locations
+    And the button "Test the locations of nas" shows "Test", which its name begins with
+    And the widths of the columns of the table "Repositories" are noted
+    When the next Test of the repository "nas" finds that each location holds another repository
+    And I press "Test" for the repository "nas"
+    Then each location of the repository "nas" says "Answers, but holds another repository. Check its address."
+    And the address "<address>" of the repository "nas" <breaks>
+    And the column "Password" of the table "Repositories" takes at least a quarter of the table's width
+    And the columns of the table "Repositories" keep the widths noted
+
+    Examples:
+      | address                                        | width | breaks                                         |
+      | /srv/b                                         | 1280  | breaks only after a separator, each part whole |
+      | sftp:me@nas.home.lan:/srv/data/repo/pc/main    | 768   | breaks only after a separator, each part whole |
+      | sftp:me@nas.home.lan:/srv/backupvolume/pc/main | 560   | breaks only after a separator                  |
+
   Scenario: A password written in the configuration file is flagged on its row in words
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/repositories"

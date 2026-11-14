@@ -608,6 +608,77 @@ impl Sentence {
 const FIRST_ISOLATE: char = '\u{2068}';
 const POP_ISOLATE: char = '\u{2069}';
 
+/// A stretch of a catalog's text as a cell lays it out: words, which break
+/// where words do, or a placeable the catalog isolated (a name, a path, an
+/// address), its marks kept, which a cell keeps whole on a line that has room
+/// for it (#430, #482).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Run<'a> {
+    Words(&'a str),
+    Placeable(&'a str),
+}
+
+/// `text` in its runs, in order, which joined are `text`: each outermost
+/// placeable from its first isolate to the pop that closes it, and the words
+/// between. A mark that closes nothing, or one never closed, is a character
+/// of the words around it.
+pub(crate) fn runs(text: &str) -> Vec<Run<'_>> {
+    let mut found = Vec::new();
+    // Where the words not yet taken start, and the placeable that is open:
+    // where its first isolate is and how many isolates are open in it.
+    let mut words = 0;
+    let mut open: Option<(usize, usize)> = None;
+    for (at, char) in text.char_indices() {
+        match (char, open) {
+            (FIRST_ISOLATE, None) => open = Some((at, 1)),
+            (FIRST_ISOLATE, Some((start, depth))) => open = Some((start, depth.saturating_add(1))),
+            (POP_ISOLATE, Some((start, 1))) => {
+                let end = at.saturating_add(POP_ISOLATE.len_utf8());
+                if let Some(before) = text.get(words..start).filter(|before| !before.is_empty()) {
+                    found.push(Run::Words(before));
+                }
+                if let Some(placeable) = text.get(start..end) {
+                    found.push(Run::Placeable(placeable));
+                }
+                words = end;
+                open = None;
+            }
+            (POP_ISOLATE, Some((start, depth))) => open = Some((start, depth.saturating_sub(1))),
+            _ => {}
+        }
+    }
+    if let Some(rest) = text.get(words..).filter(|rest| !rest.is_empty()) {
+        found.push(Run::Words(rest));
+    }
+    found
+}
+
+/// `address` in the parts a reader splits it into (#482): each ends after a
+/// slash, a dot, an at sign or a colon that a letter follows, so
+/// `backup@storage.example.net` is `backup@`, `storage.`, `example.`, `net`.
+/// A separator before a digit or another separator stays inside its part,
+/// as in `10.0.0.1` or `https://`. Joined, the parts are `address`.
+pub(crate) fn address_parts(address: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut chars = address.char_indices().peekable();
+    while let Some((_, char)) = chars.next() {
+        if matches!(char, '/' | '.' | '@' | ':')
+            && let Some(&(next, letter)) = chars.peek()
+            && letter.is_alphabetic()
+        {
+            if let Some(part) = address.get(start..next) {
+                parts.push(part);
+            }
+            start = next;
+        }
+    }
+    if let Some(rest) = address.get(start..).filter(|rest| !rest.is_empty()) {
+        parts.push(rest);
+    }
+    parts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1587,5 +1658,128 @@ mod tests {
 
     fn english_of((id, args): (MessageId, Vec<(&'static str, MsgArg)>)) -> String {
         crate::routes::text_with(&Localizer::new(&[]), id, &args)
+    }
+}
+
+#[cfg(test)]
+mod runs {
+    use super::{Run, address_parts, runs};
+
+    #[test]
+    fn text_with_no_placeable_is_one_run_of_words_and_no_text_is_none() {
+        assert_eq!(runs("Took 1 second"), vec![Run::Words("Took 1 second")]);
+        assert_eq!(runs(""), Vec::<Run<'_>>::new());
+    }
+
+    #[test]
+    fn a_placeable_is_a_run_of_its_own_with_its_marks() {
+        assert_eq!(
+            runs("Used location 2 of 2: \u{2068}rest:https://backup.example.org/laptop\u{2069}"),
+            vec![
+                Run::Words("Used location 2 of 2: "),
+                Run::Placeable("\u{2068}rest:https://backup.example.org/laptop\u{2069}"),
+            ]
+        );
+        assert_eq!(
+            runs("\u{2068}3\u{2069} files in \u{2068}home\u{2069}."),
+            vec![
+                Run::Placeable("\u{2068}3\u{2069}"),
+                Run::Words(" files in "),
+                Run::Placeable("\u{2068}home\u{2069}"),
+                Run::Words("."),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_placeable_inside_another_is_part_of_the_outer_one() {
+        assert_eq!(
+            runs("a \u{2068}b \u{2068}c\u{2069} d\u{2069} e"),
+            vec![
+                Run::Words("a "),
+                Run::Placeable("\u{2068}b \u{2068}c\u{2069} d\u{2069}"),
+                Run::Words(" e"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_mark_that_closes_nothing_or_is_never_closed_is_part_of_the_words() {
+        assert_eq!(
+            runs("a \u{2069}b \u{2068}c\u{2069}"),
+            vec![
+                Run::Words("a \u{2069}b "),
+                Run::Placeable("\u{2068}c\u{2069}")
+            ]
+        );
+        assert_eq!(
+            runs("x \u{2068}y\u{2069} z \u{2068}w"),
+            vec![
+                Run::Words("x "),
+                Run::Placeable("\u{2068}y\u{2069}"),
+                Run::Words(" z \u{2068}w"),
+            ]
+        );
+        assert_eq!(
+            runs("\u{2068}\u{2068}y\u{2069}"),
+            vec![Run::Words("\u{2068}\u{2068}y\u{2069}")]
+        );
+    }
+
+    #[test]
+    fn the_runs_joined_are_the_text() {
+        for text in [
+            "The password file \u{2068}/srv/données/été.password\u{2069} could not be read.",
+            "\u{2069}\u{2068}\u{2068}a\u{2069}\u{2069}\u{2068}",
+            "plain",
+        ] {
+            let joined: String = runs(text)
+                .into_iter()
+                .map(|run| match run {
+                    Run::Words(words) | Run::Placeable(words) => words,
+                })
+                .collect();
+            assert_eq!(joined, text);
+        }
+    }
+
+    #[test]
+    fn an_address_parts_after_a_separator_that_a_letter_follows() {
+        assert_eq!(
+            address_parts("sftp:backup@storage.example.net:/srv/restic/laptop"),
+            [
+                "sftp:", "backup@", "storage.", "example.", "net:/", "srv/", "restic/", "laptop"
+            ]
+        );
+        assert_eq!(
+            address_parts("rest:https://backup.example.org/laptop"),
+            ["rest:", "https://", "backup.", "example.", "org/", "laptop"]
+        );
+        assert_eq!(
+            address_parts("/srv/home-laptop.password"),
+            ["/", "srv/", "home-laptop.", "password"]
+        );
+    }
+
+    #[test]
+    fn a_separator_before_a_digit_another_separator_or_the_end_stays_in_its_part() {
+        assert_eq!(address_parts("10.0.0.1:8000/"), ["10.0.0.1:8000/"]);
+        assert_eq!(address_parts("s3:"), ["s3:"]);
+        assert_eq!(address_parts(""), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn the_parts_joined_are_the_address_whatever_its_letters() {
+        for address in [
+            "\u{2068}/srv/données/été.password\u{2069}",
+            "sftp:ünïcode@例え.jp:/バックアップ",
+            "@:./",
+        ] {
+            assert_eq!(address_parts(address).concat(), address);
+        }
+        assert_eq!(
+            address_parts("/srv/données/été"),
+            ["/", "srv/", "données/", "été"]
+        );
     }
 }

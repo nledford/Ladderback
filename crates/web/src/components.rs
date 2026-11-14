@@ -20,7 +20,7 @@ use crate::live::{PageClock, modal_gone, open_modal, pause, reply, resume};
 use crate::progress::{
     Clear, Next, Teller, Told, Wake, percent, progress_text, value_text, wait_for,
 };
-use crate::repositories::Sentence;
+use crate::repositories::{Run, Sentence, address_parts, runs};
 use crate::routes::text_with;
 use crate::text;
 use crate::toast::{ToastTimers, arrival};
@@ -520,6 +520,54 @@ pub(crate) fn sentence_view(sentence: Sentence) -> impl IntoView {
         {before}
         {detail}
     }
+}
+
+/// A sentence in a table's cell, as [`sentence_view`] says it, with the
+/// catalog's placeables in it kept whole as [`runs_view`] keeps them.
+pub(crate) fn cell_sentence_view(sentence: Sentence) -> impl IntoView {
+    let Sentence { before, detail } = sentence;
+    let detail = detail.map(|(detail, after)| {
+        view! {
+            <span lang="en">{detail}</span>
+            {runs_view(&after)}
+        }
+    });
+    view! {
+        {runs_view(&before)}
+        {detail}
+    }
+}
+
+/// A catalog's text in a table's cell, each placeable in it (a name, a path,
+/// an address) a `placeable` of its own: the cell moves one whole to the next
+/// line rather than breaking it where a line runs out, and breaks one longer
+/// than a line only after a separator in it (#430, #482).
+pub(crate) fn runs_view(text: &str) -> impl IntoView + use<> {
+    runs(text)
+        .into_iter()
+        .map(|run| match run {
+            Run::Words(words) => words.to_owned().into_any(),
+            Run::Placeable(placeable) => {
+                view! { <span class="placeable">{address_view(placeable)}</span> }.into_any()
+            }
+        })
+        .collect_view()
+}
+
+/// An address, or any text that splits like one, which may break only
+/// between its parts ([`address_parts`]) where a line has no room for it
+/// whole (#482).
+pub(crate) fn address_view(address: &str) -> impl IntoView + use<> {
+    address_parts(address)
+        .into_iter()
+        .enumerate()
+        .map(|(at, part)| {
+            view! {
+                {(at > 0).then(|| view! { <wbr /> })}
+                {part.to_owned()}
+            }
+        })
+        .collect_view()
 }
 
 /// Moves focus to the element with `id`, when the page has one that takes it.

@@ -210,6 +210,15 @@ Then("the label of the button {string} is as large as the page's text", async fu
   assert.equal(sizes.label, sizes.page, `the label of "${name}" is ${sizes.label}, the page's text ${sizes.page}`);
 });
 
+// A short visible label with a longer name that starts with it, so a reader
+// who speaks the label they see reaches the button (WCAG 2.5.3, Label in
+// Name), and a screen reader still hears what the button acts on.
+Then("the button {string} shows {string}, which its name begins with", async function (this: BrowserWorld, name: string, label: string) {
+  const button = this.page.getByRole("button", { name: namePattern(name) });
+  await expect(button, `the button "${name}" shows "${label}"`).toHaveText(label);
+  assert.ok(name.startsWith(label), `the name "${name}" doesn't begin with "${label}"`);
+});
+
 // What a screen reader is told of the bar's value: `aria-valuenow`, which
 // changes at most every 30 s while the step stays the same (§4.5).
 Then("the progress bar {string} shows {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
