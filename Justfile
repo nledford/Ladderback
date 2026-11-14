@@ -400,6 +400,20 @@ web-release:
 install *args: web-release
     cargo install --locked --path . --profile dist {{ release_flags }} "$@"
 
+# Updates an installed service from this checkout (#519): `install` with the
+# arguments, then waits until the daemon has no operation running or queued
+# (`GET /api/v1/operations`, every 5 s, up to `--wait` minutes, default 120),
+# restarts the service with the new binary (`ladderback install-service`) and
+# checks that it runs this checkout's build. A daemon it can't reach, or one
+# with sign-in on, isn't restarted unless `--now`, which skips the wait.
+# `--address <host:port>` names the service's address (default
+# 127.0.0.1:9898). The wait's race and the rest: scripts/install-restart.ts.
+[doc('Install from this checkout, then restart the service once it is idle (--now, --wait, --address).')]
+[group('release')]
+[positional-arguments]
+install-restart *args:
+    node scripts/install-restart.ts "$@"
+
 # Builds the release archive for `target` as the Release builds workflow does
 # (§12.1): the web UI with the release flags, which the binary embeds, then
 # cargo-dist's `dist build` (dist-workspace.toml), which builds the daemon with
