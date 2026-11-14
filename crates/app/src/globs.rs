@@ -25,8 +25,27 @@ pub async fn never_matching_globs(
     plan: &Plan,
     sources: &dyn NormalizeSources,
 ) -> Vec<NeverMatching> {
-    let _ = (plan, sources);
-    todo!()
+    let walked = sources.walked(&plan.sources).await;
+    let mut said = Vec::new();
+    for glob in plan.never_matching_globs(&walked) {
+        let absolute = match glob.placement() {
+            Placement::Whole(whole) => Some(whole),
+            Placement::Holder(folders) => {
+                let mut holding = Vec::new();
+                for source in &walked {
+                    if sources.holds(source, &folders).await {
+                        holding.push(source);
+                    }
+                }
+                glob.under(&holding)
+            }
+        };
+        said.push(NeverMatching {
+            glob: glob.glob.to_owned(),
+            absolute,
+        });
+    }
+    said
 }
 
 #[cfg(test)]

@@ -34,8 +34,16 @@ pub trait NormalizeSources: Send + Sync {
     /// be (it isn't there yet) comes back as written, and the domain reads
     /// its dots as rustic does (#510).
     async fn walked(&self, sources: &[Source]) -> Vec<Source> {
-        let _ = sources;
-        todo!()
+        let mut walked = Vec::with_capacity(sources.len());
+        for source in sources {
+            let resolved = self
+                .normalized(std::slice::from_ref(source))
+                .await
+                .ok()
+                .and_then(|mut one| one.pop());
+            walked.push(resolved.unwrap_or_else(|| source.clone()));
+        }
+        walked
     }
 
     /// Whether `source`, as the backup walks it, holds `folders`, a path
@@ -43,8 +51,11 @@ pub trait NormalizeSources: Send + Sync {
     /// [`Self::normalized`] resolves a source. It tells which of a plan's
     /// sources a glob that can never match was written from (#510).
     async fn holds(&self, source: &Source, folders: &str) -> bool {
-        let _ = (source, folders);
-        todo!()
+        let under = source.as_str().trim_end_matches('/');
+        let Ok(path) = Source::parse(&format!("{under}/{folders}")) else {
+            return false;
+        };
+        self.normalized(std::slice::from_ref(&path)).await.is_ok()
     }
 }
 

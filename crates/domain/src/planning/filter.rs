@@ -79,15 +79,35 @@ impl<'a> NeverMatchingGlob<'a> {
     /// with several, the one that holds its folders, which only the disk
     /// can tell ([`Placement::Holder`]).
     pub fn placement(&self) -> Placement {
-        todo!()
+        let parts = self.parts();
+        let named = self
+            .written
+            .iter()
+            .zip(self.walked)
+            .find_map(|(written, walked)| {
+                let names = walked_names(written);
+                let tail = parts.get(names.len()..)?;
+                parts
+                    .iter()
+                    .zip(&names)
+                    .all(|(part, name)| same(part, name, self.case_insensitive))
+                    .then_some((walked, tail))
+            });
+        match (named, self.walked) {
+            (Some((source, tail)), _) => Placement::Whole(self.whole(source, tail)),
+            (None, [only]) => Placement::Whole(self.whole(only, &parts)),
+            (None, _) => Placement::Holder(self.folders()),
+        }
     }
 
     /// The whole path under the one source of `holding`, the plan's
     /// sources as walked that hold the folders of [`Placement::Holder`];
     /// none when none or several do, as no one source is then the glob's.
     pub fn under(&self, holding: &[&Source]) -> Option<String> {
-        let _ = holding;
-        todo!()
+        match holding {
+            [holder] => Some(self.whole(holder, &self.parts())),
+            _ => None,
+        }
     }
 
     /// The glob less its `!`.
@@ -153,8 +173,24 @@ impl SourceFilter {
         written: &'a [Source],
         walked: &'a [Source],
     ) -> impl Iterator<Item = NeverMatchingGlob<'a>> {
-        let _ = (written, walked, &self.globs);
-        std::iter::from_fn(|| todo!())
+        let names: Vec<Vec<&str>> = walked.iter().map(walked_names).collect();
+        let cased = self.globs.iter().map(|glob| (glob, false));
+        let uncased = self.iglobs.iter().map(|glob| (glob, true));
+        cased
+            .chain(uncased)
+            .filter_map(move |(glob, case_insensitive)| {
+                // A plan without sources backs up nothing to match.
+                let path = rooted_path(glob).filter(|_| !walked.is_empty())?;
+                names
+                    .iter()
+                    .all(|names| !may_reach(path, names, case_insensitive))
+                    .then_some(NeverMatchingGlob {
+                        glob,
+                        case_insensitive,
+                        written,
+                        walked,
+                    })
+            })
     }
 }
 
