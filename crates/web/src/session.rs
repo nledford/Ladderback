@@ -182,7 +182,7 @@ fn millis(seconds: u64) -> i64 {
 
 /// A live session, as a sign-in or the session route gave it: the CSRF token
 /// its changed requests carry, its lease, and the build the daemon runs, which
-/// the header shows once the page may see the pages (decision NN).
+/// the header shows once the page may see the pages (decision 90).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Signed {
     pub(crate) csrf: String,

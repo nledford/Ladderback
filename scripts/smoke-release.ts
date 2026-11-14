@@ -15,7 +15,7 @@
 // container (Docker, no network, the binary copied in):
 //   - `--version` names the build of this checkout (scripts/build-identity.ts):
 //     the workspace version alone at its release tag, as cargo-dist builds a
-//     release, and with the commit between releases (decision NN), as the
+//     release, and with the commit between releases (decision 90), as the
 //     nightly and pull request builds are; `--version <x.y.z>` expects that
 //     text instead;
 //   - with `LANGUAGE=en-XA` it speaks plain English: a release build has no

@@ -1,4 +1,4 @@
-//! What the build script makes of what it found (decision NN). The build
+//! What the build script makes of what it found (decision 90). The build
 //! script compiles this file too (`build.rs`), so it needs nothing but `std`;
 //! the program's tests test it.
 

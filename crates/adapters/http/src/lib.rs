@@ -76,7 +76,7 @@ pub struct AppState {
     /// session route tells the page (§10.1).
     pub exposure: Exposure,
     /// The build the daemon runs, which the session route tells a page that
-    /// may see the pages (decision NN).
+    /// may see the pages (decision 90).
     pub build: api::BuildDto,
 }
 

@@ -1,4 +1,4 @@
-//! Finds the build this program comes from (§16, decision NN) and hands it to
+//! Finds the build this program comes from (§16, decision 90) and hands it to
 //! the program as `LADDERBACK_BUILT_COMMIT`, `LADDERBACK_BUILT_DIRTY` and
 //! `LADDERBACK_BUILT_RELEASE` (`src/build_info.rs`). A packager names the
 //! commit in `LADDERBACK_BUILD_COMMIT`; otherwise `git` is asked about the

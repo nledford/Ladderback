@@ -3401,7 +3401,7 @@ pub struct SessionDto {
     pub build: Option<BuildDto>,
 }
 
-/// The build a program came from (§3.1, decision NN): its version, the
+/// The build a program came from (§3.1, decision 90): its version, the
 /// commit it was built from (`null` when the build had no git to ask), whether
 /// the tree had uncommitted changes, and whether the commit is the one its
 /// version's release tag names. Separate fields, so no reader parses the

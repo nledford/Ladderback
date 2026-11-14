@@ -102,7 +102,7 @@ async function workspaceVersion(): Promise<string> {
 }
 
 // The build the binary under test came from, as people read it: this
-// checkout's, with its commit between releases (decision NN).
+// checkout's, with its commit between releases (decision 90).
 async function runningBuild(): Promise<string> {
   const build = checkoutBuild(repoRoot);
   return build === undefined ? await workspaceVersion() : shown(build);

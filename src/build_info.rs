@@ -1,4 +1,4 @@
-//! The build this program came from (decision NN), as `build.rs` found it.
+//! The build this program came from (decision 90), as `build.rs` found it.
 
 use std::sync::LazyLock;
 

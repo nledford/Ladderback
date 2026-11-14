@@ -3,7 +3,7 @@
 // (`just install`), waits until the installed daemon has nothing running or
 // queued, restarts its service with the new binary (`ladderback
 // install-service`, decision 64), then checks that the daemon now runs this
-// checkout's build (scripts/build-identity.ts, decision NN).
+// checkout's build (scripts/build-identity.ts, decision 90).
 //
 //   1. `just install [args]`: a failed build stops here, before the running
 //      daemon is touched.

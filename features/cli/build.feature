@@ -2,7 +2,7 @@
 Feature: The build that is running
   A build is named by its version alone only when it is its version's
   release: a build from another commit adds the commit it came from, and
-  ".dirty" when tracked files had changes (decision NN). Machines running
+  ".dirty" when tracked files had changes (decision 90). Machines running
   builds from between two releases can then be told apart. The program
   names its build wherever it says its version, and the daemon tells a page
   that may see the pages each part of it on its own, so nothing has to read

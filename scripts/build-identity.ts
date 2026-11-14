@@ -1,5 +1,5 @@
 // The build a checkout of Ladderback makes (technical design §16, decision
-// NN), as `git` says it now: what a binary built from it names. The release
+// 90), as `git` says it now: what a binary built from it names. The release
 // smoke test and the UI tests check the binary against it, and
 // `just install-restart` the daemon it restarted. `build.rs` decides the same
 // from the same answers; this is the independent reading the checks compare

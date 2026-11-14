@@ -206,7 +206,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let notice = RwSignal::new(SignInOffNotice::None);
     let warning = RwSignal::new(false);
     let ended = RwSignal::new(false);
-    // The build the daemon runs, once it has told the page (decision NN).
+    // The build the daemon runs, once it has told the page (decision 90).
     let build = RwSignal::new(None::<api::BuildDto>);
     provide_context(standing);
     provide_context(notice);
