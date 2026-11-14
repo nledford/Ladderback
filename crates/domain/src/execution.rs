@@ -243,7 +243,17 @@ impl WarningKind {
     /// log keeps it under, which the history's `warning-codes` and a
     /// notification's `{code}` carry too.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            Self::SourceUnreadable => "source-unreadable",
+            Self::Hook => "hook-warning",
+            Self::MaintenancePartial => "maintenance-partial",
+            Self::CheckWarning => "check-warning",
+            Self::CheckError => "check-error",
+            Self::OtherHosts => "maintenance-other-hosts",
+            Self::LocationSkipped => "location-skipped",
+            Self::SecretFileReadable => "secret-file-readable",
+            Self::Other => "unknown",
+        }
     }
 }
 

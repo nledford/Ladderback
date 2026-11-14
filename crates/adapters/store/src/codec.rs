@@ -94,20 +94,6 @@ pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
     }
 }
 
-pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
-    match kind {
-        WarningKind::SourceUnreadable => "source-unreadable",
-        WarningKind::Hook => "hook-warning",
-        WarningKind::MaintenancePartial => "maintenance-partial",
-        WarningKind::CheckWarning => "check-warning",
-        WarningKind::CheckError => "check-error",
-        WarningKind::OtherHosts => "maintenance-other-hosts",
-        WarningKind::LocationSkipped => "location-skipped",
-        WarningKind::SecretFileReadable => "secret-file-readable",
-        WarningKind::Other => "unknown",
-    }
-}
-
 /// A code this version doesn't know is a warning of another kind, as the
 /// domain has it: a newer worker may have written it.
 pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
@@ -503,7 +489,7 @@ mod tests {
             WarningKind::OtherHosts,
             WarningKind::Other,
         ] {
-            let text = warning_code_text(kind);
+            let text = kind.code();
             assert_eq!(warning_kind_from_text(text), kind, "{text} reads back");
         }
     }
@@ -516,7 +502,7 @@ mod tests {
             (WarningKind::CheckWarning, "check-warning"),
             (WarningKind::CheckError, "check-error"),
         ] {
-            assert_eq!(warning_code_text(kind), text);
+            assert_eq!(kind.code(), text);
             assert_eq!(warning_kind_from_text(text), kind, "{text} reads back");
         }
     }

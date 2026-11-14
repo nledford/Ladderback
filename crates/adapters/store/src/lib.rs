@@ -269,7 +269,7 @@ async fn write(
             .bind(id)
             .bind(warning.item.as_deref())
             .bind(warning.during.as_str())
-            .bind(codec::warning_code_text(warning.kind))
+            .bind(warning.kind.code())
             .bind(warning.detail.as_str())
             .execute(&mut *conn)
             .await
