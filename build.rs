@@ -97,9 +97,12 @@ impl Answers {
 /// commit, a checkout, a tag, the index, or a change to a tracked file (so
 /// `.dirty` is right; an untracked file doesn't count). Only paths that
 /// exist: Cargo reruns a script whose watched path is missing every build.
+/// HEAD's log covers a branch whose ref is packed, which `git reset --soft`
+/// or `git update-ref` moves without touching any other file watched here.
 fn watch(package: &Path) {
     let mut paths = vec![
         "HEAD".to_owned(),
+        "logs/HEAD".to_owned(),
         "index".to_owned(),
         "packed-refs".to_owned(),
         "refs/tags".to_owned(),
@@ -130,7 +133,9 @@ fn watch(package: &Path) {
     }
 }
 
-/// What `git` printed with `args` in `folder`, when it ran and succeeded.
+/// What `git` printed with `args` in `folder`, when it ran and succeeded. A
+/// name that isn't UTF-8 (a tracked file's) is read with replacement
+/// characters, so it names no path that exists, and the rest are still read.
 fn git(folder: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .args(args)
@@ -142,5 +147,5 @@ fn git(folder: &Path, args: &[&str]) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    String::from_utf8(output.stdout).ok()
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
