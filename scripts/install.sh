@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Installs Ladderback from source, and updates an installation made this way:
+# Installs Ladderback, and updates an installation made this way:
 #
 #   curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash
 #
-# It checks the tools the build needs, installs the ones that need no
-# administrator rights (rustup, just, trunk) after asking once, clones
-# Ladderback's source into a folder of its own or updates it there, checks out
-# the newest release and installs it with `just install`. It never runs sudo:
-# a missing C compiler, git or Node.js is named with how to install it, and
-# nothing is changed. Decision 79
-# (docs/design/decisions/79-a-from-source-install-script.md) says why;
+# On 64-bit Linux with glibc 2.35 or newer it installs the newest release
+# from its archive, checked against the release's SHA256SUMS, and needs none
+# of the build's tools. On macOS, wherever the release has no archive, and
+# with --from-source, it builds from source: it checks the tools the build
+# needs, installs the ones that need no administrator rights (rustup, just,
+# trunk) after asking once, clones Ladderback's source into a folder of its
+# own or updates it there, checks out the newest release and installs it
+# with `just install`. It never runs sudo: a missing C compiler, git or
+# Node.js is named with how to install it, and nothing is changed. Decision
+# 79 (docs/design/decisions/79-a-from-source-install-script.md) says why;
 # `features/cli/install_script.feature` specifies it. `--help` lists the
 # options.
 #
@@ -23,6 +26,11 @@
 set -euo pipefail
 
 readonly LADDERBACK_URL="https://github.com/nledford/Ladderback.git"
+# The newest release that isn't a release candidate, which GitHub calls the
+# latest: the one the source path checks out too.
+readonly RELEASE_URL="https://github.com/nledford/Ladderback/releases/latest/download"
+# The oldest glibc the release's Linux archives run with.
+readonly GLIBC_FLOOR=2.35
 readonly SCRIPT_URL="https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh"
 readonly BY_HAND_URL="https://github.com/nledford/Ladderback/blob/main/docs/guide/install.md#by-hand"
 readonly FULL_DISK_ACCESS_URL="https://github.com/nledford/Ladderback/blob/main/docs/guide/install.md#macos-full-disk-access"
@@ -44,20 +52,24 @@ readonly STALL_SECONDS=60
 
 usage() {
     cat <<EOF
-Usage: install.sh [--yes] [--dir <folder>] [-- <options for just install>]
+Usage: install.sh [--yes] [--from-source] [--dir <folder>] [-- <options for just install>]
 
-Builds the newest release of Ladderback from source and installs it with
-\`just install\`. Running it again updates to the newest release.
+Installs the newest release of Ladderback. On 64-bit Linux with glibc
+$GLIBC_FLOOR or newer it installs the release's archive, checked against the
+release's SHA256SUMS. Elsewhere, or with --from-source, it builds the release
+from source and installs it with \`just install\`. Running it again updates to
+the newest release.
 
 Options:
   -y, --yes         install missing tools (rustup, just, trunk) without asking
+      --from-source build from source where the release has an archive
       --dir <folder>
-                    where to keep Ladderback's source (default:
+                    where to keep Ladderback's source to build it (default:
                     \${XDG_DATA_HOME:-~/.local/share}/ladderback/source)
   -h, --help        show this help
   --                what follows goes to \`just install\`, which passes it to
                     \`cargo install\`: \`-- --root ~/.local\` installs into
-                    ~/.local/bin
+                    ~/.local/bin. From a release archive only --root applies.
 
 Piped into bash, options follow \`bash -s --\`:
   curl -fsSL $SCRIPT_URL | bash -s -- --yes
@@ -174,6 +186,7 @@ parse_args() {
     while [ $# -gt 0 ]; do
         case $1 in
             -y | --yes) yes=1 ;;
+            --from-source) from_source=1 ;;
             --dir)
                 if [ $# -lt 2 ] || [ -z "$2" ]; then
                     warn "error: --dir needs a folder"
@@ -328,17 +341,46 @@ trunk_build_jobs() {
 # Downloads URL $2 into file $3, saying $1 is what it is when it fails. One
 # that stalls (STALL_CONNECT, STALL_BYTES, STALL_SECONDS) is given up, after
 # curl's three retries, with a message that says it stalled; there is no
-# limit on the whole time, so a slow link that still moves finishes.
+# limit on the whole time, so a slow link that still moves finishes. With a
+# fourth argument, `release`, the file is one of Ladderback's release: one
+# the release doesn't have (HTTP 404) returns 1 rather than stopping the
+# script, and a failure suggests building from source instead. The 404 is
+# told by the HTTP status alone: under --fail, curl 8 over HTTP/2 can exit
+# 56 for it rather than 22. --proto '=https' holds for redirects too, which
+# --proto-redir can't widen: the release's archive and its SHA256SUMS come
+# through the same redirects, and one to plain HTTP could swap both.
 download() {
-    local what=$1 url=$2 out=$3 status=0
-    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+    local what=$1 url=$2 out=$3 release=${4:-} code status=0 again='run this again.'
+    if [ "$release" = release ]; then
+        again='run this again, or build from source with --from-source.'
+    fi
+    code=$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
         --connect-timeout "$STALL_CONNECT" --speed-limit "$STALL_BYTES" --speed-time "$STALL_SECONDS" \
-        -o "$out" "$url" || status=$?
+        --write-out '%{http_code}' -o "$out" "$url" 2>"$scratch/curl-error") || status=$?
+    if [ "$status" != 0 ] && [ "$code" = 404 ] && [ "$release" = release ]; then
+        return 1
+    fi
+    if [ "$status" != 0 ]; then
+        cat "$scratch/curl-error" >&2
+    fi
     case $status in
         0) ;;
-        28) die "the download of $what stalled: after three retries, it found no connection within $STALL_CONNECT s, or moved under $STALL_BYTES bytes a second for $STALL_SECONDS s. Nothing was installed; check the network connection and run this again." ;;
-        *) die "$what couldn't be downloaded. Nothing was installed; run this again." ;;
+        28) die "the download of $what stalled: after three retries, it found no connection within $STALL_CONNECT s, or moved under $STALL_BYTES bytes a second for $STALL_SECONDS s. Nothing was installed; check the network connection and $again" ;;
+        *) die "$what couldn't be downloaded. Nothing was installed; $again" ;;
     esac
+}
+
+# The SHA-256 of file $1, which $2 names in a failure.
+sha256_of() {
+    local out
+    if has sha256sum; then
+        out=$(sha256sum "$1") || die "sha256sum couldn't read $2. Nothing was installed."
+    elif has shasum; then
+        out=$(shasum -a 256 "$1") || die "shasum couldn't read $2. Nothing was installed."
+    else
+        die "neither sha256sum nor shasum is installed, to check $2. Nothing was installed."
+    fi
+    say "${out%% *}"
 }
 
 # Downloads trunk's release archive for this system and checks it against the
@@ -349,18 +391,92 @@ download_trunk() {
     local archive="trunk-$trunk_target.tar.gz" actual
     say "Downloading trunk $TRUNK_VERSION for $trunk_target"
     download "trunk's release" "$TRUNK_RELEASES_URL/download/v$TRUNK_VERSION/$archive" "$scratch/$archive"
-    if has sha256sum; then
-        actual=$(sha256sum "$scratch/$archive") || die "sha256sum couldn't read trunk's release. Nothing was installed."
-    elif has shasum; then
-        actual=$(shasum -a 256 "$scratch/$archive") || die "shasum couldn't read trunk's release. Nothing was installed."
-    else
-        die "neither sha256sum nor shasum is installed, to check trunk's release. Nothing was installed."
-    fi
-    actual=${actual%% *}
+    actual=$(sha256_of "$scratch/$archive" "trunk's release")
     if [ "$actual" != "$trunk_sha" ]; then
         die "trunk's release $archive doesn't match the SHA-256 this script pins: it has $actual, not $trunk_sha. Nothing was installed. Run this again; if it says the same, report it: https://github.com/nledford/Ladderback/issues"
     fi
     tar -xzf "$scratch/$archive" -C "$scratch" trunk
+}
+
+# Whether the newest release's archive is the way to install on this system:
+# sets target and from_archive where it is, and otherwise says in one line
+# why Ladderback is built from source. The archives are for 64-bit Linux,
+# x86_64 and aarch64, with glibc GLIBC_FLOOR or newer. A 32-bit Raspberry Pi
+# OS runs on a 64-bit kernel, whose `uname -m` says aarch64, so the width of
+# the system's programs is asked too.
+choose_archive() {
+    local machine glibc
+    if [ "$from_source" = 1 ]; then
+        return 0
+    fi
+    if [ "$os" = Darwin ]; then
+        say "Releases have no archive for macOS yet: building Ladderback from source."
+        return 0
+    fi
+    machine=$(uname -m)
+    case $machine in
+        x86_64) ;;
+        aarch64 | arm64) machine=aarch64 ;;
+        *)
+            say "Releases have no archive for Linux on $machine: building Ladderback from source."
+            return 0
+            ;;
+    esac
+    if [ "$(getconf LONG_BIT 2>/dev/null || true)" = 32 ]; then
+        say "This system runs 32-bit programs, and the release's archives hold 64-bit ones: building Ladderback from source."
+        return 0
+    fi
+    glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+    glibc=${glibc#glibc }
+    if [ -z "$glibc" ]; then
+        say "The release's archives need glibc $GLIBC_FLOOR or newer, which this system doesn't have: building Ladderback from source."
+        return 0
+    fi
+    if ! version_at_least "$glibc" "$GLIBC_FLOOR"; then
+        say "The release's archives need glibc $GLIBC_FLOOR or newer, and this system has glibc $glibc: building Ladderback from source."
+        return 0
+    fi
+    if ! has curl; then
+        say "curl isn't installed, to download the release's archive: building Ladderback from source."
+        return 0
+    fi
+    target="$machine-unknown-linux-gnu"
+    from_archive=1
+}
+
+# Installs the newest release from its archive for target: downloads the
+# archive and the release's SHA256SUMS, checks the one against the other,
+# and installs the binary where `cargo install` puts a build (install_root),
+# written beside it and renamed over it, so an update either way replaces
+# the same file, whole, and a service goes on running it. Where the release
+# has no archive for target (a 404, as in the hour before a release's
+# archives are attached), it says so and clears from_archive. Any other
+# failed download, and an archive that doesn't match its checksum, stop the
+# script and build nothing: a mismatch means a damaged download or one that
+# isn't the release's, which a build would hide.
+install_archive() {
+    local archive="ladderback-$target.tar.xz" expected='' actual sum name bin_dir
+    say "Downloading Ladderback's newest release for $target"
+    if ! download "the release's SHA256SUMS" "$RELEASE_URL/SHA256SUMS" "$scratch/SHA256SUMS" release ||
+        ! download "$archive" "$RELEASE_URL/$archive" "$scratch/$archive" release; then
+        say "Ladderback's newest release has no archive for $target yet: building it from source."
+        from_archive=0
+        return 0
+    fi
+    while read -r sum name || [ -n "$sum" ]; do
+        if [ "${name#\*}" = "$archive" ]; then
+            expected=$sum
+        fi
+    done <"$scratch/SHA256SUMS"
+    actual=$(sha256_of "$scratch/$archive" "$archive")
+    if [ "$actual" != "$expected" ]; then
+        die "$archive doesn't match the checksum in the release's SHA256SUMS: it has $actual, and SHA256SUMS gives ${expected:-none}. Nothing was installed, and nothing is built instead: a download that doesn't match is damaged or isn't the release's. Run this again; if it says the same, report it: https://github.com/nledford/Ladderback/issues"
+    fi
+    tar -xJf "$scratch/$archive" -C "$scratch" "ladderback-$target/ladderback"
+    bin_dir="$(install_root)/bin"
+    mkdir -p "$bin_dir"
+    install -m 0755 "$scratch/ladderback-$target/ladderback" "$bin_dir/.ladderback.new"
+    mv -f "$bin_dir/.ladderback.new" "$bin_dir/ladderback"
 }
 
 # Refuses a source folder this script must not touch: one that holds
@@ -650,7 +766,8 @@ restore_stylesheet() {
 
 # Where `cargo install` puts the binary: `--root` among the options, else
 # CARGO_INSTALL_ROOT, else CARGO_HOME, else ~/.cargo. A relative root is
-# relative to the source folder, where `just install` runs.
+# relative to the source folder, where `just install` runs, for the
+# release's archive too, so both go in the same place.
 install_root() {
     local root="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}" next=0 arg
     for arg in ${forward[@]+"${forward[@]}"}; do
@@ -721,6 +838,9 @@ main() {
     exec </dev/null
 
     yes=0
+    from_source=0
+    from_archive=0
+    target=''
     dir=''
     forward=()
     rustup=1
@@ -766,11 +886,20 @@ main() {
         PATH="$cargo_bin:$PATH"
     fi
 
-    check_tools
-    check_source_folder
-
     scratch=$(mktemp -d)
     trap 'rm -rf "$scratch"' EXIT
+
+    choose_archive
+    if [ "$from_archive" = 1 ]; then
+        install_archive
+        if [ "$from_archive" = 1 ]; then
+            report
+            return 0
+        fi
+    fi
+
+    check_tools
+    check_source_folder
 
     install_missing_tools
     checkout_newest_release
@@ -781,9 +910,11 @@ main() {
     fi
     build_wasm_bindgen_if_needed
 
+    # --force: cargo won't overwrite a binary it didn't install, such as one
+    # an earlier run took from the release's archive.
     say "Building and installing Ladderback $release (several minutes)"
     local status=0
-    (cd "$dir" && just install ${forward[@]+"${forward[@]}"}) || status=$?
+    (cd "$dir" && just install --force ${forward[@]+"${forward[@]}"}) || status=$?
     restore_stylesheet
     if [ "$status" != 0 ]; then
         die "\`just install\` failed in $dir. Fix what it names, then run this again."
