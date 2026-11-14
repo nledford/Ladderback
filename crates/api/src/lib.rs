@@ -302,6 +302,10 @@ pub enum WarningCode {
     /// `silent`, `refused`, `not-a-repository` or `password-not-accepted`.
     /// Never an address or a network's name.
     LocationSkipped,
+    /// A secret was read from a file other users of the machine can read
+    /// (#386). The arguments are `path`, the file's path, and `mode`, its
+    /// permission bits in octal (`0644`). Never the secret (I4).
+    SecretFileReadable,
     /// A location of a repository sends its credentials where whoever
     /// answers at its address can read them (decision 80, §10.6). The
     /// arguments are `position`, the location's, from 1; `cause`:
@@ -928,6 +932,18 @@ impl WarningCode {
                 },
                 ArgSpec {
                     name: "hosts",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::SecretFileReadable => &[
+                ArgSpec {
+                    name: "path",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "mode",
                     kind: ArgKind::Text,
                     optional: false,
                 },

@@ -27,6 +27,7 @@ use crate::ports::{
     ConfigError, ConfigStore, Credentials, Destination, Message, Notification, Notifier,
     NotifyError, OperationRecord, OperationStore, SecretResolver,
 };
+use crate::secrets::SecretWarnings;
 
 /// Why a notification wasn't sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +151,12 @@ impl Notify {
             secrets,
             notifier,
         }
+    }
+
+    /// Tells `told` each warning reading a channel's secrets gives (§10.2).
+    #[must_use]
+    pub fn telling(self, _told: SecretWarnings) -> Self {
+        todo!("tell each warning of a channel's secrets, masked")
     }
 
     /// Tells the channels of every rule that sends the event `news` is, and

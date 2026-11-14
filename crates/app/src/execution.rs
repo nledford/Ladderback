@@ -83,6 +83,14 @@ impl Queued {
             job,
         }
     }
+
+    /// The run with `warnings` it carries from its start: what reading the
+    /// job's secrets told (#386). They are attached when the run starts, not
+    /// here, so the queued row holds none and a run the queue takes up again,
+    /// which reads its secrets anew, carries them once.
+    pub fn with_warnings(self, warnings: Vec<Warning>) -> Self {
+        todo!("attach {} warnings at the start", warnings.len())
+    }
 }
 
 /// How the write that says an operation is running ended, or what cut it
@@ -670,7 +678,8 @@ mod tests {
     use std::sync::Arc;
 
     use domain::execution::{
-        FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger,
+        FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
+        WarningKind,
     };
     use domain::planning::{HookEntry, Hooks, OnFailure};
     use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp};
@@ -901,6 +910,94 @@ mod tests {
             "not-started"
         );
         assert_eq!(super::outcome_detail(&outcome(HookStatus::Succeeded)), "");
+    }
+
+    /// What the job's secrets told is the run's from its start, not the
+    /// queued row's (#386).
+    #[tokio::test]
+    async fn warnings_handed_with_a_queued_run_are_attached_when_it_starts() {
+        use crate::ports::{FakeEnd, FakeJob, Job, OperationStore};
+
+        let readable = Warning {
+            kind: WarningKind::SecretFileReadable,
+            item: Some("/home/demo/nas-password".to_owned()),
+            during: "secret".to_owned(),
+            detail: "0644".to_owned(),
+        };
+        let clock = Arc::new(FakeClock::new(t(0)));
+        let store = Arc::new(InMemoryOperationStore::new());
+        let use_case = RunOperation::new(
+            Arc::new(SimulatedEngine::new(clock.clone())),
+            clock,
+            store.clone(),
+        );
+        let id = OperationId::from_uuid(uuid::Uuid::from_u128(7));
+        let job = Job::Fake(FakeJob {
+            steps: 0,
+            step_delay: std::time::Duration::ZERO,
+            warnings: Vec::new(),
+            end: FakeEnd::Succeed,
+            deadline_budget: None,
+        });
+        let queued = use_case
+            .queue(id, Trigger::Manual, job)
+            .await
+            .with_warnings(vec![readable.clone()]);
+        let held = store.get(id).await.expect("the log answers");
+        assert_eq!(
+            held.map(|detail| detail.warnings),
+            Some(Vec::new()),
+            "the queued row holds none"
+        );
+        let finished = use_case
+            .run_queued(queued, std::future::pending::<()>())
+            .await;
+        assert_eq!(finished.operation.warnings(), [readable]);
+        assert_eq!(
+            finished.operation.status(),
+            &OperationStatus::SucceededWithWarnings
+        );
+    }
+
+    /// A file the run's start read and its job met again, as a choice of
+    /// location that reads the same password file does, is named once
+    /// (#386).
+    #[tokio::test]
+    async fn a_readable_secret_file_met_at_the_start_and_in_the_job_is_named_once() {
+        use crate::ports::{FakeEnd, FakeJob, Job};
+
+        let readable = Warning {
+            kind: WarningKind::SecretFileReadable,
+            item: Some("/home/demo/nas-password".to_owned()),
+            during: "secret".to_owned(),
+            detail: "0644".to_owned(),
+        };
+        let clock = Arc::new(FakeClock::new(t(0)));
+        let use_case = RunOperation::new(
+            Arc::new(SimulatedEngine::new(clock.clone())),
+            clock,
+            Arc::new(InMemoryOperationStore::new()),
+        );
+        let job = Job::Fake(FakeJob {
+            steps: 0,
+            step_delay: std::time::Duration::ZERO,
+            warnings: vec![readable.clone()],
+            end: FakeEnd::Succeed,
+            deadline_budget: None,
+        });
+        let queued = use_case
+            .queue(
+                OperationId::from_uuid(uuid::Uuid::from_u128(8)),
+                Trigger::Manual,
+                job,
+            )
+            .await
+            .with_warnings(vec![readable.clone()]);
+        let finished = use_case
+            .run_queued(queued, std::future::pending::<()>())
+            .await;
+        assert_eq!(finished.operation.warnings(), [readable]);
+        assert_eq!(finished.operation.warning_count(), 1);
     }
 
     #[tokio::test]

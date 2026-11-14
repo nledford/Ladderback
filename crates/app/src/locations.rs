@@ -1577,4 +1577,75 @@ mod tests {
         assert!(entry.is_some());
         assert_eq!(opened.entry, entry);
     }
+
+    /// Probes as [`Holds`] does; any other job starts and says nothing more.
+    struct Starts;
+
+    #[async_trait]
+    impl Engine for Starts {
+        async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            if let Job::Probe(_) = job {
+                return Holds::default().run(op, job).await;
+            }
+            Ok(RunningJob {
+                events: futures::stream::iter([EngineEvent::Started {
+                    index_read_at: Timestamp::UNIX_EPOCH,
+                    repository: None,
+                }])
+                .boxed(),
+                control: Box::new(Gone),
+            })
+        }
+    }
+
+    /// A secret the choice read from a file other users can read comes out
+    /// of the job as a warning, by the file's path and mode, right after the
+    /// job starts, the first moment a run takes one; so the operation that
+    /// used it carries it (#386).
+    #[tokio::test]
+    async fn a_secret_file_others_can_read_that_the_choice_read_comes_out_as_a_warning() {
+        let fake = FakeSecrets::default();
+        fake.set_env("NAS_PASSWORD", "demo-password");
+        fake.write_file("/home/demo/lan-key", b"demo-key\n", 0o644);
+        let resolve = ResolveRepository::new(Arc::new(fake));
+        let access = nas(
+            &resolve,
+            first("/srv/lan", &[("password", "${file:/home/demo/lan-key}")]),
+        )
+        .await;
+        let choose = ChooseLocation::new(
+            Arc::new(Starts),
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(|_| {}),
+        );
+        let RunningJob { events, .. } = choose
+            .run(op(), Job::Ls(access))
+            .now_or_never()
+            .expect("the choice ends at once")
+            .expect("the job starts");
+        let events: Vec<EngineEvent> = events
+            .collect::<Vec<_>>()
+            .now_or_never()
+            .expect("the job's events end at once")
+            .into_iter()
+            .filter(|event| !matches!(event, EngineEvent::Located(_)))
+            .collect();
+        assert_eq!(
+            events,
+            [
+                EngineEvent::Started {
+                    index_read_at: Timestamp::UNIX_EPOCH,
+                    repository: None,
+                },
+                EngineEvent::Warning(domain::execution::Warning {
+                    kind: domain::execution::WarningKind::SecretFileReadable,
+                    item: Some("/home/demo/lan-key".to_owned()),
+                    during: "secret".to_owned(),
+                    detail: "0644".to_owned(),
+                }),
+            ]
+        );
+    }
 }

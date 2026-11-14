@@ -6,7 +6,7 @@
 use std::assert_matches;
 use std::time::Duration;
 
-use app::history::GetOperation;
+use app::history::{GetOperation, ListOperations};
 use app::ports::{FakeEnd, OperationDetail, OperationRecord};
 use cucumber::{given, then, when};
 use domain::SignedDuration;
@@ -30,6 +30,28 @@ fn unreadable_files(agent: &mut Agent, count: usize) {
             detail: "permission denied".to_owned(),
         })
         .collect();
+}
+
+#[given(
+    expr = "the engine will report an unreadable file, a check warning and another unreadable file"
+)]
+fn unreadable_check_unreadable(agent: &mut Agent) {
+    let unreadable = |path: &str| Warning {
+        kind: WarningKind::SourceUnreadable,
+        item: Some(path.to_owned()),
+        during: "backup".to_owned(),
+        detail: "permission denied".to_owned(),
+    };
+    agent.job.warnings = vec![
+        unreadable("/home/demo/locked-1.txt"),
+        Warning {
+            kind: WarningKind::CheckWarning,
+            item: None,
+            during: "check".to_owned(),
+            detail: "pack not referenced in index".to_owned(),
+        },
+        unreadable("/home/demo/locked-2.txt"),
+    ];
 }
 
 /// An unreadable file's warning with `length` characters of text in `field`
@@ -203,6 +225,38 @@ async fn history_lists_warnings(agent: &mut Agent, count: usize) {
 async fn history_counts_warnings(agent: &mut Agent, count: u64) {
     let detail = history_of_the_operation(agent).await;
     assert_eq!(detail.record.warning_count, count);
+}
+
+/// A warning's kind by its code on the wire.
+fn kind_named(code: &str) -> WarningKind {
+    match code {
+        "source-unreadable" => WarningKind::SourceUnreadable,
+        "check-warning" => WarningKind::CheckWarning,
+        other => panic!("no warning kind is named {other}"),
+    }
+}
+
+/// What the history page lists, not the operation's own detail: the page
+/// names its warnings without reading them all (#508).
+#[then(
+    expr = "the history page names the operation's warnings {string} and {string}, in the order they came"
+)]
+async fn history_page_names_warnings(agent: &mut Agent, first: String, second: String) {
+    let store = agent.store().await;
+    let id = agent.operation().id();
+    let page = ListOperations::new(store)
+        .list(None, None, None)
+        .await
+        .expect("the history answers");
+    let record = page
+        .operations
+        .iter()
+        .find(|record| record.id == id)
+        .expect("the operation is on the history page");
+    assert_eq!(
+        record.warning_kinds,
+        [kind_named(&first), kind_named(&second)]
+    );
 }
 
 /// `field` (`item`, `during` or `detail`) of `warning`.

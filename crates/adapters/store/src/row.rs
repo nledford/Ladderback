@@ -291,6 +291,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         started_at,
         finished_at,
         warning_count,
+        warning_kinds: Vec::new(),
         result,
         repository_alias,
         locations,

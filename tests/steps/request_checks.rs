@@ -557,6 +557,18 @@ fn warns(agent: &mut Agent, words: String) {
     );
 }
 
+/// Nothing the daemon says itself holds these words.
+#[then(expr = "Ladderback doesn't warn {string}")]
+fn doesnt_warn(agent: &mut Agent, words: String) {
+    let path = agent.web.log.as_ref().expect("Ladderback was started");
+    let log = std::fs::read_to_string(path).expect("the daemon's log");
+    assert!(
+        !log.lines()
+            .any(|line| line.starts_with("ladderback: ") && line.contains(&words)),
+        "Ladderback said {words:?} in: {log}"
+    );
+}
+
 /// The warning names the address the daemon took, its port included rather
 /// than the 0 it was asked for, and comes before the line that says where it
 /// listens, which scripts and people read first.

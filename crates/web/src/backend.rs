@@ -1091,23 +1091,40 @@ mod tests {
             [WarningCode::HookWarning, WarningCode::SourceUnreadable],
             "a second read adds nothing the row has"
         );
-        // A second unreadable source is a warning of its own: a history that
-        // has one of the two leaves the row both.
+    }
+
+    /// The row names each kind of warning once, as the history page does
+    /// (#508): a second warning of a kind the row names adds nothing, heard
+    /// or read.
+    #[test]
+    fn a_row_names_each_kind_of_warning_once() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        let unreadable = UiEvent::OperationWarning {
+            operation: id(FIRST),
+            code: WarningCode::SourceUnreadable,
+            args: Vec::new(),
+        };
         state.apply(&unreadable);
+        state.apply(&unreadable);
+        assert_eq!(
+            state.rows[0].summary.warning_codes,
+            [WarningCode::SourceUnreadable]
+        );
+        // A row held from before, with the code twice, and a history that
+        // names it once: the row names it once.
+        state.rows[0].summary.warning_codes =
+            vec![WarningCode::SourceUnreadable, WarningCode::SourceUnreadable];
         state.merge(page(
             vec![warned(
                 summary(FIRST, "running", true, false),
-                &[WarningCode::HookWarning, WarningCode::SourceUnreadable],
+                &[WarningCode::SourceUnreadable],
             )],
             None,
         ));
         assert_eq!(
             state.rows[0].summary.warning_codes,
-            [
-                WarningCode::HookWarning,
-                WarningCode::SourceUnreadable,
-                WarningCode::SourceUnreadable
-            ]
+            [WarningCode::SourceUnreadable]
         );
     }
 

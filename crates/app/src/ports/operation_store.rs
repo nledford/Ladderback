@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
 use domain::execution::{
-    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
+    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
 };
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
 
@@ -242,6 +242,11 @@ pub struct OperationRecord {
     pub finished_at: Option<Timestamp>,
     /// Every warning the operation recorded, kept or not.
     pub warning_count: u64,
+    /// The kinds of the warnings the log keeps (the first
+    /// [`MAX_STORED_WARNINGS`](domain::execution::MAX_STORED_WARNINGS)), each
+    /// once, in the order the first of each came (#508). A kind only past
+    /// the cap is not known.
+    pub warning_kinds: Vec<WarningKind>,
     /// What the engine reported when the operation succeeded.
     pub result: Option<EngineResult>,
     /// The alias of the repository a maintenance operation ran on, as it
@@ -267,6 +272,7 @@ impl OperationRecord {
             started_at: operation.started_at().map(to_millisecond),
             finished_at: operation.finished_at().map(to_millisecond),
             warning_count: operation.warning_count(),
+            warning_kinds: Vec::new(),
             result: result.cloned(),
             repository_alias: operation.repository_alias().cloned(),
             locations: operation.locations().cloned(),

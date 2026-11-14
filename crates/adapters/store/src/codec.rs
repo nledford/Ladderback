@@ -103,6 +103,7 @@ pub(crate) fn warning_code_text(kind: WarningKind) -> &'static str {
         WarningKind::CheckError => "check-error",
         WarningKind::OtherHosts => "maintenance-other-hosts",
         WarningKind::LocationSkipped => "location-skipped",
+        WarningKind::SecretFileReadable => "secret-file-readable",
         WarningKind::Other => "unknown",
     }
 }
@@ -118,6 +119,7 @@ pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
         "check-error" => WarningKind::CheckError,
         "maintenance-other-hosts" => WarningKind::OtherHosts,
         "location-skipped" => WarningKind::LocationSkipped,
+        "secret-file-readable" => WarningKind::SecretFileReadable,
         _ => WarningKind::Other,
     }
 }

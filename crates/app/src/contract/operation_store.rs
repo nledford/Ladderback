@@ -37,6 +37,7 @@ pub async fn run(store: &dyn OperationStore) {
     a_later_save_replaces_the_warnings_too(store).await;
     one_operations_warnings_are_not_anothers(store).await;
     warnings_past_the_cap_are_counted_not_stored(store).await;
+    history_names_each_operations_warnings_by_kind(store).await;
     times_are_kept_to_the_millisecond(store).await;
     history_lists_the_newest_operation_first(store, &fx).await;
     a_page_ends_at_its_limit_and_says_whether_more_remain(store, &fx).await;
@@ -750,6 +751,54 @@ async fn warnings_past_the_cap_are_counted_not_stored(store: &dyn OperationStore
     );
     assert_eq!(found.warnings.len(), MAX_STORED_WARNINGS);
     assert_eq!(found.warnings, op.warnings(), "the first ones are kept");
+}
+
+/// A page of history names each operation's warnings by kind, each once,
+/// in the order the first of each came, without reading the warnings
+/// themselves (#508); the operation's detail names them the same way.
+async fn history_names_each_operations_warnings_by_kind(store: &dyn OperationStore) {
+    let mut warned = started(queued(0xc8, None));
+    let check = Warning {
+        kind: WarningKind::CheckWarning,
+        item: None,
+        during: "check".to_owned(),
+        detail: "pack not referenced in index".to_owned(),
+    };
+    applied(warned.record_warning(unreadable("/home/demo/a")));
+    applied(warned.record_warning(check.clone()));
+    applied(warned.record_warning(unreadable("/home/demo/b")));
+    applied(warned.record_warning(check));
+    applied(warned.succeed(at(70)));
+    let quiet = succeeded(queued(0xc9, None));
+    save(store, &warned, None).await;
+    save(store, &quiet, None).await;
+
+    let listed = page(store, &query(None, Some(id(0xca)), 2)).await;
+    let kinds: Vec<(OperationId, Vec<WarningKind>)> = listed
+        .operations
+        .into_iter()
+        .map(|record| (record.id, record.warning_kinds))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            (id(0xc9), Vec::new()),
+            (
+                id(0xc8),
+                vec![WarningKind::SourceUnreadable, WarningKind::CheckWarning]
+            ),
+        ]
+    );
+    let found = read(store, id(0xc8))
+        .await
+        .map(|found| found.record.warning_kinds);
+    assert_eq!(
+        found,
+        Some(vec![
+            WarningKind::SourceUnreadable,
+            WarningKind::CheckWarning
+        ])
+    );
 }
 
 async fn times_are_kept_to_the_millisecond(store: &dyn OperationStore) {

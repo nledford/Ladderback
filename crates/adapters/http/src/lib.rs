@@ -46,7 +46,8 @@ pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
-    Exposure, InvalidHostName, RequestChecks, StartupRefusal, startup_rule, validate_host_name,
+    Exposure, InvalidHostName, RequestChecks, StartupRefusal, proxied_hosts, startup_rule,
+    validate_host_name,
 };
 pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 

@@ -229,9 +229,20 @@ pub struct ResolveRepository {
     resolver: Arc<dyn SecretResolver>,
 }
 
+/// Told each warning that reading a set of secrets gave, once the set is
+/// read, with its path masked of those secrets (I4): the daemon says it in
+/// its log, an operation's read or not (§10.2, #386).
+pub type SecretWarnings = Arc<dyn Fn(&SecretWarning) + Send + Sync>;
+
 impl ResolveRepository {
     pub fn new(resolver: Arc<dyn SecretResolver>) -> Self {
         Self { resolver }
+    }
+
+    /// Tells `told` each warning a resolution gives.
+    #[must_use]
+    pub fn telling(self, _told: SecretWarnings) -> Self {
+        todo!("tell each warning, masked")
     }
 
     /// Each distinct reference is read once, so a value can't change between
@@ -919,5 +930,61 @@ mod tests {
                 limit: 262_144,
             }
         );
+    }
+
+    /// A file other users can read is named by its path masked of the
+    /// repository's secrets, in the resolution and to whoever is told
+    /// (I4, #386): the whole repository's when it is resolved at once, the
+    /// password's when it alone is.
+    #[tokio::test]
+    async fn a_readable_files_path_is_masked_of_the_repositorys_secrets() {
+        use std::sync::Mutex;
+
+        use domain::secrets::FileRead;
+
+        use crate::fakes::FakeSecrets;
+
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/alice/nas-password", b"bob\n", 0o644);
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::clone(&told);
+        let resolve = ResolveRepository::new(store).telling(Arc::new(move |warning| {
+            heard.lock().expect("the list").push(warning.clone());
+        }));
+        let password = SecretRef::File {
+            path: "/home/alice/nas-password".to_owned(),
+            read: FileRead::FirstLine,
+        };
+        let settings = RepositorySettings {
+            repository: "/srv/backups".to_owned(),
+            repo_hot: None,
+            password: password.clone(),
+            options: BTreeMap::from([("secret_access_key".to_owned(), "alice".to_owned())]),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        };
+        let masked = |path: &str| SecretWarning::FileReadableByOthers {
+            path: path.to_owned(),
+            mode: 0o644,
+        };
+
+        let resolved = resolve.resolve(&settings).await.expect("it resolves");
+        assert_eq!(resolved.warnings, [masked("/home/***/nas-password")]);
+        assert_eq!(
+            *told.lock().expect("the list"),
+            [masked("/home/***/nas-password")]
+        );
+
+        // The password alone masks only itself.
+        let store = Arc::new(FakeSecrets::new());
+        store.write_file("/home/bob/nas-password", b"bob\n", 0o644);
+        let resolved = ResolveRepository::new(store)
+            .resolve_password(&SecretRef::File {
+                path: "/home/bob/nas-password".to_owned(),
+                read: FileRead::FirstLine,
+            })
+            .await
+            .expect("it resolves");
+        assert_eq!(resolved.warnings, [masked("/home/***/nas-password")]);
     }
 }

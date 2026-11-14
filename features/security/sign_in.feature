@@ -219,6 +219,15 @@ Feature: Sign-in
       Then Ladderback is listening
       And its log warns "sign-in is off"
 
+    Scenario: With sign-in off and host names a proxy reaches it by, Ladderback names each one but loopback
+      When Ladderback is started with the arguments "--listen 127.0.0.1:0 --allowed-host localhost --allowed-host backup.example --allowed-host nas.example"
+      Then Ladderback is listening
+      And Ladderback warns "anyone who can reach backup.example through the proxy can run and change backups"
+      And Ladderback warns "anyone who can reach nas.example through the proxy can run and change backups"
+      And Ladderback warns "To turn sign-in on, run ladderback set-password"
+      And Ladderback doesn't warn "reach localhost"
+      And its log warns "sign-in is off"
+
     Scenario: An admin password file Ladderback cannot read is a refusal to start, never sign-in off
       Given the data folder holds an admin password file that is not a password hash
       When Ladderback is started with the arguments "--listen 127.0.0.1:0"
@@ -265,6 +274,16 @@ Feature: Sign-in
     Scenario: Signing in from a page served over HTTPS by a proxy marks the cookie Secure
       When the admin signs in over HTTP with "demo-admin-pass" from the page "https://localhost:{port}"
       Then the sign-in sets a session cookie with "HttpOnly", "SameSite=Strict" and "Secure"
+
+    Scenario: No cache keeps the answer to a sign-in
+      When the admin signs in over HTTP with "demo-admin-pass"
+      Then the response has the header "Cache-Control" with the value "no-store"
+
+    Scenario: No cache keeps a signed-in session's answers
+      Given the admin has signed in over HTTP with "demo-admin-pass"
+      And a "GET" request for "/api/v1/session" with the session cookie
+      When the request is sent
+      Then the response has the header "Cache-Control" with the value "no-store"
 
     Scenario: With the session cookie, the API answers
       Given the admin has signed in over HTTP with "demo-admin-pass"
