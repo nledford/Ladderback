@@ -406,9 +406,9 @@ install *args: web-release
 # restarts the service with the new binary (`ladderback install-service`) and
 # checks that it runs this checkout's build. A daemon it can't reach, or one
 # with sign-in on, isn't restarted unless `--now`, which skips the wait.
-# `--address <host:port>` names the service's address (default
-# 127.0.0.1:9898). The wait's race and the rest: scripts/install-restart.ts.
-[doc('Install from this checkout, then restart the service once it is idle (--now, --wait, --address).')]
+# INSTALL_RESTART_ADDRESS names the service's address when it isn't
+# 127.0.0.1:9898. The wait's race and the rest: scripts/install-restart.ts.
+[doc('Install from this checkout, then restart the service once it is idle (--now, --wait).')]
 [group('release')]
 [positional-arguments]
 install-restart *args:

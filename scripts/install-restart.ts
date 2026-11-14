@@ -18,19 +18,26 @@
 //   4. The check: `GET /api/v1/session` until the daemon answers, which must
 //      name the build of this checkout as it was when the install began.
 //
-// The wait is a race in principle: a scheduled run can start between the
-// last check and the restart. The window is seconds, and the queue survives
-// a restart (§5), so such a run is interrupted and run again, as any restart
-// does to it.
+// The wait is a race in principle: a backup can start between the last
+// check and the restart. The window is seconds. A run the restart catches
+// ends failed (`daemon-stopped`), as any restart ends it, and a backup still
+// queued runs again once the daemon is back (§5,
+// features/execution/recovery.feature).
 //
-// Usage: node scripts/install-restart.ts [--now] [--address <host:port>]
-//          [--wait <minutes>] [args for `just install`]...
-// Exit status: 0 once the daemon runs the new build, 1 when it isn't
-// restarted or doesn't run it, 2 on bad usage.
+// Usage: node scripts/install-restart.ts [--now] [--wait <minutes>]
+//          [args for `just install`]...
+// Exit status: 0 once the daemon runs the new build; 1 when it isn't
+// restarted, or is but can't be confirmed to run the new build; 2 on bad
+// usage.
 //
+// INSTALL_RESTART_ADDRESS names the address the service listens on
+// (`host:port`, default 127.0.0.1:9898, where `install-service` has it
+// listen): set it for a service file edited to `serve --listen` elsewhere,
+// or the wait can't reach the daemon and refuses to restart it.
 // INSTALL_RESTART_JUST and INSTALL_RESTART_LADDERBACK name the programs run
-// for `just` and for the installed `ladderback`, so the script can be tried
-// without installing anything or touching the real service.
+// for `just` and for the installed `ladderback`. With the three, the script
+// can be tried against a `just try` daemon without installing anything or
+// touching the real service.
 
 import { spawnSync } from "node:child_process";
 import { homedir, platform } from "node:os";
@@ -53,7 +60,7 @@ const RESTART_MS = 60_000;
 
 function usage(message: string): never {
   console.error(`error: ${message}`);
-  console.error("usage: just install-restart [--now] [--address <host:port>] [--wait <minutes>] [args for just install]...");
+  console.error("usage: just install-restart [--now] [--wait <minutes>] [args for just install]...");
   process.exit(2);
 }
 
@@ -179,7 +186,6 @@ function run(program: string, args: string[]): number {
 
 async function main(argv: string[]): Promise<number> {
   let now = false;
-  let address = DEFAULT_ADDRESS;
   let minutes = DEFAULT_WAIT_MINUTES;
   const install: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -187,13 +193,13 @@ async function main(argv: string[]): Promise<number> {
     const value = () => argv[++i] ?? usage(`${arg} needs a value`);
     if (arg === "--help" || arg === "-h") usage("help");
     else if (arg === "--now") now = true;
-    else if (arg === "--address") address = value();
     else if (arg === "--wait") {
       const given = value();
       minutes = Number(given);
       if (given.trim() === "" || !Number.isFinite(minutes) || minutes < 0) usage(`--wait takes minutes, not ${JSON.stringify(given)}`);
     } else install.push(arg);
   }
+  const address = process.env["INSTALL_RESTART_ADDRESS"] || DEFAULT_ADDRESS;
   const base = `http://${address}`;
 
   // What the binary will be built from: the tree now, before the build.
