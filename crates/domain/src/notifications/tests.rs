@@ -264,6 +264,38 @@ fn a_backup_that_warned_tells_the_code_of_each_kind_of_warning_once_in_the_order
 }
 
 #[test]
+fn only_a_backup_that_warned_tells_its_warnings() {
+    // A success has no warning to tell, and a failure tells its failure.
+    let warnings = &[WarningKind::Hook];
+    let mut succeeded = operation(OperationKind::Backup, Some("home"));
+    succeeded.succeed(at()).unwrap();
+    let event = Event::ended(
+        Subject {
+            warnings,
+            ..subject(&succeeded)
+        },
+        Outcome::Succeeded,
+        at(),
+    )
+    .unwrap();
+    assert_eq!(event.codes, Vec::<&str>::new());
+    assert_eq!(event.code(), None);
+    let mut failed = operation(OperationKind::Backup, Some("home"));
+    failed.fail(FailureReason::DeadlinePassed, at()).unwrap();
+    let event = Event::ended(
+        Subject {
+            warnings,
+            ..subject(&failed)
+        },
+        Outcome::Failed,
+        at(),
+    )
+    .unwrap();
+    assert_eq!(event.codes, ["deadline-passed"]);
+    assert_eq!(event.code().as_deref(), Some("deadline-passed"));
+}
+
+#[test]
 fn a_failure_the_log_has_not_recorded_has_no_code_and_keeps_the_repository_it_is_given() {
     // The run told of the failure, but the log lost its last write: the
     // operation is still running there, and its reason is unknown.

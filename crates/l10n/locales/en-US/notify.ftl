@@ -44,3 +44,32 @@ notify-prune-failed = The prune of { $repository } failed ({ $code }).
 # $repository (text): the repository's alias, such as nas, or the operation's ID when the agent has none for it.
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 notify-check-failed = The check of { $repository } failed ({ $code }).
+
+### The title of a notification of each event (technical design §11): the
+### line an ntfy topic shows above the message, on a phone's lock screen too.
+### A short sentence that names what happened, with nothing of the event's
+### facts in it: the message says which plan or repository it was.
+
+# The title of a notification that a backup started.
+notify-title-backup-started = Backup started
+
+# The title of a notification that a backup ended well, with no warning.
+notify-title-backup-succeeded = Backup succeeded
+
+# The title of a notification that a backup ended well, but with one or more warnings.
+notify-title-backup-warning = Backup finished with warnings
+
+# The title of a notification that a backup failed.
+notify-title-backup-failed = Backup failed
+
+# The title of a notification that a backup failed and the agent will run it again.
+notify-title-backup-retrying = Backup will be retried
+
+# The title of a notification that a forget of old snapshots failed.
+notify-title-forget-failed = Forgetting old snapshots failed
+
+# The title of a notification that a prune of a repository failed.
+notify-title-prune-failed = Prune failed
+
+# The title of a notification that a check of a repository failed.
+notify-title-check-failed = Check failed

@@ -199,7 +199,15 @@ impl Event {
         let kind = EventKind::ended(subject.kind, outcome)?;
         let codes = match outcome {
             Outcome::Failed => failed(subject.status),
-            Outcome::SucceededWithWarnings => Vec::new(),
+            Outcome::SucceededWithWarnings => {
+                let mut codes = Vec::new();
+                for code in subject.warnings.iter().map(|warning| warning.code()) {
+                    if !codes.contains(&code) {
+                        codes.push(code);
+                    }
+                }
+                codes
+            }
             Outcome::Succeeded => Vec::new(),
         };
         Some(Self::of(kind, subject, codes, at))
@@ -208,7 +216,7 @@ impl Event {
     /// What `{code}` and a webhook's `code` say: the event's codes,
     /// separated by `, `, or nothing when it has none.
     pub fn code(&self) -> Option<String> {
-        self.codes.first().map(|code| (*code).to_owned())
+        (!self.codes.is_empty()).then(|| self.codes.join(", "))
     }
 
     /// The event a retry of `subject`, the backup that failed, makes when it

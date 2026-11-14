@@ -153,7 +153,8 @@ impl HttpNotifier {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain; charset=utf-8"),
                 )
-                .header("Title", HeaderValue::from_static(event.kind.name()))
+                .header("Title", header_text(&self.title(notification)))
+                .header("Tags", HeaderValue::from_static(event.kind.name()))
                 .body(text),
             ChannelKind::Healthchecks => self
                 .client
@@ -336,16 +337,45 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
 /// The catalog's title for an event of `kind`, in the localizer's locale.
 /// It takes no argument, so nothing of the event, and no secret, can reach
 /// it (I4).
-fn title(_localizer: &Localizer, _kind: EventKind) -> String {
-    todo!()
+fn title(localizer: &Localizer, kind: EventKind) -> String {
+    let id = match kind {
+        EventKind::BackupStarted => msg::NOTIFY_TITLE_BACKUP_STARTED,
+        EventKind::BackupSucceeded => msg::NOTIFY_TITLE_BACKUP_SUCCEEDED,
+        EventKind::BackupWarning => msg::NOTIFY_TITLE_BACKUP_WARNING,
+        EventKind::BackupFailed => msg::NOTIFY_TITLE_BACKUP_FAILED,
+        EventKind::BackupRetrying => msg::NOTIFY_TITLE_BACKUP_RETRYING,
+        EventKind::ForgetFailed => msg::NOTIFY_TITLE_FORGET_FAILED,
+        EventKind::PruneFailed => msg::NOTIFY_TITLE_PRUNE_FAILED,
+        EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
+    };
+    localizer.message(id, &[]).text().to_owned()
 }
 
 /// `text` as a header's value: as it is when it is printable ASCII, and
 /// else as an RFC 2047 encoded word (`=?UTF-8?Q?…?=`), which ntfy decodes,
 /// since a header carries no other characters. Text that holds `=?` is
 /// encoded too, so that it isn't read as the start of an encoded word.
-fn header_text(_text: &str) -> String {
-    todo!()
+fn header_text(text: &str) -> String {
+    if text.bytes().all(|byte| matches!(byte, b' '..=b'~')) && !text.contains("=?") {
+        return text.to_owned();
+    }
+    let mut encoded = String::from("=?UTF-8?Q?");
+    for byte in text.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' => encoded.push(char::from(byte)),
+            b' ' => encoded.push('_'),
+            _ => {
+                encoded.push('=');
+                for nibble in [byte >> 4, byte & 0x0f] {
+                    if let Some(digit) = char::from_digit(u32::from(nibble), 16) {
+                        encoded.push(digit.to_ascii_uppercase());
+                    }
+                }
+            }
+        }
+    }
+    encoded.push_str("?=");
+    encoded
 }
 
 /// `text`, cut at the last character boundary within [`MAX_MESSAGE_BYTES`].
