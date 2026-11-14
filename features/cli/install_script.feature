@@ -72,24 +72,42 @@ Feature: Install Ladderback with one command
         | Arch Linux       | sudo pacman -S --needed base-devel                  |
         | another Linux    | install gcc or clang with your system's package manager |
 
-    Scenario Outline: Node.js older than 20 is named with the command that installs a newer one
+    Scenario Outline: Node.js older than 26 is named, with where to get Node.js 26
       Given the system is <system>
-      And Node.js is version "18.19.0"
+      And Node.js is version "24.18.0"
       When the owner runs the install script with "--yes"
       Then the command exits with status 1
-      And standard error says "found 18.19.0"
-      And standard error says "<command>"
+      And standard error says "Node.js 26 or newer"
+      And standard error says "found 24.18.0"
+      And standard error says "<where>"
       And nothing was installed, fetched or built
       And nothing ran sudo or a package manager
 
       Examples:
-        | system              | command                            |
+        | system              | where                              |
         | macOS with Homebrew | brew install node                  |
         | macOS               | https://nodejs.org                 |
-        | Debian or Ubuntu    | sudo apt install nodejs npm        |
-        | Fedora              | sudo dnf install nodejs npm        |
+        | Debian or Ubuntu    | NodeSource's signed apt repository |
+        | Fedora              | https://nodejs.org                 |
         | Arch Linux          | sudo pacman -S --needed nodejs npm |
         | another Linux       | https://nodejs.org                 |
+
+    Scenario Outline: Node.js <old> is refused, and once Node.js <new> replaces it the install goes through
+      Given Node.js is version "<old>"
+      When the owner runs the install script with "--yes"
+      Then the command exits with status 1
+      And standard error says "found <old>"
+      And nothing was installed, fetched or built
+      When the owner replaces Node.js with version "<new>"
+      And the owner runs the install script with "--yes"
+      Then the command exits with status 0
+      And the release was installed
+
+      Examples:
+        | old     | new                          |
+        | 25.9.0  | 26.0.0                       |
+        | 24.18.0 | 26.0.0-nightly20260415f00ba5 |
+        | 20.19.2 | 100.1.0                      |
 
     Scenario: Missing git and Node.js are named together
       Given the system is Debian or Ubuntu
@@ -98,7 +116,7 @@ Feature: Install Ladderback with one command
       When the owner runs the install script with "--yes"
       Then the command exits with status 1
       And standard error says "sudo apt install git"
-      And standard error says "sudo apt install nodejs npm"
+      And standard error says "NodeSource's signed apt repository"
       And nothing was installed, fetched or built
 
     Scenario: On macOS without the Command Line Tools, the compiler and git macOS ships don't count
@@ -293,6 +311,33 @@ Feature: Install Ladderback with one command
       And standard error says "publishes no release"
       And standard error says "https://rustup.rs"
       And nothing was installed, fetched or built
+
+  Rule: A download that stalls stops the script, and a slow one is left to finish
+    A download that connects within 30 s and never averages under 1 KiB/s
+    for 60 s runs to its end however long it takes, so a slow link still
+    installs. One that stalls stops the script with a message that says so,
+    rather than leave it hanging with nothing on the screen.
+
+    Scenario Outline: A stalled download of <download> stops with a message instead of hanging
+      Given Rust isn't installed
+      And just and trunk aren't installed
+      And the download of <download> stalls
+      When the owner runs the install script with "--yes"
+      Then the command exits with status 1
+      And standard error says "the download of <download> stalled"
+      And nothing was installed or built
+
+      Examples:
+        | download           |
+        | trunk's release    |
+        | rustup's installer |
+
+    Scenario: A download is cut off only when it stalls, never for taking long
+      Given Rust isn't installed
+      And trunk isn't installed
+      When the owner runs the install script with "--yes"
+      Then the command exits with status 0
+      And every download gives up after 30 s without a connection or 60 s under 1 KiB/s, with no limit on its whole time
 
   Rule: With rustup, it builds with the Rust the release pins
     A release names the Rust it builds with in `rust-toolchain.toml`
