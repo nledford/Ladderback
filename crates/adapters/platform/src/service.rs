@@ -252,11 +252,9 @@ impl ServiceManager for UserService {
                 self.call("systemctl", &["--user", "restart", &self.name])
                     .await?;
             }
-            Kind::Launchd { uid, log, .. } => {
+            Kind::Launchd { uid, log, stop } => {
                 let agent = format!("gui/{uid}/{}", self.name);
-                if self.loaded(&agent).await? {
-                    self.call("launchctl", &["bootout", &agent]).await?;
-                }
+                self.boot_out(&agent, *stop).await?;
                 self.write(&launchd_plist(&self.name, program, log))?;
                 self.call("launchctl", &["enable", &agent]).await?;
                 let file = self.file.clone().into_os_string();
@@ -290,11 +288,9 @@ impl ServiceManager for UserService {
                 self.remove_file()?;
                 self.call("systemctl", &["--user", "daemon-reload"]).await?;
             }
-            Kind::Launchd { uid, .. } => {
+            Kind::Launchd { uid, stop, .. } => {
                 let agent = format!("gui/{uid}/{}", self.name);
-                if self.loaded(&agent).await? {
-                    self.call("launchctl", &["bootout", &agent]).await?;
-                }
+                self.boot_out(&agent, *stop).await?;
                 self.remove_file()?;
             }
         }
@@ -432,6 +428,32 @@ impl UserService {
                 }))
             }
         }
+    }
+
+    /// Has launchd stop `agent` when it has it loaded, then waits until it
+    /// no longer knows it: `bootout` returns before the agent's program has
+    /// ended, and launchd refuses a `bootstrap` of the label until it has.
+    /// It asks every `stop.every`, for `stop.limit` at most; an agent still
+    /// loaded then is [`ServiceProblem::StillStopping`]. An agent launchd is
+    /// still letting go of, as a rerun after that finds it, is booted out
+    /// again: launchd answers that `bootout` with 0 too.
+    async fn boot_out(&self, agent: &str, stop: StopWait) -> Result<(), ServiceError> {
+        if !self.loaded(agent).await? {
+            return Ok(());
+        }
+        let bootout = ["bootout", agent];
+        self.call("launchctl", &bootout).await?;
+        let deadline = tokio::time::Instant::now() + stop.limit;
+        while self.loaded(agent).await? {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(self.error(ServiceProblem::StillStopping {
+                    command: manager::shown("launchctl", &bootout.map(OsString::from)),
+                    seconds: stop.limit.as_secs(),
+                }));
+            }
+            tokio::time::sleep(stop.every).await;
+        }
+        Ok(())
     }
 
     async fn call(&self, program: &str, args: &[&str]) -> Result<(), ServiceError> {

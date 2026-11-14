@@ -203,7 +203,14 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
                 ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
             ],
         ),
-        ServiceProblem::StillStopping { .. } => todo!(),
+        ServiceProblem::StillStopping { command, seconds } => said(
+            localizer,
+            msg::CLI_SERVICE_STILL_STOPPING,
+            &[
+                ("command", text(command)),
+                ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
+            ],
+        ),
         ServiceProblem::NotOurs => said(
             localizer,
             msg::CLI_SERVICE_NOT_OURS,
