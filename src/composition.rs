@@ -956,10 +956,11 @@ fn log_location(report: LocationReport) {
             alias,
             position: None,
             cause,
-        } => {
-            let _ = (alias, cause);
-            todo!()
-        }
+        } => log::warn!(
+            "repository {}: this repository sends its credentials where whoever answers at its address can read them ({})",
+            alias.as_str(),
+            cause.code()
+        ),
         LocationReport::OtherRepository { alias, position } => log::warn!(
             "repository {}: location {position} holds another repository, so it was not used",
             alias.as_str()
