@@ -437,6 +437,37 @@ table.operations thead th:nth-child(5) {
   inline-size: 21%;
 }
 
+/* Above 48rem of room the shares gave Result, the column that says what a
+   run did or why it failed, 18 % beside an empty Actions column, so a
+   finished backup's facts broke inside ("Snapshot" / "ba5cc73e") and a
+   reason read as a column of words (#430). There each other column is as
+   wide as what it holds needs, in rem, so it grows with the text: Status a
+   badge and a progress bar's step, Started an instant on two lines with the
+   sort button under its header's text, Actions a Cancel button. Result takes
+   the rest. A query on the frame around the table, not on the page: the
+   columns share the table's width, and a query on the table itself left its
+   columns as they were (Chromium). The rem in the query is the reader's text
+   size, so with 200 % text a laptop keeps the shares below. */
+.table-frame {
+  container-type: inline-size;
+}
+
+@container (min-width: 48rem) {
+  table.operations thead th:nth-child(1),
+  table.operations thead th:nth-child(2),
+  table.operations thead th:nth-child(5) {
+    inline-size: 8rem;
+  }
+
+  table.operations thead th:nth-child(3) {
+    inline-size: 11rem;
+  }
+
+  table.operations thead th:nth-child(4) {
+    inline-size: auto;
+  }
+}
+
 /* A fixed column is as narrow as its share, and its content can't widen it:
    what doesn't fit runs into the next column. At 320 px with 200 % text a
    share is 46 to 56 px, and the space around the text (a cell's padding, a
@@ -487,33 +518,107 @@ td {
   border-block-end: 1px solid var(--muted);
 }
 
-/* A list in a cell, such as an operation's Result, starts on the row's first
-   line, level with the text of the cells beside it: no margin above or below,
-   and only the indent its markers need. */
-td ul {
+/* A list in a cell, such as an operation's Result or a repository's
+   locations, starts on the row's first line, level with the text of the
+   cells beside it: no margin above or below, and only the indent its markers
+   need. The browser's 40 px left a location's address 65 px of a 113 px
+   column at 320 px (#482). */
+td :is(ul, ol) {
   margin-block: 0;
   padding-inline-start: 1.25rem;
+}
+
+/* A placeable in a cell's text, such as a path, an address or a snapshot's
+   ID, moves to the next line whole when the line it starts on has no room
+   for it, rather than breaking where that line runs out ("home-" /
+   "laptop.password"), and breaks inside only when it is wider than the cell,
+   then after a separator first (`<wbr>`, #430, #482). */
+td .placeable {
+  display: inline-block;
+  max-inline-size: 100%;
 }
 
 /* The table of repositories puts short names and labels beside long paths.
    An automatic table gives each column at least its narrowest content, and
    the body lets any word break anywhere, so a short name's narrowest is one
    letter: beside the paths, which took the room, it was squeezed to a letter
-   or two a line ("Na/me", "de/m/o"). In this table only, a cell that holds a
-   path takes 35 % of the table's width, so the columns beside it get their
-   whole width when the screen has room. A row's name and a button's label
-   keep a floor of 12ch, so a short one is never squeezed and a long one
-   breaks at a space or a hyphen first; past the floor a word still breaks
-   anywhere, so a 64-letter name with no hyphen fits a small screen too
-   (1.4.10). The floor is never more than 35 % of the screen's width less
-   2rem, so it gives way as the text grows: at 320 px and 200 % text the four
-   columns' padding alone takes 128 of the table's 256 px, no floor in ch can
-   hold, and the table must still fit. */
+   or two a line ("Na/me", "de/m/o"). In this table only, the cells that
+   hold a path and where a password comes from have their own widths
+   (below), so the columns beside them get their whole width when the
+   screen has room. A row's name and a button's label keep a floor of 12ch,
+   so a short one is never squeezed and a long one breaks at a space or a
+   hyphen first; past the floor a word still breaks anywhere, so a 64-letter
+   name with no hyphen fits a small screen too (1.4.10). The floor is never
+   more than 35 % of the screen's width less 2rem, so it gives way as the
+   text grows: at 320 px and 200 % text the four columns' padding alone
+   takes 128 of the table's 256 px, no floor in ch can hold, and the table
+   must still fit. */
 table.repositories th[scope="row"],
-table.repositories td button {
+table.repositories td button:not(.whole-words) {
   min-inline-size: min(12ch, 35vw - 2rem);
 }
 
-table.repositories td.path {
-  inline-size: 35%;
+/* On a small screen a location's address is longer than where its password
+   comes from, so its column has the larger share, which keeps each part of
+   an address whole at 320 px (#482). */
+table.repositories td.location {
+  inline-size: 55%;
+}
+
+table.repositories td.password {
+  inline-size: 20%;
+}
+
+/* With 26rem of room or more, shares miss both ways: at 1280 px 55 % left
+   Location half empty beside an address that needs 36 %, and Password's
+   20 % squeezed a warning in it to fifteen lines and broke its file's path
+   inside a word (#482). There Location is as wide as its widest address
+   needs, up to the room that leaves the other columns 30rem and never less
+   than 6rem; past that the address breaks between its parts. Password, the
+   column with the most to say, takes what the others leave: an automatic
+   table gives the room to the column whose content wants the most. An
+   address's box, as wide as the address up to that, is what Location can't
+   be narrower than. The room is the frame around the table's, in rem, so
+   with 200 % text a phone keeps the shares. A column's header keeps its
+   words whole there: Actions, as narrow as its Test button, broke its
+   header ("Actio" / "ns"); below 26rem a word still breaks anywhere so the
+   table fits. */
+@container (min-width: 26rem) {
+  table.repositories td.location,
+  table.repositories td.password {
+    inline-size: auto;
+  }
+
+  /* Location is exactly its widest capped address: a Test result, an option
+     or a rule line beside it no longer widens it, so columns don't jump when
+     results arrive. The address's box fills its line, so a part narrower than
+     the column stays whole. */
+  table.repositories td.location {
+    inline-size: 0;
+  }
+
+  table.repositories .address {
+    inline-size: max-content;
+    min-inline-size: 100%;
+    max-inline-size: max(6rem, 100cqi - 30rem);
+  }
+
+  table.repositories thead th {
+    overflow-wrap: normal;
+  }
+}
+
+/* The space around the text follows the screen's width, as in the table of
+   operations: at 320 px with 200 % text the cells' padding took half the
+   table's width, and with a Test button that keeps its word whole the table
+   no longer fit (#482). */
+table.repositories :is(th, td) {
+  padding-inline: min(0.5rem, 1.25vw);
+}
+
+/* A label of one short word, such as a row's Test, breaks only between
+   words, never inside one, so it takes one line beside the addresses; it
+   needs no floor, and the column keeps the room it doesn't need (#482). */
+button.whole-words {
+  overflow-wrap: normal;
 }

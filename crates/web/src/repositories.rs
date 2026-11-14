@@ -620,7 +620,34 @@ pub(crate) enum Run<'a> {
 /// between. A mark that closes nothing, or one never closed, is a character
 /// of the words around it.
 pub(crate) fn runs(text: &str) -> Vec<Run<'_>> {
-    todo!("{text}")
+    let mut found = Vec::new();
+    // Where the words not yet taken start, and the placeable that is open:
+    // where its first isolate is and how many isolates are open in it.
+    let mut words = 0;
+    let mut open: Option<(usize, usize)> = None;
+    for (at, char) in text.char_indices() {
+        match (char, open) {
+            (FIRST_ISOLATE, None) => open = Some((at, 1)),
+            (FIRST_ISOLATE, Some((start, depth))) => open = Some((start, depth.saturating_add(1))),
+            (POP_ISOLATE, Some((start, 1))) => {
+                let end = at.saturating_add(POP_ISOLATE.len_utf8());
+                if let Some(before) = text.get(words..start).filter(|before| !before.is_empty()) {
+                    found.push(Run::Words(before));
+                }
+                if let Some(placeable) = text.get(start..end) {
+                    found.push(Run::Placeable(placeable));
+                }
+                words = end;
+                open = None;
+            }
+            (POP_ISOLATE, Some((start, depth))) => open = Some((start, depth.saturating_sub(1))),
+            _ => {}
+        }
+    }
+    if let Some(rest) = text.get(words..).filter(|rest| !rest.is_empty()) {
+        found.push(Run::Words(rest));
+    }
+    found
 }
 
 /// `address` in the parts a reader splits it into (#482): each ends after a
@@ -629,7 +656,24 @@ pub(crate) fn runs(text: &str) -> Vec<Run<'_>> {
 /// A separator before a digit or another separator stays inside its part,
 /// as in `10.0.0.1` or `https://`. Joined, the parts are `address`.
 pub(crate) fn address_parts(address: &str) -> Vec<&str> {
-    todo!("{address}")
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut chars = address.char_indices().peekable();
+    while let Some((_, char)) = chars.next() {
+        if matches!(char, '/' | '.' | '@' | ':')
+            && let Some(&(next, letter)) = chars.peek()
+            && letter.is_alphabetic()
+        {
+            if let Some(part) = address.get(start..next) {
+                parts.push(part);
+            }
+            start = next;
+        }
+    }
+    if let Some(rest) = address.get(start..).filter(|rest| !rest.is_empty()) {
+        parts.push(rest);
+    }
+    parts
 }
 
 #[cfg(test)]
@@ -1650,7 +1694,10 @@ mod runs {
     fn a_mark_that_closes_nothing_or_is_never_closed_is_part_of_the_words() {
         assert_eq!(
             runs("a \u{2069}b \u{2068}c\u{2069}"),
-            vec![Run::Words("a \u{2069}b "), Run::Placeable("\u{2068}c\u{2069}")]
+            vec![
+                Run::Words("a \u{2069}b "),
+                Run::Placeable("\u{2068}c\u{2069}")
+            ]
         );
         assert_eq!(
             runs("x \u{2068}y\u{2069} z \u{2068}w"),
@@ -1660,7 +1707,10 @@ mod runs {
                 Run::Words(" z \u{2068}w"),
             ]
         );
-        assert_eq!(runs("\u{2068}\u{2068}y\u{2069}"), vec![Run::Words("\u{2068}\u{2068}y\u{2069}")]);
+        assert_eq!(
+            runs("\u{2068}\u{2068}y\u{2069}"),
+            vec![Run::Words("\u{2068}\u{2068}y\u{2069}")]
+        );
     }
 
     #[test]
@@ -1684,7 +1734,9 @@ mod runs {
     fn an_address_parts_after_a_separator_that_a_letter_follows() {
         assert_eq!(
             address_parts("sftp:backup@storage.example.net:/srv/restic/laptop"),
-            ["sftp:", "backup@", "storage.", "example.", "net:/", "srv/", "restic/", "laptop"]
+            [
+                "sftp:", "backup@", "storage.", "example.", "net:/", "srv/", "restic/", "laptop"
+            ]
         );
         assert_eq!(
             address_parts("rest:https://backup.example.org/laptop"),
@@ -1712,6 +1764,9 @@ mod runs {
         ] {
             assert_eq!(address_parts(address).concat(), address);
         }
-        assert_eq!(address_parts("/srv/données/été"), ["/", "srv/", "données/", "été"]);
+        assert_eq!(
+            address_parts("/srv/données/été"),
+            ["/", "srv/", "données/", "été"]
+        );
     }
 }

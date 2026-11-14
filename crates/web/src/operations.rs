@@ -99,8 +99,12 @@ pub(crate) enum Said<T> {
 
 impl<T> Said<T> {
     /// `items`, in their order, as the cell says them.
-    pub(crate) fn of(items: Vec<T>) -> Self {
-        todo!("{}", items.len())
+    pub(crate) fn of(mut items: Vec<T>) -> Self {
+        match items.len() {
+            0 => Self::Nothing,
+            1 => items.pop().map_or(Self::Nothing, Self::One),
+            _ => Self::List(items),
+        }
     }
 }
 
@@ -753,7 +757,10 @@ mod said {
 
     #[test]
     fn one_item_alone_is_said_as_it_is_not_as_a_list_of_one() {
-        assert_eq!(Said::of(vec!["The operation failed."]), Said::One("The operation failed."));
+        assert_eq!(
+            Said::of(vec!["The operation failed."]),
+            Said::One("The operation failed.")
+        );
     }
 
     #[test]

@@ -294,9 +294,6 @@ ui-operations-heading = Operations
 # The operations page's text, until its history loads.
 ui-operations-body = The history of every operation, live.
 
-# The operations table's caption.
-ui-operations-caption = Operations
-
 # The operations table's column of what each row is: a backup's plan, or the
 # maintenance run and its repository. Its cells are the rows' headers.
 ui-column-operation = Operation
@@ -319,8 +316,13 @@ ui-column-actions = Actions
 ui-start-plan = Start backup of { $plan }
 
 # The button that cancels a plan's running or queued backup, named with its
-# row's plan.
+# row's plan. It begins with the button's visible text, ui-cancel.
 ui-cancel-plan = Cancel { $plan }
+
+# The visible text of a row's Cancel button, one short word, so the button takes
+# one line in the narrow Actions column. Its name (ui-cancel-plan,
+# ui-cancel-operation-of or ui-cancel-operation) begins with it.
+ui-cancel = Cancel
 
 # The row header of a maintenance run: what ran and the repository it ran on,
 # by the alias this agent gave the repository when the run started.
@@ -351,7 +353,7 @@ ui-operation =
     }
 
 # The button that cancels a running or queued maintenance run, named as its
-# row is, so each Cancel says which run it stops.
+# row is, so each Cancel says which run it stops. It begins with ui-cancel.
 # $kind is the wire text of what runs: forget, prune, check or adopt; any other
 # kind is an operation.
 # $repository (text): the repository's alias. It is shown as it came.
@@ -365,7 +367,7 @@ ui-cancel-operation-of =
     }
 
 # The button that cancels a running or queued run the log names no plan or
-# repository for.
+# repository for. It begins with ui-cancel.
 # $kind is the wire text of what runs: backup, forget, prune, check or adopt;
 # any other kind is an operation.
 ui-cancel-operation =
@@ -1038,9 +1040,6 @@ ui-repositories-heading = Repositories
 # The repositories page's text, above the list.
 ui-repositories-body = The repositories { -brand-name } backs up to.
 
-# The repositories table's caption.
-ui-repositories-caption = Repositories
-
 # The repositories table's column of names.
 ui-column-name = Name
 
@@ -1199,9 +1198,12 @@ ui-location-option-reference = The option { $name } in { $set } comes from { $re
 # $set (text): the set of options it is in: options, options-hot or options-cold, as the configuration file writes it. It is shown as it came.
 ui-location-option-written = The option { $name } in { $set } is written in the configuration file and not shown.
 
-# The button in the row of a repository reached at several locations that tries each location in turn, without changing anything.
+# The button in the row of a repository reached at several locations that tries each location in turn, without changing anything: its name, which a screen reader says. It begins with the button's visible text, ui-repository-test.
 # $alias (text): the name the repository is saved under.
 ui-repository-test-locations = Test the locations of { $alias }
+
+# The visible text of that button, one short word, so the button takes one line in a narrow column. Its name, ui-repository-test-locations, begins with it.
+ui-repository-test = Test
 
 # What a row's Test found at one location, shown under the location in the repository's list of locations.
 # $outcome (text): what it found, one of the codes below. Not shown.
