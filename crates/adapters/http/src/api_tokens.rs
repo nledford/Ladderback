@@ -48,26 +48,71 @@ pub(crate) struct TokenOf {
 /// token, or the request has two of them. A request with no such header is
 /// `None`, its other schemes ignored: it is judged by its session.
 pub(crate) fn bearer(headers: &HeaderMap) -> Option<Option<PresentedApiToken>> {
-        todo!()
+    let mut credentials = headers
+        .get_all(AUTHORIZATION)
+        .iter()
+        .filter_map(|value| bearer_credentials(value.as_bytes()));
+    let first = credentials.next()?;
+    if credentials.next().is_some() {
+        return Some(None);
     }
+    Some(
+        std::str::from_utf8(first)
+            .ok()
+            .and_then(PresentedApiToken::parse),
+    )
+}
 
 /// What follows the `Bearer` scheme in one header's value, if that is its
 /// scheme.
 fn bearer_credentials(value: &[u8]) -> Option<&[u8]> {
-        todo!()
+    const SCHEME: &[u8] = b"bearer";
+    let scheme = value.get(..SCHEME.len())?;
+    let rest = value.get(SCHEME.len()..)?;
+    if !scheme.eq_ignore_ascii_case(SCHEME) || !(rest.is_empty() || rest.starts_with(b" ")) {
+        return None;
     }
+    Some(rest.trim_ascii())
+}
 
 /// The scope table (decision 93): the scope a token needs for `method` on
 /// `path`, or `None` for a route only a session may use, which is every
 /// route the table doesn't name.
 pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
-        todo!()
+    let rest = path.strip_prefix("/api/v1/")?;
+    let segments: Vec<&str> = rest.split('/').collect();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return None;
     }
+    let reads = method == Method::GET || method == Method::HEAD;
+    match segments.as_slice() {
+        ["events" | "operations" | "plans" | "repositories"]
+        | ["operations", _]
+        | ["repositories", _, "snapshots" | "groups"]
+            if reads =>
+        {
+            Some(Scope::Read)
+        }
+        ["operations"] | ["operations", _, "cancel"] | ["repositories", _, "test"]
+            if method == Method::POST =>
+        {
+            Some(Scope::Run)
+        }
+        ["repositories", _, "maintenance", "preview"] if method == Method::POST => {
+            Some(Scope::Preview)
+        }
+        _ => None,
+    }
+}
 
 /// `403 api-token-scope`, naming the scope the route needs.
 pub(crate) fn scope_refused(scope: &str) -> Response {
-        todo!()
-    }
+    refused_with(
+        StatusCode::FORBIDDEN,
+        ErrorCode::ApiTokenScope,
+        vec![("scope", MsgArg::Text(scope.to_owned()))],
+    )
+}
 
 /// Lets a request with an API token through to its route when the token is
 /// good and its scopes open the route. A token is checked as a sign-in is,
@@ -79,44 +124,122 @@ pub(crate) async fn enforce(
     mut request: Request,
     next: Next,
 ) -> Response {
-        todo!()
+    // As a sign-in, by the connection's address: without it every client
+    // would share one wait (§10.1).
+    let Some(ConnectInfo(crate::PeerAddr(peer))) = request
+        .extensions()
+        .get::<ConnectInfo<crate::PeerAddr>>()
+        .copied()
+    else {
+        log::error!(
+            "an API token arrived without its connection's address; the server must be served with its connect info"
+        );
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::SignInUnavailable,
+        );
+    };
+    let grant = match access.check_api_token(peer.ip(), presented.as_ref()).await {
+        Ok(grant) => grant,
+        Err(ApiTokenRefused::Invalid) => {
+            return refused(StatusCode::UNAUTHORIZED, ErrorCode::ApiTokenInvalid);
+        }
+        Err(ApiTokenRefused::Wait { seconds }) => {
+            let mut response = refused_with(
+                StatusCode::TOO_MANY_REQUESTS,
+                ErrorCode::SignInWait,
+                vec![("seconds", MsgArg::Count(seconds))],
+            );
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from(seconds));
+            return response;
+        }
+        Err(ApiTokenRefused::Unavailable(detail)) => return unavailable(&detail),
+    };
+    match required_scope(request.method(), request.uri().path()) {
+        None => return scope_refused(SESSION_SCOPE),
+        Some(scope) if !grant.scopes.allows(scope) => return scope_refused(scope.as_str()),
+        Some(_) => {}
     }
+    request.extensions_mut().insert(TokenOf { access, grant });
+    next.run(request).await
+}
 
 /// `503 api-tokens-unavailable`. The detail names files of the data folder
 /// or the database: the log keeps it for whoever runs the daemon.
 fn unavailable(detail: &str) -> Response {
-        todo!()
-    }
+    log::warn!("the API tokens could not be read or kept: {detail}");
+    refused(
+        StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::ApiTokensUnavailable,
+    )
+}
 
 fn sign_in_off() -> Response {
-        todo!()
-    }
+    refused(StatusCode::CONFLICT, ErrorCode::SignInOff)
+}
 
 fn refused_as(refusal: ApiTokensRefused) -> Response {
-        todo!()
+    match refusal {
+        ApiTokensRefused::Full => refused_with(
+            StatusCode::CONFLICT,
+            ErrorCode::ApiTokenLimit,
+            vec![("limit", MsgArg::Count(count(MAX_API_TOKENS)))],
+        ),
+        ApiTokensRefused::Unavailable(detail) => unavailable(&detail),
     }
+}
 
 fn count(value: usize) -> u64 {
-        todo!()
-    }
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
 
 fn scope_dto(scope: Scope) -> ApiTokenScopeDto {
-        todo!()
+    match scope {
+        Scope::Read => ApiTokenScopeDto::Read,
+        Scope::Run => ApiTokenScopeDto::Run,
+        Scope::Preview => ApiTokenScopeDto::Preview,
+        Scope::Propose => ApiTokenScopeDto::Propose,
     }
+}
 
 fn scope_of(dto: ApiTokenScopeDto) -> Scope {
-        todo!()
+    match dto {
+        ApiTokenScopeDto::Read => Scope::Read,
+        ApiTokenScopeDto::Run => Scope::Run,
+        ApiTokenScopeDto::Preview => Scope::Preview,
+        ApiTokenScopeDto::Propose => Scope::Propose,
     }
+}
 
 /// A token as it is listed: never its secret, which the daemon doesn't keep.
 fn listed(token: &ApiToken) -> ApiTokenDto {
-        todo!()
+    ApiTokenDto {
+        id: token.id.as_str().to_owned(),
+        label: token.label.as_str().to_owned(),
+        scopes: token.scopes.iter().map(scope_dto).collect(),
+        created_at: token.created_at.to_string(),
+        last_used_at: token.last_used_at.map(|at| at.to_string()),
     }
+}
 
 /// `GET /api/v1/tokens`: the tokens kept, oldest first.
 pub(crate) async fn list(State(sign_in): State<SignIn>) -> Response {
-        todo!()
+    let SignIn::On(access) = sign_in else {
+        return sign_in_off();
+    };
+    match access.api_tokens().await {
+        Ok(tokens) => (
+            StatusCode::OK,
+            axum::Json(ApiTokensDto {
+                tokens: tokens.iter().map(listed).collect(),
+            }),
+        )
+            .into_response(),
+        Err(refusal) => refused_as(refusal),
     }
+}
 
 /// `POST /api/v1/tokens`: creates a token with the body's label and scopes,
 /// and answers with its whole text, this once.
@@ -124,14 +247,63 @@ pub(crate) async fn create(
     State(sign_in): State<SignIn>,
     body: Result<axum::Json<CreateApiTokenDto>, JsonRejection>,
 ) -> Response {
-        todo!()
+    let SignIn::On(access) = sign_in else {
+        return sign_in_off();
+    };
+    let Ok(axum::Json(CreateApiTokenDto { label, scopes })) = body else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let label = match ApiTokenLabel::new(label) {
+        Ok(label) => label,
+        Err(_) => {
+            return refused_with(
+                StatusCode::BAD_REQUEST,
+                ErrorCode::ApiTokenLabel,
+                vec![("max", MsgArg::Count(count(LABEL_MAX_CHARS)))],
+            );
+        }
+    };
+    let scopes = match Scopes::new(scopes.into_iter().map(scope_of)) {
+        Ok(scopes) => scopes,
+        Err(_) => {
+            return refused(StatusCode::BAD_REQUEST, ErrorCode::ApiTokenNoScope);
+        }
+    };
+    match access.create_api_token(label, scopes).await {
+        Ok(created) => (
+            StatusCode::CREATED,
+            axum::Json(CreatedApiTokenDto {
+                token: listed(&created.token),
+                secret: created.text.expose().to_owned(),
+            }),
+        )
+            .into_response(),
+        Err(refusal) => refused_as(refusal),
     }
+}
 
 /// `DELETE /api/v1/tokens/{id}`: revokes the token; an events stream opened
 /// with it ends within the recheck.
 pub(crate) async fn revoke(State(sign_in): State<SignIn>, Path(id): Path<String>) -> Response {
-        todo!()
+    let SignIn::On(access) = sign_in else {
+        return sign_in_off();
+    };
+    let unknown = |id: String| {
+        refused_with(
+            StatusCode::NOT_FOUND,
+            ErrorCode::ApiTokenUnknown,
+            vec![("token", MsgArg::Text(id))],
+        )
+    };
+    let Some(token) = ApiTokenId::parse(&id) else {
+        return unknown(id);
+    };
+    match access.revoke_api_token(&token).await {
+        Ok(true) => (StatusCode::OK, axum::Json(serde_json::json!({}))).into_response(),
+        Ok(false) => unknown(id),
+        Err(refusal) => refused_as(refusal),
     }
+}
 
 #[cfg(test)]
 mod tests;

@@ -3562,6 +3562,7 @@ impl std::fmt::Debug for SignInDto {
 
 /// A scope of an API token (§10.1, decision 93), as the token routes name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ApiTokenScopeDto {
     Read,
     Run,
@@ -3572,6 +3573,7 @@ pub enum ApiTokenScopeDto {
 /// One API token as the token routes list it: who it is, what it may do,
 /// when it was created and last used. Never its secret (I4).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct ApiTokenDto {
     pub id: String,
     pub label: String,
@@ -3591,7 +3593,7 @@ pub struct ApiTokensDto {
 
 /// `POST /api/v1/tokens`: the label and scopes of the token to create.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CreateApiTokenDto {
     pub label: String,
     pub scopes: Vec<ApiTokenScopeDto>,
@@ -3609,7 +3611,10 @@ pub struct CreatedApiTokenDto {
 
 impl std::fmt::Debug for CreatedApiTokenDto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        f.debug_struct("CreatedApiTokenDto")
+            .field("token", &self.token)
+            .field("secret", &"[hidden]")
+            .finish()
     }
 }
 
