@@ -14,6 +14,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Given, Then, When } from "@cucumber/cucumber";
 
 import { journey } from "../support/keyboard.ts";
+import { partsBrokenInside } from "../support/parts.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 import { api, ended } from "./maintenance.ts";
@@ -180,6 +181,66 @@ function locationList(world: BrowserWorld, alias: string) {
   return world.page.getByRole("list", { name: new RegExp(`^Locations of \\W?${escape(alias)}\\W?$`) });
 }
 
+// A daemon whose only repository is reached at two addresses that need no
+// folder of the scenario's, with its password read from a file: the page
+// lists them from the configuration and opens neither, nor reads the file,
+// unless a Test asks it to. A repository with several locations records its
+// ID (decision 80).
+Given(
+  "a daemon whose repository {string} has the locations {string} and {string} and its password in the file {string}",
+  async function (this: BrowserWorld, alias: string, first: string, second: string, passwordFile: string) {
+    const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-addresses-"));
+    const configDir = path.join(scratch, "config");
+    await mkdir(configDir);
+    await writeFile(
+      path.join(configDir, "config.toml"),
+      [
+        "schema = 1",
+        "",
+        `[repositories.${alias}]`,
+        `repository = ${JSON.stringify(first)}`,
+        `repository-id = "${"0123456789abcdef".repeat(4)}"`,
+        `password-file = ${JSON.stringify(passwordFile)}`,
+        "",
+        `[[repositories.${alias}.locations]]`,
+        `repository = ${JSON.stringify(second)}`,
+        "",
+      ].join("\n"),
+    );
+    const { child, url } = await startServer({
+      LADDERBACK_CONFIG_DIR: configDir,
+      LADDERBACK_DATA_DIR: path.join(scratch, "data"),
+      LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
+    });
+    this.ownServer = { child, scratch };
+    this.baseUrl = url;
+  },
+);
+
+Then("the repository {string} lists {int} locations", async function (this: BrowserWorld, alias: string, count: number) {
+  const items = locationList(this, alias).getByRole("listitem");
+  await until(async () => (await items.count()) === count, `the repository ${alias} lists ${count} locations`);
+});
+
+// Where an address may break, as a reader splits one (`partsBrokenInside`);
+// "each part whole" allows no part to break, so the column must have room
+// for the longest. An address on one line has one distinct top.
+Then(
+  /^the address "([^"]*)" of the repository "([^"]*)" (sits on one line|breaks only after a separator|breaks only after a separator, each part whole)$/,
+  async function (this: BrowserWorld, address: string, alias: string, how: string) {
+    const shownAddress = locationList(this, alias).getByText(address, { exact: true });
+    await until(async () => (await shownAddress.count()) === 1, `the repository ${alias} shows the address ${address} once`);
+    const whole = how.endsWith("each part whole");
+    const found = await shownAddress.evaluate(partsBrokenInside, { text: address, whole });
+    assert.ok(found !== null, `the repository ${alias} doesn't show the address ${address}`);
+    if (how === "sits on one line") {
+      assert.equal(found.lines, 1, `the address ${address} takes ${found.lines} lines`);
+    } else {
+      assert.deepEqual(found.inside, [], `the address ${address} breaks inside a part`);
+    }
+  },
+);
+
 Then(
   "the repository {string} lists the location {string} first and the location {string} second",
   async function (this: BrowserWorld, alias: string, first: string, second: string) {
@@ -225,6 +286,36 @@ Then("each location shows whether it answers", async function (this: BrowserWorl
     const texts = await Promise.all([0, 1].map((n) => shown(items.nth(n).innerText())));
     return texts.every((text) => text.includes("Answers and holds the repository"));
   }, "each location shows that it answers");
+});
+
+// The daemon's answer to the repository's next Test, as the page receives
+// it: each of its two locations answers but holds another repository, the
+// longest line an outcome puts under an address. The addresses' own fixture
+// reaches neither location, so the answer is the page's input, not a run.
+When(
+  "the next Test of the repository {string} finds that each location holds another repository",
+  async function (this: BrowserWorld, alias: string) {
+    await this.page.route(
+      (url) => url.pathname === `/api/v1/repositories/${alias}/test`,
+      (route) =>
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            locations: [1, 2].map((position) => ({ position, address: "", outcome: "other-repository" })),
+          }),
+        }),
+    );
+  },
+);
+
+Then("each location of the repository {string} says {string}", async function (this: BrowserWorld, alias: string, words: string) {
+  const items = locationList(this, alias).getByRole("listitem");
+  await until(async () => {
+    const count = await items.count();
+    if (count !== 2) return false;
+    const texts = await Promise.all([0, 1].map((n) => shown(items.nth(n).innerText())));
+    return texts.every((text) => text.includes(words));
+  }, `each location of ${alias} says "${words}"`);
 });
 
 Then("the row for the plan {string} says {string}", async function (this: BrowserWorld, plan: string, words: string) {

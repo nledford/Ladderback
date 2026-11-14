@@ -15,6 +15,7 @@ import type { Locator } from "playwright";
 import { expect } from "playwright/test";
 
 import { ISOLATION, namePattern } from "../support/keyboard.ts";
+import { partsBrokenInside } from "../support/parts.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 
@@ -220,6 +221,48 @@ Given("the daemon reports two finished backups of {string}", function (this: Bro
     });
   }
 });
+
+// A backup refused before it ran because the password file its repository
+// names could not be read: the failure's code and arguments as the daemon's
+// wire has them, so the reason names the file as a placeable.
+Given(
+  "the daemon reports a backup of {string} that failed because it could not read {string}",
+  function (this: BrowserWorld, plan: string, file: string) {
+    const daemon = new ScriptedDaemon();
+    daemon.addBackup(plan, "failed", {
+      queuedAt: "2026-11-09T10:00:00Z",
+      finishedAt: "2026-11-09T10:00:00Z",
+      failure: {
+        code: "secret-unreadable",
+        args: { field: { type: "text", value: "password" }, source: { type: "text", value: file } },
+      },
+    });
+    this.scriptedDaemon = daemon;
+  },
+);
+
+// A backup that went through `gib` GiB and wrote a snapshot: the facts a
+// finished backup's Result cell lists, as the daemon's wire has them.
+Given(
+  "the daemon reports a finished backup of {string} that went through {float} GiB",
+  function (this: BrowserWorld, plan: string, gib: number) {
+    const daemon = new ScriptedDaemon();
+    daemon.addBackup(plan, "succeeded", {
+      queuedAt: "2026-11-09T10:00:00Z",
+      startedAt: "2026-11-09T10:00:00Z",
+      finishedAt: "2026-11-09T10:42:00Z",
+      result: {
+        type: "backup",
+        files: 1204,
+        bytes: 1_288_490_189,
+        "duration-ms": 2_520_000,
+        snapshot: `ba5cc73e${"0".repeat(56)}`,
+        "bytes-processed": Math.round(gib * 2 ** 30),
+      },
+    });
+    this.scriptedDaemon = daemon;
+  },
+);
 
 When("the daemon reports that the backup of {string} has started", async function (this: BrowserWorld, plan: string) {
   await scripted(this).starts(plan, "2026-11-09T10:00:05Z");
@@ -685,10 +728,9 @@ Then(
   },
 );
 
-/** Waits until the cell of `row` under `column` holds a list with an item
- *  that says `expected`: a reader hears what a run did as a list, one fact an
- *  item. */
-export async function untilCellLists(world: BrowserWorld, name: string, row: string, column: string, expected: string): Promise<void> {
+/** The cell of `row` under the column header `column`, once the row is
+ *  there, found by its role. */
+async function cellOf(world: BrowserWorld, name: string, row: string, column: string): Promise<Locator> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   const found = rowNamed(world, name, row).first();
@@ -696,8 +738,16 @@ export async function untilCellLists(world: BrowserWorld, name: string, row: str
   // A cell's role leaves the row header out, so the cells count from after it.
   const headerAt = await found.getByRole("rowheader").evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   assert.equal(headerAt, 0, `the row ${row} of the table ${name} is not named by its first cell`);
+  return found.getByRole("cell").nth(index - 1);
+}
+
+/** Waits until the cell of `row` under `column` holds a list with an item
+ *  that says `expected`: a reader hears what a run did as a list, one fact an
+ *  item. */
+export async function untilCellLists(world: BrowserWorld, name: string, row: string, column: string, expected: string): Promise<void> {
   const said = new RegExp([...expected].map(escape).join(ISOLATION));
-  const item = found.getByRole("cell").nth(index - 1).getByRole("list").getByRole("listitem").filter({ hasText: said });
+  const cell = await cellOf(world, name, row, column);
+  const item = cell.getByRole("list").getByRole("listitem").filter({ hasText: said });
   await expect(item, `the ${column} of the row ${row} lists "${expected}"`).toHaveCount(1, { timeout: ROW_PATIENCE_MS });
 }
 
@@ -705,6 +755,142 @@ Then(
   "the row {string} of the table {string} lists {string} in its {string} column",
   async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
     await untilCellLists(this, name, row, column, expected);
+  },
+);
+
+// One item alone is said as it is: a list of one is heard as a list and
+// draws a marker that sets nothing apart (#430).
+Then(
+  "the row {string} of the table {string} says {string} in its {string} column, not as a list",
+  async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
+    await untilCellShows(this, name, row, column, expected);
+    const cell = await cellOf(this, name, row, column);
+    await expect(cell.getByRole("list"), `the ${column} of the row ${row} says "${expected}" as a list`).toHaveCount(0);
+  },
+);
+
+// Where the table has room, each item of a list in the cell reads on one
+// line: it wraps only between items, not inside one (#430). Each
+// character's box says which line it is on; a mark of no width is on none.
+Then(
+  "the row {string} of the table {string} lists each item on one line in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, column: string) {
+    const cell = await cellOf(this, name, row, column);
+    const items = cell.getByRole("list").getByRole("listitem");
+    await expect(items.first(), `the ${column} of the row ${row} lists nothing`).toBeVisible({ timeout: ROW_PATIENCE_MS });
+    const split = await items.evaluateAll((elements) =>
+      elements.flatMap((item) => {
+        const tops = new Set<number>();
+        const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          for (let at = 0; at < (node.textContent ?? "").length; at += 1) {
+            const range = document.createRange();
+            range.setStart(node, at);
+            range.setEnd(node, at + 1);
+            const box = [...range.getClientRects()].find((rect) => rect.width > 0);
+            if (box !== undefined) tops.add(Math.round(box.top));
+          }
+        }
+        return tops.size > 1 ? [`"${item.textContent}" takes ${tops.size} lines`] : [];
+      }),
+    );
+    assert.deepEqual(split, [], `the ${column} of the row ${row} breaks inside an item`);
+  },
+);
+
+// A path or an address the cell shows moves to a line of its own rather than
+// breaking where a line runs out, when a line has room for it: its letters
+// all sit on one line. The text is found across the cell's text nodes, a
+// placeable's bidi isolation marks left out, as a reader doesn't see them.
+Then(
+  "the row {string} of the table {string} keeps {string} on one line in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
+    await untilCellShows(this, name, row, column, expected);
+    const cell = await cellOf(this, name, row, column);
+    const lines = await cell.evaluate((td, expected) => {
+      const chars: { node: Node; at: number }[] = [];
+      let text = "";
+      const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const content = node.textContent ?? "";
+        for (let at = 0; at < content.length; at += 1) {
+          const char = content.charAt(at);
+          if (/[\u2066-\u2069]/.test(char)) continue;
+          chars.push({ node, at });
+          text += char;
+        }
+      }
+      const start = text.indexOf(expected);
+      if (start < 0) return null;
+      const tops = new Set<number>();
+      for (const { node, at } of chars.slice(start, start + expected.length)) {
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + 1);
+        const box = [...range.getClientRects()].find((rect) => rect.width > 0);
+        if (box !== undefined) tops.add(Math.round(box.top));
+      }
+      return tops.size;
+    }, expected);
+    assert.ok(lines !== null, `the ${column} of the row ${row} doesn't show "${expected}"`);
+    assert.equal(lines, 1, `"${expected}" takes ${lines} lines in the ${column} of the row ${row}`);
+  },
+);
+
+// A path the cell shows breaks, where a line has no room for it whole, only
+// between its parts, as an address does (`partsBrokenInside`, #482).
+Then(
+  "the row {string} of the table {string} keeps each part of {string} whole in its {string} column",
+  async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
+    await untilCellShows(this, name, row, column, expected);
+    const cell = await cellOf(this, name, row, column);
+    const found = await cell.evaluate(partsBrokenInside, { text: expected, whole: true });
+    assert.ok(found !== null, `the ${column} of the row ${row} doesn't show "${expected}"`);
+    assert.deepEqual(found.inside, [], `"${expected}" breaks inside a part in the ${column} of the row ${row}`);
+  },
+);
+
+// A column's header is a word or two: beside columns that take the room it
+// keeps each word whole rather than breaking where its line runs out
+// ("Actio" / "ns", #482).
+Then(
+  "the header {string} of the table {string} keeps its words whole",
+  async function (this: BrowserWorld, column: string, name: string) {
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    for (const word of column.split(" ")) {
+      const found = await header.evaluate(partsBrokenInside, { text: word, whole: true });
+      assert.ok(found !== null, `the header ${column} of the table ${name} doesn't show "${word}"`);
+      assert.deepEqual(found.inside, [], `"${word}" breaks inside in the header ${column} of the table ${name}`);
+    }
+  },
+);
+
+// The column that says what a run did or why it failed has the room the
+// others leave: it is wider than any of them.
+Then(
+  "the column {string} of the table {string} is wider than each of the others",
+  async function (this: BrowserWorld, column: string, name: string) {
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+    const widths = await columnWidths(this, name);
+    const own = widths[index] ?? 0;
+    const wider = widths.flatMap((width, at) => (at !== index && width >= own ? [`column ${at + 1}: ${Math.round(width)}px`] : []));
+    assert.deepEqual(wider, [], `the column ${column} of the table ${name} is ${Math.round(own)}px wide, no wider than these`);
+  },
+);
+
+// A column of sentences keeps room enough to read them as sentences beside
+// columns that hold paths: at least a quarter of the table, whatever those
+// need (#482).
+Then(
+  "the column {string} of the table {string} takes at least a quarter of the table's width",
+  async function (this: BrowserWorld, column: string, name: string) {
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+    const widths = await columnWidths(this, name);
+    const own = widths[index] ?? 0;
+    const whole = widths.reduce((sum, width) => sum + width, 0);
+    assert.ok(own >= whole / 4, `the column ${column} of the table ${name} is ${Math.round(own)}px of ${Math.round(whole)}px`);
   },
 );
 
@@ -880,4 +1066,13 @@ Then("the page shows the heading {string}", async function (this: BrowserWorld, 
   await this.page
     .getByRole("heading", { level: 1, name, exact: true })
     .waitFor({ state: "visible", timeout: 25_000 });
+});
+
+// The page's heading names what the page shows, and a table takes its name
+// from it, rather than a caption saying it again under the heading (#431):
+// the main content shows the words once, and that once is the heading.
+Then("the main content shows {string} once, as its heading", async function (this: BrowserWorld, text: string) {
+  const main = this.page.getByRole("main");
+  await expect(main.getByRole("heading", { level: 1, name: text, exact: true })).toBeVisible();
+  await expect(main.getByText(text, { exact: true }), `the main content shows "${text}" besides its heading`).toHaveCount(1);
 });
