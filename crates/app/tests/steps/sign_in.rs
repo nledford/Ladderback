@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use app::access::{Access, SignInRefused, SignedIn};
-use app::fakes::{InMemoryAdminPassword, SeededRandom};
+use app::fakes::{InMemoryAdminPassword, InMemoryApiTokenStore, SeededRandom};
 use app::ports::AdminPassword;
 use cucumber::{given, then, when};
 use domain::SignedDuration;
@@ -36,7 +36,7 @@ impl std::fmt::Debug for SignInWorld {
 }
 
 impl SignInWorld {
-    fn access(&self) -> &Access {
+    pub(crate) fn access(&self) -> &Access {
         self.access.as_ref().expect("an admin password is set")
     }
 
@@ -77,6 +77,7 @@ fn admin_password(agent: &mut Agent, password: String) {
         kept.clone(),
         Arc::new(SeededRandom::new(1)),
         agent.clock.clone(),
+        Arc::new(InMemoryApiTokenStore::new()),
     ));
     agent.sign_in.kept = Some(kept);
 }
@@ -198,7 +199,7 @@ fn refused_wrong(agent: &mut Agent) {
     );
 }
 
-#[then(expr = "the sign-in is refused, to be tried again in {int} seconds")]
+#[then(expr = "the sign-in is refused, to be tried again in {int} second(s)")]
 fn refused_wait(agent: &mut Agent, seconds: u64) {
     assert_eq!(
         agent

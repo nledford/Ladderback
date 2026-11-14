@@ -524,7 +524,7 @@ async fn backup_runs_again(agent: &mut Agent, plan: String) {
         [operation] => {
             assert_eq!(operation.status(), &OperationStatus::Queued);
             assert_eq!(operation.kind(), OperationKind::Backup);
-            assert_eq!(operation.trigger(), queued.trigger);
+            assert_eq!(operation.trigger(), &queued.trigger);
             assert_eq!(operation.target(), &queued.target);
         }
         runs => panic!("the backup ran again {} times", runs.len()),

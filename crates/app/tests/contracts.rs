@@ -90,6 +90,29 @@ async fn in_memory_schedule_store_keeps_each_plans_pending_retry() {
     contract::schedule_store::run_retries(&InMemorySchedules::default()).await;
 }
 
+/// The in-memory token store: a new one for each `empty`, and the same one
+/// again for `reopened`, as the real store's file outlives its handle.
+#[derive(Default)]
+struct InMemoryApiTokens(Mutex<Option<Arc<app::fakes::InMemoryApiTokenStore>>>);
+
+#[async_trait]
+impl contract::api_token_store::ApiTokenHarness for InMemoryApiTokens {
+    async fn empty(&self) -> Arc<dyn app::ports::ApiTokenStore> {
+        let store = Arc::new(app::fakes::InMemoryApiTokenStore::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&store));
+        store
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::ApiTokenStore> {
+        self.0.lock().unwrap().clone().expect("a store was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_api_token_store_meets_the_api_token_store_contract() {
+    contract::api_token_store::run(&InMemoryApiTokens::default()).await;
+}
+
 #[test]
 fn seeded_randomness_meets_the_random_contract() {
     contract::random::run(&SeededRandom::new(0x5eed));

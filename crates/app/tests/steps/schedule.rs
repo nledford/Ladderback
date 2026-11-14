@@ -41,7 +41,9 @@ impl ScheduleWorld {
     }
 
     fn next(&self) -> NextRun {
-        self.next.expect("a step asked for the plan's next run")
+        self.next
+            .clone()
+            .expect("a step asked for the plan's next run")
     }
 }
 

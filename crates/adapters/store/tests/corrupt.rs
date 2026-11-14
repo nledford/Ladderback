@@ -227,6 +227,46 @@ fn cases() -> Vec<Case> {
             "trigger",
             good().with("trigger", "cron"),
         ),
+        broken(
+            "an API token trigger with no token ID",
+            "token_id",
+            good()
+                .with("trigger", "api-token")
+                .with("token_label", "nightly-mcp"),
+        ),
+        broken(
+            "an API token trigger with no token label",
+            "token_label",
+            good()
+                .with("trigger", "api-token")
+                .with("token_id", "abcdefghijkl"),
+        ),
+        broken(
+            "an API token trigger whose ID is no token ID",
+            "token_id",
+            good()
+                .with("trigger", "api-token")
+                .with("token_id", "ABCDEFGHIJKL")
+                .with("token_label", "nightly-mcp"),
+        ),
+        broken(
+            "an API token trigger whose label is blank",
+            "token_label",
+            good()
+                .with("trigger", "api-token")
+                .with("token_id", "abcdefghijkl")
+                .with("token_label", "   "),
+        ),
+        broken(
+            "a token ID on an operation no token started",
+            "token_id",
+            good().with("token_id", "abcdefghijkl"),
+        ),
+        broken(
+            "a token label on an operation no token started",
+            "token_label",
+            good().with("token_label", "nightly-mcp"),
+        ),
         // Why it failed.
         broken(
             "a failed operation with no error code",
@@ -922,5 +962,82 @@ async fn a_pending_retry_this_version_did_not_write_is_reported() {
         let report = corrupt(store.pending_retries().await, name);
         assert!(report.contains("demo-home"), "{name}: {report}");
         assert!(report.contains(column), "{name}: {report}");
+    }
+}
+
+/// An API token row this version didn't write is reported, naming the token
+/// and the column, never read as a token that lets more or less than it was
+/// given (§10.1).
+#[tokio::test]
+async fn an_api_token_this_version_did_not_write_is_reported() {
+    let digest = vec![0x5e_u8; 32];
+    for (name, column, label, scopes, digest) in [
+        (
+            "a blank label",
+            "label",
+            Cell::from(" "),
+            Cell::from("read"),
+            digest.clone(),
+        ),
+        (
+            "an unknown scope",
+            "scopes",
+            Cell::from("demo"),
+            Cell::from("admin"),
+            digest.clone(),
+        ),
+        (
+            "no scope",
+            "scopes",
+            Cell::from("demo"),
+            Cell::from(""),
+            digest.clone(),
+        ),
+        (
+            "scopes that are no list",
+            "scopes",
+            Cell::from("demo"),
+            Cell::from("read;run"),
+            digest.clone(),
+        ),
+        (
+            "a short digest",
+            "digest",
+            Cell::from("demo"),
+            Cell::from("read"),
+            vec![0x5e; 31],
+        ),
+        (
+            "a long digest",
+            "digest",
+            Cell::from("demo"),
+            Cell::from("read,run"),
+            vec![0x5e; 33],
+        ),
+    ] {
+        let scratch = Scratch::new();
+        let store = scratch.open().await;
+        let mut raw = scratch.raw().await;
+        let mut query = sqlx::query(
+            "INSERT INTO api_tokens (id, label, digest, scopes, password, created_at) \
+             VALUES ('abcdefghijkl', ?, ?, ?, 1, 1800000000000)",
+        );
+        let text = |cell: Cell| match cell {
+            Cell::Text(text) => text,
+            other => panic!("a text cell: {other:?}"),
+        };
+        query = query.bind(text(label)).bind(digest).bind(text(scopes));
+        query
+            .execute(&mut raw)
+            .await
+            .expect("the raw token is inserted");
+        let id = domain::access::api_token::ApiTokenId::parse("abcdefghijkl").expect("an ID");
+        for report in [
+            corrupt(app::ports::ApiTokenStore::get(&store, &id).await, name),
+            corrupt(app::ports::ApiTokenStore::all(&store).await, name),
+        ] {
+            assert!(report.contains("abcdefghijkl"), "{name}: {report}");
+            assert!(report.contains(column), "{name}: {report}");
+        }
     }
 }

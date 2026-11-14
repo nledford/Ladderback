@@ -48,6 +48,9 @@ mod formatting;
 mod gallery;
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod live;
+// What the API tokens of Settings decide, host-tested; `settings.rs` is
+// their glue.
+mod api_tokens;
 // The live pages' decisions (host-tested) and their DOM glue; see
 // `backend.rs` for why the fetch-and-socket glue is only covered by the
 // browser journeys.
@@ -63,6 +66,8 @@ mod pause;
 // `components.rs`'s `Progress` is its glue.
 mod progress;
 mod routes;
+// The Settings page's DOM glue; `api_tokens.rs` decides for it.
+mod settings;
 // What the page's standing with sign-in is, decided on the host.
 mod session;
 // The sign-in page and dialog's DOM glue; `session.rs` decides for them.
@@ -90,6 +95,7 @@ mod toast;
 
 use routes::{NotFound, Operations, Repositories, Start};
 use session::{SignInOffNotice, Standing, Title};
+use settings::Settings;
 use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut};
 use snapshots::Snapshots;
 
@@ -135,6 +141,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let operations = Arc::clone(&localizer);
     let snapshots = Arc::clone(&localizer);
     let repositories = Arc::clone(&localizer);
+    let settings = Arc::clone(&localizer);
     view! {
         <Arrival localizer=localizer />
         <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
@@ -152,6 +159,10 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
                 path=path!("/repositories")
                 view=move || view! { <Repositories localizer=Arc::clone(&repositories) /> }
             />
+            <Route
+                path=path!("/settings")
+                view=move || view! { <Settings localizer=Arc::clone(&settings) /> }
+            />
         </Routes>
     }
 }
@@ -160,11 +171,12 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
 /// session, it ends with the Sign out control.
 #[component]
 fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl IntoView {
-    let (label, operations, snapshots, repositories) = (
+    let (label, operations, snapshots, repositories, settings) = (
         text(&localizer, msg::UI_NAV_LABEL),
         text(&localizer, msg::UI_NAV_OPERATIONS),
         text(&localizer, msg::UI_NAV_SNAPSHOTS),
         text(&localizer, msg::UI_NAV_REPOSITORIES),
+        text(&localizer, msg::UI_NAV_SETTINGS),
     );
     view! {
         <nav class="site-nav" aria-label=label>
@@ -177,6 +189,9 @@ fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl I
                 </li>
                 <li>
                     <A href="/repositories">{repositories}</A>
+                </li>
+                <li>
+                    <A href="/settings">{settings}</A>
                 </li>
                 {move || {
                     (standing.get() == Standing::SignedIn)

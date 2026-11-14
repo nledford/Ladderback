@@ -378,7 +378,9 @@ impl Scheduler {
     async fn resume_all(&self, planned: &mut BTreeMap<PlanId, Planned>) {
         let now = self.clock.now();
         for (plan, held) in planned.iter_mut() {
-            let Some(next) = held.next else { continue };
+            let Some(next) = held.next.clone() else {
+                continue;
+            };
             let resumed = NextRun::resume(
                 &held.schedule,
                 self.zone_of(&held.schedule),
@@ -386,7 +388,9 @@ impl Scheduler {
                 now,
                 self.random.draw(),
             );
-            held.after_wake = resumed.is_ok_and(|run| run.trigger == Trigger::CatchUp);
+            held.after_wake = resumed
+                .as_ref()
+                .is_ok_and(|run| run.trigger == Trigger::CatchUp);
             held.next = self.keep(plan, resumed).await;
         }
     }
@@ -401,7 +405,7 @@ impl Scheduler {
         let now = self.clock.now();
         let due: Vec<PlanId> = planned
             .iter()
-            .filter(|(_, held)| held.next.is_some_and(|next| next.at <= now))
+            .filter(|(_, held)| held.next.as_ref().is_some_and(|next| next.at <= now))
             .map(|(plan, _)| plan.clone())
             .collect();
         if due
@@ -418,7 +422,9 @@ impl Scheduler {
             let Some(held) = planned.get_mut(plan) else {
                 continue;
             };
-            let Some(next) = held.next else { continue };
+            let Some(next) = held.next.clone() else {
+                continue;
+            };
             held.after_wake = false;
             let power = match check_power(&held.schedule, self.power.as_ref()).await {
                 PowerCheck::Met => Ok(None),
@@ -514,7 +520,7 @@ impl Scheduler {
     /// plan's retries as they were.
     async fn ended(&self, plans: &mut Plans, end: RunEnd) {
         let failed = end.outcome == RunOutcome::Failed;
-        if failed && !RetrySchedule::retried(end.trigger) {
+        if failed && !RetrySchedule::retried(&end.trigger) {
             return;
         }
         let series = match plans.retries.remove(&end.plan) {
@@ -545,7 +551,7 @@ impl Scheduler {
             let next_run = plans
                 .planned
                 .get(&end.plan)
-                .and_then(|held| held.next)
+                .and_then(|held| held.next.as_ref())
                 .map(|next| next.at);
             RetrySchedule::first(policy, now, next_run)
         };
@@ -626,7 +632,7 @@ impl Scheduler {
     /// Keeps `next` as `plan`'s planned run and returns it; a schedule with
     /// no run left is reported and forgotten.
     async fn keep(&self, plan: &PlanId, next: Result<NextRun, NoNextRun>) -> Option<NextRun> {
-        let kept = match next {
+        let kept = match &next {
             Ok(next) => {
                 self.schedules
                     .plan_run(&PlannedRun {
@@ -658,7 +664,7 @@ impl Scheduler {
         let now = self.clock.now();
         let runs = planned
             .values()
-            .filter_map(|held| held.next)
+            .filter_map(|held| held.next.as_ref())
             .map(|next| next.at);
         let pending = retries.values().filter_map(|retrying| match retrying {
             Retrying::Pending(retry) => Some(retry.at),
@@ -856,7 +862,7 @@ mod tests {
         scheduler.start_due(&mut planned).await;
         assert_eq!(runs.runs(), vec![(home(), Trigger::Schedule)]);
         assert_eq!(
-            planned[&home()].next.map(|next| next.at),
+            planned[&home()].next.as_ref().map(|next| next.at),
             Some(at("2026-06-11T03:00:00Z"))
         );
     }
@@ -869,7 +875,7 @@ mod tests {
         scheduler.start_due(&mut planned).await;
         assert_eq!(runs.runs(), vec![]);
         assert_eq!(
-            planned[&home()].next.map(|next| next.at),
+            planned[&home()].next.as_ref().map(|next| next.at),
             Some(at("2026-06-10T03:00:00Z"))
         );
     }
@@ -889,7 +895,7 @@ mod tests {
             });
         }
         scheduler.start_due(&mut planned).await;
-        let next = planned[&home()].next.map(|next| next.at);
+        let next = planned[&home()].next.as_ref().map(|next| next.at);
         (runs, next)
     }
 
@@ -1168,7 +1174,7 @@ mod tests {
                 ] {
                     let mut plans = home_retrying(retrying);
                     scheduler
-                        .ended(&mut plans, home_ended(trigger, outcome))
+                        .ended(&mut plans, home_ended(trigger.clone(), outcome))
                         .await;
                     assert_eq!(
                         plans.retries.get(&home()),

@@ -548,7 +548,7 @@ async fn a_queued_operation_taken_up_from_the_log_runs_under_its_id_and_is_not_r
         .await;
     assert_eq!(finished.operation.id(), id());
     assert_eq!(finished.operation.status(), &OperationStatus::Succeeded);
-    assert_eq!(finished.operation.trigger(), Trigger::Schedule);
+    assert_eq!(finished.operation.trigger(), &Trigger::Schedule);
     assert_eq!(
         journal.writes(),
         // The second running write carries the result, before any ending
@@ -1611,7 +1611,7 @@ async fn a_refused_run_is_written_once_as_failed_and_announced() {
 
     let failed = OperationStatus::Failed { reason };
     assert_eq!(finished.operation.status(), &failed);
-    assert_eq!(finished.operation.trigger(), Trigger::Schedule);
+    assert_eq!(finished.operation.trigger(), &Trigger::Schedule);
     assert_eq!(finished.operation.target(), &target);
     assert_eq!(finished.operation.started_at(), None);
     assert_eq!(finished.operation.finished_at(), Some(t(9)));
@@ -1691,7 +1691,7 @@ async fn a_resumed_backup_refused_before_it_runs_is_written_once_as_failed_and_a
     let failed = OperationStatus::Failed { reason };
     assert_eq!(finished.operation.id(), id());
     assert_eq!(finished.operation.status(), &failed);
-    assert_eq!(finished.operation.trigger(), Trigger::Retry);
+    assert_eq!(finished.operation.trigger(), &Trigger::Retry);
     assert_eq!(finished.operation.target(), &target);
     assert_eq!(finished.operation.queued_at(), t(1));
     assert_eq!(finished.operation.started_at(), None);

@@ -58,6 +58,40 @@ async fn a_password_another_process_sets_changes_the_fingerprint_the_daemon_sees
 }
 
 #[tokio::test]
+async fn a_daemon_started_again_sees_the_same_password_as_before() {
+    // API tokens are kept with the fingerprint of the password they were
+    // created under: a fingerprint that changed with each start would revoke
+    // them all on a restart (decision 93).
+    let data = tempfile::tempdir().unwrap();
+    let before = FileAdminPassword::in_data_dir(data.path());
+    before.set(&password("demo-admin-pass")).await.unwrap();
+    let after = FileAdminPassword::in_data_dir(data.path());
+    assert_eq!(after.fingerprint(), before.fingerprint());
+    assert!(after.fingerprint().is_ok());
+}
+
+#[tokio::test]
+async fn the_fingerprint_is_of_the_hash_s_salt() {
+    // The salt is drawn anew by each `set-password`, so it tells passwords
+    // apart; it is no secret, so its SHA-256 tells nothing of the password.
+    let data = tempfile::tempdir().unwrap();
+    let kept = FileAdminPassword::in_data_dir(data.path());
+    let hash = "$argon2id$v=19$m=19456,t=2,p=1$ZGVtby1zYWx0LTE2Ynl0ZQ$\
+                C3Ssyc5K5ZJ3V4EWRuAyQCm7AaRtPXV1SwuFt4cQwpY";
+    write_hash(&data.path().join(FILE), hash).unwrap();
+    // SHA-256 of "ZGVtby1zYWx0LTE2Ynl0ZQ", its first 8 bytes big-endian.
+    let expected = {
+        use sha2::{Digest as _, Sha256};
+        let digest = Sha256::digest(b"ZGVtby1zYWx0LTE2Ynl0ZQ");
+        u64::from_be_bytes(digest[..8].try_into().unwrap())
+    };
+    assert_eq!(
+        kept.fingerprint().map(PasswordFingerprint::value),
+        Ok(expected)
+    );
+}
+
+#[tokio::test]
 async fn only_an_argon2id_hash_is_kept_never_the_password() {
     let data = tempfile::tempdir().unwrap();
     let kept = FileAdminPassword::in_data_dir(data.path());

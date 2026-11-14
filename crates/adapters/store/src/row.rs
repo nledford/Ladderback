@@ -9,9 +9,13 @@
 use std::fmt::Display;
 
 use app::ports::{EngineResult, OperationRecord, PendingRetry, PlannedRun, StoreError};
+use domain::access::PasswordFingerprint;
+use domain::access::api_token::{
+    ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, Scope, Scopes,
+};
 use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
-use domain::execution::{OperationStatus, Target, Warning, WarningKind};
+use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -53,6 +57,38 @@ impl Reader<'_> {
         self.row
             .try_get::<Option<i64>, _>(column)
             .map_err(|error| self.corrupt(column, unreadable(&error)))
+    }
+
+    fn blob(&self, column: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        self.row
+            .try_get::<Option<Vec<u8>>, _>(column)
+            .map_err(|error| self.corrupt(column, unreadable(&error)))
+    }
+
+    /// What started the operation: a trigger word, and for an API token the
+    /// token's ID and label beside it, which no other trigger leaves set.
+    fn trigger(&self) -> Result<Trigger, StoreError> {
+        let word = self.required_text("trigger")?;
+        let id = self.text("token_id")?;
+        let label = self.text("token_label")?;
+        if word == codec::API_TOKEN {
+            let id = id.ok_or_else(|| self.corrupt("token_id", "is NULL"))?;
+            let id = ApiTokenId::parse(&id).ok_or_else(|| {
+                self.corrupt("token_id", format!("{} is not an API token ID", shown(&id)))
+            })?;
+            let label = label.ok_or_else(|| self.corrupt("token_label", "is NULL"))?;
+            let label = ApiTokenLabel::new(label)
+                .map_err(|_| self.corrupt("token_label", "is not an API token label"))?;
+            return Ok(Trigger::ApiToken { id, label });
+        }
+        let trigger = codec::trigger_from_text(&word)
+            .ok_or_else(|| self.corrupt("trigger", format!("{} is not a trigger", shown(&word))))?;
+        for (column, stray) in [("token_id", &id), ("token_label", &label)] {
+            if stray.is_some() {
+                return Err(self.corrupt(column, "is set on an operation no API token started"));
+            }
+        }
+        Ok(trigger)
     }
 
     fn time(&self, column: &str) -> Result<Option<Timestamp>, StoreError> {
@@ -202,6 +238,49 @@ pub(crate) fn pending_retry(row: &SqliteRow) -> Result<PendingRetry, StoreError>
     })
 }
 
+/// A row of `api_tokens`. A token whose label, scopes or digest this
+/// version couldn't have written is [`StoreError::Corrupt`], never a token
+/// that lets more or less than it was given.
+pub(crate) fn api_token(row: &SqliteRow) -> Result<ApiToken, StoreError> {
+    let mut reader = Reader {
+        row,
+        scope: "an API token".to_owned(),
+    };
+    let id_text = reader.required_text("id")?;
+    let id = ApiTokenId::parse(&id_text).ok_or_else(|| {
+        reader.corrupt("id", format!("{} is not an API token ID", shown(&id_text)))
+    })?;
+    reader.scope = format!("API token {}", id.as_str());
+    let label = ApiTokenLabel::new(reader.required_text("label")?)
+        .map_err(|_| reader.corrupt("label", "is not an API token label"))?;
+    let scopes_text = reader.required_text("scopes")?;
+    let scopes = scopes_text
+        .split(',')
+        .map(|name| {
+            Scope::parse(name)
+                .ok_or_else(|| reader.corrupt("scopes", format!("{} is not a scope", shown(name))))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let scopes = Scopes::new(scopes).map_err(|_| reader.corrupt("scopes", "names no scope"))?;
+    let digest = reader
+        .blob("digest")?
+        .ok_or_else(|| reader.corrupt("digest", "is NULL"))?;
+    let digest = <[u8; 32]>::try_from(digest.as_slice())
+        .map_err(|_| reader.corrupt("digest", format!("is {} bytes, not 32", digest.len())))?;
+    let password = reader
+        .integer("password")?
+        .ok_or_else(|| reader.corrupt("password", "is NULL"))?;
+    Ok(ApiToken {
+        id,
+        label,
+        scopes,
+        digest: ApiTokenDigest::from_bytes(digest),
+        password: PasswordFingerprint::new(password.cast_unsigned()),
+        created_at: reader.required_time("created_at")?,
+        last_used_at: reader.time("last_used_at")?,
+    })
+}
+
 /// What a column that couldn't be read says: for a value of the wrong type,
 /// SQLx's account of the types, without its repeating the column.
 fn unreadable(error: &sqlx::Error) -> String {
@@ -236,10 +315,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
     let kind = reader.required_text("kind")?;
     let kind = codec::kind_from_text(&kind)
         .ok_or_else(|| reader.corrupt("kind", format!("{} is not a kind", shown(&kind))))?;
-    let trigger = reader.required_text("trigger")?;
-    let trigger = codec::trigger_from_text(&trigger).ok_or_else(|| {
-        reader.corrupt("trigger", format!("{} is not a trigger", shown(&trigger)))
-    })?;
+    let trigger = reader.trigger()?;
     let target = Target {
         plan: reader.id_of("plan_id", "plan ID", PlanId::parse)?,
         repository: reader.id_of("repo_uuid", "repository ID", RepositoryId::parse)?,

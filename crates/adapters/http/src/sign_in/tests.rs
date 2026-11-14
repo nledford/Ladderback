@@ -31,6 +31,7 @@ fn on_with(password: Arc<dyn AdminPassword>, clock: &Arc<FakeClock>) -> SignIn {
         password,
         Arc::new(SeededRandom::new(7)),
         clock.clone(),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
     )))
 }
 

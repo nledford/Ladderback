@@ -3,7 +3,6 @@
 //! written by `ladderback set-password`. The password itself is never kept,
 //! and `config.toml` never names it.
 
-use std::hash::{BuildHasher, RandomState};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -15,6 +14,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use argon2::{Algorithm, Argon2};
 use async_trait::async_trait;
 use domain::access::{Password, PasswordFingerprint};
+use sha2::{Digest as _, Sha256};
 use tokio::sync::Semaphore;
 
 /// The file's name in the data folder.
@@ -33,9 +33,6 @@ pub struct FileAdminPassword {
     /// The hash file's fingerprint as last read, beside what its metadata
     /// said then: while the metadata says the same, the file is not read.
     seen: Mutex<Option<(Stamp, PasswordFingerprint)>>,
-    /// Keys drawn once per process, so a fingerprint means nothing outside
-    /// it and the hash can't be guessed back from one.
-    keys: RandomState,
 }
 
 /// What the hash file's metadata says of which file it is. `set-password`
@@ -72,7 +69,6 @@ impl FileAdminPassword {
             path: data_dir.join(FILE),
             hashing: Arc::new(Semaphore::new(1)),
             seen: Mutex::new(None),
-            keys: RandomState::new(),
         }
     }
 
@@ -128,6 +124,16 @@ fn read_hash(path: &Path) -> Result<String, AdminPasswordError> {
         return Err(not_a_hash());
     }
     Ok(text)
+}
+
+/// Which password `hash` is: the first 8 bytes of the SHA-256 of its salt.
+/// `set-password` draws a new salt each time, so a password set anew, even to
+/// the same text, is another; the salt is no secret, so the fingerprint tells
+/// nothing of the password; and the same file gives the same fingerprint in
+/// every process, so the API tokens kept with it outlive a restart (decision
+/// 93).
+fn salt_fingerprint(hash: &str) -> Result<PasswordFingerprint, AdminPasswordError> {
+    todo!()
 }
 
 /// Writes `hash` as the file at `path`, readable by its owner alone, in
@@ -226,7 +232,7 @@ impl AdminPassword for FileAdminPassword {
         {
             return Ok(fingerprint);
         }
-        let fingerprint = PasswordFingerprint::new(self.keys.hash_one(read_hash(&self.path)?));
+        let fingerprint = salt_fingerprint(&read_hash(&self.path)?)?;
         *seen = Some((stamp, fingerprint));
         Ok(fingerprint)
     }

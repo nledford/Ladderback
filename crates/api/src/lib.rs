@@ -288,6 +288,30 @@ pub enum ErrorCode {
     /// be drawn, so nobody was signed in. The detail is the platform's own
     /// message, never the password or its hash.
     SignInUnavailable,
+    /// The request's API token (`Authorization: Bearer`) is not one the
+    /// daemon keeps: unknown, revoked, of an admin password set since, or with
+    /// a wrong secret, all alike (§10.1, decision 93). It counted as a failed
+    /// sign-in.
+    ApiTokenInvalid,
+    /// The request's API token is good but doesn't open this route. The
+    /// argument `scope` is what the route needs: `read`, `run`, `preview`,
+    /// `propose`, or `session` for a route only a signed-in browser may use.
+    ApiTokenScope,
+    /// Sign-in is off, so there are no API tokens to create, list or revoke.
+    SignInOff,
+    /// An API token's label is empty, blank, holds a control character, or is
+    /// longer than `max` characters.
+    ApiTokenLabel,
+    /// An API token was asked for with no scope.
+    ApiTokenNoScope,
+    /// `limit` API tokens are kept already, so no other was created.
+    ApiTokenLimit,
+    /// No API token with the ID `token` is kept: it was revoked already.
+    ApiTokenUnknown,
+    /// The API tokens could not be read or kept: the store or the admin
+    /// password file could not be read, or no random bytes drawn. The daemon's
+    /// log says why.
+    ApiTokensUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -612,6 +636,26 @@ impl ErrorCode {
                 kind: ArgKind::Count,
                 optional: false,
             }],
+            Self::ApiTokenScope => &[ArgSpec {
+                name: "scope",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ApiTokenLabel => &[ArgSpec {
+                name: "max",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
+            Self::ApiTokenLimit => &[ArgSpec {
+                name: "limit",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
+            Self::ApiTokenUnknown => &[ArgSpec {
+                name: "token",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::BodyTooLarge => &[ArgSpec {
                 name: "limit",
                 kind: ArgKind::Bytes,
@@ -905,6 +949,10 @@ impl ErrorCode {
             | Self::SignInFailed
             | Self::CsrfTokenInvalid
             | Self::SignInUnavailable
+            | Self::ApiTokenInvalid
+            | Self::SignInOff
+            | Self::ApiTokenNoScope
+            | Self::ApiTokensUnavailable
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
@@ -1840,6 +1888,10 @@ mod tests {
             ErrorCode::SignInFailed,
             ErrorCode::CsrfTokenInvalid,
             ErrorCode::SignInUnavailable,
+            ErrorCode::ApiTokenInvalid,
+            ErrorCode::SignInOff,
+            ErrorCode::ApiTokenNoScope,
+            ErrorCode::ApiTokensUnavailable,
             ErrorCode::ConfigFolderUnknown,
             ErrorCode::RuntimeUnavailable,
             ErrorCode::Unknown,
@@ -3508,6 +3560,59 @@ impl std::fmt::Debug for SignInDto {
     }
 }
 
+/// A scope of an API token (§10.1, decision 93), as the token routes name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApiTokenScopeDto {
+    Read,
+    Run,
+    Preview,
+    Propose,
+}
+
+/// One API token as the token routes list it: who it is, what it may do,
+/// when it was created and last used. Never its secret (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiTokenDto {
+    pub id: String,
+    pub label: String,
+    pub scopes: Vec<ApiTokenScopeDto>,
+    pub created_at: String,
+    /// `null` for a token never used.
+    #[serde(default)]
+    pub last_used_at: Option<String>,
+}
+
+/// `GET /api/v1/tokens`: the tokens kept, oldest first.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ApiTokensDto {
+    pub tokens: Vec<ApiTokenDto>,
+}
+
+/// `POST /api/v1/tokens`: the label and scopes of the token to create.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CreateApiTokenDto {
+    pub label: String,
+    pub scopes: Vec<ApiTokenScopeDto>,
+}
+
+/// What creating a token answers: the token as it is listed, and its whole
+/// text, `ladderback_<id>_<secret>`, shown this once. Its `Debug` hides the
+/// secret (I4).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CreatedApiTokenDto {
+    pub token: ApiTokenDto,
+    pub secret: String,
+}
+
+impl std::fmt::Debug for CreatedApiTokenDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
 /// What initialising a repository answers: its ID, and whether it was saved
 /// into the configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -4941,5 +5046,88 @@ mod maintenance_dto_tests {
             )
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod api_token_dto_tests {
+    use serde_json::{from_str, json, to_value};
+
+    use super::{
+        ApiTokenDto, ApiTokenScopeDto, ApiTokensDto, CreateApiTokenDto, CreatedApiTokenDto,
+    };
+
+    fn listed() -> ApiTokenDto {
+        ApiTokenDto {
+            id: "abcdefghijkl".to_owned(),
+            label: "nightly-mcp".to_owned(),
+            scopes: vec![ApiTokenScopeDto::Read, ApiTokenScopeDto::Run],
+            created_at: "2026-11-14T10:00:00Z".to_owned(),
+            last_used_at: None,
+        }
+    }
+
+    #[test]
+    fn a_listed_token_has_kebab_case_fields_and_a_null_last_use_when_never_used() {
+        let wire = to_value(ApiTokensDto {
+            tokens: vec![listed()],
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            json!({"tokens": [{
+                "id": "abcdefghijkl",
+                "label": "nightly-mcp",
+                "scopes": ["read", "run"],
+                "created-at": "2026-11-14T10:00:00Z",
+                "last-used-at": null,
+            }]})
+        );
+        assert_eq!(
+            serde_json::from_value::<ApiTokensDto>(wire).unwrap().tokens,
+            vec![listed()]
+        );
+    }
+
+    #[test]
+    fn every_scope_reads_by_its_name_and_no_other_name_is_a_scope() {
+        let body: CreateApiTokenDto =
+            from_str(r#"{"label":"every-scope","scopes":["read","run","preview","propose"]}"#)
+                .unwrap();
+        assert_eq!(
+            body.scopes,
+            [
+                ApiTokenScopeDto::Read,
+                ApiTokenScopeDto::Run,
+                ApiTokenScopeDto::Preview,
+                ApiTokenScopeDto::Propose
+            ]
+        );
+        assert!(from_str::<CreateApiTokenDto>(r#"{"label":"x","scopes":["admin"]}"#).is_err());
+        assert!(from_str::<CreateApiTokenDto>(r#"{"label":"x","scopes":["Read"]}"#).is_err());
+    }
+
+    #[test]
+    fn a_create_body_with_a_field_of_its_own_is_refused() {
+        assert!(from_str::<CreateApiTokenDto>(r#"{"label":"x","scopes":["read"]}"#).is_ok());
+        assert!(
+            from_str::<CreateApiTokenDto>(r#"{"label":"x","scopes":["read"],"expires":1}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_created_token_shows_its_secret_on_the_wire_but_never_in_debug() {
+        let created = CreatedApiTokenDto {
+            token: listed(),
+            secret: "ladderback_abcdefghijkl_canary-secret".to_owned(),
+        };
+        assert_eq!(
+            to_value(&created).unwrap()["secret"],
+            "ladderback_abcdefghijkl_canary-secret"
+        );
+        let shown = format!("{created:?}");
+        assert!(!shown.contains("canary-secret"), "{shown}");
+        assert!(shown.contains("nightly-mcp"), "{shown}");
     }
 }

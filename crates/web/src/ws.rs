@@ -114,7 +114,7 @@ thread_local! {
 /// The page's clock, in milliseconds since the epoch. It is the wall clock,
 /// which goes on while the computer sleeps, so a timer that fires late still
 /// sees how much time has passed.
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     // `as` saturates: no clock is past what an `i64` counts.
     js_sys::Date::now() as i64
 }
@@ -379,6 +379,21 @@ pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
             None => builder,
         };
         builder.json(body).ok()
+    })
+    .await?;
+    sorted(status, &text)
+}
+
+/// Sends `DELETE url`, a JSON request with no body, with the session's CSRF
+/// token when sign-in is on, and sorts the answer as [`post`] does.
+pub(crate) async fn delete(url: &str) -> Option<Posted> {
+    let (status, text) = send(None, Asked::ByPerson, |csrf, _| {
+        let builder = Request::delete(url).header("content-type", "application/json");
+        let builder = match csrf {
+            Some(csrf) => builder.header(CSRF_HEADER, csrf),
+            None => builder,
+        };
+        builder.build().ok()
     })
     .await?;
     sorted(status, &text)

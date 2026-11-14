@@ -257,6 +257,11 @@ impl Web {
     pub(crate) fn response(&self) -> &Response {
         self.response.as_ref().expect("the request was sent")
     }
+
+    /// The log of the daemon started last.
+    pub(crate) fn log(&self) -> &Path {
+        self.log.as_deref().expect("Ladderback was started")
+    }
 }
 
 #[given(expr = "Ladderback is serving on loopback, configured for the host name {string}")]
@@ -345,6 +350,13 @@ fn json_body(agent: &mut Agent, size: usize) {
 #[given(expr = "the request has a body of {int} byte(s)")]
 fn plain_body(agent: &mut Agent, size: usize) {
     agent.web.request().body = "x".repeat(size);
+}
+
+/// The body as the step gives it, its `\"` read as `"`: a JSON body in a
+/// step's quoted string escapes its own quotes.
+#[given(expr = "the request has the body {string}")]
+fn the_body(agent: &mut Agent, body: String) {
+    agent.web.request().body = body.replace(r#"\""#, "\"");
 }
 
 #[given("the request has no Host header")]
@@ -507,6 +519,11 @@ async fn start_with(agent: &mut Agent, arguments: &str, rust_log: Option<&'stati
     }
     agent.web.start = Some(outcome);
     agent.web.log = Some(log);
+}
+
+#[given("Ladderback is serving on loopback")]
+async fn serving_on_loopback(agent: &mut Agent) {
+    serve_on_loopback(agent).await;
 }
 
 /// Starts `ladderback serve` on a free loopback port with the scenario's

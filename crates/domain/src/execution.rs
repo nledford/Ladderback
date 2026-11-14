@@ -335,7 +335,7 @@ impl OperationKind {
 }
 
 /// What started an operation: the `trigger` the operation log stores (§9).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Trigger {
     Schedule,
     /// The user asked for it.
@@ -345,6 +345,12 @@ pub enum Trigger {
     Retry,
     Hub,
     Mcp,
+    /// A program asked for it with an API token: the token's ID and label,
+    /// never its secret (§10.1, decision 93).
+    ApiToken {
+        id: crate::access::api_token::ApiTokenId,
+        label: crate::access::api_token::ApiTokenLabel,
+    },
 }
 
 /// What an operation works on, as far as its job says: a backup names its
@@ -477,8 +483,8 @@ impl Operation {
         self.kind
     }
 
-    pub fn trigger(&self) -> Trigger {
-        self.trigger
+    pub fn trigger(&self) -> &Trigger {
+        &self.trigger
     }
 
     pub fn target(&self) -> &Target {
@@ -894,7 +900,7 @@ mod tests {
             t(0),
         );
         assert_eq!(op.kind(), OperationKind::Prune);
-        assert_eq!(op.trigger(), Trigger::CatchUp);
+        assert_eq!(op.trigger(), &Trigger::CatchUp);
         assert_eq!(op.target(), &target);
     }
 
@@ -1454,7 +1460,7 @@ mod tests {
         assert_eq!(op.started_at(), None);
         assert_eq!(op.queued_at(), t(30));
         assert_eq!(op.finished_at(), Some(t(30)));
-        assert_eq!(op.trigger(), Trigger::Schedule);
+        assert_eq!(op.trigger(), &Trigger::Schedule);
         assert_eq!(op.kind(), OperationKind::Backup);
         assert_eq!(op.target(), &target);
     }

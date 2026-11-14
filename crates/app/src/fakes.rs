@@ -2,6 +2,7 @@
 //! one passes the same contract suite (`crate::contract`) as its real adapter.
 
 mod admin_password;
+mod api_token_store;
 mod clock;
 mod config_store;
 mod engine;
@@ -19,6 +20,7 @@ mod service;
 mod sources;
 
 pub use admin_password::InMemoryAdminPassword;
+pub use api_token_store::InMemoryApiTokenStore;
 pub use clock::FakeClock;
 pub use config_store::InMemoryConfigStore;
 pub use engine::SimulatedEngine;

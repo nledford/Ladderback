@@ -4830,6 +4830,7 @@ dependencies = [
  "hostname",
  "nix 0.31.3",
  "serde_json",
+ "sha2 0.10.9",
  "shell-words",
  "spawn-gate",
  "tempfile",

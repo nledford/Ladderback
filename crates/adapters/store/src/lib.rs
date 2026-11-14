@@ -11,6 +11,7 @@
     clippy::unreachable
 )]
 
+mod api_tokens;
 mod codec;
 mod error_args;
 mod locations;
@@ -34,7 +35,7 @@ use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{
-    FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus, warning_kinds,
+    FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus, Trigger, warning_kinds,
 };
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp};
 use sqlx::migrate::{MigrateError, Migrator};
@@ -319,6 +320,14 @@ async fn write(
                 .map(i64::from),
         )
         .bind(encoded.locations.as_deref())
+        .bind(match operation.trigger() {
+            Trigger::ApiToken { id, .. } => Some(id.as_str()),
+            _ => None,
+        })
+        .bind(match operation.trigger() {
+            Trigger::ApiToken { label, .. } => Some(label.as_str()),
+            _ => None,
+        })
         .execute(&mut *conn)
         .await
         .map_err(unavailable)?;

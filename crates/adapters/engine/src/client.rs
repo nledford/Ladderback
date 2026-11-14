@@ -1479,6 +1479,14 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::SignInWait
                 | ErrorCode::CsrfTokenInvalid
                 | ErrorCode::SignInUnavailable
+                | ErrorCode::ApiTokenInvalid
+                | ErrorCode::ApiTokenScope
+                | ErrorCode::SignInOff
+                | ErrorCode::ApiTokenLabel
+                | ErrorCode::ApiTokenNoScope
+                | ErrorCode::ApiTokenLimit
+                | ErrorCode::ApiTokenUnknown
+                | ErrorCode::ApiTokensUnavailable
                 | ErrorCode::ConfigUnavailable
                 | ErrorCode::ConfigTooLarge
                 | ErrorCode::ConfigInvalid

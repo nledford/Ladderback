@@ -44,7 +44,11 @@ pub(crate) fn kind_from_text(text: &str) -> Option<OperationKind> {
     }
 }
 
-pub(crate) fn trigger_text(trigger: Trigger) -> &'static str {
+/// The trigger column's word for an operation an API token started: the one
+/// trigger that carries more than a word, in `token_id` and `token_label`.
+pub(crate) const API_TOKEN: &str = "api-token";
+
+pub(crate) fn trigger_text(trigger: &Trigger) -> &'static str {
     match trigger {
         Trigger::Schedule => "schedule",
         Trigger::Manual => "manual",
@@ -52,9 +56,11 @@ pub(crate) fn trigger_text(trigger: Trigger) -> &'static str {
         Trigger::Retry => "retry",
         Trigger::Hub => "hub",
         Trigger::Mcp => "mcp",
+        Trigger::ApiToken { .. } => API_TOKEN,
     }
 }
 
+/// A trigger that is a word alone: every one but [`API_TOKEN`].
 pub(crate) fn trigger_from_text(text: &str) -> Option<Trigger> {
     match text {
         "schedule" => Some(Trigger::Schedule),

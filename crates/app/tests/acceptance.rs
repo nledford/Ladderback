@@ -45,6 +45,8 @@ mod preview_steps;
 #[path = "steps/secrets.rs"]
 mod secrets_steps;
 
+#[path = "steps/api_tokens.rs"]
+mod api_tokens_steps;
 #[path = "steps/hooks.rs"]
 mod hooks_steps;
 #[path = "steps/interop.rs"]
@@ -86,6 +88,7 @@ struct Agent {
     scheduler: scheduler_steps::SchedulerWorld,
     notifications: notifications_steps::NotificationsWorld,
     sign_in: sign_in_steps::SignInWorld,
+    api_tokens: api_tokens_steps::ApiTokensWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -120,6 +123,7 @@ impl Agent {
             schedule: Default::default(),
             conditions: Default::default(),
             sign_in: Default::default(),
+            api_tokens: Default::default(),
             maintenance: Default::default(),
             hooks: hooks_steps::HooksWorld::new(),
             repositories: Default::default(),

@@ -28,6 +28,7 @@ fn access(clock: &Arc<FakeClock>) -> Access {
         Arc::new(InMemoryAdminPassword::with("demo-admin-pass")),
         Arc::new(SeededRandom::new(7)),
         clock.clone(),
+        Arc::new(crate::fakes::InMemoryApiTokenStore::new()),
     )
 }
 
@@ -166,6 +167,7 @@ fn a_password_that_cannot_be_checked_starts_no_session() {
         Arc::new(Unreadable),
         Arc::new(SeededRandom::new(7)),
         clock(),
+        Arc::new(crate::fakes::InMemoryApiTokenStore::new()),
     );
     let refused = access
         .sign_in(HOME, &password("demo-admin-pass"))
@@ -185,6 +187,7 @@ fn no_randomness_starts_no_session_and_keeps_the_wait() {
         Arc::new(InMemoryAdminPassword::with("demo-admin-pass")),
         Arc::new(NoRandomness),
         clock.clone(),
+        Arc::new(crate::fakes::InMemoryApiTokenStore::new()),
     );
     let refused = access
         .sign_in(HOME, &password("demo-admin-pass"))
@@ -233,7 +236,12 @@ fn signing_out_ends_the_session_it_names() {
 #[test]
 fn a_new_admin_password_ends_the_sessions_started_before_it() {
     let kept = Arc::new(InMemoryAdminPassword::with("demo-admin-pass"));
-    let access = Access::new(kept.clone(), Arc::new(SeededRandom::new(7)), clock());
+    let access = Access::new(
+        kept.clone(),
+        Arc::new(SeededRandom::new(7)),
+        clock(),
+        Arc::new(crate::fakes::InMemoryApiTokenStore::new()),
+    );
     let before = access
         .sign_in(HOME, &password("demo-admin-pass"))
         .now_or_never()

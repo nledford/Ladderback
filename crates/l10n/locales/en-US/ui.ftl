@@ -263,6 +263,18 @@ ui-gallery-demo-empty-review = Demo review with nothing to do
 # What the review demo that has nothing to do says.
 ui-gallery-demo-empty-review-body = There is nothing to change.
 
+# The button that opens the review demo that starts on a button of its own.
+ui-gallery-open-secret-review = Open a demo secret
+
+# The accessible name and heading of the review demo that starts on a button of its own, as a dialog that shows a secret once does.
+ui-gallery-demo-secret-review = Demo secret shown once
+
+# What the review demo that starts on a button of its own says.
+ui-gallery-demo-secret-review-body = This demo secret is shown only once.
+
+# The button inside that review demo that focus starts on. The demo shows only where focus starts: pressing it does nothing.
+ui-gallery-copy-demo-secret = Copy the demo secret
+
 # The heading of the pause control's demo.
 ui-gallery-pause-heading = Pause control
 
@@ -1028,6 +1040,9 @@ ui-nav-snapshots = Snapshots
 # The navigation's link to the repositories page.
 ui-nav-repositories = Repositories
 
+# The navigation's link to the Settings page.
+ui-nav-settings = Settings
+
 ## The repositories page: the repositories Ladderback backs up to, and the
 ## form that tests, connects or creates one (§4.4).
 
@@ -1314,3 +1329,142 @@ ui-sign-out = Sign out
 
 # Shown beside Sign out, or in the warning, when the daemon did not answer the request, so the session is as it was.
 ui-session-unreachable = The daemon that serves this page did not answer, so nothing changed. Try again in a moment.
+
+## The Settings page (§4.4): the API tokens, which let a program other than a
+## browser use Ladderback while sign-in is on (§10.1).
+
+# The Settings page's title, as the browser's tab and history show it.
+ui-settings-title = Settings – { -brand-name }
+
+# The Settings page's heading: its one main heading.
+ui-settings-heading = Settings
+
+# The heading of the section of Settings that lists the API tokens and creates them. It names the table of tokens too.
+ui-api-tokens-heading = { -api-token(form: "other") }
+
+# What that section says above the list.
+ui-api-tokens-body = An { -api-token } lets a program other than a browser, such as MCP connect mode, use { -brand-name } while sign-in is on. It can do only what its scopes allow, and it works until you revoke it or set a new admin password.
+
+# Shown in place of the list when no token is kept.
+ui-api-tokens-none = No { -api-token(form: "other") } yet.
+
+# The header of the column of each token's label, which names its row.
+ui-api-tokens-column-label = Label
+
+# The header of the column of what each token may do.
+ui-api-tokens-column-scopes = Scopes
+
+# The header of the column of when each token was created.
+ui-api-tokens-column-created = Created
+
+# The header of the column of when a program last used each token.
+ui-api-tokens-column-last-used = Last used
+
+# The name of a scope of an API token, as a token's row lists it and as the checkbox that chooses it says it.
+# $scope (text): the scope, as a code: read, run, preview or propose.
+ui-api-token-scope = { $scope ->
+    [read] Read
+    [run] Run
+    [preview] Preview
+   *[propose] Propose
+  }
+
+# The hint under the checkbox of a scope: what a program with a token of that scope may do.
+# $scope (text): the scope, as a code: read, run, preview or propose.
+ui-api-token-scope-hint = { $scope ->
+    [read] See the plans, the repositories and their snapshots, the operations and their live progress.
+    [run] Start a plan's backup, cancel a backup, and test a saved repository.
+    [preview] Ask what a forget, a prune or a check would do, without running it.
+   *[propose] Propose changes to the configuration for you to review here. Nothing uses this scope yet.
+  }
+
+# The Last used column of a token no program has used yet.
+ui-api-token-never-used = Never
+
+# The Last used column of a token: how long ago a program last used it, counted back from now on this computer's clock.
+# $unit (text): which count follows: now (under a minute), minutes, hours or days.
+# $count (number): how many minutes, hours or days, rounded down.
+ui-api-token-last-used = { $unit ->
+    [now] Less than a minute ago
+    [minutes] { $count ->
+        [one] { $count } minute ago
+       *[other] { $count } minutes ago
+      }
+    [hours] { $count ->
+        [one] { $count } hour ago
+       *[other] { $count } hours ago
+      }
+   *[days] { $count ->
+        [one] { $count } day ago
+       *[other] { $count } days ago
+      }
+  }
+
+# The button on a token's row that asks to revoke it, named for the token so a screen reader tells the rows' buttons apart.
+# $label (text): the token's label.
+ui-api-token-revoke = Revoke token { $label }
+
+# The title of the dialog that asks before a token is revoked.
+# $label (text): the token's label.
+ui-api-token-revoke-title = Revoke token { $label }
+
+# What that dialog says: what revoking does, and that it can't be undone.
+ui-api-token-revoke-body = A program that uses this token is refused from then on, and the token can't be brought back. To let the program in again, create a new token and give it to the program.
+
+# The button of that dialog that revokes the token.
+ui-api-token-revoke-confirm = Revoke the token
+
+# Said in that dialog while the daemon revokes the token.
+ui-api-token-revoking = Revoking the token…
+
+# Announced once a token is revoked.
+# $label (text): the token's label.
+ui-api-token-revoked = Token { $label } revoked.
+
+# The heading of the form that creates a token.
+ui-api-token-form-heading = Create an { -api-token }
+
+# The label of the field of the token's label.
+ui-api-token-label-label = Label
+
+# The hint under that field.
+# $max (number): the most characters a label may have.
+ui-api-token-label-hint = Up to { $max } characters, so you can tell this token from the others: the program that uses it, for example.
+
+# The name of the group of checkboxes that choose the token's scopes.
+ui-api-token-scopes-legend = Scopes
+
+# The hint under that group's name.
+ui-api-token-scopes-hint = What a program with this token may do. Choose at least one.
+
+# The button that creates the token.
+ui-api-token-create = Create the token
+
+# Said while the daemon creates the token.
+ui-api-token-creating = Creating the token…
+
+# The heading of the list of what is wrong with the form, which takes focus when the form is refused.
+# $count (number): how many problems the list names.
+ui-api-token-problems = { $count ->
+    [one] There is { $count } problem with the form
+   *[other] There are { $count } problems with the form
+  }
+
+# The title of the dialog that shows a new token's whole text, the only time it is shown.
+ui-api-token-created-title = Copy the new { -api-token }
+
+# What that dialog says: the token is shown this once, so it must be copied now.
+# $label (text): the token's label.
+ui-api-token-created-body = This is token { $label }. Copy it now and give it to the program that uses it: { -brand-name } doesn't keep the token itself, so it won't show it again. If it is lost, revoke it and create another.
+
+# The label of the field that holds the new token's whole text, which can be selected and copied by hand.
+ui-api-token-created-field = The new token
+
+# The button that copies the new token to the clipboard.
+ui-api-token-copy = Copy the token
+
+# Said in the dialog once the token is on the clipboard.
+ui-api-token-copied = Copied.
+
+# Said in the dialog when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
+ui-api-token-copy-failed = The browser would not let the page copy it. Select the token in the field and copy it yourself.

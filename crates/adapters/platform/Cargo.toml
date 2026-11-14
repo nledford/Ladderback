@@ -13,6 +13,8 @@ app.workspace = true
 domain.workspace = true
 async-trait.workspace = true
 argon2.workspace = true
+# The admin password's fingerprint: the SHA-256 of its hash's salt (decision 93).
+sha2.workspace = true
 # The manager's command line as a person would type it, in a refusal.
 shell-words.workspace = true
 # The Wi-Fi report of `system_profiler -json` on macOS (decision 80).

@@ -28,7 +28,7 @@ struct Ran {
 }
 
 /// The folders the scenario's `set-password` and daemons share.
-fn home(agent: &mut Agent) -> PathBuf {
+pub(crate) fn home(agent: &mut Agent) -> PathBuf {
     let scratch = agent.scratch().join("shared");
     agent.web.home.get_or_insert(scratch).clone()
 }
@@ -167,8 +167,13 @@ fn files_under(folder: &Path) -> Vec<PathBuf> {
 
 #[then(expr = "no file Ladderback keeps contains {string}")]
 fn no_file_contains(agent: &mut Agent, text: String) {
-    let files = files_under(&home(agent));
-    assert!(!files.is_empty(), "set-password kept no file");
+    no_file_under_holds(&home(agent), &text);
+}
+
+/// Fails unless `folder` holds a file and none of its files holds `text`.
+pub(crate) fn no_file_under_holds(folder: &Path, text: &str) {
+    let files = files_under(folder);
+    assert!(!files.is_empty(), "Ladderback kept no file");
     for path in files {
         let bytes = std::fs::read(&path).expect("a file Ladderback keeps");
         assert!(
@@ -260,13 +265,29 @@ fn has_signed_in(agent: &mut Agent, password: String) {
     assert!(agent.sign_in.cookie.is_some(), "no session cookie");
 }
 
-fn session_cookie(agent: &Agent) -> String {
+pub(crate) fn session_cookie(agent: &Agent) -> String {
     let cookie = agent
         .sign_in
         .cookie
         .as_deref()
         .expect("the admin signed in");
     format!("Cookie: {cookie}")
+}
+
+/// The `X-CSRF-Token` header of the session signed in last.
+pub(crate) fn csrf_header(agent: &Agent) -> String {
+    let csrf = agent
+        .sign_in
+        .csrf
+        .as_deref()
+        .expect("the session's CSRF token");
+    format!("X-CSRF-Token: {csrf}")
+}
+
+#[given("the request has the session cookie")]
+fn has_the_cookie(agent: &mut Agent) {
+    let cookie = session_cookie(agent);
+    agent.web.request().headers.push(cookie);
 }
 
 #[given("the admin has signed out over HTTP")]
