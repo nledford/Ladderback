@@ -1,16 +1,18 @@
 # Builds the release archives and smoke-tests them (technical design §12.1,
-# §16 decision 54). Nothing is published: each archive is a run artifact for a
-# few days, and M6's release packaging adds the hosting. `just release-build`
+# §16 decision 54). Each archive is a run artifact for a few days; the release
+# workflow (release.yml) calls this one for the Linux archives of the commit
+# it tags and attaches them to the GitHub release. `just release-build`
 # runs cargo-dist's `dist build` (dist-workspace.toml) for one target, and
 # `just smoke-release` checks the binary in it (scripts/smoke-release.ts): on
 # Linux in clean containers, Debian 12 and Ubuntu 22.04 among them, on macOS on
 # the runner.
 #
-# It runs every night, by hand, and on pull requests labelled `release`:
-# release-plz labels each release PR so (release-plz.toml), and a change that
-# could break a release build (dependencies, build settings, features) can be
-# labelled to try it before it merges. None of its jobs is a required check,
-# and their names must not match one (development.md §13.8).
+# It runs every night, by hand, from release.yml, and on pull requests
+# labelled `release`: release-plz labels each release PR so
+# (release-plz.toml), and a change that could break a release build
+# (dependencies, build settings, features) can be labelled to try it before it
+# merges. None of its jobs is a required check, and their names must not match
+# one (development.md §13.8).
 #
 # The Linux builds run on Ubuntu 22.04, so the binary needs no glibc newer
 # than 2.35, and the smoke test fails if it does. No build cache: a release
@@ -21,6 +23,17 @@ on:
   schedule:
     - cron: "43 4 * * *" # nightly, apart from ci.yml's 03:17
   workflow_dispatch:
+  # From release.yml, for the archives a release publishes.
+  workflow_call:
+    inputs:
+      macos-optional:
+        description: A failed macOS build doesn't fail the run; a release publishes no macOS archive yet (decision 71)
+        type: boolean
+        default: false
+      tag:
+        description: The release tag to build and expect in `--version`, as `vX.Y.Z`
+        type: string
+        default: ""
   pull_request:
     # Not `opened`: a pull request opened with the `release` label also gets
     # a `labeled` event, and the two runs would cancel each other's builds.
@@ -45,9 +58,11 @@ jobs:
     # pull request's older build. On the job, not the workflow, so that a run
     # whose builds are skipped (another label added) cancels nothing. Nightly
     # and manual runs aren't cancelled: GitHub keeps one running and one
-    # waiting per group, and a newer waiting run replaces the older one.
+    # waiting per group, and a newer waiting run replaces the older one. The
+    # event is in the group, so a nightly or manual run on main never replaces
+    # a release's waiting build (release.yml runs on `push`).
     concurrency:
-      group: release-builds-${{ github.event.pull_request.number || github.ref }}-${{ matrix.target }}
+      group: release-builds-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ matrix.target }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       fail-fast: false
@@ -61,12 +76,20 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-26
     runs-on: ${{ matrix.os }}
+    # A release publishes no macOS archive yet, so its macOS build can't hold
+    # back the Linux ones.
+    continue-on-error: ${{ inputs.macos-optional == true && matrix.target == 'aarch64-apple-darwin' }}
     timeout-minutes: 60
     env:
       TARGET: ${{ matrix.target }}
+      TAG: ${{ inputs.tag }}
     steps:
+      # A release's build checks out its tag, which fetches the tag, so the
+      # binary names itself as that release (decision 90); otherwise the
+      # commit the run is for.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.tag }}
           persist-credentials: false
       # The toolchain and the wasm32 target rust-toolchain.toml names.
       - run: rustup toolchain install
@@ -97,7 +120,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/release"
           tar -xJf "ladderback-$TARGET.tar.xz" -C "$RUNNER_TEMP/release"
       # Uploaded before the smoke test, so a failing build can be downloaded
-      # and looked at.
+      # and looked at. `overwrite`: a rerun's build replaces the failed one's,
+      # so a release never publishes an archive whose smoke test failed.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ladderback-${{ matrix.target }}
@@ -107,10 +131,12 @@ jobs:
             target/distrib/release-build-manifest.json
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
+      # A release's binary must say exactly its version, with no commit.
       - if: runner.os == 'Linux'
-        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" --container all
+        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" --container all ${TAG:+--version "${TAG#v}"}
       - if: runner.os == 'macOS'
-        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback"
+        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" ${TAG:+--version "${TAG#v}"}
 
   # A scheduled run notifies no one, so a failed nightly build opens an issue,
   # or comments on the open one, as ci.yml's nightly jobs do. A job of its own,

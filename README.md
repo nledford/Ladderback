@@ -55,7 +55,7 @@ The [technical design](docs/design/README.md#relationship-to-backrest) has the f
 
 ## Install
 
-Releases don't come with binaries yet, so one command builds the newest release from source, on Linux or macOS:
+On Linux, each release from 0.3.1 on has a download for `x86_64` and `aarch64` with its checksums: the [install guide](docs/guide/install.md#download-a-release-linux) has the commands. macOS has no download yet, so there, or on Linux if you prefer, one command builds the newest release from source:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash

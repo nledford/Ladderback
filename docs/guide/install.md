@@ -1,6 +1,21 @@
 # Install Ladderback
 
-Releases don't come with binaries yet, so you build one from source, on Linux or macOS. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. The [README](../../README.md#install) has the one command that does it. This guide says what that command does, how to build by hand, how to update, and how to keep Ladderback running in the background.
+On Linux, from 0.3.1 on, you can [download a release](#download-a-release-linux); on macOS, and on Linux too if you prefer, you build one from source. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. The [README](../../README.md#install) has the one command that builds from source. This guide says how to download a release, what that command does, how to build by hand, how to update, and how to keep Ladderback running in the background.
+
+## Download a release (Linux)
+
+Each release from 0.3.1 on has an archive for `x86_64` and one for `aarch64` Linux, each holding the `ladderback` binary with the web UI built in, and a `SHA256SUMS` file with their checksums. macOS has no archive until it can be signed and notarized ([decision 71](../design/decisions/71-signing-macos-builds-without-a-developer-id.md)). Download the archive for your machine and the checksums, check the archive, and install the binary into `~/.local/bin`:
+
+```sh
+target="$(uname -m)-unknown-linux-gnu"
+base=https://github.com/nledford/Ladderback/releases/latest/download
+curl -fL -O "$base/ladderback-$target.tar.xz" -O "$base/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xJf "ladderback-$target.tar.xz"
+mkdir -p ~/.local/bin && install -m 755 "ladderback-$target/ladderback" ~/.local/bin/
+```
+
+`sha256sum` must print `ladderback-…tar.xz: OK`; anything else means the download is damaged or isn't the release's, so don't install it. On a Raspberry Pi, `uname -m` says `aarch64` under 32-bit Raspberry Pi OS too, whose 64-bit kernel runs 32-bit programs, and the binary then doesn't start: `getconf LONG_BIT` must print `64`. `~/.local/bin` must be on your `PATH`; if you built Ladderback from source before, `cargo uninstall ladderback` removes that one, so the shell doesn't find the old binary first. To update, run the same commands again, which replace the binary, then `ladderback install-service` again if it runs as a [service](#running-as-a-service).
 
 ## The install script
 

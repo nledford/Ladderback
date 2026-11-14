@@ -121,7 +121,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [51](decisions/51-what-a-checks-findings-are.md) | What a check's findings are |
 | [52](decisions/52-the-operation-log-keeps-the-repositorys-alias.md) | The operation log keeps the repository's alias |
 | [53](decisions/53-creating-an-imported-repository-from-its-row.md) | Creating an imported repository from its row |
-| [54](decisions/54-early-release-builds.md) | Early release builds |
+| [54](decisions/54-early-release-builds.md) | Early release builds; the Linux archives published from 0.3.1 |
 | [55](decisions/55-a-backup-stopped-at-its-deadline-winds-down.md) | A backup stopped at its deadline winds down |
 | [56](decisions/56-the-calendar-a-retention-rule-counts-on.md) | The calendar a retention rule counts on |
 | [57](decisions/57-recording-the-id-of-a-repository-a-job-opened.md) | Recording the ID of a repository a job opened |
