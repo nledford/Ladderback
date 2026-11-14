@@ -22,7 +22,7 @@ use jiff::Timestamp;
 
 pub use template::{MAX_TEMPLATE_BYTES, Template};
 
-use crate::execution::{Operation, OperationKind, OperationStatus, Target};
+use crate::execution::{OperationKind, OperationStatus, Target, WarningKind};
 use crate::planning::{InvalidValue, ValueKind, Violation, is_relative_program};
 use crate::secrets::SecretRef;
 use crate::{OperationId, PlanId, RepositoryAlias};
@@ -150,9 +150,13 @@ pub struct Event {
     /// When the operation started, for a start, or ended; for a retry, when
     /// the retry runs.
     pub at: Timestamp,
-    /// The failure's stored code (`operation-failed`), for a failure whose
-    /// reason the operation records, and for the failure a retry follows.
-    pub code: Option<&'static str>,
+    /// The codes the event tells (§9): the failure's stored code
+    /// (`operation-failed`), for a failure whose reason the operation
+    /// records and for the failure a retry follows; for a backup that ended
+    /// with warnings, the code of each kind of warning it kept
+    /// (`hook-warning`), each once, in the order the first of each came, as
+    /// the history names them (#508). Empty for any other event.
+    pub codes: Vec<&'static str>,
     /// Which retry a `backup.retrying` tells of.
     pub attempt: Option<Attempt>,
 }
@@ -175,38 +179,44 @@ pub struct Subject<'a> {
     pub target: &'a Target,
     pub repository: Option<&'a RepositoryAlias>,
     pub status: &'a OperationStatus,
-}
-
-impl<'a> Subject<'a> {
-    /// The facts of `operation`, with the repository alias it records.
-    pub fn of(operation: &'a Operation) -> Self {
-        Self {
-            operation: operation.id(),
-            kind: operation.kind(),
-            target: operation.target(),
-            repository: operation.repository_alias(),
-            status: operation.status(),
-        }
-    }
+    /// The kinds of the warnings the log keeps of the operation, in the
+    /// order the first of each came.
+    pub warnings: &'a [WarningKind],
 }
 
 impl Event {
     /// The event `subject` makes when it starts, at `at`.
     pub fn started(subject: Subject<'_>, at: Timestamp) -> Option<Self> {
         let kind = EventKind::started(subject.kind)?;
-        Some(Self::of(kind, subject, None, at))
+        Some(Self::of(kind, subject, Vec::new(), at))
     }
 
-    /// The event `subject` makes when it ends with `outcome`, at `at`. The
-    /// code is the one the operation's status records, when it records a
-    /// failure; a failure the log hasn't recorded has none.
+    /// The event `subject` makes when it ends with `outcome`, at `at`. A
+    /// failure's code is the one the operation's status records, and a
+    /// failure the log hasn't recorded has none; a success with warnings
+    /// tells the code of each kind of warning, each once.
     pub fn ended(subject: Subject<'_>, outcome: Outcome, at: Timestamp) -> Option<Self> {
         let kind = EventKind::ended(subject.kind, outcome)?;
-        let code = match outcome {
+        let codes = match outcome {
             Outcome::Failed => failed(subject.status),
-            Outcome::Succeeded | Outcome::SucceededWithWarnings => None,
+            Outcome::SucceededWithWarnings => {
+                let mut codes = Vec::new();
+                for code in subject.warnings.iter().map(|warning| warning.code()) {
+                    if !codes.contains(&code) {
+                        codes.push(code);
+                    }
+                }
+                codes
+            }
+            Outcome::Succeeded => Vec::new(),
         };
-        Some(Self::of(kind, subject, code, at))
+        Some(Self::of(kind, subject, codes, at))
+    }
+
+    /// What `{code}` and a webhook's `code` say: the event's codes,
+    /// separated by `, `, or nothing when it has none.
+    pub fn code(&self) -> Option<String> {
+        (!self.codes.is_empty()).then(|| self.codes.join(", "))
     }
 
     /// The event a retry of `subject`, the backup that failed, makes when it
@@ -225,19 +235,14 @@ impl Event {
         })
     }
 
-    fn of(
-        kind: EventKind,
-        subject: Subject<'_>,
-        code: Option<&'static str>,
-        at: Timestamp,
-    ) -> Self {
+    fn of(kind: EventKind, subject: Subject<'_>, codes: Vec<&'static str>, at: Timestamp) -> Self {
         Self {
             kind,
             operation: subject.operation,
             plan: subject.target.plan.clone(),
             repository: subject.repository.cloned(),
             at,
-            code,
+            codes,
             attempt: None,
         }
     }
@@ -558,11 +563,11 @@ impl Notifications {
     }
 }
 
-/// Whether `status` is an ending a notification tells as a failure.
-fn failed(status: &OperationStatus) -> Option<&'static str> {
+/// The code of the failure `status` records, when it records one.
+fn failed(status: &OperationStatus) -> Vec<&'static str> {
     match status {
-        OperationStatus::Failed { reason } => Some(reason.code()),
-        _ => None,
+        OperationStatus::Failed { reason } => vec![reason.code()],
+        _ => Vec::new(),
     }
 }
 

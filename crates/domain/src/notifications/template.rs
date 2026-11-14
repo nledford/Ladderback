@@ -139,8 +139,8 @@ impl Template {
                     message.push_str(&event.operation.as_uuid().to_string());
                 }
                 Part::Value(Placeholder::Code) => {
-                    if let Some(code) = event.code {
-                        message.push_str(code);
+                    if let Some(code) = event.code() {
+                        message.push_str(&code);
                     }
                 }
                 Part::Value(Placeholder::Time) => message.push_str(&event.at.to_string()),

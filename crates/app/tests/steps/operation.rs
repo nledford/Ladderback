@@ -228,10 +228,11 @@ async fn history_counts_warnings(agent: &mut Agent, count: u64) {
 }
 
 /// A warning's kind by its code on the wire.
-fn kind_named(code: &str) -> WarningKind {
+pub(crate) fn kind_named(code: &str) -> WarningKind {
     match code {
         "source-unreadable" => WarningKind::SourceUnreadable,
         "check-warning" => WarningKind::CheckWarning,
+        "hook-warning" => WarningKind::Hook,
         other => panic!("no warning kind is named {other}"),
     }
 }

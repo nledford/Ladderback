@@ -1,6 +1,7 @@
 //! The notifications adapter (technical design §11): the [`Notifier`] port
 //! over HTTP. A webhook is posted a JSON body, an ntfy topic the message's
-//! text, and a healthchecks check is pinged at its URL, or at `/start` or
+//! text under the catalog's title for the event, tagged with the event's
+//! name, and a healthchecks check is pinged at its URL, or at `/start` or
 //! `/fail` of it.
 //!
 //! The client follows no redirect, reads no answer past its status, and
@@ -91,19 +92,35 @@ impl HttpNotifier {
 
     /// The text `notification` says, cut to [`MAX_MESSAGE_BYTES`].
     fn text(&self, notification: &Notification) -> String {
-        let text = match (&notification.message, &notification.locale) {
-            (Message::Custom(text), _) => text.clone(),
-            (Message::Default, None) => default_message(&self.system, &notification.event),
-            (Message::Default, Some(locale)) => {
-                let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
-                let (_, localizer) = match agents.take() {
-                    Some(held) if held.0 == *locale => agents.insert(held),
-                    _ => agents.insert((locale.clone(), self.localizer(locale))),
-                };
+        let text = match &notification.message {
+            Message::Custom(text) => text.clone(),
+            Message::Default => self.in_locale(notification.locale.as_ref(), |localizer| {
                 default_message(localizer, &notification.event)
-            }
+            }),
         };
         capped(text)
+    }
+
+    /// The title `notification` is headed with: the catalog's for its
+    /// event, in the agent's locale, whatever the message says.
+    fn title(&self, notification: &Notification) -> String {
+        self.in_locale(notification.locale.as_ref(), |localizer| {
+            title(localizer, notification.event.kind)
+        })
+    }
+
+    /// What `write` writes with the localizer of the agent's `locale`, when
+    /// the agent names one, and else with the system's.
+    fn in_locale<T>(&self, locale: Option<&Locale>, write: impl FnOnce(&Localizer) -> T) -> T {
+        let Some(locale) = locale else {
+            return write(&self.system);
+        };
+        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        let (_, localizer) = match agents.take() {
+            Some(held) if held.0 == *locale => agents.insert(held),
+            _ => agents.insert((locale.clone(), self.localizer(locale))),
+        };
+        write(localizer)
     }
 
     /// A localizer for the agent's `locale`, then the system's locales: a
@@ -136,7 +153,8 @@ impl HttpNotifier {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain; charset=utf-8"),
                 )
-                .header("Title", HeaderValue::from_static(event.kind.name()))
+                .header("Title", header_text(&self.title(notification)))
+                .header("Tags", HeaderValue::from_static(event.kind.name()))
                 .body(text),
             ChannelKind::Healthchecks => self
                 .client
@@ -233,7 +251,7 @@ fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
         "operation": event.operation.as_uuid().to_string(),
         "plan": event.plan.as_ref().map(|plan| plan.as_str()),
         "repository": event.repository.as_ref().map(|repository| repository.as_str()),
-        "code": event.code,
+        "code": event.code(),
         "time": event.at.to_string(),
         "attempt": event.attempt.map(|attempt| attempt.number),
         "attempts": event.attempt.map(|attempt| attempt.of),
@@ -251,7 +269,7 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
         .repository
         .as_ref()
         .map_or_else(operation, |repository| repository.as_str().to_owned());
-    let code = event.code.unwrap_or("none").to_owned();
+    let code = event.code().unwrap_or_else(|| "none".to_owned());
     let (id, args): (MessageId, Vec<(&str, MsgArg)>) = match event.kind {
         EventKind::BackupStarted => (
             msg::NOTIFY_BACKUP_STARTED,
@@ -314,6 +332,50 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
         ),
     };
     localizer.message(id, &args).text().to_owned()
+}
+
+/// The catalog's title for an event of `kind`, in the localizer's locale.
+/// It takes no argument, so nothing of the event, and no secret, can reach
+/// it (I4).
+fn title(localizer: &Localizer, kind: EventKind) -> String {
+    let id = match kind {
+        EventKind::BackupStarted => msg::NOTIFY_TITLE_BACKUP_STARTED,
+        EventKind::BackupSucceeded => msg::NOTIFY_TITLE_BACKUP_SUCCEEDED,
+        EventKind::BackupWarning => msg::NOTIFY_TITLE_BACKUP_WARNING,
+        EventKind::BackupFailed => msg::NOTIFY_TITLE_BACKUP_FAILED,
+        EventKind::BackupRetrying => msg::NOTIFY_TITLE_BACKUP_RETRYING,
+        EventKind::ForgetFailed => msg::NOTIFY_TITLE_FORGET_FAILED,
+        EventKind::PruneFailed => msg::NOTIFY_TITLE_PRUNE_FAILED,
+        EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
+    };
+    localizer.message(id, &[]).text().to_owned()
+}
+
+/// `text` as a header's value: as it is when it is printable ASCII, and
+/// else as an RFC 2047 encoded word (`=?UTF-8?Q?…?=`), which ntfy decodes,
+/// since a header carries no other characters. Text that holds `=?` is
+/// encoded too, so that it isn't read as the start of an encoded word.
+fn header_text(text: &str) -> String {
+    if text.bytes().all(|byte| matches!(byte, b' '..=b'~')) && !text.contains("=?") {
+        return text.to_owned();
+    }
+    let mut encoded = String::from("=?UTF-8?Q?");
+    for byte in text.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' => encoded.push(char::from(byte)),
+            b' ' => encoded.push('_'),
+            _ => {
+                encoded.push('=');
+                for nibble in [byte >> 4, byte & 0x0f] {
+                    if let Some(digit) = char::from_digit(u32::from(nibble), 16) {
+                        encoded.push(digit.to_ascii_uppercase());
+                    }
+                }
+            }
+        }
+    }
+    encoded.push_str("?=");
+    encoded
 }
 
 /// `text`, cut at the last character boundary within [`MAX_MESSAGE_BYTES`].

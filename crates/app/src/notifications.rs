@@ -217,6 +217,7 @@ impl Notify {
             target: &record.target,
             repository: record.repository_alias.as_ref().or(plan_repository),
             status: &record.status,
+            warnings: &record.warning_kinds,
         };
         let event = match turn {
             Turn::Started => Event::started(subject, at),

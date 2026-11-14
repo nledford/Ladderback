@@ -393,6 +393,25 @@ async fn a_backup_warns(agent: &mut Agent, plan: String) {
     world.tell_end(&operation).await;
 }
 
+#[when(expr = "the backup of {string} succeeds with the warnings {string}")]
+async fn a_backup_warns_of(agent: &mut Agent, plan: String, codes: String) {
+    let world = &mut agent.notifications;
+    let mut operation = world.backup(&plan);
+    for code in codes.split(", ") {
+        operation
+            .record_warning(Warning {
+                kind: super::operation_steps::kind_named(code),
+                item: None,
+                during: "backup".to_owned(),
+                detail: "canary-warning-detail".to_owned(),
+            })
+            .expect("a running backup warns");
+    }
+    let at = world.now();
+    operation.succeed(at).expect("a running backup succeeds");
+    world.tell_end(&operation).await;
+}
+
 #[when(expr = "the backup of {string} fails")]
 async fn a_backup_fails(agent: &mut Agent, plan: String) {
     fails_saying(agent, plan, "repository locked".to_owned()).await;
@@ -459,14 +478,11 @@ fn sent_for_a_plan(agent: &mut Agent, channel: String, event: String, plan: Stri
             (
                 event.kind.name(),
                 event.plan.as_ref().map(PlanId::as_str),
-                event.code,
+                event.code(),
             )
         })
         .collect();
-    assert_eq!(
-        told,
-        [(event.as_str(), Some(plan.as_str()), Some(code.as_str()))]
-    );
+    assert_eq!(told, [(event.as_str(), Some(plan.as_str()), Some(code))]);
 }
 
 #[then(expr = "{string} is sent {string} for the repository {string} with the code {string}")]
@@ -486,18 +502,13 @@ fn sent_for_a_repository(
                 event.kind.name(),
                 event.plan.clone(),
                 event.repository.as_ref().map(RepositoryAlias::as_str),
-                event.code,
+                event.code(),
             )
         })
         .collect();
     assert_eq!(
         told,
-        [(
-            event.as_str(),
-            None,
-            Some(repository.as_str()),
-            Some(code.as_str())
-        )]
+        [(event.as_str(), None, Some(repository.as_str()), Some(code))]
     );
 }
 

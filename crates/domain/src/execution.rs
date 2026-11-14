@@ -238,6 +238,25 @@ pub enum WarningKind {
     Other,
 }
 
+impl WarningKind {
+    /// The warning's stored code (§9): the kebab-case name the operation
+    /// log keeps it under, which the history's `warning-codes` and a
+    /// notification's `{code}` carry too.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::SourceUnreadable => "source-unreadable",
+            Self::Hook => "hook-warning",
+            Self::MaintenancePartial => "maintenance-partial",
+            Self::CheckWarning => "check-warning",
+            Self::CheckError => "check-error",
+            Self::OtherHosts => "maintenance-other-hosts",
+            Self::LocationSkipped => "location-skipped",
+            Self::SecretFileReadable => "secret-file-readable",
+            Self::Other => "unknown",
+        }
+    }
+}
+
 /// The kinds of `warnings`, each once, in the order the first of each came:
 /// what the history names an operation's warnings by (#508).
 pub fn warning_kinds(warnings: &[Warning]) -> Vec<WarningKind> {
@@ -697,6 +716,40 @@ mod tests {
             [WarningKind::SourceUnreadable, WarningKind::CheckWarning]
         );
         assert_eq!(warning_kinds(&[]), Vec::new());
+    }
+
+    /// Each warning is told by the code the history names it by, which a
+    /// notification's `{code}` repeats (#548).
+    #[test]
+    fn each_warning_kind_has_the_code_the_history_names_it_by() {
+        let codes: Vec<&str> = [
+            WarningKind::SourceUnreadable,
+            WarningKind::Hook,
+            WarningKind::MaintenancePartial,
+            WarningKind::CheckWarning,
+            WarningKind::CheckError,
+            WarningKind::OtherHosts,
+            WarningKind::LocationSkipped,
+            WarningKind::SecretFileReadable,
+            WarningKind::Other,
+        ]
+        .into_iter()
+        .map(WarningKind::code)
+        .collect();
+        assert_eq!(
+            codes,
+            [
+                "source-unreadable",
+                "hook-warning",
+                "maintenance-partial",
+                "check-warning",
+                "check-error",
+                "maintenance-other-hosts",
+                "location-skipped",
+                "secret-file-readable",
+                "unknown",
+            ]
+        );
     }
 
     /// An operation names a readable secret file once, however many of its
