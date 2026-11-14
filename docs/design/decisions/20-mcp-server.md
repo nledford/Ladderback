@@ -1,3 +1,5 @@
 # Decision 20: MCP server
 
 **`ladderback mcp`: newline-delimited JSON-RPC 2.0 over stdio (MCP `2025-06-18` or later), in one inbound adapter (`adapters/mcp`).** Connect mode drives a running agent through `/api/v1` (a hub from M4b) with a scoped API token; headless and scratch modes run their own in-process session under the data-dir lock. Tools read state, run and cancel backups, and preview forget and import. Nothing restores, deletes, edits config or adds a command: a model-driven client is not a human confirmation, and token scopes enforce this in the daemon (§4.6, §10.5).
+
+**Amended by decision NN** (2026-11-14, #518): MCP gains tools that propose configuration changes (`propose_setup`, `check_proposal`, `dry_run_plan`, `get_proposal`, `withdraw_proposal`) under a new `propose` token scope. A proposal changes nothing until a person approves it in the web UI, ticking each command it adds, with step-up confirmation; there is still no tool that approves, restores, deletes or edits config directly. With sign-in off, that approval is a convenience, not a safety boundary.

@@ -52,7 +52,7 @@ CREATE TABLE repo_grants (repo_uuid TEXT PRIMARY KEY, owner TEXT, epoch INTEGER,
                           keep_delete_secs INTEGER, prune_margin_secs INTEGER, updated_at INTEGER);
 
 CREATE TABLE api_tokens (id TEXT PRIMARY KEY, label TEXT, hash TEXT NOT NULL,  -- argon2id of the secret part
-                         scopes TEXT NOT NULL,      -- comma list of read|run|preview (§10.1)
+                         scopes TEXT NOT NULL,      -- comma list of read|run|preview|propose (§10.1)
                          created_at INTEGER, last_used_at INTEGER);
 
 -- hub only
