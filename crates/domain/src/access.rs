@@ -384,7 +384,10 @@ impl SignInWaits {
     /// What is left of `client`'s wait at `now`, if it is waiting: a
     /// sign-in or an API token from it now is refused unchecked.
     pub fn waiting(&self, client: Client, now: Timestamp) -> Option<SignedDuration> {
-        todo!()
+        self.by_client
+            .get(&client)
+            .filter(|attempts| now < attempts.next)
+            .map(|attempts| attempts.next.duration_since(now))
     }
 
     /// The sign-in from `client` succeeded: its waits start over.

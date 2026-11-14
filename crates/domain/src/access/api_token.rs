@@ -50,15 +50,25 @@ impl Scope {
 
     /// Its name on the wire and in the store.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Read => "read",
+            Self::Run => "run",
+            Self::Preview => "preview",
+            Self::Propose => "propose",
+        }
     }
 
     pub fn parse(text: &str) -> Option<Self> {
-        todo!()
+        Self::ALL.into_iter().find(|scope| scope.as_str() == text)
     }
 
     fn bit(self) -> u8 {
-        todo!()
+        match self {
+            Self::Read => 1,
+            Self::Run => 2,
+            Self::Preview => 4,
+            Self::Propose => 8,
+        }
     }
 }
 
@@ -68,17 +78,23 @@ pub struct Scopes(u8);
 
 impl Scopes {
     pub fn new(scopes: impl IntoIterator<Item = Scope>) -> Result<Self, ApiTokenProblem> {
-        todo!()
+        let bits = scopes.into_iter().fold(0, |bits, scope| bits | scope.bit());
+        if bits == 0 {
+            return Err(ApiTokenProblem::NoScope);
+        }
+        Ok(Self(bits))
     }
 
     /// Whether the token was given `scope`.
     pub fn allows(self, scope: Scope) -> bool {
-        todo!()
+        self.0 & scope.bit() != 0
     }
 
     /// The scopes, in [`Scope::ALL`]'s order.
     pub fn iter(self) -> impl Iterator<Item = Scope> {
-        todo!() as std::iter::Empty<Scope>
+        Scope::ALL
+            .into_iter()
+            .filter(move |scope| self.allows(*scope))
     }
 }
 
@@ -100,16 +116,29 @@ impl ApiTokenId {
     /// The ID random `bytes` make: their first 60 bits, five to a
     /// character, so every bit drawn counts.
     pub fn from_bytes(bytes: &[u8; TOKEN_BYTES]) -> Self {
-        todo!()
+        let bits = bytes
+            .iter()
+            .take(8)
+            .fold(0_u64, |bits, byte| (bits << 8) | u64::from(*byte));
+        Self(
+            (0..ID_CHARS)
+                .map(|index| {
+                    let quintet = (bits >> (59 - 5 * index)) & 31;
+                    let index = usize::try_from(quintet).unwrap_or(0);
+                    char::from(BASE32.get(index).copied().unwrap_or(b'a'))
+                })
+                .collect(),
+        )
     }
 
     /// Exactly [`ID_CHARS`] characters of lower-case base32.
     pub fn parse(text: &str) -> Option<Self> {
-        todo!()
+        (text.len() == ID_CHARS && text.bytes().all(|byte| BASE32.contains(&byte)))
+            .then(|| Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
@@ -120,11 +149,18 @@ pub struct ApiTokenLabel(String);
 
 impl ApiTokenLabel {
     pub fn new(text: String) -> Result<Self, ApiTokenProblem> {
-        todo!()
+        let fits = !text.trim().is_empty()
+            && text.chars().count() <= LABEL_MAX_CHARS
+            && !text.chars().any(char::is_control);
+        if fits {
+            Ok(Self(text))
+        } else {
+            Err(ApiTokenProblem::Label)
+        }
     }
 
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
@@ -135,17 +171,17 @@ pub struct ApiTokenSecret([u8; TOKEN_BYTES]);
 
 impl ApiTokenSecret {
     pub fn from_bytes(bytes: [u8; TOKEN_BYTES]) -> Self {
-        todo!()
+        Self(bytes)
     }
 
     fn digest(&self) -> ApiTokenDigest {
-        todo!()
+        ApiTokenDigest(Sha256::digest(self.0).into())
     }
 }
 
 impl std::fmt::Debug for ApiTokenSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        f.write_str("ApiTokenSecret(***)")
     }
 }
 
@@ -156,17 +192,17 @@ pub struct ApiTokenDigest([u8; 32]);
 
 impl ApiTokenDigest {
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        todo!()
+        Self(bytes)
     }
 
     pub fn as_bytes(&self) -> &[u8; 32] {
-        todo!()
+        &self.0
     }
 }
 
 impl std::fmt::Debug for ApiTokenDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        f.write_str("ApiTokenDigest(***)")
     }
 }
 
@@ -176,27 +212,48 @@ pub struct ApiTokenText(String);
 
 impl ApiTokenText {
     pub fn new(id: &ApiTokenId, secret: &ApiTokenSecret) -> Self {
-        todo!()
+        let mut text = String::with_capacity(PREFIX.len() + ID_CHARS + 1 + SECRET_CHARS);
+        text.push_str(PREFIX);
+        text.push_str(id.as_str());
+        text.push('_');
+        let (triples, rest) = secret.0.as_chunks::<3>();
+        for [a, b, c] in triples {
+            let bits = (u32::from(*a) << 16) | (u32::from(*b) << 8) | u32::from(*c);
+            for shift in [18, 12, 6, 0] {
+                text.push(base64_char(bits >> shift));
+            }
+        }
+        if let [a, b] = rest {
+            let bits = (u32::from(*a) << 16) | (u32::from(*b) << 8);
+            for shift in [18, 12, 6] {
+                text.push(base64_char(bits >> shift));
+            }
+        }
+        Self(text)
     }
 
     pub fn expose(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
 impl std::fmt::Debug for ApiTokenText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        f.write_str("ApiTokenText(***)")
     }
 }
 
 fn base64_char(sextet: u32) -> char {
-        todo!()
-    }
+    let index = usize::try_from(sextet & 63).unwrap_or(0);
+    char::from(BASE64URL.get(index).copied().unwrap_or(b'A'))
+}
 
 fn base64_value(char: u8) -> Option<u32> {
-        todo!()
-    }
+    BASE64URL
+        .iter()
+        .position(|candidate| *candidate == char)
+        .and_then(|index| u32::try_from(index).ok())
+}
 
 /// A token as a request presents it: its ID and the secret to check.
 #[derive(Debug)]
@@ -209,11 +266,40 @@ impl PresentedApiToken {
     /// Exactly what [`ApiTokenText`] writes: the prefix, the ID, `_` and the
     /// secret, the secret's unused last bits zero, so a secret has one text.
     pub fn parse(text: &str) -> Option<Self> {
-        todo!()
+        let rest = text.strip_prefix(PREFIX)?;
+        let (id, rest) = (rest.get(..ID_CHARS)?, rest.get(ID_CHARS..)?);
+        let id = ApiTokenId::parse(id)?;
+        let encoded = rest.strip_prefix('_')?.as_bytes();
+        if encoded.len() != SECRET_CHARS {
+            return None;
+        }
+        let mut bytes = [0; TOKEN_BYTES];
+        let (quads, tail) = encoded.as_chunks::<4>();
+        let (triples, last) = bytes.as_chunks_mut::<3>();
+        for (triple, quad) in triples.iter_mut().zip(quads) {
+            let mut bits = 0;
+            for char in quad {
+                bits = (bits << 6) | base64_value(*char)?;
+            }
+            let [_, high, middle, low] = bits.to_be_bytes();
+            *triple = [high, middle, low];
+        }
+        let [a, b, c] = tail else { return None };
+        let bits = (base64_value(*a)? << 12) | (base64_value(*b)? << 6) | base64_value(*c)?;
+        if bits & 0b11 != 0 {
+            return None;
+        }
+        let [_, _, high, low] = (bits >> 2).to_be_bytes();
+        let [first, second] = last else { return None };
+        (*first, *second) = (high, low);
+        Some(Self {
+            id,
+            secret: ApiTokenSecret(bytes),
+        })
     }
 
     pub fn id(&self) -> &ApiTokenId {
-        todo!()
+        &self.id
     }
 }
 
@@ -242,20 +328,30 @@ impl ApiToken {
         password: PasswordFingerprint,
         now: Timestamp,
     ) -> Self {
-        todo!()
+        Self {
+            id,
+            label,
+            scopes,
+            digest: secret.digest(),
+            password,
+            created_at: now,
+            last_used_at: None,
+        }
     }
 
     /// Whether `presented` is this token, with its own secret, while the
     /// admin password it was created under is kept still. The secret is
     /// compared by its SHA-256, in constant time.
     pub fn accepts(&self, presented: &PresentedApiToken, under: PasswordFingerprint) -> bool {
-        todo!()
+        let same_secret: bool = presented.secret.digest().0.ct_eq(&self.digest.0).into();
+        same_secret && presented.id == self.id && under == self.password
     }
 
     /// Whether a use at `now` is to be written: the first, and then one at
     /// least [`LAST_USE_EVERY`] after the last written.
     pub fn use_to_record(&self, now: Timestamp) -> bool {
-        todo!()
+        self.last_used_at
+            .is_none_or(|last| now.duration_since(last) >= LAST_USE_EVERY)
     }
 }
 
@@ -263,8 +359,8 @@ impl ApiToken {
 /// a backup only. Stopping maintenance or an initialisation is left to a
 /// signed-in admin (decision 93).
 pub fn cancels(kind: crate::execution::OperationKind) -> bool {
-        todo!()
-    }
+    kind == crate::execution::OperationKind::Backup
+}
 
 #[cfg(test)]
 mod tests;
