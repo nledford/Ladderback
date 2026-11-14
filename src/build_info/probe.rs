@@ -33,6 +33,12 @@ pub fn is_commit(text: &str) -> bool {
     (7..=64).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// A one-line answer of `git` without the line break that ends it, and
+/// nothing else: a folder's name may end in a space.
+pub fn line(answer: &str) -> &str {
+    answer.strip_suffix('\n').unwrap_or(answer)
+}
+
 /// The build of `version` from the package folder `package`: the commit a
 /// packager `named`, when it is one, built as between releases and without
 /// changes; otherwise what `git` said of the `checkout`, when that is the
@@ -60,7 +66,7 @@ pub fn found(
         return unknown;
     };
     let head = checkout.head.trim();
-    if Path::new(checkout.top.trim()) != package || !is_commit(head) {
+    if Path::new(line(checkout.top)) != package || !is_commit(head) {
         return unknown;
     }
     let tag = format!("v{version}");
@@ -175,6 +181,23 @@ mod tests {
                 dirty: false,
                 release: false,
             }
+        );
+    }
+
+    #[test]
+    fn a_work_tree_whose_folder_ends_in_a_space_is_its_own() {
+        let spaced = Checkout {
+            top: "/home/demo/ladderback \n",
+            ..checkout("", "")
+        };
+        assert_eq!(
+            found(
+                "0.3.0",
+                Path::new("/home/demo/ladderback "),
+                None,
+                Some(&spaced)
+            ),
+            between_releases("3f937cf0a1b2c3d4e5f60718293a4b5c6d7e8f90")
         );
     }
 

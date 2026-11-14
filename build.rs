@@ -64,7 +64,7 @@ impl Answers {
     /// in no work tree.
     fn of(package: &Path) -> Option<Self> {
         let top = git(package, &["rev-parse", "--show-toplevel"])?;
-        let top = Path::new(top.trim()).canonicalize().ok()?;
+        let top = Path::new(probe::line(&top)).canonicalize().ok()?;
         Some(Self {
             top: top.to_str()?.to_owned(),
             head: git(package, &["rev-parse", "HEAD"])?,
