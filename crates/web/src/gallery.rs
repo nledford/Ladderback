@@ -73,12 +73,16 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let toast = RwSignal::<Option<String>>::new(None);
     let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
     // The review demos: whether each is open, and what confirming the first
-    // announces.
+    // announces. The third starts on a button of its own (`starts_on`).
     let review_open = RwSignal::new(false);
     let empty_review_open = RwSignal::new(false);
+    let secret_review_open = RwSignal::new(false);
+    let secret_copy = NodeRef::<leptos::html::Button>::new();
     let review_confirmed = t(msg::UI_GALLERY_DEMO_REVIEW_CONFIRMED);
     let review_body = t(msg::UI_GALLERY_DEMO_REVIEW_BODY);
     let empty_review_body = t(msg::UI_GALLERY_DEMO_EMPTY_REVIEW_BODY);
+    let secret_review_body = t(msg::UI_GALLERY_DEMO_SECRET_REVIEW_BODY);
+    let copy_demo_secret = t(msg::UI_GALLERY_COPY_DEMO_SECRET);
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
@@ -304,6 +308,15 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     {t(msg::UI_GALLERY_OPEN_EMPTY_REVIEW)}
                 </button>
             </p>
+            <p>
+                <button
+                    type="button"
+                    id="gallery-secret-review"
+                    on:click=move |_| secret_review_open.set(true)
+                >
+                    {t(msg::UI_GALLERY_OPEN_SECRET_REVIEW)}
+                </button>
+            </p>
             <ReviewDialog
                 open=review_open
                 title=t(msg::UI_GALLERY_DEMO_REVIEW)
@@ -329,6 +342,22 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 described_by="gallery-empty-review-body".to_owned()
             >
                 <p id="gallery-empty-review-body">{empty_review_body}</p>
+            </ReviewDialog>
+            <ReviewDialog
+                open=secret_review_open
+                title=t(msg::UI_GALLERY_DEMO_SECRET_REVIEW)
+                dismiss_label=t(msg::UI_REVIEW_CLOSE)
+                confirm=None
+                returns_to="gallery-secret-review".to_owned()
+                described_by="gallery-secret-review-body".to_owned()
+                starts_on=secret_copy
+            >
+                <p id="gallery-secret-review-body">{secret_review_body}</p>
+                <p>
+                    <button type="button" node_ref=secret_copy>
+                        {copy_demo_secret}
+                    </button>
+                </p>
             </ReviewDialog>
         </section>
         <section>

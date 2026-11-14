@@ -1869,6 +1869,8 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_REPOSITORIES_TITLE
     } else if path == "/snapshots" {
         msg::UI_SNAPSHOTS_TITLE
+    } else if path == "/settings" {
+        msg::UI_SETTINGS_TITLE
     } else {
         msg::UI_NOT_FOUND_TITLE
     };

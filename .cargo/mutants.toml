@@ -38,6 +38,15 @@
 # `@ui` scenarios of `features/security/sign_in.feature` run the glue in
 # Chromium.
 #
+# `crates/web/src/settings.rs` is the DOM glue of the Settings page's API
+# tokens (security §10.1): it sends the list, create and revoke requests,
+# opens and closes the two dialogs, clears a new token's text when its dialog
+# is left, and writes the text to the clipboard. What the form lacks, the
+# request it sends, which field a refusal is about, how a scope and a last use
+# read and the words of each button and dialog are `api_tokens.rs`'s, mutated
+# on the host; the `@ui` scenarios of `features/security/api_tokens.feature`
+# run the glue in Chromium.
+#
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
 # starts and the cancel; doing what `maintenance::Panel` decides (`Page::act`:
@@ -72,6 +81,7 @@ exclude_globs = [
     "crates/web/src/ws.rs",
     "crates/web/src/snapshots.rs",
     "crates/web/src/sign_in.rs",
+    "crates/web/src/settings.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [

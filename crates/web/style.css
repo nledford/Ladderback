@@ -306,6 +306,31 @@ main:focus {
   grid-column: 2;
 }
 
+/* A group of choices, such as an API token's scopes: named by its legend,
+   which reads as a field's label does, without the browser's frame. */
+fieldset.choices {
+  border: 0;
+  margin-block: 1rem;
+  margin-inline: 0;
+  padding: 0;
+}
+
+fieldset.choices legend {
+  font-weight: 600;
+  padding: 0;
+}
+
+fieldset.choices > p {
+  margin-block: 0.25rem;
+}
+
+/* A new API token's whole text: data, in the monospace a terminal shows it
+   in, and wide enough for its 66 characters where the screen has room. */
+.field input.token {
+  font-family: ui-monospace, monospace;
+  max-inline-size: 40rem;
+}
+
 .form-error {
   color: var(--badge-error-fg);
   font-weight: 600;
