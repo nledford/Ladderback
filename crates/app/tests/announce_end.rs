@@ -641,6 +641,9 @@ async fn a_success_is_announced_after_its_hooks_and_the_write_of_its_end() {
             "hook before",
             "write running",
             "announce started",
+            // The result, with a backup's snapshot, before any ending hook
+            // (decision 92).
+            "write running",
             "hook after",
             "hook finally",
             "write succeeded",

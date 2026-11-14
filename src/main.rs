@@ -327,6 +327,7 @@ fn run_daemon(
         // The queue's leftovers and the scheduler start once the daemon
         // listens, and stop with it: they run on what the log still holds
         // open (§5, decision 73).
+        let runs = background.runs();
         let scheduled = tokio::spawn(background.run(random));
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
@@ -351,6 +352,17 @@ fn run_daemon(
             served = &mut serving => (cause.try_recv().unwrap_or("the server ended"), Some(served)),
             Ok(cause) = &mut cause => (cause, None),
         };
+        // At the signal, before anything else: no scheduled run starts, the
+        // workers are asked to stop, as a cancel stops one, so a backup that
+        // archives winds down and saves the index of the packs it wrote
+        // (decision 50), and every run is frozen where it stands. A run
+        // frozen starts no worker, runs no hook, records no end and
+        // announces none, whatever its worker, its timers or its turn in the
+        // queue do from now on; a worker it lets go of still gets its SIGTERM
+        // and its grace, since the stop was asked for first (decision 92).
+        scheduled.abort();
+        let workers_stopped = workers.stop();
+        runs.freeze();
         log::info!("stopping ({cause})");
         let mut stop = Stopping::new(shutdown::LIMIT);
         let served = match served {
@@ -360,13 +372,7 @@ fn run_daemon(
             }
             None => stop.wait(Step::OpenRequests, REQUESTS_BOUND, serving).await,
         };
-        // No scheduled run starts once the daemon stops serving.
-        scheduled.abort();
-        // The workers, as a cancel stops one, so a backup that archives
-        // winds down and saves the index of the packs it wrote (decision 50).
-        // The run of a job stopped so never reads an end, so it records and
-        // announces none.
-        stop.wait(Step::Workers, WORKERS_BOUND, workers.stop())
+        stop.wait(Step::Workers, WORKERS_BOUND, workers_stopped)
             .await;
         // Then the operation log ends what is still running as
         // `daemon-shut-down` and closes, inside the runtime, so a write in

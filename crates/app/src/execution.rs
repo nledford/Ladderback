@@ -113,7 +113,7 @@ pub struct Finished {
     /// operation refused (a protocol violation) isn't kept.
     pub result: Option<EngineResult>,
     /// One for each write the log refused or never answered: a run writes at
-    /// most three times. The last of them has no write after it to make it
+    /// most four times. The last of them has no write after it to make it
     /// good.
     pub recording_errors: Vec<StoreError>,
 }
@@ -369,6 +369,26 @@ impl RunOperation {
                         let d = Deadline::after_index_read(*index_read_at, budget);
                         deadline = Some(d);
                         timer = self.clock.sleep_until(d.at()).fuse();
+                    }
+                    // A success's result is in the log on the running
+                    // operation before any ending hook runs: a backup's
+                    // snapshot is written by then, so an orderly stop that
+                    // ends the run in its after hooks keeps it on the record
+                    // (decision 92). A result the operation can't take, as
+                    // one before its start, is never written.
+                    if let EngineEvent::Succeeded(result) = &event
+                        && run.operation.status() == &OperationStatus::Running
+                    {
+                        let saved = save_within_bound(
+                            &*self.clock,
+                            &*self.store,
+                            &run.operation,
+                            Some(result),
+                        )
+                        .await;
+                        if let Err(error) = saved {
+                            run.recording_errors.push(error);
+                        }
                     }
                     self.apply(run, event, &ruled);
                     if run.operation.status().is_finished() {
@@ -1182,5 +1202,16 @@ mod tests {
         let first = seen.first().expect("the after hook read the log");
         assert_eq!(first.status, OperationStatus::Running);
         assert_eq!(first.result, Some(backup_result()));
+    }
+
+    /// A result the operation can't take, as one before its start, is never
+    /// in the log: the run fails on it as a protocol violation.
+    #[tokio::test]
+    async fn a_result_before_the_start_is_never_in_the_log() {
+        let seen =
+            the_log_as_the_ending_hooks_find_it(vec![EngineEvent::Succeeded(backup_result())])
+                .await;
+        let first = seen.first().expect("an ending hook read the log");
+        assert_eq!(first.result, None);
     }
 }

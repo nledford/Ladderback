@@ -314,6 +314,12 @@ pub(crate) struct Background {
 }
 
 impl Background {
+    /// What the daemon's orderly stop freezes: every run of an operation,
+    /// whoever started it (decision 92).
+    pub(crate) fn runs(&self) -> runs::Runs {
+        self.runner.runs.clone()
+    }
+
     /// Runs the queue's leftovers, oldest first, then the scheduler, with
     /// `random` spreading its runs over their jitter, until the future is
     /// dropped.
@@ -644,6 +650,7 @@ async fn state_over(
         events: Arc::clone(&bus),
         queue: Arc::new(RunQueue::new()),
         ends: run_ends,
+        runs: runs::Runs::default(),
     });
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
@@ -1180,6 +1187,9 @@ struct PlanRunner {
     /// Where each backup's run says how it ended, so the scheduler can
     /// retry a failed one (§5).
     ends: app::retry::RunEndSender,
+    /// What the daemon's orderly stop freezes: every run starts under it
+    /// (decision 92).
+    runs: runs::Runs,
 }
 
 impl PlanRunner {
@@ -1305,6 +1315,7 @@ impl PlanRunner {
         let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
         let registry = Arc::clone(&self.registry);
         let ends = self.ends.clone();
+        let runs = self.runs.clone();
         tokio::spawn(async move {
             let queued = use_case
                 .queue(operation, trigger, job)
@@ -1312,11 +1323,16 @@ impl PlanRunner {
                 .with_warnings(warnings);
             let _ = recorded.send(());
             // Nothing waits on the run: it reports through the event bus. It
-            // waits in the log as queued until its turn comes.
-            let finished = use_case.run_in_turn(queued, place, cancel).await;
-            registry.finish(&operation);
-            log_ended(&finished);
-            say_how_it_ended(&ends, &finished);
+            // waits in the log as queued until its turn comes. A run the
+            // daemon's stop freezes stays queued, for the next start to run
+            // (decision 73): the stop came after the log had it.
+            runs.until_frozen(async move {
+                let finished = use_case.run_in_turn(queued, place, cancel).await;
+                registry.finish(&operation);
+                log_ended(&finished);
+                say_how_it_ended(&ends, &finished);
+            })
+            .await;
         });
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
@@ -1541,14 +1557,14 @@ impl PlanRuns for PlanRunner {
                 let use_case = self.backup_use_case(setup);
                 let registry = Arc::clone(&self.registry);
                 let ends = self.ends.clone();
-                tokio::spawn(async move {
+                tokio::spawn(self.runs.until_frozen(async move {
                     let queued =
                         app::execution::Queued::resumed(operation, job).with_warnings(warnings);
                     let finished = use_case.run_in_turn(queued, place, cancel).await;
                     registry.finish(&id);
                     log_ended(&finished);
                     say_how_it_ended(&ends, &finished);
-                });
+                }));
             }
             // The queue can't run it again, as decision 40 ended every
             // queued operation: its plan or repository is gone or changed, its
@@ -5189,6 +5205,7 @@ mod tests {
             events: Arc::new(BroadcastEventBus::new()),
             queue: Arc::new(RunQueue::new()),
             ends: app::retry::run_ends().0,
+            runs: crate::composition::runs::Runs::default(),
         };
         (runner, entered, open_gate, scratch)
     }
@@ -10260,6 +10277,7 @@ mod repository_service_tests {
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
                 ends: app::retry::run_ends().0,
+                runs: crate::composition::runs::Runs::default(),
             };
             let detail = detail.map(str::to_owned);
             assert_eq!(
@@ -10305,6 +10323,7 @@ mod repository_service_tests {
                 events: Arc::new(BroadcastEventBus::new()),
                 queue: Arc::new(RunQueue::new()),
                 ends: app::retry::run_ends().0,
+                runs: crate::composition::runs::Runs::default(),
             };
 
             let place = runner
@@ -10397,6 +10416,7 @@ mod repository_service_tests {
             events: Arc::new(BroadcastEventBus::new()),
             queue: Arc::new(RunQueue::new()),
             ends: app::retry::run_ends().0,
+            runs: crate::composition::runs::Runs::default(),
         };
 
         let refused = runner.start_backup("home".to_owned()).await;
@@ -10646,6 +10666,7 @@ mod repository_service_tests {
             events,
             queue: Arc::new(RunQueue::new()),
             ends,
+            runs: crate::composition::runs::Runs::default(),
         };
         (runner, heard, scripted, plan)
     }

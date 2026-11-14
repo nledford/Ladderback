@@ -1,14 +1,30 @@
 //! The daemon's runs of operations and the orderly stop that freezes them
 //! (§4.2, decision 92).
 
+use std::sync::Arc;
+
+use tokio::sync::watch;
+
 /// What the daemon's orderly stop freezes: the run of each operation, on a
 /// task of its own. A run frozen goes no further than where it stands, so it
 /// starts no worker, runs no hook, records no end and announces none: its
 /// timers, its turn in the queue and the end its worker read all belong to a
 /// daemon that is going, and the stop's operation log step records its end
-/// (`daemon-shut-down`). Clones share one switch.
-#[derive(Clone, Default)]
-pub(crate) struct Runs {}
+/// (`daemon-shut-down`). A frozen run is dropped where it stands, so a hook
+/// it was running is killed at once, as the runtime's end once killed it.
+/// Clones share one switch.
+#[derive(Clone)]
+pub(crate) struct Runs {
+    frozen: Arc<watch::Sender<bool>>,
+}
+
+impl Default for Runs {
+    fn default() -> Self {
+        Self {
+            frozen: Arc::new(watch::channel(false).0),
+        }
+    }
+}
 
 impl Runs {
     /// `run`, until the runs are frozen: from then on it is never polled
@@ -17,13 +33,28 @@ impl Runs {
         &self,
         run: impl Future<Output = ()> + Send + 'static,
     ) -> impl Future<Output = ()> + Send + 'static {
-        let _ = run;
-        async { todo!() }
+        let mut frozen = self.frozen.subscribe();
+        async move {
+            tokio::select! {
+                // Frozen first: a run that could go on in the same poll
+                // doesn't.
+                biased;
+                () = frozen_at(&mut frozen) => {}
+                () = run => {}
+            }
+        }
     }
 
     /// Freezes every run, those begun from now on too.
     pub(crate) fn freeze(&self) {
-        todo!()
+        self.frozen.send_replace(true);
+    }
+}
+
+/// Returns once the runs are frozen; never once nothing can freeze them.
+async fn frozen_at(frozen: &mut watch::Receiver<bool>) {
+    if frozen.wait_for(|frozen| *frozen).await.is_err() {
+        std::future::pending::<()>().await;
     }
 }
 

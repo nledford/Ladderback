@@ -551,7 +551,13 @@ async fn a_queued_operation_taken_up_from_the_log_runs_under_its_id_and_is_not_r
     assert_eq!(finished.operation.trigger(), Trigger::Schedule);
     assert_eq!(
         journal.writes(),
-        vec![OperationStatus::Running, OperationStatus::Succeeded],
+        // The second running write carries the result, before any ending
+        // hook (decision 92).
+        vec![
+            OperationStatus::Running,
+            OperationStatus::Running,
+            OperationStatus::Succeeded
+        ],
         "a run taken up from the log writes no second queued row"
     );
     let detail = logged(&journal.inner).await;
@@ -1138,6 +1144,8 @@ async fn a_busy_run_writes_the_log_when_its_state_changes_not_for_every_event() 
         [
             OperationStatus::Queued,
             OperationStatus::Running,
+            // The result, before any ending hook (decision 92).
+            OperationStatus::Running,
             OperationStatus::SucceededWithWarnings
         ]
     );
@@ -1328,8 +1336,8 @@ async fn a_log_that_never_answers_does_not_hold_the_run() {
     assert_eq!(ended.operation.status(), &OperationStatus::Succeeded);
     assert_eq!(
         ended.recording_errors.len(),
-        3,
-        "the queued, running and final writes"
+        4,
+        "the queued, running, result and final writes"
     );
 }
 
