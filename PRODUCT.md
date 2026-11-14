@@ -62,7 +62,7 @@ Calm and exact.
 
 ## Boundaries
 
-- Linux and macOS only. Windows is out of scope.
+- Linux and macOS only. Windows is out of scope; WSL2 runs it as a Linux install for files inside WSL, never as a way to back up Windows ([decision 4](docs/design/decisions/04-windows.md)).
 - One owner and their machines: no multiple users, no multi-tenant SaaS.
 - Not a general rustic GUI. `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` stay CLI-only in v1.
 - Not a manager for restic repositories that restic also maintains. Restic must never prune a repository Ladderback manages.
