@@ -72,6 +72,16 @@ Then("focus is on the link {string}", async function (this: BrowserWorld, name: 
   await keys.assertFocused(keys.byRole("link", { name }), `the link "${name}"`);
 });
 
+// The product name in the header is the start page's link, marked as the
+// current page there like the navigation's links on theirs (#594).
+Then(
+  "the link {string} in the banner is marked as the current page",
+  async function (this: BrowserWorld, name: string) {
+    const link = this.page.getByRole("banner").getByRole("link", { name, exact: true });
+    await expect(link).toHaveAttribute("aria-current", "page");
+  },
+);
+
 // The project's own documentation at the tag of the release this build is,
 // where a reader of that release finds what the page says is there. The
 // section must exist in this checkout, so a renamed heading fails here and not

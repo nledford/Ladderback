@@ -35,6 +35,14 @@ Feature: Start page
     And I press Enter
     Then focus is on the main heading "Operations"
 
+  Scenario: The product name in the banner leads back to the start page, by keyboard
+    When I open the address "/operations"
+    And I press Tab until focus is on the link "Ladderback"
+    And I press Enter
+    Then focus is on the main heading "Welcome to Ladderback"
+    And the link "Ladderback" in the banner is marked as the current page
+    And the page has no accessibility violations
+
   Scenario: A glob of a plan that can never match is pointed out on its row in words
     Given a demo plan "demo-home" whose iglobs are "!.local/share/demo-cache" and "!.cache"
     When I open the web UI
