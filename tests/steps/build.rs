@@ -22,14 +22,25 @@ fn this_checkout() -> Option<BuildDto> {
     }
     let package = Path::new(env!("CARGO_MANIFEST_DIR"));
     let top = git(package, &["rev-parse", "--show-toplevel"])?;
-    let same = Path::new(top.trim()).canonicalize().ok()? == package.canonicalize().ok()?;
+    let top = top.strip_suffix('\n').unwrap_or(&top);
+    let same = Path::new(top).canonicalize().ok()? == package.canonicalize().ok()?;
     if !same {
         return None;
     }
     let version = env!("CARGO_PKG_VERSION");
     let commit = git(package, &["rev-parse", "HEAD"])?.trim().to_owned();
     let tags = git(package, &["tag", "--points-at", "HEAD"])?;
-    let changes = git(package, &["status", "--porcelain", "--untracked-files=no"])?;
+    // `--no-optional-locks`, as build.rs asks: a `status` that refreshed the
+    // index would have the next build run the build script again.
+    let changes = git(
+        package,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+        ],
+    )?;
     Some(BuildDto {
         version: version.to_owned(),
         commit: Some(commit),

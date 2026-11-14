@@ -27,12 +27,17 @@ export function workspaceVersion(root: string): string {
 }
 
 /**
- * The build the checkout at `root` makes now; `undefined` when `git` can't
- * say (no `git`, or `root` isn't the top of a work tree of its own) or
- * `LADDERBACK_BUILD_COMMIT` names the commit instead.
+ * The build the checkout at `root` makes now: the commit
+ * `LADDERBACK_BUILD_COMMIT` names, when it is one (7 to 64 hex digits), as a
+ * build between releases without changes; otherwise what `git` says;
+ * `undefined` when it can't say (no `git`, or `root` isn't the top of a work
+ * tree of its own).
  */
 export function checkoutBuild(root: string): Build | undefined {
-  if (process.env["LADDERBACK_BUILD_COMMIT"]) return undefined;
+  const named = process.env["LADDERBACK_BUILD_COMMIT"] ?? "";
+  if (/^[0-9a-fA-F]{7,64}$/.test(named)) {
+    return { version: workspaceVersion(root), commit: named.toLowerCase(), dirty: false, release: false };
+  }
   const git = (...args: string[]): string | undefined => {
     try {
       return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -40,11 +45,15 @@ export function checkoutBuild(root: string): Build | undefined {
       return undefined;
     }
   };
-  const top = git("rev-parse", "--show-toplevel")?.trim();
+  // Only the line break git ends the answer with: a folder's name may end in
+  // a space.
+  const top = git("rev-parse", "--show-toplevel")?.replace(/\n$/, "");
   if (top === undefined || realpathSync(top) !== realpathSync(root)) return undefined;
   const commit = git("rev-parse", "HEAD")?.trim();
   const tags = git("tag", "--points-at", "HEAD");
-  const changes = git("status", "--porcelain", "--untracked-files=no");
+  // `--no-optional-locks`, as build.rs asks: a `status` that refreshed the
+  // index would have the next build run the build script again.
+  const changes = git("--no-optional-locks", "status", "--porcelain", "--untracked-files=no");
   if (commit === undefined || tags === undefined || changes === undefined) return undefined;
   const version = workspaceVersion(root);
   return {
