@@ -40,6 +40,7 @@ Ladderback turns rustic into a managed service on each machine, with one place t
 3. **Safe maintenance on shared repositories.** Backups never wait for a lock. Exactly one place runs forget, prune and check for each repository.
 4. **No lock-in.** Import existing rustic profiles, and export any plan back to one, so the `rustic` CLI always remains an option.
 5. **One self-contained program.** It runs headless on servers and as a user service on desktops and laptops, with the web UI built in.
+6. **Help from an AI agent, confirmed by a person.** People can ask an AI agent to help them work out what to back up, where and for how long. The AI agent proposes the setup; Ladderback shows in its own words what would change, what it could delete and every command it would add, and with sign-in on, nothing changes until a person has reviewed every change and confirmed it in the web UI. With sign-in off, anyone who can reach Ladderback, an AI agent included, can confirm, and Ladderback says so.
 
 Success means: every machine's last good backup is visible at a glance, and a missed or failed backup is reported, not discovered during a restore.
 

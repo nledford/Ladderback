@@ -18,7 +18,7 @@ Without a manager, each machine runs rustic from its own cron job or timer. Fail
 - **Safe maintenance on shared repositories.** Backups never wait for a lock, and exactly one place runs forget, prune and check for each repository.
 - **No lock-in.** Import existing rustic profiles and export any plan back to one, so the `rustic` CLI always stays an option.
 - **Careful restores.** Restore into a new folder by default; in-place restore only from the machine's own UI, after a dry-run summary.
-- **Scriptable by AI agents.** `ladderback mcp` is an MCP server over stdio. It drives a running instance, or a headless session of its own, through read, run and preview tools. It can't restore, delete or change configuration.
+- **Scriptable by AI agents.** `ladderback mcp` is an MCP server over stdio. It drives a running instance, or a headless session of its own, through read, run and preview tools. It can't restore or delete. It will be able to propose a backup setup, which changes nothing until a person confirms it in the web UI.
 - **One self-contained program.** It runs headless on servers and as a user service on desktops and laptops, with the web UI built in. It is accessible (WCAG 2.2 AA) and localization-ready.
 
 Ladderback supports **Linux and macOS**. Windows is out of scope.
