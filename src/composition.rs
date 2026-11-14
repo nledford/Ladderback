@@ -1407,17 +1407,47 @@ impl PlanRuns for PlanRunner {
             },
             None => Err(Unbuilt::Refused(StartError::UnknownPlan)),
         };
-        let built = built
-            .map_err(|error| start_refused(&error.into_start_error()))
-            .and_then(|(job, setup, plan, limit)| {
-                // The plan may have moved to another repository since the
-                // queue's own read: it isn't run there under a record of the old.
-                if operation.target().is_on(job.target().repository.as_ref()) {
-                    Ok((job, setup, plan, limit))
-                } else {
-                    Err("its plan now backs up to another repository".to_owned())
-                }
-            });
+        // Refused for a secret of the repository its plan still backs up to,
+        // it ends failed with the refusal, as a refused scheduled run does
+        // (§5, #490), and is heard as any run's end, so retries follow it.
+        let built = match built {
+            Err(Unbuilt::Secret(secret))
+                if operation.target().is_on(secret.target.repository.as_ref()) =>
+            {
+                let SecretUnbuilt {
+                    refusal, failure, ..
+                } = *secret;
+                log::warn!(
+                    "the queued backup {} can't run again, and ends as failed: {}",
+                    id.as_uuid().hyphenated(),
+                    start_refused(&StartError::SecretRefused(refusal))
+                );
+                let finished = RunOperation::new(
+                    Arc::clone(&self.engine),
+                    Arc::new(SystemClock),
+                    Arc::clone(&self.store),
+                )
+                .with_events(Arc::clone(&self.events))
+                .refuse_resumed(operation, failure)
+                .await;
+                log_recording_errors(&finished);
+                say_how_it_ended(&self.ends, &finished);
+                return;
+            }
+            Err(Unbuilt::Secret(_)) => {
+                Err("its plan now backs up to another repository".to_owned())
+            }
+            other => other.map_err(|error| start_refused(&error.into_start_error())),
+        };
+        let built = built.and_then(|(job, setup, plan, limit)| {
+            // The plan may have moved to another repository since the
+            // queue's own read: it isn't run there under a record of the old.
+            if operation.target().is_on(job.target().repository.as_ref()) {
+                Ok((job, setup, plan, limit))
+            } else {
+                Err("its plan now backs up to another repository".to_owned())
+            }
+        });
         match built {
             Ok((job, setup, plan, limit)) => {
                 // Oldest first, as the queue hands them on: each waits for
@@ -1436,8 +1466,8 @@ impl PlanRuns for PlanRunner {
                 });
             }
             // The queue can't run it again, as decision 40 ended every
-            // queued operation: its plan or repository is gone or changed, a
-            // secret is refused, or the configuration can't be read. Left
+            // queued operation: its plan or repository is gone or changed, its
+            // plan moved and the secret is refused, or the configuration can't be read. Left
             // queued, it would show as queued with nothing to run it until
             // the next start (decision 73).
             Err(why) => {
@@ -10396,6 +10426,198 @@ mod repository_service_tests {
             said.iter()
                 .all(|(_, line)| !line.contains(super::tests::REFUSAL)),
             "{said:?}"
+        );
+    }
+
+    /// A backup of the plan `home` on `repository`, as the log holds it
+    /// queued under `id` when the daemon starts again.
+    fn queued_home_backup(
+        id: u128,
+        repository: Option<RepositoryId>,
+    ) -> domain::execution::Operation {
+        domain::execution::Operation::queue(
+            OperationId::from_uuid(Uuid::from_u128(id)),
+            OperationKind::Backup,
+            Trigger::Schedule,
+            Target {
+                plan: Some(domain::PlanId::parse("home").expect("a plan ID")),
+                repository,
+            },
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        )
+    }
+
+    /// A backup left queued when the daemon stopped, whose repository's
+    /// password can't be read when the next start takes it up again, ends
+    /// failed with the refusal, not `daemon-stopped` (#490): under its own
+    /// ID, never started, the engine never asked. The schedule hears it
+    /// failed, so its retries follow it as they follow a refused scheduled
+    /// run (decision 76), a page is told, and the daemon's log names the
+    /// operation and the refusal's code.
+    #[tokio::test]
+    async fn a_resumed_backup_refused_for_its_secret_ends_with_the_refusal() {
+        capture();
+        const UNSET: &str = "LADDERBACK_TEST_RESUMED_PASSWORD_UNSET";
+        let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let events = Arc::new(BroadcastEventBus::new());
+        let mut page = events.subscribe().await;
+        let (runner, heard, scripted, plan) =
+            refused_password_runner(UNSET, store.clone(), events).await;
+        let queued = queued_home_backup(0x0490, None);
+        store
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+
+        PlanRuns::resume(&runner, queued.clone()).await;
+
+        assert_eq!(jobs(&scripted), 0, "the engine was asked");
+        let history = store
+            .list(&app::ports::HistoryQuery::default())
+            .await
+            .expect("the log reads");
+        let [record] = history.operations.as_slice() else {
+            panic!("one operation is recorded: {history:?}");
+        };
+        assert_eq!(record.id, queued.id());
+        assert_eq!(
+            record.status,
+            OperationStatus::Failed {
+                reason: FailureReason::SecretRefused {
+                    field: "password".to_owned(),
+                    refusal: domain::execution::refusal::SettingRefusal::SecretMissing {
+                        source: UNSET.to_owned(),
+                    },
+                },
+            }
+        );
+        assert_eq!(record.started_at, None, "a refused run never started");
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+            .await
+            .expect("the schedule hears how the run ended");
+        assert_eq!(
+            end,
+            Some(app::retry::RunEnd {
+                operation: queued.id(),
+                plan,
+                trigger: Trigger::Schedule,
+                outcome: app::retry::RunOutcome::Failed,
+            })
+        );
+        let told = futures::FutureExt::now_or_never(page.next()).flatten();
+        assert!(
+            matches!(
+                told,
+                Some(UiEvent::OperationFailed {
+                    code: ErrorCode::SecretMissing,
+                    ..
+                })
+            ),
+            "{told:?}"
+        );
+        let operation = queued.id().as_uuid().hyphenated().to_string();
+        let said = captured_log::lines();
+        assert!(
+            said.iter().any(|(level, line)| *level == log::Level::Warn
+                && line.contains(&operation)
+                && line.contains("(secret-missing)")),
+            "no warning names the operation and the code: {said:?}"
+        );
+    }
+
+    /// The history row of such a backup keeps what a failing password
+    /// command said masked of the repository's secrets, as a refused
+    /// scheduled run's row does, and no secret reaches it (I4).
+    #[tokio::test]
+    async fn a_resumed_backups_refusal_is_kept_masked_of_the_repositorys_secrets() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let referenced = scratch.path().join("token");
+        std::fs::write(&referenced, "canary-from-a-file\n").expect("the file is written");
+        let settings = domain::planning::RepositorySettings {
+            repository: "/srv/demo-repo".to_owned(),
+            repo_hot: None,
+            password: SecretRef::Command(
+                domain::secrets::CommandLine::parse(
+                    "sh -c 'echo canary-inline canary-from-a-file >&2; exit 3'",
+                )
+                .expect("a command"),
+            ),
+            options: [
+                ("secret_access_key".to_owned(), "canary-inline".to_owned()),
+                (
+                    "application_key".to_owned(),
+                    format!("${{file:{}}}", referenced.display()),
+                ),
+            ]
+            .into(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let (runner, _heard, _, _) =
+            refused_runner(settings, store.clone(), Arc::new(BroadcastEventBus::new())).await;
+        let queued = queued_home_backup(0x0491, None);
+        store
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+
+        PlanRuns::resume(&runner, queued).await;
+
+        let page = Operations::history(&runner, None, None, None)
+            .await
+            .expect("the history reads");
+        let [row] = page.operations.as_slice() else {
+            panic!("one operation is recorded: {page:?}");
+        };
+        let failure = row.failure.as_ref().expect("the row says why it failed");
+        assert_eq!(failure.code, ErrorCode::SecretCommandFailed);
+        let detail = failure
+            .detail
+            .as_deref()
+            .expect("the command's words are kept");
+        assert!(detail.contains(domain::secrets::REDACTED), "{detail}");
+        let wire = serde_json::to_string(row).expect("the row serializes");
+        assert!(!wire.contains("canary-inline"), "{wire}");
+        assert!(!wire.contains("canary-from-a-file"), "{wire}");
+    }
+
+    /// A refused backup whose plan now backs up to another repository than
+    /// the one it was queued for ends `daemon-stopped`, as any backup whose
+    /// plan moved does (decision 73): the refusal is of a repository it was
+    /// never queued for.
+    #[tokio::test]
+    async fn a_resumed_backup_whose_plan_moved_ends_as_daemon_stopped_though_its_secret_is_refused()
+    {
+        let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let (runner, _heard, _, _) = refused_password_runner(
+            "LADDERBACK_TEST_MOVED_PASSWORD_UNSET",
+            store.clone(),
+            Arc::new(BroadcastEventBus::new()),
+        )
+        .await;
+        let queued = queued_home_backup(
+            0x0492,
+            Some(RepositoryId::parse(&"b".repeat(64)).expect("a repository ID")),
+        );
+        store
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+
+        PlanRuns::resume(&runner, queued.clone()).await;
+
+        let record = store
+            .get(queued.id())
+            .await
+            .expect("the log reads")
+            .expect("the backup is in the log")
+            .record;
+        assert_eq!(
+            record.status,
+            OperationStatus::Failed {
+                reason: FailureReason::DaemonStopped
+            }
         );
     }
 

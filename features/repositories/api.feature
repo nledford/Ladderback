@@ -16,12 +16,12 @@ Feature: Repositories over HTTP
     Then the answer has status 200 and the repository's ID
     And the daemon lists no repositories
 
-  Scenario: Testing with a wrong password is refused with the engine's words, and saves nothing
+  Scenario: Testing with a wrong password is refused as a password not accepted, and saves nothing
     Given an initialised repository
     And the client uses the wrong password
     When the client tests the repository
-    Then the refusal has status 422 and the typed code "operation-failed"
-    And the refusal carries the engine's detail
+    Then the refusal has status 503 and the typed code "password-not-accepted"
+    And the refusal carries no detail
     And no answer holds the password
     And the daemon lists no repositories
 
@@ -73,11 +73,11 @@ Feature: Repositories over HTTP
     Then the refusal has status 422 and the typed code "repository-alias-invalid"
     And the daemon lists no repositories
 
-  Scenario: Connecting a repository whose test fails saves nothing
+  Scenario: Connecting a repository with a wrong password is refused as a password not accepted, and saves nothing
     Given an initialised repository
     And the client uses the wrong password
     When the client connects it as "demo"
-    Then the refusal has status 422 and the typed code "operation-failed"
+    Then the refusal has status 503 and the typed code "password-not-accepted"
     And the daemon lists no repositories
 
   Scenario: A password file that is not there is refused with a code of its own
@@ -129,6 +129,14 @@ Feature: Repositories over HTTP
     Then the refusal has status 409 and the typed code "repository-exists"
     And the repository is unchanged
     And no answer holds the password
+
+  Scenario: Initialising at a server that refuses the credentials says so, and saves nothing
+    Given a REST server that refuses the credentials the client sends it
+    When the client initialises the repository
+    Then the refusal has status 503 and the typed code "credentials-refused"
+    And no answer holds the password
+    And no answer shows "canary-wrong-secret"
+    And the daemon lists no repositories
 
   Scenario: A new hot/cold repository is initialised in both halves over HTTP
     Given an empty hot/cold repository location

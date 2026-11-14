@@ -6,8 +6,11 @@ Feature: A scheduled run refused before it starts
   as a failed backup of its plan, queued and failed in the same instant and
   never started. Its failure is the refusal's own code, naming where the
   secret was looked for and never a secret, and the plan's retries follow it
-  as they follow any failed scheduled run. A run a person asks for is
-  refused to them instead, and nothing is kept (technical design §5).
+  as they follow any failed scheduled run. A backup left queued when the
+  daemon stopped, and refused the same way when the next start takes it up
+  again, ends failed with that refusal too, not because the daemon stopped.
+  A run a person asks for is refused to them instead, and nothing is kept
+  (technical design §5).
 
   Scenario: A scheduled run whose password isn't in the keyring is kept as a failed backup
     Given the repository's password is in the keyring under "ladderback/demo"
@@ -36,5 +39,26 @@ Feature: A scheduled run refused before it starts
       schedule = { every = "6h" }
       """
     And the schedule, while the daemon was down, kept the plan "home" due an hour ago
+    When Ladderback is started again on the same folders
+    Then the history comes to list one backup of the plan "home", failed with the code "secret-missing" and never started
+
+  @e2e
+  Scenario: A backup left queued whose password file is gone ends with its refusal after a restart
+    Given Ladderback is serving on loopback with no repositories
+    And the daemon is killed
+    And the daemon's config file is edited by hand to hold:
+      """
+      schema = 1
+
+      [repositories.demo]
+      repository = "/srv/demo-repo"
+      password-file = "/nonexistent/ladderback-demo/password"
+
+      [[plans]]
+      id = "home"
+      repository = "demo"
+      sources = ["/home/demo"]
+      """
+    And the log, while the daemon is down, shows a queued backup of the plan "home"
     When Ladderback is started again on the same folders
     Then the history comes to list one backup of the plan "home", failed with the code "secret-missing" and never started

@@ -197,6 +197,9 @@ pub(crate) fn rereads_list(answered: bool, phase: Phase) -> bool {
 pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Field> {
     match code {
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
+        // The repository answered, and the password typed opened none of
+        // its keys (#481).
+        ErrorCode::PasswordNotAccepted => Some(Field::Password),
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
         | ErrorCode::SecretKeyringUnavailable
@@ -935,6 +938,16 @@ mod tests {
             ),
             None,
             "only the argument named field says which field"
+        );
+    }
+
+    /// The repository answered and its password opened none of its keys: the
+    /// password typed is the field to fix (#481).
+    #[test]
+    fn a_password_not_accepted_belongs_to_the_password_field() {
+        assert_eq!(
+            field_of(ErrorCode::PasswordNotAccepted, &[]),
+            Some(Field::Password)
         );
     }
 

@@ -280,10 +280,9 @@ async fn a_wrong_password_never_appears_in_the_failure() {
     location.init();
     let wrong = "hunter2-not-the-password";
     let events = run_to_end(&engine(), app::ports::Job::Identify(location.access(wrong))).await;
-    let Some(EngineEvent::Failed(FailureReason::EngineFailed { detail })) = events.last() else {
-        panic!("expected an engine failure: {events:?}");
+    let Some(EngineEvent::Failed(FailureReason::PasswordNotAccepted)) = events.last() else {
+        panic!("expected the password to be refused: {events:?}");
     };
-    assert!(!detail.is_empty());
     assert!(
         !format!("{events:?}").contains(wrong),
         "the password leaked: {events:?}"

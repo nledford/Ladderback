@@ -210,6 +210,28 @@ impl RunOperation {
         }
     }
 
+    /// Ends `operation`, a backup the log held as queued when the daemon
+    /// stopped, failed with `reason`: the next start took it up again (decision
+    /// 73) and its start was refused before anything ran (§5). One write, of
+    /// the end, then the news that it failed, as [`Self::refused`]. No hook
+    /// runs and the engine is never asked.
+    pub async fn refuse_resumed(&self, operation: Operation, reason: FailureReason) -> Finished {
+        let mut run = Run {
+            operation,
+            result: None,
+            recording_errors: Vec::new(),
+            stopped_by_hook: false,
+        };
+        self.fail(&mut run, reason);
+        self.record(&mut run).await;
+        announce_end(self.events.as_deref(), &run.operation).await;
+        Finished {
+            operation: run.operation,
+            result: None,
+            recording_errors: run.recording_errors,
+        }
+    }
+
     /// Runs the job of an operation [`Self::queue`] recorded, as
     /// [`Self::run`] does.
     pub async fn run_queued(

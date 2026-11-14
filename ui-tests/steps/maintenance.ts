@@ -188,6 +188,21 @@ Given(
   },
 );
 
+// The configuration now names a folder that isn't there for the repository,
+// so the engine fails before it asks for any key, in its own words.
+Given("the configuration has the repository {string} at a folder that isn't there", async function (this: BrowserWorld, alias: string) {
+  const file = configPath(this);
+  const config = await readFile(file, "utf8");
+  const heading = `[repositories.${alias}]\n`;
+  const key = 'repository = "';
+  const at = config.indexOf(heading);
+  assert.ok(at >= 0, `the config has no repository ${alias}`);
+  const from = config.indexOf(key, at);
+  assert.ok(from >= 0, `the repository ${alias} has no location`);
+  const end = config.indexOf('"', from + key.length);
+  await writeFile(file, config.slice(0, end) + "-not-there" + config.slice(end));
+});
+
 Given("a backup of the plan {string} has failed", async function (this: BrowserWorld, plan: string) {
   const { status } = await ended(this, await api(this, "POST", "/api/v1/operations", { plan }), `the backup of ${plan}`);
   assert.equal(status, "failed", `the backup of ${plan} ended as ${status}`);

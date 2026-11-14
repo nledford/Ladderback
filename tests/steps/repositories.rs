@@ -729,6 +729,13 @@ fn api_refusal_has_detail(agent: &mut Agent) {
     );
 }
 
+/// The code says it all: none of the engine's words come with it.
+#[then("the refusal carries no detail")]
+fn api_refusal_has_no_detail(agent: &mut Agent) {
+    let (_, json) = api_answer(agent);
+    assert!(json["detail"].is_null(), "the refusal has a detail: {json}");
+}
+
 #[then("no answer holds the password")]
 fn api_no_answer_holds_password(agent: &mut Agent) {
     let secret = api_secret(agent);

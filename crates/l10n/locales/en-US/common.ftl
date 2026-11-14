@@ -303,8 +303,8 @@ error-no-location-usable = No location of this repository could be used, so noth
 # Every location of the repository has a rule for the network it may be tried on, and none held when the job started: the machine was on another kind of network, or couldn't tell which it was on. The operation's detail lists each location and why.
 error-no-location-rule-holds = No location of this repository may be tried on the network this machine is on, so nothing was read or written. The operation lists each location's rule and why it didn't hold; connect to a network one of them allows, or run again later.
 
-# The repository's password opened nothing at any of its locations that answered.
-error-password-not-accepted = The repository's password was not accepted at any of its locations, so nothing was read or written. Check the repository's password, then try again.
+# The repository's password opened none of its keys: at its one location, or at every one of its locations that answered.
+error-password-not-accepted = The repository's password was not accepted, so nothing was read or written. Check the repository's password, then try again.
 
 # A saved repository's Create was refused because its row doesn't offer it: no backup found the location empty, or one reached the repository there once, so nothing says the location can be reached and holds no repository. Nothing was run.
 error-create-not-offered = This repository wasn't created: { -brand-name } creates one only where a backup found the location empty. Check that the drive or location can be reached, then run a backup.
