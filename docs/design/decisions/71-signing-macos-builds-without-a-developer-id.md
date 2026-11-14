@@ -3,7 +3,7 @@
 **A build from source can be signed with a self-signed certificate the person names; a macOS archive is published only once it can be signed with a Developer ID and notarized** (recorded 2026-11-12, §12; #281, #344). Ladderback has no paid Apple Developer account, so no Developer ID certificate and no notarization.
 
 - **M3:** on macOS, `just install` signs the installed binary with a code-signing identity from the person's own keychain when they name one, always with the same fixed identifier (`codesign -i`). Without one it installs as before, with the ad-hoc signature the linker gives every arm64 binary. The Full Disk Access checks of §12 run on the signed build.
-- **M5:** release packaging publishes the Linux archives. A macOS archive waits for #344 (Developer ID signing and notarization, not scheduled); until then macOS users build from source.
+- **From 0.3.1:** each release publishes the Linux archives (decision 54, amended by #582). A macOS archive waits for #344 (Developer ID signing and notarization, not scheduled); until then macOS users build from source.
 
 Why:
 
