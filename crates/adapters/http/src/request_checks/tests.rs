@@ -36,6 +36,17 @@ pub(crate) fn test_state() -> AppState {
         repositories: Arc::new(NoRepositories),
         sign_in: crate::SignIn::Off,
         exposure: crate::Exposure::Loopback,
+        build: test_build(),
+    }
+}
+
+/// The build these tests' daemon runs: between releases, with changes.
+pub(crate) fn test_build() -> api::BuildDto {
+    api::BuildDto {
+        version: "0.3.0".to_owned(),
+        commit: Some("3f937cf0a1b2c3d4e5f60718293a4b5c6d7e8f90".to_owned()),
+        dirty: true,
+        release: false,
     }
 }
 

@@ -1853,6 +1853,7 @@ mod tests {
             idle_seconds: Some(43_200),
             ends_in_seconds: Some(60),
             exposure: ExposureDto::Loopback,
+            build: None,
         };
         assert_eq!(
             serde_json::to_value(&signed_in).unwrap(),
@@ -1869,6 +1870,7 @@ mod tests {
             idle_seconds: None,
             ends_in_seconds: None,
             exposure: ExposureDto::Loopback,
+            build: None,
         };
         assert_eq!(
             serde_json::to_value(&off).unwrap(),
@@ -1887,6 +1889,50 @@ mod tests {
         let read: SessionDto =
             serde_json::from_value(serde_json::json!({"sign-in": "off"})).unwrap();
         assert_eq!(read.exposure, ExposureDto::Loopback);
+    }
+
+    fn build(commit: Option<&str>, dirty: bool, release: bool) -> BuildDto {
+        BuildDto {
+            version: "0.3.0".to_owned(),
+            commit: commit.map(str::to_owned),
+            dirty,
+            release,
+        }
+    }
+
+    const COMMIT: &str = "3f937cf0a1b2c3d4e5f60718293a4b5c6d7e8f90";
+
+    #[test]
+    fn a_clean_build_of_its_release_tag_shows_the_version_alone() {
+        assert_eq!(build(Some(COMMIT), false, true).display(), "0.3.0");
+    }
+
+    #[test]
+    fn a_build_between_releases_shows_its_short_commit() {
+        assert_eq!(build(Some(COMMIT), false, false).display(), "0.3.0+3f937cf");
+    }
+
+    #[test]
+    fn a_build_with_changes_says_so_even_at_its_release_tag() {
+        assert_eq!(
+            build(Some(COMMIT), true, false).display(),
+            "0.3.0+3f937cf.dirty"
+        );
+        assert_eq!(
+            build(Some(COMMIT), true, true).display(),
+            "0.3.0+3f937cf.dirty"
+        );
+    }
+
+    #[test]
+    fn a_build_with_no_known_commit_shows_the_version_alone() {
+        assert_eq!(build(None, false, false).display(), "0.3.0");
+        assert_eq!(build(None, true, false).display(), "0.3.0");
+    }
+
+    #[test]
+    fn a_commit_shorter_than_a_short_hash_is_shown_whole() {
+        assert_eq!(build(Some("3f93"), false, false).display(), "0.3.0+3f93");
     }
 
     #[test]
@@ -3293,7 +3339,10 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// however it is used (`ends-in-seconds`): the web UI warns before the
 /// first ends it (components §4.5). `exposure` is `network` when the daemon
 /// listens beyond loopback, and left out on loopback, as before it existed:
-/// with sign-in off, the web UI then warns on every page.
+/// with sign-in off, the web UI then warns on every page. The build the
+/// daemon runs (`version`, `commit`, `dirty`, `release`) is told to a page
+/// that may see the pages, with sign-in off or a live session, and left out
+/// for a page that has yet to sign in.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
@@ -3306,6 +3355,40 @@ pub struct SessionDto {
     pub ends_in_seconds: Option<u64>,
     #[serde(default, skip_serializing_if = "ExposureDto::is_loopback")]
     pub exposure: ExposureDto,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub build: Option<BuildDto>,
+}
+
+/// The build a program came from (§3.1, decision NN): its version, the
+/// commit it was built from (`null` when the build had no git to ask), whether
+/// the tree had uncommitted changes, and whether the commit is the one its
+/// version's release tag names. Separate fields, so no reader parses the
+/// shown form ([`BuildDto::display`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BuildDto {
+    /// The workspace version, `0.3.0`.
+    pub version: String,
+    /// The full commit hash.
+    pub commit: Option<String>,
+    /// Whether tracked files differed from the commit.
+    pub dirty: bool,
+    /// Whether the commit is the one the tag `v<version>` names.
+    pub release: bool,
+}
+
+/// How many of a commit's hex digits the shown form keeps, as `git`'s short
+/// hash does.
+const SHORT_COMMIT: usize = 7;
+
+impl BuildDto {
+    /// The build as people read it, a SemVer version with build metadata:
+    /// `0.3.0` for a clean build of its release tag or when the commit is
+    /// unknown; otherwise the version and the short commit, `0.3.0+3f937cf`,
+    /// with `.dirty` after it when the tree had changes.
+    pub fn display(&self) -> String {
+        todo!()
+    }
 }
 
 /// Where a request stands with sign-in.

@@ -26,6 +26,7 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::random::OsRandom;
 
+mod build_info;
 mod composition;
 mod logging;
 mod output;

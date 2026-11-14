@@ -45,6 +45,8 @@ mod secrets_steps;
 
 #[path = "steps/adopt.rs"]
 mod adopt_steps;
+#[path = "steps/build.rs"]
+mod build_steps;
 #[path = "steps/cache.rs"]
 mod cache_steps;
 #[path = "steps/cli_output.rs"]

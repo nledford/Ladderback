@@ -338,6 +338,7 @@ mod tests {
             idle_seconds: None,
             ends_in_seconds: None,
             exposure: api::ExposureDto::Loopback,
+            build: None,
         }
     }
 

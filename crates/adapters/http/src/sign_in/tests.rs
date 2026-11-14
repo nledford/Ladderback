@@ -89,6 +89,20 @@ fn sign_in_request(password: &str, headers: &[(&str, &str)]) -> Request {
     )
 }
 
+/// `answer` with the build the tests' daemon runs, in fields of its own.
+fn told_the_build(mut answer: serde_json::Value) -> serde_json::Value {
+    let fields = serde_json::json!({
+        "version": "0.3.0",
+        "commit": "3f937cf0a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "dirty": true,
+        "release": false
+    });
+    if let (Some(answer), Some(fields)) = (answer.as_object_mut(), fields.as_object()) {
+        answer.extend(fields.clone());
+    }
+    answer
+}
+
 async fn json(response: Response) -> serde_json::Value {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
@@ -158,13 +172,13 @@ async fn with_sign_in_off_every_request_is_let_through_without_a_session() {
     let response = send(&off, get(SESSION_PATH, &[])).await;
     assert_eq!(
         json(response).await,
-        serde_json::json!({ "sign-in": "off" })
+        told_the_build(serde_json::json!({ "sign-in": "off" }))
     );
     let response = send(&off, sign_in_request(PASSWORD, &[])).await;
     assert!(!response.headers().contains_key(SET_COOKIE));
     assert_eq!(
         json(response).await,
-        serde_json::json!({ "sign-in": "off" })
+        told_the_build(serde_json::json!({ "sign-in": "off" }))
     );
 }
 
@@ -175,17 +189,42 @@ async fn the_session_route_says_when_the_daemon_answers_on_the_network() {
     let response = send_listening(&off, network, get(SESSION_PATH, &[])).await;
     assert_eq!(
         json(response).await,
-        serde_json::json!({ "sign-in": "off", "exposure": "network" })
+        told_the_build(serde_json::json!({ "sign-in": "off", "exposure": "network" }))
     );
     let response = send_listening(&off, network, sign_in_request(PASSWORD, &[])).await;
     assert_eq!(
         json(response).await,
-        serde_json::json!({ "sign-in": "off", "exposure": "network" })
+        told_the_build(serde_json::json!({ "sign-in": "off", "exposure": "network" }))
     );
     let response = send_listening(&on(), network, get(SESSION_PATH, &[])).await;
     assert_eq!(
         json(response).await,
         serde_json::json!({ "sign-in": "signed-out", "exposure": "network" })
+    );
+}
+
+#[tokio::test]
+async fn the_session_route_tells_a_build_with_no_known_commit_as_null() {
+    let mut state = test_state();
+    state.build = BuildDto {
+        version: "0.3.0".to_owned(),
+        commit: None,
+        dirty: false,
+        release: false,
+    };
+    let response = router(Arc::new(NoUi), RequestChecks::default(), state)
+        .oneshot(get(SESSION_PATH, &[]))
+        .await
+        .unwrap();
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({
+            "sign-in": "off",
+            "version": "0.3.0",
+            "commit": null,
+            "dirty": false,
+            "release": false
+        })
     );
 }
 
@@ -308,23 +347,23 @@ async fn the_session_route_says_where_a_request_stands_and_how_long_its_session_
     let csrf = body["csrf-token"].as_str().unwrap().to_owned();
     assert_eq!(
         body,
-        serde_json::json!({
+        told_the_build(serde_json::json!({
             "sign-in": "signed-in",
             "csrf-token": csrf,
             "idle-seconds": 43_200,
             "ends-in-seconds": 2_592_000
-        })
+        }))
     );
     clock.advance(domain::SignedDuration::from_hours(11));
     let response = send(&on, get(SESSION_PATH, &[("cookie", &cookie)])).await;
     assert_eq!(
         json(response).await,
-        serde_json::json!({
+        told_the_build(serde_json::json!({
             "sign-in": "signed-in",
             "csrf-token": csrf,
             "idle-seconds": 43_200,
             "ends-in-seconds": 2_592_000 - 11 * 3_600
-        })
+        }))
     );
     // Asking was a use: the session lasts another 12 hours from there.
     clock.advance(domain::SignedDuration::from_hours(11));
