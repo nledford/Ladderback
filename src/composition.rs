@@ -101,7 +101,7 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
     let localizer = l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
     for (alias, repository) in config.repositories() {
         for secret in repository.settings.inline_secrets() {
-            let (code, args) = inline_secret_warning(&repository.settings, &secret);
+            let (code, args) = inline_secret_warning(&repository.settings, &secret, 1);
             let message = localizer.warning(code, &args, None);
             log::warn!("repository {}: {message}", alias.as_str());
         }
@@ -178,13 +178,15 @@ fn glob_never_matches(
 
 /// The warning for a secret the configuration holds as text, with its
 /// arguments: one in a location is moved differently from a setting of its
-/// own, and one in an rclone location differently again (§10.2).
+/// own, and one in an rclone location differently again (§10.2). `settings`
+/// open the location at `position`, from 1; a further one is named by it.
 fn inline_secret_warning(
     settings: &RepositorySettings,
     secret: &domain::secrets::InlineSecret,
+    position: u8,
 ) -> (WarningCode, Vec<(&'static str, MsgArg)>) {
     let field = ("field", MsgArg::Text(secret.field()));
-    match settings.location_of(secret) {
+    let (code, mut args) = match settings.location_of(secret) {
         Some(location) => (
             WarningCode::LocationSecret,
             vec![
@@ -196,7 +198,11 @@ fn inline_secret_warning(
             ],
         ),
         None => (WarningCode::ConfigInlineSecret, vec![field]),
+    };
+    if position > 1 {
+        args.push(("position", text(position)));
     }
+    (code, args)
 }
 
 /// The `kind` argument of a `location-secret` warning.
@@ -2868,12 +2874,15 @@ fn config_unusable<R>(
     }
 }
 
-/// A configured entry as the repositories list shows it: its row, and for
-/// an entry reached at several locations, each location in order with its
+/// A configured entry as the repositories list shows it: its row, with the
+/// secrets each further location writes as text by its position; for an
+/// entry reached at several locations, each location in order with its
 /// rule; a warning for each location that sends its credentials where an
 /// impostor could read them, by position, cause and whether it has a rule,
 /// never the address; and the notes about what the locations' rules mean
-/// for `plans`, the plans that back up to it (decision 80).
+/// for `plans`, the plans that back up to it (decision 80). The warnings
+/// and notes of a repository of one location say so, for its row lists no
+/// locations.
 fn listed_repository(
     alias: &RepositoryAlias,
     repository: &RepositoryConfig,
@@ -2887,6 +2896,25 @@ fn listed_repository(
         repository.maintenance,
         create_offered,
     );
+    let location_settings = repository.location_settings();
+    row.warnings.extend(
+        repository
+            .inline_secrets()
+            .into_iter()
+            .filter(|(position, _)| *position > 1)
+            .filter_map(|(position, secret)| {
+                let settings = location_settings.get(usize::from(position).checked_sub(1)?)?;
+                let (code, args) = inline_secret_warning(settings, &secret, position);
+                Some(api::WarningDto {
+                    code,
+                    args: args
+                        .into_iter()
+                        .map(|(name, value)| (name.to_owned(), value))
+                        .collect(),
+                })
+            }),
+    );
+    let locations = || ("locations".to_owned(), text(repository.locations_code()));
     row.warnings
         .extend(repository.location_warnings().into_iter().map(|warning| {
             api::WarningDto {
@@ -2895,6 +2923,7 @@ fn listed_repository(
                     ("position".to_owned(), text(warning.position)),
                     ("cause".to_owned(), text(warning.cause.code())),
                     ("rule".to_owned(), text(warning.rule_code())),
+                    locations(),
                 ]
                 .into(),
             }
@@ -2906,15 +2935,15 @@ fn listed_repository(
             .map(|note| {
                 let (code, args) = match note {
                     RuleNote::EveryLocationRuled => {
-                        (api::WarningCode::LocationEveryRuled, Vec::new())
+                        (api::WarningCode::LocationEveryRuled, vec![locations()])
                     }
                     RuleNote::LastRuledWithoutRetry { plan } => (
                         api::WarningCode::LocationLastRuledNoRetry,
-                        vec![("plan".to_owned(), text(plan.as_str()))],
+                        vec![("plan".to_owned(), text(plan.as_str())), locations()],
                     ),
                     RuleNote::NameUnreadable { position } => (
                         api::WarningCode::LocationRuleNameUnreadable,
-                        vec![("position".to_owned(), text(position))],
+                        vec![("position".to_owned(), text(position)), locations()],
                     ),
                 };
                 api::WarningDto {
@@ -3020,7 +3049,7 @@ fn repository_row(
             .inline_secrets()
             .iter()
             .map(|secret| {
-                let (code, args) = inline_secret_warning(settings, secret);
+                let (code, args) = inline_secret_warning(settings, secret, 1);
                 api::WarningDto {
                     code,
                     args: args
@@ -3447,8 +3476,9 @@ mod tests {
             );
         }
         assert!(
-            shown[0].contains("The location in repository holds a password as text")
-                && shown[1].contains("The location in repo-hot holds a password as text"),
+            shown[0].contains("The address in the repository setting holds a password as text")
+                && shown[1]
+                    .contains("The address in the repo-hot setting holds a password as text"),
             "{shown:?}"
         );
     }
@@ -7309,7 +7339,7 @@ mod tests {
                     field: "repository.repository".into(),
                     rclone: false,
                 },
-                "The location in repository.repository holds a password as text",
+                "The address in the repository.repository setting holds a password as text",
             ),
             (
                 ProfileNotice::LocationSecret {

@@ -306,22 +306,25 @@ pub enum WarningCode {
     /// answers at its address can read them (decision 80, §10.6). The
     /// arguments are `position`, the location's, from 1; `cause`:
     /// `plain-http`, `unchecked-certificate`, `plain-endpoint` or
-    /// `plain-ftp`; and `rule`: `network` when the location has a rule,
-    /// which a network made to look like the person's own passes too, or
-    /// `none`. Never the address or a credential.
+    /// `plain-ftp`; `rule`: `network` when the location has a rule, which
+    /// a network made to look like the person's own passes too, or `none`;
+    /// and `locations`: `one` for a repository of one location, whose text
+    /// names no position, or `several`. Never the address or a credential.
     LocationPlainHttpCredentials,
     /// Every location of a repository has a rule (decision 80): a scheduled
     /// run is skipped on a network where none holds, and any other run fails
-    /// there. No arguments.
+    /// there. The argument `locations` is `one` for a repository of one
+    /// location, which the page lists without its locations, or `several`.
     LocationEveryRuled,
     /// A repository's last location has a rule and the plan `plan`, which
     /// has a schedule, doesn't retry a failed run (decision 80): a run that
-    /// finds no location usable fails until the next one.
+    /// finds no location usable fails until the next one. `locations` as
+    /// for `location-every-ruled`.
     LocationLastRuledNoRetry,
     /// The rule of the location at `position`, from 1, lists Wi-Fi networks
     /// by name, and this machine couldn't read the name of the one it is on
     /// when it last tried (decision 80): that part of the rule doesn't hold
-    /// here.
+    /// here. `locations` as for `location-every-ruled`.
     LocationRuleNameUnreadable,
     /// An export wrote the repository's first location only: rustic has no
     /// fallback. The argument `count` is how many locations it left out.
@@ -346,8 +349,9 @@ pub enum WarningCode {
     /// A repository's configuration holds a secret as text: its password, or
     /// an option whose name says it is a credential. Said when the
     /// configuration loads and on the repository's row of the list. The
-    /// argument `field` names where it is, as the configuration names it.
-    /// Never the secret itself (I4).
+    /// argument `field` names where it is, as the configuration names it;
+    /// the optional `position`, from 2, is the further location that holds
+    /// it, absent for the first. Never the secret itself (I4).
     ConfigInlineSecret,
     /// A repository's location holds a credential as text: a password in the
     /// userinfo of its URL, or a credential of its rclone connection string.
@@ -356,8 +360,10 @@ pub enum WarningCode {
     /// that holds the location, as the profile or the configuration names it
     /// (`repository.repository`, `repo-hot`); `kind` is `rclone` for an rclone
     /// location, whose credential belongs in rclone's own configuration, and
-    /// `url` for any other, where a `${…}` reference keeps it out. Never the
-    /// credential, nor the location it is in (I4).
+    /// `url` for any other, where a `${…}` reference keeps it out; the
+    /// optional `position`, from 2, is the further location the setting is
+    /// in, absent for the first. Never the credential, nor the location it
+    /// is in (I4).
     LocationSecret,
     /// A glob of a plan can never match (#510): it has a slash in the middle,
     /// so rustic reads it from the root of the file system, and written from
@@ -938,17 +944,35 @@ impl WarningCode {
                     optional: false,
                 },
             ],
-            Self::LocationEveryRuled => &[],
-            Self::LocationLastRuledNoRetry => &[ArgSpec {
-                name: "plan",
+            Self::LocationEveryRuled => &[ArgSpec {
+                name: "locations",
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::LocationRuleNameUnreadable => &[ArgSpec {
-                name: "position",
-                kind: ArgKind::Text,
-                optional: false,
-            }],
+            Self::LocationLastRuledNoRetry => &[
+                ArgSpec {
+                    name: "plan",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "locations",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::LocationRuleNameUnreadable => &[
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "locations",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::LocationPlainHttpCredentials => &[
                 ArgSpec {
                     name: "position",
@@ -962,6 +986,11 @@ impl WarningCode {
                 },
                 ArgSpec {
                     name: "rule",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "locations",
                     kind: ArgKind::Text,
                     optional: false,
                 },
@@ -998,11 +1027,23 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::InlineSecret | Self::ConfigInlineSecret => &[ArgSpec {
+            Self::InlineSecret => &[ArgSpec {
                 name: "field",
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ConfigInlineSecret => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
             Self::LocationSecret => &[
                 ArgSpec {
                     name: "field",
@@ -1013,6 +1054,11 @@ impl WarningCode {
                     name: "kind",
                     kind: ArgKind::Text,
                     optional: false,
+                },
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: true,
                 },
             ],
             Self::GlobNeverMatches => &[
