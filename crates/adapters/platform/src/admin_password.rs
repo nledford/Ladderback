@@ -133,7 +133,17 @@ fn read_hash(path: &Path) -> Result<String, AdminPasswordError> {
 /// every process, so the API tokens kept with it outlive a restart (decision
 /// 93).
 fn salt_fingerprint(hash: &str) -> Result<PasswordFingerprint, AdminPasswordError> {
-    todo!()
+    let salt = PasswordHash::new(hash)
+        .ok()
+        .and_then(|hash| hash.salt)
+        .ok_or_else(|| {
+            AdminPasswordError::Unreadable("the password hash has no salt".to_owned())
+        })?;
+    let digest: [u8; 32] = Sha256::digest(salt.as_str().as_bytes()).into();
+    let [a, b, c, d, e, f, g, h, ..] = digest;
+    Ok(PasswordFingerprint::new(u64::from_be_bytes([
+        a, b, c, d, e, f, g, h,
+    ])))
 }
 
 /// Writes `hash` as the file at `path`, readable by its owner alone, in
