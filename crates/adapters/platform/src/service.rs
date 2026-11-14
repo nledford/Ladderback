@@ -10,9 +10,10 @@
 //! when it is a file with the template's mark line: one written by hand, or
 //! systemd's mask, is left as it is.
 //!
-//! The manager is run as `systemctl --user …` or `launchctl …`, by name from
-//! the `PATH`, as a shell would, with an environment of only the variables
-//! it needs to find the user's manager and speak the user's language
+//! The manager is run as `systemctl --user …` or `launchctl …`, and asked
+//! whether the user lingers as `loginctl show-user …`, by name from the
+//! `PATH`, as a shell would, with an environment of only the variables it
+//! needs to find the user's manager and speak the user's language
 //! ([`Environment`]), through the spawn gate (decision 58), with argv only.
 
 mod files;
@@ -234,9 +235,32 @@ impl UserService {
     }
 
     /// Whether to tell the user how to keep the service running while they
-    /// are logged out (`loginctl enable-linger`, #546).
+    /// are logged out (`loginctl enable-linger`, #546). systemd stops a
+    /// user's services when the user's last session ends, unless the user
+    /// lingers, so it tells unless `loginctl show-user <uid> -p Linger`
+    /// says `Linger=yes`: a check that can't say (`loginctl` isn't on the
+    /// `PATH`, fails, or doesn't answer within the limit) tells too. A
+    /// launchd agent has no lingering to tell of, and nothing is asked.
     pub async fn should_hint_lingering(&self) -> bool {
-        todo!()
+        match self.kind {
+            Kind::Systemd => {}
+            Kind::Launchd { .. } => return false,
+        }
+        #[cfg(unix)]
+        let uid = nix::unistd::getuid().as_raw();
+        #[cfg(not(unix))]
+        let uid = 0;
+        let args: [OsString; 4] = [
+            "show-user".into(),
+            uid.to_string().into(),
+            "-p".into(),
+            "Linger".into(),
+        ];
+        let lingers = match manager::run("loginctl", &args, &self.environment, self.limit).await {
+            Ok(manager::Ended::Succeeded { out }) => out.lines().any(|line| line == "Linger=yes"),
+            Ok(manager::Ended::Failed { .. }) | Err(_) => false,
+        };
+        !lingers
     }
 }
 
@@ -423,7 +447,7 @@ impl UserService {
             .await
             .map_err(|problem| self.error(problem))?
         {
-            manager::Ended::Succeeded => Ok(true),
+            manager::Ended::Succeeded { .. } => Ok(true),
             manager::Ended::Failed {
                 code: Some(code), ..
             } if NOT_LOADED.contains(&code) => Ok(false),
@@ -470,7 +494,7 @@ impl UserService {
     /// Runs the manager's `program` with `args`; an error is a refusal.
     async fn call_os(&self, program: &str, args: Vec<OsString>) -> Result<(), ServiceError> {
         match manager::run(program, &args, &self.environment, self.limit).await {
-            Ok(manager::Ended::Succeeded) => Ok(()),
+            Ok(manager::Ended::Succeeded { .. }) => Ok(()),
             Ok(manager::Ended::Failed { said, .. }) => {
                 Err(self.error(ServiceProblem::ManagerRefused {
                     command: manager::shown(program, &args),

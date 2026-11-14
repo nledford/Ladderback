@@ -48,7 +48,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
             let mut told = line(localizer, id, &[("file", MsgArg::Text(shown(&file)))]);
             // A user's systemd services stop when the user's last session
             // ends, unless the user lingers.
-            if cfg!(target_os = "linux") {
+            if runtime.block_on(service.should_hint_lingering()) {
                 told.push_str(&line(localizer, msg::CLI_SERVICE_LINGER, &[]));
             }
             to_stdout(&told)?;

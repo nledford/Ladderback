@@ -10,7 +10,8 @@
 #             (`the_real_manager_meets_the_contract`), on a service of a name
 #             of its own whose program and home are scratch folders: it
 #             leaves an installed Ladderback service alone.
-#   install   The real binary: `ladderback install-service`; the service
+#   install   The real binary: `ladderback install-service`, which says how
+#             to linger only to a user who doesn't (#546); the service
 #             runs and answers on 127.0.0.1:9898; `install-service` again over
 #             the running one, which must have stopped by the time it returns,
 #             and a new process answers; then `remove-service`, after which
@@ -195,7 +196,20 @@ install() {
   trap after_install EXIT
 
   echo "--- install-service"
-  "$bin" install-service || fail "install-service failed"
+  local said
+  said=$("$bin" install-service) || fail "install-service failed"
+  printf '%s\n' "$said"
+  # #546: install-service says how to linger only on Linux, to a user whom
+  # the real loginctl doesn't say lingers already (CI's runner lingers,
+  # ci.yml).
+  local expected=no hinted=no
+  if [ "$os" = Linux ] && [ "$(loginctl show-user "$uid" -p Linger 2>/dev/null)" != Linger=yes ]; then
+    expected=yes
+  fi
+  case "$said" in
+    *"loginctl enable-linger"*) hinted=yes ;;
+  esac
+  [ "$hinted" = "$expected" ] || fail "install-service said how to linger: $hinted, where it should have: $expected"
   [ -f "$file" ] || fail "install-service wrote no service file at $file"
   local first
   first=$(wait_running "")

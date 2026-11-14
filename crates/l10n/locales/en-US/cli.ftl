@@ -190,7 +190,7 @@ cli-service-installed = installed the service { $file }: it runs now, and from e
 # $file (text): the service file's path.
 cli-service-replaced = replaced the service { $file } and started it again
 
-# Linux only, after an install: a user's services stop when the user logs out, unless the user lingers.
+# Linux only, after an install, when loginctl doesn't say the user lingers already: a user's services stop when the user logs out, unless the user lingers.
 # `loginctl enable-linger` is a command, typed as it is: keep it a string literal.
 cli-service-linger = to keep it running while you are logged out, run { "loginctl enable-linger" }
 
