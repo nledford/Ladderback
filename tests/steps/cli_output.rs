@@ -331,20 +331,34 @@ fn daemon_config_holds(agent: &mut Agent, step: &Step) {
 }
 
 #[then(
-    expr = "the daemon warns that the location in {string} of the repository {string} holds a password"
+    expr = "the daemon warns that the address in the setting {string} of the repository {string} holds a password"
 )]
 fn daemon_warns_location(agent: &mut Agent, field: String, alias: String) {
     let log = &ran(agent).stderr;
-    let line = format!("repository {alias}: The location in {field} holds a password as text");
+    let line =
+        format!("repository {alias}: The address in the {field} setting holds a password as text");
     assert!(log.contains(&line), "no {line:?} in the log: {log}");
 }
 
 #[then(
-    expr = "the daemon warns that the location in {string} of the repository {string} holds a credential that belongs in rclone's own configuration"
+    expr = "the daemon warns that the address in the setting {string} of location {int} of the repository {string} holds a password"
+)]
+fn daemon_warns_further_location(agent: &mut Agent, field: String, position: u8, alias: String) {
+    let log = &ran(agent).stderr;
+    let line = format!(
+        "repository {alias}: The address in the {field} setting of location {position} holds a password as text"
+    );
+    assert!(log.contains(&line), "no {line:?} in the log: {log}");
+}
+
+#[then(
+    expr = "the daemon warns that the address in the setting {string} of the repository {string} holds a credential that belongs in rclone's own configuration"
 )]
 fn daemon_warns_rclone_location(agent: &mut Agent, field: String, alias: String) {
     let log = &ran(agent).stderr;
-    let warning = format!("repository {alias}: The location in {field} holds a credential as text");
+    let warning = format!(
+        "repository {alias}: The address in the {field} setting holds a credential as text"
+    );
     let line = log
         .lines()
         .find(|line| line.contains(&warning))
@@ -390,4 +404,27 @@ fn daemon_no_plan_warning(agent: &mut Agent, plan: String) {
 fn daemon_log_never_shows(agent: &mut Agent, text: String) {
     let log = &ran(agent).stderr;
     assert!(!log.contains(&text), "{log}");
+}
+
+#[then(
+    expr = "the daemon warns that the repository {string} sends its credentials over plain HTTP"
+)]
+fn daemon_warns_plain_http(agent: &mut Agent, alias: String) {
+    let log = &ran(agent).stderr;
+    let warning =
+        format!("repository {alias}: This repository sends its credentials over plain HTTP");
+    let line = log
+        .lines()
+        .find(|line| line.contains(&warning))
+        .unwrap_or_else(|| panic!("no {warning:?} in the log: {log}"));
+    assert!(line.contains("WARN"), "{line}");
+}
+
+/// A repository of one location is listed without its locations, so
+/// nothing it is told names one by its position (#473).
+#[then("the daemon's log names no location by its position")]
+fn daemon_log_names_no_position(agent: &mut Agent) {
+    let log = &ran(agent).stderr;
+    assert!(log.contains(LISTENING), "the daemon didn't start: {log}");
+    assert!(!log.to_lowercase().contains("location 1"), "{log}");
 }

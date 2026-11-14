@@ -273,7 +273,10 @@ Given("the machine can't read the Wi-Fi network's name", function (this: Browser
     const position = places.findIndex(([known]) => known === name) + 1;
     daemon.warnOfRepository(alias, {
       code: "location-rule-name-unreadable",
-      args: { position: { type: "text", value: String(position) } },
+      args: {
+        position: { type: "text", value: String(position) },
+        locations: { type: "text", value: "several" },
+      },
     });
   }
   this.scriptedDaemon = daemon;

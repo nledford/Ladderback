@@ -207,6 +207,7 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
         ("position", text("2")),
         ("cause", text("plain-http")),
         ("rule", text("network")),
+        ("locations", text("several")),
     ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);

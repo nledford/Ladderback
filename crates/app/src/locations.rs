@@ -46,10 +46,12 @@ use crate::secrets::{Cause, JobReferences, ResolveError, ResolveRepository, Reso
 pub enum LocationReport {
     /// A location, as its references resolved, sends its credentials where
     /// whoever answers at its address can read them: a warning in the log
-    /// for that job, never one of the operation (§10.6).
+    /// for that job, never one of the operation (§10.6). `position` is
+    /// `None` for a repository of one location, which the page lists
+    /// without its locations (#473).
     ExposedCredentials {
         alias: RepositoryAlias,
-        position: u8,
+        position: Option<u8>,
         cause: ExposedCredentials,
     },
     /// A location holds a repository whose ID isn't the entry's.
@@ -150,6 +152,9 @@ impl ChooseLocation {
                 }
                 None => true,
             };
+            if holds {
+                self.report_lone(&access);
+            }
             return if holds {
                 Ok(Located {
                     access,
@@ -190,6 +195,23 @@ impl ChooseLocation {
                 record: Some(record),
             }),
             None => Err((failure(&record), Some(record))),
+        }
+    }
+
+    /// Reports what a repository of one location sends where whoever
+    /// answers at its address can read it, as its references resolved in
+    /// `access`: it is opened with no choice to make, but checked as a
+    /// further location is (§10.6, decision 80, point 7).
+    fn report_lone(&self, access: &RepositoryAccess) {
+        let Some(saved) = &access.entry else {
+            return;
+        };
+        if let Some(cause) = ExposedCredentials::of_location(&location_of(access)) {
+            (self.report)(LocationReport::ExposedCredentials {
+                alias: saved.alias.clone(),
+                position: None,
+                cause,
+            });
         }
     }
 
@@ -342,7 +364,7 @@ impl ChooseLocation {
                             {
                                 (self.report)(LocationReport::ExposedCredentials {
                                     alias: alias.clone(),
-                                    position,
+                                    position: Some(position),
                                     cause,
                                 });
                             }
@@ -751,6 +773,11 @@ impl Engine for ChooseLocation {
             .filter(|access| chosen(access).is_some())
             .cloned()
         else {
+            // No location to choose: a repository of one location with no
+            // rule, or a job that names no saved entry.
+            if let Some(access) = job.access() {
+                self.report_lone(access);
+            }
             return self.inner.run(op, job).await;
         };
         let phase: Probing = Arc::new(Mutex::new(Phase::Probing(Vec::new())));

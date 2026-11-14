@@ -40,7 +40,7 @@ Feature: Repositories page
   Scenario: A password written in the configuration file is flagged on its row in words
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/repositories"
-    Then the table "Repositories" has a row "demo" that shows "of this repository is written as text in the configuration file."
+    Then the table "Repositories" has a row "demo" that shows "setting of this repository holds a secret written as text in the configuration file."
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
 

@@ -515,7 +515,7 @@ fn warns_inline_secret(agent: &mut Agent, field: String) {
 fn warns_location_secret(agent: &mut Agent, field: String) {
     assert_stderr_names(
         agent,
-        &format!("The location in {field} holds a password as text"),
+        &format!("The address in the {field} setting holds a password as text"),
     );
 }
 
@@ -563,7 +563,7 @@ fn glob_warning(agent: &mut Agent, glob: &str, plan: &str) -> String {
 fn warns_rclone_location_secret(agent: &mut Agent, field: String) {
     assert_succeeded(agent);
     let said = said(agent);
-    let warning = format!("The location in {field} holds a credential as text");
+    let warning = format!("The address in the {field} setting holds a credential as text");
     let line = said
         .lines()
         .find(|line| line.contains(&warning))

@@ -498,34 +498,63 @@ warning-location-skipped = { $outcome ->
 # $position (text): the location's place in the list, from 1.
 # $cause (text): why: plain-http, unchecked-certificate, plain-endpoint or plain-ftp.
 # $rule (text): network when the location has a rule about the network the machine is on, which a network made to look like the intended one passes too; none when it has no rule and is tried on every network.
+# $locations (text): one for a repository of one location, which the page lists without locations, so the text speaks of the repository and not of $position; several otherwise.
 # `http-cacert` is an option of the configuration, typed as it is: keep it a string literal.
-warning-location-plain-http-credentials = { $rule ->
-    [network] { $cause ->
-        [unchecked-certificate] Location { $position } accepts any certificate, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate: HTTPS that checks the certificate stops an impostor before the credentials are sent.
-        [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
-        [plain-ftp] Location { $position } sends its credentials over FTP without encryption, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use a backend over HTTPS instead, which checks the server before the credentials are sent.
-       *[other] Location { $position } sends its credentials over plain HTTP, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+warning-location-plain-http-credentials = { $locations ->
+    [one] { $rule ->
+        [network] { $cause ->
+            [unchecked-certificate] This repository accepts any certificate, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate: HTTPS that checks the certificate stops an impostor before the credentials are sent.
+            [plain-endpoint] This repository sends its credentials to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-ftp] This repository sends its credentials over FTP without encryption, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use a backend over HTTPS instead, which checks the server before the credentials are sent.
+           *[other] This repository sends its credentials over plain HTTP, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+        }
+       *[none] { $cause ->
+            [unchecked-certificate] This repository accepts any certificate, so on any network the machine is on, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-endpoint] This repository sends its credentials to an address without HTTPS, so on any network the machine is on, whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-ftp] This repository sends its credentials over FTP without encryption, so on any network the machine is on, whoever answers at its address can read them.
+           *[other] This repository sends its credentials over plain HTTP, so on any network the machine is on, whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+        }
     }
-   *[none] { $cause ->
-        [unchecked-certificate] Location { $position } accepts any certificate, so whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate.
-        [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, so whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
-        [plain-ftp] Location { $position } sends its credentials over FTP without encryption, so whoever answers at its address can read them.
-       *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+   *[several] { $rule ->
+        [network] { $cause ->
+            [unchecked-certificate] Location { $position } accepts any certificate, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate: HTTPS that checks the certificate stops an impostor before the credentials are sent.
+            [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-ftp] Location { $position } sends its credentials over FTP without encryption, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use a backend over HTTPS instead, which checks the server before the credentials are sent.
+           *[other] Location { $position } sends its credentials over plain HTTP, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+        }
+       *[none] { $cause ->
+            [unchecked-certificate] Location { $position } accepts any certificate, so whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, so whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-ftp] Location { $position } sends its credentials over FTP without encryption, so whoever answers at its address can read them.
+           *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+        }
     }
   }
 
 # Every location of a repository has a rule about the network the machine is on, so on a network where no rule holds, nothing can be tried.
-warning-location-every-ruled = Every location of this repository has a rule, so a scheduled run is skipped on a network where none holds, and any other run fails there. Leave one location without a rule to have it tried on every network.
+# $locations (text): one for a repository of one location, which the page lists without locations, so the text speaks of the repository; several otherwise.
+warning-location-every-ruled = { $locations ->
+    [one] This repository has a rule, so a scheduled run is skipped on a network where it doesn't hold, and any other run fails there. Remove the rule to have the repository tried on every network.
+   *[several] Every location of this repository has a rule, so a scheduled run is skipped on a network where none holds, and any other run fails there. Leave one location without a rule to have it tried on every network.
+  }
 
 # A repository's last location has a rule about the network the machine is on, and a scheduled plan backing up to it doesn't retry a failed run.
 # $plan (text): the plan's ID, as the configuration file writes it. It is shown as it came.
+# $locations (text): one for a repository of one location, which the page lists without locations, so the text speaks of the repository; several otherwise.
 # `retry` is a key of the configuration file, typed as it is: keep it a string literal.
-warning-location-last-ruled-no-retry = The plan { $plan } doesn't retry a failed run, and this repository's last location has a rule: when no location can be used, as while a network comes up after the machine wakes, its scheduled run fails until the next one. Set { "retry" } on the plan to try again sooner.
+warning-location-last-ruled-no-retry = { $locations ->
+    [one] The plan { $plan } doesn't retry a failed run, and this repository has a rule: when the repository can't be used, as while a network comes up after the machine wakes, its scheduled run fails until the next one. Set { "retry" } on the plan to try again sooner.
+   *[several] The plan { $plan } doesn't retry a failed run, and this repository's last location has a rule: when no location can be used, as while a network comes up after the machine wakes, its scheduled run fails until the next one. Set { "retry" } on the plan to try again sooner.
+  }
 
 # A location's rule lists Wi-Fi networks by name, and this machine couldn't read the name of the network it is on, so that part of the rule doesn't hold and the location is skipped there.
 # $position (text): the location's place in the list, from 1.
+# $locations (text): one for a repository of one location, which the page lists without locations, so the text speaks of the repository and not of $position; several otherwise.
 # `wired` and `wifi` are values of the configuration file, typed as they are: keep them string literals.
-warning-location-rule-name-unreadable = Ladderback can't read the name of the Wi-Fi network this machine is on, so the rule of location { $position }, which names Wi-Fi networks, doesn't apply here and the location is skipped. A rule of { "wired" } or { "wifi" } alone needs no name.
+warning-location-rule-name-unreadable = { $locations ->
+    [one] Ladderback can't read the name of the Wi-Fi network this machine is on, so the rule of this repository, which names Wi-Fi networks, doesn't apply here and the repository isn't used. A rule of { "wired" } or { "wifi" } alone needs no name.
+   *[several] Ladderback can't read the name of the Wi-Fi network this machine is on, so the rule of location { $position }, which names Wi-Fi networks, doesn't apply here and the location is skipped. A rule of { "wired" } or { "wifi" } alone needs no name.
+  }
 
 # An export wrote the repository's first location only, because a rustic profile has no fallback.
 # $count (count): how many further locations it left out.
@@ -558,17 +587,28 @@ warning-profile-used-missing = The profile uses a profile called { $name }, whic
 warning-inline-secret = The profile holds a secret in { $field }, which { -brand-name } kept as text in its configuration. Move it to a keyring, a file or an environment variable, and refer to that instead.
 
 # A repository's secret is written as text in the configuration file.
-# $field (text): where it is, as the configuration names it, such as password or options.secret_access_key. Keep it as it is.
+# $field (text): the setting it is in, as the configuration names it, such as password or options.secret_access_key. Keep it as it is.
+# $position (text): the place, from 2, of the further location whose setting it is, in the repository's list of locations; none for the repository's own setting.
 # `${VAR}` and `${file:/path}` are references typed as they are: keep them string literals.
-warning-config-inline-secret = The { $field } of this repository is written as text in the configuration file. Keep the secret outside the file and refer to it: a password can come from a keyring, a file, a command or an environment variable, and an option from a { "${VAR}" } or { "${file:/path}" } reference.
+warning-config-inline-secret = { $position ->
+    [none] The { $field } setting of this repository holds a secret written as text in the configuration file. Keep the secret outside the file and refer to it: a password can come from a keyring, a file, a command or an environment variable, and an option from a { "${VAR}" } or { "${file:/path}" } reference.
+   *[other] The { $field } setting of location { $position } holds a secret written as text in the configuration file. Keep the secret outside the file and refer to it with a { "${VAR}" } or { "${file:/path}" } reference.
+  }
 
 # A repository's location holds a credential written as text: a password in a URL, as in user:password@host, or a credential in an rclone connection string.
-# $field (text): the setting that holds the location, as the profile or the configuration names it, such as repository.repository or repo-hot. Keep it as it is.
-# $kind (text): what the location is: rclone, for an rclone connection string, which rclone is started with in its arguments, or url for any other.
+# $field (text): the setting that holds the address, as the profile or the configuration names it, such as repository.repository or repo-hot. Keep it as it is.
+# $kind (text): what the address is: rclone, for an rclone connection string, which rclone is started with in its arguments, or url for any other.
+# $position (text): the place, from 2, of the further location whose setting it is, in the repository's list of locations; none for the repository's own setting.
 # `${VAR}`, `${file:/path}` and `rclone:remote:path` are typed as they are: keep them string literals.
-warning-location-secret = { $kind ->
-    [rclone] The location in { $field } holds a credential as text, so the configuration file keeps it as text too, and rclone is started with it in its arguments, where other users of this computer can see it. Set up the remote in rclone's own configuration file, with the credential there, and name it in the location instead, as in { "rclone:remote:path" }.
-   *[other] The location in { $field } holds a password as text, so the configuration file keeps it as text too. Put a { "${VAR}" } or { "${file:/path}" } reference where the password is, or give the password in the backend's own option instead.
+warning-location-secret = { $position ->
+    [none] { $kind ->
+        [rclone] The address in the { $field } setting holds a credential as text, so the configuration file keeps it as text too, and rclone is started with it in its arguments, where other users of this computer can see it. Set up the remote in rclone's own configuration file, with the credential there, and name it in the address instead, as in { "rclone:remote:path" }.
+       *[other] The address in the { $field } setting holds a password as text, so the configuration file keeps it as text too. Put a { "${VAR}" } or { "${file:/path}" } reference where the password is, or give the password in the backend's own option instead.
+    }
+   *[other] { $kind ->
+        [rclone] The address in the { $field } setting of location { $position } holds a credential as text, so the configuration file keeps it as text too, and rclone is started with it in its arguments, where other users of this computer can see it. Set up the remote in rclone's own configuration file, with the credential there, and name it in the address instead, as in { "rclone:remote:path" }.
+       *[other] The address in the { $field } setting of location { $position } holds a password as text, so the configuration file keeps it as text too. Put a { "${VAR}" } or { "${file:/path}" } reference where the password is, or give the password in the backend's own option instead.
+    }
   }
 
 # A glob of a plan has a slash in the middle, so rustic matches it against the whole path from the root of the file system, and written from one of the plan's sources it matches nothing. An exclude glob (it starts with !) that matches nothing leaves nothing out; an include glob (no !) that matches nothing leaves out every file that no other glob includes.

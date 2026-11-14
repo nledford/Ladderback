@@ -588,8 +588,8 @@ Feature: An agent's configuration
         password-env = "DEMO_PASSWORD"
         """
       When the daemon is started with "--listen 127.0.0.1:0 --plain"
-      Then the daemon warns that the location in "repository" of the repository "nas" holds a password
-      And the daemon warns that the location in "repo-hot" of the repository "nas" holds a password
+      Then the daemon warns that the address in the setting "repository" of the repository "nas" holds a password
+      And the daemon warns that the address in the setting "repo-hot" of the repository "nas" holds a password
       And the daemon's log never shows "CANARY-location-password"
       And the daemon's log never shows "CANARY-hot-password"
 
@@ -603,8 +603,25 @@ Feature: An agent's configuration
         password-env = "DEMO_PASSWORD"
         """
       When the daemon is started with "--listen 127.0.0.1:0 --plain"
-      Then the daemon warns that the location in "repository" of the repository "nas" holds a credential that belongs in rclone's own configuration
+      Then the daemon warns that the address in the setting "repository" of the repository "nas" holds a credential that belongs in rclone's own configuration
       And the daemon's log never shows "CANARY-rclone-pass"
+
+    Scenario: A password in a further location's address is pointed out by the setting and the location's position
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        repository-id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        password-env = "DEMO_PASSWORD"
+
+        [[repositories.nas.locations]]
+        repository = "rest:https://demo:CANARY-further-password@backup.example.com/nas"
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon warns that the address in the setting "repository" of location 2 of the repository "nas" holds a password
+      And the daemon's log never shows "CANARY-further-password"
 
     Scenario Outline: A location with no password written in it is not pointed out
       Given the daemon's config file holds:
@@ -627,6 +644,40 @@ Feature: An agent's configuration
         | rest:https://backup.example.com:8000/nas@2026                       |
         | rclone:demo-remote:backups/token=2024                               |
         | rclone::sftp,host=nas.example.com,bypass_cache=true:/backups        |
+
+  # Decision 80, point 7: whoever answers at the address can read the
+  # credentials, with one location as with several. The page lists no
+  # locations for a repository of one, so neither does the warning.
+  @e2e
+  Rule: A repository that sends its credentials where an impostor could read them is pointed out when the daemon starts, never by its address
+
+    Scenario: A repository of one location that sends its credentials over plain HTTP is pointed out
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "rest:http://demo:${file:/run/demo/password}@nas.example.com:8000/"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon warns that the repository "nas" sends its credentials over plain HTTP
+      And the daemon's log names no location by its position
+      And the daemon's log never shows "nas.example.com"
+
+    Scenario: A hot address that sends its credentials over plain HTTP is pointed out
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        repo-hot = "rest:http://demo:${file:/run/demo/password}@hot.example.com:8000/"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon warns that the repository "nas" sends its credentials over plain HTTP
+      And the daemon's log never shows "hot.example.com"
 
   @e2e
   Rule: A glob that can never match is pointed out when the daemon starts and on its plan's row, with the whole path to write instead

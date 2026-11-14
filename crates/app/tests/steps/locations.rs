@@ -85,8 +85,10 @@ pub struct LocationsWorld {
     /// By repository: the warnings the Repositories page lists for its
     /// locations.
     listed: BTreeMap<String, Vec<LocationWarning>>,
-    /// The warning a step found, which the next steps look at.
+    /// The warning a step found, and the repository it is about, which the
+    /// next steps look at.
     warned: Option<LocationWarning>,
+    warned_in: Option<String>,
     /// The credentials a location's next step writes, when its address
     /// comes from a variable.
     pending_credentials: Option<String>,
@@ -848,7 +850,9 @@ fn location_is(agent: &mut Agent, name: String, address: String, credentials: St
     };
     world.readdress(&name, &written);
     let options: Vec<(&str, &str)> = match credentials.as_str() {
-        "a user and a password in it" | "a user and a password from a file" => Vec::new(),
+        "a user and a password in it" | "a user and a password from a file" | "no credential" => {
+            Vec::new()
+        }
         "a credential option" => vec![("password", "canary-pass")],
         "the option http-insecure-tls set to true" => vec![("http-insecure-tls", "true")],
         "an http endpoint and a credential option" => vec![
@@ -861,6 +865,34 @@ fn location_is(agent: &mut Agent, name: String, address: String, credentials: St
         for (key, value) in options {
             location.options.insert(key.to_owned(), value.to_owned());
         }
+    });
+}
+
+#[given(
+    regex = r#"^the location "([^"]+)" has the hot address "([^"]+)" with (a user and a password in it|no credential)$"#
+)]
+fn location_has_hot(agent: &mut Agent, name: String, address: String, credentials: String) {
+    let written = match address.split_once("://") {
+        Some((scheme, rest)) if credentials == "a user and a password in it" => {
+            format!("{scheme}://demo:canary-pass@{rest}")
+        }
+        _ => address,
+    };
+    agent
+        .locations
+        .change_location(&name, |location| location.repo_hot = Some(written));
+}
+
+#[given(expr = "the location {string} sets {string} to {string} in its {string}")]
+fn location_sets_option(agent: &mut Agent, name: String, key: String, value: String, set: String) {
+    agent.locations.change_location(&name, |location| {
+        let options = match set.as_str() {
+            "options" => &mut location.options,
+            "options-hot" => &mut location.options_hot,
+            "options-cold" => &mut location.options_cold,
+            other => panic!("no option set is called {other:?}"),
+        };
+        options.insert(key, value);
     });
 }
 
@@ -1308,6 +1340,7 @@ fn carries_warning(agent: &mut Agent, name: String, code: String, position: u8, 
         .copied();
     assert!(warned.is_some(), "{listed:?}");
     agent.locations.warned = warned;
+    agent.locations.warned_in = Some(name);
 }
 
 #[then(
@@ -1324,6 +1357,26 @@ fn warning_says_no_rule(agent: &mut Agent) {
     assert_eq!(warned.rule_code(), "none", "{warned:?}");
 }
 
+/// The page lists a repository's locations only when it has several, so
+/// the warning of a repository of one names no location by its position
+/// and no rule the page doesn't show (#473): the warning found is the
+/// repository's only one, about its only location, and its text is chosen
+/// by `locations` being `one`.
+#[then("the warning speaks of the repository, never of a location by its position")]
+fn warning_speaks_of_repository(agent: &mut Agent) {
+    let world = &agent.locations;
+    let warned = world.warned.expect("a step found the warning");
+    let name = world.warned_in.as_ref().expect("a step found the warning");
+    assert_eq!(world.listed[name], vec![warned], "{name}");
+    let entry = &world.entries[name];
+    assert_eq!(
+        usize::from(warned.position),
+        entry.location_count(),
+        "{name}"
+    );
+    assert_eq!(entry.locations_code(), "one", "{name}");
+}
+
 #[then("the warning names neither the address nor a credential")]
 fn warning_names_neither(agent: &mut Agent) {
     let shown = format!("{:?}", agent.locations.listed);
@@ -1332,6 +1385,7 @@ fn warning_names_neither(agent: &mut Agent) {
         "canary-pass",
         "s3.example.lan",
         "lan-userinfo",
+        "hot.example.lan",
     ] {
         assert!(!shown.contains(hidden), "{shown}");
     }
@@ -1402,8 +1456,34 @@ fn log_warns_plain_http(agent: &mut Agent, position: u8) {
                 position: at,
                 cause: domain::planning::ExposedCredentials::PlainHttp,
                 ..
-            } if *at == position
+            } if *at == Some(position)
         )),
+        "{reports:?}"
+    );
+    let shown = format!("{reports:?}");
+    assert!(!shown.contains("canary-pass"), "{shown}");
+}
+
+/// A repository of one location is listed without its locations, so the
+/// log names none by its position (#473), and it is told once.
+#[then(
+    expr = "the daemon's log warns that the repository {string} sends its credentials over plain HTTP, naming no location"
+)]
+fn log_warns_repository_plain_http(agent: &mut Agent, name: String) {
+    let reports = agent.locations.reports();
+    let exposed: Vec<_> = reports
+        .iter()
+        .filter(|report| matches!(report, LocationReport::ExposedCredentials { .. }))
+        .collect();
+    assert!(
+        matches!(
+            exposed.as_slice(),
+            [LocationReport::ExposedCredentials {
+                alias: warned,
+                position: None,
+                cause: domain::planning::ExposedCredentials::PlainHttp,
+            }] if warned.as_str() == name
+        ),
         "{reports:?}"
     );
     let shown = format!("{reports:?}");
@@ -1456,6 +1536,42 @@ fn one_location_plain_http_wired(agent: &mut Agent, name: String, address: Strin
         .get_mut(&name)
         .expect("the repository");
     entry.settings.repository = format!("{scheme}://demo:canary-pass@{rest}");
+}
+
+#[given(
+    expr = "a repository {string} of one location, {string} with a user and a password from a file"
+)]
+fn one_location_plain_http_from_file(agent: &mut Agent, name: String, address: String) {
+    repository_with_one_location(agent, name.clone());
+    let (scheme, rest) = address.split_once("://").expect("an address with a scheme");
+    let entry = agent
+        .locations
+        .entries
+        .get_mut(&name)
+        .expect("the repository");
+    entry.settings.repository =
+        format!("{scheme}://demo:${{file:/home/user/.config/secrets/solo-password}}@{rest}");
+}
+
+#[given(expr = "a repository {string} of one location, {string} with a user and a password in it")]
+fn one_location_with_credentials(agent: &mut Agent, name: String, address: String) {
+    repository_with_one_location(agent, name.clone());
+    let world = &mut agent.locations;
+    let user = "demo:canary-pass@";
+    let written = match address.split_once("://") {
+        Some((scheme, rest)) => format!("{scheme}://{user}{rest}"),
+        // The user and password come with what the reference resolves to.
+        None => {
+            world.pending_credentials = Some(user.to_owned());
+            address
+        }
+    };
+    world
+        .entries
+        .get_mut(&name)
+        .expect("the repository")
+        .settings
+        .repository = written;
 }
 
 #[given(expr = "the location {string} is eligible only on the Wi-Fi network {string}")]
