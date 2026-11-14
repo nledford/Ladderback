@@ -10868,6 +10868,76 @@ mod repository_service_tests {
         assert!(!wire.contains("canary-from-a-file"), "{wire}");
     }
 
+    /// A backup carries from its start the warnings reading its repository's
+    /// secrets met (#386): one the schedule starts now and one the queue held
+    /// from before the start alike, each recorded with a password file other
+    /// users can read (#539).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn started_and_resumed_backups_carry_the_warnings_their_secrets_gave() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let password = scratch.path().join("password");
+        std::fs::write(&password, "demo-readable-password\n").expect("the password file");
+        std::fs::set_permissions(&password, std::fs::Permissions::from_mode(0o644))
+            .expect("the file's mode");
+        let settings = domain::planning::RepositorySettings {
+            repository: "/srv/demo-repo".to_owned(),
+            repo_hot: None,
+            password: SecretRef::File {
+                path: password
+                    .to_str()
+                    .expect("a scratch path is text")
+                    .to_owned(),
+                read: domain::secrets::FileRead::FirstLine,
+            },
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let (runner, heard, _, plan) =
+            refused_runner(settings, store.clone(), Arc::new(BroadcastEventBus::new())).await;
+        let next_end = || async {
+            tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+                .await
+                .expect("the run ends")
+                .expect("an end")
+        };
+
+        let place = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+        let started = next_end().await.operation;
+        let queued = queued_home_backup(0x0539, None);
+        store
+            .save(&queued, None)
+            .await
+            .expect("the queued backup is saved");
+        PlanRuns::resume(&runner, queued.clone()).await;
+        let resumed = next_end().await.operation;
+        assert_eq!(resumed, queued.id());
+
+        let history = store
+            .list(&app::ports::HistoryQuery::default())
+            .await
+            .expect("the log reads");
+        for (run, id) in [("started", started), ("resumed", resumed)] {
+            let record = history
+                .operations
+                .iter()
+                .find(|record| record.id == id)
+                .unwrap_or_else(|| panic!("the {run} backup is recorded: {history:?}"));
+            assert_eq!(
+                record.warning_kinds,
+                [WarningKind::SecretFileReadable],
+                "the {run} backup: {record:?}"
+            );
+        }
+    }
+
     /// A refused backup whose plan now backs up to another repository than
     /// the one it was queued for ends `daemon-stopped`, as any backup whose
     /// plan moved does (decision 73): the refusal is of a repository it was
