@@ -243,9 +243,10 @@ impl Workers {
     /// stop is asked for at the call, not when the answer is first polled,
     /// so the daemon can let go of the jobs straight after and a worker let
     /// go of so still gets its SIGTERM and its grace. The events of a job
-    /// stopped so never end: what runs it ends with the daemon, and records
-    /// no end (decision 92). A job asked for from then on is never started
-    /// nor answered: nothing would be left to stop it.
+    /// stopped so never end: what runs it ends with the daemon and records
+    /// no end, which the daemon's stop records for it (decision 92). A job
+    /// asked for from then on is never started nor answered: nothing would
+    /// be left to stop it.
     pub fn stop(&self) -> impl Future<Output = ()> + Send + 'static {
         self.stopping.send_replace(true);
         let stopping = Arc::clone(&self.stopping);
@@ -1052,10 +1053,10 @@ impl Reading {
 
     /// The end of the events of a job that was stopped. A cancel ends them
     /// without a failure, as ever. The daemon's stop of its workers never
-    /// ends them: it comes once the operation log has closed, and what runs
-    /// the job, which would record and announce the end it read and run the
-    /// hooks of one, ends with the daemon instead, so the run ends
-    /// `daemon-stopped` at the next start (decision 92).
+    /// ends them: what runs the job, which would record and announce the end
+    /// it read and run the hooks of one, ends with the daemon instead, and
+    /// the daemon's stop records the operation as ended `daemon-shut-down`,
+    /// announcing nothing (decision 92).
     async fn stopped_end(self) -> Option<(EngineEvent, Self)> {
         if self.daemon_stopped.load(Ordering::SeqCst) {
             std::future::pending::<()>().await;
@@ -1467,6 +1468,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::EngineExitTimedOut
                 | ErrorCode::RepositoryTimedOut
                 | ErrorCode::DaemonStopped
+                | ErrorCode::DaemonShutDown
                 | ErrorCode::NoLocationUsable
                 | ErrorCode::NoLocationRuleHolds
                 | ErrorCode::HostNotAllowed
@@ -1876,6 +1878,7 @@ mod tests {
             ErrorCode::EngineStartTimedOut,
             ErrorCode::EngineExitTimedOut,
             ErrorCode::DaemonStopped,
+            ErrorCode::DaemonShutDown,
             ErrorCode::Unknown,
         ] {
             assert_eq!(
@@ -1942,6 +1945,7 @@ mod tests {
             ErrorCode::EngineStartTimedOut,
             ErrorCode::EngineExitTimedOut,
             ErrorCode::DaemonStopped,
+            ErrorCode::DaemonShutDown,
             ErrorCode::Unknown,
         ] {
             assert_eq!(
@@ -2376,9 +2380,8 @@ mod tests {
     /// Asserts that the events of a job the daemon's stop of its workers
     /// stopped, called once that stop has returned and so once the worker
     /// has exited, never end: what runs the job then neither records nor
-    /// announces an end, nor runs a hook for one, after the operation log
-    /// has closed, and the run ends `daemon-stopped` at the next start
-    /// (decision 92).
+    /// announces an end, nor runs a hook for one, and the daemon's stop
+    /// records the operation as ended `daemon-shut-down` (decision 92).
     async fn assert_events_never_end(events: &mut stream::BoxStream<'static, EngineEvent>) {
         let next = tokio::time::timeout(Duration::from_millis(300), events.next()).await;
         assert!(

@@ -174,7 +174,7 @@ impl FailureReason {
             Self::RepositoryNotFound => "repository-not-found",
             Self::CredentialsRefused => "credentials-refused",
             Self::DaemonStopped => "daemon-stopped",
-            Self::DaemonShutDown => todo!(),
+            Self::DaemonShutDown => "daemon-shut-down",
             Self::NoLocationUsable => "no-location-usable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
             Self::PasswordNotAccepted => "password-not-accepted",

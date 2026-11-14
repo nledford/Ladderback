@@ -49,6 +49,10 @@ pub enum ErrorCode {
     /// a kill, a power cut), so the operation never reached its end and what
     /// it did is unknown. The next start ended it as failed.
     DaemonStopped,
+    /// The daemon was told to stop while the operation was running (a
+    /// service stop, a restart, the computer shutting down), and its orderly
+    /// stop ended it. No notification is sent of it.
+    DaemonShutDown,
     /// The request's `Host` header names neither a loopback address nor a
     /// configured host name (a DNS-rebinding defense, §10.1).
     HostNotAllowed,
@@ -893,6 +897,7 @@ impl ErrorCode {
             | Self::RepositoryTimedOut
             | Self::RepositoryReplaced
             | Self::DaemonStopped
+            | Self::DaemonShutDown
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired
@@ -1827,6 +1832,7 @@ mod tests {
             ErrorCode::RepositoryReplaced,
             ErrorCode::CredentialsRefused,
             ErrorCode::DaemonStopped,
+            ErrorCode::DaemonShutDown,
             ErrorCode::HostNotAllowed,
             ErrorCode::OriginNotAllowed,
             ErrorCode::JsonRequired,

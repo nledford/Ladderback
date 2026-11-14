@@ -30,10 +30,11 @@ const _: () = assert!(LIMIT.as_secs() < platform::service::KILL_AFTER.as_secs())
 pub(crate) enum Step {
     /// The requests still open when the daemon was told to stop.
     OpenRequests,
-    /// The operation log's calls in flight, and its close.
-    OperationLog,
     /// The workers, stopped as a cancel stops one.
     Workers,
+    /// The operation log's calls in flight, the ends of what is still
+    /// running, and its close.
+    OperationLog,
     /// What the daemon's tasks were still doing.
     Tasks,
 }
@@ -53,7 +54,9 @@ impl Step {
     fn given_up(self) -> &'static str {
         match self {
             Self::OpenRequests => "the requests still open end with the daemon",
-            Self::OperationLog => "an operation it was still recording is ended at the next start",
+            Self::OperationLog => {
+                "the operations still running are ended at the next start, and announced, as after a crash"
+            }
             Self::Workers => "a worker still running is killed with the daemon",
             Self::Tasks => "what they were still doing is left behind with the daemon",
         }
@@ -210,12 +213,12 @@ mod tests {
     fn the_last_line_says_how_long_the_stop_and_each_step_took() {
         let mut stopping = Stopping::new(Duration::from_secs(65));
         stopping.waited(Step::OpenRequests, Duration::from_millis(5_000), false);
-        stopping.waited(Step::OperationLog, Duration::from_millis(120), true);
         stopping.waited(Step::Workers, Duration::from_millis(2_340), true);
+        stopping.waited(Step::OperationLog, Duration::from_millis(120), true);
         stopping.waited(Step::Tasks, Duration::ZERO, true);
         assert_eq!(
             stopping.said(Duration::from_millis(7_470)),
-            "stopped after 7.5 s: open requests 5.0 s (gave up), operation log 0.1 s, workers 2.3 s, tasks 0.0 s"
+            "stopped after 7.5 s: open requests 5.0 s (gave up), workers 2.3 s, operation log 0.1 s, tasks 0.0 s"
         );
     }
 }

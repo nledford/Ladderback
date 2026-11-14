@@ -258,8 +258,8 @@ fn location_kind(rclone: bool) -> MsgArg {
 /// What `serve` runs: the router's state, the operation log it writes, the
 /// hold on the data folder that keeps every other process off it, the work
 /// it does with no request (the queue left from before it started and the
-/// scheduler), and its workers. The caller closes the log once it has
-/// stopped serving, then stops the workers, and keeps the lock until the
+/// scheduler), and its workers. The caller stops the workers once it has
+/// stopped serving, then closes the log, and keeps the lock until the
 /// daemon is gone (§4.2, §9).
 pub(crate) struct Daemon {
     pub(crate) state: AppState,
@@ -403,11 +403,26 @@ impl OperationLog {
         close_within(self.store.close(), &self.database, LOG_CLOSE_BOUND).await;
     }
 
-    /// Closes the log once the calls in flight have ended, however long
-    /// that takes: for the daemon's stop, which bounds it as one of its
-    /// steps (`shutdown`).
-    pub(crate) async fn close_unbounded(&self) {
-        self.store.close().await;
+    /// Ends each operation still running as failed with `daemon-shut-down`
+    /// at this moment, once the calls in flight have ended, and closes the
+    /// log, however long that takes: the daemon's orderly stop, which calls
+    /// it once its workers have stopped and bounds it as one of its steps
+    /// (`shutdown`, decision 92). Nothing is announced. Ends it couldn't
+    /// write, said in the log, are the next start's, as after a crash.
+    pub(crate) async fn close_at_orderly_stop(&self) {
+        let ended = self
+            .store
+            .close_ending_running(&FailureReason::DaemonShutDown, SystemClock.now())
+            .await;
+        match ended {
+            Ok(0) => {}
+            Ok(ended) => {
+                log::info!("stopping: {ended} running operation(s) ended as daemon-shut-down")
+            }
+            Err(error) => log::warn!(
+                "stopping: the operations still running couldn't be ended as daemon-shut-down, so the next start ends them as daemon-stopped: {error}"
+            ),
+        }
     }
 }
 
@@ -3010,7 +3025,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
-        F::DaemonShutDown => todo!(),
+        F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
@@ -9119,6 +9134,10 @@ mod repository_service_tests {
             (
                 F::DaemonStopped,
                 unavailable(ErrorCode::DaemonStopped, vec![], None),
+            ),
+            (
+                F::DaemonShutDown,
+                unavailable(ErrorCode::DaemonShutDown, vec![], None),
             ),
             (
                 F::SecretsTooLargeToMask {

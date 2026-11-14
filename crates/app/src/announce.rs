@@ -149,7 +149,7 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             None,
         ),
         F::DaemonStopped => ErrorDto::new(ErrorCode::DaemonStopped, [], None),
-        F::DaemonShutDown => todo!(),
+        F::DaemonShutDown => ErrorDto::new(ErrorCode::DaemonShutDown, [], None),
         F::NoLocationUsable => ErrorDto::new(ErrorCode::NoLocationUsable, [], None),
         F::NoLocationRuleHolds => ErrorDto::new(ErrorCode::NoLocationRuleHolds, [], None),
         F::PasswordNotAccepted => ErrorDto::new(ErrorCode::PasswordNotAccepted, [], None),
@@ -438,6 +438,7 @@ mod tests {
             (F::RepositoryNotFound, C::RepositoryNotFound, vec![]),
             (F::CredentialsRefused, C::CredentialsRefused, vec![]),
             (F::DaemonStopped, C::DaemonStopped, vec![]),
+            (F::DaemonShutDown, C::DaemonShutDown, vec![]),
             (
                 F::SecretsTooLargeToMask {
                     field: Some("HTTPS_PROXY".to_owned()),
@@ -562,6 +563,10 @@ mod tests {
                 ErrorDto::new(C::CredentialsRefused, [], None),
             ),
             (F::DaemonStopped, ErrorDto::new(C::DaemonStopped, [], None)),
+            (
+                F::DaemonShutDown,
+                ErrorDto::new(C::DaemonShutDown, [], None),
+            ),
             (
                 F::NoLocationUsable,
                 ErrorDto::new(C::NoLocationUsable, [], None),

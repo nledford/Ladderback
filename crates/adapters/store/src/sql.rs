@@ -71,15 +71,17 @@ pub(crate) const LIST_WARNING_KINDS: &str = concat!(
     "GROUP BY op_id, code ORDER BY first"
 );
 
-/// Ends every running operation as failed (startup recovery), and nothing
-/// else about it: not its times, warnings or target, and returns the ID of
-/// each it ended, in no set order. Parameters: `status`, `error_code`,
-/// `error_args`, `error_detail`, then the status it ends, running. A
+/// Ends every running operation as failed (startup recovery, and the
+/// daemon's orderly stop), and nothing else about it but its finish time:
+/// not its start, warnings or target, and returns the ID of each it ended,
+/// in no set order. Parameters: `status`, `error_code`, `error_args`,
+/// `error_detail`, `finished_at` (NULL for recovery, which doesn't know when
+/// the daemon stopped), then the status it ends, running. A
 /// running maintenance row stops being one, so the one-maintenance index
 /// stops holding its repository.
 pub(crate) const FAIL_RUNNING: &str = concat!(
-    "UPDATE operations SET status = ?, error_code = ?, error_args = ?, error_detail = ? ",
-    "WHERE status = ? RETURNING id"
+    "UPDATE operations SET status = ?, error_code = ?, error_args = ?, error_detail = ?, ",
+    "finished_at = ? WHERE status = ? RETURNING id"
 );
 
 /// The persistent queue (§5), oldest first: the queued operations by ID,

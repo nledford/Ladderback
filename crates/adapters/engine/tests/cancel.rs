@@ -271,8 +271,8 @@ async fn a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(by: S
     let took = began.elapsed();
     match by {
         StoppedBy::Cancel => assert!(events.next().await.is_none(), "events followed the stop"),
-        // The run that reads them ends with the daemon, which records no end
-        // (decision 92).
+        // The run that reads them ends with the daemon, whose stop records
+        // the end for it (decision 92).
         StoppedBy::Daemon => {
             let next = tokio::time::timeout(Duration::from_millis(300), events.next()).await;
             assert!(

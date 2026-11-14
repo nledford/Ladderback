@@ -360,23 +360,26 @@ fn run_daemon(
             }
             None => stop.wait(Step::OpenRequests, REQUESTS_BOUND, serving).await,
         };
-        // No run starts once the daemon stops serving. One already started
-        // records nothing once the log has closed, and its operation ends
-        // `daemon-stopped` at the next start (§9).
+        // No scheduled run starts once the daemon stops serving.
         scheduled.abort();
-        // The operation log closes inside the runtime, so a write in flight
-        // ends as it would have rather than being cut off, and nothing of
-        // the log outlives the daemon.
+        // The workers, as a cancel stops one, so a backup that archives
+        // winds down and saves the index of the packs it wrote (decision 50).
+        // The run of a job stopped so never reads an end, so it records and
+        // announces none.
+        stop.wait(Step::Workers, WORKERS_BOUND, workers.stop())
+            .await;
+        // Then the operation log ends what is still running as
+        // `daemon-shut-down` and closes, inside the runtime, so a write in
+        // flight ends as it would have rather than being cut off, and nothing
+        // of the log outlives the daemon. A stop that never gets here, or
+        // gives this step up, leaves them to the next start, which ends and
+        // announces them as `daemon-stopped` (§9, decision 92).
         stop.wait(
             Step::OperationLog,
             LOG_CLOSE_BOUND,
-            operation_log.close_unbounded(),
+            operation_log.close_at_orderly_stop(),
         )
         .await;
-        // Then the workers, as a cancel stops one, so a backup that archives
-        // winds down and saves the index of the packs it wrote (decision 50).
-        stop.wait(Step::Workers, WORKERS_BOUND, workers.stop())
-            .await;
         let code = match served {
             Some(Err(error)) => say(localizer, msg::CLI_SERVER_ERROR, &[("detail", text(error))])
                 .map(|()| ExitCode::FAILURE),

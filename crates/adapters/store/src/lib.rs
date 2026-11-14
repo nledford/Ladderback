@@ -153,15 +153,46 @@ impl SqliteStore {
         self.pool.close().await;
     }
 
-    /// Ends every running operation as failed with `reason` at `at`, then
-    /// closes as [`close`](Self::close) does: the daemon's orderly stop.
+    /// Ends every operation the log shows as running as failed with
+    /// `reason`, finished at `at`, and closes as [`close`](Self::close)
+    /// does: the daemon's orderly stop, once its workers have stopped
+    /// (decision 92). It returns how many it ended.
+    ///
+    /// It waits for the calls in flight first, so an end a run was writing
+    /// lands before it and is kept; a call made after it is refused, so no
+    /// write lands between the ends and the close. The ends are one
+    /// transaction, as recovery's are: all or none. On an error none was
+    /// ended, the log is closed all the same, and the next start ends them
+    /// as after a crash. A future dropped before it returns, as a stop
+    /// given up at its bound drops it, ends none unless the transaction had
+    /// committed. Queued and finished operations are left as they were, and
+    /// a running maintenance operation stops holding its repository (I7).
     pub async fn close_ending_running(
         &self,
         reason: &FailureReason,
         at: Timestamp,
     ) -> Result<usize, StoreError> {
-        let _ = (reason, at);
-        todo!()
+        let _alone = self.calls.write().await;
+        let ended = self.end_running_alone(reason, at).await;
+        self.pool.close().await;
+        ended
+    }
+
+    /// The ends of [`close_ending_running`](Self::close_ending_running),
+    /// committed or rolled back, for a caller that holds the store alone.
+    async fn end_running_alone(
+        &self,
+        reason: &FailureReason,
+        at: Timestamp,
+    ) -> Result<usize, StoreError> {
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let ended = fail_running(&mut tx, reason, Some(at)).await?;
+        tx.commit().await.map_err(unavailable)?;
+        Ok(ended.len())
     }
 
     /// The store, held for one call until it has done with the database.
@@ -170,6 +201,27 @@ impl SqliteStore {
     async fn call(&self) -> RwLockReadGuard<'_, ()> {
         self.calls.read().await
     }
+}
+
+/// Ends every running row of the log as failed with `reason`, finished at
+/// `at` or with no finish time, inside the caller's transaction, and returns
+/// the rows it ended, each with its `id`.
+async fn fail_running(
+    conn: &mut SqliteConnection,
+    reason: &FailureReason,
+    at: Option<Timestamp>,
+) -> Result<Vec<sqlx::sqlite::SqliteRow>, StoreError> {
+    let failure = codec::encode_failure(reason).map_err(encoding)?;
+    sqlx::query(sql::FAIL_RUNNING)
+        .bind(codec::FAILED)
+        .bind(failure.code)
+        .bind(failure.args.as_str())
+        .bind(failure.detail)
+        .bind(at.map(Timestamp::as_millisecond))
+        .bind(codec::status_text(&OperationStatus::Running))
+        .fetch_all(conn)
+        .await
+        .map_err(unavailable)
 }
 
 /// A database or connection failure.
@@ -513,7 +565,6 @@ impl OperationStore for SqliteStore {
     }
 
     async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {
-        let failure = codec::encode_failure(reason).map_err(encoding)?;
         let _call = self.call().await;
         let mut conn = self.pool.acquire().await.map_err(unavailable)?;
         // One transaction under the write lock: every running row ends or
@@ -523,15 +574,8 @@ impl OperationStore for SqliteStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(unavailable)?;
-        let ended = sqlx::query(sql::FAIL_RUNNING)
-            .bind(codec::FAILED)
-            .bind(failure.code)
-            .bind(failure.args.as_str())
-            .bind(failure.detail)
-            .bind(codec::status_text(&OperationStatus::Running))
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(unavailable)?;
+        // When the daemon stopped is unknown: no finish time (decision 40).
+        let ended = fail_running(&mut tx, reason, None).await?;
         let rows = sqlx::query(sql::LIST_QUEUED)
             .persistent(true)
             .fetch_all(&mut *tx)

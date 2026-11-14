@@ -101,6 +101,9 @@ error-engine-exit-timed-out = The engine stopped reporting, so { -brand-name } e
 # The daemon stopped while the operation was queued or running: a crash, a kill or a power cut.
 error-daemon-stopped = { -brand-name } stopped before this operation ended, so the outcome of the operation is unknown. Check the repository, then run the operation again.
 
+# The daemon was told to stop while the operation was running: a service stop, a restart, the computer shutting down. No notification is sent of it.
+error-daemon-shut-down = { -brand-name } was shut down while this operation was running, so the operation stopped before it finished. Run the operation again if you still need it.
+
 # The request named a host the daemon does not answer for.
 # `localhost`, `127.0.0.1` and `--allowed-host` are typed as they are: keep them string literals.
 error-host-not-allowed = { -brand-name } refused this request because it names a host that { -brand-name } does not answer for. Open { -brand-name } at { "localhost" } or { "127.0.0.1" }, or allow the host with { "--allowed-host" }.
