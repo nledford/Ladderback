@@ -31,18 +31,22 @@ use domain::execution::plan_tags::PlanTags;
 use domain::planning::{AgentConfig, Hostname, Plan, RepositoryConfig, Violation};
 use domain::{AgentId, PlanId, RepositoryAlias};
 
+use crate::globs::never_matching_globs;
 use crate::ports::{
-    ConfigError, ConfigStore, ExportRefusal, PlanExport, Problem, ProfileError, ProfileNotice,
-    ProfileReader, ProfileWriter,
+    ConfigError, ConfigStore, ExportRefusal, NormalizeSources, PlanExport, Problem, ProfileError,
+    ProfileNotice, ProfileReader, ProfileWriter,
 };
 
 /// Imports a rustic profile: reads it through the [`ProfileReader`], checks
 /// it against the configuration, and saves the repository (unless the
 /// configuration already holds it under that alias), the plans and the
-/// profile's global hooks in one save, or saves nothing.
+/// profile's global hooks in one save, or saves nothing. The plans' sources
+/// are resolved through [`NormalizeSources`] only to read their globs as
+/// the backup will (#510); they are saved as written.
 pub struct ImportProfile {
     reader: Arc<dyn ProfileReader>,
     config: Arc<dyn ConfigStore>,
+    sources: Arc<dyn NormalizeSources>,
 }
 
 /// What an import added to the configuration.
@@ -103,8 +107,16 @@ pub enum ExportError {
 
 #[allow(clippy::result_large_err)]
 impl ImportProfile {
-    pub fn new(reader: Arc<dyn ProfileReader>, config: Arc<dyn ConfigStore>) -> Self {
-        Self { reader, config }
+    pub fn new(
+        reader: Arc<dyn ProfileReader>,
+        config: Arc<dyn ConfigStore>,
+        sources: Arc<dyn NormalizeSources>,
+    ) -> Self {
+        Self {
+            reader,
+            config,
+            sources,
+        }
     }
 
     /// Imports the profile in `file` under the repository alias `repository`.
@@ -154,6 +166,21 @@ impl ImportProfile {
                     setting: setting.to_owned(),
                 }
             }));
+        }
+
+        // A glob rustic reads from the root and that reaches none of the
+        // folders the plan's backup walks is kept as written, as rustic
+        // would read it, and said (#510).
+        for plan in &profile.plans {
+            let said = never_matching_globs(plan, self.sources.as_ref()).await;
+            notices.extend(
+                said.into_iter()
+                    .map(|glob| ProfileNotice::GlobNeverMatches {
+                        plan: plan.id.as_str().to_owned(),
+                        glob: glob.glob,
+                        absolute: glob.absolute,
+                    }),
+            );
         }
 
         let mut agent = loaded.agent().clone();
@@ -302,8 +329,8 @@ mod tests {
     use domain::secrets::{SecretRef, SecretValue};
 
     use super::*;
-    use crate::fakes::{FakeProfileReader, InMemoryConfigStore};
-    use crate::ports::ImportedProfile;
+    use crate::fakes::{FakeProfileReader, FakeSources, InMemoryConfigStore};
+    use crate::ports::{ImportedProfile, SourcesError};
 
     fn alias(text: &str) -> RepositoryAlias {
         RepositoryAlias::parse(text).expect("an alias")
@@ -362,6 +389,7 @@ mod tests {
         ImportProfile::new(
             Arc::new(FakeProfileReader::new(Ok(profile))),
             config.clone(),
+            Arc::new(FakeSources),
         )
         .import(Path::new("nas.toml"), alias("nas"))
         .await
@@ -369,6 +397,86 @@ mod tests {
 
     async fn saved(config: &InMemoryConfigStore) -> AgentConfig {
         config.load().await.expect("the configuration loads")
+    }
+
+    /// rustic reads a glob with a slash in the middle from the root of the
+    /// file system: written from the source, it matches nothing, and the
+    /// import says so for each, after the profile's own notices, and keeps
+    /// it as written (#510).
+    #[tokio::test]
+    async fn an_imported_glob_that_can_never_match_is_kept_and_warned_of() {
+        let config = Arc::new(InMemoryConfigStore::default());
+        let mut home = plan("home", None);
+        home.filter.globs = vec!["!.cache".to_owned(), "!.local/share/x".to_owned()];
+        home.filter.iglobs = vec!["!**/a/b".to_owned(), "c/d".to_owned()];
+        let mut profile = profile(vec![home.clone(), plan("docs", None)], Hooks::default());
+        profile.notices = vec![ProfileNotice::EnvIgnored];
+        let imported = import(&config, profile).await.expect("the import");
+        assert_eq!(
+            imported.notices,
+            [
+                ProfileNotice::EnvIgnored,
+                ProfileNotice::GlobNeverMatches {
+                    plan: "home".to_owned(),
+                    glob: "!.local/share/x".to_owned(),
+                    absolute: Some("!/home/demo/home/.local/share/x".to_owned()),
+                },
+                ProfileNotice::GlobNeverMatches {
+                    plan: "home".to_owned(),
+                    glob: "c/d".to_owned(),
+                    absolute: Some("/home/demo/home/c/d".to_owned()),
+                },
+            ]
+        );
+        let saved = saved(&config).await;
+        assert_eq!(saved.plans().first(), Some(&home));
+    }
+
+    /// A source is read as the backup walks it, its links followed: the
+    /// globs are read against the folder walked, and the whole path is
+    /// written under it (#510). The plan keeps its sources as written.
+    #[tokio::test]
+    async fn an_imported_glob_is_read_against_the_sources_as_the_backup_walks_them() {
+        let config = Arc::new(InMemoryConfigStore::default());
+        let mut home = plan("home", None);
+        home.filter.globs = vec![
+            "!home/demo/home/.cache".to_owned(),
+            "!var/home/demo/home/.cache".to_owned(),
+        ];
+        let imported = ImportProfile::new(
+            Arc::new(FakeProfileReader::new(Ok(profile(
+                vec![home.clone()],
+                Hooks::default(),
+            )))),
+            config.clone(),
+            Arc::new(HomeUnderVar),
+        )
+        .import(Path::new("nas.toml"), alias("nas"))
+        .await
+        .expect("the import");
+        assert_eq!(
+            imported.notices,
+            [ProfileNotice::GlobNeverMatches {
+                plan: "home".to_owned(),
+                glob: "!home/demo/home/.cache".to_owned(),
+                absolute: Some("!/var/home/demo/home/.cache".to_owned()),
+            }]
+        );
+        assert_eq!(saved(&config).await.plans().first(), Some(&home));
+    }
+
+    /// Sources as a machine resolves them whose `/home` is a link to
+    /// `/var/home`.
+    struct HomeUnderVar;
+
+    #[async_trait::async_trait]
+    impl NormalizeSources for HomeUnderVar {
+        async fn normalized(&self, sources: &[Source]) -> Result<Vec<Source>, SourcesError> {
+            Ok(sources
+                .iter()
+                .map(|source| Source::parse(&format!("/var{}", source.as_str())).expect("a source"))
+                .collect())
+        }
     }
 
     #[tokio::test]
@@ -545,7 +653,7 @@ mod tests {
             vec![plan("docs", None)],
             Hooks::default(),
         ))));
-        let imported = ImportProfile::new(reader, config.clone())
+        let imported = ImportProfile::new(reader, config.clone(), Arc::new(FakeSources))
             .import(Path::new("nas.toml"), alias("nas"))
             .await
             .expect("the plans are added");
@@ -598,6 +706,7 @@ mod tests {
         ImportProfile::new(
             Arc::new(FakeProfileReader::new(Ok(profile))),
             config.clone(),
+            Arc::new(FakeSources),
         )
         .import(Path::new("nas.toml"), alias(name))
         .await
@@ -683,6 +792,7 @@ mod tests {
         let imported = ImportProfile::new(
             Arc::new(FakeProfileReader::new(Ok(profile))),
             config.clone(),
+            Arc::new(FakeSources),
         )
         .import(Path::new("nas.toml"), alias("nas"))
         .await
@@ -921,7 +1031,7 @@ mod tests {
             vec![plan("home", None)],
             Hooks::default(),
         ))));
-        ImportProfile::new(reader.clone(), config.clone())
+        ImportProfile::new(reader.clone(), config.clone(), Arc::new(FakeSources))
             .import(Path::new("nas.toml"), alias("nas"))
             .await
             .expect("imported");

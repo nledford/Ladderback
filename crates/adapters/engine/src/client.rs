@@ -1191,6 +1191,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::InlineSecret
                 | WarningCode::ConfigInlineSecret
                 | WarningCode::LocationSecret
+                | WarningCode::GlobNeverMatches
                 | WarningCode::ProfileTagDropped
                 | WarningCode::ProfileOptionLeftOut
                 | WarningCode::ProfileRetentionEmpty

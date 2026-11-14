@@ -19,6 +19,7 @@ pub mod announce;
 pub mod conditions;
 pub mod event_bus;
 pub mod execution;
+pub mod globs;
 pub mod history;
 pub mod interop;
 pub mod locations;

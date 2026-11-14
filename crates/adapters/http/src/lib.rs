@@ -1024,6 +1024,7 @@ mod tests {
                     repository: "demo".to_owned(),
                     scheduled: false,
                     next_run: None,
+                    warnings: Vec::new(),
                 }],
             })
         }

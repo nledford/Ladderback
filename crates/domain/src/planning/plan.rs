@@ -12,8 +12,8 @@ use crate::execution::plan_tags::UserTag;
 use crate::{PlanId, RepositoryAlias};
 
 use super::{
-    AgentSettings, Hooks, Hostname, InvalidValue, RetentionPolicy, Schedule, Source, SourceFilter,
-    ValueKind, format_duration,
+    AgentSettings, Hooks, Hostname, InvalidValue, NeverMatchingGlob, RetentionPolicy, Schedule,
+    Source, SourceFilter, ValueKind, format_duration,
 };
 
 /// How a failed backup is tried again (§5): up to `attempts` more times,
@@ -149,6 +149,28 @@ impl Plan {
     /// then records the machine's own name, as rustic does.
     pub fn snapshot_host<'a>(&'a self, agent: &'a AgentSettings) -> Option<&'a Hostname> {
         self.host.as_ref().or(agent.hostname.as_ref())
+    }
+
+    /// The globs of its source filter that can never match (#510): rustic
+    /// reads a glob with a slash in the middle from the root of the file
+    /// system, and one written from the source reaches none of the folders
+    /// the backup walks. `walked` is the plan's sources as the backup walks
+    /// them, in the order written: each with its links followed where it
+    /// can be resolved, as written where it can't (it isn't there yet); a
+    /// `.`, a `..` and a repeated `/` in them are read here as rustic reads
+    /// them. `globs`, then `iglobs`, each in the order written.
+    pub fn never_matching_globs<'a>(
+        &'a self,
+        walked: &'a [Source],
+    ) -> impl Iterator<Item = NeverMatchingGlob<'a>> {
+        self.filter.never_matching(&self.sources, walked)
+    }
+
+    /// Whether it may have a glob that can never match: it has sources and
+    /// a glob or iglob read from the root. Only then is its disk looked at
+    /// for [`Self::never_matching_globs`].
+    pub fn may_have_never_matching_globs(&self) -> bool {
+        !self.sources.is_empty() && self.filter.reads_from_root()
     }
 }
 

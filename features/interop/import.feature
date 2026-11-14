@@ -952,6 +952,77 @@ Feature: Import a rustic profile
       And no config file was written
 
   @e2e
+  Rule: A glob that can never match is kept as the profile wrote it, with a warning that says the whole path to write
+
+    Scenario: A glob with a slash in the middle, written from the source, is kept and pointed out
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [backup]
+        iglobs = ["!.cache", "!.local/share/containers", "!**/node_modules/.cache"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/user"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import succeeds
+      And the import warns that the glob "!.local/share/containers" of the plan "home" matches nothing, and to write "!/home/user/.local/share/containers" instead
+      And the import gives no warning about "!.cache"
+      And the import gives no warning about "!**/node_modules/.cache"
+      And the saved config has:
+        | key               | value                                                            |
+        | plans.home.iglobs | ["!.cache", "!.local/share/containers", "!**/node_modules/.cache"] |
+
+    Scenario: A source given through a link is read as the backup walks it, the link followed
+      Given the source folder "{scratch}/home" is a link to the folder "{scratch}/disk/home"
+      And a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [backup]
+        iglobs = ["!.local/share/containers"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["{scratch}/./home"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import warns that the glob "!.local/share/containers" of the plan "home" matches nothing, and to write "!{walked scratch}/disk/home/.local/share/containers" instead
+      And the saved config has:
+        | key                | value                      |
+        | plans.home.sources | ["{scratch}/./home"]       |
+
+    Scenario Outline: Of several sources, the whole path is said under the one that holds the glob's folders, and none when no one source does
+      Given the folders "<folders>" exist
+      And a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [backup]
+        globs = ["!docker/app/cache"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["{scratch}/home", "{scratch}/disk"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import warns that the glob "!docker/app/cache" of the plan "home" matches nothing, and <advice>
+
+      Examples:
+        | held under        | folders                                                          | advice                                                                         |
+        | the second source | {scratch}/home, {scratch}/disk/docker/app/cache                  | to write "!{walked scratch}/disk/docker/app/cache" instead                     |
+        | both sources      | {scratch}/home/docker/app/cache, {scratch}/disk/docker/app/cache | to write the whole path, starting with the folder of the source it belongs to |
+        | neither source    | {scratch}/home, {scratch}/disk                                   | to write the whole path, starting with the folder of the source it belongs to |
+
+  @e2e
   Rule: Secrets stay references, and rustic's variables fill only what the profile leaves out
 
     Scenario: An inline password is kept with a warning, and never shown

@@ -23,7 +23,7 @@ mod schedule;
 
 pub use agent::{AgentConfig, AgentSettings, Concurrency, Nice, NotRecorded, Violation};
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
-pub use filter::SourceFilter;
+pub use filter::{NeverMatchingGlob, Placement, SourceFilter};
 pub use hooks::{HookEntry, Hooks, OnFailure};
 pub(crate) use local_paths::is_relative_program;
 pub use local_paths::{RepositoryField, is_relative_location};

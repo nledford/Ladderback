@@ -42,6 +42,9 @@ ui-column-plan = Plan
 # The start page's column of the instants plans run next on their schedule.
 ui-column-next-run = Next run
 
+# The column of the start page's plans table that holds what the user should know about a plan's configuration, shown only when a plan has something.
+ui-column-notes = Notes
+
 # The next run of a plan that has a schedule, while the scheduler has planned
 # none: it hasn't yet, or the schedule has no run left.
 ui-start-not-planned = Not planned yet

@@ -629,6 +629,91 @@ Feature: An agent's configuration
         | rclone::sftp,host=nas.example.com,bypass_cache=true:/backups        |
 
   @e2e
+  Rule: A glob that can never match is pointed out when the daemon starts and on its plan's row, with the whole path to write instead
+    rustic matches a glob with a slash in the middle against the whole path,
+    from the root of the file system, and a backup walks whole paths: such a
+    glob written from the source, as a profile run from inside its source
+    folder may have it, matches nothing, and the run says nothing of it. The
+    glob is kept as written, as rustic would read it.
+
+    Scenario Outline: A glob with a slash in the middle, written from the source, is pointed out with its whole path
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/user"]
+        <key> = ["<glob>"]
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon warns that the glob "<glob>" of the plan "home" matches nothing, and to write "<whole path>" instead
+
+      Examples:
+        | key    | glob                     | whole path                               |
+        | iglobs | !.local/share/containers | !/home/user/.local/share/containers      |
+        | globs  | !docker/data/app/temp    | !/home/user/docker/data/app/temp         |
+        | globs  | !./projects/build/       | !/home/user/projects/build/              |
+        | iglobs | documents/reports        | /home/user/documents/reports             |
+
+    Scenario Outline: A glob rustic matches where it is written is not pointed out
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/user"]
+        iglobs = ["<glob>"]
+        """
+      When the daemon is started with "--listen 127.0.0.1:0 --plain"
+      Then the daemon gives no warning about the plan "home"
+
+      Examples:
+        | glob                                | why                                      |
+        | !/home/user/.local/share/containers | the whole path                           |
+        | !.cache                             | no slash: it matches at any depth        |
+        | !.cache/                            | a slash at the end only marks a folder   |
+        | !**/containers/storage              | `**/` matches at any depth               |
+        | !home/user/.cache                   | the whole path, less its first slash     |
+
+    Scenario: The plans list carries the warning on the plan's row, and none on a plan whose globs match
+      Given Ladderback is serving on loopback with no repositories
+      And the config file Ladderback serves from is written as:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/user"]
+        iglobs = ["!.cache", "!.local/share/containers"]
+
+        [[plans]]
+        id = "photos"
+        repository = "nas"
+        sources = ["/home/user/photos"]
+        iglobs = ["!/home/user/photos/.thumbnails", "!**/cache/tmp"]
+        """
+      When the client asks to list the plans
+      Then the daemon lists the plan "home" with a warning that the glob "!.local/share/containers" matches nothing, and to write "!/home/user/.local/share/containers" instead
+      And the daemon lists the plan "photos" with no warnings
+
+  @e2e
   Rule: A schedule or an overlap policy the daemon can't use is refused through the API at its setting and line, past the ones it can use
 
     Scenario Outline: A refused schedule or overlap policy names its setting and line, and nothing else

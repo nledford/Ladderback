@@ -92,9 +92,10 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let empty = text(&localizer, msg::UI_START_NO_PLANS);
     let caption = text(&localizer, msg::UI_START_CAPTION);
-    let (plan_column, next_run_column) = (
+    let (plan_column, next_run_column, notes_column) = (
         text(&localizer, msg::UI_COLUMN_PLAN),
         text(&localizer, msg::UI_COLUMN_NEXT_RUN),
+        text(&localizer, msg::UI_COLUMN_NOTES),
     );
     let operations_link = text(&localizer, msg::UI_START_OPERATIONS_LINK);
     let repositories_link = text(&localizer, msg::UI_START_REPOSITORIES_LINK);
@@ -157,6 +158,11 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                         view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
                     }
                     (None, Some(plans)) if !plans.is_empty() => {
+                        let noted = plans.iter().any(|plan| !plan.warnings.is_empty());
+                        let notes_column = notes_column.clone();
+                        // A plan's notes, such as a glob that can never
+                        // match (#510), have a column only when a plan has
+                        // one.
                         view! {
                             <table class="plans">
                                 <caption class="text-muted">{caption.clone()}</caption>
@@ -164,6 +170,10 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                                     <tr>
                                         <th scope="col">{plan_column.clone()}</th>
                                         <th scope="col">{next_run_column.clone()}</th>
+                                        {noted
+                                            .then(|| {
+                                                view! { <th scope="col">{notes_column}</th> }
+                                            })}
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -175,10 +185,25 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                                                 &plan,
                                                 viewer.as_ref(),
                                             );
+                                            let notes = noted
+                                                .then(|| {
+                                                    let notes = repository_notes(&localizer, &plan.warnings);
+                                                    view! {
+                                                        <td>
+                                                            {notes
+                                                                .into_iter()
+                                                                .map(|note| {
+                                                                    view! { <div class="text-muted">{note}</div> }
+                                                                })
+                                                                .collect_view()}
+                                                        </td>
+                                                    }
+                                                });
                                             view! {
                                                 <tr>
                                                     <th scope="row">{plan.id}</th>
                                                     <td title=title>{shown}</td>
+                                                    {notes}
                                                 </tr>
                                             }
                                         })
@@ -2154,6 +2179,7 @@ mod tests {
             repository: "demo".to_owned(),
             scheduled,
             next_run: next_run.map(str::to_owned),
+            warnings: Vec::new(),
         }
     }
 

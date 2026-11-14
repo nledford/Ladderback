@@ -76,6 +76,15 @@ pub enum ProfileNotice {
     /// `rclone` says the location is an rclone one, whose credentials belong
     /// in rclone's own configuration rather than in a reference.
     LocationSecret { field: String, rclone: bool },
+    /// A glob of the plan `plan` can never match (#510): `glob` as written,
+    /// and `absolute`, the same glob written from the root under the source
+    /// it is for as the backup walks it, its links followed; none when no
+    /// one source is (see [`crate::globs::NeverMatching`]).
+    GlobNeverMatches {
+        plan: String,
+        glob: String,
+        absolute: Option<String>,
+    },
     /// One of Ladderback's reserved tags was dropped from a plan.
     TagDropped { tag: String },
     /// An export left an option out because it is a reference; `variable` is

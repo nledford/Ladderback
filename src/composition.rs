@@ -27,8 +27,8 @@ use app::ports::SecretResolver;
 use app::ports::{
     AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
     EngineEvent, EngineResult, EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network,
-    NetworkLink, OperationRecord, OperationStore, PowerSupply, ProfileError, ProfileNotice, Random,
-    RunningJob, ScheduleStore, SnapshotSummary,
+    NetworkLink, NormalizeSources, OperationRecord, OperationStore, PowerSupply, ProfileError,
+    ProfileNotice, Random, RunningJob, ScheduleStore, SnapshotSummary,
 };
 use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
@@ -106,6 +106,74 @@ fn log_inline_secrets(config: &domain::planning::AgentConfig) {
             log::warn!("repository {}: {message}", alias.as_str());
         }
     }
+}
+
+/// How long the daemon waits on one look at a plan's sources for its globs
+/// (#510): a source on a mount that stopped answering is then read as
+/// written, and holds nothing, so neither the daemon's start nor the plans
+/// list waits on it.
+const SOURCES_LOOK_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// `S`, with each look at the disk given up after its limit, as one that
+/// can't be resolved.
+struct WithinLimit<S>(S, std::time::Duration);
+
+#[async_trait]
+impl<S: NormalizeSources> NormalizeSources for WithinLimit<S> {
+    async fn normalized(
+        &self,
+        sources: &[domain::planning::Source],
+    ) -> Result<Vec<domain::planning::Source>, app::ports::SourcesError> {
+        tokio::time::timeout(self.1, self.0.normalized(sources))
+            .await
+            .unwrap_or_else(|_| {
+                Err(app::ports::SourcesError::Unreadable {
+                    detail: format!("no answer within {:?}", self.1),
+                })
+            })
+    }
+}
+
+/// Says in the log, once at load, each glob of a plan that can never match
+/// (#510): the plan, the glob and the whole path to write instead, read
+/// against the plan's sources as the backup walks them.
+async fn log_never_matching_globs(
+    config: &domain::planning::AgentConfig,
+    sources: &dyn NormalizeSources,
+) {
+    let localizer = l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
+    for plan in config.plans() {
+        for (code, args) in never_matching_glob_warnings(plan, sources).await {
+            let message = localizer.warning(code, &args, None);
+            log::warn!("{message}");
+        }
+    }
+}
+
+/// A `glob-never-matches` warning, with its arguments, for each glob of
+/// `plan` that can never match, read against its sources as `sources` walks
+/// them (#510).
+async fn never_matching_glob_warnings(
+    plan: &Plan,
+    sources: &dyn NormalizeSources,
+) -> Vec<(WarningCode, Vec<(&'static str, MsgArg)>)> {
+    app::globs::never_matching_globs(plan, sources)
+        .await
+        .into_iter()
+        .map(|glob| glob_never_matches(plan.id.as_str(), &glob.glob, glob.absolute.as_deref()))
+        .collect()
+}
+
+/// The `glob-never-matches` warning for `glob` of the plan `plan`, with
+/// `absolute`, the whole path to write instead, left out when there is none.
+fn glob_never_matches(
+    plan: &str,
+    glob: &str,
+    absolute: Option<&str>,
+) -> (WarningCode, Vec<(&'static str, MsgArg)>) {
+    let mut args = vec![("plan", text(plan)), ("glob", text(glob))];
+    args.extend(absolute.map(|absolute| ("absolute", text(absolute))));
+    (WarningCode::GlobNeverMatches, args)
 }
 
 /// The warning for a secret the configuration holds as text, with its
@@ -349,6 +417,11 @@ async fn daemon_at(
     ));
     let loaded = config.load().await.map_err(config_refused)?;
     log_inline_secrets(&loaded);
+    log_never_matching_globs(
+        &loaded,
+        &WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT),
+    )
+    .await;
     let recorded = recorded_repositories(&loaded);
     let database = data_dir.join("ladderback.db");
     let log = OperationLog {
@@ -490,6 +563,7 @@ async fn state_over(
         operations: Arc::clone(&store),
         schedules: Arc::clone(&schedules),
         link: Arc::clone(&conditions.link),
+        sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
     });
     let background = Background {
         runner,
@@ -1920,6 +1994,11 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             WarningCode::LocationSecret,
             vec![("field", text(field)), ("kind", location_kind(rclone))],
         ),
+        ProfileNotice::GlobNeverMatches {
+            plan,
+            glob,
+            absolute,
+        } => glob_never_matches(&plan, &glob, absolute.as_deref()),
         ProfileNotice::TagDropped { tag } => {
             (WarningCode::ProfileTagDropped, vec![("tag", text(tag))])
         }
@@ -1970,6 +2049,9 @@ struct ConfigCatalog {
     /// Whether this machine reads the Wi-Fi network's name, for the notes
     /// on rules that name networks (decision 80).
     link: Arc<NameWatch>,
+    /// A plan's sources as the backup walks them, which its globs are read
+    /// against (#510).
+    sources: Arc<dyn NormalizeSources>,
 }
 
 #[async_trait]
@@ -1989,26 +2071,27 @@ impl Catalog for ConfigCatalog {
                 HashMap::new()
             }
         };
-        Ok(api::PlansDto {
-            plans: config
-                .plans()
-                .iter()
-                .map(|plan| {
-                    let scheduled = plan.schedule.is_some();
-                    api::PlanSummaryDto {
-                        id: plan.id.as_str().to_owned(),
-                        repository: plan.repository.as_str().to_owned(),
-                        scheduled,
-                        // A run kept for a plan whose schedule was just
-                        // removed is the scheduler's to forget, not a run.
-                        next_run: planned
-                            .get(&plan.id)
-                            .filter(|_| scheduled)
-                            .map(ToString::to_string),
-                    }
-                })
-                .collect(),
-        })
+        let mut plans = Vec::with_capacity(config.plans().len());
+        for plan in config.plans() {
+            let scheduled = plan.schedule.is_some();
+            plans.push(api::PlanSummaryDto {
+                id: plan.id.as_str().to_owned(),
+                repository: plan.repository.as_str().to_owned(),
+                scheduled,
+                // A run kept for a plan whose schedule was just removed is
+                // the scheduler's to forget, not a run.
+                next_run: planned
+                    .get(&plan.id)
+                    .filter(|_| scheduled)
+                    .map(ToString::to_string),
+                warnings: never_matching_glob_warnings(plan, self.sources.as_ref())
+                    .await
+                    .into_iter()
+                    .map(|(code, args)| api::WarningDto::new(code, args))
+                    .collect(),
+            });
+        }
+        Ok(api::PlansDto { plans })
     }
 
     async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
@@ -3788,6 +3871,43 @@ mod tests {
         backup
     }
 
+    /// A disk that never answers, as a mount whose server is down.
+    struct Stalled;
+
+    #[async_trait]
+    impl NormalizeSources for Stalled {
+        async fn normalized(
+            &self,
+            _: &[domain::planning::Source],
+        ) -> Result<Vec<domain::planning::Source>, app::ports::SourcesError> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_look_at_the_sources_that_never_answers_is_given_up() {
+        // One look to walk the sources, then one per source for the holder.
+        let limit = std::time::Duration::from_millis(50);
+        let mut plan = Plan::new(
+            domain::PlanId::parse("home").expect("an ID"),
+            domain::RepositoryAlias::parse("nas").expect("an alias"),
+            ["/home/user", "/srv/disk"]
+                .map(|source| domain::planning::Source::parse(source).expect("a source"))
+                .to_vec(),
+        );
+        plan.filter.globs = vec!["!docker/app/cache".to_owned()];
+        let said = tokio::time::timeout(
+            limit * 3 + std::time::Duration::from_millis(200),
+            never_matching_glob_warnings(&plan, &WithinLimit(Stalled, limit)),
+        )
+        .await
+        .expect("the look is given up");
+        assert_eq!(
+            said,
+            [glob_never_matches("home", "!docker/app/cache", None)]
+        );
+    }
+
     #[tokio::test]
     async fn the_daemon_starts_with_no_configuration() {
         let scratch = tempfile::tempdir().expect("a scratch dir");
@@ -5034,6 +5154,7 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -5113,6 +5234,7 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -5210,6 +5332,7 @@ mod tests {
             )),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -5861,6 +5984,7 @@ mod tests {
             engine: Arc::clone(&runner.engine),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -7026,6 +7150,22 @@ mod tests {
                     rclone: true,
                 },
                 "Set up the remote in rclone's own configuration file",
+            ),
+            (
+                ProfileNotice::GlobNeverMatches {
+                    plan: "home".into(),
+                    glob: "!.local/share/containers".into(),
+                    absolute: Some("!/home/user/.local/share/containers".into()),
+                },
+                "Write the whole path instead, as in !/home/user/.local/share/containers.",
+            ),
+            (
+                ProfileNotice::GlobNeverMatches {
+                    plan: "home".into(),
+                    glob: "!docker/app/cache".into(),
+                    absolute: None,
+                },
+                "Write the whole path instead, starting with the folder of the source it belongs to.",
             ),
             (
                 ProfileNotice::TagDropped {
@@ -9047,6 +9187,7 @@ mod repository_service_tests {
             engine,
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -9085,6 +9226,7 @@ mod repository_service_tests {
             engine: engine(),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules,
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -9463,6 +9605,7 @@ mod repository_service_tests {
                 engine: engine(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+                sources: Arc::new(app::fakes::FakeSources),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -9498,6 +9641,7 @@ mod repository_service_tests {
                 engine: scripted.clone(),
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+                sources: Arc::new(app::fakes::FakeSources),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -10091,6 +10235,7 @@ mod repository_service_tests {
             engine: engine(),
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -10228,6 +10373,7 @@ mod repository_service_tests {
             engine: engine(),
             operations,
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+            sources: Arc::new(app::fakes::FakeSources),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
