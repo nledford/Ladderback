@@ -70,36 +70,53 @@ impl Location {
         }
     }
 
-    /// Whether any option set holds a credential: an option whose name says
-    /// it is one, written or a reference.
-    fn carries_credential_option(&self) -> bool {
-        [&self.options, &self.options_hot, &self.options_cold]
-            .into_iter()
-            .flatten()
+    /// Each address of the location with the options rustic opens it with:
+    /// `repository` with `options` and then `options-cold`, `repo-hot` with
+    /// `options` and then `options-hot`, a key of the later set replacing
+    /// the same key of `options` (`to_backends` in `rustic_backend`'s
+    /// `choose.rs`). A set never reaches the other address.
+    fn opened_addresses(&self) -> Vec<(&str, BTreeMap<&str, &str>)> {
+        std::iter::once((
+            self.repository.as_str(),
+            merged(&self.options, &self.options_cold),
+        ))
+        .chain(
+            self.repo_hot
+                .as_deref()
+                .map(|hot| (hot, merged(&self.options, &self.options_hot))),
+        )
+        .collect()
+    }
+}
+
+/// `over` laid over `base`, a key of `over` replacing the same key of `base`.
+fn merged<'a>(
+    base: &'a BTreeMap<String, String>,
+    over: &'a BTreeMap<String, String>,
+) -> BTreeMap<&'a str, &'a str> {
+    base.iter()
+        .chain(over)
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect()
+}
+
+/// Whether `address`, opened with `options`, sends a credential: a user and
+/// password in its URL (written or a reference), an rclone connection
+/// string's, or an option whose name says it is one.
+fn sends_credential(address: &str, options: &BTreeMap<&str, &str>) -> bool {
+    url_has_userinfo(address)
+        || location_secret_written(address)
+        || options
+            .iter()
             .any(|(name, value)| is_secret_option(name) && !value.is_empty())
-    }
+}
 
-    /// Whether `repository` or `repo-hot` carries a credential in its text: a
-    /// user and password in its URL (written or a reference), or an rclone
-    /// connection string's.
-    fn carries_credential_in_address(&self) -> bool {
-        std::iter::once(self.repository.as_str())
-            .chain(self.repo_hot.as_deref())
-            .any(|address| url_has_userinfo(address) || location_secret_written(address))
-    }
-
-    fn carries_credential(&self) -> bool {
-        self.carries_credential_in_address() || self.carries_credential_option()
-    }
-
-    /// The value of the option `name` in any set, compared without case.
-    fn option(&self, name: &str) -> Option<&str> {
-        [&self.options, &self.options_hot, &self.options_cold]
-            .into_iter()
-            .flatten()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.as_str())
-    }
+/// Whether any option of `options` named `name`, compared without case,
+/// has a value `holds` accepts.
+fn option_is(options: &BTreeMap<&str, &str>, name: &str, holds: impl Fn(&str) -> bool) -> bool {
+    options
+        .iter()
+        .any(|(key, value)| key.eq_ignore_ascii_case(name) && holds(value.trim()))
 }
 
 /// Whether `text` starts with `prefix`, compared without ASCII case.
@@ -237,16 +254,26 @@ impl ExposedCredentials {
         Self::of_location(&Location::of(settings))
     }
 
-    /// The cause of `location`, as written or as resolved.
+    /// The cause of `location`, as written or as resolved: of its first
+    /// address that exposes its credentials, each judged with the options
+    /// rustic opens it with.
     pub fn of_location(location: &Location) -> Option<Self> {
-        let address = location.repository.as_str();
+        location
+            .opened_addresses()
+            .into_iter()
+            .find_map(|(address, options)| Self::of_address(address, &options))
+    }
+
+    /// The cause of one address opened with `options`.
+    fn of_address(address: &str, options: &BTreeMap<&str, &str>) -> Option<Self> {
+        let credential = || sends_credential(address, options);
         if starts_with_ignore_case(address, "rest:http://") {
-            return location.carries_credential().then_some(Self::PlainHttp);
+            return credential().then_some(Self::PlainHttp);
         }
         if starts_with_ignore_case(address, "rest:https://") {
-            let insecure = location
-                .option("http-insecure-tls")
-                .is_some_and(|value| value.trim().eq_ignore_ascii_case("true"));
+            let insecure = option_is(options, "http-insecure-tls", |value| {
+                value.eq_ignore_ascii_case("true")
+            });
             return insecure.then_some(Self::UncheckedCertificate);
         }
         if let Some(service) = address.get("opendal:".len()..)
@@ -256,14 +283,14 @@ impl ExposedCredentials {
                 .split_once(':')
                 .map_or(service, |(scheme, _)| scheme);
             if scheme.eq_ignore_ascii_case("ftp") {
-                return location.carries_credential().then_some(Self::PlainFtp);
+                return credential().then_some(Self::PlainFtp);
             }
             let plain = ["endpoint", "url"].into_iter().any(|name| {
-                location
-                    .option(name)
-                    .is_some_and(|value| starts_with_ignore_case(value.trim(), "http://"))
+                option_is(options, name, |value| {
+                    starts_with_ignore_case(value, "http://")
+                })
             });
-            return (plain && location.carries_credential()).then_some(Self::PlainEndpoint);
+            return (plain && credential()).then_some(Self::PlainEndpoint);
         }
         if starts_with_ignore_case(address, "rclone:") {
             // rclone quotes a value that holds a `:`, such as a URL.
@@ -271,7 +298,7 @@ impl ExposedCredentials {
                 .to_ascii_lowercase()
                 .replace(['"', '\''], "")
                 .contains("url=http://");
-            return (plain && location.carries_credential()).then_some(Self::PlainEndpoint);
+            return (plain && credential()).then_some(Self::PlainEndpoint);
         }
         None
     }
@@ -335,7 +362,11 @@ impl RepositoryConfig {
     /// lists without its locations, so their text names no position and no
     /// rule it doesn't show; `several` otherwise.
     pub fn locations_code(&self) -> &'static str {
-        todo!()
+        if self.has_several_locations() {
+            "several"
+        } else {
+            "one"
+        }
     }
 
     /// Every secret the entry holds as text, each with the position, from
@@ -343,7 +374,17 @@ impl RepositoryConfig {
     /// password, as [`RepositorySettings::inline_secrets`] finds them, then
     /// each further location's, which hold no password of their own.
     pub fn inline_secrets(&self) -> Vec<(u8, InlineSecret)> {
-        todo!()
+        self.location_settings()
+            .iter()
+            .zip(1u8..)
+            .flat_map(|(settings, position)| {
+                settings
+                    .inline_secrets()
+                    .into_iter()
+                    .filter(move |secret| position == 1 || *secret != InlineSecret::Password)
+                    .map(move |secret| (position, secret))
+            })
+            .collect()
     }
 
     /// The settings that open the repository at each location, in order,
@@ -439,12 +480,9 @@ impl RepositoryConfig {
 
     /// The entry's locations whose credentials can be read by whoever
     /// answers at their address, as written, each saying whether it has a
-    /// rule: none for an entry of one location and no rule, which is
-    /// unchanged in every way.
+    /// rule: a repository of one location included, which is tried on every
+    /// network the machine is on (decision 80, point 7).
     pub fn location_warnings(&self) -> Vec<LocationWarning> {
-        if !self.chooses_location() {
-            return Vec::new();
-        }
         std::iter::once(Location::of(&self.settings))
             .chain(self.locations.further.iter().cloned())
             .zip(self.location_rules())
