@@ -800,6 +800,37 @@ fn api_lists_no_warnings(agent: &mut Agent, alias: String) {
     assert!(row.get("warnings").is_none(), "{row}");
 }
 
+/// The plan `id` of the plans list the client was last answered.
+fn api_plan(agent: &mut Agent, id: &str) -> serde_json::Value {
+    let (_, json) = api_answer(agent);
+    json["plans"]
+        .as_array()
+        .and_then(|plans| plans.iter().find(|plan| plan["id"].as_str() == Some(id)))
+        .cloned()
+        .unwrap_or_else(|| panic!("the list has no plan {id}: {json}"))
+}
+
+#[then(
+    expr = "the daemon lists the plan {string} with a warning that the glob {string} matches nothing, and to write {string} instead"
+)]
+fn api_lists_glob_warning(agent: &mut Agent, id: String, glob: String, whole: String) {
+    let plan = api_plan(agent, &id);
+    let text = |value: &str| serde_json::json!({"type": "text", "value": value});
+    assert_eq!(
+        plan["warnings"],
+        serde_json::json!([{
+            "code": "glob-never-matches",
+            "args": {"plan": text(&id), "glob": text(&glob), "absolute": text(&whole)}
+        }])
+    );
+}
+
+#[then(expr = "the daemon lists the plan {string} with no warnings")]
+fn api_lists_plan_without_warnings(agent: &mut Agent, id: String) {
+    let plan = api_plan(agent, &id);
+    assert!(plan.get("warnings").is_none(), "{plan}");
+}
+
 #[then(expr = "the daemon lists the repository {string} at the location, its password in the file")]
 fn api_lists_file(agent: &mut Agent, alias: String) {
     let location = text(agent.repositories.cold.as_ref().expect("the location"));

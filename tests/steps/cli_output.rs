@@ -366,6 +366,26 @@ fn daemon_no_warning(agent: &mut Agent, alias: String) {
     assert!(!log.contains(&format!("repository {alias}:")), "{log}");
 }
 
+#[then(
+    expr = "the daemon warns that the glob {string} of the plan {string} matches nothing, and to write {string} instead"
+)]
+fn daemon_warns_glob(agent: &mut Agent, glob: String, plan: String, whole: String) {
+    let log = &ran(agent).stderr;
+    let warning = format!("plan {plan}: The glob {glob} of the plan {plan} matches nothing");
+    let line = log
+        .lines()
+        .find(|line| line.contains(&warning))
+        .unwrap_or_else(|| panic!("no {warning:?} in the log: {log}"));
+    assert!(line.contains(&format!("as in {whole}.")), "{line}");
+}
+
+#[then(expr = "the daemon gives no warning about the plan {string}")]
+fn daemon_no_plan_warning(agent: &mut Agent, plan: String) {
+    let log = &ran(agent).stderr;
+    assert!(log.contains(LISTENING), "the daemon didn't start: {log}");
+    assert!(!log.contains(&format!("plan {plan}:")), "{log}");
+}
+
 #[then(expr = "the daemon's log never shows {string}")]
 fn daemon_log_never_shows(agent: &mut Agent, text: String) {
     let log = &ran(agent).stderr;

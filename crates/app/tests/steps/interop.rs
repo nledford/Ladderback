@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use app::fakes::{FakeProfileReader, FakeProfileWriter, InMemoryConfigStore};
+use app::fakes::{FakeProfileReader, FakeProfileWriter, FakeSources, InMemoryConfigStore};
 use app::interop::{
     ExportError, ExportProfile, ExportedProfile, ImportError, ImportProfile, Imported,
 };
@@ -356,7 +356,7 @@ async fn imports(agent: &mut Agent, name: String) {
         })
     });
     let reader: Arc<dyn ProfileReader> = world.reader.clone();
-    let use_case = ImportProfile::new(reader, world.store.clone());
+    let use_case = ImportProfile::new(reader, world.store.clone(), Arc::new(FakeSources));
     world.imported = Some(use_case.import(Path::new("nas.toml"), repository).await);
 }
 

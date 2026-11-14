@@ -359,6 +359,16 @@ pub enum WarningCode {
     /// `url` for any other, where a `${…}` reference keeps it out. Never the
     /// credential, nor the location it is in (I4).
     LocationSecret,
+    /// A glob of a plan can never match (#510): it has a slash in the middle,
+    /// so rustic reads it from the root of the file system, and written from
+    /// a source it reaches none. Said by the import, when the configuration
+    /// loads and on the plan's row of the list. The arguments: `plan`, the
+    /// plan's ID; `glob`, the glob as written; and `absolute`, the glob
+    /// written from the root under the source it is for as the backup walks
+    /// it, its links followed: the plan's only source, the one the glob
+    /// names, or of several the one that holds its folders. It is left out
+    /// when no one source is, and the message then says where to write it.
+    GlobNeverMatches,
     /// A tag of Ladderback's own, found on a snapshot entry, was dropped. The
     /// argument `tag` is the tag.
     ProfileTagDropped,
@@ -1003,6 +1013,23 @@ impl WarningCode {
                     name: "kind",
                     kind: ArgKind::Text,
                     optional: false,
+                },
+            ],
+            Self::GlobNeverMatches => &[
+                ArgSpec {
+                    name: "plan",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "glob",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "absolute",
+                    kind: ArgKind::Text,
+                    optional: true,
                 },
             ],
             Self::ProfileTagDropped => &[ArgSpec {
@@ -1918,6 +1945,14 @@ mod tests {
         assert_eq!(
             WarningCode::LocationSecret.args(),
             &[text("field", false), text("kind", false)]
+        );
+        assert_eq!(
+            WarningCode::GlobNeverMatches.args(),
+            &[
+                text("plan", false),
+                text("glob", false),
+                text("absolute", true)
+            ]
         );
         assert_eq!(
             WarningCode::ProfileKeyringCommandMissing.args(),
@@ -2900,6 +2935,11 @@ pub struct PlanSummaryDto {
     /// `None` while the scheduler has planned none (it hasn't yet, or the
     /// schedule has no run left).
     pub next_run: Option<String>,
+    /// What the configuration holds that the user should know about this
+    /// plan: one `glob-never-matches` per glob that can never match. Left
+    /// out when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningDto>,
 }
 
 /// The plans list: what the operations page offers to start.
@@ -3930,8 +3970,8 @@ mod catalog_dto_tests {
     use serde_json::{from_str, to_string};
 
     use super::{
-        PasswordSourceDto, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto, SnapshotDto,
-        SnapshotsDto,
+        MsgArg, PasswordSourceDto, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto,
+        SnapshotDto, SnapshotsDto, WarningCode, WarningDto,
     };
 
     #[test]
@@ -3943,18 +3983,27 @@ mod catalog_dto_tests {
                     repository: "demo".to_owned(),
                     scheduled: true,
                     next_run: Some("2026-11-13T03:00:00Z".to_owned()),
+                    warnings: Vec::new(),
                 },
                 PlanSummaryDto {
                     id: "demo-docs".to_owned(),
                     repository: "demo".to_owned(),
                     scheduled: false,
                     next_run: None,
+                    warnings: vec![WarningDto::new(
+                        WarningCode::GlobNeverMatches,
+                        [
+                            ("plan", MsgArg::Text("demo-docs".to_owned())),
+                            ("glob", MsgArg::Text("!a/b".to_owned())),
+                            ("absolute", MsgArg::Text("!/home/user/a/b".to_owned())),
+                        ],
+                    )],
                 },
             ],
         };
         assert_eq!(
             to_string(&plans).unwrap(),
-            r#"{"plans":[{"id":"demo-home","repository":"demo","scheduled":true,"next-run":"2026-11-13T03:00:00Z"},{"id":"demo-docs","repository":"demo","scheduled":false,"next-run":null}]}"#
+            r#"{"plans":[{"id":"demo-home","repository":"demo","scheduled":true,"next-run":"2026-11-13T03:00:00Z"},{"id":"demo-docs","repository":"demo","scheduled":false,"next-run":null,"warnings":[{"code":"glob-never-matches","args":{"absolute":{"type":"text","value":"!/home/user/a/b"},"glob":{"type":"text","value":"!a/b"},"plan":{"type":"text","value":"demo-docs"}}}]}]}"#
         );
         assert_eq!(
             from_str::<PlansDto>(&to_string(&plans).unwrap()).unwrap(),

@@ -69,13 +69,15 @@ export function table(world: BrowserWorld, name: string): Locator {
  *  scratch folder, starts a daemon on it, and points the scenario's pages at
  *  that daemon. `env` is added to the daemon's environment, as `TZ` for the
  *  zone its clock runs in, which its workers inherit. A plan `schedules`
- *  names runs on that cron expression. */
+ *  names runs on that cron expression, and a plan in `iglobs` has those
+ *  globs. */
 export async function serveDemoPlans(
   world: BrowserWorld,
   plans: readonly string[],
   size: keyof typeof SOURCE_FILES,
   env: Record<string, string> = {},
   schedules: Readonly<Record<string, string>> = {},
+  iglobs: Readonly<Record<string, readonly string[]>> = {},
 ): Promise<void> {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
@@ -100,6 +102,7 @@ export async function serveDemoPlans(
       'repository = "demo"',
       `sources = [${JSON.stringify(source)}]`,
       ...(plan in schedules ? [`schedule = { cron = ${JSON.stringify(schedules[plan])} }`] : []),
+      ...(plan in iglobs ? [`iglobs = ${JSON.stringify(iglobs[plan])}`] : []),
       "",
     ]),
   ].join("\n");
@@ -162,6 +165,14 @@ Given(
   async function (this: BrowserWorld, scheduled: string, cron: string, unscheduled: string) {
     await serveDemoPlans(this, [scheduled, unscheduled], "tiny", {}, { [scheduled]: cron });
     await until(() => plannedRun(this, scheduled), UPDATE_PATIENCE_MS, `the daemon planned no run of ${scheduled}`);
+  },
+);
+
+// A plan with globs, so that its row has something to say of them.
+Given(
+  "a demo plan {string} whose iglobs are {string} and {string}",
+  async function (this: BrowserWorld, plan: string, first: string, second: string) {
+    await serveDemoPlans(this, [plan], "tiny", {}, {}, { [plan]: [first, second] });
   },
 );
 

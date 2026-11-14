@@ -2154,6 +2154,7 @@ mod tests {
             repository: "demo".to_owned(),
             scheduled,
             next_run: next_run.map(str::to_owned),
+            warnings: Vec::new(),
         }
     }
 

@@ -184,7 +184,7 @@ fn import(file: &Path, repo_name: Option<&str>) -> Result<Imported, NotImported>
         search_dirs(dirs::rustic_config_dir(), std::env::current_dir().ok()),
         rustic_variables(std::env::vars_os()),
     );
-    let use_case = ImportProfile::new(Arc::new(reader), config);
+    let use_case = ImportProfile::new(Arc::new(reader), config, Arc::new(engine::RusticSources));
     runtime
         .block_on(use_case.import(file, alias))
         .map_err(|error| NotImported::Refused(import_refusal(error, &config_file)))

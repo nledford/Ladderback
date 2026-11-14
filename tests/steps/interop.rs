@@ -286,6 +286,21 @@ fn a_profile_in_rustics_config_folder(agent: &mut Agent, name: String, step: &St
     write_profile(rustic_config_dir(agent), &name, &text);
 }
 
+#[given(expr = "the source folder {string} is a link to the folder {string}")]
+fn a_linked_source(agent: &mut Agent, link: String, real: String) {
+    let real = expand(agent, &real);
+    std::fs::create_dir_all(&real).expect("the folder is made");
+    std::os::unix::fs::symlink(&real, expand(agent, &link)).expect("the link is made");
+}
+
+/// `folders` is a list, `, ` between two.
+#[given(expr = "the folders {string} exist")]
+fn folders_exist(agent: &mut Agent, folders: String) {
+    for folder in folders.split(", ") {
+        std::fs::create_dir_all(expand(agent, folder)).expect("the folder is made");
+    }
+}
+
 #[given(expr = "a rustic profile {string} larger than 1 MiB")]
 fn a_huge_profile(agent: &mut Agent, name: String) {
     // One byte past the cap, all of it a comment, so that it is TOML.
@@ -502,6 +517,44 @@ fn warns_location_secret(agent: &mut Agent, field: String) {
         agent,
         &format!("The location in {field} holds a password as text"),
     );
+}
+
+/// `{walked scratch}` in the whole path stands for the scratch folder as a
+/// backup walks it, its links followed (`/var` is `/private/var` on macOS).
+#[then(
+    expr = "the import warns that the glob {string} of the plan {string} matches nothing, and to write {string} instead"
+)]
+fn warns_glob_never_matches(agent: &mut Agent, glob: String, plan: String, whole: String) {
+    let walked = std::fs::canonicalize(agent.scratch()).expect("the scratch folder resolves");
+    let whole = whole.replace("{walked scratch}", &walked.display().to_string());
+    let line = glob_warning(agent, &glob, &plan);
+    assert!(line.contains(&format!("as in {whole}.")), "{line}");
+}
+
+#[then(
+    expr = "the import warns that the glob {string} of the plan {string} matches nothing, and to write the whole path, starting with the folder of the source it belongs to"
+)]
+fn warns_glob_never_matches_without_path(agent: &mut Agent, glob: String, plan: String) {
+    let line = glob_warning(agent, &glob, &plan);
+    assert!(
+        line.contains(
+            "Write the whole path instead, starting with the folder of the source it belongs to."
+        ),
+        "{line}"
+    );
+    assert!(!line.contains("as in "), "{line}");
+}
+
+/// The line of the import's report that says the glob `glob` of the plan
+/// `plan` matches nothing, after an import that succeeded.
+fn glob_warning(agent: &mut Agent, glob: &str, plan: &str) -> String {
+    assert_succeeded(agent);
+    let said = said(agent);
+    let warning = format!("The glob {glob} of the plan {plan} matches nothing");
+    said.lines()
+        .find(|line| line.contains(&warning))
+        .unwrap_or_else(|| panic!("no {warning:?} in: {said}"))
+        .to_owned()
 }
 
 #[then(

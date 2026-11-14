@@ -571,6 +571,15 @@ warning-location-secret = { $kind ->
    *[other] The location in { $field } holds a password as text, so the configuration file keeps it as text too. Put a { "${VAR}" } or { "${file:/path}" } reference where the password is, or give the password in the backend's own option instead.
   }
 
+# A glob of a plan has a slash in the middle, so rustic matches it against the whole path from the root of the file system, and written from one of the plan's sources it matches nothing. An exclude glob (it starts with !) that matches nothing leaves nothing out; an include glob (no !) that matches nothing leaves out every file that no other glob includes.
+# $glob (text): the glob as written, such as !.local/share/containers. Keep it as it is.
+# $plan (text): the plan's ID. Keep it as it is.
+# $absolute (text): the same glob written from the root, under the source it is for as the backup walks it (its links followed). Keep it as it is. The sender leaves it out when the plan has several sources and the glob's folders are under none of them or under more than one, and the program then supplies the text none.
+warning-glob-never-matches = The glob { $glob } of the plan { $plan } matches nothing: rustic matches a glob with a slash in the middle against the whole path, from the root of the file system, not from the source. Starting with !, it leaves nothing out; without one, it leaves out every file no other glob includes. { $absolute ->
+    [none] Write the whole path instead, starting with the folder of the source it belongs to.
+   *[other] Write the whole path instead, as in { $absolute }.
+  }
+
 # One of the program's own tags was found on a snapshot entry and dropped.
 # $tag (text): the tag.
 warning-profile-tag-dropped = { -brand-name } dropped the tag { $tag } from a plan, because tags that start like that are its own. It adds them itself.

@@ -35,6 +35,13 @@ Feature: Start page
     And I press Enter
     Then focus is on the main heading "Operations"
 
+  Scenario: A glob of a plan that can never match is pointed out on its row in words
+    Given a demo plan "demo-home" whose iglobs are "!.local/share/demo-cache" and "!.cache"
+    When I open the web UI
+    Then the table "Plans" has a row "demo-home" that shows "matches nothing: rustic matches a glob with a slash in the middle against the whole path"
+    And the page doesn't show "!.cache"
+    And the page has no accessibility violations
+
   Scenario: A start page without plans says to connect a repository first, and where plans are described
     When I open the web UI
     Then the page shows the paragraph "There are no plans yet. To add one, connect a repository on the Repositories page first, then add a plan for it to config.toml. Each plan is listed here with its next run."
