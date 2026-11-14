@@ -267,7 +267,13 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         </a>
         <Router>
             <header class="site-header">
-                <p class="brand">{text(&localizer, msg::UI_BRAND)}</p>
+                // The product name leads back to the start page, marked as the
+                // current page there; `exact`, or every page would match "/".
+                <p class="brand">
+                    <A href="/" exact=true>
+                        {text(&localizer, msg::UI_BRAND)}
+                    </A>
+                </p>
                 {move || {
                     shown
                         .get()
