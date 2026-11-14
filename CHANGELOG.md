@@ -9,6 +9,12 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [0.3.1](https://github.com/nledford/Ladderback/compare/v0.3.0...v0.3.1) - 2026-11-14
 
+### Before you upgrade
+
+- **Installing from source now needs Node.js 26 or newer.** `scripts/install.sh` refuses an older Node.js and says which version it found; install Node.js 26 first (on Debian and Ubuntu, from NodeSource). Linux means 64-bit x86_64 or aarch64 with glibc 2.35 or newer.
+- **Linux release archives:** each release now attaches x86_64 and aarch64 archives and a `SHA256SUMS` file. The install guide's "Download a release (Linux)" section shows how to check and install one.
+- **Stops:** an orderly stop (a restart, a reboot, `systemctl stop`) is now recorded as a daemon shutdown and isn't announced, and the daemon is down within 65 s. A crash or power cut is still announced when the daemon starts again.
+
 ### Added
 
 - Publish the Linux release archives with checksums ([#599](https://github.com/nledford/Ladderback/pull/599))
