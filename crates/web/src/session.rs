@@ -5,7 +5,7 @@
 //! and the DOM around them are `ws.rs` and `sign_in.rs`, which the `@ui`
 //! scenarios of `features/security/sign_in.feature` run in a browser.
 
-use api::{ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
+use api::{BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
 use l10n::{MessageId, msg};
 use serde::Deserialize;
 
@@ -181,11 +181,13 @@ fn millis(seconds: u64) -> i64 {
 }
 
 /// A live session, as a sign-in or the session route gave it: the CSRF token
-/// its changed requests carry, and its lease.
+/// its changed requests carry, its lease, and the build the daemon runs, which
+/// the header shows once the page may see the pages (decision NN).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Signed {
     pub(crate) csrf: String,
     pub(crate) lease: Lease,
+    pub(crate) build: Option<BuildDto>,
 }
 
 impl Signed {
@@ -203,6 +205,7 @@ impl Signed {
                 millis(read.ends_in_seconds?),
                 sent,
             ),
+            build: read.build.clone(),
         })
     }
 }
@@ -482,6 +485,27 @@ mod tests {
             Answer::SignedIn(Signed {
                 csrf: "abc".to_owned(),
                 lease: fresh(),
+                build: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_sign_in_answer_carries_the_build_the_daemon_runs() {
+        assert_eq!(
+            answer(
+                200,
+                r#"{"sign-in":"signed-in","csrf-token":"abc","idle-seconds":43200,"ends-in-seconds":2592000,"version":"0.3.0","commit":"3f937cf0","dirty":false,"release":false}"#
+            ),
+            Answer::SignedIn(Signed {
+                csrf: "abc".to_owned(),
+                lease: fresh(),
+                build: Some(BuildDto {
+                    version: "0.3.0".to_owned(),
+                    commit: Some("3f937cf0".to_owned()),
+                    dirty: false,
+                    release: false,
+                }),
             })
         );
     }

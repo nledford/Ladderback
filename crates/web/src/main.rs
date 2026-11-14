@@ -206,9 +206,11 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let notice = RwSignal::new(SignInOffNotice::None);
     let warning = RwSignal::new(false);
     let ended = RwSignal::new(false);
+    // The build the daemon runs, once it has told the page (decision NN).
+    let build = RwSignal::new(None::<api::BuildDto>);
     provide_context(standing);
     provide_context(notice);
-    ws::watch_session(warning, ended);
+    ws::watch_session(warning, ended, build);
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
         let read = ws::session().await;
@@ -227,16 +229,19 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         now
     });
     let navigation = Arc::clone(&localizer);
-    // The web UI is built into the binary from the same workspace, so this is
-    // the daemon's version too.
-    let version = routes::text_with(
-        &localizer,
-        msg::UI_VERSION,
-        &[(
-            "version",
-            api::MsgArg::Text(env!("CARGO_PKG_VERSION").to_owned()),
-        )],
-    );
+    // The build the daemon says it runs: the web UI is built into it, so it
+    // is the page's too. Until the daemon has said, nothing is shown.
+    let versions = Arc::clone(&localizer);
+    let version = move || {
+        build.get().map(|build| {
+            let version = routes::text_with(
+                &versions,
+                msg::UI_VERSION,
+                &[("version", api::MsgArg::Text(build.display()))],
+            );
+            view! { <p class="site-version">{version}</p> }
+        })
+    };
     let pages = Arc::clone(&localizer);
     let dialog = Arc::clone(&localizer);
     let idle = Arc::clone(&localizer);
@@ -270,7 +275,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                         .then(|| {
                             view! {
                                 <Navigation localizer=Arc::clone(&navigation) standing=standing />
-                                <p class="site-version">{version.clone()}</p>
+                                {version.clone()}
                             }
                         })
                 }}
