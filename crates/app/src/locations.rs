@@ -46,10 +46,12 @@ use crate::secrets::{Cause, JobReferences, ResolveError, ResolveRepository, Reso
 pub enum LocationReport {
     /// A location, as its references resolved, sends its credentials where
     /// whoever answers at its address can read them: a warning in the log
-    /// for that job, never one of the operation (§10.6).
+    /// for that job, never one of the operation (§10.6). `position` is
+    /// `None` for a repository of one location, which the page lists
+    /// without its locations (#473).
     ExposedCredentials {
         alias: RepositoryAlias,
-        position: u8,
+        position: Option<u8>,
         cause: ExposedCredentials,
     },
     /// A location holds a repository whose ID isn't the entry's.
@@ -342,7 +344,7 @@ impl ChooseLocation {
                             {
                                 (self.report)(LocationReport::ExposedCredentials {
                                     alias: alias.clone(),
-                                    position,
+                                    position: Some(position),
                                     cause,
                                 });
                             }

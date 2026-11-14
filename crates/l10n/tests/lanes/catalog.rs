@@ -248,10 +248,119 @@ fn exposed(localizer: &Localizer, cause: &str, rule: &str) -> String {
             ("position", MsgArg::Text("2".to_owned())),
             ("cause", MsgArg::Text(cause.to_owned())),
             ("rule", MsgArg::Text(rule.to_owned())),
+            ("locations", MsgArg::Text("several".to_owned())),
         ],
     );
     assert!(shown.problems().is_empty(), "{cause} {rule}: {shown}");
     shown.text().to_owned()
+}
+
+/// A repository of one location is listed without its locations, so what
+/// it is told about them names no position (#473).
+#[test]
+fn a_repository_of_one_location_is_told_about_itself_and_no_location() {
+    let localizer = english();
+    let one = || ("locations", MsgArg::Text("one".to_owned()));
+    let mut seen = BTreeSet::new();
+    for cause in EXPOSING_CAUSES {
+        for rule in ["network", "none"] {
+            let shown = localizer.message(
+                msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
+                &[
+                    ("position", MsgArg::Text("1".to_owned())),
+                    ("cause", MsgArg::Text(cause.to_owned())),
+                    ("rule", MsgArg::Text(rule.to_owned())),
+                    one(),
+                ],
+            );
+            assert!(shown.problems().is_empty(), "{cause} {rule}: {shown}");
+            let text = shown.text().to_owned();
+            assert!(
+                text.starts_with("This repository"),
+                "{cause} {rule}: {text}"
+            );
+            assert!(
+                !text.to_lowercase().contains("location"),
+                "{cause} {rule}: {text}"
+            );
+            assert!(seen.insert(text.clone()), "{cause} {rule}: {text}");
+        }
+    }
+    for (id, args) in [
+        (msg::WARNING_LOCATION_EVERY_RULED, vec![one()]),
+        (
+            msg::WARNING_LOCATION_LAST_RULED_NO_RETRY,
+            vec![("plan", MsgArg::Text("home".to_owned())), one()],
+        ),
+        (
+            msg::WARNING_LOCATION_RULE_NAME_UNREADABLE,
+            vec![("position", MsgArg::Text("1".to_owned())), one()],
+        ),
+    ] {
+        let shown = localizer.message(id, &args);
+        assert!(shown.problems().is_empty(), "{}: {shown}", id.as_str());
+        assert!(
+            !shown.text().to_lowercase().contains("location"),
+            "{}: {shown}",
+            id.as_str()
+        );
+    }
+}
+
+/// A secret written as text is pointed out by its setting, said to be one,
+/// never as if the setting were a place, and by the position of the
+/// location that holds it when that is a further one (#505).
+#[test]
+fn a_written_secret_is_named_by_its_setting_and_its_further_location() {
+    use api::WarningCode;
+    let localizer = english();
+    let text = |value: &str| MsgArg::Text(value.to_owned());
+    let shown = |code, args: &[(&str, MsgArg)]| {
+        let shown = localizer.warning(code, args, None);
+        assert!(shown.problems().is_empty(), "{code:?}: {shown}");
+        shown.text().to_owned()
+    };
+    for (code, args, start) in [
+        (
+            WarningCode::LocationSecret,
+            vec![("field", text("repository")), ("kind", text("url"))],
+            "The address in the repository setting holds a password as text",
+        ),
+        (
+            WarningCode::LocationSecret,
+            vec![
+                ("field", text("repo-hot")),
+                ("kind", text("rclone")),
+                ("position", text("2")),
+            ],
+            "The address in the repo-hot setting of location 2 holds a credential as text",
+        ),
+        (
+            WarningCode::LocationSecret,
+            vec![
+                ("field", text("repository")),
+                ("kind", text("url")),
+                ("position", text("3")),
+            ],
+            "The address in the repository setting of location 3 holds a password as text",
+        ),
+        (
+            WarningCode::ConfigInlineSecret,
+            vec![("field", text("options.password"))],
+            "The options.password setting of this repository holds a secret written as text",
+        ),
+        (
+            WarningCode::ConfigInlineSecret,
+            vec![
+                ("field", text("options-cold.secret_access_key")),
+                ("position", text("2")),
+            ],
+            "The options-cold.secret_access_key setting of location 2 holds a secret written as text",
+        ),
+    ] {
+        let text = shown(code, &args);
+        assert!(text.starts_with(start), "{code:?}: {text}");
+    }
 }
 
 #[test]

@@ -357,6 +357,49 @@ Feature: A repository reached at several locations
       When the repositories are listed
       Then the repository "solo" carries the warning "location-plain-http-credentials" for the location 1 with the cause "plain-http"
       And the warning says the location's rule can't tell the network it is meant for from one made to look like it
+      And the warning speaks of the repository, never of a location by its position
+
+    # With no rule, the one location is tried on every network, so whoever
+    # answers at its address wherever the machine is gets the credentials.
+    Scenario: A repository of one location with no rule that sends its credentials over plain HTTP is warned about
+      Given a repository "solo" of one location, "rest:http://solo.example.lan:8000/" with a user and a password from a file
+      When the repositories are listed
+      Then the repository "solo" carries the warning "location-plain-http-credentials" for the location 1 with the cause "plain-http"
+      And the warning says the location has no rule
+      And the warning speaks of the repository, never of a location by its position
+
+    # rustic opens a location's address with the shared options and
+    # `options-cold`, and its hot address with the shared options and
+    # `options-hot`: each address is checked with each set it is opened with.
+    Scenario: A location's hot address that sends its credentials over plain HTTP is warned about
+      Given the location "lan" is "rest:https://lan.example.lan/r" with no credential
+      And the location "lan" has the hot address "rest:http://hot.example.lan/r" with a user and a password in it
+      When the repositories are listed
+      Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "plain-http"
+      And the warning names neither the address nor a credential
+
+    Scenario: A hot address whose own option set turns the certificate check off is warned about
+      Given the location "lan" is "/srv/lan" with no credential
+      And the location "lan" has the hot address "rest:https://hot.example.lan/r" with no credential
+      And the location "lan" sets "http-insecure-tls" to "true" in its "options-hot"
+      When the repositories are listed
+      Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "unchecked-certificate"
+
+    # rustic merges the option sets key by key, `options-cold` over the
+    # shared `options` for the address: the set it merges last decides.
+    Scenario: An options-cold that turns the certificate check off over the shared options is warned about
+      Given the location "lan" is "rest:https://lan.example.lan/r" with no credential
+      And the location "lan" sets "http-insecure-tls" to "false" in its "options"
+      And the location "lan" sets "http-insecure-tls" to "true" in its "options-cold"
+      When the repositories are listed
+      Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "unchecked-certificate"
+
+    Scenario: An options-cold that turns the certificate check back on over the shared options isn't warned about
+      Given the location "lan" is "rest:https://lan.example.lan/r" with no credential
+      And the location "lan" sets "http-insecure-tls" to "true" in its "options"
+      And the location "lan" sets "http-insecure-tls" to "false" in its "options-cold"
+      When the repositories are listed
+      Then the repository "nas" carries no warning about its locations
 
     @ui
     Scenario: The Repositories page says a rule can't keep a plain-HTTP location's credentials from an impostor
@@ -376,6 +419,20 @@ Feature: A repository reached at several locations
       When the plan "home" runs
       Then the daemon's log warns that the location 1 sends its credentials over plain HTTP
       And the operation has no warnings
+
+    # A repository of one location is opened with no choice to make, but
+    # what its reference resolves to is checked as a further location's is.
+    Scenario: A repository of one location whose address is a reference is checked once it is resolved
+      Given a repository "solo" of one location, "rest:${SOLO_URL}" with a user and a password in it
+      And the variable "SOLO_URL" holds an http address
+      When a backup of "solo" runs
+      Then the daemon's log warns that the repository "solo" sends its credentials over plain HTTP, naming no location
+
+    Scenario: A repository of one location whose rule holds is checked when it is opened
+      Given a repository "solo" of one location, "rest:http://solo.example.lan/r" with a user and a password in it, eligible only on a wired network
+      And the machine is on a wired network
+      When a backup of "solo" runs
+      Then the daemon's log warns that the repository "solo" sends its credentials over plain HTTP, naming no location
 
   Rule: The Repositories page notes what the locations' rules mean for a plan's runs
 

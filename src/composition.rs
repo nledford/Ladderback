@@ -945,13 +945,21 @@ fn log_location(report: LocationReport) {
     match report {
         LocationReport::ExposedCredentials {
             alias,
-            position,
+            position: Some(position),
             cause,
         } => log::warn!(
             "repository {}: location {position} sends its credentials where whoever answers at its address can read them ({})",
             alias.as_str(),
             cause.code()
         ),
+        LocationReport::ExposedCredentials {
+            alias,
+            position: None,
+            cause,
+        } => {
+            let _ = (alias, cause);
+            todo!()
+        }
         LocationReport::OtherRepository { alias, position } => log::warn!(
             "repository {}: location {position} holds another repository, so it was not used",
             alias.as_str()
@@ -1235,6 +1243,13 @@ fn log_not_started(plan: &PlanId, trigger: Trigger, error: &StartError) {
         plan.as_str(),
         start_refused(error)
     );
+}
+
+/// A run started by `trigger`, in the log's words: "the scheduled run",
+/// never the trigger's name in the code.
+fn run_named(trigger: Trigger) -> &'static str {
+    let _ = trigger;
+    todo!()
 }
 
 /// Why a plan's run didn't start, for the daemon's log: a code, and for a
@@ -3638,6 +3653,7 @@ mod tests {
                 ("position".to_owned(), MsgArg::Text("1".to_owned())),
                 ("cause".to_owned(), MsgArg::Text("plain-http".to_owned())),
                 ("rule".to_owned(), MsgArg::Text(rule.to_owned())),
+                ("locations".to_owned(), MsgArg::Text("several".to_owned())),
             ]
             .into(),
         };
@@ -3702,8 +3718,11 @@ mod tests {
                 .collect(),
         };
         for expected in [
-            note(WarningCode::LocationEveryRuled, &[]),
-            note(WarningCode::LocationLastRuledNoRetry, &[("plan", "home")]),
+            note(WarningCode::LocationEveryRuled, &[("locations", "several")]),
+            note(
+                WarningCode::LocationLastRuledNoRetry,
+                &[("plan", "home"), ("locations", "several")],
+            ),
         ] {
             assert!(
                 row.warnings.contains(&expected),
@@ -3793,6 +3812,153 @@ mod tests {
         assert_eq!(row.locations, Vec::new());
         let wire = serde_json::to_value(&row).expect("a row is JSON");
         assert_eq!(wire.get("locations"), None, "{wire}");
+    }
+
+    /// The page lists no locations for a repository of one, so neither its
+    /// warning nor its notes name a location by its position or a rule the
+    /// page doesn't show (#473), and the warning is given with no rule as
+    /// with one (#506).
+    #[test]
+    fn a_listed_repository_of_one_location_is_warned_and_noted_as_a_repository() {
+        use domain::planning::{Alternative, NetworkKind, NetworkName};
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let mut entry = two_locations();
+        entry.locations = Default::default();
+        let row = listed_repository(&alias, &entry, &[], true, false);
+        let exposed = api::WarningDto {
+            code: WarningCode::LocationPlainHttpCredentials,
+            args: [
+                ("position".to_owned(), MsgArg::Text("1".to_owned())),
+                ("cause".to_owned(), MsgArg::Text("plain-http".to_owned())),
+                ("rule".to_owned(), MsgArg::Text("none".to_owned())),
+                ("locations".to_owned(), MsgArg::Text("one".to_owned())),
+            ]
+            .into(),
+        };
+        assert!(row.warnings.contains(&exposed), "{:?}", row.warnings);
+
+        let office = NetworkName::parse("Office").expect("a name");
+        entry.locations.first_when = Some(
+            LocationRule::new(vec![
+                Alternative::new(NetworkKind::WiFi, Some(NameFilter::Only(vec![office])))
+                    .expect("an alternative"),
+            ])
+            .expect("a rule"),
+        );
+        let mut plan = Plan::new(
+            PlanId::parse("home").expect("a plan ID"),
+            alias.clone(),
+            Vec::new(),
+        );
+        plan.schedule = Some(domain::planning::Schedule::new(
+            domain::planning::Interval::parse("1d").expect("an interval"),
+        ));
+        let row = listed_repository(&alias, &entry, &[&plan], false, false);
+        for code in [
+            WarningCode::LocationPlainHttpCredentials,
+            WarningCode::LocationEveryRuled,
+            WarningCode::LocationLastRuledNoRetry,
+            WarningCode::LocationRuleNameUnreadable,
+        ] {
+            let warning = row
+                .warnings
+                .iter()
+                .find(|warning| warning.code == code)
+                .unwrap_or_else(|| panic!("no {code:?} in {:?}", row.warnings));
+            assert_eq!(
+                warning.args.get("locations"),
+                Some(&MsgArg::Text("one".to_owned())),
+                "{code:?}"
+            );
+        }
+    }
+
+    /// The log names a run by what started it, in words (#505).
+    #[test]
+    fn a_run_is_named_in_the_log_by_what_started_it_in_words() {
+        for (trigger, words) in [
+            (Trigger::Schedule, "the scheduled run"),
+            (Trigger::Manual, "the manual run"),
+            (Trigger::CatchUp, "the catch-up run"),
+            (Trigger::Retry, "the retry"),
+            (Trigger::Hub, "the hub's run"),
+            (Trigger::Mcp, "the MCP client's run"),
+        ] {
+            assert_eq!(run_named(trigger), words, "{trigger:?}");
+        }
+    }
+
+    /// A secret written as text in a further location is pointed out as one
+    /// in the first is, by the setting and the location's position, never
+    /// the secret (#505).
+    #[test]
+    fn a_listed_repository_points_out_a_secret_written_in_a_further_location() {
+        let alias = RepositoryAlias::parse("nas").expect("an alias");
+        let mut entry = two_locations();
+        entry.locations.further[0].repo_hot =
+            Some("rest:https://demo:CANARY-hot-pass@hot.example.lan/r".to_owned());
+        let row = listed_repository(&alias, &entry, &[], true, false);
+        let warning = |code, args: &[(&str, &str)]| api::WarningDto {
+            code,
+            args: args
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), MsgArg::Text((*value).to_owned())))
+                .collect(),
+        };
+        for expected in [
+            warning(
+                WarningCode::LocationSecret,
+                &[("field", "repository"), ("kind", "url")],
+            ),
+            warning(
+                WarningCode::LocationSecret,
+                &[("field", "repo-hot"), ("kind", "url"), ("position", "2")],
+            ),
+            warning(
+                WarningCode::ConfigInlineSecret,
+                &[
+                    ("field", "options-cold.secret_access_key"),
+                    ("position", "2"),
+                ],
+            ),
+        ] {
+            assert!(
+                row.warnings.contains(&expected),
+                "{expected:?} in {:?}",
+                row.warnings
+            );
+        }
+        let shown = format!("{row:?}");
+        for secret in ["CANARY-url-pass", "CANARY-written-key", "CANARY-hot-pass"] {
+            assert!(!shown.contains(secret), "{shown}");
+        }
+    }
+
+    /// What a repository of one location resolves to is said of the
+    /// repository, never of "location 1" (#473).
+    #[test]
+    fn the_log_says_a_repository_of_one_location_exposes_its_credentials_naming_no_location() {
+        captured_log::capture();
+        log_location(LocationReport::ExposedCredentials {
+            alias: RepositoryAlias::parse("solo-exposed").expect("an alias"),
+            position: None,
+            cause: domain::planning::ExposedCredentials::PlainHttp,
+        });
+        let said: Vec<_> = captured_log::lines()
+            .into_iter()
+            .filter(|(_, line)| line.contains("solo-exposed"))
+            .collect();
+        let [(level, line)] = said.as_slice() else {
+            panic!("one line names the repository: {said:?}");
+        };
+        assert_eq!(*level, log::Level::Warn);
+        assert!(
+            line.contains(
+                "repository solo-exposed: this repository sends its credentials where whoever answers at its address can read them (plain-http)"
+            ),
+            "{line}"
+        );
+        assert!(!line.contains("location"), "{line}");
     }
 
     #[test]
@@ -9719,12 +9885,15 @@ mod repository_service_tests {
                 .expect("the log reads");
             assert!(history.operations.is_empty(), "{error:?}: {history:?}");
             let said = captured_log::lines();
+            // The code as the page and the API name it, not its Rust name.
+            let wire = serde_json::to_value(code).expect("a code is JSON");
+            let wire = wire.as_str().expect("a code is a string");
             let line = said
                 .iter()
                 .find(|(level, line)| {
                     *level == log::Level::Warn
-                        && line.contains("run of plan home didn't start")
-                        && line.contains(&format!("({code:?})"))
+                        && line.contains("the scheduled run of plan home didn't start")
+                        && line.contains(&format!("({wire})"))
                 })
                 .map(|(_, line)| line);
             let line =
@@ -9811,12 +9980,12 @@ mod repository_service_tests {
             .iter()
             .find(|(level, line)| {
                 *level == log::Level::Warn
-                    && line.contains("the Manual run of plan home didn't start")
+                    && line.contains("the manual run of plan home didn't start")
                     && line.contains(variable)
             })
             .map(|(_, line)| line)
             .unwrap_or_else(|| panic!("no warning names the plan and the variable: {said:?}"));
-        assert!(line.contains("(SecretMissing)"), "{line}");
+        assert!(line.contains("(secret-missing)"), "{line}");
         assert!(line.contains("password"), "{line}");
     }
 
@@ -9892,8 +10061,11 @@ mod repository_service_tests {
             .find(|(level, line)| *level == log::Level::Warn && line.contains(&operation))
             .map(|(_, line)| line)
             .unwrap_or_else(|| panic!("no warning names the operation: {said:?}"));
-        assert!(line.contains("run of plan home didn't start"), "{line}");
-        assert!(line.contains("SecretMissing"), "{line}");
+        assert!(
+            line.contains("the scheduled run of plan home didn't start"),
+            "{line}"
+        );
+        assert!(line.contains("(secret-missing)"), "{line}");
         // Where the secret was looked for is a name, never a secret (#483).
         assert!(
             line.contains(&format!("its password, from {UNSET}")),

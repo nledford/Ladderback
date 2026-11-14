@@ -15,7 +15,7 @@ use super::{
 };
 use crate::PlanId;
 use crate::secrets::{
-    REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, is_secret_option,
+    InlineSecret, REDACTED, Redactor, RepositorySecrets, SecretRef, SecretValue, is_secret_option,
     location_secret_written, url_has_userinfo,
 };
 
@@ -328,6 +328,22 @@ impl RepositoryConfig {
     /// location chosen, by a probe of each.
     pub fn has_several_locations(&self) -> bool {
         !self.locations.further.is_empty()
+    }
+
+    /// The `locations` argument of the warnings and notes about the entry's
+    /// locations: `one` for a repository of one location, which the page
+    /// lists without its locations, so their text names no position and no
+    /// rule it doesn't show; `several` otherwise.
+    pub fn locations_code(&self) -> &'static str {
+        todo!()
+    }
+
+    /// Every secret the entry holds as text, each with the position, from
+    /// 1, of the location that holds it: the first location's, with the
+    /// password, as [`RepositorySettings::inline_secrets`] finds them, then
+    /// each further location's, which hold no password of their own.
+    pub fn inline_secrets(&self) -> Vec<(u8, InlineSecret)> {
+        todo!()
     }
 
     /// The settings that open the repository at each location, in order,
@@ -663,25 +679,113 @@ mod tests {
         );
     }
 
-    /// A repository of one location and no rule is unchanged in every way
-    /// (decision 80, point 2): its plain-HTTP credentials are no location's
-    /// warning.
+    /// Whoever answers at a lone location's address reads its credentials as
+    /// at any location's (decision 80, point 7), and with no rule it is
+    /// tried on every network the machine is on (#506).
     #[test]
-    fn an_entry_of_one_location_is_warned_about_no_location() {
-        let lone = location("rest:http://nas/r", &[("password", "${PW2}")]);
-        assert!(
-            ExposedCredentials::of_location(&lone).is_some(),
-            "the location alone would be warned about"
+    fn an_entry_of_one_location_is_warned_about_with_a_rule_or_without() {
+        let mut entry = entry(
+            "rest:http://demo:${file:/home/user/nas-password}@nas.example:8000/",
+            &[],
+            None,
         );
-        let entry = RepositoryConfig {
-            settings: lone.with_password(SecretRef::Env("PW".to_owned())),
-            locations: Locations::default(),
-            id: None,
-            maintenance: super::super::Maintenance::None,
-            group_by: super::super::GroupBy::default(),
-            hooks: super::super::Hooks::default(),
+        let warning = |ruled| LocationWarning {
+            position: 1,
+            cause: ExposedCredentials::PlainHttp,
+            ruled,
         };
-        assert_eq!(entry.location_warnings(), Vec::new());
+        assert_eq!(entry.location_warnings(), vec![warning(false)]);
+        entry.locations.first_when = ruled(&[NetworkKind::Wired]);
+        assert_eq!(entry.location_warnings(), vec![warning(true)]);
+    }
+
+    /// rustic opens `repository` with `options` and then `options-cold`, and
+    /// `repo-hot` with `options` and then `options-hot`, a key in the later
+    /// set replacing the same key in `options` (`to_backends` in
+    /// `rustic_backend`'s `choose.rs`): each address is checked with the
+    /// options it is opened with, and never with a set or a credential of
+    /// the other (#497).
+    #[test]
+    fn each_address_is_checked_with_the_option_sets_it_is_opened_with() {
+        use ExposedCredentials::{PlainEndpoint, PlainHttp, UncheckedCertificate};
+        type Set<'a> = &'a [(&'a str, &'a str)];
+        let set = |pairs: Set<'_>| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect()
+        };
+        let of = |repository: &str, hot: Option<&str>, options: Set<'_>, hot_set, cold_set| {
+            ExposedCredentials::of_location(&Location {
+                repository: repository.to_owned(),
+                repo_hot: hot.map(str::to_owned),
+                options: set(options),
+                options_hot: set(hot_set),
+                options_cold: set(cold_set),
+                when: None,
+            })
+        };
+        let insecure = [("http-insecure-tls", "true")];
+        let secure = [("http-insecure-tls", "false")];
+        let password = [("password", "${PW}")];
+        // The hot address, with what it is opened with.
+        let hot = Some("rest:http://demo:pw@hot.lan/r");
+        assert_eq!(of("/srv/r", hot, &[], &[], &[]), Some(PlainHttp));
+        let hot = Some("rest:http://hot.lan/r");
+        assert_eq!(of("/srv/r", hot, &[], &password, &[]), Some(PlainHttp));
+        assert_eq!(of("/srv/r", hot, &password, &[], &[]), Some(PlainHttp));
+        let hot = Some("rest:https://hot.lan/r");
+        assert_eq!(
+            of("/srv/r", hot, &[], &insecure, &[]),
+            Some(UncheckedCertificate)
+        );
+        let s3 = [("endpoint", "http://s3.lan")];
+        let key = [("secret_access_key", "${K}")];
+        assert_eq!(
+            of("/srv/r", Some("opendal:s3"), &key, &s3, &[]),
+            Some(PlainEndpoint)
+        );
+        // The address, with `options-cold` over the shared set, as rustic
+        // merges them.
+        let nas = "rest:https://nas.lan/r";
+        assert_eq!(
+            of(nas, None, &secure, &[], &insecure),
+            Some(UncheckedCertificate)
+        );
+        assert_eq!(of(nas, None, &insecure, &[], &secure), None);
+        let hot = Some("rest:https://hot.lan/r");
+        assert_eq!(of("/srv/r", hot, &insecure, &secure, &[]), None);
+        assert_eq!(
+            of("/srv/r", hot, &insecure, &[], &secure),
+            Some(UncheckedCertificate),
+            "the cold set is not the hot address's"
+        );
+        let no_password = [("password", "")];
+        let plain = "rest:http://nas.lan/r";
+        assert_eq!(of(plain, None, &password, &[], &no_password), None);
+        assert_eq!(of(plain, None, &[], &[], &password), Some(PlainHttp));
+        // Never a set or a credential of the other address.
+        assert_eq!(of(nas, None, &[], &insecure, &[]), None);
+        assert_eq!(of(plain, Some("/srv/hot"), &[], &password, &[]), None);
+        assert_eq!(
+            of(nas, Some("rest:http://hot.lan/r"), &[], &[], &password),
+            None
+        );
+        let hot = Some("rest:https://demo:pw@hot.lan/r");
+        assert_eq!(of(plain, hot, &[], &[], &[]), None);
+        assert_eq!(of("/srv/r", Some("opendal:s3"), &key, &[], &s3), None);
+    }
+
+    /// The page lists a repository's locations only when it has several, so
+    /// what it says of a repository of one names no position (#473).
+    #[test]
+    fn an_entry_says_whether_it_has_one_location_or_several() {
+        let mut entry = entry("/srv/one", &[], None);
+        assert_eq!(entry.locations_code(), "one");
+        entry.locations.first_when = ruled(&[NetworkKind::Wired]);
+        assert_eq!(entry.locations_code(), "one", "a rule is no location");
+        entry.locations.further.push(location("/srv/two", &[]));
+        assert_eq!(entry.locations_code(), "several");
     }
 
     /// A rule reads only the network link, which an impostor's network
@@ -720,24 +824,6 @@ mod tests {
         assert_eq!(rules, [false, true]);
     }
 
-    /// A `when` on a repository of one location makes it a location chosen
-    /// by its rule (decision 80, point 2), so its plain-HTTP credentials are
-    /// warned about as any ruled location's are.
-    #[test]
-    fn an_entry_of_one_location_with_a_rule_is_warned_about() {
-        let mut entry = entry("rest:http://demo:pw@lan.example.lan/r", &[], None);
-        assert_eq!(entry.location_warnings(), Vec::new());
-        entry.locations.first_when = ruled(&[NetworkKind::Wired]);
-        assert_eq!(
-            entry.location_warnings(),
-            vec![LocationWarning {
-                position: 1,
-                cause: ExposedCredentials::PlainHttp,
-                ruled: true,
-            }]
-        );
-    }
-
     #[test]
     fn a_warnings_rule_argument_says_network_or_none() {
         let warning = |ruled| LocationWarning {
@@ -747,6 +833,35 @@ mod tests {
         };
         assert_eq!(warning(true).rule_code(), "network");
         assert_eq!(warning(false).rule_code(), "none");
+    }
+
+    /// A secret written as text in a further location is pointed out as one
+    /// in the first is, by the position of the location that holds it; the
+    /// password is the repository's, written once (#505).
+    #[test]
+    fn an_entry_holds_as_text_the_secrets_each_location_writes() {
+        let mut entry = entry(
+            "rest:https://demo:canary-one@one.lan/r",
+            &["rest:https://demo:canary-two@two.lan/r", "/srv/three"],
+            Some("aa"),
+        );
+        entry.settings.password = SecretRef::Inline(SecretValue::new("canary-pw"));
+        entry.locations.further[0].repo_hot = Some("rest:https://hot.lan/r".to_owned());
+        entry.locations.further[1]
+            .options_cold
+            .insert("secret_access_key".to_owned(), "canary-key".to_owned());
+        entry.locations.further[1]
+            .options
+            .insert("password".to_owned(), "${PW}".to_owned());
+        assert_eq!(
+            entry.inline_secrets(),
+            vec![
+                (1, InlineSecret::Location),
+                (1, InlineSecret::Password),
+                (2, InlineSecret::Location),
+                (3, InlineSecret::OptionCold("secret_access_key".to_owned())),
+            ]
+        );
     }
 
     fn entry(first: &str, further: &[&str], id: Option<&str>) -> RepositoryConfig {

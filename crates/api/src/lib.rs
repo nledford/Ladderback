@@ -1940,11 +1940,38 @@ mod tests {
         );
         assert_eq!(
             WarningCode::ConfigInlineSecret.args(),
-            &[text("field", false)]
+            &[text("field", false), text("position", true)]
         );
         assert_eq!(
             WarningCode::LocationSecret.args(),
-            &[text("field", false), text("kind", false)]
+            &[
+                text("field", false),
+                text("kind", false),
+                text("position", true)
+            ]
+        );
+        // A repository of one location is told about itself, never about
+        // "location 1" (#473).
+        assert_eq!(
+            WarningCode::LocationPlainHttpCredentials.args(),
+            &[
+                text("position", false),
+                text("cause", false),
+                text("rule", false),
+                text("locations", false)
+            ]
+        );
+        assert_eq!(
+            WarningCode::LocationEveryRuled.args(),
+            &[text("locations", false)]
+        );
+        assert_eq!(
+            WarningCode::LocationLastRuledNoRetry.args(),
+            &[text("plan", false), text("locations", false)]
+        );
+        assert_eq!(
+            WarningCode::LocationRuleNameUnreadable.args(),
+            &[text("position", false), text("locations", false)]
         );
         assert_eq!(
             WarningCode::GlobNeverMatches.args(),

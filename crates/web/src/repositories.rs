@@ -1076,7 +1076,8 @@ mod tests {
         );
         assert_eq!(notes.len(), 2, "{notes:?}");
         assert!(
-            notes[0].contains("The password of this repository is written as text"),
+            notes[0]
+                .contains("The password setting of this repository holds a secret written as text"),
             "{notes:?}"
         );
         assert!(notes[1].contains("options.secret_access_key"), "{notes:?}");
