@@ -216,6 +216,25 @@ mod tests {
     }
 
     #[test]
+    fn owner_tags_that_disagree_survive_a_cut_however_many_ladderback_tags_come_first() {
+        let agent = "ladderback-agent:0000".to_owned();
+        let home = "ladderback-plan:home".to_owned();
+        let photos = "ladderback-plan:photos".to_owned();
+        // 63 other `ladderback-` tags before the disagreeing plan tag.
+        let mut tags = vec![home.clone(), agent.clone()];
+        tags.extend(numbered("ladderback-note:", api::MAX_SNAPSHOT_TAGS - 1));
+        tags.push(photos.clone());
+        let result = snapshot_result(&file(&[], &tags)).expect("converts");
+        assert!(result.tags_truncated);
+        assert!(result.tags.contains(&photos), "{:?}", result.tags);
+        // The same owner tag repeated past the cap can't push it out either.
+        let mut tags = vec![agent; api::MAX_SNAPSHOT_TAGS];
+        tags.extend([home.clone(), home, photos.clone()]);
+        let result = snapshot_result(&file(&[], &tags)).expect("converts");
+        assert!(result.tags.contains(&photos), "{:?}", result.tags);
+    }
+
+    #[test]
     fn a_few_snapshots_go_out_as_one_batch() {
         let sent = sent(vec![listed(3, ""), listed(2, ""), listed(1, "")]);
         assert_eq!(sent.len(), 1);
