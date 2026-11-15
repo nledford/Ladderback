@@ -882,6 +882,15 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
         });
     });
 
+    // The status shows in the section and reaches screen readers through
+    // the page's one polite region (§4.5), each time it says something new.
+    let status = Memo::new(move |_| status_of(section.stage.get(), section.not_back.get()));
+    let announce_localizer = Arc::clone(&localizer);
+    Effect::new(move |_| {
+        if let Some(id) = status.get() {
+            reply(Politeness::Polite, &text(&announce_localizer, id));
+        }
+    });
     let heading = text(&localizer, msg::UI_RESTART_HEADING);
     let stage_localizer = Arc::clone(&localizer);
     let status_localizer = Arc::clone(&localizer);
@@ -939,12 +948,7 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
                     Stage::Restarting { .. } => ().into_any(),
                 }
             }}
-            <p role="status" aria-atomic="true">
-                {move || {
-                    status_of(section.stage.get(), section.not_back.get())
-                        .map(|id| text(&status_localizer, id))
-                }}
-            </p>
+            <p>{move || status.get().map(|id| text(&status_localizer, id))}</p>
             {move || {
                 (section.stage.get() == Stage::Pending)
                     .then(|| error.get())

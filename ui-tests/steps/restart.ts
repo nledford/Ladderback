@@ -12,15 +12,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Given, Then } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
 import { type BrowserWorld, startServer } from "../support/world.ts";
 
 // The status a service manager starts the daemon again on (decision NN).
 const RESTART_STATUS = 75;
 
-// How long the daemon may take to stop in order with nothing running, and
-// for the page to say so, with room.
+// How long the daemon may take to stop in order with nothing running, with
+// room.
 const STOP_PATIENCE_MS = 20_000;
 
 // A daemon of the scenario's own, with sign-in off, as a service file starts
@@ -38,14 +37,6 @@ Given("a daemon run by a service manager", async function (this: BrowserWorld) {
   );
   this.ownServer = { child, scratch };
   this.baseUrl = url;
-});
-
-// What the page shows in a status of its own, beside the announcer's live
-// regions, which carry the same role.
-Then("the page shows the status {string}", async function (this: BrowserWorld, text: string) {
-  await expect(this.page.getByRole("status").filter({ hasText: text })).toBeVisible({
-    timeout: STOP_PATIENCE_MS,
-  });
 });
 
 Then("the daemon has exited with the restart status", async function (this: BrowserWorld) {

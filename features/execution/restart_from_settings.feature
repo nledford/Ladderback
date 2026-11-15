@@ -87,5 +87,6 @@ Feature: Restarting Ladderback from Settings
     And the page has no accessibility violations
     When I press Tab until focus is on the button "Restart"
     And I press Enter
-    Then the page shows the status "Ladderback is restarting. This page reloads once it answers again."
+    Then the page shows the paragraph "Ladderback is restarting. This page reloads once it answers again."
+    And the polite region reads "Ladderback is restarting. This page reloads once it answers again."
     And the daemon has exited with the restart status
