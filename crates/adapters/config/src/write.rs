@@ -13,7 +13,7 @@ use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
     KeepWithin, Location, LocationRule, Maintenance, NameFilter, NetworkName, Overlap, Plan,
-    RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, format_duration,
+    RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, UpdateCheck, format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
 
@@ -297,6 +297,7 @@ fn agent(settings: &AgentSettings) -> Option<AgentTable> {
             .locale
             .as_ref()
             .map(|locale| locale.as_str().to_owned()),
+        check_for_updates: (settings.update_check == UpdateCheck::Off).then_some(false),
     })
 }
 

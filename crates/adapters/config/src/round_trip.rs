@@ -37,7 +37,8 @@ use domain::planning::{
     GroupBy, HookEntry, Hooks, Hostname, Interval, KeepCount, KeepWithin, Locale, Location,
     LocationRule, Locations, MAX_DURATION, MAX_LOCATIONS, MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES,
     MIN_INTERVAL, Maintenance, NameFilter, NetworkKind, NetworkName, Nice, OnFailure, Overlap,
-    Plan, RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter, UpdateCheck,
+    Plan, RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
+    UpdateCheck,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{PlanId, RepositoryAlias, RepositoryId};
@@ -273,13 +274,15 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
         prop_oneof![Just(UpdateCheck::On), Just(UpdateCheck::Off)],
     )
         .prop_map(
-            |(hostname, concurrency, nice, allow_hub_restore, locale, update_check)| AgentSettings {
-                hostname,
-                concurrency: Concurrency::new(concurrency).expect("drawn in its range"),
-                nice: nice.map(|nice| Nice::new(nice).expect("drawn in its range")),
-                allow_hub_restore,
-                locale,
-                update_check,
+            |(hostname, concurrency, nice, allow_hub_restore, locale, update_check)| {
+                AgentSettings {
+                    hostname,
+                    concurrency: Concurrency::new(concurrency).expect("drawn in its range"),
+                    nice: nice.map(|nice| Nice::new(nice).expect("drawn in its range")),
+                    allow_hub_restore,
+                    locale,
+                    update_check,
+                }
             },
         )
 }
