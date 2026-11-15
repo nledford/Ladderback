@@ -178,6 +178,26 @@ error-api-token-unknown = No { -api-token } { $token } is kept: it may have been
 # The API tokens could not be read or kept.
 error-api-tokens-unavailable = { -brand-name } could not read or keep its { -api-token(form: "other") }. Its log says why; check the data folder and try again.
 
+# A new admin password, set in Settings, is shorter than the rule allows, so it was not set.
+# $min (count): the fewest characters an admin password may have.
+error-admin-password-too-short = { $min ->
+    [one] Choose a new password of at least 1 character.
+   *[other] Choose a new password of at least { $min } characters.
+  }
+
+# A new admin password, set in Settings, is longer than the rule allows, so it was not set.
+# $max (count): the most bytes an admin password may hold.
+error-admin-password-too-long = { $max ->
+    [one] Choose a shorter new password: it may hold at most 1 byte.
+   *[other] Choose a shorter new password: it may hold at most { $max } bytes.
+  }
+
+# Changing the admin password needs the current one, and what was typed is not it. It counted as a failed sign-in.
+error-current-password-wrong = That is not the current admin password. Check it and try again.
+
+# The admin password could not be checked or kept, so it was not set.
+error-admin-password-unavailable = { -brand-name } could not check or keep the admin password, so it was not set. Its log says why; check the data folder and try again.
+
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.
 # $detail (text): the platform's message. It is shown as it came.

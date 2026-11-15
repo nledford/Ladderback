@@ -5,13 +5,15 @@
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use domain::access::{Client, Password, Sessions, SignInWaits, Token};
+use domain::access::{Client, Password, PasswordFingerprint, Sessions, SignInWaits, Token};
 use domain::{SignedDuration, Timestamp};
 
 use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore, Clock, Random};
 
+mod admin_password;
 mod api_tokens;
 
+pub use admin_password::{PasswordChangeRefused, SetPasswordRefused, set_admin_password};
 pub use api_tokens::{ApiTokenGrant, ApiTokenRefused, ApiTokensRefused, CreatedApiToken};
 
 /// The admin's sessions and the waits after failed sign-ins, kept in memory:
@@ -123,6 +125,33 @@ impl Access {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Checks `attempt` against the admin password for `client`, in its
+    /// waits: the attempt counts as failed before it is checked, so two sent
+    /// at once are not both checked, and during a wait it is refused
+    /// unchecked. `Ok` is the admin password as it was before the check;
+    /// the caller starts the client's waits over once it has done what the
+    /// password was for.
+    async fn check(
+        &self,
+        client: Client,
+        attempt: &Password,
+    ) -> Result<PasswordFingerprint, SignInRefused> {
+        let now = self.clock.now();
+        self.lock()
+            .waits
+            .attempt(client, now)
+            .map_err(|left| SignInRefused::Wait {
+                seconds: api_tokens::seconds_left(left),
+            })?;
+        let unavailable = |error| SignInRefused::Unavailable(format!("{error:?}"));
+        let under = self.password.fingerprint().map_err(unavailable)?;
+        match self.password.verify(attempt).await {
+            Ok(true) => Ok(under),
+            Ok(false) => Err(SignInRefused::WrongPassword),
+            Err(error) => Err(unavailable(error)),
+        }
+    }
+
     /// Signs in from `address` with `attempt`. The attempt counts as failed
     /// before the password is checked, so two sent at once are not both
     /// checked; one that succeeds starts the address's waits over. The
@@ -135,20 +164,7 @@ impl Access {
         attempt: &Password,
     ) -> Result<SignedIn, SignInRefused> {
         let client = Client::of(address);
-        let now = self.clock.now();
-        self.lock()
-            .waits
-            .attempt(client, now)
-            .map_err(|left| SignInRefused::Wait {
-                seconds: api_tokens::seconds_left(left),
-            })?;
-        let unavailable = |error| SignInRefused::Unavailable(format!("{error:?}"));
-        let under = self.password.fingerprint().map_err(unavailable)?;
-        match self.password.verify(attempt).await {
-            Ok(true) => {}
-            Ok(false) => return Err(SignInRefused::WrongPassword),
-            Err(error) => return Err(unavailable(error)),
-        }
+        let under = self.check(client, attempt).await?;
         let draw = || {
             self.random
                 .token()

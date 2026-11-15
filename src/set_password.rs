@@ -8,8 +8,8 @@ use std::io;
 use std::process::ExitCode;
 
 use api::MsgArg;
-use app::ports::AdminPassword;
-use domain::access::{PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS, Password, PasswordProblem};
+use app::access::{SetPasswordRefused, set_admin_password};
+use domain::access::{PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::admin_password::{FILE, FileAdminPassword};
 use platform::{dirs, terminal};
@@ -31,19 +31,6 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
         Ok(typed) => typed,
         Err(code) => return Ok(code),
     };
-    let password = match Password::new_admin(typed) {
-        Ok(password) => password,
-        Err(PasswordProblem::Empty | PasswordProblem::TooShort) => {
-            let min = u64::try_from(PASSWORD_MIN_CHARS).unwrap_or(u64::MAX);
-            say(
-                localizer,
-                msg::CLI_SET_PASSWORD_TOO_SHORT,
-                &[("min", MsgArg::Count(min))],
-            )?;
-            return Ok(ExitCode::FAILURE);
-        }
-        Err(PasswordProblem::TooLong) => return too_long(localizer),
-    };
     // Hashing runs on a blocking thread of its own, which a runtime gives.
     let runtime = match tokio::runtime::Builder::new_current_thread().build() {
         Ok(runtime) => runtime,
@@ -57,18 +44,28 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
         }
     };
     let kept = FileAdminPassword::in_data_dir(&data_dir);
-    match runtime.block_on(kept.set(&password)) {
+    match runtime.block_on(set_admin_password(&kept, typed)) {
         Ok(()) => {
             say(localizer, msg::CLI_SET_PASSWORD_DONE, &[])?;
             Ok(ExitCode::SUCCESS)
         }
-        Err(error) => {
+        Err(SetPasswordRefused::TooShort) => {
+            let min = u64::try_from(PASSWORD_MIN_CHARS).unwrap_or(u64::MAX);
+            say(
+                localizer,
+                msg::CLI_SET_PASSWORD_TOO_SHORT,
+                &[("min", MsgArg::Count(min))],
+            )?;
+            Ok(ExitCode::FAILURE)
+        }
+        Err(SetPasswordRefused::TooLong) => too_long(localizer),
+        Err(SetPasswordRefused::Unwritable(detail)) => {
             say(
                 localizer,
                 msg::CLI_SET_PASSWORD_UNWRITABLE,
                 &[
                     ("path", text(data_dir.join(FILE).display())),
-                    ("detail", text(format!("{error:?}"))),
+                    ("detail", text(detail)),
                 ],
             )?;
             Ok(ExitCode::FAILURE)

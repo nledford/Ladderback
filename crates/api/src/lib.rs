@@ -319,6 +319,17 @@ pub enum ErrorCode {
     /// password file could not be read, or no random bytes drawn. The daemon's
     /// log says why.
     ApiTokensUnavailable,
+    /// A new admin password is shorter than `min` characters, the rule
+    /// `ladderback set-password` keeps too (§10.1), so it was not set.
+    AdminPasswordTooShort,
+    /// A new admin password is longer than `max` bytes, so it was not set.
+    AdminPasswordTooLong,
+    /// The current password a change of the admin password needs is not the
+    /// admin password. It counted as a failed sign-in (§10.1).
+    CurrentPasswordWrong,
+    /// The admin password could not be checked or kept, so it was not set.
+    /// The daemon's log says why.
+    AdminPasswordUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -663,6 +674,16 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::AdminPasswordTooShort => &[ArgSpec {
+                name: "min",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
+            Self::AdminPasswordTooLong => &[ArgSpec {
+                name: "max",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
             Self::BodyTooLarge => &[ArgSpec {
                 name: "limit",
                 kind: ArgKind::Bytes,
@@ -962,6 +983,8 @@ impl ErrorCode {
             | Self::RestartPending
             | Self::ApiTokenNoScope
             | Self::ApiTokensUnavailable
+            | Self::CurrentPasswordWrong
+            | Self::AdminPasswordUnavailable
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
@@ -1903,6 +1926,8 @@ mod tests {
             ErrorCode::RestartPending,
             ErrorCode::ApiTokenNoScope,
             ErrorCode::ApiTokensUnavailable,
+            ErrorCode::CurrentPasswordWrong,
+            ErrorCode::AdminPasswordUnavailable,
             ErrorCode::ConfigFolderUnknown,
             ErrorCode::RuntimeUnavailable,
             ErrorCode::Unknown,
@@ -3622,6 +3647,32 @@ impl std::fmt::Debug for SignInDto {
     }
 }
 
+/// `POST /api/v1/admin-password`: the new admin password, as typed, and, with
+/// sign-in on, the current one, which a change needs (§10.1, decision 70).
+/// With sign-in off the current one is not asked for, and not read. Never
+/// logged or shown (I4): its `Debug` hides both.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SetAdminPasswordDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_password: Option<String>,
+    pub new_password: String,
+}
+
+impl std::fmt::Debug for SetAdminPasswordDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let current = if self.current_password.is_some() {
+            "Some([hidden])"
+        } else {
+            "None"
+        };
+        write!(
+            f,
+            "SetAdminPasswordDto {{ current_password: {current}, new_password: [hidden] }}"
+        )
+    }
+}
+
 /// A scope of an API token (§10.1, decision 93), as the token routes name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -4691,6 +4742,23 @@ mod repository_request_tests {
         );
         assert!(!shown.contains("demo-admin-pass"), "{shown}");
         assert!(shown.contains("SignInDto"), "the type helps: {shown}");
+    }
+
+    #[test]
+    fn debug_of_a_new_admin_password_names_it_but_never_either_password_typed() {
+        let shown = format!(
+            "{:?}",
+            super::SetAdminPasswordDto {
+                current_password: Some("demo-admin-pass".into()),
+                new_password: "another-admin-pass".into(),
+            }
+        );
+        assert!(!shown.contains("demo-admin-pass"), "{shown}");
+        assert!(!shown.contains("another-admin-pass"), "{shown}");
+        assert!(
+            shown.contains("SetAdminPasswordDto"),
+            "the type helps: {shown}"
+        );
     }
 
     #[test]

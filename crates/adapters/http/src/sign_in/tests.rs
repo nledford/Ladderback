@@ -858,3 +858,159 @@ async fn with_sign_in_off_the_session_route_says_an_admin_password_file_it_cant_
     );
     assert!(!body.to_string().contains("argon2id"), "{body}");
 }
+
+/// The route that sets and changes the admin password.
+const ADMIN_PASSWORD: &str = "/api/v1/admin-password";
+const NEW_PASSWORD: &str = "another-admin-pass";
+
+/// A request to change the admin password from the session `cookie` and
+/// `csrf`, with `current` as the current password (none when `None`).
+fn change_request(cookie: &str, csrf: &str, current: Option<&str>) -> Request {
+    let mut body = serde_json::json!({ "new-password": NEW_PASSWORD });
+    if let Some(current) = current {
+        body["current-password"] = current.into();
+    }
+    post(
+        ADMIN_PASSWORD,
+        &[("cookie", cookie), ("x-csrf-token", csrf)],
+        &body.to_string(),
+    )
+}
+
+#[tokio::test]
+async fn a_changed_password_has_the_browser_forget_the_session_s_cookie() {
+    let on = on();
+    let (cookie, csrf) = signed_in(&on).await;
+    let response = send(&on, change_request(&cookie, &csrf, Some(PASSWORD))).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        set_cookie(&response),
+        format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+    );
+    assert_sign_in_required(&on, get("/api/v1/plans", &[("cookie", &cookie)]), "after").await;
+    assert_eq!(
+        send(&on, sign_in_request(NEW_PASSWORD, &[])).await.status(),
+        StatusCode::OK
+    );
+}
+
+/// No current password, an empty one, or one longer than any admin password
+/// can't be the admin password: refused as a wrong one, without a hash, and
+/// counted for no one.
+#[tokio::test]
+async fn a_current_password_that_cant_be_the_admin_password_is_refused_uncounted() {
+    let on = on();
+    let (cookie, csrf) = signed_in(&on).await;
+    let over = "d".repeat(domain::access::PASSWORD_MAX_BYTES + 1);
+    for (current, what) in [
+        (None, "none"),
+        (Some(""), "empty"),
+        (Some(over.as_str()), "over"),
+    ] {
+        let response = send(&on, change_request(&cookie, &csrf, current)).await;
+        assert!(!response.headers().contains_key(SET_COOKIE), "{what}");
+        assert_eq!(
+            code(response).await,
+            (
+                StatusCode::FORBIDDEN,
+                Some("current-password-wrong".to_owned())
+            ),
+            "{what}"
+        );
+    }
+    assert_eq!(
+        send(&on, change_request(&cookie, &csrf, Some(PASSWORD)))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT,
+        "the refused changes made the client wait"
+    );
+}
+
+#[tokio::test]
+async fn a_change_without_its_connection_s_address_is_refused_and_counts_for_no_one() {
+    let on = on();
+    let (cookie, csrf) = signed_in(&on).await;
+    for current in ["not-the-password", PASSWORD] {
+        let mut request = change_request(&cookie, &csrf, Some(current));
+        request
+            .extensions_mut()
+            .remove::<ConnectInfo<crate::PeerAddr>>();
+        assert_eq!(
+            code(send(&on, request).await).await,
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Some("sign-in-unavailable".to_owned())
+            ),
+            "{current}"
+        );
+    }
+    assert_eq!(
+        send(&on, change_request(&cookie, &csrf, Some(PASSWORD)))
+            .await
+            .status(),
+        StatusCode::NO_CONTENT,
+        "the refused changes made the client wait or changed the password"
+    );
+}
+
+/// Checks the admin password once, for the sign-in, and can't read it after.
+#[derive(Default)]
+struct UnreadableAfterSignIn {
+    checked: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait]
+impl AdminPassword for UnreadableAfterSignIn {
+    async fn verify(&self, attempt: &Password) -> Result<bool, AdminPasswordError> {
+        if self.checked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            Err(AdminPasswordError::Unreadable(
+                "/demo/admin-password: denied".into(),
+            ))
+        } else {
+            Ok(attempt.expose() == PASSWORD)
+        }
+    }
+
+    async fn set(&self, _password: &Password) -> Result<(), AdminPasswordError> {
+        Ok(())
+    }
+
+    fn fingerprint(&self) -> Result<PasswordFingerprint, AdminPasswordError> {
+        Ok(PasswordFingerprint::new(1))
+    }
+}
+
+#[tokio::test]
+async fn a_password_that_cant_be_checked_or_kept_is_unavailable_and_its_detail_stays_in_the_log() {
+    let on = on_with(Arc::new(UnreadableAfterSignIn::default()), &clock());
+    let (cookie, csrf) = signed_in(&on).await;
+    let response = send(&on, change_request(&cookie, &csrf, Some(PASSWORD))).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "check");
+    assert!(!response.headers().contains_key(SET_COOKIE), "check");
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "code": "admin-password-unavailable" }),
+        "check"
+    );
+    let off = SignIn::Off(Arc::new(Damaged));
+    let body = serde_json::json!({ "new-password": NEW_PASSWORD }).to_string();
+    let response = send(&off, post(ADMIN_PASSWORD, &[], &body)).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "keep");
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "code": "admin-password-unavailable" }),
+        "keep"
+    );
+}
+
+#[tokio::test]
+async fn a_new_password_too_long_is_refused_with_the_most_it_may_have() {
+    let long = "d".repeat(domain::access::PASSWORD_MAX_BYTES + 1);
+    let body = serde_json::json!({ "new-password": long }).to_string();
+    let response = send(&sign_in_off(), post(ADMIN_PASSWORD, &[], &body)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = json(response).await;
+    assert_eq!(body["code"], "admin-password-too-long");
+    assert_eq!(body["args"]["max"]["value"], 1024);
+}

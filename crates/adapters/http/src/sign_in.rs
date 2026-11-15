@@ -13,10 +13,13 @@
 use std::sync::Arc;
 
 use api::{
-    AdminPasswordDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInDto,
-    SignInStateDto,
+    AdminPasswordDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SetAdminPasswordDto,
+    SignInDto, SignInStateDto,
 };
-use app::access::{Access, PasswordWaiting, SignInRefused};
+use app::access::{
+    Access, PasswordChangeRefused, PasswordWaiting, SetPasswordRefused, SignInRefused,
+    set_admin_password,
+};
 use app::ports::AdminPassword;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, HOST, ORIGIN, RETRY_AFTER, SET_COOKIE};
@@ -24,7 +27,9 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use domain::SignedDuration;
-use domain::access::{Password, SESSION_IDLE, SESSION_LIFETIME, Token};
+use domain::access::{
+    PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS, Password, SESSION_IDLE, SESSION_LIFETIME, Token,
+};
 
 use crate::{Exposure, refused, refused_with};
 
@@ -41,6 +46,9 @@ pub(crate) const SESSION_PATH: &str = "/api/v1/session";
 /// The events stream's route. Its stream stays open while a page does, so
 /// opening it is never a use of the session.
 pub(crate) const EVENTS_PATH: &str = "/api/v1/events";
+
+/// The route that sets and changes the admin password.
+pub(crate) const ADMIN_PASSWORD_PATH: &str = "/api/v1/admin-password";
 
 /// The header a request the page sent on its own carries.
 const BACKGROUND: HeaderName = HeaderName::from_static(api::BACKGROUND_HEADER);
@@ -239,17 +247,7 @@ pub(crate) async fn sign_in(
         Err(SignInRefused::WrongPassword) => {
             refused(StatusCode::UNAUTHORIZED, ErrorCode::SignInFailed)
         }
-        Err(SignInRefused::Wait { seconds }) => {
-            let mut response = refused_with(
-                StatusCode::TOO_MANY_REQUESTS,
-                ErrorCode::SignInWait,
-                vec![("seconds", MsgArg::Count(seconds))],
-            );
-            response
-                .headers_mut()
-                .insert(RETRY_AFTER, HeaderValue::from(seconds));
-            response
-        }
+        Err(SignInRefused::Wait { seconds }) => wait_refused(seconds),
         Err(SignInRefused::Unavailable(detail)) => {
             // The platform's words name files of the data folder: the log
             // keeps them for whoever runs the daemon, not for whoever asked.
@@ -285,10 +283,138 @@ pub(crate) async fn sign_out(
         access.sign_out(&token);
     }
     let mut response = answer(SignInStateDto::SignedOut, None, None, exposure, build);
+    forget_cookie(&mut response);
+    response
+}
+
+/// Has the browser forget the session cookie.
+fn forget_cookie(response: &mut Response) {
     let forget = format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
     if let Ok(value) = HeaderValue::from_str(&forget) {
         response.headers_mut().insert(SET_COOKIE, value);
     }
+}
+
+/// `POST /api/v1/admin-password`: sets the admin password by the rules
+/// `ladderback set-password` keeps (decision 70). With sign-in off it is
+/// set, and waits for a restart to turn sign-in on: whoever can reach the
+/// page can already run and change everything. With sign-in on, only a
+/// session reaches here (an API token is refused before, as for every
+/// route only a session may use), and it changes the password only with
+/// the current one, checked as a sign-in from the connection's address is:
+/// in its waits, a wrong one counted. A changed password ends every
+/// session and API token, the caller's included, so the browser is told to
+/// forget its cookie. Neither password is ever logged or answered (I4).
+pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request) -> Response {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<crate::PeerAddr>>()
+        .copied();
+    // The body limit has already read the body, bounded by the API's limit
+    // (`body_limit`), so this only takes the bytes it holds.
+    let body = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(body) => body,
+        Err(_) => return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody),
+    };
+    let Ok(SetAdminPasswordDto {
+        current_password,
+        new_password,
+    }) = serde_json::from_slice::<SetAdminPasswordDto>(&body)
+    else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let access = match sign_in {
+        SignIn::On(access) => access,
+        SignIn::Off(kept) => {
+            return match set_admin_password(kept.as_ref(), new_password).await {
+                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                Err(refusal) => set_refused(refusal),
+            };
+        }
+    };
+    // The current password counts in the waits of the connection's address,
+    // as a sign-in does; without it, refuse as `sign_in` does.
+    let Some(ConnectInfo(crate::PeerAddr(peer))) = peer else {
+        log::error!(
+            "a change of the admin password arrived without its connection's address; the server must be served with its connect info"
+        );
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::SignInUnavailable,
+        );
+    };
+    // None, empty, or longer than any admin password: not the admin
+    // password, and not worth a hash, as with a sign-in.
+    let Some(current) = current_password.and_then(|current| Password::parse(current).ok()) else {
+        return refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong);
+    };
+    match access
+        .change_password(peer.ip(), &current, new_password)
+        .await
+    {
+        Ok(()) => {
+            let mut response = StatusCode::NO_CONTENT.into_response();
+            forget_cookie(&mut response);
+            response
+        }
+        Err(PasswordChangeRefused::Current(SignInRefused::WrongPassword)) => {
+            refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong)
+        }
+        Err(PasswordChangeRefused::Current(SignInRefused::Wait { seconds })) => {
+            wait_refused(seconds)
+        }
+        Err(PasswordChangeRefused::Current(SignInRefused::Unavailable(detail))) => {
+            log::warn!("the admin password could not be checked: {detail}");
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorCode::AdminPasswordUnavailable,
+            )
+        }
+        Err(PasswordChangeRefused::New(refusal)) => set_refused(refusal),
+    }
+}
+
+/// The answer to a new admin password that was not set.
+fn set_refused(refusal: SetPasswordRefused) -> Response {
+    match refusal {
+        SetPasswordRefused::TooShort => refused_with(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::AdminPasswordTooShort,
+            vec![(
+                "min",
+                MsgArg::Count(u64::try_from(PASSWORD_MIN_CHARS).unwrap_or(u64::MAX)),
+            )],
+        ),
+        SetPasswordRefused::TooLong => refused_with(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::AdminPasswordTooLong,
+            vec![(
+                "max",
+                MsgArg::Count(u64::try_from(PASSWORD_MAX_BYTES).unwrap_or(u64::MAX)),
+            )],
+        ),
+        SetPasswordRefused::Unwritable(detail) => {
+            // The platform's words name files of the data folder: the log
+            // keeps them for whoever runs the daemon, not for whoever asked.
+            log::warn!("the admin password could not be kept: {detail}");
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorCode::AdminPasswordUnavailable,
+            )
+        }
+    }
+}
+
+/// `429 sign-in-wait`, with the seconds left in its `Retry-After`.
+fn wait_refused(seconds: u64) -> Response {
+    let mut response = refused_with(
+        StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::SignInWait,
+        vec![("seconds", MsgArg::Count(seconds))],
+    );
+    response
+        .headers_mut()
+        .insert(RETRY_AFTER, HeaderValue::from(seconds));
     response
 }
 

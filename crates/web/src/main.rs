@@ -48,8 +48,9 @@ mod formatting;
 mod gallery;
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod live;
-// What the API tokens of Settings decide, host-tested; `settings.rs` is
-// their glue.
+// What the admin password's and the API tokens' sections of Settings
+// decide, host-tested; `settings.rs` is their glue.
+mod admin_password;
 mod api_tokens;
 // The live pages' decisions (host-tested) and their DOM glue; see
 // `backend.rs` for why the fetch-and-socket glue is only covered by the
@@ -228,6 +229,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let build = RwSignal::new(None::<api::BuildDto>);
     provide_context(standing);
     provide_context(notice);
+    provide_context(sign_in::PasswordChanged(RwSignal::new(false)));
     ws::watch_session(warning, ended, build);
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
