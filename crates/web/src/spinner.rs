@@ -7,10 +7,11 @@
 use crate::variants::{Size, Tone};
 
 /// Whether a spinner's label is shown beside it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LabelShown {
     /// Shown beside the drawing as ordinary text, which a screen reader
     /// reads; the drawing is hidden from it.
+    #[default]
     Visible,
     /// Not shown (a tight spot): the drawing is an image named by the label.
     Hidden,
@@ -19,45 +20,39 @@ pub enum LabelShown {
 impl LabelShown {
     /// Whether the label is written beside the drawing.
     pub fn shows_label(self) -> bool {
-        todo!()
+        self == Self::Visible
     }
 
     /// The drawing's `role`: an image only when it carries the label.
     pub fn graphic_role(self) -> Option<&'static str> {
-        todo!()
+        (!self.shows_label()).then_some("img")
     }
 
     /// The drawing's `aria-hidden`: hidden beside a label a screen reader
     /// reads already, so the label is read once.
     pub fn graphic_hidden(self) -> Option<&'static str> {
-        todo!()
+        self.shows_label().then_some("true")
     }
 
     /// The drawing's accessible name (`aria-label`): the label, when it
     /// isn't shown.
     pub fn graphic_name(self, label: &str) -> Option<String> {
-        let _ = label;
-        todo!()
+        (!self.shows_label()).then(|| label.to_owned())
     }
 }
 
-impl Default for LabelShown {
-    fn default() -> Self {
-        todo!()
-    }
-}
-
-/// The size a spinner is drawn at when its page names none.
+/// The size a spinner is drawn at when its page names none: as tall as the
+/// text (1em), for a spinner in a line of text or inside a button. The
+/// vocabulary has no default size, so each component picks its own.
 pub fn default_size() -> Size {
-    todo!()
+    Size::Small
 }
 
 /// The classes of the spinner, the element around its drawing and its label
 /// inside its line: its tone, which colors the drawing, and its size, which
-/// `style.css` maps to the drawing's length (`style.css`).
+/// `style.css` maps to the drawing's length.
 pub fn spinner_class(tone: Tone, size: Size) -> String {
-    let _ = (tone, size);
-    todo!()
+    format!("spinner {} {}", tone.class(), size.class())
 }
 
 #[cfg(test)]

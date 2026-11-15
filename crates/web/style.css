@@ -510,6 +510,101 @@ main:focus {
   display: block;
 }
 
+/* A spinner (§4.5): a faint track and an arc of one circle, beside its label
+   or alone, inside its line, the element around it its placement goes on
+   (the shared vocabulary above: Inline keeps it in the line of text; Start,
+   Center and End give it a line of its own). Inline, its label is text on
+   the line's baseline, and the drawing is centered on the text as an inline
+   image is, so its label stands on the baseline of the words around it. */
+.spinner-graphic:not(:last-child) {
+  margin-inline-end: 0.5em;
+}
+
+/* Its size: the drawing's length in `em` (`--spinner-size`), so it grows
+   with the reader's text (1.4.4). */
+.spinner.size-small {
+  --spinner-size: 1em;
+}
+
+.spinner.size-medium {
+  --spinner-size: 1.5em;
+}
+
+.spinner.size-large {
+  --spinner-size: 2em;
+}
+
+.spinner.size-xlarge {
+  --spinner-size: 3em;
+}
+
+.spinner > .spinner-graphic {
+  inline-size: var(--spinner-size);
+  block-size: var(--spinner-size);
+}
+
+/* On a line of its own, a long label wraps beside the drawing, not under
+   it: the spinner is a row, the drawing at its start, the label's lines all
+   starting after it. The drawing stands centered on the label's first line,
+   or that line on the drawing when the drawing is the taller. */
+:is(.placement-start, .placement-center, .placement-end) > .spinner {
+  display: flex;
+  align-items: flex-start;
+}
+
+:is(.placement-start, .placement-center, .placement-end) > .spinner > .spinner-graphic {
+  flex: none;
+  margin-block-start: max(0px, (1lh - var(--spinner-size)) / 2);
+}
+
+:is(.placement-start, .placement-center, .placement-end) > .spinner > .spinner-label {
+  margin-block-start: max(0px, (var(--spinner-size) - 1lh) / 2);
+}
+
+/* The arc turns once in 0.9 s, steadily. The reduced-motion rule above takes
+   the animation away, and the arc then stands still, the label carrying the
+   meaning. The drawing is stroked in its tone (`--tone`), whose tokens reach
+   4.5:1 on the page and on a surface (the contrast gate's tone pairs), more
+   than the 3:1 a part needs (1.4.11); the track is the same color, faint.
+   The label keeps the text's color: a tone colors the drawing only. */
+.spinner-graphic {
+  vertical-align: middle;
+  color: var(--tone);
+}
+
+/* What turns is the circle inside the drawing, about the drawing's middle,
+   not the drawing: its box keeps its length at every angle, so a spinner at
+   the edge of a part that scrolls never changes how far it scrolls. */
+.spinner-turn {
+  transform-box: view-box;
+  transform-origin: center;
+  animation: spinner-turn 0.9s linear infinite;
+}
+
+@keyframes spinner-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.spinner-track {
+  stroke-opacity: 0.25;
+}
+
+/* Forced colors: the arc follows the tone rule above, the text's own color
+   whatever the tone, which the mode gives the drawing as it gives the text;
+   the track takes the color of unavailable text, the reader's own two. Only
+   the track opts out of the mode's colors, to keep `GrayText`: when the
+   whole drawing opted out, Chromium drew its arc in the author's text color,
+   not the reader's. */
+@media (forced-colors: active) {
+  .spinner-track {
+    forced-color-adjust: none;
+    stroke: GrayText;
+    stroke-opacity: 1;
+  }
+}
+
 /* A toast: visually above its neighbors while it lasts (§4.5). */
 .toast {
   background-color: var(--surface);

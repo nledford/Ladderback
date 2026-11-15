@@ -391,6 +391,45 @@ ui-gallery-tree-written-rtl = הערות.txt
 # What the demo tree says when its folder "unreadable" is opened.
 ui-gallery-tree-unreadable-said = The demo folder could not be read.
 
+# The heading of the gallery's spinner demo (§4.5): the drawing that turns
+# while a page waits for something it can't show yet.
+ui-gallery-spinner-heading = Spinner
+
+# The text of a line in the gallery's spinner demo, a step of a longer task,
+# which the first spinner and its label follow on the same line.
+ui-gallery-spinner-step = Step 2 of 3:
+
+# The label beside the demo's first spinner, as a page would show it while it
+# reads a list.
+ui-gallery-spinner-loading = Loading the demo snapshots…
+
+# The names of the demo's spinners that show no label, one for each size of
+# the shared vocabulary (Small, Medium, Large, Extra large): a screen reader
+# reads them as images. The size names match the vocabulary demo's.
+ui-gallery-spinner-small = Demo spinner at the Small size
+ui-gallery-spinner-medium = Demo spinner at the Medium size
+ui-gallery-spinner-large = Demo spinner at the Large size
+ui-gallery-spinner-xlarge = Demo spinner at the Extra large size
+
+# The names of the demo's spinners that show no label, one for each tone of
+# the shared vocabulary. The tone names match the vocabulary demo's.
+ui-gallery-spinner-primary = Demo spinner in the Primary tone
+ui-gallery-spinner-secondary = Demo spinner in the Secondary tone
+ui-gallery-spinner-success = Demo spinner in the Success tone
+ui-gallery-spinner-warning = Demo spinner in the Warning tone
+ui-gallery-spinner-error = Demo spinner in the Error tone
+ui-gallery-spinner-inherit = Demo spinner in the Inherit tone
+
+# The labels of the demo's spinners on lines of their own, each saying where
+# on its line it sits.
+ui-gallery-spinner-start = Loading at the start of the line…
+ui-gallery-spinner-center = Loading in the middle of the line…
+ui-gallery-spinner-end = Loading at the end of the line…
+
+# A demo button that is busy saving: the label of the spinner inside it, which
+# names the button.
+ui-gallery-spinner-saving = Saving the demo settings…
+
 ## The review dialog (§4.5): what a run would do, shown in a dialog before it
 ## runs. The gallery's demos and the snapshots page both use its buttons.
 
