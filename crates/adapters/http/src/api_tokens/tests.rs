@@ -276,6 +276,16 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
             Some(Read),
         ),
         (Method::GET, "/api/v1/repositories/home/groups", Some(Read)),
+        (
+            Method::GET,
+            "/api/v1/repositories/home/snapshots/abcd/folder",
+            Some(Read),
+        ),
+        (
+            Method::HEAD,
+            "/api/v1/repositories/home/snapshots/abcd/folder",
+            Some(Read),
+        ),
         (Method::POST, "/api/v1/operations", Some(Run)),
         (Method::POST, "/api/v1/operations/018f/cancel", Some(Run)),
         (Method::POST, "/api/v1/repositories/home/test", Some(Run)),
@@ -331,6 +341,21 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
         (Method::GET, "/api/v1/profiles/preview", None),
         (Method::POST, "/api/v1/profiles", None),
         (Method::GET, "/api/v1/plans//profile", None),
+        (
+            Method::POST,
+            "/api/v1/repositories/home/snapshots/abcd/folder",
+            None,
+        ),
+        (
+            Method::GET,
+            "/api/v1/repositories/home/snapshots/abcd",
+            None,
+        ),
+        (
+            Method::GET,
+            "/api/v1/repositories/home/snapshots//folder",
+            None,
+        ),
     ] {
         assert_eq!(required_scope(&method, path), scope, "{method} {path}");
     }
@@ -344,6 +369,26 @@ async fn a_read_token_reads_without_a_session_or_a_csrf_token() {
         .send(get("/api/v1/plans", &[("authorization", &token)]))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// The snapshot tree reads a folder with the `read` scope, as it reads the
+/// list of snapshots (decision 93).
+#[tokio::test]
+async fn a_read_token_reads_a_snapshot_s_folder() {
+    let daemon = Daemon::new();
+    let token = daemon.token(&[Scope::Read]).await;
+    let response = daemon
+        .send(get(&folder_of_a_snapshot(), &[("authorization", &token)]))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// The folder route of a snapshot, at its top.
+fn folder_of_a_snapshot() -> String {
+    format!(
+        "/api/v1/repositories/home/snapshots/{}/folder?path=",
+        "ab".repeat(32)
+    )
 }
 
 #[tokio::test]
@@ -375,13 +420,10 @@ async fn a_token_without_the_routes_scope_is_refused_naming_the_scope() {
     )
     .await;
     assert!(daemon.operations.started.lock().unwrap().is_empty());
-    let token = daemon.token(&[Scope::Run]).await;
-    assert_needs(
-        &daemon,
-        get("/api/v1/plans", &[("authorization", &token)]),
-        "read",
-    )
-    .await;
+    let token = daemon.token(&[Scope::Run, Scope::Preview]).await;
+    let auth = [("authorization", token.as_str())];
+    assert_needs(&daemon, get("/api/v1/plans", &auth), "read").await;
+    assert_needs(&daemon, get(&folder_of_a_snapshot(), &auth), "read").await;
 }
 
 #[tokio::test]

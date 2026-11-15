@@ -347,6 +347,16 @@ impl http_adapter::Catalog for WithSnapshots {
         }
         self.catalog.snapshots(alias).await
     }
+
+    async fn folder(
+        &self,
+        alias: String,
+        snapshot: domain::SnapshotId,
+        folder: domain::browse::FolderPath,
+        from: u64,
+    ) -> Result<api::FolderDto, http_adapter::FolderError> {
+        self.catalog.folder(alias, snapshot, folder, from).await
+    }
 }
 
 /// Snapshot `n` of `plan`, taken on `host` at a clock six hours behind UTC.

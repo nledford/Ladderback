@@ -195,6 +195,12 @@ pub enum ErrorCode {
     /// The configuration holds no repository by that name. The argument
     /// `alias` names it.
     RepositoryUnknown,
+    /// The repository holds no snapshot by that ID: it was forgotten, or
+    /// never there. The argument `snapshot` names it.
+    SnapshotUnknown,
+    /// The snapshot holds no folder at that path. The argument `path` names
+    /// it, its names joined by `/`.
+    FolderUnknown,
     /// The request names an operation the log has none of. The argument
     /// `operation` names it.
     OperationUnknown,
@@ -1016,6 +1022,16 @@ impl ErrorCode {
             ],
             Self::RepositoryUnknown => &[ArgSpec {
                 name: "alias",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::SnapshotUnknown => &[ArgSpec {
+                name: "snapshot",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::FolderUnknown => &[ArgSpec {
+                name: "path",
                 kind: ArgKind::Text,
                 optional: false,
             }],
@@ -4106,6 +4122,63 @@ pub struct RepositoryInitDto {
 #[serde(rename_all = "kebab-case")]
 pub struct SnapshotsDto {
     pub snapshots: Vec<SnapshotDto>,
+}
+
+/// The most entries one [`FolderDto`] lists: a folder is read in pages
+/// (§16, decision 102), and a page is an input-derived size, capped (§13.5).
+pub const MAX_FOLDER_ENTRIES: usize = 1_000;
+
+/// One page of one folder of a snapshot, in the order the snapshot records
+/// its entries.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FolderDto {
+    /// The folder's path in the snapshot, its names joined by `/`; empty
+    /// for the snapshot's top folder.
+    pub path: String,
+    /// At most [`MAX_FOLDER_ENTRIES`].
+    pub entries: Vec<EntryDto>,
+    /// How many entries the folder holds in all.
+    pub total: u64,
+    /// The position the next page starts at, sent back as `from`; absent
+    /// on the folder's last page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<u64>,
+}
+
+/// One entry of a folder.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct EntryDto {
+    /// The name as rustic records it: the key a request opens the entry by,
+    /// never shown. A byte the file system's name had that isn't UTF-8 is
+    /// written as `\xNN`, and a backslash, a quote and the controls
+    /// `\a\b\f\n\r\t\v` escaped as Go's `strconv.Quote` does.
+    pub name: String,
+    /// The name as a person reads it: as the file system wrote it, a byte
+    /// that isn't UTF-8 as U+FFFD, and a control, bidirectional or
+    /// separator character made visible (`domain::browse::DisplayName`).
+    pub display: String,
+    pub kind: EntryKindDto,
+    /// A file's size in bytes; absent for anything else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// When the entry was last modified, RFC 3339 in UTC, when the snapshot
+    /// recorded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+}
+
+/// What an entry is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EntryKindDto {
+    Folder,
+    File,
+    /// A symbolic link, recorded as a link.
+    Link,
+    /// A device, a pipe or a socket.
+    Other,
 }
 
 /// How many snapshots one group of [`SnapshotGroupsDto`] lists. An

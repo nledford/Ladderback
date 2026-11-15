@@ -55,13 +55,14 @@ use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SecretWarning, Template,
 };
-use domain::{AgentId, OperationId, PlanId, RepositoryId};
+use domain::browse::FolderPath;
+use domain::{AgentId, OperationId, PlanId, RepositoryId, SnapshotId};
 use engine::{Recorded, RemovedKind, WorkerEngine};
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
 use http_adapter::{
-    AppState, Catalog, CatalogError, MaintenanceRefusal, Operations, Plans, Repositories,
-    RepositoriesError, SecretRefusal, SignIn, SnapshotsError, StartError,
+    AppState, Catalog, CatalogError, FolderError, MaintenanceRefusal, Operations, Plans,
+    Repositories, RepositoriesError, SecretRefusal, SignIn, SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
 use notify_adapter::HttpNotifier;
@@ -1196,7 +1197,12 @@ fn log_location(report: LocationReport) {
 /// run that read, which keeps none of it (#308).
 fn is_operation(job: &Job) -> bool {
     match job {
-        Job::Identify(_) | Job::Probe(_) | Job::Init(_) | Job::Ls(_) | Job::PrunePlan(_) => false,
+        Job::Identify(_)
+        | Job::Probe(_)
+        | Job::Init(_)
+        | Job::Ls(_)
+        | Job::Browse(_)
+        | Job::PrunePlan(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
@@ -2023,7 +2029,8 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         | EngineResult::Repository { .. }
         | EngineResult::PrunePlan(_)
         | EngineResult::Probed(_)
-        | EngineResult::Snapshots(_) => None,
+        | EngineResult::Snapshots(_)
+        | EngineResult::Folder(_) => None,
     }
 }
 
@@ -2560,6 +2567,17 @@ impl Catalog for ConfigCatalog {
             })
             .collect();
         Ok(api::SnapshotsDto { snapshots })
+    }
+
+    async fn folder(
+        &self,
+        alias: String,
+        snapshot: SnapshotId,
+        folder: FolderPath,
+        from: u64,
+    ) -> Result<api::FolderDto, FolderError> {
+        let _ = (alias, snapshot, folder, from);
+        todo!("ConfigCatalog::folder")
     }
 }
 
@@ -10259,6 +10277,260 @@ mod repository_service_tests {
             "{logged}"
         );
         assert!(!logged.contains("CANARY-rclone-log"), "{logged}");
+    }
+
+    use app::ports::FolderAnswer;
+
+    /// An engine that answers every browse with `answer`, and keeps the
+    /// jobs it was given.
+    struct Browsing {
+        answer: FolderAnswer,
+        seen: Mutex<Vec<Job>>,
+    }
+
+    #[async_trait]
+    impl Engine for Browsing {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            Ok(RunningJob {
+                events: futures::stream::iter([EngineEvent::Succeeded(EngineResult::Folder(
+                    self.answer.clone(),
+                ))])
+                .boxed(),
+                control: Box::new(Stop),
+            })
+        }
+    }
+
+    fn browsing(answer: FolderAnswer) -> Arc<Browsing> {
+        Arc::new(Browsing {
+            answer,
+            seen: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn a_snapshot() -> SnapshotId {
+        SnapshotId::parse(&"ab".repeat(32)).expect("a snapshot ID")
+    }
+
+    fn docs() -> FolderPath {
+        FolderPath::parse("source/docs").expect("a folder path")
+    }
+
+    /// The lines logged so far about a browse of `alias`.
+    fn logged_about_browsing(alias: &str) -> Vec<String> {
+        captured_log::lines()
+            .into_iter()
+            .map(|(_, line)| line)
+            .filter(|line| line.contains(&format!("a snapshot of {alias} could not be read")))
+            .collect()
+    }
+
+    /// A page is told with its folder's path, each entry's name, kind, size
+    /// and modification time, the folder's total and where the next page
+    /// starts; the engine is asked for that snapshot, folder and position.
+    #[tokio::test]
+    async fn a_page_of_a_snapshot_s_folder_is_told_entry_by_entry() {
+        use domain::browse::{DisplayName, Entry, EntryKind, EntryName, FolderPage};
+        // Each shown name differs from its key, so the page can't swap them.
+        let entry = |name: &str, kind, size, modified: Option<i64>| Entry {
+            name: EntryName::parse(name).expect("a name"),
+            display: DisplayName::from(name.to_uppercase()),
+            kind,
+            size,
+            modified: modified
+                .map(|second| domain::Timestamp::from_second(second).expect("a time")),
+        };
+        let engine = browsing(FolderAnswer::Page(FolderPage {
+            entries: vec![
+                entry("drafts", EntryKind::Folder, None, None),
+                entry("notes.md", EntryKind::File, Some(5), Some(1_793_534_400)),
+                entry("latest", EntryKind::Link, None, None),
+                entry("pipe", EntryKind::Other, None, None),
+            ],
+            total: 1_004,
+            next: Some(1_004),
+        }));
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("demo", "echo not-a-real-password", engine.clone())
+                .await;
+        let page = catalog
+            .folder("demo".to_owned(), a_snapshot(), docs(), 1_000)
+            .await
+            .expect("the page");
+        let entry = |name: &str, kind, size, modified: Option<&str>| api::EntryDto {
+            name: name.to_owned(),
+            display: name.to_uppercase(),
+            kind,
+            size,
+            modified: modified.map(str::to_owned),
+        };
+        assert_eq!(
+            page,
+            api::FolderDto {
+                path: "source/docs".to_owned(),
+                entries: vec![
+                    entry("drafts", api::EntryKindDto::Folder, None, None),
+                    entry(
+                        "notes.md",
+                        api::EntryKindDto::File,
+                        Some(5),
+                        Some("2026-11-01T12:00:00Z")
+                    ),
+                    entry("latest", api::EntryKindDto::Link, None, None),
+                    entry("pipe", api::EntryKindDto::Other, None, None),
+                ],
+                total: 1_004,
+                next: Some(1_004),
+            }
+        );
+        let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let [Job::Browse(job)] = seen.as_slice() else {
+            panic!("one browse, not {seen:?}");
+        };
+        assert_eq!(
+            (&job.snapshot, &job.folder, job.from),
+            (&a_snapshot(), &docs(), 1_000)
+        );
+    }
+
+    /// A snapshot or a folder that isn't there is told as such, not as an
+    /// engine that failed.
+    #[tokio::test]
+    async fn a_snapshot_or_folder_that_is_not_there_is_told_as_unknown() {
+        for (answer, refused) in [
+            (FolderAnswer::SnapshotUnknown, FolderError::SnapshotUnknown),
+            (FolderAnswer::FolderUnknown, FolderError::FolderUnknown),
+        ] {
+            let (catalog, _scratch) = catalog_with_a_password_command(
+                "demo",
+                "echo not-a-real-password",
+                browsing(answer),
+            )
+            .await;
+            let read = catalog
+                .folder("demo".to_owned(), a_snapshot(), docs(), 0)
+                .await;
+            assert_eq!(read, Err(refused));
+        }
+    }
+
+    /// An alias the configuration doesn't hold, or no alias could be, is an
+    /// unknown repository; the engine isn't asked.
+    #[tokio::test]
+    async fn a_folder_of_a_repository_the_configuration_does_not_hold_is_unknown() {
+        let engine = browsing(FolderAnswer::FolderUnknown);
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("demo", "echo not-a-real-password", engine.clone())
+                .await;
+        for alias in ["other", "not an alias!"] {
+            let read = catalog
+                .folder(alias.to_owned(), a_snapshot(), docs(), 0)
+                .await;
+            assert_eq!(
+                read,
+                Err(FolderError::Repository(SnapshotsError::Unknown)),
+                "{alias}"
+            );
+        }
+        assert!(
+            engine
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty()
+        );
+    }
+
+    /// A browse whose password command fails is refused with the code of
+    /// the failure, and neither the answer nor the log holds a secret of
+    /// the repository (I4).
+    #[tokio::test]
+    async fn a_browse_whose_password_command_fails_is_refused_with_its_code_and_masks_the_secrets()
+    {
+        capture();
+        let (catalog, _scratch) = catalog_with_a_password_command(
+            "failing-browse",
+            "sh -c 'echo canary-inline canary-from-a-file >&2; exit 3'",
+            browsing(FolderAnswer::FolderUnknown),
+        )
+        .await;
+        let refused = catalog
+            .folder("failing-browse".to_owned(), a_snapshot(), docs(), 0)
+            .await
+            .expect_err("the browse is refused");
+        let FolderError::Repository(SnapshotsError::SecretRefused(refusal)) = refused else {
+            panic!("a secret refusal, not {refused:?}");
+        };
+        assert_eq!(refusal.code, ErrorCode::SecretCommandFailed);
+        let said = format!("{refusal:?}");
+        let logged = logged_about_browsing("failing-browse").join("\n");
+        for line in [&said, &logged] {
+            assert!(!line.contains("canary-inline"), "{line}");
+            assert!(!line.contains("canary-from-a-file"), "{line}");
+        }
+        assert!(logged.contains("SecretCommandFailed"), "{logged}");
+        assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
+    }
+
+    /// An engine that can't be started is told by its code alone, and what
+    /// it said reaches the log with the repository's secrets masked (I4).
+    #[tokio::test]
+    async fn the_log_of_a_browse_the_engine_refused_masks_the_secrets_of_the_repository() {
+        capture();
+        let engine = engine();
+        *engine
+            .refuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(EngineError::Unavailable {
+            detail: "could not start with canary-inline and canary-from-a-file".to_owned(),
+        });
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("browse-down", "echo not-a-real-password", engine)
+                .await;
+        let refused = catalog
+            .folder("browse-down".to_owned(), a_snapshot(), docs(), 0)
+            .await;
+        assert_eq!(refused, Err(FolderError::Repository(engine_unavailable())));
+        let logged = logged_about_browsing("browse-down").join("\n");
+        assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
+        assert!(!logged.contains("canary-inline"), "{logged}");
+        assert!(!logged.contains("canary-from-a-file"), "{logged}");
+    }
+
+    /// A browse the engine refused for more secrets than it masks is
+    /// refused with that code (§10.2).
+    #[tokio::test]
+    async fn a_browse_the_engine_refused_for_too_much_to_mask_is_refused_with_its_code() {
+        let engine = engine();
+        *engine
+            .refuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(EngineError::SecretsTooLargeToMask {
+            field: Some("HTTPS_PROXY".to_owned()),
+            limit: 262_144,
+        });
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("too-much", "echo not-a-real-password", engine).await;
+        let refused = catalog
+            .folder("too-much".to_owned(), a_snapshot(), docs(), 0)
+            .await;
+        assert_eq!(
+            refused,
+            Err(FolderError::Repository(SnapshotsError::SecretRefused(
+                SecretRefusal {
+                    code: ErrorCode::SecretsTooLargeToMask,
+                    args: vec![
+                        ("limit", MsgArg::Bytes(262_144)),
+                        ("field", MsgArg::Text("HTTPS_PROXY".to_owned())),
+                    ],
+                    detail: None,
+                }
+            )))
+        );
     }
 
     /// A command's line cut at the cap can end in the beginning of a secret

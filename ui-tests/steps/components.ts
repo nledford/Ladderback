@@ -515,4 +515,16 @@ const SNAPSHOTS: Record<string, string> = {
 - button "Pause the demo updates"
 - paragraph:
   - button "Finish a demo run"`,
+  Tree: `- heading "Tree" [level=2]
+- tree "Demo snapshot":
+  - treeitem "documents" [level=1] [selected]
+  - treeitem "empty" [level=1]
+  - treeitem "many" [level=1]
+  - treeitem "slow" [level=1]
+  - treeitem "unreadable" [level=1]
+  - treeitem "latest" [level=1]
+  - treeitem "pipe" [level=1]
+  - treeitem "abc[U+202E]txt.exe" [level=1]
+  - treeitem "הערות.txt" [level=1]
+  - treeitem "readme.txt" [level=1]`,
 };

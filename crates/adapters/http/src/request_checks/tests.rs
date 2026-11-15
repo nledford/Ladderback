@@ -161,6 +161,16 @@ impl crate::Catalog for EmptyCatalog {
     async fn snapshots(&self, _alias: String) -> Result<api::SnapshotsDto, crate::SnapshotsError> {
         Ok(api::SnapshotsDto::default())
     }
+
+    async fn folder(
+        &self,
+        _alias: String,
+        _snapshot: domain::SnapshotId,
+        _folder: domain::browse::FolderPath,
+        _from: u64,
+    ) -> Result<api::FolderDto, crate::FolderError> {
+        Ok(api::FolderDto::default())
+    }
 }
 
 /// Starts nothing: the checks never reach a route.

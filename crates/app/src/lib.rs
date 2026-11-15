@@ -16,6 +16,7 @@
 
 pub mod access;
 pub mod announce;
+pub mod browse;
 pub mod conditions;
 pub mod event_bus;
 pub mod execution;
