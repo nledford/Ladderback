@@ -1161,7 +1161,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
-            sign_in: SignIn::Off,
+            sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
         }
@@ -1199,7 +1199,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
-            sign_in: SignIn::Off,
+            sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
         };
@@ -2369,7 +2369,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: repos.clone(),
-            sign_in: SignIn::Off,
+            sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
         };

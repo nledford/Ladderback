@@ -82,6 +82,22 @@ Given(
   },
 );
 
+// A daemon of the scenario's own with sign-in off, on loopback, and no admin
+// password yet: one set while it runs waits for a restart to turn sign-in on.
+Given("a daemon with sign-in off", async function (this: BrowserWorld) {
+  const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-sign-in-off-"));
+  const { child, url } = await startServer(folders(scratch));
+  this.ownServer = { child, scratch };
+  this.baseUrl = url;
+});
+
+// Set from standard input while the daemon runs, as a person would.
+When("the admin password {string} is set", async function (this: BrowserWorld, password: string) {
+  const own = this.ownServer;
+  assert.ok(own, "this scenario's daemon was never started");
+  await setPassword(own.scratch, password);
+});
+
 // What a screen reader reads after the page's heading, which takes focus when
 // a reader navigates to the page: a notice above it would be passed over.
 Then("the page's heading is described by {string}", async function (this: BrowserWorld, needle: string) {

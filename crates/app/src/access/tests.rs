@@ -259,3 +259,22 @@ fn a_new_admin_password_ends_the_sessions_started_before_it() {
         .unwrap();
     assert!(access.session(&after.token).is_some());
 }
+
+#[test]
+fn with_sign_in_off_an_admin_password_set_since_the_start_waits_for_the_next_one() {
+    let kept = InMemoryAdminPassword::default();
+    assert_eq!(PasswordWaiting::of(&kept), None, "nothing is kept yet");
+    kept.set(&password("demo-admin-pass"))
+        .now_or_never()
+        .unwrap()
+        .unwrap();
+    assert_eq!(PasswordWaiting::of(&kept), Some(PasswordWaiting::Set));
+}
+
+#[test]
+fn with_sign_in_off_an_admin_password_file_that_cant_be_read_is_said_so() {
+    assert_eq!(
+        PasswordWaiting::of(&Unreadable),
+        Some(PasswordWaiting::Unreadable)
+    );
+}

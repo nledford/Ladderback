@@ -12,7 +12,7 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use super::*;
-use crate::request_checks::tests::{NoUi, test_state};
+use crate::request_checks::tests::{NoUi, sign_in_off, test_state};
 use crate::{Exposure, RequestChecks, router};
 
 const PASSWORD: &str = "demo-admin-pass";
@@ -162,7 +162,7 @@ async fn assert_let_through(sign_in: &SignIn, request: Request, what: &str) {
 
 #[tokio::test]
 async fn with_sign_in_off_every_request_is_let_through_without_a_session() {
-    let off = SignIn::Off;
+    let off = sign_in_off();
     assert_let_through(&off, get("/api/v1/plans", &[]), "a read").await;
     assert_let_through(
         &off,
@@ -185,7 +185,7 @@ async fn with_sign_in_off_every_request_is_let_through_without_a_session() {
 
 #[tokio::test]
 async fn the_session_route_says_when_the_daemon_answers_on_the_network() {
-    let off = SignIn::Off;
+    let off = sign_in_off();
     let network = Exposure::Network;
     let response = send_listening(&off, network, get(SESSION_PATH, &[])).await;
     assert_eq!(
@@ -798,4 +798,63 @@ async fn an_events_stream_ends_once_the_session_that_opened_it_does() {
     )
     .await;
     assert!(ended.is_ok(), "the stream outlived its session");
+}
+
+#[tokio::test]
+async fn with_sign_in_off_the_session_route_says_an_admin_password_set_since_the_start_waits() {
+    let kept = Arc::new(InMemoryAdminPassword::default());
+    let off = SignIn::Off(kept.clone());
+    let response = send(&off, get(SESSION_PATH, &[])).await;
+    assert_eq!(
+        json(response).await,
+        told_the_build(serde_json::json!({ "sign-in": "off" })),
+        "nothing is kept yet"
+    );
+    kept.set(&Password::parse(PASSWORD.to_owned()).unwrap())
+        .await
+        .unwrap();
+    let waits = told_the_build(serde_json::json!({ "sign-in": "off", "admin-password": "set" }));
+    let response = send(&off, get(SESSION_PATH, &[])).await;
+    assert_eq!(json(response).await, waits);
+    // Sign-in stays off until the next start: a sign-in starts no session.
+    let response = send(&off, sign_in_request(PASSWORD, &[])).await;
+    assert!(!response.headers().contains_key(SET_COOKIE));
+    assert_eq!(json(response).await, waits);
+    assert_let_through(&off, get("/api/v1/plans", &[]), "a read without a session").await;
+}
+
+/// An admin password file that is there but can't be read.
+struct Damaged;
+
+#[async_trait]
+impl AdminPassword for Damaged {
+    async fn verify(&self, _attempt: &Password) -> Result<bool, AdminPasswordError> {
+        Err(AdminPasswordError::Unreadable(
+            "/demo/admin-password is not an argon2id hash".into(),
+        ))
+    }
+
+    async fn set(&self, _password: &Password) -> Result<(), AdminPasswordError> {
+        Err(AdminPasswordError::Unwritable(
+            "/demo/admin-password: denied".into(),
+        ))
+    }
+
+    fn fingerprint(&self) -> Result<PasswordFingerprint, AdminPasswordError> {
+        Err(AdminPasswordError::Unreadable(
+            "/demo/admin-password is not an argon2id hash".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn with_sign_in_off_the_session_route_says_an_admin_password_file_it_cant_read() {
+    let off = SignIn::Off(Arc::new(Damaged));
+    let response = send(&off, get(SESSION_PATH, &[])).await;
+    let body = json(response).await;
+    assert_eq!(
+        body,
+        told_the_build(serde_json::json!({ "sign-in": "off", "admin-password": "unreadable" }))
+    );
+    assert!(!body.to_string().contains("argon2id"), "{body}");
 }

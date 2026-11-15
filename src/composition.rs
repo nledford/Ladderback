@@ -434,9 +434,10 @@ impl OperationLog {
 
 /// Whether sign-in is on (§10.1, decision 70), decided once as the daemon
 /// starts, before its store opens: on when the data folder keeps an admin
-/// password's hash, off when it keeps none.
+/// password's hash, off when it keeps none. Either way with where the hash
+/// is kept: off, the session route looks there for one set since.
 pub(crate) enum SignInDecided {
-    Off,
+    Off(Arc<FileAdminPassword>),
     On(Arc<FileAdminPassword>),
 }
 
@@ -452,7 +453,7 @@ pub(crate) fn sign_in() -> Result<SignInDecided, Refused> {
     let data_dir = dirs::data_dir().ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
     let kept = Arc::new(FileAdminPassword::in_data_dir(&data_dir));
     match kept.is_set() {
-        Ok(false) => Ok(SignInDecided::Off),
+        Ok(false) => Ok(SignInDecided::Off(kept)),
         Ok(true) => Ok(SignInDecided::On(kept)),
         Err(error) => {
             // `is_set` never answers `NotSet`: no file is sign-in off.
@@ -485,7 +486,7 @@ pub(crate) async fn daemon(
 ) -> Result<Daemon, Refused> {
     let mut daemon = daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await?;
     daemon.state.sign_in = match sign_in {
-        SignInDecided::Off => SignIn::Off,
+        SignInDecided::Off(kept) => SignIn::Off(kept),
         SignInDecided::On(password) => SignIn::On(Arc::new(app::access::Access::new(
             password,
             random,
@@ -702,7 +703,7 @@ async fn state_over(
             operations,
             catalog,
             repositories,
-            sign_in: SignIn::Off,
+            sign_in: SignIn::Off(Arc::new(FileAdminPassword::in_data_dir(data_dir))),
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
         },

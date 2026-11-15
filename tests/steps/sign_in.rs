@@ -187,6 +187,7 @@ pub(crate) fn no_file_under_holds(folder: &Path, text: &str) {
 }
 
 #[given("the data folder holds an admin password file that is not a password hash")]
+#[when("the data folder holds an admin password file that is not a password hash")]
 fn not_a_hash(agent: &mut Agent) {
     let path = hash_file(agent);
     std::fs::create_dir_all(path.parent().expect("the data folder")).expect("the data folder");
@@ -215,6 +216,51 @@ fn refusal_gives_platform_message(agent: &mut Agent) {
 async fn serving_with_sign_in(agent: &mut Agent, password: String) {
     is_set(agent, password).await;
     web::serve_on_loopback(agent).await;
+}
+
+#[given("Ladderback is serving on loopback with sign-in off")]
+async fn serving_with_sign_in_off(agent: &mut Agent) {
+    // The shared folders, so a later set-password writes where it serves.
+    home(agent);
+    web::serve_on_loopback(agent).await;
+}
+
+/// Stops the daemon and starts it again on the same folders.
+#[when("Ladderback is restarted")]
+async fn restarted(agent: &mut Agent) {
+    let server = agent.web.server.take();
+    blocking(move || drop(server)).await;
+    web::serve_on_loopback(agent).await;
+}
+
+/// The session route's answer, read without a session.
+fn session_answer(agent: &mut Agent) -> serde_json::Value {
+    web::request_for(agent, "GET".to_owned(), "/api/v1/session".to_owned());
+    web::send(agent);
+    let response = agent.web.response();
+    assert_eq!(response.status, 200, "body {:?}", response.body);
+    serde_json::from_str(&response.body).expect("the session route answers JSON")
+}
+
+#[then("Ladderback says sign-in is still off and a restart turns it on")]
+fn says_restart_turns_it_on(agent: &mut Agent) {
+    let read = session_answer(agent);
+    assert_eq!(read["sign-in"], "off", "{read}");
+    assert_eq!(read["admin-password"], "set", "{read}");
+}
+
+#[then("Ladderback says sign-in is still off and the admin password file is damaged")]
+fn says_file_is_damaged(agent: &mut Agent) {
+    let read = session_answer(agent);
+    assert_eq!(read["sign-in"], "off", "{read}");
+    assert_eq!(read["admin-password"], "unreadable", "{read}");
+}
+
+#[then("sign-in is on")]
+fn sign_in_is_on(agent: &mut Agent) {
+    let read = session_answer(agent);
+    assert_eq!(read["sign-in"], "signed-out", "{read}");
+    assert!(read.get("admin-password").is_none(), "{read}");
 }
 
 /// Signs in over HTTP with `password`, from the page `origin` if any, and

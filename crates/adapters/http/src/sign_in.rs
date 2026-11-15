@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use api::{BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInDto, SignInStateDto};
 use app::access::{Access, SignInRefused};
+use app::ports::AdminPassword;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, HOST, ORIGIN, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
@@ -42,11 +43,12 @@ pub(crate) const EVENTS_PATH: &str = "/api/v1/events";
 const BACKGROUND: HeaderName = HeaderName::from_static(api::BACKGROUND_HEADER);
 
 /// Whether sign-in is on, decided when the daemon starts: on when an admin
-/// password is kept, with the sessions it has started.
-#[derive(Clone, Default)]
+/// password is kept, with the sessions it has started; off with where one
+/// would be kept, which the session route looks at to say that one set since
+/// waits for a restart (decision 70).
+#[derive(Clone)]
 pub enum SignIn {
-    #[default]
-    Off,
+    Off(Arc<dyn AdminPassword>),
     On(Arc<Access>),
 }
 
@@ -333,6 +335,7 @@ fn answer(
                 Exposure::Loopback => ExposureDto::Loopback,
                 Exposure::Network => ExposureDto::Network,
             },
+            admin_password: None,
             build,
         }),
     )

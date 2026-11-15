@@ -27,6 +27,11 @@ async fn send(request: Request<Body>) -> Response {
         .unwrap()
 }
 
+/// Sign-in off, with no admin password kept since the start.
+pub(crate) fn sign_in_off() -> crate::SignIn {
+    crate::SignIn::Off(Arc::new(app::fakes::InMemoryAdminPassword::default()))
+}
+
 /// A state with the in-memory event bus: these tests only check the checks.
 pub(crate) fn test_state() -> AppState {
     AppState {
@@ -34,7 +39,7 @@ pub(crate) fn test_state() -> AppState {
         operations: Arc::new(NoOperations),
         catalog: Arc::new(EmptyCatalog),
         repositories: Arc::new(NoRepositories),
-        sign_in: crate::SignIn::Off,
+        sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
     }
