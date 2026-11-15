@@ -182,6 +182,16 @@ pub enum ErrorCode {
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
+    /// A plan sent to be created or changed is not one the configuration
+    /// file would load, so nothing was saved (decision 96). The argument
+    /// `field` is the plan's setting at fault, as its key in the plan's
+    /// table (`schedule.cron`), and `problem` what is wrong with it, a
+    /// [`PlanProblem`]'s wire name. Neither holds a value of the plan.
+    PlanInvalid,
+    /// A plan was not deleted because a notification rule names it: the
+    /// configuration file would no longer load. The argument `plan` names
+    /// the plan, and `rule` the rule.
+    PlanInUse,
     /// The configuration holds no repository by that name. The argument
     /// `alias` names it.
     RepositoryUnknown,
@@ -846,6 +856,30 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::PlanInvalid => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "problem",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::PlanInUse => &[
+                ArgSpec {
+                    name: "plan",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "rule",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::RepositoryUnknown => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
@@ -2182,6 +2216,14 @@ mod tests {
         );
         assert_eq!(ErrorCode::PlanIdTaken.args(), &[text("plan", false)]);
         assert_eq!(
+            ErrorCode::PlanInvalid.args(),
+            &[text("field", false), text("problem", false)]
+        );
+        assert_eq!(
+            ErrorCode::PlanInUse.args(),
+            &[text("plan", false), text("rule", false)]
+        );
+        assert_eq!(
             WarningCode::ProfileOptionLeftOut.args(),
             &[text("option", false), text("variable", false)]
         );
@@ -2250,6 +2292,23 @@ mod tests {
         ] {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);
             assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
+        }
+    }
+
+    // The `plan-invalid` message and the Plans page select on these names,
+    // so each is its own, as the catalog's arms spell it.
+    #[test]
+    fn each_plan_problem_is_named_on_the_wire() {
+        for (problem, wire) in [
+            (PlanProblem::Missing, "missing"),
+            (PlanProblem::UnknownKey, "unknown-key"),
+            (PlanProblem::WrongType, "wrong-type"),
+            (PlanProblem::Invalid, "invalid"),
+            (PlanProblem::Taken, "taken"),
+            (PlanProblem::UnknownRepository, "unknown-repository"),
+            (PlanProblem::NoSources, "no-sources"),
+        ] {
+            assert_eq!(problem.as_str(), wire, "{problem:?}");
         }
     }
 }
@@ -3223,6 +3282,45 @@ pub struct PlanSummaryDto {
 #[serde(rename_all = "kebab-case")]
 pub struct PlansDto {
     pub plans: Vec<PlanSummaryDto>,
+}
+
+/// One plan as the Plans page edits it: the plan's table in the
+/// configuration file's keys, as a `[[plans]]` entry writes it, each default
+/// left out (decision 96). The daemon reads it as the file is read when it
+/// loads, so the wire holds no second schema of a plan.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PlanDto(pub serde_json::Map<String, serde_json::Value>);
+
+/// What is wrong with a plan's setting a [`ErrorCode::PlanInvalid`] names,
+/// sent as its `problem` argument by its wire name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PlanProblem {
+    /// A setting the plan needs isn't there.
+    Missing,
+    /// A setting a plan doesn't have.
+    UnknownKey,
+    /// A value of another type than the setting takes: a number where it
+    /// wants text, say.
+    WrongType,
+    /// A value the setting doesn't take: a schedule that is not one, a tag
+    /// Ladderback keeps for its own, an ID that is not a name.
+    Invalid,
+    /// The plan's ID is another plan's.
+    Taken,
+    /// The plan's repository is not one the configuration has.
+    UnknownRepository,
+    /// The plan backs up nothing: it has no source.
+    NoSources,
+}
+
+impl PlanProblem {
+    /// The name the `problem` argument carries, which the message selects
+    /// on.
+    pub const fn as_str(self) -> &'static str {
+        let _ = self;
+        todo!()
+    }
 }
 
 /// The repositories list: what the Repositories page shows and the snapshots

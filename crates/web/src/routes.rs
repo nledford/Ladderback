@@ -1911,6 +1911,11 @@ mod tests {
     }
 
     #[test]
+    fn the_plans_page_is_titled_with_the_product_name() {
+        assert_eq!(title_of("/plans"), "Plans – Ladderback");
+    }
+
+    #[test]
     fn a_path_with_no_page_is_titled_page_not_found() {
         assert_eq!(title_of("/no/such/page"), "Page not found – Ladderback");
     }

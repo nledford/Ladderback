@@ -297,6 +297,9 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
         (Method::POST, "/api/v1/repositories/_init", None),
         (Method::POST, "/api/v1/repositories/home/init", None),
         (Method::POST, "/api/v1/repositories/home/maintenance", None),
+        (Method::GET, "/api/v1/plans/home", None),
+        (Method::PUT, "/api/v1/plans/home", None),
+        (Method::DELETE, "/api/v1/plans/home", None),
         (Method::GET, "/api/v1/no-such-route", None),
         (Method::GET, "/api/v1", None),
         (Method::GET, "/api/v1/", None),
@@ -385,6 +388,15 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
         post("/api/v1/repositories", &auth, "{}"),
         post("/api/v1/repositories/_test", &auth, "{}"),
         post("/api/v1/repositories/home/maintenance", &auth, "{}"),
+        post("/api/v1/plans", &auth, "{}"),
+        get("/api/v1/plans/home", &auth),
+        build(
+            Method::PUT,
+            "/api/v1/plans/home",
+            &[("content-type", "application/json"), auth[0]],
+            "{}",
+        ),
+        delete("/api/v1/plans/home", &auth),
         get("/api/v1/no-such-route", &auth),
     ] {
         assert_needs(&daemon, request, "session").await;

@@ -390,6 +390,11 @@ impl SchedulerWorld {
         &self.link
     }
 
+    /// The configuration the scheduler reads.
+    pub(super) fn config(&self) -> Arc<InMemoryConfigStore> {
+        self.config.clone()
+    }
+
     fn plan(&mut self, name: &str) -> &mut Plan {
         let id = plan_id(name);
         self.plans
@@ -406,7 +411,7 @@ impl SchedulerWorld {
     }
 
     /// Saves the plans as the configuration the scheduler reads.
-    async fn save(&self) {
+    pub(super) async fn save(&self) {
         let config = config_of(self.concurrency, self.rule.clone(), self.plans.clone());
         self.config.save(&config).await.expect("the config saves");
     }
@@ -428,6 +433,8 @@ impl SchedulerWorld {
                 zone: self.zone.clone(),
                 ends: self.runs.ends(),
                 events: self.events.clone(),
+                // The scenarios' changes are read at the next wake check.
+                changes: app::schedule::config_changes().1,
             };
             async move { scheduler.run().await }.boxed()
         });
@@ -490,7 +497,7 @@ fn time(text: &str) -> Timestamp {
         .unwrap_or_else(|error| panic!("{text:?} is a time with its offset: {error}"))
 }
 
-fn plan_id(name: &str) -> PlanId {
+pub(super) fn plan_id(name: &str) -> PlanId {
     PlanId::parse(name).expect("the scenario's plan ID is valid")
 }
 
@@ -569,11 +576,11 @@ pub fn config_with_plans(plans: &[(&str, &str)], id: fn(&str) -> RepositoryId) -
     .expect("the scenario's configuration is valid")
 }
 
-fn plan_named(name: &str) -> Plan {
+pub(super) fn plan_named(name: &str) -> Plan {
     plan_on(name, alias())
 }
 
-fn plan_on(name: &str, repository: RepositoryAlias) -> Plan {
+pub(super) fn plan_on(name: &str, repository: RepositoryAlias) -> Plan {
     Plan::new(
         plan_id(name),
         repository,

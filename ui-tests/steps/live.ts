@@ -49,7 +49,7 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Polls `read` until it returns a value, or fails with what it last saw. */
-async function until<T>(read: () => Promise<T | null>, ms: number, what: string): Promise<T> {
+export async function until<T>(read: () => Promise<T | null>, ms: number, what: string): Promise<T> {
   const end = Date.now() + ms;
   let last: T | null = null;
   while (Date.now() < end) {
@@ -70,8 +70,8 @@ export function table(world: BrowserWorld, name: string): Locator {
  *  scratch folder, starts a daemon on it, and points the scenario's pages at
  *  that daemon. `env` is added to the daemon's environment, as `TZ` for the
  *  zone its clock runs in, which its workers inherit. A plan `schedules`
- *  names runs on that cron expression, and a plan in `iglobs` has those
- *  globs. */
+ *  names runs on that cron expression, a plan in `iglobs` has those
+ *  globs, and `after` is written at the end, after the plans. */
 export async function serveDemoPlans(
   world: BrowserWorld,
   plans: readonly string[],
@@ -79,6 +79,7 @@ export async function serveDemoPlans(
   env: Record<string, string> = {},
   schedules: Readonly<Record<string, string>> = {},
   iglobs: Readonly<Record<string, readonly string[]>> = {},
+  after: readonly string[] = [],
 ): Promise<void> {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
@@ -106,6 +107,7 @@ export async function serveDemoPlans(
       ...(plan in iglobs ? [`iglobs = ${JSON.stringify(iglobs[plan])}`] : []),
       "",
     ]),
+    ...after,
   ].join("\n");
   const configDir = path.join(scratch, "config");
   await mkdir(configDir);
@@ -149,7 +151,7 @@ Given(
 );
 
 /** The run the daemon's plans list says `plan` has planned, if any. */
-async function plannedRun(world: BrowserWorld, plan: string): Promise<string | null> {
+export async function plannedRun(world: BrowserWorld, plan: string): Promise<string | null> {
   assert.ok(world.baseUrl, "this scenario's daemon was never started");
   const response = await fetch(new URL("/api/v1/plans", world.baseUrl), {
     headers: { Origin: new URL(world.baseUrl).origin },
@@ -174,6 +176,27 @@ Given(
   "a demo plan {string} whose iglobs are {string} and {string}",
   async function (this: BrowserWorld, plan: string, first: string, second: string) {
     await serveDemoPlans(this, [plan], "tiny", {}, {}, { [plan]: [first, second] });
+  },
+);
+
+// A plan a notification rule names, which the daemon refuses to delete
+// (`plan-in-use`). The channel's address is read from the environment only
+// when a message is sent, and the scenario sends none.
+Given(
+  "a demo plan {string} that the notification rule {string} names",
+  async function (this: BrowserWorld, plan: string, rule: string) {
+    const after = [
+      "[notifications.channels.desk]",
+      'kind = "ntfy"',
+      'url-env = "DEMO_NTFY_URL"',
+      "",
+      `[notifications.rules.${JSON.stringify(rule)}]`,
+      'events = ["backup.failed"]',
+      'channel = "desk"',
+      `plans = [${JSON.stringify(plan)}]`,
+      "",
+    ];
+    await serveDemoPlans(this, [plan], "tiny", {}, {}, {}, after);
   },
 );
 

@@ -92,6 +92,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     LocationTooManyCredentials => msg::ERROR_LOCATION_TOO_MANY_CREDENTIALS,
     RepositoryPathRelative => msg::ERROR_REPOSITORY_PATH_RELATIVE,
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
+    PlanInvalid => msg::ERROR_PLAN_INVALID,
+    PlanInUse => msg::ERROR_PLAN_IN_USE,
     RepositoryUnknown => msg::ERROR_REPOSITORY_UNKNOWN,
     InvalidBody => msg::ERROR_INVALID_BODY,
     BodyTooLarge => msg::ERROR_BODY_TOO_LARGE,

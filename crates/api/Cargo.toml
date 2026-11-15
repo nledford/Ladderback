@@ -10,8 +10,6 @@ publish.workspace = true
 [dependencies]
 jiff.workspace = true
 serde.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
 
 [lints]

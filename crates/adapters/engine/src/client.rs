@@ -1499,6 +1499,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ConfigSchemaMissing
                 | ErrorCode::ConfigSchemaNewer
                 | ErrorCode::PlanUnknown
+                | ErrorCode::PlanInvalid
+                | ErrorCode::PlanInUse
                 | ErrorCode::RepositoryUnknown
                 | ErrorCode::MaintenanceBusy
                 | ErrorCode::MaintenanceNotOwner
