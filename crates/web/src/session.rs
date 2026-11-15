@@ -48,6 +48,13 @@ impl Standing {
     pub(crate) fn shows_pages(self) -> bool {
         matches!(self, Self::Off | Self::SignedIn | Self::Unread)
     }
+
+    /// Whether a failed Sign out (`failed`) is still said on this standing.
+    /// The failure is the session's, so the page forgets it once it has
+    /// none, as after Sign out everywhere or a new password.
+    pub(crate) fn keeps_sign_out_failure(self, failed: bool) -> bool {
+        todo!()
+    }
 }
 
 /// Which notice says that sign-in is off, and where the page shows it
@@ -392,6 +399,24 @@ mod tests {
             exposure: api::ExposureDto::Network,
             ..session(sign_in, None)
         }
+    }
+
+    #[test]
+    fn a_failed_sign_out_is_kept_only_while_the_page_is_signed_in() {
+        let all = [
+            Standing::Asking,
+            Standing::Off,
+            Standing::SignedOut,
+            Standing::SignedIn,
+            Standing::Unread,
+        ];
+        let keeping = |failed| {
+            all.into_iter()
+                .filter(|standing| standing.keeps_sign_out_failure(failed))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keeping(true), [Standing::SignedIn]);
+        assert_eq!(keeping(false), []);
     }
 
     #[test]
