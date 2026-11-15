@@ -110,7 +110,9 @@ jobs:
       # `$/`: the action and its script from the commit this workflow runs,
       # the merge commit, not from the pull request's head checked out above,
       # which may predate them.
-      - uses: $/.github/actions/chromium
+      - uses: $/.github/actions/browser
+        with:
+          engines: chromium
       - run: just red-first "origin/$BASE_REF"
         env:
           BASE_REF: ${{ github.base_ref }}

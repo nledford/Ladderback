@@ -1,0 +1,76 @@
+# Playwright's browser engines and the system packages they need, for the @ui
+# scenarios of ci.yml's `ui` job and of red-first.yml. Use it after `npm ci` in
+# ui-tests, on a GitHub-hosted Linux runner, as
+# `uses: $/.github/actions/browser` with `engines: chromium` (or any of
+# `chromium`, `firefox` and `webkit`, space-separated, as red-first.yml's
+# `chromium firefox webkit`): GitHub then fetches the action from the commit the
+# workflow runs, with the script beside it, whatever the job checked out
+# (red-first.yml checks out a pull request's head, which may predate both
+# files).
+#
+# Two caches per set of engines, both keyed on ui-tests/package-lock.json,
+# which pins the Playwright version, and on the set, so a job restores the
+# browsers and packages of its own set, never another set's, which would pass
+# for complete while it lacks an engine or that engine's system packages:
+# - the browser downloads, which live outside node_modules;
+# - the system packages (fonts and libraries) as the .deb files apt downloaded,
+#   keyed on the runner image too (ImageOS, ImageVersion), so they always match
+#   the packages the image already has. With them the script installs with dpkg
+#   and needs no Ubuntu mirror, so a mirror outage ("Temporary failure resolving
+#   'security.ubuntu.com'") can't fail the job. A new image or Playwright
+#   version misses and installs through apt once.
+#
+# Each package set is saved under its own key (the run's ID) and the newest one
+# that matches is restored, so when cached files fail to install and apt
+# replaces them, the next run gets apt's set instead of the broken one.
+name: Browsers for the UI journeys
+description: Installs the Playwright browser engines named and their system packages, from caches when it can.
+inputs:
+  engines:
+    description: "The Playwright engines to install, space-separated: one or more of chromium, firefox and webkit."
+    required: true
+runs:
+  using: composite
+  steps:
+    # `chromium firefox webkit` -> `chromium-firefox-webkit`, for the keys.
+    # Only GitHub-hosted runners set the image variables; elsewhere the debs
+    # prefix is empty and the packages aren't cached.
+    - id: keys
+      shell: bash
+      env:
+        ENGINES: ${{ inputs.engines }}
+        LOCK_HASH: ${{ hashFiles('ui-tests/package-lock.json') }}
+      run: |
+        read -ra engines <<< "$ENGINES"
+        set=$(IFS=-; echo "${engines[*]}")
+        echo "browsers=playwright-$set-$RUNNER_OS-$LOCK_HASH" >> "$GITHUB_OUTPUT"
+        if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
+          echo "debs=playwright-debs-$set-$ImageOS-$ImageVersion-$LOCK_HASH-" >> "$GITHUB_OUTPUT"
+        fi
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.keys.outputs.browsers }}
+    # No entry has the bare prefix as its key, so this always restores through
+    # restore-keys: the newest entry under the prefix.
+    - if: steps.keys.outputs.debs != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/playwright-debs
+        key: ${{ steps.keys.outputs.debs }}
+        restore-keys: ${{ steps.keys.outputs.debs }}
+    - id: install
+      shell: bash
+      working-directory: ui-tests
+      env:
+        ENGINES: ${{ inputs.engines }}
+      # One argument per engine, so the word splitting is wanted; the script
+      # refuses any word that doesn't name an engine.
+      run: '"$GITHUB_ACTION_PATH/../../../scripts/install-browser.sh" $ENGINES'
+    # Saved straight away, not when the job ends, so a failing journey later
+    # in the job still leaves the packages for the next run.
+    - if: steps.keys.outputs.debs != '' && steps.install.outputs.debs == 'saved'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/playwright-debs
+        key: ${{ steps.keys.outputs.debs }}${{ github.run_id }}-${{ github.run_attempt }}
