@@ -367,8 +367,9 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// maintain a repository: its history by owner, a preview of each run and
 /// the start of one — the routes that test, connect and initialise a
 /// repository, the routes that read, create, change and delete a plan, the
-/// session route that signs in and out, and the route that sets the admin
-/// password. A request that fails `checks` never reaches a
+/// session route that signs in and out, the route that signs out everywhere,
+/// the sign-in settings' route, and the route that sets the admin password. A
+/// request that fails `checks` never reaches a
 /// route; with sign-in on, neither does an API request without a live
 /// session, or a changed one without its CSRF token; and neither does one
 /// whose body is over the limit of its class of route (§10.1). Every
@@ -386,6 +387,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
                 .delete(sign_in::sign_out),
         )
         .route(
+            sign_in::SESSIONS_PATH,
+            axum::routing::delete(sign_in::sign_out_everywhere),
+        )
+        .route(
             sign_in::ADMIN_PASSWORD_PATH,
             axum::routing::post(sign_in::set_password),
         )
@@ -396,6 +401,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/tokens/{id}",
             axum::routing::delete(api_tokens::revoke),
+        )
+        .route(
+            sign_in::settings::SETTINGS_PATH,
+            axum::routing::get(sign_in::settings::read).put(sign_in::settings::change),
         )
         .route(sign_in::EVENTS_PATH, axum::routing::get(events))
         .route(

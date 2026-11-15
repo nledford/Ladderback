@@ -95,6 +95,24 @@ pub(crate) fn waiting_password(read: Option<&SessionDto>) -> Option<MessageId> {
     }
 }
 
+/// Whether the sign-in form offers **Keep me signed in on this device**, as
+/// a signed-out answer says (`keep-signed-in-offered`): it doesn't under
+/// **Stay signed in for** Until I close the browser. A signed-out answer
+/// that doesn't say, from a daemon from before the choice, offers it, as the
+/// daemon then reads it. `None` is an answer that isn't signed out, which
+/// says nothing of the form.
+pub(crate) fn keep_signed_in_offered(read: &SessionDto) -> Option<bool> {
+    (read.sign_in == SignInStateDto::SignedOut)
+        .then_some(read.keep_signed_in_offered != Some(false))
+}
+
+/// Whether a sign-in asks to be kept: only when the box is `checked` and
+/// the form still `offered` it. A box checked while it was offered asks for
+/// nothing once it isn't.
+pub(crate) fn asks_to_keep(checked: bool, offered: bool) -> bool {
+    checked && offered
+}
+
 /// What the page's title says once its standing has changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Title {
@@ -204,7 +222,9 @@ pub(crate) struct Signed {
 impl Signed {
     /// The live session `read` says the page has, in answer to a request
     /// sent at `sent`; `None` when it says the page has none, or leaves out
-    /// its CSRF token or how long it lasts.
+    /// its CSRF token. A session with no idle limit (kept signed in) or no
+    /// end after its sign-in (Until I sign out, Until I close the browser)
+    /// leaves that out, and lasts as long as can be counted by it.
     pub(crate) fn of(read: &SessionDto, sent: i64) -> Option<Self> {
         if read.sign_in != SignInStateDto::SignedIn {
             return None;
@@ -212,8 +232,8 @@ impl Signed {
         Some(Self {
             csrf: read.csrf_token.clone()?,
             lease: Lease::new(
-                millis(read.idle_seconds?),
-                millis(read.ends_in_seconds?),
+                read.idle_seconds.map_or(i64::MAX, millis),
+                read.ends_in_seconds.map_or(i64::MAX, millis),
                 sent,
             ),
             build: read.build.clone(),
@@ -341,6 +361,15 @@ pub(crate) fn about_the_password(code: ErrorCode) -> bool {
     code == ErrorCode::SignInFailed
 }
 
+/// Whether a Sign out the daemon refused with `code` has signed out all the
+/// same: `sessions-unavailable` says the database still holds the session,
+/// but the daemon has ended it and the browser has forgotten its cookie, so
+/// the page forgets it too and shows the sign-in page. Any other refusal
+/// left the session live.
+pub(crate) fn signed_out_all_the_same(code: ErrorCode) -> bool {
+    code == ErrorCode::SessionsUnavailable
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +383,7 @@ mod tests {
             exposure: api::ExposureDto::Loopback,
             build: None,
             admin_password: None,
+            keep_signed_in_offered: None,
         }
     }
 
@@ -362,6 +392,37 @@ mod tests {
             exposure: api::ExposureDto::Network,
             ..session(sign_in, None)
         }
+    }
+
+    #[test]
+    fn a_signed_out_answer_says_whether_keep_me_signed_in_is_offered() {
+        let offered = |said| SessionDto {
+            keep_signed_in_offered: said,
+            ..session(SignInStateDto::SignedOut, None)
+        };
+        assert_eq!(keep_signed_in_offered(&offered(Some(false))), Some(false));
+        assert_eq!(keep_signed_in_offered(&offered(Some(true))), Some(true));
+        // A daemon from before the choice doesn't say, and takes it.
+        assert_eq!(keep_signed_in_offered(&offered(None)), Some(true));
+    }
+
+    #[test]
+    fn an_answer_that_is_not_signed_out_says_nothing_of_keep_me_signed_in() {
+        for state in [SignInStateDto::SignedIn, SignInStateDto::Off] {
+            let read = SessionDto {
+                keep_signed_in_offered: Some(false),
+                ..session(state, Some("t"))
+            };
+            assert_eq!(keep_signed_in_offered(&read), None, "{state:?}");
+        }
+    }
+
+    #[test]
+    fn a_sign_in_asks_to_be_kept_only_with_the_box_checked_while_it_is_offered() {
+        assert!(asks_to_keep(true, true));
+        assert!(!asks_to_keep(true, false));
+        assert!(!asks_to_keep(false, true));
+        assert!(!asks_to_keep(false, false));
     }
 
     #[test]
@@ -541,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn a_signed_in_answer_without_its_csrf_token_or_limits_is_unreadable() {
+    fn a_signed_in_answer_is_unreadable_only_without_its_csrf_token() {
         assert_eq!(
             answer(
                 200,
@@ -549,25 +610,74 @@ mod tests {
             ),
             Answer::Unreadable
         );
-        assert_eq!(
-            answer(
-                200,
-                r#"{"sign-in":"signed-in","csrf-token":"abc","ends-in-seconds":60}"#
+        assert!(
+            matches!(
+                answer(200, r#"{"sign-in":"signed-in","csrf-token":"abc"}"#),
+                Answer::SignedIn(_)
             ),
-            Answer::Unreadable
-        );
-        assert_eq!(
-            answer(
-                200,
-                r#"{"sign-in":"signed-in","csrf-token":"abc","idle-seconds":60}"#
-            ),
-            Answer::Unreadable
+            "a signed-in answer with its CSRF token and no limits is a session with no idle limit and no end"
         );
         assert_eq!(
             answer(200, r#"{"sign-in":"signed-out"}"#),
             Answer::Unreadable
         );
         assert_eq!(answer(200, "not json"), Answer::Unreadable);
+    }
+
+    /// The lease of a signed-in answer to a sign-in sent at
+    /// [`SIGNED_IN_AT`] with `limits`, the fields after the CSRF token.
+    fn lease_of(limits: &str) -> Lease {
+        let body = format!(r#"{{"sign-in":"signed-in","csrf-token":"abc"{limits}}}"#);
+        match answer(200, &body) {
+            Answer::SignedIn(signed) => signed.lease,
+            other => panic!("{body} is a live session, not {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_session_kept_signed_in_has_no_idle_limit_and_ends_without_a_warning() {
+        let lease = lease_of(r#","ends-in-seconds":2592000"#);
+        let ends_at = SIGNED_IN_AT + LIFETIME;
+        assert_eq!(lease.at(SIGNED_IN_AT), Stand::Quiet { until: ends_at });
+        assert_eq!(
+            lease.at(SIGNED_IN_AT + IDLE + HOUR),
+            Stand::Quiet { until: ends_at }
+        );
+        assert_eq!(lease.at(ends_at), Stand::Ended);
+    }
+
+    #[test]
+    fn a_session_with_no_end_after_its_sign_in_ends_only_unused_and_warns_first() {
+        let lease = lease_of(r#","idle-seconds":43200"#);
+        let idle_ends = SIGNED_IN_AT + IDLE;
+        assert_eq!(
+            lease.at(SIGNED_IN_AT),
+            Stand::Quiet {
+                until: idle_ends - WARNING_LEAD_MS
+            }
+        );
+        assert_eq!(lease.at(idle_ends - 1), Stand::Warning { until: idle_ends });
+        assert_eq!(lease.at(idle_ends), Stand::Ended);
+        let used = lease.used(SIGNED_IN_AT + 2 * LIFETIME);
+        assert_eq!(
+            used.at(SIGNED_IN_AT + 2 * LIFETIME + HOUR),
+            Stand::Quiet {
+                until: SIGNED_IN_AT + 2 * LIFETIME + IDLE - WARNING_LEAD_MS
+            }
+        );
+    }
+
+    #[test]
+    fn a_session_kept_signed_in_until_sign_out_never_ends_by_the_page_s_clock() {
+        let lease = lease_of("");
+        for now in [
+            SIGNED_IN_AT,
+            SIGNED_IN_AT + IDLE,
+            SIGNED_IN_AT + 20 * LIFETIME,
+        ] {
+            assert_eq!(lease.at(now), Stand::Quiet { until: i64::MAX });
+            assert_eq!(wait_ms(now, i64::MAX), LONGEST_WAIT_MS);
+        }
     }
 
     #[test]
@@ -685,5 +795,15 @@ mod tests {
         assert!(about_the_password(ErrorCode::SignInFailed));
         assert!(!about_the_password(ErrorCode::SignInWait));
         assert!(!about_the_password(ErrorCode::SignInUnavailable));
+    }
+
+    #[test]
+    fn a_sign_out_the_database_could_not_forget_has_signed_out_all_the_same() {
+        // By its wire name: the daemon's answer, as `ws` reads it.
+        let unavailable = serde_json::from_str::<ErrorCode>(r#""sessions-unavailable""#);
+        assert!(unavailable.is_ok_and(signed_out_all_the_same));
+        assert!(!signed_out_all_the_same(ErrorCode::CsrfTokenInvalid));
+        assert!(!signed_out_all_the_same(ErrorCode::OriginNotAllowed));
+        assert!(!signed_out_all_the_same(ErrorCode::SignInUnavailable));
     }
 }

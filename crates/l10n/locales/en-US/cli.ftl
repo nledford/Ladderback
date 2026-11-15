@@ -74,6 +74,11 @@ cli-set-password-unwritable = cannot keep the admin password in { $path }: { $de
 # The admin password is set, and sign-in is on from now. A daemon already running with sign-in on uses the new password at once and signs everyone out; one running with sign-in off turns sign-in on only when it starts again.
 cli-set-password-done = admin password set. Every session has ended: sign in again with the new password. A daemon running with sign-in off turns it on when it next starts.
 
+# The admin password is set, but the sessions Ladderback keeps for after a restart could not be forgotten. They have ended all the same: none is let in again, and Ladderback forgets them when it next starts.
+# $path (text): the database file. It is shown as it is.
+# $detail (text): the database's message. It is shown as it came.
+cli-set-password-sessions-left = the sessions kept in { $path } could not be forgotten: { $detail }. They have ended all the same, and Ladderback forgets them when it next starts.
+
 # `--allowed-host` was given a name that no Host header could ever match, which would lock the web UI out.
 # $name (text): the value as it was typed. It is shown as it is.
 # `--allowed-host`, `nas.example.com`, `192.168.1.5` and `[fd00::1]` are typed as they are: keep them string literals.

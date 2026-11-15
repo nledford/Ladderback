@@ -13,11 +13,15 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::components::{ErrorSummary, FormField, SummaryItem, recover_focus, trap_focus};
+use crate::components::{
+    Checkbox, ErrorSummary, FormField, SummaryItem, recover_focus, trap_focus,
+};
 use crate::live::{modal_gone, open_modal};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, refusal, text_with};
-use crate::session::{Answer, SignInOffNotice, Signed, Standing, about_the_password, lacking};
+use crate::session::{
+    Answer, SignInOffNotice, Signed, Standing, about_the_password, asks_to_keep, lacking,
+};
 use crate::{text, ws};
 
 /// Where a sign-in form stands, which decides how it says a problem: the
@@ -37,14 +41,23 @@ impl Place {
             Self::Dialog => "session-ended-password",
         }
     }
+
+    /// The `id` of the form's Keep me signed in checkbox.
+    fn keep(self) -> &'static str {
+        match self {
+            Self::Page => "sign-in-keep",
+            Self::Dialog => "session-ended-keep",
+        }
+    }
 }
 
-/// The admin password's one field and the button that sends it. The field is
-/// a password manager's (`current-password`) and takes paste (A5). What was
-/// typed is cleared once the daemon has answered, whatever it answered, so
-/// the page never holds the password longer than the request (I4).
-/// `signed_in` runs with the new session, or none when the daemon says
-/// sign-in is off.
+/// The admin password's one field, **Keep me signed in on this device**
+/// while the daemon offers it (`KeepOffered`), and the button that sends
+/// them. The field is a password manager's (`current-password`) and takes
+/// paste (A5). What was typed is cleared once the daemon has answered,
+/// whatever it answered, so the page never holds the password longer than
+/// the request (I4). `signed_in` runs with the new session, or none when
+/// the daemon says sign-in is off.
 #[component]
 fn SignInForm(
     localizer: Arc<Localizer>,
@@ -52,6 +65,8 @@ fn SignInForm(
     signed_in: Callback<Option<Signed>>,
 ) -> impl IntoView {
     let value = RwSignal::new(String::new());
+    let keep = RwSignal::new(false);
+    let offered = use_context::<KeepOffered>().map(|KeepOffered(offered)| offered);
     let error = RwSignal::new(None::<String>);
     let summary = RwSignal::new(Vec::<SummaryItem>::new());
     let alert = RwSignal::new(None::<String>);
@@ -81,9 +96,13 @@ fn SignInForm(
             return;
         }
         busy.set(true);
+        let keep_signed_in = asks_to_keep(
+            keep.get_untracked(),
+            offered.is_some_and(|offered| offered.get_untracked()),
+        );
         let localizer = Arc::clone(&submit_localizer);
         spawn_local(async move {
-            let answer = ws::sign_in(password).await;
+            let answer = ws::sign_in(password, keep_signed_in).await;
             // The form may have gone with its page while the daemon checked.
             if value.try_set(String::new()).is_some() {
                 return;
@@ -103,6 +122,20 @@ fn SignInForm(
         });
     };
     let summary_localizer = Arc::clone(&localizer);
+    let keep_label = text(&localizer, msg::UI_SIGN_IN_KEEP);
+    let keep_hint = text(&localizer, msg::UI_SIGN_IN_KEEP_HINT);
+    let keep_box = move || {
+        offered.is_some_and(|offered| offered.get()).then(|| {
+            view! {
+                <Checkbox
+                    id=place.keep()
+                    label=keep_label.clone()
+                    description=keep_hint.clone()
+                    checked=keep
+                />
+            }
+        })
+    };
     view! {
         {move || {
             let items = summary.get();
@@ -133,6 +166,7 @@ fn SignInForm(
                 kind="password"
                 autocomplete="current-password"
             />
+            {keep_box}
             {(place == Place::Dialog).then(|| view! { <p role="alert">{move || alert.get()}</p> })}
             <p class="actions">
                 <button type="submit" aria-disabled=move || busy.get().then_some("true")>
@@ -148,6 +182,12 @@ fn SignInForm(
 /// says so, until the page signs in again. `App` provides it.
 #[derive(Clone, Copy)]
 pub(crate) struct PasswordChanged(pub(crate) RwSignal<bool>);
+
+/// Whether the sign-in form offers **Keep me signed in on this device**: it
+/// doesn't under **Stay signed in for** Until I close the browser. Each
+/// signed-out answer sets it (`ws::watch_session`); `App` provides it.
+#[derive(Clone, Copy)]
+pub(crate) struct KeepOffered(pub(crate) RwSignal<bool>);
 
 /// The sign-in page, shown in place of the page asked for while sign-in is
 /// on and the page has no session. Once signed in, the page asked for is
@@ -195,6 +235,10 @@ pub(crate) fn SessionEnded(localizer: Arc<Localizer>, ended: RwSignal<bool>) -> 
             open_modal(&dialog, counted);
         }
     });
+    // Whether the form offers Keep me signed in may have changed in Settings
+    // since the page last heard: a signed-out answer says, read without the
+    // session, which this read must neither use nor bring back.
+    spawn_local(ws::hear_keep_offered());
     let signed_in = Callback::new(move |session: Option<Signed>| {
         signed.set_value(true);
         if let Some(dialog) = dialog.get_untracked() {

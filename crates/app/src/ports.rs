@@ -16,6 +16,7 @@ mod retention;
 mod schedule_store;
 mod secrets;
 mod service;
+mod session_store;
 mod sources;
 
 pub use admin_password::{AdminPassword, AdminPasswordError};
@@ -54,4 +55,5 @@ pub use retention::{Retention, RetentionError};
 pub use schedule_store::{PendingRetry, PlannedRun, ScheduleStore};
 pub use secrets::{Resolved, SecretResolver};
 pub use service::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
+pub use session_store::SessionStore;
 pub use sources::{NormalizeSources, SourcesError};

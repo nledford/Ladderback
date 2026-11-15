@@ -19,6 +19,9 @@ pub struct SignInE2e {
     cookie: Option<String>,
     /// That session's CSRF token.
     csrf: Option<String>,
+    /// The `Cookie` header's `name=value` of a session another browser
+    /// signed in with.
+    second_cookie: Option<String>,
 }
 
 #[derive(Debug)]
@@ -186,6 +189,29 @@ pub(crate) fn no_file_under_holds(folder: &Path, text: &str) {
     }
 }
 
+/// The session cookie's token is kept neither as its text nor as its bytes:
+/// the store holds its digest only (I4).
+#[then("no file Ladderback keeps holds the session cookie's token")]
+fn no_file_holds_the_session_token(agent: &mut Agent) {
+    let cookie = agent.sign_in.cookie.clone().expect("the admin signed in");
+    let (_, token) = cookie.split_once('=').expect("a cookie's name and value");
+    assert_eq!(token.len(), 64, "a session token is 64 hex digits");
+    let home = home(agent);
+    no_file_under_holds(&home, token);
+    let bytes: Vec<u8> = (0..token.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&token[at..at + 2], 16).expect("a hex digit pair"))
+        .collect();
+    for path in files_under(&home) {
+        let kept = std::fs::read(&path).expect("a file Ladderback keeps");
+        assert!(
+            !kept.windows(bytes.len()).any(|window| window == bytes),
+            "{} holds the session token's bytes",
+            path.display()
+        );
+    }
+}
+
 #[given("the data folder holds an admin password file that is not a password hash")]
 #[when("the data folder holds an admin password file that is not a password hash")]
 fn not_a_hash(agent: &mut Agent) {
@@ -226,11 +252,31 @@ async fn serving_with_sign_in_off(agent: &mut Agent) {
 }
 
 /// Stops the daemon and starts it again on the same folders.
+#[given("Ladderback has been restarted")]
 #[when("Ladderback is restarted")]
 async fn restarted(agent: &mut Agent) {
+    stopped(agent).await;
+    web::serve_on_loopback(agent).await;
+}
+
+/// Stops the daemon, leaving its folders as they are.
+#[when("Ladderback is stopped")]
+async fn stopped(agent: &mut Agent) {
     let server = agent.web.server.take();
     blocking(move || drop(server)).await;
-    web::serve_on_loopback(agent).await;
+}
+
+/// The daemon's store, opened while it is stopped, keeps no session.
+#[then("Ladderback keeps no session for after a restart")]
+async fn keeps_no_session(agent: &mut Agent) {
+    use app::ports::SessionStore;
+    let path = testkit::daemon::data_dir(&home(agent)).join("ladderback.db");
+    let store = store::SqliteStore::open(&path)
+        .await
+        .expect("the store opens while the daemon is stopped");
+    let kept = store.all().await;
+    store.close().await;
+    assert_eq!(kept.expect("the store reads its sessions"), Vec::new());
 }
 
 /// The session route's answer, read without a session.
@@ -370,6 +416,31 @@ fn has_signed_in(agent: &mut Agent, password: String) {
     assert!(agent.sign_in.cookie.is_some(), "no session cookie");
 }
 
+/// Another browser signs in: its cookie is kept apart from the one the
+/// scenario's later steps send.
+#[given(expr = "the admin has signed in over HTTP with {string} in a second browser")]
+fn has_signed_in_elsewhere(agent: &mut Agent, password: String) {
+    has_signed_in(agent, password);
+    agent.sign_in.second_cookie = agent.sign_in.cookie.take();
+    agent.sign_in.csrf = None;
+}
+
+#[when(expr = "a {string} request for {string} is sent with the second browser's session cookie")]
+fn sent_from_the_second_browser(agent: &mut Agent, method: String, path: String) {
+    web::request_for(agent, method, path);
+    let cookie = agent
+        .sign_in
+        .second_cookie
+        .clone()
+        .expect("a second browser signed in");
+    agent
+        .web
+        .request()
+        .headers
+        .push(format!("Cookie: {cookie}"));
+    web::send(agent);
+}
+
 pub(crate) fn session_cookie(agent: &Agent) -> String {
     let cookie = agent
         .sign_in
@@ -473,6 +544,71 @@ fn cookie_not_marked(agent: &mut Agent, attribute: String) {
         !cookie.split(';').any(|part| part.trim() == attribute),
         "{cookie}"
     );
+}
+
+/// The name the wire gives a choice of **Stay signed in for**, as Settings
+/// shows it.
+fn session_length_name(choice: &str) -> &'static str {
+    match choice {
+        "Until I close the browser" => "until-browser-closes",
+        "7 days" => "7-days",
+        "30 days" => "30-days",
+        "90 days" => "90-days",
+        "1 year" => "1-year",
+        "Until I sign out" => "until-sign-out",
+        other => panic!("no choice of Stay signed in for is {other:?}"),
+    }
+}
+
+#[given(expr = "the admin has set Stay signed in for to {string} over HTTP")]
+async fn has_set_session_length(agent: &mut Agent, choice: String) {
+    let request = Request {
+        method: "PUT".to_owned(),
+        path: "/api/v1/settings/sign-in".to_owned(),
+        headers: vec![
+            session_cookie(agent),
+            csrf_header(agent),
+            "Content-Type: application/json".to_owned(),
+        ],
+        default_host: true,
+        body: serde_json::json!({ "session-length": session_length_name(&choice) }).to_string(),
+    };
+    let addr = agent.web.server().addr;
+    let response = blocking(move || web::exchange(addr, &request)).await;
+    assert_eq!(response.status, 200, "body {:?}", response.body);
+}
+
+/// The attributes of the session cookie the last answer set, trimmed.
+fn set_cookie_attributes(agent: &Agent) -> Vec<String> {
+    let response = agent.web.response();
+    assert_eq!(response.status, 200, "body {:?}", response.body);
+    let cookie = response.header("set-cookie").expect("a Set-Cookie header");
+    assert!(cookie.starts_with("ladderback-session="), "{cookie}");
+    cookie
+        .split(';')
+        .map(|part| part.trim().to_owned())
+        .collect()
+}
+
+#[then(expr = "the session cookie lasts {int} days")]
+fn cookie_lasts(agent: &mut Agent, days: u64) {
+    let attributes = set_cookie_attributes(agent);
+    let max_age = format!("Max-Age={}", days * 24 * 3600);
+    assert!(attributes.contains(&max_age), "{attributes:?}");
+}
+
+#[then(expr = "the session cookie has neither {string} nor {string}")]
+fn cookie_has_neither(agent: &mut Agent, first: String, second: String) {
+    let attributes = set_cookie_attributes(agent);
+    for unwanted in [first, second] {
+        let named = format!("{}=", unwanted.to_ascii_lowercase());
+        assert!(
+            !attributes
+                .iter()
+                .any(|part| part.to_ascii_lowercase().starts_with(&named)),
+            "{unwanted}: {attributes:?}"
+        );
+    }
 }
 
 #[then(expr = "the sign-in is refused with status {int}, to be tried again after {int} second(s)")]

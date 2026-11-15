@@ -31,14 +31,14 @@ function textField(answer: unknown, name: string): string | undefined {
 
 /** Where the scenario's own daemon listens: these steps need one with
  *  sign-in on, which only a scenario's own daemon has. */
-function ownBase(world: BrowserWorld): string {
+export function ownBase(world: BrowserWorld): string {
   assert.ok(world.baseUrl, "no Given started a daemon of the scenario's own with sign-in on");
   return world.baseUrl;
 }
 
 /** The headers a changed request of the page carries: its own origin, which
  *  the request checks admit, and the session's CSRF token. */
-async function changeHeaders(context: BrowserContext, base: string): Promise<Record<string, string>> {
+export async function changeHeaders(context: BrowserContext, base: string): Promise<Record<string, string>> {
   const session = await context.request.get(`${base}/api/v1/session`);
   assert.equal(session.status(), 200, "the session could not be read");
   const token = textField(await session.json(), "csrf-token");

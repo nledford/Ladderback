@@ -17,6 +17,7 @@ mod error_args;
 mod locations;
 mod report;
 mod row;
+mod sessions;
 mod sql;
 mod summary;
 

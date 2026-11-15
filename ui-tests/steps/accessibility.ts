@@ -54,6 +54,26 @@ When("I press Shift+Tab until focus is on the {word} {string}", async function (
   await pressUntilFocusIsOn(this, "Shift+Tab", role, name);
 });
 
+// Within a radio group the arrow keys move focus and choose as they go;
+// Tab only enters and leaves the group (§4.5).
+When("I press the down arrow until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
+  await pressUntilFocusIsOn(this, "ArrowDown", role, name);
+});
+
+Then("focus is on the radio {string}", async function (this: BrowserWorld, name: string) {
+  const radio = journey(this.page).byRole("radio", { name: namePattern(name) });
+  assert.equal(await radio.count(), 1, `the radio "${name}" is not on the page once`);
+  await journey(this.page).assertFocused(radio, `the radio "${name}", not ${await whereFocusIs(this.page)}`);
+});
+
+// A radio group is one stop: Tab from the choice made goes past the others.
+Then("focus has left the group {string}", async function (this: BrowserWorld, name: string) {
+  const group = journey(this.page).byRole("group", { name: namePattern(name) });
+  assert.equal(await group.count(), 1, `the group "${name}" is not on the page once`);
+  const inside = await group.evaluate((el) => el.contains(document.activeElement));
+  assert.ok(!inside, `focus is still in the group "${name}": it is ${await whereFocusIs(this.page)}`);
+});
+
 Then("focus is on the main heading {string}", async function (this: BrowserWorld, name: string) {
   const keys = journey(this.page);
   await keys.assertFocused(

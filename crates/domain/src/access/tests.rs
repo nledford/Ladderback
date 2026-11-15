@@ -110,7 +110,7 @@ fn tokens_differing_only_in_their_last_byte_dont_match() {
 #[test]
 fn a_session_is_found_by_its_own_token_only() {
     let mut sessions = Sessions::default();
-    sessions.start(token(1), token(2), PASSWORD, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
     let found = sessions.peek(&token(1), PASSWORD, at(1)).unwrap();
     assert!(found.accepts(&token(2)));
     assert!(sessions.use_at(&token(1), PASSWORD, at(1)).is_some());
@@ -129,7 +129,7 @@ fn a_session_is_found_by_its_own_token_only() {
 #[test]
 fn a_session_lives_twelve_hours_from_its_last_use() {
     let mut sessions = Sessions::default();
-    sessions.start(token(1), token(2), PASSWORD, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
     let idle = SESSION_IDLE.as_secs();
     assert!(sessions.use_at(&token(1), PASSWORD, at(idle - 1)).is_some());
     assert!(
@@ -149,19 +149,21 @@ fn a_session_lives_twelve_hours_from_its_last_use() {
 #[test]
 fn a_session_ends_on_the_twelfth_hour_unused_exactly() {
     let mut sessions = Sessions::default();
-    let session = sessions.start(token(1), token(2), PASSWORD, at(0));
-    assert!(session.live_at(at(SESSION_IDLE.as_secs() - 1)));
-    assert!(!session.live_at(at(SESSION_IDLE.as_secs())));
+    let session = sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    let length = SessionLength::default();
+    assert!(session.live_at(at(SESSION_IDLE.as_secs() - 1), length));
+    assert!(!session.live_at(at(SESSION_IDLE.as_secs()), length));
 }
 
 #[test]
 fn a_session_ends_thirty_days_after_it_started_however_it_is_used() {
     let mut sessions = Sessions::default();
-    let session = sessions.start(token(1), token(2), PASSWORD, at(0));
-    // Thirty days, written out: a lifetime read back from the constant would
+    assert_eq!(sessions.length(), SessionLength::ThirtyDays);
+    let session = sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    // Thirty days, written out: a lifetime read back from the code would
     // follow any change to it.
     let lifetime = 30 * 24 * 3600;
-    assert_eq!(session.ends_at(), at(lifetime));
+    assert_eq!(session.ends_at(sessions.length()), Some(at(lifetime)));
     for hour in 1..(lifetime / 3600) {
         assert!(
             sessions
@@ -181,7 +183,7 @@ fn a_session_ends_thirty_days_after_it_started_however_it_is_used() {
 #[test]
 fn a_clock_that_steps_back_never_shortens_a_session() {
     let mut sessions = Sessions::default();
-    sessions.start(token(1), token(2), PASSWORD, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
     let idle = SESSION_IDLE.as_secs();
     assert!(sessions.use_at(&token(1), PASSWORD, at(idle - 1)).is_some());
     assert!(sessions.use_at(&token(1), PASSWORD, at(10)).is_some());
@@ -196,15 +198,178 @@ fn a_clock_that_steps_back_never_shortens_a_session() {
 fn a_session_at_the_end_of_time_is_live_until_then() {
     let mut sessions = Sessions::default();
     let late = Timestamp::MAX - SignedDuration::from_hours(1);
-    let session = sessions.start(token(1), token(2), PASSWORD, late);
-    assert_eq!(session.ends_at(), Timestamp::MAX);
-    assert!(session.live_at(late));
+    let session = sessions.start(token(1), token(2), PASSWORD, false, false, late);
+    assert_eq!(
+        session.ends_at(SessionLength::ThirtyDays),
+        Some(Timestamp::MAX)
+    );
+    assert!(session.live_at(late, SessionLength::ThirtyDays));
+}
+
+const DAY: i64 = 24 * 3600;
+
+/// Uses the session of `token` every 11 hours from `from` while short of
+/// `until`, so its idle limit never ends it; whether it was live at each use.
+fn used_every_eleven_hours(sessions: &mut Sessions, token: &Token, from: i64, until: i64) -> bool {
+    (0..)
+        .map(|step| from + step * 11 * 3600)
+        .take_while(|&second| second < until)
+        .all(|second| sessions.use_at(token, PASSWORD, at(second)).is_some())
+}
+
+#[test]
+fn each_session_length_ends_a_session_that_long_after_its_sign_in_however_it_is_used() {
+    // In days, written out: a length read back from the code would follow
+    // any change to it.
+    for (length, days) in [
+        (SessionLength::SevenDays, 7),
+        (SessionLength::ThirtyDays, 30),
+        (SessionLength::NinetyDays, 90),
+        (SessionLength::OneYear, 365),
+    ] {
+        let end = days * DAY;
+        assert_eq!(
+            length.after_sign_in(),
+            Some(SignedDuration::from_secs(end)),
+            "{length:?}"
+        );
+        let mut sessions = Sessions::default();
+        sessions.set_length(length, at(0));
+        let session = sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+        assert_eq!(session.ends_at(length), Some(at(end)), "{length:?}");
+        assert!(
+            used_every_eleven_hours(&mut sessions, &token(1), 0, end - 1),
+            "{length:?}"
+        );
+        assert!(
+            sessions.use_at(&token(1), PASSWORD, at(end - 1)).is_some(),
+            "{length:?}"
+        );
+        assert!(
+            sessions.use_at(&token(1), PASSWORD, at(end)).is_none(),
+            "{length:?}"
+        );
+    }
+}
+
+#[test]
+fn until_the_browser_closes_and_until_sign_out_set_no_end_after_sign_in_but_the_idle_limit() {
+    let two_years = 730 * DAY;
+    for length in [
+        SessionLength::UntilBrowserCloses,
+        SessionLength::UntilSignOut,
+    ] {
+        assert_eq!(length.after_sign_in(), None, "{length:?}");
+        let mut sessions = Sessions::default();
+        sessions.set_length(length, at(0));
+        let session = sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+        assert_eq!(session.ends_at(length), None, "{length:?}");
+        assert!(
+            used_every_eleven_hours(&mut sessions, &token(1), 0, two_years),
+            "{length:?}"
+        );
+        assert!(
+            sessions
+                .use_at(&token(1), PASSWORD, at(two_years))
+                .is_some(),
+            "{length:?}"
+        );
+        let idle = SESSION_IDLE.as_secs();
+        assert!(
+            sessions
+                .use_at(&token(1), PASSWORD, at(two_years + idle))
+                .is_none(),
+            "{length:?}"
+        );
+    }
+}
+
+#[test]
+fn a_session_length_is_named_for_the_wire_and_the_store_and_read_back_by_that_name() {
+    let names: Vec<&str> = SessionLength::ALL
+        .into_iter()
+        .map(SessionLength::as_str)
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "until-browser-closes",
+            "7-days",
+            "30-days",
+            "90-days",
+            "1-year",
+            "until-sign-out"
+        ]
+    );
+    for length in SessionLength::ALL {
+        assert_eq!(SessionLength::parse(length.as_str()), Some(length));
+    }
+    for other in ["", "30 days", "30-DAYS", "2-days", " 7-days", "forever"] {
+        assert_eq!(SessionLength::parse(other), None, "{other:?}");
+    }
+}
+
+#[test]
+fn shortening_the_session_length_ends_the_sessions_older_than_it_at_once_and_no_younger_one() {
+    let mut sessions = Sessions::default();
+    let now = 8 * DAY;
+    assert!(sessions.restore(
+        kept(1, 0, now - 3600, PASSWORD),
+        token(8),
+        PASSWORD,
+        at(now)
+    ));
+    assert!(sessions.restore(
+        kept(3, 2 * DAY, now - 3600, PASSWORD),
+        token(9),
+        PASSWORD,
+        at(now)
+    ));
+    sessions.set_length(SessionLength::SevenDays, at(now));
+    assert_eq!(sessions.length(), SessionLength::SevenDays);
+    assert_eq!(sessions.take_forgotten(), vec![token(1).digest()]);
+    assert_eq!(sessions.len(), 1);
+    assert!(sessions.peek(&token(3), PASSWORD, at(now)).is_some());
+}
+
+#[test]
+fn lengthening_the_session_length_extends_the_sessions_already_open() {
+    let mut sessions = Sessions::default();
+    sessions.set_length(SessionLength::SevenDays, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    assert!(used_every_eleven_hours(
+        &mut sessions,
+        &token(1),
+        0,
+        6 * DAY
+    ));
+    sessions.set_length(SessionLength::ThirtyDays, at(6 * DAY));
+    assert!(used_every_eleven_hours(
+        &mut sessions,
+        &token(1),
+        6 * DAY,
+        8 * DAY
+    ));
+    assert!(sessions.take_forgotten().is_empty());
+}
+
+#[test]
+fn a_restored_session_is_measured_by_the_session_length() {
+    let mut sessions = Sessions::default();
+    sessions.set_length(SessionLength::SevenDays, at(0));
+    assert!(!sessions.restore(
+        kept(1, 0, 7 * DAY - 3600, PASSWORD),
+        token(9),
+        PASSWORD,
+        at(7 * DAY)
+    ));
+    assert_eq!(sessions.take_forgotten(), vec![token(1).digest()]);
 }
 
 #[test]
 fn a_session_accepts_its_own_csrf_token_only() {
     let mut sessions = Sessions::default();
-    let session = sessions.start(token(1), token(2), PASSWORD, at(0));
+    let session = sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
     assert!(session.accepts(&token(2)));
     assert!(!session.accepts(&token(1)));
     assert!(session.csrf().matches(&token(2)));
@@ -213,8 +378,8 @@ fn a_session_accepts_its_own_csrf_token_only() {
 #[test]
 fn signing_out_ends_one_session_only() {
     let mut sessions = Sessions::default();
-    sessions.start(token(1), token(2), PASSWORD, at(0));
-    sessions.start(token(3), token(4), PASSWORD, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    sessions.start(token(3), token(4), PASSWORD, false, false, at(0));
     sessions.end(&token(1));
     assert!(sessions.use_at(&token(1), PASSWORD, at(1)).is_none());
     assert!(sessions.use_at(&token(3), PASSWORD, at(1)).is_some());
@@ -222,15 +387,39 @@ fn signing_out_ends_one_session_only() {
 }
 
 #[test]
+fn signing_out_everywhere_ends_every_session_for_the_store_to_forget_too() {
+    let mut sessions = Sessions::default();
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    sessions.start(token(3), token(4), PASSWORD, true, false, at(0));
+    sessions.take_forgotten();
+    sessions.end_all();
+    assert!(sessions.is_empty());
+    assert!(sessions.peek(&token(1), PASSWORD, at(1)).is_none());
+    assert!(sessions.peek(&token(3), PASSWORD, at(1)).is_none());
+    let mut forgotten = sessions.take_forgotten();
+    forgotten.sort_by_key(|digest| *digest.as_bytes());
+    let mut expected = vec![token(1).digest(), token(3).digest()];
+    expected.sort_by_key(|digest| *digest.as_bytes());
+    assert_eq!(forgotten, expected);
+}
+
+#[test]
 fn a_new_session_past_the_most_ends_the_one_used_longest_ago() {
     let mut sessions = Sessions::default();
     for index in 0..MAX_SESSIONS {
         let byte = u8::try_from(index).unwrap();
-        sessions.start(token(byte), token(200), PASSWORD, at(i64::from(byte)));
+        sessions.start(
+            token(byte),
+            token(200),
+            PASSWORD,
+            false,
+            false,
+            at(i64::from(byte)),
+        );
     }
     // The first is used again, so the second is the one used longest ago.
     assert!(sessions.use_at(&token(0), PASSWORD, at(100)).is_some());
-    sessions.start(token(99), token(200), PASSWORD, at(101));
+    sessions.start(token(99), token(200), PASSWORD, false, false, at(101));
     assert_eq!(sessions.len(), MAX_SESSIONS);
     assert!(sessions.use_at(&token(1), PASSWORD, at(102)).is_none());
     assert!(sessions.use_at(&token(0), PASSWORD, at(102)).is_some());
@@ -240,21 +429,28 @@ fn a_new_session_past_the_most_ends_the_one_used_longest_ago() {
 #[test]
 fn starting_a_session_forgets_those_that_ended() {
     let mut sessions = Sessions::default();
-    sessions.start(token(1), token(2), PASSWORD, at(0));
-    sessions.start(token(3), token(4), PASSWORD, at(SESSION_IDLE.as_secs()));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    sessions.start(
+        token(3),
+        token(4),
+        PASSWORD,
+        false,
+        false,
+        at(SESSION_IDLE.as_secs()),
+    );
     assert_eq!(sessions.len(), 1);
 }
 
 #[test]
 fn a_new_admin_password_ends_every_session_started_under_the_old_one() {
     let mut sessions = Sessions::default();
-    sessions.start(token(1), token(2), PASSWORD, at(0));
-    sessions.start(token(3), token(4), PASSWORD, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    sessions.start(token(3), token(4), PASSWORD, false, false, at(0));
     assert!(sessions.use_at(&token(1), NEW_PASSWORD, at(1)).is_none());
     // Ended, so the old password, were it kept again, doesn't bring it back.
     assert!(sessions.use_at(&token(1), PASSWORD, at(2)).is_none());
     // A session that starts under the new password ends the old ones too.
-    sessions.start(token(5), token(6), NEW_PASSWORD, at(3));
+    sessions.start(token(5), token(6), NEW_PASSWORD, false, false, at(3));
     assert_eq!(sessions.len(), 1);
     assert!(sessions.use_at(&token(5), NEW_PASSWORD, at(4)).is_some());
 }
@@ -262,13 +458,197 @@ fn a_new_admin_password_ends_every_session_started_under_the_old_one() {
 #[test]
 fn peeking_at_a_session_does_not_use_it() {
     let mut sessions = Sessions::default();
-    sessions.start(token(1), token(2), PASSWORD, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
     let idle = SESSION_IDLE.as_secs();
     let peeked = sessions.peek(&token(1), PASSWORD, at(idle - 1));
     assert!(peeked.is_some_and(|session| session.accepts(&token(2))));
     assert!(sessions.peek(&token(1), PASSWORD, at(idle)).is_none());
     assert!(sessions.peek(&token(1), NEW_PASSWORD, at(1)).is_none());
     assert!(sessions.peek(&token(3), PASSWORD, at(1)).is_none());
+}
+
+/// The session `byte` as the store kept it: started at `started`, last used
+/// at `last_used`, under `password`.
+fn kept(byte: u8, started: i64, last_used: i64, password: PasswordFingerprint) -> KeptSession {
+    KeptSession {
+        digest: token(byte).digest(),
+        password,
+        started: at(started),
+        last_used: at(last_used),
+        keep_signed_in: false,
+        secure: false,
+    }
+}
+
+#[test]
+fn a_session_is_kept_as_its_tokens_digest_and_its_times_never_a_token() {
+    let mut sessions = Sessions::default();
+    let session = sessions.start(token(1), token(2), PASSWORD, false, false, at(5));
+    let kept_session = session.kept(token(1).digest());
+    assert_eq!(kept_session, kept(1, 5, 5, PASSWORD));
+    let shown = format!("{kept_session:?}");
+    assert!(!shown.contains(&token(1).to_text()), "{shown}");
+    assert!(!shown.contains(&token(2).to_text()), "{shown}");
+}
+
+#[test]
+fn a_session_s_digest_names_itself_in_debug_output_and_hides_its_bytes() {
+    let digest = token(1).digest();
+    assert_eq!(format!("{digest:?}"), "SessionDigest(..)");
+    assert_eq!(format!("{digest:#?}"), "SessionDigest(..)");
+    let mut sessions = Sessions::default();
+    let session = sessions.start(token(1), token(2), PASSWORD, false, false, at(5));
+    let shown = format!("{:?}", session.kept(digest));
+    assert!(shown.contains("digest: SessionDigest(..)"), "{shown}");
+}
+
+#[test]
+fn a_session_is_kept_by_its_token_s_sha_256_and_found_again_by_those_bytes() {
+    // The store keeps a session under its digest's bytes and looks it up by
+    // them after a restart: they are the token's SHA-256, one session's never
+    // another's.
+    let digest = token(1).digest();
+    assert_eq!(
+        digest.as_bytes(),
+        &[
+            0x72, 0xcd, 0x6e, 0x84, 0x22, 0xc4, 0x07, 0xfb, 0x6d, 0x09, 0x86, 0x90, 0xf1, 0x13,
+            0x0b, 0x7d, 0xed, 0x7e, 0xc2, 0xf7, 0xf5, 0xe1, 0xd3, 0x0b, 0xd9, 0xd5, 0x21, 0xf0,
+            0x15, 0x36, 0x37, 0x93,
+        ]
+    );
+    assert_eq!(SessionDigest::from_bytes(*digest.as_bytes()), digest);
+    assert_ne!(token(2).digest().as_bytes(), digest.as_bytes());
+}
+
+#[test]
+fn a_restored_session_keeps_its_times_and_takes_its_new_csrf_token() {
+    let mut sessions = Sessions::default();
+    let idle = SESSION_IDLE.as_secs();
+    assert!(sessions.restore(kept(1, 0, 3600, PASSWORD), token(9), PASSWORD, at(7200)));
+    let session = sessions.peek(&token(1), PASSWORD, at(3600 + idle - 1));
+    assert!(session.is_some_and(|session| session.accepts(&token(9))));
+    assert!(
+        sessions
+            .peek(&token(1), PASSWORD, at(3600 + idle))
+            .is_none()
+    );
+    let ends = sessions
+        .peek(&token(1), PASSWORD, at(7200))
+        .and_then(|session| session.ends_at(SessionLength::ThirtyDays));
+    assert_eq!(ends, Some(at(30 * 24 * 3600)));
+    assert!(sessions.take_forgotten().is_empty());
+}
+
+#[test]
+fn a_kept_session_that_has_ended_or_is_of_another_password_is_forgotten_not_restored() {
+    let mut sessions = Sessions::default();
+    let idle = SESSION_IDLE.as_secs();
+    assert!(!sessions.restore(kept(1, 0, 0, PASSWORD), token(9), PASSWORD, at(idle)));
+    assert!(!sessions.restore(kept(2, 0, 0, NEW_PASSWORD), token(9), PASSWORD, at(1)));
+    let lifetime = 30 * 24 * 3600;
+    assert!(!sessions.restore(
+        kept(3, 0, lifetime - 1, PASSWORD),
+        token(9),
+        PASSWORD,
+        at(lifetime)
+    ));
+    assert!(sessions.is_empty());
+    assert_eq!(
+        sessions.take_forgotten(),
+        vec![token(1).digest(), token(2).digest(), token(3).digest()]
+    );
+    assert!(sessions.take_forgotten().is_empty());
+}
+
+#[test]
+fn restoring_past_the_most_forgets_the_session_used_longest_ago() {
+    let mut sessions = Sessions::default();
+    for byte in 0..=u8::try_from(MAX_SESSIONS).unwrap() {
+        let used = i64::from(byte) + 100;
+        assert!(sessions.restore(kept(byte, 0, used, PASSWORD), token(200), PASSWORD, at(200)));
+    }
+    assert_eq!(sessions.len(), MAX_SESSIONS);
+    assert_eq!(sessions.take_forgotten(), vec![token(0).digest()]);
+    assert!(sessions.peek(&token(1), PASSWORD, at(200)).is_some());
+}
+
+#[test]
+fn a_restored_session_used_before_every_one_of_the_most_is_forgotten_itself() {
+    let mut sessions = Sessions::default();
+    for byte in 1..=u8::try_from(MAX_SESSIONS).unwrap() {
+        assert!(sessions.restore(kept(byte, 0, 100, PASSWORD), token(200), PASSWORD, at(200)));
+    }
+    assert!(!sessions.restore(kept(0, 0, 99, PASSWORD), token(200), PASSWORD, at(200)));
+    assert_eq!(sessions.len(), MAX_SESSIONS);
+    assert_eq!(sessions.take_forgotten(), vec![token(0).digest()]);
+    assert!(sessions.peek(&token(0), PASSWORD, at(200)).is_none());
+    // One used as recently as the oldest kept takes that one's place.
+    assert!(sessions.restore(kept(99, 0, 100, PASSWORD), token(200), PASSWORD, at(200)));
+    assert_eq!(sessions.len(), MAX_SESSIONS);
+    assert_eq!(sessions.take_forgotten().len(), 1);
+}
+
+#[test]
+fn every_session_that_ends_is_forgotten_for_the_store_once() {
+    let mut sessions = Sessions::default();
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    sessions.start(token(3), token(4), PASSWORD, false, false, at(0));
+    sessions.end(&token(3));
+    assert_eq!(sessions.take_forgotten(), vec![token(3).digest()]);
+    // Ended unused: forgotten when it is next looked for.
+    let idle = SESSION_IDLE.as_secs();
+    assert!(sessions.use_at(&token(1), PASSWORD, at(idle)).is_none());
+    assert_eq!(sessions.take_forgotten(), vec![token(1).digest()]);
+    // Ended under an old password: forgotten when a session starts.
+    sessions.start(token(5), token(6), PASSWORD, false, false, at(idle));
+    sessions.start(token(7), token(8), NEW_PASSWORD, false, false, at(idle));
+    assert_eq!(sessions.take_forgotten(), vec![token(5).digest()]);
+    // A session that was never there is nothing to forget.
+    sessions.end(&token(42));
+    assert!(sessions.take_forgotten().is_empty());
+}
+
+#[test]
+fn the_session_used_longest_ago_is_forgotten_when_a_new_one_needs_its_place() {
+    let mut sessions = Sessions::default();
+    for byte in 0..u8::try_from(MAX_SESSIONS).unwrap() {
+        sessions.start(
+            token(byte),
+            token(200),
+            PASSWORD,
+            false,
+            false,
+            at(i64::from(byte)),
+        );
+    }
+    sessions.start(token(99), token(200), PASSWORD, false, false, at(100));
+    assert_eq!(sessions.take_forgotten(), vec![token(0).digest()]);
+}
+
+#[test]
+fn a_sessions_use_is_kept_at_most_once_a_minute() {
+    let mut sessions = Sessions::default();
+    let minute = SESSION_USE_KEPT_EVERY.as_secs();
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    assert!(
+        sessions
+            .use_at(&token(1), PASSWORD, at(minute - 1))
+            .is_some()
+    );
+    assert_eq!(sessions.use_to_keep(&token(1)), None);
+    assert!(sessions.use_at(&token(1), PASSWORD, at(minute)).is_some());
+    assert_eq!(
+        sessions.use_to_keep(&token(1)),
+        Some((token(1).digest(), at(minute)))
+    );
+    assert_eq!(sessions.use_to_keep(&token(1)), None);
+    assert!(
+        sessions
+            .use_at(&token(1), PASSWORD, at(2 * minute - 1))
+            .is_some()
+    );
+    assert_eq!(sessions.use_to_keep(&token(1)), None);
+    assert_eq!(sessions.use_to_keep(&token(3)), None);
 }
 
 #[test]
@@ -438,7 +818,7 @@ fn a_table_is_empty_until_it_holds_something() {
     assert!(!waits.is_empty());
     let mut sessions = Sessions::default();
     assert!(sessions.is_empty());
-    sessions.start(token(1), token(2), PASSWORD, at(0));
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
     assert!(!sessions.is_empty());
 }
 
@@ -478,4 +858,255 @@ fn waiting_tells_what_is_left_of_a_wait_and_counts_nothing() {
         waits.waiting(v4(1), at(1)),
         Some(SignedDuration::from_secs(2))
     );
+}
+
+#[test]
+fn keep_me_signed_in_lifts_the_idle_limit_but_never_the_end_after_sign_in() {
+    let mut sessions = Sessions::default();
+    let session = sessions.start(token(1), token(2), PASSWORD, true, false, at(0));
+    assert_eq!(session.idle_limit(SessionLength::ThirtyDays), None);
+    assert!(session.kept(token(1).digest()).keep_signed_in);
+    let unkept = sessions.start(token(3), token(4), PASSWORD, false, false, at(0));
+    assert_eq!(
+        unkept.idle_limit(SessionLength::ThirtyDays),
+        Some(SignedDuration::from_hours(12))
+    );
+    assert!(
+        sessions
+            .use_at(&token(1), PASSWORD, at(13 * 3600))
+            .is_some()
+    );
+    assert!(
+        sessions
+            .use_at(&token(3), PASSWORD, at(13 * 3600))
+            .is_none()
+    );
+    // Unused from the 13th hour until the 30th day, and live all along.
+    assert!(
+        sessions
+            .use_at(&token(1), PASSWORD, at(30 * DAY - 1))
+            .is_some()
+    );
+    assert!(sessions.use_at(&token(1), PASSWORD, at(30 * DAY)).is_none());
+}
+
+#[test]
+fn until_the_browser_closes_gives_every_session_the_idle_limit_keep_me_signed_in_or_not() {
+    let idle = Some(SignedDuration::from_hours(12));
+    let mut sessions = Sessions::default();
+    sessions.set_length(SessionLength::UntilBrowserCloses, at(0));
+    let asked = sessions.start(token(1), token(2), PASSWORD, true, false, at(0));
+    assert_eq!(asked.idle_limit(SessionLength::UntilBrowserCloses), idle);
+    // Asked for where it isn't offered, it is never had: not once the
+    // length lasts after all.
+    assert_eq!(asked.idle_limit(SessionLength::ThirtyDays), idle);
+    assert!(!asked.kept(token(1).digest()).keep_signed_in);
+    assert!(
+        sessions
+            .use_at(&token(1), PASSWORD, at(12 * 3600))
+            .is_none()
+    );
+    // One that has it loses its use while the length is Until I close the
+    // browser.
+    let mut sessions = Sessions::default();
+    let kept = sessions.start(token(1), token(2), PASSWORD, true, false, at(0));
+    assert_eq!(kept.idle_limit(SessionLength::UntilBrowserCloses), idle);
+    sessions.set_length(SessionLength::UntilBrowserCloses, at(12 * 3600));
+    assert!(sessions.is_empty());
+}
+
+#[test]
+fn the_sign_in_form_offers_keep_me_signed_in_under_every_length_but_until_the_browser_closes() {
+    for length in SessionLength::ALL {
+        assert_eq!(
+            length.offers_keep_signed_in(),
+            length != SessionLength::UntilBrowserCloses,
+            "{length:?}"
+        );
+    }
+}
+
+#[test]
+fn a_cookie_lasts_as_long_as_the_session_has_left_at_most_400_days() {
+    // In days, written out: a length read back from the code would follow
+    // any change to it.
+    for (length, days) in [
+        (SessionLength::SevenDays, 7),
+        (SessionLength::ThirtyDays, 30),
+        (SessionLength::NinetyDays, 90),
+        (SessionLength::OneYear, 365),
+        (SessionLength::UntilSignOut, 400),
+    ] {
+        let mut sessions = Sessions::default();
+        sessions.set_length(length, at(0));
+        let session = sessions.start(token(1), token(2), PASSWORD, true, false, at(0));
+        assert_eq!(
+            session.cookie_at(at(0), length),
+            CookieLife::Lasts(SignedDuration::from_secs(days * DAY)),
+            "{length:?}"
+        );
+        let left = if length == SessionLength::UntilSignOut {
+            400 * DAY
+        } else {
+            days * DAY - DAY - 1
+        };
+        assert_eq!(
+            session.cookie_at(at(DAY + 1), length),
+            CookieLife::Lasts(SignedDuration::from_secs(left)),
+            "{length:?}"
+        );
+    }
+    let session = Sessions::default().start(token(1), token(2), PASSWORD, false, false, at(0));
+    assert_eq!(
+        session.cookie_at(at(0), SessionLength::UntilBrowserCloses),
+        CookieLife::UntilBrowserCloses
+    );
+    // Past its end, a session's cookie has nothing left, never a negative
+    // age.
+    assert_eq!(
+        session.cookie_at(at(31 * DAY), SessionLength::ThirtyDays),
+        CookieLife::Lasts(SignedDuration::ZERO)
+    );
+}
+
+#[test]
+fn a_use_renews_the_cookie_at_most_once_a_day() {
+    let mut sessions = Sessions::default();
+    sessions.start(token(1), token(2), PASSWORD, true, false, at(0));
+    assert_eq!(sessions.renew_cookie(&token(1), at(DAY - 1)), None);
+    assert_eq!(
+        sessions.renew_cookie(&token(1), at(DAY)),
+        Some(CookieLife::Lasts(SignedDuration::from_secs(29 * DAY)))
+    );
+    assert_eq!(sessions.renew_cookie(&token(1), at(DAY + 3600)), None);
+    assert_eq!(sessions.renew_cookie(&token(1), at(2 * DAY - 1)), None);
+    assert_eq!(
+        sessions.renew_cookie(&token(1), at(2 * DAY)),
+        Some(CookieLife::Lasts(SignedDuration::from_secs(28 * DAY)))
+    );
+    assert_eq!(sessions.renew_cookie(&token(3), at(3 * DAY)), None);
+}
+
+#[test]
+fn an_until_i_sign_out_cookie_is_renewed_to_400_days_every_day() {
+    let mut sessions = Sessions::default();
+    sessions.set_length(SessionLength::UntilSignOut, at(0));
+    sessions.start(token(1), token(2), PASSWORD, true, false, at(0));
+    for day in 1..=401 {
+        assert_eq!(
+            sessions.renew_cookie(&token(1), at(day * DAY)),
+            Some(CookieLife::Lasts(SignedDuration::from_secs(400 * DAY))),
+            "day {day}"
+        );
+    }
+}
+
+#[test]
+fn a_new_session_length_renews_the_cookie_at_the_next_use() {
+    let mut sessions = Sessions::default();
+    sessions.start(token(1), token(2), PASSWORD, true, false, at(0));
+    sessions.set_length(SessionLength::SevenDays, at(3600));
+    assert_eq!(
+        sessions.renew_cookie(&token(1), at(3600)),
+        Some(CookieLife::Lasts(SignedDuration::from_secs(7 * DAY - 3600)))
+    );
+    assert_eq!(sessions.renew_cookie(&token(1), at(7200)), None);
+    // A longer one too, so the cookie never ends before the session does.
+    sessions.set_length(SessionLength::NinetyDays, at(7200));
+    assert_eq!(
+        sessions.renew_cookie(&token(1), at(7200)),
+        Some(CookieLife::Lasts(SignedDuration::from_secs(
+            90 * DAY - 7200
+        )))
+    );
+    assert_eq!(sessions.renew_cookie(&token(1), at(10_800)), None);
+    // The same length chosen again changes nothing.
+    sessions.set_length(SessionLength::NinetyDays, at(10_800));
+    assert_eq!(sessions.renew_cookie(&token(1), at(10_800)), None);
+}
+
+#[test]
+fn a_change_to_or_from_until_the_browser_closes_renews_the_cookie_at_the_next_use() {
+    let mut sessions = Sessions::default();
+    sessions.start(token(1), token(2), PASSWORD, false, false, at(0));
+    sessions.set_length(SessionLength::UntilBrowserCloses, at(60));
+    assert_eq!(
+        sessions.renew_cookie(&token(1), at(60)),
+        Some(CookieLife::UntilBrowserCloses)
+    );
+    // A cookie the browser drops as it closes needs no renewal.
+    assert!(sessions.use_at(&token(1), PASSWORD, at(DAY / 3)).is_some());
+    assert!(
+        sessions
+            .use_at(&token(1), PASSWORD, at(2 * DAY / 3))
+            .is_some()
+    );
+    assert_eq!(sessions.renew_cookie(&token(1), at(2 * DAY / 3)), None);
+    assert!(sessions.use_at(&token(1), PASSWORD, at(DAY + 60)).is_some());
+    assert_eq!(sessions.renew_cookie(&token(1), at(DAY + 60)), None);
+    sessions.set_length(SessionLength::ThirtyDays, at(DAY + 120));
+    assert_eq!(
+        sessions.renew_cookie(&token(1), at(DAY + 120)),
+        Some(CookieLife::Lasts(SignedDuration::from_secs(29 * DAY - 120)))
+    );
+}
+
+#[test]
+fn a_restored_session_keeps_keep_me_signed_in_and_renews_its_cookie_at_its_first_use() {
+    let mut sessions = Sessions::default();
+    let mut kept_session = kept(1, 0, 0, PASSWORD);
+    kept_session.keep_signed_in = true;
+    assert!(sessions.restore(kept_session, token(9), PASSWORD, at(13 * 3600)));
+    assert!(
+        sessions
+            .use_at(&token(1), PASSWORD, at(13 * 3600))
+            .is_some()
+    );
+    assert_eq!(
+        sessions.renew_cookie(&token(1), at(13 * 3600)),
+        Some(CookieLife::Lasts(SignedDuration::from_secs(
+            30 * DAY - 13 * 3600
+        )))
+    );
+    assert_eq!(sessions.renew_cookie(&token(1), at(14 * 3600)), None);
+}
+
+#[test]
+fn a_session_s_cookie_stays_secure_as_its_sign_in_set_it_also_after_a_restart() {
+    for secure in [true, false] {
+        let mut sessions = Sessions::default();
+        let session = sessions.start(token(1), token(2), PASSWORD, false, secure, at(0));
+        assert_eq!(session.secure(), secure);
+        let kept_session = session.kept(token(1).digest());
+        assert_eq!(kept_session.secure, secure);
+        let mut restarted = Sessions::default();
+        assert!(restarted.restore(kept_session, token(9), PASSWORD, at(60)));
+        let found = restarted.use_at(&token(1), PASSWORD, at(60));
+        assert_eq!(found.map(Session::secure), Some(secure));
+    }
+}
+
+#[test]
+fn a_kept_session_started_after_now_is_forgotten_not_restored() {
+    // As a clock set back a year leaves it: started and used a year ahead.
+    // Counted from now at every start, it would outlive its length.
+    let year = 365 * DAY;
+    let mut sessions = Sessions::default();
+    assert!(!sessions.restore(kept(1, year, year, PASSWORD), token(9), PASSWORD, at(0)));
+    assert!(sessions.peek(&token(1), PASSWORD, at(0)).is_none());
+    assert_eq!(sessions.take_forgotten(), vec![token(1).digest()]);
+    assert!(sessions.restore(kept(2, 0, 0, PASSWORD), token(9), PASSWORD, at(0)));
+}
+
+#[test]
+fn a_kept_session_used_after_now_is_forgotten_not_restored() {
+    // As a clock set back leaves it: signed in before now, last used a year
+    // ahead. Counted as now, its last use would move forward at every start,
+    // as if each start were a use.
+    let mut sessions = Sessions::default();
+    let restored = kept(1, 0, 365 * DAY, PASSWORD);
+    assert!(!sessions.restore(restored, token(9), PASSWORD, at(DAY)));
+    assert!(sessions.peek(&token(1), PASSWORD, at(DAY)).is_none());
+    assert_eq!(sessions.take_forgotten(), vec![token(1).digest()]);
+    assert!(sessions.restore(kept(2, 0, DAY, PASSWORD), token(9), PASSWORD, at(DAY)));
 }

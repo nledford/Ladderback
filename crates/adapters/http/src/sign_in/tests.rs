@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use app::fakes::{FakeClock, InMemoryAdminPassword, SeededRandom};
+use app::fakes::{FakeClock, InMemoryAdminPassword, InMemorySessionStore, SeededRandom};
 use app::ports::{AdminPassword, AdminPasswordError};
 use async_trait::async_trait;
 use axum::body::Body;
@@ -32,11 +32,18 @@ fn on_with(password: Arc<dyn AdminPassword>, clock: &Arc<FakeClock>) -> SignIn {
         Arc::new(SeededRandom::new(7)),
         clock.clone(),
         Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        Arc::new(app::fakes::InMemorySessionStore::new()),
     )))
 }
 
 fn on() -> SignIn {
     on_with(Arc::new(InMemoryAdminPassword::with(PASSWORD)), &clock())
+}
+
+/// Sign-in off, with the admin password kept in `password` and the sessions
+/// kept from when it was on in `sessions`.
+fn off_over(password: Arc<dyn AdminPassword>, sessions: Arc<InMemorySessionStore>) -> SignIn {
+    SignIn::Off { password, sessions }
 }
 
 async fn send(sign_in: &SignIn, request: Request) -> Response {
@@ -200,7 +207,11 @@ async fn the_session_route_says_when_the_daemon_answers_on_the_network() {
     let response = send_listening(&on(), network, get(SESSION_PATH, &[])).await;
     assert_eq!(
         json(response).await,
-        serde_json::json!({ "sign-in": "signed-out", "exposure": "network" })
+        serde_json::json!({
+            "sign-in": "signed-out",
+            "exposure": "network",
+            "keep-signed-in-offered": true
+        })
     );
 }
 
@@ -339,7 +350,7 @@ async fn the_session_route_says_where_a_request_stands_and_how_long_its_session_
     let response = send(&on, get(SESSION_PATH, &[])).await;
     assert_eq!(
         json(response).await,
-        serde_json::json!({ "sign-in": "signed-out" })
+        serde_json::json!({ "sign-in": "signed-out", "keep-signed-in-offered": true })
     );
     let response = send(&on, sign_in_request(PASSWORD, &[])).await;
     let cookie = set_cookie(&response);
@@ -589,7 +600,7 @@ async fn signing_out_ends_the_session_and_has_the_browser_forget_its_cookie() {
     );
     assert_eq!(
         json(response).await,
-        serde_json::json!({ "sign-in": "signed-out" })
+        serde_json::json!({ "sign-in": "signed-out", "keep-signed-in-offered": true })
     );
     assert_sign_in_required(&on, get("/api/v1/plans", &[("cookie", &cookie)]), "after").await;
 }
@@ -638,6 +649,143 @@ async fn signing_out_a_session_that_already_ended_still_forgets_its_cookie() {
     assert_eq!(
         set_cookie(&response),
         format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+    );
+}
+
+/// Keeps sessions in memory until it is broken, then refuses every write.
+#[derive(Default)]
+struct Breakable {
+    kept: app::fakes::InMemorySessionStore,
+    broken: std::sync::atomic::AtomicBool,
+}
+
+impl Breakable {
+    fn check(&self) -> Result<(), app::ports::StoreError> {
+        if self.broken.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(app::ports::StoreError::Unavailable {
+                detail: "/demo/ladderback.db: disk I/O error".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl app::ports::SessionStore for Breakable {
+    async fn add(
+        &self,
+        session: &domain::access::KeptSession,
+        forget: &[domain::access::SessionDigest],
+    ) -> Result<(), app::ports::StoreError> {
+        self.check()?;
+        self.kept.add(session, forget).await
+    }
+
+    async fn all(&self) -> Result<Vec<domain::access::KeptSession>, app::ports::StoreError> {
+        self.check()?;
+        self.kept.all().await
+    }
+
+    async fn forget_unreadable(&self) -> Result<usize, app::ports::StoreError> {
+        self.check()?;
+        self.kept.forget_unreadable().await
+    }
+
+    async fn remove(
+        &self,
+        digests: &[domain::access::SessionDigest],
+    ) -> Result<(), app::ports::StoreError> {
+        self.check()?;
+        self.kept.remove(digests).await
+    }
+
+    async fn remove_all(&self) -> Result<(), app::ports::StoreError> {
+        self.check()?;
+        self.kept.remove_all().await
+    }
+
+    async fn record_use(
+        &self,
+        digest: &domain::access::SessionDigest,
+        at: Timestamp,
+    ) -> Result<(), app::ports::StoreError> {
+        self.check()?;
+        self.kept.record_use(digest, at).await
+    }
+
+    async fn length(
+        &self,
+    ) -> Result<Option<domain::access::SessionLength>, app::ports::StoreError> {
+        self.check()?;
+        self.kept.length().await
+    }
+
+    async fn set_length(
+        &self,
+        length: domain::access::SessionLength,
+    ) -> Result<(), app::ports::StoreError> {
+        self.check()?;
+        self.kept.set_length(length).await
+    }
+}
+
+#[tokio::test]
+async fn a_sign_out_the_store_cant_keep_is_unavailable_yet_ends_the_session_and_forgets_its_cookie()
+{
+    let store = Arc::new(Breakable::default());
+    let on = SignIn::On(Arc::new(Access::new(
+        Arc::new(InMemoryAdminPassword::with(PASSWORD)),
+        Arc::new(SeededRandom::new(7)),
+        clock(),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        store.clone(),
+    )));
+    let (cookie, csrf) = signed_in(&on).await;
+    store
+        .broken
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let request = build(
+        Method::DELETE,
+        SESSION_PATH,
+        &[
+            ("cookie", &cookie),
+            ("content-type", "application/json"),
+            ("x-csrf-token", &csrf),
+        ],
+        "",
+    );
+    let response = send(&on, request).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        set_cookie(&response),
+        format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+    );
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "code": "sessions-unavailable" })
+    );
+    assert_sign_in_required(&on, get("/api/v1/plans", &[("cookie", &cookie)]), "after").await;
+}
+
+#[tokio::test]
+async fn a_sign_in_whose_session_the_store_cant_keep_says_the_sessions_are_unavailable() {
+    let store = Arc::new(Breakable::default());
+    let on = SignIn::On(Arc::new(Access::new(
+        Arc::new(InMemoryAdminPassword::with(PASSWORD)),
+        Arc::new(SeededRandom::new(7)),
+        clock(),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        store.clone(),
+    )));
+    store
+        .broken
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let response = send(&on, sign_in_request(PASSWORD, &[])).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(!response.headers().contains_key(SET_COOKIE));
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "code": "sessions-unavailable" })
     );
 }
 
@@ -783,7 +931,7 @@ async fn an_events_stream_ends_once_the_session_that_opened_it_does() {
         panic!("signed in above")
     };
     let token = Token::parse(cookie.split_once('=').unwrap().1).unwrap();
-    access.sign_out(&token);
+    access.sign_out(&token).await.unwrap();
     let ended = tokio::time::timeout(
         crate::SESSION_RECHECK + std::time::Duration::from_secs(2),
         async {
@@ -803,7 +951,7 @@ async fn an_events_stream_ends_once_the_session_that_opened_it_does() {
 #[tokio::test]
 async fn with_sign_in_off_the_session_route_says_an_admin_password_set_since_the_start_waits() {
     let kept = Arc::new(InMemoryAdminPassword::default());
-    let off = SignIn::Off(kept.clone());
+    let off = off_over(kept.clone(), Arc::new(InMemorySessionStore::new()));
     let response = send(&off, get(SESSION_PATH, &[])).await;
     assert_eq!(
         json(response).await,
@@ -849,7 +997,7 @@ impl AdminPassword for Damaged {
 
 #[tokio::test]
 async fn with_sign_in_off_the_session_route_says_an_admin_password_file_it_cant_read() {
-    let off = SignIn::Off(Arc::new(Damaged));
+    let off = off_over(Arc::new(Damaged), Arc::new(InMemorySessionStore::new()));
     let response = send(&off, get(SESSION_PATH, &[])).await;
     let body = json(response).await;
     assert_eq!(
@@ -927,6 +1075,121 @@ async fn a_current_password_that_cant_be_the_admin_password_is_refused_uncounted
     );
 }
 
+/// A `PUT` of the sign-in settings with `body`, carrying `headers`.
+fn put_settings(headers: &[(&str, &str)], body: &str) -> Request {
+    let mut all = vec![("content-type", "application/json")];
+    all.extend_from_slice(headers);
+    build(Method::PUT, settings::SETTINGS_PATH, &all, body)
+}
+
+fn settings_body(length: &str) -> String {
+    serde_json::json!({ "session-length": length }).to_string()
+}
+
+/// The session length, as the access a `SignIn::On` holds has it.
+fn length_of(sign_in: &SignIn) -> domain::access::SessionLength {
+    match sign_in {
+        SignIn::On(access) => access.session_length(),
+        SignIn::Off { .. } => panic!("sign-in is on"),
+    }
+}
+
+#[tokio::test]
+async fn the_sign_in_settings_say_the_session_length_and_a_session_changes_it() {
+    let on = on();
+    let (cookie, csrf) = signed_in(&on).await;
+    let read = || get(settings::SETTINGS_PATH, &[("cookie", &cookie)]);
+    let response = send(&on, read()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "session-length": "30-days" })
+    );
+    // Each name, written out: one read back from the code would follow any
+    // change to it.
+    for (name, length) in [
+        ("7-days", domain::access::SessionLength::SevenDays),
+        ("90-days", domain::access::SessionLength::NinetyDays),
+        ("1-year", domain::access::SessionLength::OneYear),
+        (
+            "until-sign-out",
+            domain::access::SessionLength::UntilSignOut,
+        ),
+        ("30-days", domain::access::SessionLength::ThirtyDays),
+        (
+            "until-browser-closes",
+            domain::access::SessionLength::UntilBrowserCloses,
+        ),
+    ] {
+        let response = send(
+            &on,
+            put_settings(
+                &[("cookie", &cookie), ("x-csrf-token", &csrf)],
+                &settings_body(name),
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK, "{name}");
+        let answer = serde_json::json!({ "session-length": name });
+        assert_eq!(json(response).await, answer, "{name}");
+        assert_eq!(length_of(&on), length, "{name}");
+        assert_eq!(json(send(&on, read()).await).await, answer, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn the_sign_in_settings_need_a_live_session_and_a_change_its_csrf_token() {
+    let on = on();
+    let (cookie, csrf) = signed_in(&on).await;
+    assert_sign_in_required(&on, get(settings::SETTINGS_PATH, &[]), "a read").await;
+    assert_sign_in_required(&on, put_settings(&[], &settings_body("7-days")), "a change").await;
+    assert_eq!(
+        code(
+            send(
+                &on,
+                put_settings(&[("cookie", &cookie)], &settings_body("7-days"))
+            )
+            .await
+        )
+        .await,
+        (StatusCode::FORBIDDEN, Some("csrf-token-invalid".to_owned()))
+    );
+    assert_eq!(length_of(&on), domain::access::SessionLength::ThirtyDays);
+    let with_both = put_settings(
+        &[("cookie", &cookie), ("x-csrf-token", &csrf)],
+        &settings_body("7-days"),
+    );
+    assert_eq!(send(&on, with_both).await.status(), StatusCode::OK);
+    assert_eq!(length_of(&on), domain::access::SessionLength::SevenDays);
+}
+
+#[tokio::test]
+async fn a_sign_in_settings_body_that_isnt_one_session_length_is_refused_and_changes_nothing() {
+    let on = on();
+    let (cookie, csrf) = signed_in(&on).await;
+    for body in [
+        "",
+        "{}",
+        "\"7-days\"",
+        r#"{ "session-length": "2-days" }"#,
+        r#"{ "session-length": "7 days" }"#,
+        r#"{ "session-length": null }"#,
+        r#"{ "session-length": "7-days", "idle": false }"#,
+    ] {
+        let response = send(
+            &on,
+            put_settings(&[("cookie", &cookie), ("x-csrf-token", &csrf)], body),
+        )
+        .await;
+        assert_eq!(
+            code(response).await,
+            (StatusCode::BAD_REQUEST, Some("invalid-body".to_owned())),
+            "{body}"
+        );
+    }
+    assert_eq!(length_of(&on), domain::access::SessionLength::ThirtyDays);
+}
+
 #[tokio::test]
 async fn a_change_without_its_connection_s_address_is_refused_and_counts_for_no_one() {
     let on = on();
@@ -993,7 +1256,7 @@ async fn a_password_that_cant_be_checked_or_kept_is_unavailable_and_its_detail_s
         serde_json::json!({ "code": "admin-password-unavailable" }),
         "check"
     );
-    let off = SignIn::Off(Arc::new(Damaged));
+    let off = off_over(Arc::new(Damaged), Arc::new(InMemorySessionStore::new()));
     let body = serde_json::json!({ "new-password": NEW_PASSWORD }).to_string();
     let response = send(&off, post(ADMIN_PASSWORD, &[], &body)).await;
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "keep");
@@ -1013,4 +1276,390 @@ async fn a_new_password_too_long_is_refused_with_the_most_it_may_have() {
     let body = json(response).await;
     assert_eq!(body["code"], "admin-password-too-long");
     assert_eq!(body["args"]["max"]["value"], 1024);
+}
+
+#[tokio::test]
+async fn with_sign_in_off_the_sign_in_settings_are_refused() {
+    let off = sign_in_off();
+    let refusal = (StatusCode::CONFLICT, Some("sign-in-off".to_owned()));
+    assert_eq!(
+        code(send(&off, get(settings::SETTINGS_PATH, &[])).await).await,
+        refusal
+    );
+    assert_eq!(
+        code(send(&off, put_settings(&[], &settings_body("7-days"))).await).await,
+        refusal
+    );
+}
+
+#[tokio::test]
+async fn a_session_length_the_store_cant_keep_is_unavailable_and_changes_nothing() {
+    let store = Arc::new(Breakable::default());
+    let on = SignIn::On(Arc::new(Access::new(
+        Arc::new(InMemoryAdminPassword::with(PASSWORD)),
+        Arc::new(SeededRandom::new(7)),
+        clock(),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        store.clone(),
+    )));
+    let (cookie, csrf) = signed_in(&on).await;
+    store
+        .broken
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let response = send(
+        &on,
+        put_settings(
+            &[("cookie", &cookie), ("x-csrf-token", &csrf)],
+            &settings_body("7-days"),
+        ),
+    )
+    .await;
+    assert_eq!(
+        code(response).await,
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Some("sessions-unavailable".to_owned())
+        )
+    );
+    assert_eq!(length_of(&on), domain::access::SessionLength::ThirtyDays);
+}
+
+/// Sessions kept from when sign-in was on, before the admin password file
+/// went: a password Settings sets with sign-in off has the store forget them.
+#[tokio::test]
+async fn with_sign_in_off_a_password_set_in_settings_has_the_store_forget_every_kept_session() {
+    use app::ports::SessionStore;
+    let sessions = Arc::new(InMemorySessionStore::new());
+    let was_on = SignIn::On(Arc::new(Access::new(
+        Arc::new(InMemoryAdminPassword::with(PASSWORD)),
+        Arc::new(SeededRandom::new(7)),
+        clock(),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        sessions.clone(),
+    )));
+    signed_in(&was_on).await;
+    assert_eq!(sessions.all().await.unwrap().len(), 1);
+    let off = off_over(Arc::new(InMemoryAdminPassword::default()), sessions.clone());
+    let body = serde_json::json!({ "new-password": NEW_PASSWORD }).to_string();
+    let response = send(&off, post(ADMIN_PASSWORD, &[], &body)).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(sessions.all().await.unwrap(), Vec::new());
+}
+
+fn access_of(sign_in: &SignIn) -> Arc<Access> {
+    match sign_in {
+        SignIn::On(access) => access.clone(),
+        SignIn::Off { .. } => panic!("sign-in is on"),
+    }
+}
+
+/// A session signed in from `HOME` with Keep me signed in on this device:
+/// the `Cookie` header that carries it, the whole `Set-Cookie` of the
+/// sign-in, and its answer.
+async fn kept_signed_in(sign_in: &SignIn) -> (String, String, serde_json::Value) {
+    let body = serde_json::json!({ "password": PASSWORD, "keep-signed-in": true });
+    let response = send(sign_in, post(SESSION_PATH, &[], &body.to_string())).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let cookie = set_cookie(&response);
+    let pair = cookie.split(';').next().unwrap().to_owned();
+    (pair, cookie, json(response).await)
+}
+
+#[tokio::test]
+async fn a_session_kept_signed_in_is_said_to_have_no_idle_limit_and_its_cookie_lasts_as_long_as_it()
+{
+    let clock = clock();
+    let on = on_with(Arc::new(InMemoryAdminPassword::with(PASSWORD)), &clock);
+    let (pair, cookie, body) = kept_signed_in(&on).await;
+    assert_eq!(
+        body,
+        told_the_build(serde_json::json!({
+            "sign-in": "signed-in",
+            "csrf-token": body["csrf-token"],
+            "ends-in-seconds": 2_592_000
+        }))
+    );
+    assert_eq!(
+        cookie,
+        format!("{pair}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict")
+    );
+    clock.advance(SignedDuration::from_hours(13));
+    let response = send(&on, get(SESSION_PATH, &[("cookie", &pair)])).await;
+    let read = json(response).await;
+    assert_eq!(read["sign-in"], "signed-in", "{read}");
+    assert_eq!(read.get("idle-seconds"), None, "{read}");
+}
+
+#[tokio::test]
+async fn until_the_browser_closes_offers_no_keep_me_signed_in_and_sets_a_cookie_with_no_max_age() {
+    let on = on();
+    access_of(&on)
+        .set_session_length(domain::access::SessionLength::UntilBrowserCloses)
+        .await
+        .unwrap();
+    let response = send(&on, get(SESSION_PATH, &[])).await;
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "sign-in": "signed-out", "keep-signed-in-offered": false })
+    );
+    let (pair, cookie, body) = kept_signed_in(&on).await;
+    assert_eq!(cookie, format!("{pair}; Path=/; HttpOnly; SameSite=Strict"));
+    assert_eq!(body["idle-seconds"], 43_200, "{body}");
+    assert_eq!(body.get("ends-in-seconds"), None, "{body}");
+}
+
+#[tokio::test]
+async fn a_use_renews_the_cookie_once_a_day_and_a_read_on_its_own_never_does() {
+    let clock = clock();
+    let on = on_with(Arc::new(InMemoryAdminPassword::with(PASSWORD)), &clock);
+    let (pair, _, _) = kept_signed_in(&on).await;
+    clock.advance(SignedDuration::from_hours(24));
+    let on_its_own = send(
+        &on,
+        get(
+            "/api/v1/plans",
+            &[("cookie", &pair), (api::BACKGROUND_HEADER, "1")],
+        ),
+    )
+    .await;
+    assert_eq!(on_its_own.headers().get(SET_COOKIE), None);
+    let used = send(&on, get("/api/v1/plans", &[("cookie", &pair)])).await;
+    assert_eq!(
+        set_cookie(&used),
+        format!("{pair}; Path=/; Max-Age=2505600; HttpOnly; SameSite=Strict")
+    );
+    clock.advance(SignedDuration::from_hours(1));
+    let again = send(&on, get("/api/v1/plans", &[("cookie", &pair)])).await;
+    assert_eq!(again.headers().get(SET_COOKIE), None);
+    // The session route renews it too, as the sign-in set it: an `Origin`
+    // of HTTPS on the renewing request changes nothing.
+    clock.advance(SignedDuration::from_hours(23));
+    let asked = send(
+        &on,
+        get(
+            SESSION_PATH,
+            &[("cookie", &pair), ("origin", "https://127.0.0.1:8080")],
+        ),
+    )
+    .await;
+    assert_eq!(
+        set_cookie(&asked),
+        format!("{pair}; Path=/; Max-Age=2419200; HttpOnly; SameSite=Strict")
+    );
+}
+
+#[tokio::test]
+async fn a_session_read_the_page_sends_on_its_own_never_keeps_the_session() {
+    let clock = clock();
+    let on = on_with(Arc::new(InMemoryAdminPassword::with(PASSWORD)), &clock);
+    let (on_its_own, _) = signed_in(&on).await;
+    let (by_a_person, _) = signed_in(&on).await;
+    clock.advance(half_idle());
+    for (cookie, background) in [(&on_its_own, true), (&by_a_person, false)] {
+        let mut headers = vec![("cookie", cookie.as_str())];
+        if background {
+            headers.push((api::BACKGROUND_HEADER, "1"));
+        }
+        let read = json(send(&on, get(SESSION_PATH, &headers)).await).await;
+        assert_eq!(
+            read["sign-in"], "signed-in",
+            "background {background}: {read}"
+        );
+    }
+    clock.advance(half_idle());
+    assert_sign_in_required(
+        &on,
+        get("/api/v1/plans", &[("cookie", &on_its_own)]),
+        "12 hours after signing in, the session read sent on its own",
+    )
+    .await;
+    assert_let_through(
+        &on,
+        get("/api/v1/plans", &[("cookie", &by_a_person)]),
+        "12 hours after signing in, 6 after the session read a person caused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_session_read_on_its_own_never_renews_the_cookie_and_one_a_person_causes_does() {
+    let clock = clock();
+    let on = on_with(Arc::new(InMemoryAdminPassword::with(PASSWORD)), &clock);
+    let (pair, _, _) = kept_signed_in(&on).await;
+    clock.advance(SignedDuration::from_hours(24));
+    let on_its_own = send(
+        &on,
+        get(
+            SESSION_PATH,
+            &[("cookie", &pair), (api::BACKGROUND_HEADER, "1")],
+        ),
+    )
+    .await;
+    assert_eq!(on_its_own.headers().get(SET_COOKIE), None);
+    let read = json(on_its_own).await;
+    assert_eq!(read["sign-in"], "signed-in", "{read}");
+    let asked = send(&on, get(SESSION_PATH, &[("cookie", &pair)])).await;
+    assert_eq!(
+        set_cookie(&asked),
+        format!("{pair}; Path=/; Max-Age=2505600; HttpOnly; SameSite=Strict")
+    );
+}
+
+#[tokio::test]
+async fn a_renewal_is_secure_as_its_sign_in_was_though_a_same_origin_read_has_no_origin() {
+    let clock = clock();
+    let on = on_with(Arc::new(InMemoryAdminPassword::with(PASSWORD)), &clock);
+    let body = serde_json::json!({ "password": PASSWORD, "keep-signed-in": true });
+    let origin = format!("https://{OWN_HOST}");
+    let response = send(
+        &on,
+        post(SESSION_PATH, &[("origin", &origin)], &body.to_string()),
+    )
+    .await;
+    let cookie = set_cookie(&response);
+    assert!(cookie.ends_with("; Secure"), "{cookie}");
+    let pair = cookie.split(';').next().unwrap().to_owned();
+    clock.advance(SignedDuration::from_hours(24));
+    let used = send(&on, get("/api/v1/plans", &[("cookie", &pair)])).await;
+    assert_eq!(
+        set_cookie(&used),
+        format!("{pair}; Path=/; Max-Age=2505600; HttpOnly; SameSite=Strict; Secure")
+    );
+    clock.advance(SignedDuration::from_hours(24));
+    let asked = send(&on, get(SESSION_PATH, &[("cookie", &pair)])).await;
+    assert_eq!(
+        set_cookie(&asked),
+        format!("{pair}; Path=/; Max-Age=2419200; HttpOnly; SameSite=Strict; Secure")
+    );
+}
+
+#[tokio::test]
+async fn a_renewal_never_replaces_the_cookie_a_route_sets_and_rides_on_a_refusal() {
+    let clock = clock();
+    let on = on_with(Arc::new(InMemoryAdminPassword::with(PASSWORD)), &clock);
+    let (pair, _, body) = kept_signed_in(&on).await;
+    let csrf = body["csrf-token"].as_str().unwrap().to_owned();
+    clock.advance(SignedDuration::from_hours(24));
+    // A changed request without its CSRF token is refused, and the use that
+    // renewed the cookie still says so.
+    let refused = send(&on, post("/api/v1/plans", &[("cookie", &pair)], "{}")).await;
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        set_cookie(&refused),
+        format!("{pair}; Path=/; Max-Age=2505600; HttpOnly; SameSite=Strict")
+    );
+    clock.advance(SignedDuration::from_hours(24));
+    let response = send(&on, change_request(&pair, &csrf, Some(PASSWORD))).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        set_cookie(&response),
+        format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+    );
+}
+
+fn sign_out_everywhere_request(headers: &[(&str, &str)]) -> Request {
+    let mut all = vec![("content-type", "application/json")];
+    all.extend_from_slice(headers);
+    build(Method::DELETE, SESSIONS_PATH, &all, "")
+}
+
+#[tokio::test]
+async fn signing_out_everywhere_ends_every_session_this_one_too_and_leaves_api_tokens_alone() {
+    use app::ports::SessionStore;
+    let sessions = Arc::new(InMemorySessionStore::new());
+    let on = SignIn::On(Arc::new(Access::new(
+        Arc::new(InMemoryAdminPassword::with(PASSWORD)),
+        Arc::new(SeededRandom::new(7)),
+        clock(),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        sessions.clone(),
+    )));
+    let (cookie, csrf) = signed_in(&on).await;
+    let (other, _) = signed_in(&on).await;
+    let created = access_of(&on)
+        .create_api_token(
+            domain::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
+            domain::access::api_token::Scopes::new([domain::access::api_token::Scope::Read])
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bearer = format!("Bearer {}", created.text.expose());
+    let refused = send(&on, sign_out_everywhere_request(&[("cookie", &cookie)])).await;
+    assert_eq!(
+        code(refused).await,
+        (StatusCode::FORBIDDEN, Some("csrf-token-invalid".to_owned())),
+        "without its CSRF token"
+    );
+    let response = send(
+        &on,
+        sign_out_everywhere_request(&[("cookie", &cookie), ("x-csrf-token", &csrf)]),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        set_cookie(&response),
+        format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+    );
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "sign-in": "signed-out", "keep-signed-in-offered": true })
+    );
+    assert_sign_in_required(
+        &on,
+        get("/api/v1/plans", &[("cookie", &cookie)]),
+        "this one",
+    )
+    .await;
+    assert_sign_in_required(&on, get("/api/v1/plans", &[("cookie", &other)]), "another").await;
+    assert_eq!(sessions.all().await.unwrap(), Vec::new());
+    let read = send(&on, get("/api/v1/plans", &[("authorization", &bearer)])).await;
+    assert_eq!(read.status(), StatusCode::OK, "the API token");
+}
+
+#[tokio::test]
+async fn with_sign_in_off_signing_out_everywhere_is_refused() {
+    assert_eq!(
+        code(send(&sign_in_off(), sign_out_everywhere_request(&[])).await).await,
+        (StatusCode::CONFLICT, Some("sign-in-off".to_owned()))
+    );
+}
+
+#[tokio::test]
+async fn a_sign_out_everywhere_the_store_cant_keep_is_unavailable_yet_ends_every_session_and_forgets_the_cookie()
+ {
+    let store = Arc::new(Breakable::default());
+    let on = SignIn::On(Arc::new(Access::new(
+        Arc::new(InMemoryAdminPassword::with(PASSWORD)),
+        Arc::new(SeededRandom::new(7)),
+        clock(),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        store.clone(),
+    )));
+    let (cookie, csrf) = signed_in(&on).await;
+    let (other, _) = signed_in(&on).await;
+    store
+        .broken
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let response = send(
+        &on,
+        sign_out_everywhere_request(&[("cookie", &cookie), ("x-csrf-token", &csrf)]),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        set_cookie(&response),
+        format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+    );
+    assert_eq!(
+        json(response).await,
+        serde_json::json!({ "code": "sessions-unavailable" })
+    );
+    assert_sign_in_required(
+        &on,
+        get("/api/v1/plans", &[("cookie", &cookie)]),
+        "this one",
+    )
+    .await;
+    assert_sign_in_required(&on, get("/api/v1/plans", &[("cookie", &other)]), "another").await;
 }

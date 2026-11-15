@@ -18,3 +18,4 @@ pub mod random;
 pub mod schedule_store;
 pub mod secrets;
 pub mod service;
+pub mod session_store;

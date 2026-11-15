@@ -198,6 +198,9 @@ error-current-password-wrong = That is not the current admin password. Check it 
 # The admin password could not be checked or kept, so it was not set.
 error-admin-password-unavailable = { -brand-name } could not check or keep the admin password, so it was not set. Its log says why; check the data folder and try again.
 
+# The database could not keep or forget sessions: a sign-in started none, the session length was not changed, or a sign-out ended its sessions only in the running daemon. Shown wherever that can happen, the sign-in form included, so its last sentence speaks of any session signed out, not of the request that was refused.
+error-sessions-unavailable = { -brand-name } could not keep or forget sessions in its database. Its log says why; check the data folder and try again. Any session you signed out has ended all the same, while { -brand-name } runs.
+
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.
 # $detail (text): the platform's message. It is shown as it came.

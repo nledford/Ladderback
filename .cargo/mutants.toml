@@ -33,10 +33,11 @@
 # `crates/web/src/sign_in.rs` is the DOM glue of sign-in (security §10.1):
 # the sign-in page, the dialog that asks to sign in again, and the start
 # page's notice that sign-in is off. Where the page stands, what a sign-in
-# answer means, what the form lacks, which refusal is about the field and
+# answer means, what the form lacks, whether it offers Keep me signed in and
+# whether a sign-in asks to be kept, which refusal is about the field and
 # which title the page takes are `session.rs`'s, mutated on the host; the
-# `@ui` scenarios of `features/security/sign_in.feature` run the glue in
-# Chromium.
+# `@ui` scenarios of `features/security/sign_in.feature` and
+# `features/security/session_length.feature` run the glue in Chromium.
 #
 # `crates/web/src/settings.rs` is the DOM glue of the Settings page's API
 # tokens (security §10.1): it sends the list, create and revoke requests,
@@ -69,6 +70,18 @@
 # long it is read again, and the words of each button, announcement and
 # dialog are `plans.rs`'s, mutated on the host; the `@ui` scenarios of
 # `features/ui/plans.feature` run the glue in Chromium.
+#
+# `crates/web/src/settings/sign_in.rs` is the DOM glue of Settings' signing
+# in section (security §10.1, decision 70): it reads Stay signed in for,
+# holds the choice in a signal, sends the save when its button is pressed,
+# opens the dialog that asks before Sign out everywhere and sends it, and
+# takes the steps an answer calls for (say it is saved, say a refusal, show
+# the sign-in page). The choices, their order, their words, their wire
+# names, the request a save sends and which steps an answer calls for (also
+# after the reader has left Settings) are `sign_in_settings.rs`'s, and
+# whether the sign-in form offers Keep me signed in is `session.rs`'s, both
+# mutated on the host; the `@ui` scenarios of
+# `features/security/session_length.feature` run the glue in Chromium.
 #
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
@@ -107,6 +120,7 @@ exclude_globs = [
     "crates/web/src/settings.rs",
     "crates/web/src/plans_page.rs",
     "crates/web/src/settings/password.rs",
+    "crates/web/src/settings/sign_in.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [
