@@ -34,6 +34,7 @@ readonly GLIBC_FLOOR=2.35
 readonly SCRIPT_URL="https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh"
 readonly BY_HAND_URL="https://github.com/nledford/Ladderback/blob/main/docs/guide/install.md#by-hand"
 readonly FULL_DISK_ACCESS_URL="https://github.com/nledford/Ladderback/blob/main/docs/guide/install.md#macos-full-disk-access"
+readonly SECRETS_URL="https://github.com/nledford/Ladderback/blob/main/docs/guide/secrets.md"
 readonly RUSTUP_URL="https://sh.rustup.rs"
 readonly TRUNK_RELEASES_URL="https://github.com/trunk-rs/trunk/releases"
 # The trunk installed where it is missing: from its release (trunk_release),
@@ -794,6 +795,21 @@ on_start_path() {
     command -v "$1" 2>/dev/null || true
 }
 
+# Whether something answers for a Secret Service (org.freedesktop.secrets)
+# on the session bus: running, or one D-Bus starts when it is asked for.
+# Asked as the user who runs this; a bus or busctl that can't say counts as
+# no answer.
+secret_service_answers() {
+    local names name _
+    names=$(busctl --user --no-pager --no-legend list 2>/dev/null) || return 1
+    while read -r name _; do
+        if [ "$name" = org.freedesktop.secrets ]; then
+            return 0
+        fi
+    done <<<"$names"
+    return 1
+}
+
 report() {
     local bin_dir binary version
     bin_dir="$(install_root)/bin"
@@ -824,6 +840,11 @@ report() {
         say ""
         say "On macOS, grant $binary Full Disk Access in System Settings → Privacy & Security,"
         say "and again after each update: $FULL_DISK_ACCESS_URL"
+    fi
+    if [ "$os" = Linux ] && ! secret_service_answers; then
+        say ""
+        say "Nothing answers for a Secret Service on this session's bus, so a password-keyring password can't be read:"
+        say "start one (oo7-daemon on Fedora 45, GNOME Keyring or KWallet), or use a password-file: $SECRETS_URL"
     fi
     say ""
     say "To update, run the same command again."
