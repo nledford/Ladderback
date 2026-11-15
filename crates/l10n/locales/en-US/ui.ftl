@@ -1339,6 +1339,12 @@ ui-settings-title = Settings – { -brand-name }
 # The Settings page's heading: its one main heading.
 ui-settings-heading = Settings
 
+# Settings, while sign-in is off: `ladderback set-password` has kept an admin password since Ladderback started. Sign-in is decided only when Ladderback starts, so it stays off until a restart.
+ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn sign-in on.
+
+# Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Run { "ladderback set-password" } again to set the password anew.
+
 # The heading of the section of Settings that lists the API tokens and creates them. It names the table of tokens too.
 ui-api-tokens-heading = { -api-token(form: "other") }
 

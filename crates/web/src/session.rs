@@ -5,7 +5,7 @@
 //! and the DOM around them are `ws.rs` and `sign_in.rs`, which the `@ui`
 //! scenarios of `features/security/sign_in.feature` run in a browser.
 
-use api::{BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
+use api::{AdminPasswordDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
 use l10n::{MessageId, msg};
 use serde::Deserialize;
 
@@ -81,6 +81,17 @@ impl SignInOffNotice {
     /// reader reads it after the heading that takes focus on arrival.
     pub(crate) fn describes_the_heading(self) -> bool {
         self == Self::EveryPage
+    }
+}
+
+/// What Settings says of an admin password set since the daemon started with
+/// sign-in off (decision 70): that a restart turns sign-in on, or that the
+/// file is damaged and the password must be set again; `None` while nothing
+/// waits, or with no answer the page could read.
+pub(crate) fn waiting_password(read: Option<&SessionDto>) -> Option<MessageId> {
+    match read?.admin_password? {
+        AdminPasswordDto::Set => Some(msg::UI_ADMIN_PASSWORD_WAITING),
+        AdminPasswordDto::Unreadable => Some(msg::UI_ADMIN_PASSWORD_DAMAGED),
     }
 }
 
@@ -342,6 +353,7 @@ mod tests {
             ends_in_seconds: None,
             exposure: api::ExposureDto::Loopback,
             build: None,
+            admin_password: None,
         }
     }
 
@@ -380,6 +392,24 @@ mod tests {
         assert!(SignInOffNotice::EveryPage.describes_the_heading());
         assert!(!SignInOffNotice::StartPage.describes_the_heading());
         assert!(!SignInOffNotice::None.describes_the_heading());
+    }
+
+    #[test]
+    fn settings_says_an_admin_password_that_waits_for_a_restart_or_is_damaged() {
+        let waiting = |admin_password| SessionDto {
+            admin_password,
+            ..session(SignInStateDto::Off, None)
+        };
+        assert_eq!(
+            waiting_password(Some(&waiting(Some(AdminPasswordDto::Set)))),
+            Some(msg::UI_ADMIN_PASSWORD_WAITING)
+        );
+        assert_eq!(
+            waiting_password(Some(&waiting(Some(AdminPasswordDto::Unreadable)))),
+            Some(msg::UI_ADMIN_PASSWORD_DAMAGED)
+        );
+        assert_eq!(waiting_password(Some(&waiting(None))), None);
+        assert_eq!(waiting_password(None), None);
     }
 
     const HOUR: i64 = 3_600_000;

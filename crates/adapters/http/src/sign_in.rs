@@ -12,8 +12,12 @@
 
 use std::sync::Arc;
 
-use api::{BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInDto, SignInStateDto};
-use app::access::{Access, SignInRefused};
+use api::{
+    AdminPasswordDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInDto,
+    SignInStateDto,
+};
+use app::access::{Access, PasswordWaiting, SignInRefused};
+use app::ports::AdminPassword;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, HOST, ORIGIN, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
@@ -42,11 +46,12 @@ pub(crate) const EVENTS_PATH: &str = "/api/v1/events";
 const BACKGROUND: HeaderName = HeaderName::from_static(api::BACKGROUND_HEADER);
 
 /// Whether sign-in is on, decided when the daemon starts: on when an admin
-/// password is kept, with the sessions it has started.
-#[derive(Clone, Default)]
+/// password is kept, with the sessions it has started; off with where one
+/// would be kept, which the session route looks at to say that one set since
+/// waits for a restart (decision 70).
+#[derive(Clone)]
 pub enum SignIn {
-    #[default]
-    Off,
+    Off(Arc<dyn AdminPassword>),
     On(Arc<Access>),
 }
 
@@ -147,17 +152,19 @@ pub(crate) async fn current(
     State(build): State<BuildDto>,
     headers: HeaderMap,
 ) -> Response {
-    let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None, exposure, build);
+    let access = match sign_in {
+        SignIn::On(access) => access,
+        SignIn::Off(kept) => return answer_off(kept.as_ref(), exposure, build),
     };
     match session_token(&headers).and_then(|token| access.session(&token)) {
         Some(session) => answer(
             SignInStateDto::SignedIn,
             Some((session.csrf().to_text(), session.ends_in())),
+            None,
             exposure,
             build,
         ),
-        None => answer(SignInStateDto::SignedOut, None, exposure, build),
+        None => answer(SignInStateDto::SignedOut, None, None, exposure, build),
     }
 }
 
@@ -171,8 +178,9 @@ pub(crate) async fn sign_in(
     State(build): State<BuildDto>,
     request: Request,
 ) -> Response {
-    let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None, exposure, build);
+    let access = match sign_in {
+        SignIn::On(access) => access,
+        SignIn::Off(kept) => return answer_off(kept.as_ref(), exposure, build),
     };
     // Each client's sign-ins wait on their own, keyed by the connection's
     // address (§10.1). A server that didn't hand it over would put every
@@ -213,6 +221,7 @@ pub(crate) async fn sign_in(
             let mut response = answer(
                 SignInStateDto::SignedIn,
                 Some((signed_in.csrf.to_text(), SESSION_LIFETIME)),
+                None,
                 exposure,
                 build,
             );
@@ -263,8 +272,9 @@ pub(crate) async fn sign_out(
     State(build): State<BuildDto>,
     headers: HeaderMap,
 ) -> Response {
-    let SignIn::On(access) = sign_in else {
-        return answer(SignInStateDto::Off, None, exposure, build);
+    let access = match sign_in {
+        SignIn::On(access) => access,
+        SignIn::Off(kept) => return answer_off(kept.as_ref(), exposure, build),
     };
     if let Some(token) = session_token(&headers)
         && let Some(session) = access.peek(&token)
@@ -274,7 +284,7 @@ pub(crate) async fn sign_out(
         }
         access.sign_out(&token);
     }
-    let mut response = answer(SignInStateDto::SignedOut, None, exposure, build);
+    let mut response = answer(SignInStateDto::SignedOut, None, None, exposure, build);
     let forget = format!("{COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
     if let Ok(value) = HeaderValue::from_str(&forget) {
         response.headers_mut().insert(SET_COOKIE, value);
@@ -301,13 +311,26 @@ fn over_https(headers: &HeaderMap) -> bool {
             .is_some_and(|authority| authority.eq_ignore_ascii_case(host))
 }
 
+/// The session route's answer with sign-in off: an admin password kept since
+/// the daemon started, looked for now, waits for the next start to turn
+/// sign-in on (decision 70).
+fn answer_off(kept: &dyn AdminPassword, exposure: Exposure, build: BuildDto) -> Response {
+    let waiting = PasswordWaiting::of(kept).map(|waiting| match waiting {
+        PasswordWaiting::Set => AdminPasswordDto::Set,
+        PasswordWaiting::Unreadable => AdminPasswordDto::Unreadable,
+    });
+    answer(SignInStateDto::Off, None, waiting, exposure, build)
+}
+
 /// The session route's answer: where the request stands, who can reach the
 /// daemon (so the page can say who can use it with sign-in off), for a live
-/// session its CSRF token and how long it has left however it is used, and,
-/// for a page that may see the pages, the `build` the daemon runs.
+/// session its CSRF token and how long it has left however it is used, with
+/// sign-in off an admin password that waits for a restart, and, for a page
+/// that may see the pages, the `build` the daemon runs.
 fn answer(
     sign_in: SignInStateDto,
     live: Option<(String, SignedDuration)>,
+    admin_password: Option<AdminPasswordDto>,
     exposure: Exposure,
     build: BuildDto,
 ) -> Response {
@@ -333,6 +356,7 @@ fn answer(
                 Exposure::Loopback => ExposureDto::Loopback,
                 Exposure::Network => ExposureDto::Network,
             },
+            admin_password,
             build,
         }),
     )

@@ -1927,6 +1927,7 @@ mod tests {
             idle_seconds: Some(43_200),
             ends_in_seconds: Some(60),
             exposure: ExposureDto::Loopback,
+            admin_password: None,
             build: None,
         };
         assert_eq!(
@@ -1944,6 +1945,7 @@ mod tests {
             idle_seconds: None,
             ends_in_seconds: None,
             exposure: ExposureDto::Loopback,
+            admin_password: None,
             build: None,
         };
         assert_eq!(
@@ -2017,6 +2019,7 @@ mod tests {
             idle_seconds: None,
             ends_in_seconds: None,
             exposure: ExposureDto::Loopback,
+            admin_password: None,
             build: Some(build(Some(COMMIT), true, false)),
         };
         let written = serde_json::json!({
@@ -3457,10 +3460,13 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// however it is used (`ends-in-seconds`): the web UI warns before the
 /// first ends it (components §4.5). `exposure` is `network` when the daemon
 /// listens beyond loopback, and left out on loopback, as before it existed:
-/// with sign-in off, the web UI then warns on every page. The build the
-/// daemon runs (`version`, `commit`, `dirty`, `release`) is told to a page
-/// that may see the pages, with sign-in off or a live session, and left out
-/// for a page that has yet to sign in.
+/// with sign-in off, the web UI then warns on every page. With sign-in off,
+/// `admin-password` says an admin password `ladderback set-password` has kept
+/// since the daemon started, looked for as the route is read: sign-in turns
+/// on only at the next start (decision 70), and it is left out while none is
+/// kept. The build the daemon runs (`version`, `commit`, `dirty`, `release`)
+/// is told to a page that may see the pages, with sign-in off or a live
+/// session, and left out for a page that has yet to sign in.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
@@ -3473,6 +3479,8 @@ pub struct SessionDto {
     pub ends_in_seconds: Option<u64>,
     #[serde(default, skip_serializing_if = "ExposureDto::is_loopback")]
     pub exposure: ExposureDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_password: Option<AdminPasswordDto>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildDto>,
 }
@@ -3526,6 +3534,18 @@ pub enum SignInStateDto {
     SignedOut,
     /// The request's session is live.
     SignedIn,
+}
+
+/// With sign-in off, the admin password kept since the daemon started
+/// (§10.1, decision 70), which only the next start turns sign-in on for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AdminPasswordDto {
+    /// A hash the daemon can check: a restart turns sign-in on.
+    Set,
+    /// A file the daemon can't read or check: a restart would refuse to start
+    /// until `ladderback set-password` writes it anew.
+    Unreadable,
 }
 
 /// Who can reach the daemon at the address it listens on (§10.1).

@@ -624,6 +624,8 @@ Accessibility is designed in from the first screen, not audited in at the end. T
 
   Expiry never discards unsaved form input: a "Sign in again" dialog opens over the page, which stays as it was, and the request the daemon refused is sent again once signed in. The sign-in form is one "Admin password" field with `autocomplete="current-password"` (paste and password managers work, A5, A6) and the form's error summary; while signed in, the navigation ends with "Sign out".
 
+  With sign-in off, **Settings says an admin password set since Ladderback started**, below its heading, as the page opens: "Admin password set. Restart Ladderback to turn sign-in on.", or, for a file Ladderback couldn't read, that it is damaged and `ladderback set-password` must run again (§10.1, decision 70). It is plain text in the page's reading order, not a live region: it comes from the read the page makes as it opens.
+
 **The shared component set** in `web` is the only place widgets are built. Each component has an accessibility contract and tests for it:
 
 | Component | Contract |

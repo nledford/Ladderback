@@ -164,6 +164,22 @@ Feature: Sign-in
       And the data folder holds no admin password
 
   @e2e
+  Rule: Sign-in is decided when Ladderback starts, so an admin password set while sign-in is off waits for a restart, and Ladderback says so
+
+    Background:
+      Given Ladderback is serving on loopback with sign-in off
+
+    Scenario: An admin password set while sign-in is off is said to wait for a restart, which turns sign-in on
+      When the admin password "demo-admin-pass" is set from standard input
+      Then Ladderback says sign-in is still off and a restart turns it on
+      When Ladderback is restarted
+      Then sign-in is on
+
+    Scenario: An admin password file Ladderback can't read, found while sign-in is off, is said to be damaged
+      When the data folder holds an admin password file that is not a password hash
+      Then Ladderback says sign-in is still off and the admin password file is damaged
+
+  @e2e
   Rule: Beyond loopback, Ladderback listens only for a configured host name, and with sign-in off it warns that anyone who can reach it can use it
 
     Scenario: With sign-in on and a host name configured, Ladderback listens on every address and warns that plain HTTP is unencrypted
@@ -557,3 +573,16 @@ Feature: Sign-in
       When I open the Operations page
       Then the page shows a message containing "Sign-in is off, and Ladderback answers on the network"
       And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"
+
+  @ui
+  Rule: Settings says when an admin password waits for a restart to turn sign-in on
+
+    Scenario: An admin password set while the page is open is said in Settings, with the restart it needs
+      Given a daemon with sign-in off
+      When I open the web UI
+      And the admin password "demo-admin-pass" is set
+      And I press Tab until focus is on the link "Settings"
+      And I press Enter
+      Then focus is on the main heading "Settings"
+      And the page shows a message containing "Admin password set. Restart Ladderback to turn sign-in on."
+      And the page has no accessibility violations

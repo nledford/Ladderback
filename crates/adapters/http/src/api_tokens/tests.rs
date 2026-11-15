@@ -671,7 +671,7 @@ async fn a_token_cancels_as_a_token_and_what_it_may_not_stop_needs_a_session() {
 #[tokio::test]
 async fn with_sign_in_off_the_token_routes_say_so_and_the_header_is_ignored() {
     let mut state = test_state();
-    state.sign_in = SignIn::Off;
+    state.sign_in = crate::request_checks::tests::sign_in_off();
     let send = |request: Request| {
         let state = state.clone();
         async move {

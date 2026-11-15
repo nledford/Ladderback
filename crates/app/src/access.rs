@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use domain::access::{Client, Password, Sessions, SignInWaits, Token};
 use domain::{SignedDuration, Timestamp};
 
-use crate::ports::{AdminPassword, ApiTokenStore, Clock, Random};
+use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore, Clock, Random};
 
 mod api_tokens;
 
@@ -76,6 +76,31 @@ pub enum SignInRefused {
     /// The admin password could not be checked, or no token drawn: the text
     /// is the platform's own message.
     Unavailable(String),
+}
+
+/// With sign-in off, an admin password `ladderback set-password` has kept
+/// since the daemon started (§10.1, decision 70). Sign-in is decided at
+/// start, so the daemon says this and never turns sign-in on by itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PasswordWaiting {
+    /// A hash the daemon can check: the next start turns sign-in on.
+    Set,
+    /// A file the daemon can't read or check: the next start refuses, as it
+    /// does for such a file, until the password is set anew.
+    Unreadable,
+}
+
+impl PasswordWaiting {
+    /// What `kept` holds now; `None` while it keeps no admin password.
+    pub fn of(kept: &dyn AdminPassword) -> Option<Self> {
+        match kept.fingerprint() {
+            Ok(_) => Some(Self::Set),
+            Err(AdminPasswordError::NotSet) => None,
+            Err(AdminPasswordError::Unreadable(_) | AdminPasswordError::Unwritable(_)) => {
+                Some(Self::Unreadable)
+            }
+        }
+    }
 }
 
 impl Access {
