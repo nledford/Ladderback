@@ -64,6 +64,14 @@ CREATE TABLE sessions (digest BLOB PRIMARY KEY NOT NULL,  -- SHA-256 of the cook
                        keep_signed_in INTEGER NOT NULL DEFAULT 0, secure INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE sign_in_settings (id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
                                session_length TEXT NOT NULL);  -- Stay signed in for (§10.1)
+CREATE TABLE repo_stats (id INTEGER PRIMARY KEY NOT NULL,      -- one reading of a repository's stats, kept a year (decision 104)
+                         repo_alias TEXT NOT NULL, repo_uuid TEXT,  -- the ID its entry recorded then, if any
+                         taken_at INTEGER NOT NULL,
+                         snapshots INTEGER NOT NULL CHECK (snapshots >= 0),
+                         total_bytes INTEGER NOT NULL CHECK (total_bytes >= 0),
+                         stored_bytes INTEGER NOT NULL CHECK (stored_bytes >= 0),
+                         raw_bytes INTEGER NOT NULL CHECK (raw_bytes >= 0));
+CREATE INDEX repo_stats_by_alias ON repo_stats (repo_alias, taken_at);
 CREATE TABLE release_check (id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
                             checked_at INTEGER NOT NULL,  -- the last release check (§5)
                             update_version TEXT);         -- the available update it found, if any
