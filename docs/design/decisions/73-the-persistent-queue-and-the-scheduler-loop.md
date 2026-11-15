@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 73: The persistent queue and the scheduler loop
 
 **A restart runs a queued backup again under its own ID, on the repository it was queued for, built from the configuration of that moment; anything else it held queued ends `daemon-stopped`, and the log says why. One loop in `app` runs the scheduled plans, each in its schedule's time zone, keeps each plan's planned run in the log, and checks for a wake before it starts a run** (recorded 2026-11-12, §5, §9; #274, #195). Amends decision 40, point (1), as that decision foresaw: recovery still ends every *running* operation as `daemon-stopped`, and no longer ends the *queued* ones.

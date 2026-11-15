@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 82: How a page learns which step a running operation is in
 
 **The engine adapter maps each of rustic's progress texts that it knows to a step, a typed code (`OperationStep`), and the text goes no further; the daemon tells a page of the bar the engine began last and still has open, with its step, in `operation-progress`'s `step` field; the page says the step through one catalog message per code, and says a step it doesn't know, or none, as working** (recorded 2026-11-12, §3.1, §4.1, §4.4, §4.5; #423). The Operations page said only "Running" while a first backup read the index for minutes, and drew the index's counter as the backup's percentage: `progress_ui` folded every bar into one unnamed event and dropped rustic's names for them.

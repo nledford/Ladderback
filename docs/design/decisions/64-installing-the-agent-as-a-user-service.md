@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 64: Installing the agent as a user service
 
 **`ladderback install-service` writes a service file for the user's own service manager, a systemd user unit on Linux or a launchd agent on macOS, that runs this program's `serve`, and has the manager start it; `ladderback remove-service` has the manager stop it and removes the file** (recorded 2026-11-11, §12; #278). Both run the manager's own program, `systemctl --user` or `launchctl`, behind `app`'s `ServiceManager` port; the adapter is `platform::service::UserService`.

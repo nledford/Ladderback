@@ -84,7 +84,7 @@ clippy:
 # dev-dependency), the tooling's own tests (`scripts/*.test.ts`, under Node's
 # built-in runner), the journey lint, the check that every path AGENTS.md and
 # CLAUDE.md name exists, then the check that no paragraph in docs/ runs over
-# 150 words (the baseline lists the files exempt for now).
+# 150 words (a file that has the exemption marker is exempt for now).
 [doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, and the docs paragraph-length check.')]
 [group('quality')]
 lint: _ui-deps clippy

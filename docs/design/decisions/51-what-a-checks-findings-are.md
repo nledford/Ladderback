@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 51: What a check's findings are
 
 **A check that ran to its end succeeds, whatever it found, and each finding is one of the operation's warnings** (recorded 2026-11-11, #187). The worker sends each of rustic's findings as a warning with the code of its level, `check-warning` (rustic's `Warn`: something to tidy, such as a pack no index lists) or `check-error` (rustic's `Error`), and rustic's own words as its detail; the result counts them by level. So a check that found anything ends as succeeded-with-warnings, and its findings are kept, masked (I4) and capped (§4.1), wherever an operation's warnings are: the operation log, `GET /operations/{id}` and the page.

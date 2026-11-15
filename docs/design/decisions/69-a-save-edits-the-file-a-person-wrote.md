@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 69: A save edits the file a person wrote
 
 **A save over an existing `config.toml` (Connect, Create, an edit in the web UI, `import-profile`) edits the file as it is: what the save changes is set, added or removed where the file writes it, and every other byte, comments, blank lines, key order and a value's own spelling among them, stays as written; the edit is written only when it reads back as the configuration saved and fits under the size cap, and otherwise the save writes the daemon's layout, as every save did before** (recorded 2026-11-12, §6.1; #257). Before, each save rendered the whole file again, so the first one dropped what a person had written around the settings; recording a repository's ID was already an edit (decision 57).

@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 58: One child starts at a time
 
 **Every child process the daemon starts, a worker, a hook, a password command or the `rclone` that serves an `rclone:` repository the daemon opens itself, starts through one spawn gate per process: `spawn_gate::hold(|| command.spawn())`** (recorded 2026-11-11, §4.1, §10.2; #234, #255). The gate is a process-wide lock in the `spawn-gate` crate, held only for the start itself, not while the child runs. Whatever else makes a descriptor that is not close-on-exec from the start (a test's own pipe) makes it inside `hold` and marks it before it lets go. **A hook's pipes are let go through the gate too**, when the call returns, so no start in flight still holds a copy of their read ends. **The daemon waits for the gate off the runtime's threads** (`spawn_gate::hold_blocking`, on tokio's blocking pool).

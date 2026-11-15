@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 80: A repository reached at several locations
 
 **A repository keeps its one `repository` setting as its first location and may list further locations after it, in order; each location has its own backend settings and credentials and an optional rule for when it may be tried. Before a job that opens the repository the daemon walks the list, skips every location whose rule doesn't hold, probes the rest with a bounded check, and uses the first that answers and holds the same repository ID. A rule chooses which address to try, never whether to trust it** (recorded 2026-11-12, §3.1, §5, §6.1, §6.2, §7.3, §9, §10.6; #424). The issue came out of a real run of 0.2.0: a laptop backs up to one REST repository by the server's LAN address at home and by a public HTTPS address away from it, and the person's rustic setup tries the LAN address first. Ladderback had one location per repository, so the imported plan took the slow route even at home, and a person who wanted both had to keep two entries and two plans, which decision 49 forbids for one repository.

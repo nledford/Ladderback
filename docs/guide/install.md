@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Install Ladderback
 
 On Linux, from 0.3.1 on, you can [download a release](#download-a-release-linux); on macOS, and on Linux too if you prefer, you build one from source. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. The [README](../../README.md#install) has the one command that installs it: the release's archive on Linux, a build from source on macOS. This guide says how to download a release, what that command does, how to build by hand, how to update, and how to keep Ladderback running in the background.
