@@ -8,7 +8,6 @@ docs/design/decisions/30-time-zone-data.md
 docs/design/decisions/31-a-secret-a-url-parser-splits.md
 docs/design/decisions/32-worker-messages-that-outgrow-the-cap.md
 docs/design/decisions/33-body-limits-and-security-headers.md
-docs/design/decisions/34-a-hooks-output-after-the-hook.md
 docs/design/decisions/36-repository-jobs-have-a-deadline.md
 docs/design/decisions/37-a-secret-written-in-the-config.md
 docs/design/decisions/38-the-command-lines-output.md
