@@ -138,13 +138,15 @@ deny:
 
 # Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
-# name). Tests that skip themselves (`testkit::skip!`) are listed at the end.
+# name). Every test process has a scratch home, and the run fails if a test
+# wrote there (scripts/with-test-home.sh). Tests that skip themselves
+# (`testkit::skip!`) are listed at the end.
 # Set NEXTEST_PROFILE=ci for retries and the JUnit report (.config/nextest.toml).
 [doc('Run every Rust test suite, then list skipped tests.')]
 [group('test')]
 [positional-arguments]
 test *args:
-    scripts/with-skip-log.sh '{{ just_executable() }}' _test-suites "$@"
+    scripts/with-skip-log.sh scripts/with-test-home.sh '{{ just_executable() }}' _test-suites "$@"
 
 # The suites `test` runs, under its one skip log. The cucumber runners use
 # `harness = false`, which nextest can't run (its default filter in
@@ -162,18 +164,19 @@ _test-suites *args:
     cargo test --workspace --test e2e
 
 # Arguments go to cucumber-rs as given, so `--name 'a job that runs'` stays
-# one pattern, and narrow this runner's scenarios (as for `test-e2e`).
+# one pattern, and narrow this runner's scenarios (as for `test-e2e`). The
+# tests run in a scratch home, as in `test`.
 [doc('Run the acceptance scenarios (fakes and a fake clock) only.')]
 [group('test')]
 [positional-arguments]
 test-acceptance *args:
-    scripts/with-skip-log.sh cargo test --workspace --test acceptance -- "$@"
+    scripts/with-skip-log.sh scripts/with-test-home.sh cargo test --workspace --test acceptance -- "$@"
 
-# Run the @e2e scenarios against the real binary only.
+# Run the @e2e scenarios against the real binary only, in a scratch home as in `test`.
 [group('test')]
 [positional-arguments]
 test-e2e *args:
-    scripts/with-skip-log.sh cargo test --workspace --test e2e -- "$@"
+    scripts/with-skip-log.sh scripts/with-test-home.sh cargo test --workspace --test e2e -- "$@"
 
 # A release is built with `release_flags` (`--no-default-features`), which
 # leaves out the development pseudolocales (`pseudo`, technical design §8.4).
@@ -184,14 +187,13 @@ test-e2e *args:
 # and `ladderback` built that way, so those run, and so does any test whose
 # result depends on the feature. The packages are named because only these two
 # have tests that read the feature; `web`'s wasm tests run in `test-wasm`. The
-# cucumber runners are left out, as in `test` (nextest's default filter). One
-# test, `isolation`, builds and runs the daemon's other test binaries itself,
-# with the default features. Arguments go to nextest.
+# cucumber runners are left out, as in `test` (nextest's default filter), and
+# the tests run in a scratch home, as in `test`. Arguments go to nextest.
 [doc('Run the l10n and daemon tests as a release build is made (no default features).')]
 [group('test')]
 [positional-arguments]
 test-release *args:
-    scripts/with-skip-log.sh cargo nextest run --package l10n --package ladderback {{ release_flags }} "$@"
+    scripts/with-skip-log.sh scripts/with-test-home.sh cargo nextest run --package l10n --package ladderback {{ release_flags }} "$@"
 
 # The runner is `wasm-bindgen-test-runner` from wasm-bindgen-cli, whose version
 # must equal the `wasm-bindgen` in Cargo.lock; `just setup` installs it. It is

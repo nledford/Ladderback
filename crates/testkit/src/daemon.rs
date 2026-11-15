@@ -5,7 +5,8 @@
 //! test that started it that way would share that operation log, its
 //! migrations and its schema version with every other daemon on the machine.
 //! Every test that starts the daemon gives it folders of its own through
-//! [`isolate`]; `tests/isolation.rs` fails when one doesn't.
+//! [`isolate`]; `just test` runs every test with a scratch home and fails when
+//! one doesn't (`scripts/with-test-home.sh`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
