@@ -538,8 +538,13 @@ impl RepositoryConfig {
     /// The note about `link`, the machine's link as last read: one, for an
     /// entry with a rule, while the link is mixed.
     pub fn link_note(&self, link: Option<Link>) -> Option<MixedLinkNote> {
-        let _ = link;
-        todo!()
+        let Some(Link::Mixed { ipv4, ipv6 }) = link else {
+            return None;
+        };
+        self.location_rules()
+            .iter()
+            .any(Option::is_some)
+            .then_some(MixedLinkNote { ipv4, ipv6 })
     }
 }
 

@@ -96,23 +96,62 @@ impl DefaultRoutes {
     /// Chooses, for each family, the default route of `routes` that carries
     /// traffic and has the lowest metric, the first listed of equal ones.
     pub fn choose(routes: impl IntoIterator<Item = DefaultRoute>) -> Self {
-        let _ = routes.into_iter();
-        todo!()
+        let mut ipv4: Option<(u32, Outgoing)> = None;
+        let mut ipv6: Option<(u32, Outgoing)> = None;
+        for route in routes {
+            let RouteState::Carries(kind) = route.state else {
+                continue;
+            };
+            let best = match route.family {
+                Family::Ipv4 => &mut ipv4,
+                Family::Ipv6 => &mut ipv6,
+            };
+            if best
+                .as_ref()
+                .is_none_or(|(lowest, _)| route.metric < *lowest)
+            {
+                *best = Some((
+                    route.metric,
+                    Outgoing {
+                        interface: route.interface,
+                        kind,
+                    },
+                ));
+            }
+        }
+        Self {
+            ipv4: ipv4.map(|(_, outgoing)| outgoing),
+            ipv6: ipv6.map(|(_, outgoing)| outgoing),
+        }
     }
 
     /// The link the routes make: the one interface when only one family has
     /// a route or both leave by the same interface, mixed when they leave by
     /// different ones, and no route when neither has one.
     pub fn link(&self) -> Link {
-        todo!()
+        match (&self.ipv4, &self.ipv6) {
+            (None, None) => Link::NoRoute,
+            (Some(ipv4), Some(ipv6)) if ipv4.interface != ipv6.interface => Link::Mixed {
+                ipv4: ipv4.kind,
+                ipv6: ipv6.kind,
+            },
+            (Some(one), _) | (None, Some(one)) => one.kind.into(),
+        }
     }
 
     /// The interface whose Wi-Fi network's name is asked: `family`'s, or for
     /// `None` the link's one interface. `None` when that family has no route,
     /// or, for the link's, when the link is mixed or has no route.
     pub fn interface(&self, family: Option<Family>) -> Option<&Outgoing> {
-        let _ = family;
-        todo!()
+        match family {
+            Some(Family::Ipv4) => self.ipv4.as_ref(),
+            Some(Family::Ipv6) => self.ipv6.as_ref(),
+            None => match (&self.ipv4, &self.ipv6) {
+                (Some(ipv4), Some(ipv6)) if ipv4.interface != ipv6.interface => None,
+                (Some(one), _) | (None, Some(one)) => Some(one),
+                (None, None) => None,
+            },
+        }
     }
 }
 

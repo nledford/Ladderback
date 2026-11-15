@@ -261,7 +261,16 @@ impl LocationRule {
             Some(Link::Wired) => self.holds_on(InterfaceKind::Wired, names.link),
             Some(Link::WiFi) => self.holds_on(InterfaceKind::WiFi, names.link),
             Some(Link::Other) => self.holds_on(InterfaceKind::Other, names.link),
-            Some(Link::Mixed { .. }) => todo!(),
+            Some(Link::Mixed { ipv4, ipv6 }) => {
+                match (
+                    self.holds_on(ipv4, names.ipv4),
+                    self.holds_on(ipv6, names.ipv6),
+                ) {
+                    (RuleVerdict::NotMet, _) | (_, RuleVerdict::NotMet) => RuleVerdict::NotMet,
+                    (RuleVerdict::Unknown, _) | (_, RuleVerdict::Unknown) => RuleVerdict::Unknown,
+                    (RuleVerdict::Holds, RuleVerdict::Holds) => RuleVerdict::Holds,
+                }
+            }
         }
     }
 
