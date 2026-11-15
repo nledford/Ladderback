@@ -39,6 +39,7 @@ pub(crate) fn test_state() -> AppState {
         operations: Arc::new(NoOperations),
         catalog: Arc::new(EmptyCatalog),
         repositories: Arc::new(NoRepositories),
+        profiles: Arc::new(NoProfiles),
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
@@ -94,6 +95,23 @@ impl crate::Repositories for NoRepositories {
         _alias: String,
     ) -> Result<api::LocationsTestDto, crate::RepositoriesError> {
         Err(crate::RepositoriesError::InvalidBody)
+    }
+}
+
+/// Does nothing: the checks never reach a route.
+pub(crate) struct NoProfiles;
+
+#[async_trait]
+impl crate::Profiles for NoProfiles {
+    async fn preview(
+        &self,
+        _request: api::ProfilePreviewDto,
+    ) -> Result<api::ProfileImportDto, crate::ProfilesError> {
+        Err(crate::ProfilesError::InvalidBody)
+    }
+
+    async fn export(&self, _plan: String) -> Result<api::ProfileExportDto, crate::ProfilesError> {
+        Err(crate::ProfilesError::InvalidBody)
     }
 }
 

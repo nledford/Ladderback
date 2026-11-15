@@ -281,9 +281,14 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
             "/api/v1/repositories/home/maintenance/preview",
             Some(Preview),
         ),
-        // Session-only: the session, the tokens, configuration changes,
-        // maintenance, and every route the table doesn't name.
-        (Method::GET, "/api/v1/session", None),
+        (Method::GET, "/api/v1/plans/home/profile", Some(Read)),
+        (Method::HEAD, "/api/v1/plans/home/profile", Some(Read)),
+        (Method::POST, "/api/v1/profiles/preview", Some(Preview)),
+        // A `read` token reads the session route: the build, never a session.
+        (Method::GET, "/api/v1/session", Some(Read)),
+        (Method::HEAD, "/api/v1/session", Some(Read)),
+        // Session-only: signing in and out, the tokens, configuration
+        // changes, maintenance, and every route the table doesn't name.
         (Method::POST, "/api/v1/session", None),
         (Method::DELETE, "/api/v1/session", None),
         (Method::GET, "/api/v1/tokens", None),
@@ -313,6 +318,10 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
             "/api/v1/repositories/home/maintenance/preview",
             None,
         ),
+        (Method::POST, "/api/v1/plans/home/profile", None),
+        (Method::GET, "/api/v1/profiles/preview", None),
+        (Method::POST, "/api/v1/profiles", None),
+        (Method::GET, "/api/v1/plans//profile", None),
     ] {
         assert_eq!(required_scope(&method, path), scope, "{method} {path}");
     }
@@ -374,7 +383,7 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
         .await;
     let auth = [("authorization", token.as_str())];
     for request in [
-        get("/api/v1/session", &auth),
+        post("/api/v1/session", &auth, "{}"),
         get("/api/v1/tokens", &auth),
         post(
             "/api/v1/tokens",
@@ -389,6 +398,37 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
     ] {
         assert_needs(&daemon, request, "session").await;
     }
+}
+
+/// A `read` token is told the build the daemon runs, as a signed-in page is,
+/// and that it has no session, even beside a live session's cookie
+/// (decision 93); a token without `read` is refused, naming it.
+#[tokio::test]
+async fn a_read_token_reads_the_build_on_the_session_route_and_never_a_session() {
+    let daemon = Daemon::new();
+    let (cookie, _) = daemon.signed_in().await;
+    let token = daemon.token(&[Scope::Read]).await;
+    for headers in [
+        vec![("authorization", token.as_str())],
+        vec![
+            ("authorization", token.as_str()),
+            ("cookie", cookie.as_str()),
+        ],
+    ] {
+        let response = daemon.send(get("/api/v1/session", &headers)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json(response).await;
+        assert_eq!(body["sign-in"], "signed-out", "{body}");
+        assert_eq!(body["csrf-token"], serde_json::Value::Null, "{body}");
+        assert!(body["version"].is_string(), "{body}");
+    }
+    let run = daemon.token(&[Scope::Run]).await;
+    assert_needs(
+        &daemon,
+        get("/api/v1/session", &[("authorization", &run)]),
+        "read",
+    )
+    .await;
 }
 
 /// A good token is judged alone even beside a live session and its CSRF

@@ -74,6 +74,8 @@ use store::SqliteStore;
 use uuid::Uuid;
 
 mod maintenance;
+pub(crate) mod mcp_server;
+mod profiles;
 mod runs;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
@@ -690,6 +692,7 @@ async fn state_over(
         Arc::clone(&store),
         writes,
     ));
+    let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService);
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog {
         config: Arc::clone(&config),
         engine,
@@ -713,6 +716,7 @@ async fn state_over(
             operations,
             catalog,
             repositories,
+            profiles,
             sign_in: SignIn::Off(Arc::new(FileAdminPassword::in_data_dir(data_dir))),
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
@@ -2282,6 +2286,9 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
         ProfileNotice::HooksPerPlan => (WarningCode::ProfileHooksPerPlan, Vec::new()),
         ProfileNotice::UsedProfileMissing { name } => {
             (WarningCode::ProfileUsedMissing, vec![("name", text(name))])
+        }
+        ProfileNotice::UsedProfileNotRead { name } => {
+            (WarningCode::ProfileUsedNotRead, vec![("name", text(name))])
         }
         ProfileNotice::InlineSecret { field } => {
             (WarningCode::InlineSecret, vec![("field", text(field))])

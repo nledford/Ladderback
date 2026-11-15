@@ -330,6 +330,14 @@ pub enum ErrorCode {
     /// The admin password could not be checked or kept, so it was not set.
     /// The daemon's log says why.
     AdminPasswordUnavailable,
+    /// `ladderback mcp --connect` got no answer from a Ladderback API at the
+    /// address it connects to: nothing answered, the answer didn't come in
+    /// time, or it wasn't the API's.
+    DaemonUnreachable,
+    /// `ladderback mcp --connect` sent a request that changes something, and
+    /// its answer was lost on the way back: whether it took effect is
+    /// unknown, so it is never sent again (§4.6).
+    DaemonAnswerLost,
     #[serde(other)]
     Unknown,
 }
@@ -393,6 +401,10 @@ pub enum WarningCode {
     /// A profile named by `use-profiles` wasn't found. The argument `name` is
     /// the name as the profile wrote it.
     ProfileUsedMissing,
+    /// A profile previewed from its text names a profile in `use-profiles`,
+    /// which a preview never reads: it reads no file. The argument `name` is
+    /// the name as the profile wrote it.
+    ProfileUsedNotRead,
     /// A secret written in the profile was kept as text in the configuration.
     /// The argument `field` names it.
     InlineSecret,
@@ -985,6 +997,8 @@ impl ErrorCode {
             | Self::ApiTokensUnavailable
             | Self::CurrentPasswordWrong
             | Self::AdminPasswordUnavailable
+            | Self::DaemonUnreachable
+            | Self::DaemonAnswerLost
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
@@ -1124,6 +1138,11 @@ impl WarningCode {
                 optional: false,
             }],
             Self::ProfileUsedMissing => &[ArgSpec {
+                name: "name",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileUsedNotRead => &[ArgSpec {
                 name: "name",
                 kind: ArgKind::Text,
                 optional: false,
@@ -1369,6 +1388,25 @@ fn named(args: impl IntoIterator<Item = (&'static str, MsgArg)>) -> BTreeMap<Str
 pub struct ProfileImportDto {
     pub repository: String,
     pub plans: Vec<String>,
+    pub notices: Vec<WarningDto>,
+}
+
+/// `POST /api/v1/profiles/preview`: what importing the rustic profile whose
+/// TOML is `content` would add under the repository alias `repository`,
+/// told without saving anything or reading any file (§4.6).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ProfilePreviewDto {
+    pub content: String,
+    pub repository: String,
+}
+
+/// `GET /api/v1/plans/{id}/profile`: the plan as a profile the stock
+/// `rustic` reads, and what the export left out of it or warns of (§6.2).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProfileExportDto {
+    pub text: String,
     pub notices: Vec<WarningDto>,
 }
 
@@ -1928,6 +1966,8 @@ mod tests {
             ErrorCode::ApiTokensUnavailable,
             ErrorCode::CurrentPasswordWrong,
             ErrorCode::AdminPasswordUnavailable,
+            ErrorCode::DaemonUnreachable,
+            ErrorCode::DaemonAnswerLost,
             ErrorCode::ConfigFolderUnknown,
             ErrorCode::RuntimeUnavailable,
             ErrorCode::Unknown,

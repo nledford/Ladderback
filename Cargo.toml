@@ -11,6 +11,7 @@ members = [
     "crates/adapters/http",
     "crates/adapters/hooks",
     "crates/adapters/interop",
+    "crates/adapters/mcp",
     "crates/adapters/notify",
     "crates/adapters/platform",
     "crates/adapters/secrets",
@@ -30,6 +31,7 @@ default-members = [
     "crates/adapters/http",
     "crates/adapters/hooks",
     "crates/adapters/interop",
+    "crates/adapters/mcp",
     "crates/adapters/notify",
     "crates/adapters/platform",
     "crates/adapters/secrets",
@@ -60,6 +62,7 @@ engine = { path = "crates/adapters/engine" }
 hooks = { path = "crates/adapters/hooks" }
 notify-adapter = { path = "crates/adapters/notify" }
 interop = { path = "crates/adapters/interop" }
+mcp = { path = "crates/adapters/mcp" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
 secrets = { path = "crates/adapters/secrets" }
@@ -149,6 +152,12 @@ proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 # through `rustic_backend`, with these features and more, so it adds no
 # package.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+# The MCP server's protocol layer (`adapters/mcp`, decision NN): the official
+# SDK, which serves clients of the revisions before 2026-07-28 and after it.
+# Pinned exactly: its majors come months apart and break, so an upgrade is a
+# change of its own. No defaults: no macros; `server` and `transport-io`
+# (stdio) only.
+rmcp = { version = "=3.10.0", default-features = false, features = ["server", "transport-io"] }
 rust-embed = "8.13.0"
 # One git revision of rustic's `main`, because `Progress::error` is unreleased
 # (technical design §2.1). The `engine` crate depends on them, and so do the
@@ -305,6 +314,7 @@ axum.workspace = true
 clap.workspace = true
 config-adapter.workspace = true
 domain.workspace = true
+mcp.workspace = true
 env_logger.workspace = true
 hooks.workspace = true
 log.workspace = true
@@ -339,7 +349,7 @@ tempfile.workspace = true
 toml.workspace = true
 tokio-tungstenite.workspace = true
 testkit.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["io-util", "time"] }
 
 [lints]
 workspace = true

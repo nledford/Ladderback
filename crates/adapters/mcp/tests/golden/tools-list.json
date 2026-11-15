@@ -1,0 +1,3593 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Ladderback's state: each plan with its next run and last operation, the operations queued or running, this program's build and, in connect mode, the daemon's build, sign-in state and exposure.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "status",
+    "outputSchema": {
+      "$defs": {
+        "Access": {
+          "oneOf": [
+            {
+              "const": "api-token",
+              "type": "string"
+            },
+            {
+              "const": "sign-in-off",
+              "type": "string"
+            },
+            {
+              "const": "in-process",
+              "type": "string"
+            }
+          ]
+        },
+        "BuildDto": {
+          "properties": {
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "release": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "version",
+            "commit",
+            "dirty",
+            "release"
+          ],
+          "type": "object"
+        },
+        "DaemonStatus": {
+          "properties": {
+            "build": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BuildDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exposure": {
+              "$ref": "#/$defs/ExposureDto"
+            }
+          },
+          "required": [
+            "exposure"
+          ],
+          "type": "object"
+        },
+        "ErrorDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "ExposureDto": {
+          "oneOf": [
+            {
+              "const": "loopback",
+              "type": "string"
+            },
+            {
+              "const": "network",
+              "type": "string"
+            }
+          ]
+        },
+        "IanaZone": {
+          "type": "string"
+        },
+        "LocationTriedDto": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "position",
+            "address",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationResultDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "bytes-processed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "snapshot": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "backup",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "packs-deleted": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "prune",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "packs-deleted",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "errors": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "check",
+                  "type": "string"
+                },
+                "warnings": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "errors",
+                "warnings",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "removed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "forget",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "removed",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "rewritten": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "adopt",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "rewritten",
+                "duration-ms"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationSummaryDto": {
+          "properties": {
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ErrorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "failure-code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "finished-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "locations": {
+              "items": {
+                "$ref": "#/$defs/LocationTriedDto"
+              },
+              "type": "array"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "queued-at": {
+              "type": "string"
+            },
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OperationResultDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "started-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "warning-codes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "plan",
+            "kind",
+            "status",
+            "queued-at",
+            "started-at",
+            "finished-at",
+            "warning-codes",
+            "failure-code",
+            "result"
+          ],
+          "type": "object"
+        },
+        "PlanStatus": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "last": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OperationSummaryDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "next-run": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "repository": {
+              "type": "string"
+            },
+            "scheduled": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "items": {
+                "$ref": "#/$defs/WarningDto"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "repository",
+            "scheduled",
+            "next-run"
+          ],
+          "type": "object"
+        },
+        "WarningDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/Access"
+        },
+        "build": {
+          "$ref": "#/$defs/BuildDto"
+        },
+        "daemon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DaemonStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plans": {
+          "items": {
+            "$ref": "#/$defs/PlanStatus"
+          },
+          "type": "array"
+        },
+        "running": {
+          "items": {
+            "$ref": "#/$defs/OperationSummaryDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "build",
+        "access",
+        "plans",
+        "running"
+      ],
+      "type": "object"
+    },
+    "title": "Status"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "The configured plans, a page at a time: each with its repository, whether it has a schedule, its next run and its configuration warnings.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "The `next` of the page before, to list the page after it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "list_plans",
+    "outputSchema": {
+      "$defs": {
+        "IanaZone": {
+          "type": "string"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "PlanSummaryDto": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "next-run": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "repository": {
+              "type": "string"
+            },
+            "scheduled": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "items": {
+                "$ref": "#/$defs/WarningDto"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "repository",
+            "scheduled",
+            "next-run"
+          ],
+          "type": "object"
+        },
+        "WarningDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plans": {
+          "items": {
+            "$ref": "#/$defs/PlanSummaryDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plans",
+        "next"
+      ],
+      "type": "object"
+    },
+    "title": "List plans"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "The configured repositories, a page at a time: each with its location, credentials masked, where its password comes from, whether it is maintained here and its configuration warnings. Never a secret.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "The `next` of the page before, to list the page after it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "list_repositories",
+    "outputSchema": {
+      "$defs": {
+        "IanaZone": {
+          "type": "string"
+        },
+        "LocationAlternativeDto": {
+          "properties": {
+            "except": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "network": {
+              "type": "string"
+            },
+            "only": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "network"
+          ],
+          "type": "object"
+        },
+        "LocationDto": {
+          "properties": {
+            "options": {
+              "items": {
+                "$ref": "#/$defs/LocationOptionDto"
+              },
+              "type": "array"
+            },
+            "position": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "repo-hot": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "repository": {
+              "type": "string"
+            },
+            "when": {
+              "items": {
+                "$ref": "#/$defs/LocationAlternativeDto"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "position",
+            "repository"
+          ],
+          "type": "object"
+        },
+        "LocationOptionDto": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "reference": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "set": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "set",
+            "name"
+          ],
+          "type": "object"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "PasswordSourceDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "source": {
+                  "const": "inline",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "source": {
+                  "const": "file",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "entry": {
+                  "type": "string"
+                },
+                "source": {
+                  "const": "keyring",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "entry"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "const": "env",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "name"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "program": {
+                  "type": "string"
+                },
+                "source": {
+                  "const": "command",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source",
+                "program"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "RepositoryDto": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "create-offered": {
+              "type": "boolean"
+            },
+            "locations": {
+              "items": {
+                "$ref": "#/$defs/LocationDto"
+              },
+              "type": "array"
+            },
+            "maintained-here": {
+              "default": false,
+              "type": "boolean"
+            },
+            "password": {
+              "$ref": "#/$defs/PasswordSourceDto"
+            },
+            "repo-hot": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "repository": {
+              "type": "string"
+            },
+            "warnings": {
+              "items": {
+                "$ref": "#/$defs/WarningDto"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "alias",
+            "repository",
+            "password",
+            "maintained-here"
+          ],
+          "type": "object"
+        },
+        "WarningDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repositories": {
+          "items": {
+            "$ref": "#/$defs/RepositoryDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "repositories",
+        "next"
+      ],
+      "type": "object"
+    },
+    "title": "List repositories"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "One repository's snapshots, newest first, a page at a time, read from the repository; only those of a plan, or taken on a host, when either is named.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "The `next` of the page before, asked with the same filters, to list\nthe page after it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host": {
+          "description": "Only the snapshots taken on this host, by its name exactly as the\nsnapshots give it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "plan": {
+          "description": "Only the snapshots of this plan, by its ID: those whose\n`ladderback-plan:` tag names it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "description": "The repository, by its alias, as `list_repositories` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
+    "name": "list_snapshots",
+    "outputSchema": {
+      "$defs": {
+        "ClockOffset": {
+          "type": "string"
+        },
+        "SnapshotDto": {
+          "properties": {
+            "hostname": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "offset": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ClockOffset"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "paths_truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "tags_truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "time": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "time",
+            "hostname",
+            "label",
+            "tags",
+            "paths",
+            "paths_truncated",
+            "tags_truncated"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshots": {
+          "items": {
+            "$ref": "#/$defs/SnapshotDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "snapshots",
+        "next"
+      ],
+      "type": "object"
+    },
+    "title": "List snapshots"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "The history of operations, newest first, a page at a time, running ones included: each with its status, times, warning codes and, when it failed, why.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "The `next` of the page before, to list the page after it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "plan": {
+          "description": "Only this plan's operations, by its ID.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "list_operations",
+    "outputSchema": {
+      "$defs": {
+        "ErrorDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "IanaZone": {
+          "type": "string"
+        },
+        "LocationTriedDto": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "position",
+            "address",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationResultDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "bytes-processed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "snapshot": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "backup",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "packs-deleted": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "prune",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "packs-deleted",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "errors": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "check",
+                  "type": "string"
+                },
+                "warnings": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "errors",
+                "warnings",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "removed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "forget",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "removed",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "rewritten": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "adopt",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "rewritten",
+                "duration-ms"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationSummaryDto": {
+          "properties": {
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ErrorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "failure-code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "finished-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "locations": {
+              "items": {
+                "$ref": "#/$defs/LocationTriedDto"
+              },
+              "type": "array"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "queued-at": {
+              "type": "string"
+            },
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OperationResultDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "started-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "warning-codes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "plan",
+            "kind",
+            "status",
+            "queued-at",
+            "started-at",
+            "finished-at",
+            "warning-codes",
+            "failure-code",
+            "result"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OperationSummaryDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "operations",
+        "next"
+      ],
+      "type": "object"
+    },
+    "title": "List operations"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "One operation: its summary, why it failed when it did, and the first 100 warnings it recorded.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "The operation's ID, as `list_operations` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "get_operation",
+    "outputSchema": {
+      "$defs": {
+        "ErrorDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "IanaZone": {
+          "type": "string"
+        },
+        "LocationTriedDto": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "position",
+            "address",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationResultDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "bytes-processed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "snapshot": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "backup",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "packs-deleted": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "prune",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "packs-deleted",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "errors": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "check",
+                  "type": "string"
+                },
+                "warnings": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "errors",
+                "warnings",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "removed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "forget",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "removed",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "rewritten": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "adopt",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "rewritten",
+                "duration-ms"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationSummaryDto": {
+          "properties": {
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ErrorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "failure-code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "finished-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "locations": {
+              "items": {
+                "$ref": "#/$defs/LocationTriedDto"
+              },
+              "type": "array"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "queued-at": {
+              "type": "string"
+            },
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OperationResultDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "started-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "warning-codes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "plan",
+            "kind",
+            "status",
+            "queued-at",
+            "started-at",
+            "finished-at",
+            "warning-codes",
+            "failure-code",
+            "result"
+          ],
+          "type": "object"
+        },
+        "OperationWarningDto": {
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "during": {
+              "type": "string"
+            },
+            "item": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "code",
+            "item",
+            "during",
+            "detail"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "operation": {
+          "$ref": "#/$defs/OperationSummaryDto"
+        },
+        "unlisted-warnings": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/OperationWarningDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "operation",
+        "warnings",
+        "unlisted-warnings"
+      ],
+      "type": "object"
+    },
+    "title": "Get operation"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Queues a backup of a plan now, under the plan's overlap policy, and returns its operation's ID. Its hooks and secret sources run as for any other run.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "description": "The plan's ID, as `list_plans` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "type": "object"
+    },
+    "name": "run_plan",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "operation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "type": "object"
+    },
+    "title": "Run plan"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Waits until an operation finishes or the timeout passes, then returns whether it finished and the operation as get_operation does. Sends progress notifications when the call asks for them. Cancelling the call stops the wait, not the operation.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "The operation's ID, as `run_plan` or `list_operations` names it.",
+          "type": "string"
+        },
+        "timeout": {
+          "description": "How many seconds to wait at most, up to 600; 60 when not given. A\nlarger number waits 600; 0 reads the operation once.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "wait_operation",
+    "outputSchema": {
+      "$defs": {
+        "ErrorDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        },
+        "IanaZone": {
+          "type": "string"
+        },
+        "LocationTriedDto": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "position",
+            "address",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationResultDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "bytes-processed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "snapshot": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "backup",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "packs-deleted": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "prune",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "packs-deleted",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "errors": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "check",
+                  "type": "string"
+                },
+                "warnings": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "errors",
+                "warnings",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "removed": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "forget",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "removed",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "rewritten": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "adopt",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "rewritten",
+                "duration-ms"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "OperationSummaryDto": {
+          "properties": {
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ErrorDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "failure-code": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "finished-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "locations": {
+              "items": {
+                "$ref": "#/$defs/LocationTriedDto"
+              },
+              "type": "array"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "queued-at": {
+              "type": "string"
+            },
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OperationResultDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "started-at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "warning-codes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "plan",
+            "kind",
+            "status",
+            "queued-at",
+            "started-at",
+            "finished-at",
+            "warning-codes",
+            "failure-code",
+            "result"
+          ],
+          "type": "object"
+        },
+        "OperationWarningDto": {
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "during": {
+              "type": "string"
+            },
+            "item": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "code",
+            "item",
+            "during",
+            "detail"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "finished": {
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/$defs/OperationSummaryDto"
+        },
+        "unlisted-warnings": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/OperationWarningDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "finished",
+        "operation",
+        "warnings",
+        "unlisted-warnings"
+      ],
+      "type": "object"
+    },
+    "title": "Wait for operation"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Asks a queued or running backup to stop, however it started; it then ends as cancelled. Maintenance can't be cancelled from here.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "The backup's ID, as `run_plan` or `list_operations` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "cancel_operation",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "operation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "type": "object"
+    },
+    "title": "Cancel operation"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Tries each location of a configured repository, as a backup would choose among them, and tells each one's outcome. Records nothing.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "description": "The repository's alias, as `list_repositories` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
+    "name": "test_repository",
+    "outputSchema": {
+      "$defs": {
+        "LocationTriedDto": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "position",
+            "address",
+            "outcome"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/LocationTriedDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "locations"
+      ],
+      "type": "object"
+    },
+    "title": "Test repository"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "What a forget of a repository maintained here would let go, by each plan's retention, and what it leaves alone. Reads the repository; deletes nothing.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "description": "The repository's alias, as `list_repositories` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
+    "name": "preview_forget",
+    "outputSchema": {
+      "$defs": {
+        "ClockOffset": {
+          "type": "string"
+        },
+        "ForgetPlanDto": {
+          "properties": {
+            "listed": {
+              "items": {
+                "$ref": "#/$defs/SnapshotDto"
+              },
+              "type": "array"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "remove": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "total": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "plan",
+            "total",
+            "remove",
+            "listed"
+          ],
+          "type": "object"
+        },
+        "IanaZone": {
+          "type": "string"
+        },
+        "LeftAloneDto": {
+          "properties": {
+            "orphaned": {
+              "$ref": "#/$defs/TallyDto"
+            },
+            "unmanaged": {
+              "$ref": "#/$defs/TallyDto"
+            }
+          },
+          "required": [
+            "orphaned",
+            "unmanaged"
+          ],
+          "type": "object"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "SnapshotDto": {
+          "properties": {
+            "hostname": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "offset": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ClockOffset"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "paths_truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "tags_truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "time": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "time",
+            "hostname",
+            "label",
+            "tags",
+            "paths",
+            "paths_truncated",
+            "tags_truncated"
+          ],
+          "type": "object"
+        },
+        "TallyDto": {
+          "properties": {
+            "groups": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "snapshots": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "groups",
+            "snapshots"
+          ],
+          "type": "object"
+        },
+        "WarningDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "left-alone": {
+          "$ref": "#/$defs/LeftAloneDto"
+        },
+        "plans": {
+          "items": {
+            "$ref": "#/$defs/ForgetPlanDto"
+          },
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/WarningDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plans",
+        "left-alone"
+      ],
+      "type": "object"
+    },
+    "title": "Preview forget"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "What importing a rustic profile, given as its TOML text, would add: the repository's name, the plans and what the import couldn't carry over. Saves nothing and reads no file; profiles it uses are named in a notice.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "description": "The rustic profile's TOML itself, never a path: no file is read, and\nthe profiles it uses are named in a notice.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The alias the profile's repository would be saved under.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "repository"
+      ],
+      "type": "object"
+    },
+    "name": "preview_import",
+    "outputSchema": {
+      "$defs": {
+        "IanaZone": {
+          "type": "string"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "WarningDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "notices": {
+          "items": {
+            "$ref": "#/$defs/WarningDto"
+          },
+          "type": "array"
+        },
+        "plans": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "plans",
+        "notices"
+      ],
+      "type": "object"
+    },
+    "title": "Preview import"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "A plan as a profile the stock rustic reads, and what the export left out. A password stored in the configuration is refused, never written out.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "description": "The plan's ID, as `list_plans` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "type": "object"
+    },
+    "name": "export_profile",
+    "outputSchema": {
+      "$defs": {
+        "IanaZone": {
+          "type": "string"
+        },
+        "MsgArg": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "count",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "bytes",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "duration-ms",
+                  "type": "string"
+                },
+                "value": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "timestamp",
+                  "type": "string"
+                },
+                "value": {
+                  "properties": {
+                    "utc_ms": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "zone": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/IanaZone"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "utc_ms"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "WarningDto": {
+          "properties": {
+            "args": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MsgArg"
+              },
+              "type": "object"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "notices": {
+          "items": {
+            "$ref": "#/$defs/WarningDto"
+          },
+          "type": "array"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "notices"
+      ],
+      "type": "object"
+    },
+    "title": "Export profile"
+  }
+]

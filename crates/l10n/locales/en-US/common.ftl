@@ -198,6 +198,12 @@ error-current-password-wrong = That is not the current admin password. Check it 
 # The admin password could not be checked or kept, so it was not set.
 error-admin-password-unavailable = { -brand-name } could not check or keep the admin password, so it was not set. Its log says why; check the data folder and try again.
 
+# `ladderback mcp --connect` got no answer from the daemon's API.
+error-daemon-unreachable = No { -brand-name } answered at the address { "ladderback mcp" } connects to. Check that the daemon is running and that { "--connect" } names its address.
+
+# `ladderback mcp --connect` sent a request that changes something, and its answer was lost on the way back.
+error-daemon-answer-lost = The request was sent to { -brand-name }, but no answer came back, so whether it took effect is unknown. It wasn't sent again: list the operations to see whether it did.
+
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.
 # $detail (text): the platform's message. It is shown as it came.
@@ -653,6 +659,10 @@ warning-profile-hooks-per-plan = The hooks the profile set for all its snapshot 
 # A profile named by the profile's use-profiles was not found.
 # $name (text): the name as the profile wrote it.
 warning-profile-used-missing = The profile uses a profile called { $name }, which was not found, so { -brand-name } went on without it. Check the name, or add the file to rustic's profile folder, then import again.
+
+# A profile previewed from its text uses another profile, which a preview never reads.
+# $name (text): the name as the profile wrote it.
+warning-profile-used-not-read = The profile uses a profile called { $name }, which a preview doesn't read, so this preview leaves out what it would add. Import the profile from its file to merge it.
 
 # A secret written in the profile was kept as text in the configuration.
 # $field (text): where the secret is, as its setting.

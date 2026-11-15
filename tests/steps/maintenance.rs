@@ -212,7 +212,7 @@ async fn operation_detail(agent: &Agent, id: &str) -> OperationDetailDto {
 }
 
 /// The operation the last start was accepted as.
-fn started(agent: &Agent) -> String {
+pub(crate) fn started(agent: &Agent) -> String {
     agent
         .maintenance
         .started

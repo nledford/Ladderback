@@ -15,6 +15,7 @@ mod api_tokens;
 mod body_limit;
 mod listener;
 mod maintenance;
+mod profiles;
 mod repositories;
 mod request_checks;
 mod response_headers;
@@ -46,6 +47,7 @@ use serde::{Deserialize, Serialize};
 
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
+pub use profiles::{Profiles, ProfilesError};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
     Exposure, InvalidHostName, RequestChecks, StartupRefusal, proxied_hosts, startup_rule,
@@ -75,6 +77,8 @@ pub struct AppState {
     pub catalog: Arc<dyn Catalog>,
     /// How a request tests, connects and initialises a repository.
     pub repositories: Arc<dyn Repositories>,
+    /// How a request previews a profile's import and exports a plan as one.
+    pub profiles: Arc<dyn Profiles>,
     /// Whether sign-in is on, and the sessions it has started (§10.1).
     pub sign_in: SignIn,
     /// Who can reach the daemon at the address it listens on, which the
@@ -1176,6 +1180,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
+            profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -1215,6 +1220,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
+            profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -2386,6 +2392,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: repos.clone(),
+            profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
