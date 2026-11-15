@@ -384,8 +384,7 @@ impl Server {
     /// Calls `call`'s tool as `tools/call` does, with no client to tell its
     /// progress or to cancel it: a one-shot call (§4.6).
     pub async fn call(&self, call: Call) -> Answer {
-        let _ = call;
-        todo!()
+        self.dispatch(call.tool, Some(call.arguments), None).await
     }
 
     /// Runs `tool` with the arguments `given`: the one dispatch of
