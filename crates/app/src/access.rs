@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use domain::access::{Client, Password, Sessions, SignInWaits, Token};
 use domain::{SignedDuration, Timestamp};
 
-use crate::ports::{AdminPassword, ApiTokenStore, Clock, Random};
+use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore, Clock, Random};
 
 mod api_tokens;
 
@@ -93,8 +93,13 @@ pub enum PasswordWaiting {
 impl PasswordWaiting {
     /// What `kept` holds now; `None` while it keeps no admin password.
     pub fn of(kept: &dyn AdminPassword) -> Option<Self> {
-        let _ = kept;
-        todo!()
+        match kept.fingerprint() {
+            Ok(_) => Some(Self::Set),
+            Err(AdminPasswordError::NotSet) => None,
+            Err(AdminPasswordError::Unreadable(_) | AdminPasswordError::Unwritable(_)) => {
+                Some(Self::Unreadable)
+            }
+        }
     }
 }
 

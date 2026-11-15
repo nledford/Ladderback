@@ -5,7 +5,7 @@
 //! and the DOM around them are `ws.rs` and `sign_in.rs`, which the `@ui`
 //! scenarios of `features/security/sign_in.feature` run in a browser.
 
-use api::{BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
+use api::{AdminPasswordDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
 use l10n::{MessageId, msg};
 use serde::Deserialize;
 
@@ -89,8 +89,10 @@ impl SignInOffNotice {
 /// file is damaged and the password must be set again; `None` while nothing
 /// waits, or with no answer the page could read.
 pub(crate) fn waiting_password(read: Option<&SessionDto>) -> Option<MessageId> {
-    let _ = read;
-    todo!()
+    match read?.admin_password? {
+        AdminPasswordDto::Set => Some(msg::UI_ADMIN_PASSWORD_WAITING),
+        AdminPasswordDto::Unreadable => Some(msg::UI_ADMIN_PASSWORD_DAMAGED),
+    }
 }
 
 /// What the page's title says once its standing has changed.
@@ -341,8 +343,6 @@ pub(crate) fn about_the_password(code: ErrorCode) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use api::AdminPasswordDto;
-
     use super::*;
 
     fn session(sign_in: SignInStateDto, csrf: Option<&str>) -> SessionDto {

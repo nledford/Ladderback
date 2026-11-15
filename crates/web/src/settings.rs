@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use api::{ApiTokenDto, ApiTokenScopeDto, ApiTokensDto, IanaZone, MsgArg};
-use l10n::{Localizer, msg};
+use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos::wasm_bindgen::closure::Closure;
@@ -31,6 +31,7 @@ use crate::components::{
 use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, instant, refused_sentence, text_with};
+use crate::session::{Standing, waiting_password};
 use crate::text;
 use crate::ws::{self, Got, Phase, Posted};
 
@@ -48,12 +49,25 @@ const SCOPES_ERROR_ID: &str = "api-token-scopes-error";
 /// The `id` of the field that holds a new token's whole text.
 const SECRET_ID: &str = "api-token-secret";
 
-/// The Settings page.
+/// The Settings page. With sign-in off, it asks the daemon on opening whether
+/// an admin password has been set since it started, which waits for a restart
+/// to turn sign-in on (decision 70), and says so above the API tokens.
 #[component]
 pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_SETTINGS_HEADING);
+    let waiting = RwSignal::new(None::<MessageId>);
+    let off = use_context::<RwSignal<Standing>>()
+        .is_some_and(|standing| matches!(standing.get_untracked(), Standing::Off));
+    if off {
+        spawn_local(async move {
+            let read = ws::session().await;
+            waiting.set(waiting_password(read.as_ref()));
+        });
+    }
+    let waiting_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
+        {move || waiting.get().map(|id| view! { <p>{text(&waiting_localizer, id)}</p> })}
         <ApiTokens localizer=localizer />
     }
 }
