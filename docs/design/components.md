@@ -49,7 +49,7 @@ Each running worker of a repository whose ID is known gets its own `cache_dir`, 
 
 - **Lock.** The worker also holds an exclusive `flock` on its slot directory for as long as it runs, and a daemon looking for a slot skips directories whose lock is held, so a worker that outlived a restarted daemon never shares its cache with a new one; a worker that finds its directory held runs with `no_cache`. A lock is only taken while the slot's path still names the folder locked, not a link, so a slot removed while its lock was held is never held through the folder that was removed.
 - **Cache folder.** The daemon passes its cache folder (below, under **Config**) to the engine at start, made 0700 when it isn't there yet; every folder made under it (the repository's folder, the slot, and the cache folder again when it was removed meanwhile) is always 0700.
-- **No cache folder.** With no cache folder (no home directory and no `LADDERBACK_CACHE_DIR`), or one that can't be made or written to (the daemon makes and removes a file of its own in it at start), it says so once in its log and its workers run with `no_cache`, which costs each job a fresh read of the index and nothing else (§16, decision 59).
+- **No cache folder.** With no cache folder (no home directory and no `LADDERBACK_CACHE_DIR`), or one that can't be made or written to (the daemon makes and removes a file of its own in it at start), the daemon says so once in its log and its workers run with `no_cache`, which costs each job a fresh read of the index and nothing else (§16, decision 59).
 - **No known ID.** Without a known ID, the worker runs with `no_cache`; a daemon job of a saved entry that records none therefore runs after an identify, with the ID it found (§16, decision 81), so only an identify, an initialisation and a job of a repository a request gave run that way.
 - **Why a job has no slot.** When the daemon has a cache folder and gives a job that opens a repository no slot, its log says why in one line at the info level, with the operation's ID and the job's kind: the job names no ID, or none of the repository's slots is free (a look at the slots that fails is logged the same way). A worker that finds the lock of the slot it was given held runs with `no_cache` without a line of its own: the daemon gave it a slot.
 - **A cache rustic can't write.** rustic itself treats a cache it can't write (a full or read-only disk) as a warning and goes on.
@@ -118,16 +118,18 @@ The worker keeps its own lines under the cap: it cuts each text field (log messa
   At the deadline the daemon stops the job, with the grace period, so a backup that archives can wind down (item 4), and so it does when the worker reports the deadline first; it checks the deadline on every event too, so a stream that never pauses can't hold it off. Once the worker has exited, the operation is recorded `deadline-passed`, whatever the exit code, so its end time can be up to the grace period past the deadline, as a cancelled one's is past the cancel. A result stands even when it arrives past the deadline: its snapshot is already written.
 - Two timeouts keep a hung worker from holding the daemon.
   - A new worker has one deadline of 30 s (`WorkerEngine::with_start_timeout`), counted from the start of the write of the job to its stdin, to take the job: it ends with the worker's first complete line of any kind, which is normally the `job accepted` log line above. Opening the repository, which a slow backend can make take longer, comes after that line and is not bounded by this timeout.
-  - A worker that doesn't read a spec larger than the pipe's buffer (64 KiB on Linux) leaves the write blocked, so `run` kills it with its process group and fails with `EngineError::StartTimedOut`.
-  - A worker that took its job and then says nothing is killed with its group by the job's event stream, which ends with a single `Failed(EngineStartTimedOut)`; `run` doesn't wait for it, because that would delay a user's cancel until the first event. Either way the operation fails as `EngineStartTimedOut` without having started.
-  - After its first line a worker is not on this clock: how long it takes from there is for the job's deadline and for cancel. A timeout too long to represent, such as `Duration::MAX`, never passes.
+
+    A worker that doesn't read a spec larger than the pipe's buffer (64 KiB on Linux) leaves the write blocked, so `run` kills it with its process group and fails with `EngineError::StartTimedOut`.
+
+    A worker that took its job and then says nothing is killed with its group by the job's event stream, which ends with a single `Failed(EngineStartTimedOut)`; `run` doesn't wait for it, because that would delay a user's cancel until the first event. Either way the operation fails as `EngineStartTimedOut` without having started.
+
+    After its first line a worker is not on this clock: how long it takes from there is for the job's deadline and for cancel. A timeout too long to represent, such as `Duration::MAX`, never passes.
   - Once a worker's event stream has ended, the process has 10 s to exit (`with_exit_timeout`): one that stays alive is killed, and the operation fails as `EngineExitTimedOut`.
-  - The wait inside `Control::stop()` after SIGKILL has no timeout of its own: its signature can't fail, and a SIGKILL can't be refused short of an uninterruptible sleep.
+
+    The wait inside `Control::stop()` after SIGKILL has no timeout of its own: its signature can't fail, and a SIGKILL can't be refused short of an uninterruptible sleep.
 - Backup chooses the parent with `PlanTags::parent`: explicit `ParentOptions.parents`, or rustic's own match when it returns `None`. Extra tags are `UserTag`s, which never start with the reserved `ladderback-` prefix in any case, so they can't make a snapshot look like another plan's (I6); the worker refuses such a tag in a spec too.
-
-  Prune always runs with `instant_delete = false` and `early_delete_index = false`, and `keep_delete` is a `KeepDelete`, never under rustic's 23 h default; the worker refuses a shorter one too. Its summary counts `packs_marked = unused + repack`, `packs_deleted = packs_to_delete.remove` and `packs_recovered = packs_to_delete.recover`.
-
-  Check sends each finding as a warning of its level (`check-warning` for rustic's `Warn`, `check-error` for anything else) in rustic's own words, masked and cut like every warning, the errors first so that the operation's cap on warnings never keeps a tidy-up in place of an error, then counts the findings by level; a check that ran to its end succeeds, with warnings when it found anything (§16, decision 51).
+- Prune always runs with `instant_delete = false` and `early_delete_index = false`, and `keep_delete` is a `KeepDelete`, never under rustic's 23 h default; the worker refuses a shorter one too. Its summary counts `packs_marked = unused + repack`, `packs_deleted = packs_to_delete.remove` and `packs_recovered = packs_to_delete.recover`.
+- Check sends each finding as a warning of its level (`check-warning` for rustic's `Warn`, `check-error` for anything else) in rustic's own words, masked and cut like every warning, the errors first so that the operation's cap on warnings never keeps a tidy-up in place of an error, then counts the findings by level; a check that ran to its end succeeds, with warnings when it found anything (§16, decision 51).
 - A backup's spec carries its plan's snapshot host (§3.1) and its whole `SourceFilter` as `SourceFilterSpec`. The worker maps the filter's globs and glob files onto rustic's `Excludes` and the rest onto `LocalSourceFilterOptions`, and the host onto `SnapshotOptions::host`; with no host, rustic records the machine's own name.
 
   The worker parses the host again as a `Hostname` and refuses one that isn't (`InvalidJobSpec`), before it opens the repository. A spec without `filter`, as an older daemon's would be, is refused the same way; a spec without `host` means no host.
@@ -188,7 +190,8 @@ This section decides what the daemon does: its HTTP server and API, the schedule
 - **Config** (§6.1). `config.toml` in the platform config dir, `LADDERBACK_CONFIG_DIR` when set (a non-empty value; tests and a second daemon use it). The platform folders:
   - macOS `~/Library/Application Support/ladderback` for both config and data, `~/Library/Caches/ladderback` for the cache.
   - Linux `$XDG_CONFIG_HOME|$HOME/.config/ladderback`, `$XDG_DATA_HOME|$HOME/.local/share/ladderback` and `$XDG_CACHE_HOME|$HOME/.cache/ladderback` (a relative `XDG_CACHE_HOME` is ignored, as the XDG specification says).
-  - `LADDERBACK_DATA_DIR` overrides the data dir, which holds `ladderback.db` and the agent ID, and `LADDERBACK_CACHE_DIR` the cache dir, which holds the workers' cache slots and nothing that is needed.
+
+  `LADDERBACK_DATA_DIR` overrides the data dir, which holds `ladderback.db` and the agent ID, and `LADDERBACK_CACHE_DIR` the cache dir, which holds the workers' cache slots and nothing that is needed.
 
   No home directory and no override is a typed exit for the config and data dirs, not a guess; for the cache dir it only means workers without a cache (§16, decision 59). A service with no home directory sets `LADDERBACK_CACHE_DIR` (under systemd, to its `CacheDirectory=`).
 
@@ -233,7 +236,9 @@ This section decides what the daemon does: its HTTP server and API, the schedule
     `failure` is a field added to the published `/api/v1` shape (operations.md §12.1), so `failure-code` stays as it was.
   - `POST /api/v1/operations/{id}/cancel` takes the empty JSON body `{}` (the JSON-body rule applies to every mutating method) and cancels politely: the worker stops, the finally-hooks run, the operation ends `cancelled`.
 
-    Cancel reaches an operation whose cancel switch is parked: a running one, and a queued one this daemon started or the persistent queue has handed on, which ends `cancelled` without reaching the engine. A queued operation from before a restart that the queue hasn't handed on yet (it is still on its way, or the configuration couldn't be read, decision 73) has no switch, and is `operation-not-running` (409) like a finished one; an unknown ID is `operation-unknown` (404), a cursor that isn't an operation ID `invalid-cursor` (400), and `limit` is clamped, never refused.
+    Cancel reaches an operation whose cancel switch is parked: a running one, and a queued one this daemon started or the persistent queue has handed on, which ends `cancelled` without reaching the engine. A queued operation from before a restart that the queue hasn't handed on yet (it is still on its way, or the configuration couldn't be read, decision 73) has no switch, and is `operation-not-running` (409) like a finished one.
+
+  An unknown ID is `operation-unknown` (404), a cursor that isn't an operation ID `invalid-cursor` (400), and `limit` is clamped, never refused.
 
   Operation IDs are UUIDv7, which is what the log orders by. A second backup of the same plan runs beside the first; I7's slot rule is maintenance-only.
 
@@ -374,7 +379,9 @@ This section decides what the daemon does: its HTTP server and API, the schedule
 
   A backup's `result` carries `files` (new, changed and unmodified, summed without overflowing), `bytes` (the data it added, as before), `duration-ms`, and the optional `snapshot` (64 hex digits) and `bytes-processed` (the source it went through).
 
-  A summary of a repository reached at several locations carries `locations` (decision 80): every location as the run's choice saw it, in order, as `{position, address, outcome, source?}` like a Test's answer, with `not-tried` for a location after the one used; the one whose `outcome` is `used` is the location the run used. It is left out for a repository of one location and for an operation that opens none. Every new field is optional, so a client of the earlier API reads what it read before.
+  A summary of a repository reached at several locations carries `locations` (decision 80): every location as the run's choice saw it, in order, as `{position, address, outcome, source?}` like a Test's answer, with `not-tried` for a location after the one used; the one whose `outcome` is `used` is the location the run used. It is left out for a repository of one location and for an operation that opens none.
+
+  Every new field is optional, so a client of the earlier API reads what it read before.
 - **Secrets** (§10.2).
 - **Hub client** (§7). It keeps an outbound WebSocket open, with reconnect, backoff and outbox replay.
 
@@ -404,9 +411,9 @@ Every page follows §4.5. Pages:
 3. **Plans.** Create and edit sources, excludes (globs, iglobs, git-ignore, exclude-if-present), tags and label, schedule, retry policy, retention, hooks and repository. Also "Import rustic profile…" and "Export as rustic profile".
 4. **Repositories.** Add or connect (local, SFTP, REST, S3, B2, rclone…), test the connection, init, stats (`infos_files`/`infos_index`), and request a maintenance owner and set the maintenance schedule. Shows the repository ID, the granted owner and any rejected claim. Testing opens the repository and reports its ID; a write-permission check is **not yet built** (it belongs with the maintenance-owner work).
 5. **Snapshots.** Pick a repository, and its history is grouped by owner:
-   - A section for each plan of this agent (a table of its snapshots, newest first: the newest are listed and the rest counted; each time is the one the clock that took it read, with that clock's offset after it when the viewer's was at another then, §16 decision 56).
-   - **Orphaned history** (snapshots tagged for an agent or a plan this configuration does not have).
-   - **Unmanaged history** (snapshots no agent tagged).
+   1. A section for each plan of this agent (a table of its snapshots, newest first: the newest are listed and the rest counted; each time is the one the clock that took it read, with that clock's offset after it when the viewer's was at another then, §16 decision 56).
+   2. **Orphaned history** (snapshots tagged for an agent or a plan this configuration does not have).
+   3. **Unmanaged history** (snapshots no agent tagged).
 
    A group that a plan of this agent could take over has an **Adopt** button (§7.3); a group that none could take over says why: an orphaned group lacks the tag of an agent or a plan, or no plan of this agent could take it, and an unmanaged group has no plan that backs up the same host, label and paths. A repository no plan backs up to that holds nothing says that too.
 
@@ -441,7 +448,8 @@ How an operation started and how it ended are not the worker's to announce but t
 - It publishes one `operation-succeeded` or `operation-failed` after its last write to the operation log, from the operation as it ended and after its ending hooks have run, so a page that reads the history on hearing it finds the end there.
 - A write the log refused, or gave up on after `SAVE_BOUND` (§9), does not hold either announcement back: the history then shows the operation as the log last had it, and the run's `Finished::recording_errors` holds the write.
 - A cancelled operation announces no end, and one cancelled before the log had it running announces no start either; a run of several engine jobs announces once.
-- A job that is no operation (the repository's ID, a snapshot list, the groups, a preview, initialising a repository) publishes nothing at all, no start, end, progress or warning (#308): the history has no row for it, and a run that reads first keeps none of what its read said.
+
+A job that is no operation (the repository's ID, a snapshot list, the groups, a preview, initialising a repository) publishes nothing at all, no start, end, progress or warning (#308): the history has no row for it, and a run that reads first keeps none of what its read said.
 
 The events WebSocket answers a client's ping with a pong, so a live page survives an idle network.
 
