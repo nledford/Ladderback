@@ -2,16 +2,16 @@
 
 This section decides how the web UI and the API are protected, how repository secrets are resolved and kept out of every output, and what an agent, a restore, an MCP client and a repository location may do.
 
-**Who is trusted** (§16, decision 99). Ladderback runs on a person's own computer, as a hub or an agent. The person, and every process running as their operating-system user, AI agents and development tools included, can already read and write the data folder: `config.toml`, the SQLite store, the admin password's hash, the logs. Ladderback doesn't try to protect its data from them, and a weakness that needs such a process first is not a security finding unless it reaches further than that user could already reach.
+**Who is trusted** (§16, decision 99). Ladderback runs on a person's own computer, as a hub or an agent. The person, and every program running as their operating-system user, AI tools and development tools included, can already read and write the data folder: `config.toml`, the SQLite store, the admin password's hash, the logs. Ladderback doesn't rely on keeping its data from them, and a weakness that needs such a program first is not a security finding unless it reaches further than that user already could. Root and the machine's administrators are outside every boundary here.
 
 What this section defends against instead:
 
 - other machines that can reach the address the daemon listens on;
-- other operating-system users of a shared machine;
+- other operating-system users of a shared machine, once an admin password is set ("Local users", §10.1);
 - the storage a repository lives on, and the services in between;
 - text from outside that a program acts on: an MCP client's calls, rustic's output.
 
-I4 is unchanged: argv and environments are visible to other users, and logs, templates, sync messages and the UI leave the person's control. The Justfile's recipes are development tools for contributors who know the risks; they may read the daemon's local state directly, and nothing in the product depends on them.
+I4 is unchanged, for reasons that reach beyond the person's own user: argv is visible to other users; environments are handed to hooks and the programs they start; logs, templates, sync messages and the UI leave the person's control. The rules that keep secrets out of the data folder stand too (repository passwords in the keyring, the generated password of decision 89 only in the daemon's memory), because the data folder can be copied, synced or backed up off the machine; they aren't a defense against the person's own programs. The Justfile's recipes are development tools for contributors who know the risks, so they may read the daemon's local state directly (#699).
 
 ### 10.1 Web UI
 
