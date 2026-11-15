@@ -5,6 +5,17 @@
 //! the scenario that ran over the limit, and when the run ends it says which
 //! scenario was slowest, the figure a limit is chosen from.
 //!
+//! When the runner's stdout isn't a terminal, as in CI, the watch also says
+//! on stderr when each scenario begins and ends, one line each. A run that
+//! hangs where the limit can't see it, after a scenario's `after` hook (its
+//! world being dropped) or at the runner's own end, and is stopped by CI then
+//! still shows in the log which scenarios ran last and whether any began and
+//! never ended (#638). In a terminal it stays quiet: cucumber's own writer
+//! redraws its last lines there, and a line between them would garble it.
+//! The gate is stdout alone, not cucumber's `--color`, which the watch
+//! doesn't see: `--color always` into a pipe mixes cucumber's redraws with
+//! these lines, and `--color never` in a terminal leaves them off.
+//!
 //! The runner registers [`ScenarioWatch::began`] as its `before` hook and
 //! [`ScenarioWatch::ended`] as its `after` hook, naming the scenario with
 //! [`ScenarioWatch::describe`]. The watch is a thread of its own, so a step
@@ -13,6 +24,7 @@
 //! `cargo deny` checks only for what ships (`synthez`, BlueOak-1.0.0).
 
 use std::collections::HashMap;
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -26,6 +38,8 @@ const TICK: Duration = Duration::from_millis(250);
 #[derive(Clone)]
 pub struct ScenarioWatch {
     runner: &'static str,
+    /// Whether each scenario's beginning and end are said on stderr.
+    announce: bool,
     scenarios: Arc<Mutex<Running>>,
 }
 
@@ -37,6 +51,7 @@ impl ScenarioWatch {
     pub fn start(runner: &'static str, limit: Duration) -> Self {
         let watch = Self {
             runner,
+            announce: !io::stdout().is_terminal(),
             scenarios: Arc::new(Mutex::new(Running::new(limit))),
         };
         let watching = watch.clone();
@@ -63,13 +78,29 @@ impl ScenarioWatch {
     /// Notes that `scenario`, named `name` (see [`Self::describe`]), started:
     /// the runner's `before` hook.
     pub fn began<S: ?Sized>(&self, scenario: &S, name: String) {
+        if self.announce {
+            self.say(&format!("began {name}"));
+        }
         self.running().began(key(scenario), name, Instant::now());
     }
 
     /// Notes that `scenario` ended, however it ended: the runner's `after`
     /// hook.
     pub fn ended<S: ?Sized>(&self, scenario: &S) {
-        self.running().ended(key(scenario), Instant::now());
+        let ended = self.running().ended(key(scenario), Instant::now());
+        if self.announce
+            && let Some((name, took)) = ended
+        {
+            self.say(&format!("ended {name} after {took:.1?}"));
+        }
+    }
+
+    /// Writes `what` on stderr as one line in one `write`, so it never splits
+    /// around a line cucumber writes at the same time. A lost line costs
+    /// only a clue, so a failed write is ignored rather than ending the run.
+    fn say(&self, what: &str) {
+        let line = format!("{}: {what}\n", self.runner);
+        let _ignored = io::stderr().lock().write_all(line.as_bytes());
     }
 
     /// Says on stderr which scenario was slowest, when the returned guard is
@@ -152,14 +183,15 @@ impl Running {
         self.started.insert(key, (name, at));
     }
 
-    fn ended(&mut self, key: usize, at: Instant) {
-        let Some((name, began)) = self.started.remove(&key) else {
-            return;
-        };
+    /// Ends the scenario `key` began, keeping it if it was the slowest yet,
+    /// and gives back its name and how long it took.
+    fn ended(&mut self, key: usize, at: Instant) -> Option<(String, Duration)> {
+        let (name, began) = self.started.remove(&key)?;
         let took = at.saturating_duration_since(began);
         if self.slowest.as_ref().is_none_or(|(_, worst)| took > *worst) {
-            self.slowest = Some((name, took));
+            self.slowest = Some((name.clone(), took));
         }
+        Some((name, took))
     }
 
     /// The scenario that has run longest, with how long, once that is longer
@@ -237,49 +269,73 @@ mod tests {
     fn a_scenario_that_never_began_ends_without_a_trace() {
         let start = Instant::now();
         let mut running = Running::new(LIMIT);
-        running.ended(7, start + Duration::from_secs(1));
+        assert_eq!(running.ended(7, start + Duration::from_secs(1)), None);
         assert_eq!(running.slowest, None);
         assert!(running.started.is_empty());
     }
 
+    #[test]
+    fn an_ended_scenario_gives_its_name_and_how_long_it_took() {
+        let start = Instant::now();
+        let mut running = Running::new(LIMIT);
+        running.began(1, "slow".to_owned(), start);
+        running.began(2, "quick".to_owned(), start + Duration::from_secs(1));
+        assert_eq!(
+            running.ended(1, start + Duration::from_secs(4)),
+            Some(("slow".to_owned(), Duration::from_secs(4)))
+        );
+        assert_eq!(
+            running.ended(2, start + Duration::from_secs(2)),
+            Some(("quick".to_owned(), Duration::from_secs(1)))
+        );
+    }
+
     /// The variable that makes this test binary, started again by
-    /// [`a_scenario_over_the_limit_stops_the_process_and_is_named`], play
-    /// the hung run.
+    /// [`hung_run`], play the hung run.
     const HUNG_RUN_ENV: &str = "TESTKIT_SCENARIO_WATCH_HUNG_RUN";
 
-    #[test]
-    fn a_scenario_over_the_limit_stops_the_process_and_is_named() {
-        if std::env::var_os(HUNG_RUN_ENV).is_some() {
-            // The child: a scenario begins and never ends.
-            let watch = ScenarioWatch::start("hung runner", Duration::from_millis(100));
-            let scenario = "A step that waits for ever";
-            let name = ScenarioWatch::describe(
-                scenario,
-                3,
-                Some(Path::new("features/demo.feature")),
-                "Demo",
-            );
-            watch.began(scenario, name);
-            thread::sleep(Duration::from_secs(30));
-            return;
-        }
+    /// The hung run: one scenario begins and ends, then another begins and
+    /// never ends.
+    fn play_hung_run() {
+        let watch = ScenarioWatch::start("hung runner", Duration::from_millis(100));
+        let demo = Some(Path::new("features/demo.feature"));
+        let quick = "A step that returns";
+        watch.began(quick, ScenarioWatch::describe(quick, 1, demo, "Demo"));
+        watch.ended(quick);
+        let hung = "A step that waits for ever";
+        watch.began(hung, ScenarioWatch::describe(hung, 3, demo, "Demo"));
+        thread::sleep(Duration::from_secs(30));
+    }
+
+    /// Runs [`play_hung_run`] in this test binary started again, its stdout
+    /// a pipe as in CI, as the test `test` names. Gives back its exit status,
+    /// its stderr and how long it ran.
+    fn hung_run(test: &str) -> (Option<i32>, String, Duration) {
         let begun = Instant::now();
         let mut hung = Command::new(std::env::current_exe().unwrap());
-        hung.args([
-            "--exact",
-            "scenario_watch::tests::a_scenario_over_the_limit_stops_the_process_and_is_named",
-            "--nocapture",
-        ])
-        .env(HUNG_RUN_ENV, "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        hung.args(["--exact", test, "--nocapture"])
+            .env(HUNG_RUN_ENV, "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let child = spawn_gate::hold(|| hung.spawn())
             .unwrap()
             .wait_with_output()
             .unwrap();
-        let stderr = String::from_utf8_lossy(&child.stderr);
-        assert_eq!(child.status.code(), Some(1), "stderr: {stderr}");
+        let stderr = String::from_utf8_lossy(&child.stderr).into_owned();
+        (child.status.code(), stderr, begun.elapsed())
+    }
+
+    #[test]
+    fn a_scenario_over_the_limit_stops_the_process_and_is_named() {
+        if std::env::var_os(HUNG_RUN_ENV).is_some() {
+            play_hung_run();
+            return;
+        }
+        let (status, stderr, took) = hung_run(
+            "scenario_watch::tests::a_scenario_over_the_limit_stops_the_process_and_is_named",
+        );
+        assert_eq!(status, Some(1), "stderr: {stderr}");
         assert!(
             stderr.contains(
                 "hung runner: the scenario \"A step that waits for ever\" \
@@ -288,9 +344,43 @@ mod tests {
             "stderr: {stderr}"
         );
         assert!(
-            begun.elapsed() < Duration::from_secs(20),
-            "the watch stopped the run only after {:?}",
-            begun.elapsed()
+            took < Duration::from_secs(20),
+            "the watch stopped the run only after {took:?}"
+        );
+    }
+
+    /// What a run CI stops at its own limit leaves in the log (#638): the
+    /// scenario that began and never ended.
+    #[test]
+    fn with_stdout_no_terminal_each_scenario_is_named_as_it_begins_and_ends() {
+        if std::env::var_os(HUNG_RUN_ENV).is_some() {
+            play_hung_run();
+            return;
+        }
+        let (_, stderr, _) = hung_run(
+            "scenario_watch::tests::\
+             with_stdout_no_terminal_each_scenario_is_named_as_it_begins_and_ends",
+        );
+        let said: Vec<&str> = stderr
+            .lines()
+            .filter(|line| {
+                line.starts_with("hung runner: began ") || line.starts_with("hung runner: ended ")
+            })
+            .collect();
+        assert_eq!(said.len(), 3, "stderr: {stderr}");
+        assert_eq!(
+            said[0],
+            "hung runner: began \"A step that returns\" (features/demo.feature:1)"
+        );
+        assert!(
+            said[1].starts_with(
+                "hung runner: ended \"A step that returns\" (features/demo.feature:1) after "
+            ),
+            "stderr: {stderr}"
+        );
+        assert_eq!(
+            said[2],
+            "hung runner: began \"A step that waits for ever\" (features/demo.feature:3)"
         );
     }
 }

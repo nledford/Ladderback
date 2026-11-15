@@ -198,9 +198,13 @@ jobs:
       - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just test-contrast
       # The ci profile (.config/nextest.toml) retries, reports flaky tests and
-      # writes the JUnit report.
+      # writes the JUnit report. The step has a limit of its own, below the
+      # job's 45 minutes: a hang (#638) then fails the step, which keeps its
+      # log, where cancelling the job at its limit discarded it. The figure is
+      # measured in development.md §13.8.
       - if: needs.changes.outputs.docs-only != 'true'
         run: just test
+        timeout-minutes: 30
         env:
           NEXTEST_PROFILE: ci
       # Nothing fails when the build cache saves nothing: every later run just
