@@ -310,20 +310,16 @@ impl InProcess {
 #[async_trait]
 impl ::mcp::Backend for InProcess {
     async fn status(&self) -> Result<::mcp::BackendStatus, api::ErrorDto> {
-        let listed = self.catalog.plans().await.map_err(
-            |http_adapter::CatalogError::Unavailable { code, args, detail }| {
-                api::ErrorDto::new(code, args, detail)
-            },
-        )?;
+        let listed = self.plans().await?;
         let mut plans = Vec::with_capacity(listed.plans.len());
         for plan in listed.plans {
-            let page = self.newest(Some(plan.id.clone()), 1).await?;
+            let page = self.history(Some(plan.id.clone()), None, 1).await?;
             plans.push(::mcp::PlanStatus {
                 last: page.operations.into_iter().next(),
                 plan,
             });
         }
-        let recent = self.newest(None, ::mcp::RECENT_OPERATIONS).await?;
+        let recent = self.history(None, None, ::mcp::RECENT_OPERATIONS).await?;
         Ok(::mcp::BackendStatus {
             access: ::mcp::Access::InProcess,
             daemon: None,
@@ -331,23 +327,72 @@ impl ::mcp::Backend for InProcess {
             running: ::mcp::unfinished(recent.operations),
         })
     }
-}
 
-impl InProcess {
-    /// The newest `limit` operations, of `plan` alone when it names one.
-    async fn newest(
+    async fn plans(&self) -> Result<api::PlansDto, api::ErrorDto> {
+        self.catalog.plans().await.map_err(catalog_refusal)
+    }
+
+    async fn repositories(&self) -> Result<api::RepositoriesDto, api::ErrorDto> {
+        self.catalog.repositories().await.map_err(catalog_refusal)
+    }
+
+    async fn snapshots(&self, repository: String) -> Result<api::SnapshotsDto, api::ErrorDto> {
+        use http_adapter::SnapshotsError;
+        self.catalog
+            .snapshots(repository.clone())
+            .await
+            .map_err(|error| match error {
+                SnapshotsError::Unknown => api::ErrorDto::new(
+                    api::ErrorCode::RepositoryUnknown,
+                    [("alias", MsgArg::Text(repository))],
+                    None,
+                ),
+                SnapshotsError::SecretRefused(secret) => {
+                    api::ErrorDto::new(secret.code, secret.args, secret.detail)
+                }
+                SnapshotsError::Unavailable { code, args, detail } => {
+                    api::ErrorDto::new(code, args, detail)
+                }
+            })
+    }
+
+    async fn history(
         &self,
         plan: Option<String>,
+        after: Option<String>,
         limit: u64,
     ) -> Result<api::OperationsPageDto, api::ErrorDto> {
         self.operations
-            .history(plan, None, Some(limit))
+            .history(plan, after.clone(), Some(limit))
             .await
-            // Refused only for a cursor, and none is sent.
             .map_err(|http_adapter::HistoryError::BadCursor| {
-                api::ErrorDto::new(api::ErrorCode::InvalidCursor, [], None)
+                api::ErrorDto::new(
+                    api::ErrorCode::InvalidCursor,
+                    after.map(|cursor| ("cursor", MsgArg::Text(cursor))),
+                    None,
+                )
             })
     }
+
+    async fn operation(&self, id: String) -> Result<api::OperationDetailDto, api::ErrorDto> {
+        self.operations
+            .operation(id.clone())
+            .await
+            .map_err(|http_adapter::LookupError::Unknown| {
+                api::ErrorDto::new(
+                    api::ErrorCode::OperationUnknown,
+                    [("operation", MsgArg::Text(id))],
+                    None,
+                )
+            })
+    }
+}
+
+/// A catalog's refusal as the API answers it: the configuration's
+/// `config-*` code, its arguments and the store's words.
+fn catalog_refusal(error: http_adapter::CatalogError) -> api::ErrorDto {
+    let http_adapter::CatalogError::Unavailable { code, args, detail } = error;
+    api::ErrorDto::new(code, args, detail)
 }
 
 #[cfg(test)]

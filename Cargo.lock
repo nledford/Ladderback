@@ -134,6 +134,7 @@ name = "api"
 version = "0.3.1"
 dependencies = [
  "jiff",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
 ]

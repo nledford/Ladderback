@@ -7,8 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# JSON schemas of the types the MCP server's tools return, for their output
+# schemas (§4.6). Only `adapters/mcp` turns it on.
+schemars = ["dep:schemars"]
+
 [dependencies]
 jiff.workspace = true
+schemars = { workspace = true, optional = true }
 serde.workspace = true
 
 [dev-dependencies]
