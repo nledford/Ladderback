@@ -289,7 +289,10 @@ impl UserService {
     /// Service starts only with the user's desktop session; a launchd agent
     /// runs only while its user is logged in.
     pub fn keyring_waits_for_login(&self) -> bool {
-        todo!()
+        match self.kind {
+            Kind::Systemd => true,
+            Kind::Launchd { .. } => false,
+        }
     }
 }
 

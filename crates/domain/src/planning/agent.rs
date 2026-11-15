@@ -264,7 +264,15 @@ impl AgentConfig {
     /// How many repositories read their password from the OS keyring
     /// (`password-keyring`).
     pub fn keyring_passwords(&self) -> usize {
-        todo!()
+        self.repositories
+            .values()
+            .filter(|entry| {
+                matches!(
+                    entry.settings.password,
+                    crate::secrets::SecretRef::Keyring(_)
+                )
+            })
+            .count()
     }
 
     /// The plans, in the order they were written.

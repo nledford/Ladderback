@@ -199,6 +199,14 @@ cli-service-replaced = replaced the service { $file } and started it again
 # `loginctl enable-linger` is a command, typed as it is: keep it a string literal.
 cli-service-linger = to keep it running while you are logged out, run { "loginctl enable-linger" }
 
+# Linux only, after an install, when repositories read their password from the keyring: a service that lingers starts at boot, before the login that starts the Secret Service, so it can't read the password until someone logs in.
+# $count (number): how many repositories read their password from the keyring.
+# `password-file` is a setting, typed as it is: keep it a string literal.
+cli-service-keyring-before-login = { $count ->
+    [one] a repository reads its password from the keyring, which a service that runs while you are logged out can't read before you log in: to back it up while you are logged out, keep its password in a file only you can read (mode 600) and name it with { "password-file" }
+   *[other] { $count } repositories read their passwords from the keyring, which a service that runs while you are logged out can't read before you log in: to back them up while you are logged out, keep their passwords in files only you can read (mode 600) and name them with { "password-file" }
+}
+
 # The service manager stopped the service, and its file was removed.
 # $file (text): the service file's path.
 cli-service-removed = removed the service { $file }: it no longer runs

@@ -6,12 +6,15 @@
 use std::io;
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use api::MsgArg;
-use app::ports::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
+use app::ports::{ConfigStore, Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
+use config_adapter::FileConfigStore;
 use domain::service::{ServicePath, ServicePathProblem};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::service::{Unavailable, UserService, program_path};
+use platform::{SystemClock, dirs};
 
 use crate::output::{to_stderr, to_stdout};
 use crate::{finish, said, say, text};
@@ -38,6 +41,8 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
     let Some(runtime) = runtime(localizer)? else {
         return Ok(ExitCode::FAILURE);
     };
+    // Read before the install starts the service, whose own load may
+    // migrate the file meanwhile.
     let keyring = keyring_passwords(&runtime);
     match runtime.block_on(service.install(&program)) {
         Ok(Installed { file, replaced }) => {
@@ -95,14 +100,32 @@ fn remove(localizer: &Localizer) -> io::Result<ExitCode> {
 }
 
 /// How many repositories of the configuration read their password from the
-/// keyring.
-fn keyring_passwords(_runtime: &tokio::runtime::Runtime) -> usize {
-    todo!()
+/// keyring: none when there is no configuration, or it can't be read, which
+/// the service says itself when it starts.
+fn keyring_passwords(runtime: &tokio::runtime::Runtime) -> usize {
+    let Some(folder) = dirs::config_dir() else {
+        return 0;
+    };
+    let config = FileConfigStore::new(folder.join("config.toml"), Arc::new(SystemClock));
+    runtime
+        .block_on(config.load())
+        .map_or(0, |config| config.keyring_passwords())
 }
 
-/// What to say of the repositories whose password is in the keyring.
-fn keyring_said(_localizer: &Localizer, _service: &UserService, _keyring: usize) -> String {
-    todo!()
+/// The line that says a lingering service can't read the `keyring`
+/// repositories' passwords before login, with a password file instead, or
+/// nothing where the service runs only after login or no password is in the
+/// keyring (#479).
+fn keyring_said(localizer: &Localizer, service: &UserService, keyring: usize) -> String {
+    if keyring == 0 || !service.keyring_waits_for_login() {
+        return String::new();
+    }
+    let count = u64::try_from(keyring).unwrap_or(u64::MAX);
+    line(
+        localizer,
+        msg::CLI_SERVICE_KEYRING_BEFORE_LOGIN,
+        &[("count", MsgArg::Count(count))],
+    )
 }
 
 /// This platform's service manager for this user, or `None` once why there
