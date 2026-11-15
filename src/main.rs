@@ -16,7 +16,7 @@
 
 use std::ffi::OsString;
 use std::future::IntoFuture as _;
-use std::io;
+use std::io::{self, Write as _};
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -208,7 +208,14 @@ fn main() -> ExitCode {
             scratch,
             ..
         } => serve_mcp(McpMode::of(connect, token_file, scratch), plain),
-        Command::Worker => engine::worker::main(build_info::NAMED.as_str()),
+        Command::Worker => {
+            // Before it reads its job, which carries the secrets (decision
+            // 98). The kernel set the dumpable flag again when it started.
+            for unprotected in platform::dumps::refuse() {
+                let _ = writeln!(io::stderr(), "{}", dumps::worker_line(&unprotected));
+            }
+            engine::worker::main(build_info::NAMED.as_str())
+        }
     }
 }
 
@@ -318,9 +325,15 @@ fn serve(
     service_managed: bool,
     plain: bool,
 ) -> ExitCode {
+    // First, before any secret is resolved (decision 98); said once the log
+    // is set up.
+    let unprotected = platform::dumps::refuse();
     logging::install(plain);
     log::info!("{} starting", *build_info::NAMED);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    for unprotected in &unprotected {
+        log::warn!("{}", dumps::daemon_line(&localizer, unprotected));
+    }
     finish(
         &localizer,
         run_daemon(&localizer, listen, allowed_hosts, service_managed),
