@@ -655,3 +655,25 @@ table.repositories :is(th, td) {
 button.whole-words {
   overflow-wrap: normal;
 }
+
+/* A snapshot's tree (§4.5): one flat list of rows, each indented by its
+   level from the start of the line, so it follows the page's direction, up
+   to `tree::INDENT_CAP` steps, so a deep folder's rows still fit 320 px
+   (1.4.10); `aria-level` says the exact level. A row is tall enough to aim
+   at (2.5.8), and its name and description wrap rather than run outside
+   the page. */
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree-row {
+  min-block-size: 1.5rem;
+  padding-block: 0.125rem;
+  overflow-wrap: anywhere;
+}
+
+.tree-row[aria-selected="true"] {
+  font-weight: 700;
+}
