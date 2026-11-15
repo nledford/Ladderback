@@ -103,6 +103,28 @@ Feature: Stopping the daemon
     And the daemon's log says "stopping (SIGTERM)"
     And the daemon's log says how long it took to stop, and how long it waited for each step
 
+  # The signal is sent the moment the line is read, before the daemon has
+  # answered anything, and the start is repeated: a signal that lands before
+  # the daemon listens for it kills it, so the scenario looks for that
+  # moment more than once (#628).
+  @e2e
+  Scenario: A daemon told to stop the moment it says it listens stops in order
+    A service manager may stop a daemon it has just started, as a quick
+    restart does. From the moment the daemon says it listens, a stop signal
+    takes the orderly stop, never the default that kills it outright.
+
+    Given Ladderback is serving on loopback with the plan "home"
+    When the daemon is told to stop
+    And Ladderback is started again on the same folders, and told to stop the moment it says it listens
+    Then the daemon has exited with status 0
+    And the daemon's log says how long it took to stop, and how long it waited for each step
+    When Ladderback is started again on the same folders, and told to stop the moment it says it listens
+    Then the daemon has exited with status 0
+    And the daemon's log says how long it took to stop, and how long it waited for each step
+    When Ladderback is started again on the same folders, and told to stop the moment it says it listens
+    Then the daemon has exited with status 0
+    And the daemon's log says how long it took to stop, and how long it waited for each step
+
   @e2e
   Scenario: A request that never ends doesn't keep the daemon from stopping
     The daemon waits 5 s for the requests still open to end, then stops

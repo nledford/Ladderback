@@ -197,41 +197,28 @@ impl Events {
                 .wait()
                 .expect("kill ran");
             assert!(sent.success(), "the daemon is sent SIGTERM: {sent}");
-            let began = std::time::Instant::now();
-            if let Some(let_go) = let_go {
-                while !daemon
-                    .log
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .contains("stopping (SIGTERM)")
-                {
-                    assert!(
-                        began.elapsed() < STOP_TIMEOUT,
-                        "the daemon didn't say it was stopping within {STOP_TIMEOUT:?} of SIGTERM"
-                    );
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                std::fs::remove_file(&let_go).expect("what is let go was held");
+            exited(daemon, let_go)
+        })
+        .await;
+        agent.events.stopped = Some(status);
+        agent.events.stop_took = Some(took);
+        agent.events.stopped_log = Some(log);
+    }
+
+    /// Starts the daemon on the scenario's folders, sends it SIGTERM the
+    /// moment it says it listens, with no wait for it to answer, and waits
+    /// for it to exit as [`Self::stop`] does: a service manager stopping a
+    /// daemon it has just started. Runs on a blocking thread: see
+    /// [`blocking`].
+    pub(crate) async fn start_and_stop_at_once(agent: &mut Agent) {
+        let root = Self::root(agent);
+        let env = agent.events.env.clone();
+        let (status, took, log) = blocking(move || match spawn_daemon(&root, &env, true) {
+            (Some(daemon), _) => exited(daemon, None),
+            (None, Outcome::Exited(status, log)) => {
+                panic!("ladderback exited with {status}: {log}")
             }
-            let status = loop {
-                if let Some(status) = daemon.child.try_wait().expect("the daemon's status") {
-                    break status;
-                }
-                assert!(
-                    began.elapsed() < STOP_TIMEOUT,
-                    "the daemon was still running {STOP_TIMEOUT:?} after SIGTERM"
-                );
-                std::thread::sleep(Duration::from_millis(20));
-            };
-            let took = began.elapsed();
-            // The log's last lines are read once the daemon has gone: its
-            // stderr ends with it.
-            let drained = std::time::Instant::now();
-            while !daemon.drained.is_finished() && drained.elapsed() < Duration::from_secs(5) {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            let rest = daemon.log.lock().unwrap_or_else(PoisonError::into_inner);
-            (status, took, format!("{}{rest}", daemon.start_log))
+            (None, Outcome::Listening(addr)) => panic!("ladderback listened on {addr} unkept"),
         })
         .await;
         agent.events.stopped = Some(status);
@@ -304,7 +291,7 @@ impl Events {
 async fn start(agent: &mut Agent) -> Outcome {
     let root = Events::root(agent);
     let env = agent.events.env.clone();
-    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env)).await;
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env, false)).await;
     if daemon.is_some() {
         agent.events.daemon = daemon;
     }
@@ -346,7 +333,7 @@ pub(crate) async fn serve(agent: &mut Agent) {
 pub(crate) async fn start_second(agent: &mut Agent) {
     let root = Events::root(agent);
     let env = agent.events.env.clone();
-    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env)).await;
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env, false)).await;
     agent.events.second = daemon;
     agent.events.asked_to_serve = Some(outcome);
 }
@@ -364,8 +351,13 @@ pub(crate) fn refusal(agent: &mut Agent) -> (ExitStatus, String) {
 }
 
 /// Starts the daemon and reads its log until it says where it listens or
-/// exits; the daemon is there when it listens.
-fn spawn_daemon(root: &std::path::Path, env: &[(String, String)]) -> (Option<Daemon>, Outcome) {
+/// exits; the daemon is there when it listens. With `stop_when_listening`,
+/// it is sent SIGTERM as soon as that line is read.
+fn spawn_daemon(
+    root: &std::path::Path,
+    env: &[(String, String)],
+    stop_when_listening: bool,
+) -> (Option<Daemon>, Outcome) {
     let mut command = Command::new(super::LADDERBACK);
     testkit::daemon::isolate(&mut command, root);
     command.envs(env.iter().map(|(name, value)| (name, value)));
@@ -390,6 +382,16 @@ fn spawn_daemon(root: &std::path::Path, env: &[(String, String)]) -> (Option<Dae
         if let Some(url) = line.split_once(LISTENING).map(|(_, url)| url)
             && let Ok(addr) = url.trim().parse::<SocketAddr>()
         {
+            if stop_when_listening {
+                // Straight from this thread, with no `kill` process to start
+                // first: the signal lands as close to the line as it can.
+                let pid = i32::try_from(child.id()).expect("a process ID fits a pid_t");
+                nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid),
+                    nix::sys::signal::Signal::SIGTERM,
+                )
+                .expect("the daemon is sent SIGTERM");
+            }
             break Some(addr);
         }
     };
@@ -423,6 +425,47 @@ fn spawn_daemon(root: &std::path::Path, env: &[(String, String)]) -> (Option<Dae
             (None, Outcome::Exited(status, log))
         }
     }
+}
+
+/// Waits for a daemon just sent SIGTERM to exit, and once its log says it is
+/// stopping, removes `let_go` when there is one. Returns how it ended, how
+/// long that took, and everything it logged.
+fn exited(daemon: Daemon, let_go: Option<PathBuf>) -> (ExitStatus, Duration, String) {
+    let began = std::time::Instant::now();
+    if let Some(let_go) = let_go {
+        while !daemon
+            .log
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains("stopping (SIGTERM)")
+        {
+            assert!(
+                began.elapsed() < STOP_TIMEOUT,
+                "the daemon didn't say it was stopping within {STOP_TIMEOUT:?} of SIGTERM"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::fs::remove_file(&let_go).expect("what is let go was held");
+    }
+    let status = loop {
+        if let Some(status) = daemon.child.try_wait().expect("the daemon's status") {
+            break status;
+        }
+        assert!(
+            began.elapsed() < STOP_TIMEOUT,
+            "the daemon was still running {STOP_TIMEOUT:?} after SIGTERM"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let took = began.elapsed();
+    // The log's last lines are read once the daemon has gone: its stderr
+    // ends with it.
+    let drained = std::time::Instant::now();
+    while !daemon.drained.is_finished() && drained.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let rest = daemon.log.lock().unwrap_or_else(PoisonError::into_inner);
+    (status, took, format!("{}{rest}", daemon.start_log))
 }
 
 /// What asking a daemon to serve led to.

@@ -27,6 +27,7 @@ use app::ports::Random;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::random::OsRandom;
+use tokio::signal::unix::{Signal, SignalKind};
 
 use composition::LOG_CLOSE_BOUND;
 use shutdown::{REQUESTS_BOUND, Step, Stopping, WORKERS_BOUND};
@@ -280,6 +281,12 @@ fn run_daemon(
     // What came of serving, and the stop once it began; what is said on
     // stderr before then can fail the whole of it.
     let ran: io::Result<(io::Result<ExitCode>, Option<Stopping>)> = runtime.block_on(async {
+        // Before the listener: a stop signal is listened for from here on,
+        // so one that comes once the daemon says it listens takes the
+        // orderly stop, not the default action that kills it (#628). One
+        // that can't be listened for is `None`, and never comes.
+        let interrupt = tokio::signal::unix::signal(SignalKind::interrupt()).ok();
+        let terminate = tokio::signal::unix::signal(SignalKind::terminate()).ok();
         let listener = match http_adapter::GatedListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -340,7 +347,7 @@ fn run_daemon(
             app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
         )
         .with_graceful_shutdown(async move {
-            let _ = cause_tx.send(shutdown_signal().await);
+            let _ = cause_tx.send(shutdown_signal(interrupt, terminate).await);
         })
         .into_future();
         tokio::pin!(serving);
@@ -450,20 +457,22 @@ fn text(value: impl std::fmt::Display) -> MsgArg {
     MsgArg::Text(value.to_string())
 }
 
-/// Resolves on Ctrl-C or SIGTERM (what systemd and launchd send), with
-/// the signal's name.
-async fn shutdown_signal() -> &'static str {
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(_) => std::future::pending().await,
-        }
-    };
+/// Resolves on Ctrl-C (`interrupt`) or SIGTERM (`terminate`, what systemd
+/// and launchd send), with the signal's name.
+async fn shutdown_signal(interrupt: Option<Signal>, terminate: Option<Signal>) -> &'static str {
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => "SIGINT",
-        () = terminate => "SIGTERM",
+        () = received(interrupt) => "SIGINT",
+        () = received(terminate) => "SIGTERM",
+    }
+}
+
+/// Resolves when `signal` comes, and never when there is none.
+async fn received(signal: Option<Signal>) {
+    match signal {
+        Some(mut signal) => {
+            signal.recv().await;
+        }
+        None => std::future::pending().await,
     }
 }
 
