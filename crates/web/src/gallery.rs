@@ -13,8 +13,8 @@ use leptos_router::components::A;
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
 use crate::components::{
-    Checkbox, Confirmation, FormField, ModalDialog, PauseUpdates, Progress, ReviewDialog,
-    SortableTable, StatusBadge, Toast, show_toast,
+    Checkbox, Confirmation, FormField, ModalDialog, PauseUpdates, Progress, RadioGroup,
+    ReviewDialog, SortableTable, StatusBadge, Toast, show_toast,
 };
 use crate::live::{modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -273,6 +273,21 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 id="gallery-log"
                 label=t(msg::UI_GALLERY_DEMO_LOG)
                 checked=RwSignal::new(true)
+            />
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_RADIO_HEADING)}</h2>
+            // A group with a hint, the middle choice made as it opens.
+            <RadioGroup
+                name="gallery-frequency"
+                legend=t(msg::UI_GALLERY_DEMO_FREQUENCY)
+                description=t(msg::UI_GALLERY_DEMO_FREQUENCY_HINT)
+                options=vec![
+                    ("daily", t(msg::UI_GALLERY_DEMO_DAILY)),
+                    ("weekly", t(msg::UI_GALLERY_DEMO_WEEKLY)),
+                    ("monthly", t(msg::UI_GALLERY_DEMO_MONTHLY)),
+                ]
+                chosen=RwSignal::new("weekly")
             />
         </section>
         <section>
