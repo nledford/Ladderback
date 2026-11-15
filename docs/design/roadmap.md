@@ -161,6 +161,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [92](decisions/92-the-daemons-stop-has-a-limit.md) | The daemon's stop has a limit |
 | [93](decisions/93-api-tokens.md) | API tokens |
 | [94](decisions/94-restart-from-settings.md) | Restarting from Settings |
+| [96](decisions/96-plans-edited-in-the-ui.md) | Creating, changing and deleting plans in the UI |
 
 ## 17. Open questions
 
