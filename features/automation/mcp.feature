@@ -36,6 +36,30 @@ Feature: AI agents and scripts use Ladderback through MCP
     When the MCP client lists the tools
     Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile"
 
+  # Some clients turn a tool's input schema into a function declaration of a
+  # narrower schema language, with one type per field and no `format`
+  # beyond a few of its own, and a strict one refuses a `minimum`: an
+  # optional argument is one left out of `required`, never one whose type is
+  # a list with null, and a bound is said in the argument's description.
+  Scenario: Every argument of every tool has one type, no format and no minimum
+    Given an MCP server running in a scratch folder
+    When the MCP client lists the tools
+    Then each argument in every tool's input schema has one type, no format and no minimum
+
+  # The agent sees a tool's refusal and can call the tool again; a protocol
+  # error some clients show only to the person, or retry as it was.
+  Scenario Outline: An argument a tool can't take is refused as the tool's error, naming it
+    Given an MCP server running in a scratch folder
+    When the MCP client calls the tool "<tool>" with the arguments '<arguments>'
+    Then the result is the error "invalid-arguments"
+    And the error names the argument "<argument>" as "<problem>"
+
+    Examples:
+      | tool           | arguments         | argument | problem     |
+      | wait_operation | {"id": "x"}       | id       | unknown-key |
+      | run_plan       | {}                | plan     | missing     |
+      | list_plans     | {"limit": "many"} | limit    | invalid     |
+
   Scenario: The status names each build part by part
     Given Ladderback is serving on loopback
     And an MCP server connected to it
@@ -208,6 +232,21 @@ Feature: AI agents and scripts use Ladderback through MCP
     And the MCP client waits for that operation
     Then the wait says the operation finished as "succeeded"
     And the scratch session's operation log records that operation as started by "mcp"
+
+  # A run names its operation `operation`, and each tool that takes an
+  # operation takes it under that name, so an agent passes back what it was
+  # given.
+  Scenario Outline: A tool takes an operation under the name a run gives it
+    Given an MCP server running in a scratch folder
+    When the MCP client runs the plan "scratch"
+    And the MCP client calls the tool "<tool>" with what the run returned
+    Then the answer is about that operation
+
+    Examples:
+      | tool             |
+      | get_operation    |
+      | wait_operation   |
+      | cancel_operation |
 
   # The file the backup waits on holds it running until it is let go.
   Scenario: A wait that ends before the operation does says it hasn't finished

@@ -1542,6 +1542,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
                 | ErrorCode::InvalidCursor
+                | ErrorCode::InvalidArguments
                 | ErrorCode::InvalidBody
                 | ErrorCode::BodyTooLarge
                 | ErrorCode::ConfigFolderUnknown

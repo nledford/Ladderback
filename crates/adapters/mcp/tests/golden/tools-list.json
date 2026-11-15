@@ -606,19 +606,11 @@
       "properties": {
         "cursor": {
           "description": "The `next` of the page before, to list the page after it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "limit": {
-          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "description": "How many to list, a whole number from 1 to 200; 50 when not given. A\nlarger number lists 200, and 0 lists 1.",
+          "type": "integer"
         }
       },
       "type": "object"
@@ -825,19 +817,11 @@
       "properties": {
         "cursor": {
           "description": "The `next` of the page before, to list the page after it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "limit": {
-          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "description": "How many to list, a whole number from 1 to 200; 50 when not given. A\nlarger number lists 200, and 0 lists 1.",
+          "type": "integer"
         }
       },
       "type": "object"
@@ -1217,33 +1201,19 @@
       "properties": {
         "cursor": {
           "description": "The `next` of the page before, asked with the same filters, to list\nthe page after it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "host": {
           "description": "Only the snapshots taken on this host, by its name exactly as the\nsnapshots give it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "limit": {
-          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "description": "How many to list, a whole number from 1 to 200; 50 when not given. A\nlarger number lists 200, and 0 lists 1.",
+          "type": "integer"
         },
         "plan": {
           "description": "Only the snapshots of this plan, by its ID: those whose\n`ladderback-plan:` tag names it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "repository": {
           "description": "The repository, by its alias, as `list_repositories` names it.",
@@ -1356,26 +1326,15 @@
       "properties": {
         "cursor": {
           "description": "The `next` of the page before, to list the page after it.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "limit": {
-          "description": "How many to list, from 1 to 200; 50 when not given. A larger number\nlists 200.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "description": "How many to list, a whole number from 1 to 200; 50 when not given. A\nlarger number lists 200, and 0 lists 1.",
+          "type": "integer"
         },
         "plan": {
           "description": "Only this plan's operations, by its ID.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         }
       },
       "type": "object"
@@ -1820,13 +1779,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "description": "The operation's ID, as `list_operations` names it.",
+        "operation": {
+          "description": "The operation's ID, as `run_plan` or `list_operations` names it.",
           "type": "string"
         }
       },
       "required": [
-        "id"
+        "operation"
       ],
       "type": "object"
     },
@@ -2338,22 +2297,17 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
-        "id": {
+        "operation": {
           "description": "The operation's ID, as `run_plan` or `list_operations` names it.",
           "type": "string"
         },
         "timeout": {
-          "description": "How many seconds to wait at most, up to 600; 60 when not given. A\nlarger number waits 600; 0 reads the operation once.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "description": "How many seconds to wait at most, a whole number from 0 to 600; 60\nwhen not given. A larger number waits 600; 0 reads the operation once.",
+          "type": "integer"
         }
       },
       "required": [
-        "id"
+        "operation"
       ],
       "type": "object"
     },
@@ -2832,13 +2786,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
-        "id": {
+        "operation": {
           "description": "The backup's ID, as `run_plan` or `list_operations` names it.",
           "type": "string"
         }
       },
       "required": [
-        "id"
+        "operation"
       ],
       "type": "object"
     },

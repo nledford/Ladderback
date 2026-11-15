@@ -210,6 +210,12 @@ pub enum ErrorCode {
     /// A history request's cursor is not an operation's ID. The argument
     /// `cursor` is what was sent.
     InvalidCursor,
+    /// A call of an MCP tool gives an argument the tool doesn't take, leaves
+    /// out one it needs, or gives one a value it doesn't take (§4.6), so the
+    /// tool didn't run. The argument `field` names the argument, and
+    /// `problem` what is wrong with it, an [`ArgumentProblem`]'s wire name.
+    /// Neither holds the value given.
+    InvalidArguments,
     /// A request's body is not the JSON the route takes.
     InvalidBody,
     /// A request's body is larger than the most its route class takes
@@ -1045,6 +1051,18 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::InvalidArguments => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "problem",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::MaintenanceBusy => &[ArgSpec {
                 name: "operation",
                 kind: ArgKind::Text,
@@ -2426,6 +2444,10 @@ mod tests {
             &[text("field", false), text("problem", false)]
         );
         assert_eq!(
+            ErrorCode::InvalidArguments.args(),
+            &[text("field", false), text("problem", false)]
+        );
+        assert_eq!(
             ErrorCode::PlanInUse.args(),
             &[text("plan", false), text("rule", false)]
         );
@@ -2524,6 +2546,23 @@ mod tests {
         ] {
             assert_eq!(problem.as_str(), wire, "{problem:?}");
         }
+    }
+
+    // The `invalid-arguments` message selects on these names, and an agent
+    // reads them, so each is its own, as the catalog's arms spell it.
+    #[test]
+    fn each_argument_problem_and_its_code_are_named_on_the_wire() {
+        for (problem, wire) in [
+            (ArgumentProblem::Missing, "missing"),
+            (ArgumentProblem::UnknownKey, "unknown-key"),
+            (ArgumentProblem::Invalid, "invalid"),
+        ] {
+            assert_eq!(problem.as_str(), wire, "{problem:?}");
+        }
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::InvalidArguments).unwrap(),
+            r#""invalid-arguments""#
+        );
     }
 }
 
@@ -3545,6 +3584,31 @@ impl PlanProblem {
             Self::Taken => "taken",
             Self::UnknownRepository => "unknown-repository",
             Self::NoSources => "no-sources",
+        }
+    }
+}
+
+/// What is wrong with an argument an [`ErrorCode::InvalidArguments`] names,
+/// sent as its `problem` argument by its wire name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ArgumentProblem {
+    /// An argument the tool needs isn't there.
+    Missing,
+    /// An argument the tool doesn't take.
+    UnknownKey,
+    /// A value the argument doesn't take: one of another type, or a number
+    /// out of its range.
+    Invalid,
+}
+
+impl ArgumentProblem {
+    /// The name the `problem` argument carries, which the message selects
+    /// on.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::UnknownKey => "unknown-key",
+            Self::Invalid => "invalid",
         }
     }
 }

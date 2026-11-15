@@ -931,13 +931,17 @@ async fn every_tool(session: &mut Session) -> serde_json::Value {
         ("list_snapshots", json!({})),
         ("list_operations", json!({})),
         ("list_operations", json!({"cursor": "not-a-cursor"})),
+        ("get_operation", json!({"operation": failed})),
+        ("get_operation", json!({"operation": "nowhere"})),
         ("get_operation", json!({"id": failed})),
-        ("get_operation", json!({"id": "nowhere"})),
         ("run_plan", json!({"plan": "work"})),
         ("run_plan", json!({"plan": "nowhere"})),
         ("run_plan", json!({"plan": "cold"})),
-        ("cancel_operation", json!({"id": failed})),
-        ("wait_operation", json!({"id": "nowhere", "timeout": 0})),
+        ("cancel_operation", json!({"operation": failed})),
+        (
+            "wait_operation",
+            json!({"operation": "nowhere", "timeout": 0}),
+        ),
         ("test_repository", json!({"repository": "vault"})),
         ("test_repository", json!({"repository": "nowhere"})),
         ("preview_forget", json!({"repository": "vault"})),
@@ -962,11 +966,15 @@ async fn every_tool(session: &mut Session) -> serde_json::Value {
     }
     let started = session.call("run_plan", json!({"plan": "home"})).await;
     if let Some(id) = started["result"]["structuredContent"]["operation"].as_str() {
-        session.call("get_operation", json!({"id": id})).await;
         session
-            .call("wait_operation", json!({"id": id, "timeout": 1}))
+            .call("get_operation", json!({"operation": id}))
             .await;
-        session.call("cancel_operation", json!({"id": id})).await;
+        session
+            .call("wait_operation", json!({"operation": id, "timeout": 1}))
+            .await;
+        session
+            .call("cancel_operation", json!({"operation": id}))
+            .await;
     }
     started
 }
@@ -1083,4 +1091,75 @@ async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
     assert!(in_process.1.progress() > 0, "{:?}", in_process.1.transcript);
     assert!(connect.1.progress() > 0, "{:?}", connect.1.transcript);
     assert_eq!(unknown_token.1.progress(), 0);
+}
+
+/// What `answer` names as the operation it is about: the one it tells, the
+/// one asked to stop, or the one its refusal names.
+fn operation_named(answer: &serde_json::Value) -> serde_json::Value {
+    let result = &answer["result"];
+    if result["isError"] == true {
+        let text = result["content"][0]["text"].as_str().unwrap_or_default();
+        let refusal: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+        return refusal["args"]["operation"]["value"].clone();
+    }
+    match &result["structuredContent"]["operation"] {
+        serde_json::Value::Object(operation) => operation["id"].clone(),
+        cancelled => cancelled.clone(),
+    }
+}
+
+/// The tools that take an operation take it under the name `run_plan`
+/// returns it by, in both modes (§4.6): the run's result passed back as it
+/// came is an operation each tells of or refuses by its ID, and the name
+/// they took before is an argument they don't take.
+#[tokio::test]
+async fn both_backends_take_an_operation_under_the_name_a_run_returns_it() {
+    use serde_json::json;
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let password = scratch.path().join("password");
+    std::fs::write(&password, "demo-password\n").expect("the password file");
+    let config = format!(
+        "schema = 1\n\n\
+        [repositories.demo]\nrepository = \"/srv/backups/demo\"\npassword-file = \"{}\"\n\n\
+        [[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [\"/home/demo\"]\n",
+        password.display()
+    );
+    let daemon = a_daemon_over(scratch.path(), &config, &[]).await;
+    // A run asked for stays queued, so no worker starts.
+    daemon.background.runs().freeze();
+    let mut sessions = [
+        ("in-process", Session::over(InProcess::over(&daemon.state))),
+        ("connect", Session::over(connected_to(&daemon).await)),
+    ];
+    for (backend, session) in &mut sessions {
+        let started = session.call("run_plan", json!({"plan": "home"})).await;
+        let run = started["result"]["structuredContent"].clone();
+        let id = run["operation"].clone();
+        assert!(id.is_string(), "{backend}: {started}");
+        let mut wait = run.clone();
+        wait["timeout"] = json!(0);
+        for (tool, arguments) in [
+            ("get_operation", run.clone()),
+            ("wait_operation", wait),
+            ("cancel_operation", run.clone()),
+        ] {
+            let answer = session.call(tool, arguments).await;
+            assert_eq!(operation_named(&answer), id, "{backend}, {tool}: {answer}");
+            let answer = session.call(tool, json!({"id": id})).await;
+            let text = answer["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{backend}, {tool}: {answer}"));
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(text).expect("a refusal"),
+                json!({
+                    "code": "invalid-arguments",
+                    "args": {
+                        "field": {"type": "text", "value": "id"},
+                        "problem": {"type": "text", "value": "unknown-key"},
+                    },
+                }),
+                "{backend}, {tool}"
+            );
+        }
+    }
 }

@@ -30,11 +30,12 @@ use api::{
     ProfileExportDto, ProfileImportDto, RepositoriesDto, SnapshotsDto,
 };
 use async_trait::async_trait;
-use rmcp::handler::server::tool::schema_for_output;
+use rmcp::handler::server::tool::{schema_for_input, schema_for_output};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, JsonObject,
-    ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion,
-    ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
+    CallToolRequestMethod, CallToolRequestParams, CallToolResponse, CallToolResult, ConstString,
+    CustomRequest, CustomResult, Implementation, JsonObject, ListToolsResult,
+    PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, ServerCapabilities,
+    ServerConfig, Tool, ToolAnnotations,
 };
 use rmcp::schemars::transform::transform_subschemas;
 use rmcp::schemars::{JsonSchema, Schema};
@@ -42,10 +43,11 @@ use rmcp::service::{RequestContext, ServerInitializeError};
 use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 mod actions;
+mod arguments;
 mod checks;
 mod connect;
 mod pages;
@@ -60,6 +62,7 @@ pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 use actions::{
     CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
 };
+use arguments::{NoArguments, read};
 use checks::{ExportArguments, ForgetPreview, ImportArguments, RepositoryArguments};
 use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
@@ -333,7 +336,8 @@ impl Server {
         }
     }
 
-    async fn list_plans(&self, arguments: ListArguments) -> Result<PlansPage, ErrorDto> {
+    async fn list_plans(&self, given: Option<JsonObject>) -> Result<PlansPage, ErrorDto> {
+        let arguments: ListArguments = read(given)?;
         let listed = self.backend.plans().await?;
         let (plans, next) = page(
             listed.plans,
@@ -346,8 +350,9 @@ impl Server {
 
     async fn list_repositories(
         &self,
-        arguments: ListArguments,
+        given: Option<JsonObject>,
     ) -> Result<RepositoriesPage, ErrorDto> {
+        let arguments: ListArguments = read(given)?;
         let listed = self.backend.repositories().await?;
         let (repositories, next) = page(
             listed.repositories,
@@ -358,10 +363,8 @@ impl Server {
         Ok(RepositoriesPage { repositories, next })
     }
 
-    async fn list_snapshots(
-        &self,
-        arguments: SnapshotsArguments,
-    ) -> Result<SnapshotsPage, ErrorDto> {
+    async fn list_snapshots(&self, given: Option<JsonObject>) -> Result<SnapshotsPage, ErrorDto> {
+        let arguments: SnapshotsArguments = read(given)?;
         let filter = SnapshotFilter {
             plan: arguments.plan,
             host: arguments.host,
@@ -383,8 +386,9 @@ impl Server {
 
     async fn list_operations(
         &self,
-        arguments: OperationsArguments,
+        given: Option<JsonObject>,
     ) -> Result<OperationsPageDto, ErrorDto> {
+        let arguments: OperationsArguments = read(given)?;
         self.backend
             .history(
                 arguments.plan,
@@ -394,15 +398,17 @@ impl Server {
             .await
     }
 
-    async fn get_operation(&self, arguments: OperationArguments) -> Result<Operation, ErrorDto> {
+    async fn get_operation(&self, given: Option<JsonObject>) -> Result<Operation, ErrorDto> {
+        let arguments: OperationArguments = read(given)?;
         let OperationDetailDto {
             operation,
             warnings,
-        } = self.backend.operation(arguments.id).await?;
+        } = self.backend.operation(arguments.operation).await?;
         Ok(Operation::listing(operation, warnings))
     }
 
-    async fn run_plan(&self, arguments: RunArguments) -> Result<Started, ErrorDto> {
+    async fn run_plan(&self, given: Option<JsonObject>) -> Result<Started, ErrorDto> {
+        let arguments: RunArguments = read(given)?;
         let operation = self.backend.run(arguments.plan).await?;
         Ok(Started { operation })
     }
@@ -416,14 +422,15 @@ impl Server {
     /// dropped then, as the protocol asks, so the detail isn't read for it.
     async fn wait_operation(
         &self,
-        arguments: WaitArguments,
+        given: Option<JsonObject>,
         context: &RequestContext<RoleServer>,
     ) -> Result<Waited, ErrorDto> {
+        let arguments: WaitArguments = read(given)?;
         let length = wait_length(arguments.timeout);
         let began = tokio::time::Instant::now();
         let progress = context.meta.get_progress_token();
         loop {
-            let operation = self.backend.summary(arguments.id.clone()).await?;
+            let operation = self.backend.summary(arguments.operation.clone()).await?;
             if context.ct.is_cancelled() {
                 return Ok(Waited {
                     finished: !is_unfinished(&operation),
@@ -432,7 +439,7 @@ impl Server {
             }
             let left = length.saturating_sub(began.elapsed());
             if !is_unfinished(&operation) || left.is_zero() {
-                let operation = match self.backend.operation(arguments.id).await {
+                let operation = match self.backend.operation(arguments.operation).await {
                     Ok(OperationDetailDto {
                         operation,
                         warnings,
@@ -466,42 +473,53 @@ impl Server {
         }
     }
 
-    async fn cancel_operation(&self, arguments: CancelArguments) -> Result<Cancelling, ErrorDto> {
-        self.backend.cancel(arguments.id.clone()).await?;
+    async fn cancel_operation(&self, given: Option<JsonObject>) -> Result<Cancelling, ErrorDto> {
+        let arguments: CancelArguments = read(given)?;
+        self.backend.cancel(arguments.operation.clone()).await?;
         Ok(Cancelling {
-            operation: arguments.id,
+            operation: arguments.operation,
         })
     }
 
-    async fn preview_forget(
+    async fn test_repository(
         &self,
-        arguments: RepositoryArguments,
-    ) -> Result<ForgetPreview, ErrorDto> {
-        ForgetPreview::of(self.backend.preview_forget(arguments.repository).await?)
+        given: Option<JsonObject>,
+    ) -> Result<LocationsTestDto, ErrorDto> {
+        let RepositoryArguments { repository } = read(given)?;
+        self.backend.test_repository(repository).await
+    }
+
+    async fn preview_forget(&self, given: Option<JsonObject>) -> Result<ForgetPreview, ErrorDto> {
+        let RepositoryArguments { repository } = read(given)?;
+        ForgetPreview::of(self.backend.preview_forget(repository).await?)
+    }
+
+    async fn preview_import(
+        &self,
+        given: Option<JsonObject>,
+    ) -> Result<ProfileImportDto, ErrorDto> {
+        let ImportArguments {
+            content,
+            repository,
+        } = read(given)?;
+        self.backend.preview_import(content, repository).await
+    }
+
+    async fn export_profile(
+        &self,
+        given: Option<JsonObject>,
+    ) -> Result<ProfileExportDto, ErrorDto> {
+        let ExportArguments { plan } = read(given)?;
+        self.backend.export_profile(plan).await
     }
 }
 
-/// A read tool's result: what it read, or the refusal, marked as an error.
-fn answered(result: Result<impl Serialize, ErrorDto>) -> CallToolResponse {
+/// A tool's result: what it read or did, or the refusal, marked as an error.
+fn answered(result: Result<impl Serialize, ErrorDto>) -> CallToolResult {
     match result {
         Ok(value) => structured(&value),
         Err(error) => refused(&error),
     }
-    .into()
-}
-
-/// The arguments `tool` was given, read as `T`.
-///
-/// # Errors
-///
-/// Invalid params: one is missing, unknown or of the wrong type.
-fn arguments<T: DeserializeOwned>(tool: &str, given: Option<JsonObject>) -> Result<T, McpError> {
-    serde_json::from_value(serde_json::Value::Object(given.unwrap_or_default())).map_err(|error| {
-        McpError::invalid_params(
-            format!("the tool {tool} can't take these arguments: {error}"),
-            None,
-        )
-    })
 }
 
 /// A tool's result: `value` as `structuredContent`, mirrored as JSON text.
@@ -581,8 +599,43 @@ fn drop_descriptions(schema: &mut Schema) {
     transform_subschemas(&mut drop_descriptions, schema);
 }
 
-/// Every tool, in the order `tools/list` gives them. Each argument type is
-/// a struct, whose schema is an object, the one input schema the SDK takes.
+/// A tool's input schema, in a form clients that turn it into a function
+/// declaration of a narrower schema language take (§4.6): an optional
+/// argument has its one type, left out of `required`, never a type list
+/// with null; and no argument has a `format` or a `minimum`, its
+/// description saying its bounds. Each argument type is a struct, whose
+/// schema is an object, the one input schema the SDK takes; were it not,
+/// the tool would say it takes no argument rather than give a schema that
+/// isn't an object.
+fn input_schema<T: JsonSchema + 'static>() -> Arc<JsonObject> {
+    let Ok(made) = schema_for_input::<T>() else {
+        return no_arguments();
+    };
+    let mut schema = Schema::from(made.as_ref().clone());
+    narrow(&mut schema);
+    schema
+        .as_object()
+        .map_or_else(no_arguments, |object| Arc::new(object.clone()))
+}
+
+fn narrow(schema: &mut Schema) {
+    let named: Vec<Value> = match schema.get("type") {
+        Some(Value::Array(types)) => types
+            .iter()
+            .filter(|kind| kind.as_str() != Some("null"))
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+    if let [kind] = &named[..] {
+        schema.insert("type".to_owned(), kind.clone());
+    }
+    schema.remove("format");
+    schema.remove("minimum");
+    transform_subschemas(&mut narrow, schema);
+}
+
+/// Every tool, in the order `tools/list` gives them.
 fn tools() -> Vec<Tool> {
     vec![
         Tool::new(
@@ -599,10 +652,9 @@ fn tools() -> Vec<Tool> {
             LIST_PLANS,
             "The configured plans, a page at a time: each with its repository, whether it \
              has a schedule, its next run and its configuration warnings.",
-            no_arguments(),
+            input_schema::<ListArguments>(),
         )
         .with_title("List plans")
-        .with_input_schema::<ListArguments>()
         .with_raw_output_schema(output_schema::<PlansPage>())
         .with_annotations(read_only()),
         Tool::new(
@@ -610,50 +662,45 @@ fn tools() -> Vec<Tool> {
             "The configured repositories, a page at a time: each with its location, \
              credentials masked, where its password comes from, whether it is maintained \
              here and its configuration warnings. Never a secret.",
-            no_arguments(),
+            input_schema::<ListArguments>(),
         )
         .with_title("List repositories")
-        .with_input_schema::<ListArguments>()
         .with_raw_output_schema(output_schema::<RepositoriesPage>())
         .with_annotations(read_only()),
         Tool::new(
             LIST_SNAPSHOTS,
             "One repository's snapshots, newest first, a page at a time, read from the \
              repository; only those of a plan, or taken on a host, when either is named.",
-            no_arguments(),
+            input_schema::<SnapshotsArguments>(),
         )
         .with_title("List snapshots")
-        .with_input_schema::<SnapshotsArguments>()
         .with_raw_output_schema(output_schema::<SnapshotsPage>())
         .with_annotations(read_only()),
         Tool::new(
             LIST_OPERATIONS,
             "The history of operations, newest first, a page at a time, running ones \
              included: each with its status, times, warning codes and, when it failed, why.",
-            no_arguments(),
+            input_schema::<OperationsArguments>(),
         )
         .with_title("List operations")
-        .with_input_schema::<OperationsArguments>()
         .with_raw_output_schema(output_schema::<OperationsPageDto>())
         .with_annotations(read_only()),
         Tool::new(
             GET_OPERATION,
             "One operation: its summary, why it failed when it did, and the first 100 \
              warnings it recorded.",
-            no_arguments(),
+            input_schema::<OperationArguments>(),
         )
         .with_title("Get operation")
-        .with_input_schema::<OperationArguments>()
         .with_raw_output_schema(output_schema::<Operation>())
         .with_annotations(read_only()),
         Tool::new(
             RUN_PLAN,
             "Queues a backup of a plan now, under the plan's overlap policy, and returns its \
              operation's ID. Its hooks and secret sources run as for any other run.",
-            no_arguments(),
+            input_schema::<RunArguments>(),
         )
         .with_title("Run plan")
-        .with_input_schema::<RunArguments>()
         .with_raw_output_schema(output_schema::<Started>())
         .with_annotations(acting()),
         Tool::new(
@@ -664,40 +711,36 @@ fn tools() -> Vec<Tool> {
              name them. Sends progress \
              notifications when the call asks for them. Cancelling the call stops the wait, not \
              the operation.",
-            no_arguments(),
+            input_schema::<WaitArguments>(),
         )
         .with_title("Wait for operation")
-        .with_input_schema::<WaitArguments>()
         .with_raw_output_schema(output_schema::<Waited>())
         .with_annotations(read_only()),
         Tool::new(
             CANCEL_OPERATION,
             "Asks a queued or running backup to stop, however it started; it then ends as \
              cancelled. Maintenance can't be cancelled from here.",
-            no_arguments(),
+            input_schema::<CancelArguments>(),
         )
         .with_title("Cancel operation")
-        .with_input_schema::<CancelArguments>()
         .with_raw_output_schema(output_schema::<Cancelling>())
         .with_annotations(acting()),
         Tool::new(
             TEST_REPOSITORY,
             "Tries each location of a configured repository, as a backup would choose among \
              them, and tells each one's outcome. Records nothing.",
-            no_arguments(),
+            input_schema::<RepositoryArguments>(),
         )
         .with_title("Test repository")
-        .with_input_schema::<RepositoryArguments>()
         .with_raw_output_schema(output_schema::<LocationsTestDto>())
         .with_annotations(trying()),
         Tool::new(
             PREVIEW_FORGET,
             "What a forget of a repository maintained here would let go, by each plan's \
              retention, and what it leaves alone. Reads the repository; deletes nothing.",
-            no_arguments(),
+            input_schema::<RepositoryArguments>(),
         )
         .with_title("Preview forget")
-        .with_input_schema::<RepositoryArguments>()
         .with_raw_output_schema(output_schema::<ForgetPreview>())
         .with_annotations(read_only()),
         Tool::new(
@@ -705,20 +748,18 @@ fn tools() -> Vec<Tool> {
             "What importing a rustic profile, given as its TOML text, would add: the \
              repository's name, the plans and what the import couldn't carry over. Saves \
              nothing and reads no file; profiles it uses are named in a notice.",
-            no_arguments(),
+            input_schema::<ImportArguments>(),
         )
         .with_title("Preview import")
-        .with_input_schema::<ImportArguments>()
         .with_raw_output_schema(output_schema::<ProfileImportDto>())
         .with_annotations(read_only()),
         Tool::new(
             EXPORT_PROFILE,
             "A plan as a profile the stock rustic reads, and what the export left out. A \
              password stored in the configuration is refused, never written out.",
-            no_arguments(),
+            input_schema::<ExportArguments>(),
         )
         .with_title("Export profile")
-        .with_input_schema::<ExportArguments>()
         .with_raw_output_schema(output_schema::<ProfileExportDto>())
         .with_annotations(read_only()),
     ]
@@ -743,68 +784,63 @@ impl ServerHandler for Server {
         Ok(ListToolsResult::with_all_items(tools()))
     }
 
+    /// Calls the tool `request` names. An argument it can't take is its
+    /// `invalid-arguments` refusal, which the agent reads (§4.6); only a tool
+    /// that doesn't exist is a protocol error, as are arguments that aren't
+    /// an object, which the SDK refuses before this reads them.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let given = request.arguments;
-        match request.name.as_ref() {
-            STATUS if given.as_ref().is_some_and(|args| !args.is_empty()) => Err(
-                McpError::invalid_params("the tool status takes no arguments", None),
-            ),
-            STATUS => Ok(self.status().await.into()),
-            LIST_PLANS => Ok(answered(
-                self.list_plans(arguments(LIST_PLANS, given)?).await,
-            )),
-            LIST_REPOSITORIES => Ok(answered(
-                self.list_repositories(arguments(LIST_REPOSITORIES, given)?)
-                    .await,
-            )),
-            LIST_SNAPSHOTS => Ok(answered(
-                self.list_snapshots(arguments(LIST_SNAPSHOTS, given)?).await,
-            )),
-            LIST_OPERATIONS => Ok(answered(
-                self.list_operations(arguments(LIST_OPERATIONS, given)?)
-                    .await,
-            )),
-            GET_OPERATION => Ok(answered(
-                self.get_operation(arguments(GET_OPERATION, given)?).await,
-            )),
-            RUN_PLAN => Ok(answered(self.run_plan(arguments(RUN_PLAN, given)?).await)),
-            WAIT_OPERATION => Ok(answered(
-                self.wait_operation(arguments(WAIT_OPERATION, given)?, &context)
-                    .await,
-            )),
-            CANCEL_OPERATION => Ok(answered(
-                self.cancel_operation(arguments(CANCEL_OPERATION, given)?)
-                    .await,
-            )),
-            TEST_REPOSITORY => {
-                let RepositoryArguments { repository } = arguments(TEST_REPOSITORY, given)?;
-                Ok(answered(self.backend.test_repository(repository).await))
+        let result = match request.name.as_ref() {
+            STATUS => match read::<NoArguments>(given) {
+                Ok(NoArguments {}) => self.status().await,
+                Err(error) => refused(&error),
+            },
+            LIST_PLANS => answered(self.list_plans(given).await),
+            LIST_REPOSITORIES => answered(self.list_repositories(given).await),
+            LIST_SNAPSHOTS => answered(self.list_snapshots(given).await),
+            LIST_OPERATIONS => answered(self.list_operations(given).await),
+            GET_OPERATION => answered(self.get_operation(given).await),
+            RUN_PLAN => answered(self.run_plan(given).await),
+            WAIT_OPERATION => answered(self.wait_operation(given, &context).await),
+            CANCEL_OPERATION => answered(self.cancel_operation(given).await),
+            TEST_REPOSITORY => answered(self.test_repository(given).await),
+            PREVIEW_FORGET => answered(self.preview_forget(given).await),
+            PREVIEW_IMPORT => answered(self.preview_import(given).await),
+            EXPORT_PROFILE => answered(self.export_profile(given).await),
+            name => {
+                return Err(McpError::invalid_params(
+                    format!("no tool is named {name:?}"),
+                    None,
+                ));
             }
-            PREVIEW_FORGET => Ok(answered(
-                self.preview_forget(arguments(PREVIEW_FORGET, given)?).await,
-            )),
-            PREVIEW_IMPORT => {
-                let ImportArguments {
-                    content,
-                    repository,
-                } = arguments(PREVIEW_IMPORT, given)?;
-                Ok(answered(
-                    self.backend.preview_import(content, repository).await,
-                ))
-            }
-            EXPORT_PROFILE => {
-                let ExportArguments { plan } = arguments(EXPORT_PROFILE, given)?;
-                Ok(answered(self.backend.export_profile(plan).await))
-            }
-            name => Err(McpError::invalid_params(
-                format!("no tool is named {name:?}"),
+        };
+        Ok(result.into())
+    }
+
+    /// A request the SDK couldn't read as any it knows. A `tools/call` among
+    /// them has params of another shape, such as arguments that aren't an
+    /// object: invalid params, as JSON-RPC names them, not a method this
+    /// server lacks. Any other is a method it lacks, as the SDK answers.
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, McpError> {
+        if request.method == CallToolRequestMethod::VALUE {
+            return Err(McpError::invalid_params(
+                "a tool call names its tool and gives its arguments as an object",
                 None,
-            )),
+            ));
         }
+        Err(McpError::new(
+            rmcp::model::ErrorCode::METHOD_NOT_FOUND,
+            request.method,
+            None,
+        ))
     }
 }
 

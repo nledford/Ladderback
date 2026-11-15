@@ -106,6 +106,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     OperationUnknown => msg::ERROR_OPERATION_UNKNOWN,
     OperationNotRunning => msg::ERROR_OPERATION_NOT_RUNNING,
     InvalidCursor => msg::ERROR_INVALID_CURSOR,
+    InvalidArguments => msg::ERROR_INVALID_ARGUMENTS,
     MaintenanceBusy => msg::ERROR_MAINTENANCE_BUSY,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,

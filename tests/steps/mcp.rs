@@ -60,6 +60,8 @@ pub struct McpE2e {
     last_call: Option<(String, Value)>,
     /// The results of the pages listed so far, in order.
     pages: Vec<Value>,
+    /// What the last run returned: its `structuredContent`.
+    started: Option<Value>,
 }
 
 /// One `ladderback mcp`, ended with the scenario.
@@ -562,6 +564,38 @@ async fn call(agent: &mut Agent, tool: String, arguments: Value) {
     ask(agent, "tools/call", params).await;
 }
 
+#[when(expr = "the MCP client calls the tool {string} with the arguments {string}")]
+async fn calls_with(agent: &mut Agent, tool: String, arguments: String) {
+    let arguments = serde_json::from_str(&arguments).expect("the arguments as JSON");
+    call(agent, tool, arguments).await;
+}
+
+#[when(expr = "the MCP client calls the tool {string} with what the run returned")]
+async fn calls_with_the_run(agent: &mut Agent, tool: String) {
+    let arguments = agent.mcp.started.clone().expect("a run was asked for");
+    let params = current(json!({"name": tool, "arguments": arguments}));
+    // `wait_operation` waits for the run to end, 60 s at most.
+    ask_within(agent, "tools/call", params, OPERATION_WAIT + ANSWER).await;
+}
+
+#[then("the answer is about that operation")]
+fn about_the_operation(agent: &mut Agent) {
+    let id = agent.ops.the_operation();
+    let result = result(agent);
+    let named = if result["isError"] == true {
+        // A refusal that comes from reading the operation, as one the log
+        // doesn't hold yet or one already ended, names it too.
+        refusal_of(result)["args"]["operation"]["value"].clone()
+    } else {
+        let content = &result["structuredContent"];
+        match &content["operation"] {
+            Value::Object(operation) => operation["id"].clone(),
+            cancelled => cancelled.clone(),
+        }
+    };
+    assert_eq!(named, id.as_str(), "{result}");
+}
+
 #[then(expr = "the server offers the revisions {string}")]
 fn offers_revisions(agent: &mut Agent, revisions: String) {
     let expected: Vec<&str> = revisions.split(", ").collect();
@@ -647,6 +681,38 @@ fn error_names_the_scope(agent: &mut Agent, scope: String) {
         json!({"type": "text", "value": scope}),
         "{refusal}"
     );
+}
+
+#[then(expr = "the error names the argument {string} as {string}")]
+fn error_names_the_argument(agent: &mut Agent, argument: String, problem: String) {
+    let refusal = refusal_of(result(agent));
+    assert_eq!(
+        refusal["args"],
+        json!({
+            "field": {"type": "text", "value": argument},
+            "problem": {"type": "text", "value": problem},
+        }),
+        "{refusal}"
+    );
+}
+
+#[then("each argument in every tool's input schema has one type, no format and no minimum")]
+fn one_type_no_format_no_minimum(agent: &mut Agent) {
+    let result = result(agent);
+    let tools = result["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no tools: {result}"));
+    for tool in tools {
+        let schema = &tool["inputSchema"];
+        let arguments = schema["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("no properties: {tool}"));
+        for (name, argument) in arguments {
+            assert!(argument["type"].is_string(), "{name}: {schema}");
+            assert!(argument.get("format").is_none(), "{name}: {schema}");
+            assert!(argument.get("minimum").is_none(), "{name}: {schema}");
+        }
+    }
 }
 
 #[then("standard output held only protocol messages")]
@@ -854,7 +920,7 @@ fn nothing_written_or_logged_shows(agent: &mut Agent, one: String, other: String
 async fn asks_for_the_operation(agent: &mut Agent) {
     let id = agent.ops.the_operation();
     operations_steps::wait_ended(agent, &id).await;
-    call(agent, "get_operation".to_owned(), json!({"id": id})).await;
+    call(agent, "get_operation".to_owned(), json!({"operation": id})).await;
 }
 
 #[then(expr = "the result gives the operation's failure as {string}, in the engine's own words")]
@@ -877,12 +943,13 @@ async fn headless_on_that_plan(agent: &mut Agent) {
 #[when(expr = "the MCP client runs the plan {string}")]
 async fn runs_the_plan(agent: &mut Agent, plan: String) {
     call(agent, "run_plan".to_owned(), json!({"plan": plan})).await;
-    let content = content(agent);
+    let content = content(agent).clone();
     let id = content["operation"]
         .as_str()
         .unwrap_or_else(|| panic!("no operation: {content}"))
         .to_owned();
     agent.ops.note_started(id);
+    agent.mcp.started = Some(content);
 }
 
 #[when("the MCP client waits for that operation")]
@@ -904,7 +971,7 @@ async fn waits_seconds(agent: &mut Agent, seconds: u64) {
 
 /// Calls `wait_operation` for the scenario's operation, to wait `length`.
 async fn wait_for(agent: &mut Agent, length: Duration) {
-    let arguments = json!({"id": agent.ops.the_operation(), "timeout": length.as_secs()});
+    let arguments = json!({"operation": agent.ops.the_operation(), "timeout": length.as_secs()});
     let params = current(json!({"name": "wait_operation", "arguments": arguments}));
     ask_within(agent, "tools/call", params, length + ANSWER).await;
 }
@@ -936,7 +1003,7 @@ async fn until_running(agent: &mut Agent) {
     let id = agent.ops.the_operation();
     let deadline = Instant::now() + ANSWER;
     loop {
-        call(agent, "get_operation".to_owned(), json!({"id": id})).await;
+        call(agent, "get_operation".to_owned(), json!({"operation": id})).await;
         let result = result(agent);
         let status = if result["isError"] == true {
             let refusal = refusal_of(result);
@@ -963,7 +1030,12 @@ async fn until_running(agent: &mut Agent) {
 async fn cancels_once_running(agent: &mut Agent) {
     until_running(agent).await;
     let id = agent.ops.the_operation();
-    call(agent, "cancel_operation".to_owned(), json!({"id": id})).await;
+    call(
+        agent,
+        "cancel_operation".to_owned(),
+        json!({"operation": id}),
+    )
+    .await;
     let content = content(agent);
     assert_eq!(content["operation"], id.as_str(), "{content}");
 }
@@ -971,7 +1043,12 @@ async fn cancels_once_running(agent: &mut Agent) {
 #[when("the MCP client cancels that check")]
 async fn cancels_the_check(agent: &mut Agent) {
     let id = maintenance_steps::started(agent);
-    call(agent, "cancel_operation".to_owned(), json!({"id": id})).await;
+    call(
+        agent,
+        "cancel_operation".to_owned(),
+        json!({"operation": id}),
+    )
+    .await;
 }
 
 /// The record of the operation `id` in the operation log of the data
