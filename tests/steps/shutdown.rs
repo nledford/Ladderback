@@ -75,6 +75,13 @@ async fn told_to_stop_letting_the_hook_go(agent: &mut Agent) {
     Events::stop_letting_go(agent, Some(hold)).await;
 }
 
+#[when(
+    "Ladderback is started again on the same folders, and told to stop the moment it says it listens"
+)]
+async fn started_and_told_to_stop_at_once(agent: &mut Agent) {
+    Events::start_and_stop_at_once(agent).await;
+}
+
 #[then(expr = "the daemon has exited with status {int}")]
 fn exited_with(agent: &mut Agent, code: i32) {
     let status = agent.events.stopped();
