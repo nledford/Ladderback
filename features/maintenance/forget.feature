@@ -32,6 +32,23 @@ Feature: Forget keeps each plan's history within its policy
     And the repository keeps the newest snapshot of the plan "home"
     And the repository still holds the 2 snapshots the other agent's plan holds
 
+  # Two agent tags or two plan tags that name different owners name no
+  # owner: the history is orphaned, left for the person to decide. The same
+  # tag twice is no disagreement.
+  Scenario Outline: History whose owner tags disagree survives a forget
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" keeping the last 1 snapshot
+    And the repository holds 2 snapshots of the plan "home" carrying its tags twice
+    And the repository holds 2 snapshots of the plan "home" also tagged <other owner>
+    When the owner forgets the repository
+    Then the repository keeps the newest snapshot of the plan "home"
+    And the repository still holds the 2 snapshots whose owner tags disagree
+
+    Examples:
+      | other owner            |
+      | with the plan "photos" |
+      | by another agent       |
+
   Scenario: Each plan keeps its own policy
     Given a plan "home" keeping the last 2 snapshots
     And a plan "photos" keeping the last 1 snapshot

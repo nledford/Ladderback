@@ -702,6 +702,108 @@ mod tests {
         assert_eq!(group.plan.as_deref(), Some("home"));
     }
 
+    fn own_text() -> String {
+        agent().as_uuid().hyphenated().to_string()
+    }
+
+    fn other_text() -> String {
+        other_agent().as_uuid().hyphenated().to_string()
+    }
+
+    #[test]
+    fn two_plan_tags_that_disagree_orphan_the_snapshot_and_a_repeated_one_does_not() {
+        let own = format!("{AGENT_TAG_PREFIX}{}", own_text());
+        let home = format!("{PLAN_TAG_PREFIX}home");
+        let photos = format!("{PLAN_TAG_PREFIX}photos");
+        let snapshots = vec![
+            snapshot(1, &[home.clone(), own.clone(), home.clone(), own.clone()]),
+            snapshot(2, &[home.clone(), photos.clone(), own.clone()]),
+            snapshot(3, &[photos, home, own]),
+        ];
+        let partition = ForgetSelection::partition(
+            &snapshots,
+            &agent(),
+            &plans(&[("home", home_policy()), ("photos", home_policy())]),
+        );
+        let [managed] = partition.managed.try_into().expect("one managed group");
+        assert_eq!(managed.plan.as_str(), "home");
+        assert_eq!(
+            ids(&managed),
+            ["0000000000000000000000000000000000000000000000000000000000000001"],
+            "the same tag twice is no disagreement"
+        );
+        let [group] = partition.orphaned.try_into().expect("one orphaned group");
+        assert_eq!(group.agent, Some(own_text()));
+        assert_eq!(group.plan, None, "two plans name no one plan");
+        assert_eq!(group.snapshots.len(), 2, "whichever plan tag comes first");
+    }
+
+    #[test]
+    fn two_agent_tags_that_disagree_orphan_the_snapshot_even_when_one_is_this_agents() {
+        let own = format!("{AGENT_TAG_PREFIX}{}", own_text());
+        let other = format!("{AGENT_TAG_PREFIX}{}", other_text());
+        let home = format!("{PLAN_TAG_PREFIX}home");
+        let snapshots = vec![
+            snapshot(1, &[home.clone(), own.clone(), other.clone()]),
+            snapshot(2, &[home, other, own]),
+        ];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        assert!(partition.managed.is_empty(), "no plan's forget selects it");
+        let [group] = partition.orphaned.try_into().expect("one orphaned group");
+        assert_eq!(group.agent, None, "two agents name no one agent");
+        assert_eq!(group.plan.as_deref(), Some("home"));
+        assert_eq!(group.snapshots.len(), 2, "whichever agent tag comes first");
+    }
+
+    #[test]
+    fn owner_tags_that_differ_only_in_case_or_spacing_disagree() {
+        let own = format!("{AGENT_TAG_PREFIX}{}", own_text());
+        let home = format!("{PLAN_TAG_PREFIX}home");
+        let snapshots = vec![
+            snapshot(
+                1,
+                &[home.clone(), format!("{PLAN_TAG_PREFIX}Home"), own.clone()],
+            ),
+            snapshot(
+                2,
+                &[home.clone(), format!("{PLAN_TAG_PREFIX}home "), own.clone()],
+            ),
+            snapshot(
+                3,
+                &[home, own, format!("{AGENT_TAG_PREFIX} {}", own_text())],
+            ),
+        ];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        assert!(
+            partition.managed.is_empty(),
+            "a tag is compared exactly: {:?}",
+            partition.managed
+        );
+        assert_eq!(partition.len(), 3, "each is orphaned instead");
+        assert!(partition.unmanaged.is_empty());
+    }
+
+    #[test]
+    fn owner_tags_that_disagree_on_both_kinds_are_still_orphaned_not_unmanaged() {
+        let snapshots = vec![snapshot(
+            1,
+            &[
+                format!("{AGENT_TAG_PREFIX}{}", own_text()),
+                format!("{AGENT_TAG_PREFIX}{}", other_text()),
+                format!("{PLAN_TAG_PREFIX}home"),
+                format!("{PLAN_TAG_PREFIX}photos"),
+            ],
+        )];
+        let partition =
+            ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+        assert!(partition.managed.is_empty());
+        assert!(partition.unmanaged.is_empty(), "it carries owner tags");
+        let [group] = partition.orphaned.try_into().expect("one orphaned group");
+        assert_eq!((group.agent, group.plan), (None, None));
+    }
+
     #[test]
     fn each_plan_of_this_agent_keeps_its_own_group() {
         let snapshots = vec![

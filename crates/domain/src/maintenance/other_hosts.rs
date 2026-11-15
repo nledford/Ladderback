@@ -386,6 +386,27 @@ mod tests {
     }
 
     #[test]
+    fn a_recent_snapshot_whose_agent_tags_disagree_is_another_agents_whichever_comes_first() {
+        let config = config(Maintenance::Local, None, [None, None]);
+        let agent_tag =
+            |agent: &AgentId| format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated());
+        for tags in [
+            vec![agent_tag(&agent()), agent_tag(&another_agent())],
+            vec![agent_tag(&another_agent()), agent_tag(&agent())],
+        ] {
+            let disagreeing = Snapshot {
+                tags: tags.clone(),
+                ..snapshot(1, MACHINE)
+            };
+            assert_eq!(
+                other_hosts_among(&config, &[disagreeing]),
+                [MACHINE],
+                "this agent's tag alone no longer proves it was made here: {tags:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_repository_maintained_here_names_each_other_host_once_in_order() {
         let config = config(Maintenance::Local, None, [None, None]);
         assert_eq!(
