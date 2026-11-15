@@ -10,10 +10,11 @@
 //! sweep looks at and renamed once it is locked, so no sweep sees it
 //! unlocked.
 
-use std::io;
+use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-use crate::data_dir_lock::DataDirLock;
+use crate::data_dir_lock::{DataDirLock, LockError};
 
 /// The start of every scratch folder's name.
 pub const SCRATCH_PREFIX: &str = "ladderback-scratch-";
@@ -33,8 +34,27 @@ impl Scratch {
     ///
     /// The folder could not be made, locked or named.
     pub fn create(parent: &Path, name: &str) -> io::Result<Self> {
-        let _ = (parent, name);
-        todo!()
+        let path = parent.join(format!("{SCRATCH_PREFIX}{name}"));
+        if fs::symlink_metadata(&path).is_ok() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} is already there", path.display()),
+            ));
+        }
+        // Staged under a name no sweep looks at, until it is locked.
+        let staged = parent.join(format!(".{SCRATCH_PREFIX}{name}"));
+        make_private_dir(&staged)?;
+        let held = DataDirLock::acquire(&staged)
+            .map_err(lock_error)
+            .and_then(|lock| fs::rename(&staged, &path).map(|()| lock));
+        match held {
+            Ok(lock) => Ok(Self { path, _lock: lock }),
+            Err(error) => {
+                // Nothing of a folder that never came to be is left.
+                let _ = fs::remove_dir_all(&staged);
+                Err(error)
+            }
+        }
     }
 
     /// Where the folder is.
@@ -49,8 +69,17 @@ impl Scratch {
     ///
     /// The file could not be written.
     pub fn write_private(&self, name: &str, contents: &[u8]) -> io::Result<PathBuf> {
-        let _ = (name, contents);
-        todo!()
+        let path = self.path.join(name);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&path)?;
+        file.write_all(contents)?;
+        Ok(path)
     }
 
     /// Deletes the folder and all it holds, then lets go of it.
@@ -59,7 +88,9 @@ impl Scratch {
     ///
     /// Something in it could not be deleted.
     pub fn remove(self) -> io::Result<()> {
-        todo!()
+        // The lock is let go only once the folder is gone, so no sweep
+        // deletes it under this session.
+        fs::remove_dir_all(&self.path)
     }
 }
 
@@ -75,11 +106,57 @@ pub struct Swept {
 /// one a crashed session left. Anything else is left alone, a link named
 /// like a scratch folder included.
 pub fn sweep(parent: &Path) -> Swept {
-    let _ = parent;
-    todo!()
+    let mut swept = Swept::default();
+    let Ok(entries) = fs::read_dir(parent) else {
+        return swept;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let named = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(SCRATCH_PREFIX));
+        let folder = fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
+        if !named || !folder {
+            continue;
+        }
+        // Held by a live session, or not ours to open (another user's
+        // folder in a shared temporary folder): left alone.
+        let Ok(_lock) = DataDirLock::acquire(&path) else {
+            continue;
+        };
+        match fs::remove_dir_all(&path) {
+            Ok(()) => swept.removed.push(path),
+            Err(error) => swept.failed.push((path, error)),
+        }
+    }
+    swept
 }
 
-#[cfg(all(test, unix))]
+/// Makes `path`, which must not be there, readable by its owner only.
+fn make_private_dir(path: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        builder.mode(0o700).create(path)?;
+        // The umask may take more away than the group's and others' bits.
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    builder.create(path)
+}
+
+/// A lock that couldn't be taken, as the error of making the folder.
+fn lock_error(error: LockError) -> io::Error {
+    match error {
+        LockError::InUse { .. } => io::Error::new(io::ErrorKind::WouldBlock, "the folder is held"),
+        LockError::Unavailable { detail } => io::Error::other(detail),
+    }
+}
+
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
