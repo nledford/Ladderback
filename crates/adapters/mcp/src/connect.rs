@@ -2,14 +2,15 @@
 //! `/api/v1`, like any other API client. It depends on `api` alone, never on
 //! `adapters/http` (§3.2).
 
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use api::{
     ErrorCode, ErrorDto, MsgArg, OperationDetailDto, OperationsPageDto, PlansDto, RepositoriesDto,
-    SessionDto, SnapshotsDto,
+    SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
-use reqwest::header::HeaderValue;
+use reqwest::header::{AUTHORIZATION, HeaderValue};
 use reqwest::{Client, Url, redirect};
 use serde::de::DeserializeOwned;
 
@@ -75,6 +76,28 @@ impl DaemonUrl {
         self.0.join(route).ok()
     }
 
+    /// Whether a token may be sent to this address: over `https`, or to this
+    /// computer, a loopback address or `localhost`, as the daemon's request
+    /// checks count it. Over plain HTTP to another machine, anyone on the way
+    /// could read the token and use it (decision 87).
+    fn keeps_a_token_private(&self) -> bool {
+        if self.0.scheme() == "https" {
+            return true;
+        }
+        let Some(host) = self.0.host_str() else {
+            return false;
+        };
+        if host.eq_ignore_ascii_case("localhost") {
+            return true;
+        }
+        match host.strip_prefix('[').and_then(|v6| v6.strip_suffix(']')) {
+            Some(v6) => v6.parse::<Ipv6Addr>().is_ok_and(|addr| addr.is_loopback()),
+            None => host
+                .parse::<Ipv4Addr>()
+                .is_ok_and(|addr| addr.is_loopback()),
+        }
+    }
+
     /// The URL of `route`, then `segments`, each percent-encoded as one
     /// segment of the path, so no text a tool is given reaches another
     /// route. A segment `.` or `..` would be left out: callers send none
@@ -115,8 +138,13 @@ impl ApiToken {
     /// but printable ASCII. Whether the daemon knows it is the daemon's to
     /// say.
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = text;
-        todo!()
+        let text = text.trim();
+        if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return None;
+        }
+        let mut value = HeaderValue::try_from(format!("Bearer {text}")).ok()?;
+        value.set_sensitive(true);
+        Some(Self(value))
     }
 }
 
@@ -135,6 +163,7 @@ pub struct TokenOverPlainHttp;
 pub struct Connect {
     client: Client,
     daemon: DaemonUrl,
+    token: Option<ApiToken>,
 }
 
 impl Connect {
@@ -152,7 +181,11 @@ impl Connect {
             .referer(false)
             .build()
             .map_err(|error| ClientUnavailable(error.to_string()))?;
-        Ok(Self { client, daemon })
+        Ok(Self {
+            client,
+            daemon,
+            token: None,
+        })
     }
 
     /// This backend, sending `token` with every request.
@@ -162,9 +195,12 @@ impl Connect {
     /// The daemon's address is plain HTTP to another machine, where anyone
     /// on the way could read the token (decision 87). Without a token such
     /// an address is allowed.
-    pub fn with_token(self, token: ApiToken) -> Result<Self, TokenOverPlainHttp> {
-        let _ = token;
-        todo!()
+    pub fn with_token(mut self, token: ApiToken) -> Result<Self, TokenOverPlainHttp> {
+        if !self.daemon.keeps_a_token_private() {
+            return Err(TokenOverPlainHttp);
+        }
+        self.token = Some(token);
+        Ok(self)
     }
 
     /// The daemon's answer to `GET route/segments?query`, read as `T`, the
@@ -184,7 +220,11 @@ impl Connect {
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(query);
         }
-        let response = self.client.get(url).send().await.map_err(|_| no_answer())?;
+        let mut request = self.client.get(url);
+        if let Some(token) = &self.token {
+            request = request.header(AUTHORIZATION, token.0.clone());
+        }
+        let response = request.send().await.map_err(|_| no_answer())?;
         let succeeded = response.status().is_success();
         let body = read_capped(response).await.ok_or_else(no_answer)?;
         if succeeded {
@@ -217,6 +257,15 @@ async fn read_capped(mut response: reqwest::Response) -> Option<Vec<u8>> {
 impl Backend for Connect {
     async fn status(&self) -> Result<BackendStatus, ErrorDto> {
         let session: SessionDto = self.get("api/v1/session", &[], &[]).await?;
+        // The session route answers a token `signed-out`, as it has no
+        // session (decision 93), so access is told by how this program
+        // connected: with sign-in off a token is ignored.
+        let access = match (session.sign_in, &self.token) {
+            (SignInStateDto::Off, _) => Access::SignInOff,
+            (_, Some(_)) => Access::ApiToken,
+            // Sign-in is on and no token was sent: every other route refuses.
+            (_, None) => return Err(ErrorDto::new(ErrorCode::SignInRequired, [], None)),
+        };
         let listed = self.plans().await?;
         let mut plans = Vec::with_capacity(listed.plans.len());
         for plan in listed.plans {
@@ -229,7 +278,7 @@ impl Backend for Connect {
         let recent = self.history(None, None, RECENT_OPERATIONS).await?;
         let running = unfinished(recent.operations);
         Ok(BackendStatus {
-            access: Access::SignInOff,
+            access,
             daemon: Some(DaemonStatus {
                 build: session.build,
                 exposure: session.exposure,

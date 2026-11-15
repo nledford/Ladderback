@@ -113,6 +113,11 @@ enum Command {
         /// `http://127.0.0.1:9898` when no address follows.
         #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = mcp::DEFAULT_DAEMON_URL)]
         connect: Option<String>,
+        /// Send the API token this file holds, which only its owner may
+        /// read; `mcp-token` in the configuration folder, if it is there,
+        /// when no file is named. Only to an https address or this computer.
+        #[arg(long, value_name = "PATH", requires = "connect")]
+        token_file: Option<std::path::PathBuf>,
         /// Run a session of its own on Ladderback's folders, without a
         /// daemon: refused while a daemon or another session uses them.
         #[arg(long)]
@@ -197,25 +202,30 @@ fn main() -> ExitCode {
         Command::InstallService => service::install_service(),
         Command::RemoveService => service::remove_service(),
         Command::Mcp {
-            connect, scratch, ..
-        } => serve_mcp(McpMode::of(connect, scratch), plain),
+            connect,
+            token_file,
+            scratch,
+            ..
+        } => serve_mcp(McpMode::of(connect, token_file, scratch), plain),
         Command::Worker => engine::worker::main(),
     }
 }
 
-/// What `ladderback mcp` drives: a running daemon at an address, a session
-/// of its own on Ladderback's folders, or one in a scratch folder (§4.6).
+/// What `ladderback mcp` drives: a running daemon at an address, with the
+/// token file it was named, a session of its own on Ladderback's folders,
+/// or one in a scratch folder (§4.6).
 enum McpMode {
-    Connect(String),
+    Connect(String, Option<std::path::PathBuf>),
     Headless,
     Scratch,
 }
 
 impl McpMode {
-    /// The mode the flags name; the parser lets exactly one through.
-    fn of(connect: Option<String>, scratch: bool) -> Self {
+    /// The mode the flags name; the parser lets exactly one through, and a
+    /// token file only with `--connect`.
+    fn of(connect: Option<String>, token_file: Option<std::path::PathBuf>, scratch: bool) -> Self {
         match (connect, scratch) {
-            (Some(address), _) => Self::Connect(address),
+            (Some(address), _) => Self::Connect(address, token_file),
             (None, true) => Self::Scratch,
             (None, false) => Self::Headless,
         }
@@ -236,8 +246,8 @@ fn run_mcp(localizer: &Localizer, mode: McpMode) -> io::Result<ExitCode> {
     // status 2 is the parser's own for a value it rejects. The address isn't
     // repeated: it may hold a password.
     let daemon = match &mode {
-        McpMode::Connect(address) => match mcp::DaemonUrl::parse(address) {
-            Ok(daemon) => Some(daemon),
+        McpMode::Connect(address, token_file) => match mcp::DaemonUrl::parse(address) {
+            Ok(daemon) => Some((daemon, token_file.as_deref())),
             Err(_) => {
                 say(localizer, msg::CLI_MCP_CONNECT_INVALID, &[])?;
                 return Ok(ExitCode::from(2));
@@ -257,11 +267,14 @@ fn run_mcp(localizer: &Localizer, mode: McpMode) -> io::Result<ExitCode> {
         }
     };
     // A session of its own holds the data folder from here, as `serve` does;
-    // connect mode has its address parsed above.
-    let started = match (daemon, mode) {
-        (Some(daemon), _) => {
-            composition::mcp_server::connect(daemon, None, None).map(|server| (server, None))
-        }
+    // connect mode has its address parsed above, and reads its token file.
+    let started = match (daemon, &mode) {
+        (Some((daemon, token_file)), _) => composition::mcp_server::connect(
+            daemon,
+            token_file,
+            platform::dirs::config_dir().as_deref(),
+        )
+        .map(|server| (server, None)),
         (None, McpMode::Scratch) => runtime
             .block_on(composition::mcp_server::scratch(&OsRandom))
             .map(|(server, held)| (server, Some(held))),

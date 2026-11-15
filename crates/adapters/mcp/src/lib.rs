@@ -27,7 +27,7 @@ use std::sync::Arc;
 use api::{
     BuildDto, ErrorDto, ExposureDto, LocationsTestDto, MaintenancePreviewDto, OperationDetailDto,
     OperationSummaryDto, OperationsPageDto, PlanSummaryDto, PlansDto, ProfileExportDto,
-    ProfileImportDto, RepositoriesDto, SnapshotDto, SnapshotsDto,
+    ProfileImportDto, RepositoriesDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use rmcp::handler::server::tool::schema_for_output;
@@ -54,7 +54,7 @@ pub use connect::{
     TokenOverPlainHttp,
 };
 pub use actions::not_cancellable;
-pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE};
+pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 
 use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
@@ -185,7 +185,8 @@ pub struct BackendStatus {
 /// How the tools reach Ladderback, as `status` tells it: decided by how
 /// this program connected, never by the session route's answer to a token,
 /// which is `signed-out` (decision 93).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "kebab-case")]
 pub enum Access {
     /// Connect mode, with an API token the daemon took.
@@ -209,26 +210,6 @@ pub struct DaemonStatus {
     pub exposure: ExposureDto,
 }
 
-/// Which of a repository's snapshots `list_snapshots` lists: those of a
-/// plan, those taken on a host, or both; every one when it names neither.
-/// The server filters what either backend reads, so both modes keep the
-/// same snapshots.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SnapshotFilter {
-    pub plan: Option<String>,
-    pub host: Option<String>,
-}
-
-impl SnapshotFilter {
-    /// Whether `snapshot` is one this filter lists: the plan its
-    /// `ladderback-plan:` tag names, as maintenance reads it (§7.3), is the
-    /// plan, and its host is the host.
-    pub fn keeps(&self, snapshot: &SnapshotDto) -> bool {
-        let _ = snapshot;
-        todo!()
-    }
-}
-
 /// One plan as `status` shows it: the plans list's entry, with its next run,
 /// and its last operation, left out when it has none.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -250,6 +231,9 @@ pub struct PlanStatus {
 struct Status {
     /// This program's build.
     build: BuildDto,
+    /// How the tools reach Ladderback: `api-token`, `sign-in-off` (connect
+    /// mode) or `in-process` (headless and scratch modes).
+    access: Access,
     /// The daemon the tools drive, in connect mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     daemon: Option<DaemonStatus>,
@@ -313,13 +297,14 @@ impl Server {
     async fn status(&self) -> CallToolResult {
         match self.backend.status().await {
             Ok(BackendStatus {
-                access: _,
+                access,
                 daemon,
                 plans,
                 running,
             }) => structured(
                 &Status {
                     build: self.build.clone(),
+                    access,
                     daemon,
                     plans,
                     running,
@@ -359,9 +344,18 @@ impl Server {
         &self,
         arguments: SnapshotsArguments,
     ) -> Result<SnapshotsPage, ErrorDto> {
-        let listed = self.backend.snapshots(arguments.repository).await?;
+        let filter = SnapshotFilter {
+            plan: arguments.plan,
+            host: arguments.host,
+        };
+        let mut listed = self
+            .backend
+            .snapshots(arguments.repository)
+            .await?
+            .snapshots;
+        listed.retain(|snapshot| filter.keeps(snapshot));
         let (snapshots, next) = page(
-            listed.snapshots,
+            listed,
             |snapshot| &snapshot.id,
             arguments.cursor,
             arguments.limit,
@@ -500,7 +494,7 @@ fn tools() -> Vec<Tool> {
         Tool::new(
             LIST_SNAPSHOTS,
             "One repository's snapshots, newest first, a page at a time, read from the \
-             repository.",
+             repository; only those of a plan, or taken on a host, when either is named.",
             no_arguments(),
         )
         .with_title("List snapshots")

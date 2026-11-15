@@ -7,6 +7,7 @@ use api::{
     ErrorCode, ErrorDto, MsgArg, OperationSummaryDto, OperationWarningDto, PlanSummaryDto,
     RepositoryDto, SnapshotDto,
 };
+use domain::execution::plan_tags::PLAN_TAG_PREFIX;
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -82,11 +83,48 @@ pub struct ListArguments {
 pub struct SnapshotsArguments {
     /// The repository, by its alias, as `list_repositories` names it.
     pub repository: String,
+    /// Only the snapshots of this plan, by its ID: those whose
+    /// `ladderback-plan:` tag names it.
+    pub plan: Option<String>,
+    /// Only the snapshots taken on this host, by its name exactly as the
+    /// snapshots give it.
+    pub host: Option<String>,
     /// How many to list, from 1 to 200; 50 when not given. A larger number
     /// lists 200.
     pub limit: Option<u64>,
-    /// The `next` of the page before, to list the page after it.
+    /// The `next` of the page before, asked with the same filters, to list
+    /// the page after it.
     pub cursor: Option<String>,
+}
+
+/// Which of a repository's snapshots `list_snapshots` lists: those of a
+/// plan, those taken on a host, or both; every one when it names neither.
+/// The server filters what either backend reads, so both modes keep the
+/// same snapshots.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SnapshotFilter {
+    pub plan: Option<String>,
+    pub host: Option<String>,
+}
+
+impl SnapshotFilter {
+    /// Whether `snapshot` is one this filter lists: the plan its
+    /// `ladderback-plan:` tag names, as maintenance reads it (§7.3), is the
+    /// plan, and its host is the host.
+    pub fn keeps(&self, snapshot: &SnapshotDto) -> bool {
+        let of_plan = self.plan.as_deref().is_none_or(|plan| {
+            snapshot
+                .tags
+                .iter()
+                .find_map(|tag| tag.strip_prefix(PLAN_TAG_PREFIX))
+                == Some(plan)
+        });
+        let on_host = self
+            .host
+            .as_deref()
+            .is_none_or(|host| snapshot.hostname == host);
+        of_plan && on_host
+    }
 }
 
 /// The arguments of `list_operations`.

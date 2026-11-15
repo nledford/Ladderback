@@ -3,11 +3,16 @@
 //! It must be its owner's alone, as the admin password's hash is, since the
 //! token opens the daemon's API to whoever reads it.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// The token file's name in the configuration folder, read when
 /// `--token-file` names none.
 pub const DEFAULT_NAME: &str = "mcp-token";
+
+/// The most bytes read: a token is under a hundred, with room for spaces
+/// and line ends around it.
+const MAX_FILE_BYTES: u64 = 4096;
 
 /// Why a token file that is there can't be used. Each says the file's path
 /// and what is wrong, never what it holds.
@@ -24,8 +29,35 @@ pub struct TokenFileError {
 /// The file is there but can't be read, other users than its owner can read
 /// it, it is larger than a token, or it isn't UTF-8.
 pub fn read(path: &Path) -> Result<Option<String>, TokenFileError> {
-    let _ = path;
-    todo!()
+    let refused = |detail: String| TokenFileError {
+        path: path.to_owned(),
+        detail,
+    };
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(refused(error.to_string())),
+    };
+    let metadata = file
+        .metadata()
+        .map_err(|error| refused(error.to_string()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(refused(
+                "it can be read by other users than its owner".to_owned(),
+            ));
+        }
+    }
+    if metadata.len() > MAX_FILE_BYTES {
+        return Err(refused("it is larger than an API token".to_owned()));
+    }
+    let mut text = String::new();
+    file.take(MAX_FILE_BYTES)
+        .read_to_string(&mut text)
+        .map_err(|error| refused(error.to_string()))?;
+    Ok(Some(text))
 }
 
 #[cfg(test)]

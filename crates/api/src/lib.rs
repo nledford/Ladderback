@@ -3748,7 +3748,9 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// and it is left out while none is kept. The build the daemon runs
 /// (`version`, `commit`, `dirty`, `release`) is told to a page that may see
 /// the pages, with sign-in off or a live session, and left out for a page
-/// that has yet to sign in.
+/// that has yet to sign in. A request sending a `read` API token is answered
+/// `signed-out` with the build, without `keep-signed-in-offered` or a CSRF
+/// token, whatever session cookie it also sends (decision 95).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
