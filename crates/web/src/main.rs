@@ -97,6 +97,15 @@ mod stats;
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod status_badge;
+// What a spinner looks like and how a screen reader meets it, decided on
+// the host; `components.rs`'s `Spinner` is its glue. Only the gallery shows
+// a spinner yet, and the host tests use these decisions, so only a build of
+// neither leaves them unused.
+#[cfg_attr(
+    all(not(feature = "gallery"), not(test)),
+    expect(dead_code, reason = "only the gallery shows a spinner yet")
+)]
+mod spinner;
 // Declared as `formatting` is, for the same reason.
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
