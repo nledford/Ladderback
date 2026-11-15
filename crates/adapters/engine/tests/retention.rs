@@ -96,6 +96,35 @@ async fn keep_last_removes_the_oldest_as_the_fake_does() {
 }
 
 #[tokio::test]
+async fn an_empty_policy_is_refused_as_the_fake_refuses_it() {
+    // Rustic's retention refuses a policy that sets no `keep-*` option, so
+    // the use case never asks with one (an empty policy keeps everything);
+    // the fake refuses it too, so an acceptance scenario that asks fails.
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    write_file(scratch.source().join("a.txt"), b"hello");
+    let repo = location.open().to_indexed_ids().unwrap();
+    let paths = PathList::from_iter([scratch.source()]).sanitize().unwrap();
+    repo.backup(
+        &BackupOptions::default(),
+        &paths,
+        SnapshotOptions::default().to_snapshot().unwrap(),
+    )
+    .unwrap();
+    let access = location.access(PASSWORD);
+    let group = listed(&engine(), &access).await;
+    assert_eq!(group.len(), 1, "{group:?}");
+
+    let policy = RetentionPolicy::default();
+    let real = RusticRetention.removes(&access, &policy, &group).await;
+    let fake = FakeRetention.removes(&access, &policy, &group).await;
+
+    assert_eq!(real, Err(RetentionError::InvalidPolicy));
+    assert_eq!(fake, real, "the fake and the real adapter agree");
+}
+
+#[tokio::test]
 async fn an_error_never_carries_the_repository_credentials() {
     // A repository string with credentials in it, pointed at a port
     // nothing listens on: the open fails, and its detail must come back

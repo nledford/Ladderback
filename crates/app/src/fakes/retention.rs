@@ -12,8 +12,8 @@ use domain::planning::RetentionPolicy;
 
 use crate::ports::{RepositoryAccess, Retention, RetentionError};
 
-/// Evaluates `keep-last` and `keep-within` only, newest first, exactly as
-/// the port's contract says a group arrives.
+/// Evaluates `keep-last` only, over a group newest first, exactly as the
+/// port's contract says a group arrives.
 #[derive(Default)]
 pub struct FakeRetention;
 
