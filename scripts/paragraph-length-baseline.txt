@@ -12,7 +12,6 @@ docs/design/decisions/34-a-hooks-output-after-the-hook.md
 docs/design/decisions/36-repository-jobs-have-a-deadline.md
 docs/design/decisions/37-a-secret-written-in-the-config.md
 docs/design/decisions/38-the-command-lines-output.md
-docs/design/decisions/39-live-rows-are-stable.md
 docs/design/decisions/40-crash-recovery-and-the-data-dir.md
 docs/design/decisions/41-the-end-of-an-operation-is.md
 docs/design/decisions/42-a-maintenance-start-the-client-drops.md
