@@ -1493,6 +1493,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::AdminPasswordTooLong
                 | ErrorCode::CurrentPasswordWrong
                 | ErrorCode::AdminPasswordUnavailable
+                | ErrorCode::SessionsUnavailable
                 | ErrorCode::ConfigUnavailable
                 | ErrorCode::ConfigTooLarge
                 | ErrorCode::ConfigInvalid

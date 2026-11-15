@@ -340,6 +340,11 @@ pub enum ErrorCode {
     /// The admin password could not be checked or kept, so it was not set.
     /// The daemon's log says why.
     AdminPasswordUnavailable,
+    /// The database could not keep or forget sessions: a sign-in's session,
+    /// a sign-out, Sign out everywhere or the session length (§10.1). A
+    /// session signed out has ended all the same while the daemon runs. The
+    /// daemon's log says why.
+    SessionsUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -1019,6 +1024,7 @@ impl ErrorCode {
             | Self::ApiTokensUnavailable
             | Self::CurrentPasswordWrong
             | Self::AdminPasswordUnavailable
+            | Self::SessionsUnavailable
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
@@ -1962,6 +1968,7 @@ mod tests {
             ErrorCode::ApiTokensUnavailable,
             ErrorCode::CurrentPasswordWrong,
             ErrorCode::AdminPasswordUnavailable,
+            ErrorCode::SessionsUnavailable,
             ErrorCode::ConfigFolderUnknown,
             ErrorCode::RuntimeUnavailable,
             ErrorCode::Unknown,

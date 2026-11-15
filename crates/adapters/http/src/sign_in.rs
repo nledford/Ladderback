@@ -17,7 +17,7 @@ use api::{
     SignInDto, SignInStateDto,
 };
 use app::access::{
-    Access, PasswordChangeRefused, PasswordWaiting, SetPasswordRefused, SignInRefused,
+    Access, PasswordChangeRefused, PasswordSet, PasswordWaiting, SetPasswordRefused, SignInRefused,
     set_admin_password,
 };
 use app::ports::{AdminPassword, SessionStore};
@@ -151,9 +151,10 @@ pub(crate) async fn enforce(
     };
     // A use that renews the cookie says so on whatever answers it, unless
     // the route sets the cookie itself, as a new admin password forgets it.
+    // `Secure` is as the sign-in set it: a same-origin GET has no `Origin`.
     let renewed = session
         .renewed_cookie()
-        .and_then(|life| session_cookie(&token, life, over_https(request.headers())));
+        .and_then(|life| session_cookie(&token, life, session.secure()));
     let mut response = if !reads_only(request.method())
         && !csrf_token(request.headers()).is_some_and(|presented| session.accepts(&presented))
     {
@@ -188,8 +189,9 @@ fn session_cookie(token: &Token, life: CookieLife, secure: bool) -> Option<Heade
 
 /// `GET /api/v1/session`: whether sign-in is on, and whether the request's
 /// session is live, with its CSRF token when it is, and the cookie renewed
-/// when asking renewed it; a signed-out answer says whether the sign-in form
-/// offers Keep me signed in on this device.
+/// when asking renewed it; a read the page sends on its own only looks, as
+/// at every route. A signed-out answer says whether the sign-in form offers
+/// Keep me signed in on this device.
 pub(crate) async fn current(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
@@ -202,6 +204,7 @@ pub(crate) async fn current(
     };
     let token = session_token(&headers);
     let live = match &token {
+        Some(token) if headers.contains_key(&BACKGROUND) => access.peek(token),
         Some(token) => access.session(token).await,
         None => None,
     };
@@ -222,7 +225,7 @@ pub(crate) async fn current(
     );
     if let Some(cookie) = session
         .renewed_cookie()
-        .and_then(|life| session_cookie(&token, life, over_https(&headers)))
+        .and_then(|life| session_cookie(&token, life, session.secure()))
     {
         response.headers_mut().insert(SET_COOKIE, cookie);
     }
@@ -245,7 +248,8 @@ fn answer_signed_out(access: &Access, exposure: Exposure, build: BuildDto) -> Re
 /// `POST /api/v1/session`: signs in with the admin password. A session's
 /// cookie can't be read by the page's scripts and is never sent by another
 /// site; it is marked `Secure` when the page that sent the request was served
-/// over HTTPS, as through a TLS-terminating proxy.
+/// over HTTPS, as through a TLS-terminating proxy, and stays so at every
+/// renewal.
 pub(crate) async fn sign_in(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
@@ -293,7 +297,10 @@ pub(crate) async fn sign_in(
     let Ok(password) = Password::parse(password) else {
         return refused(StatusCode::UNAUTHORIZED, ErrorCode::SignInFailed);
     };
-    match access.sign_in(address, &password, keep_signed_in, secure).await {
+    match access
+        .sign_in(address, &password, keep_signed_in, secure)
+        .await
+    {
         Ok(signed_in) => {
             let mut response = answer(
                 SignInStateDto::SignedIn,
@@ -325,7 +332,9 @@ pub(crate) async fn sign_in(
                 ErrorCode::SignInUnavailable,
             )
         }
-        Err(SignInRefused::Store(_)) => todo!(),
+        Err(SignInRefused::Store(error)) => sessions_unavailable(&format!(
+            "a session could not be kept in the database: {error}"
+        )),
     }
 }
 
@@ -350,13 +359,12 @@ pub(crate) async fn sign_out(
             return refused(StatusCode::FORBIDDEN, ErrorCode::CsrfTokenInvalid);
         }
         if let Err(error) = access.sign_out(&token).await {
-            // The session has ended here, but the store still holds it, and
-            // a restart would bring it back: say so, so the page can retry.
-            log::warn!("a signed-out session could not be forgotten: {error}");
-            let mut response = refused(
-                StatusCode::SERVICE_UNAVAILABLE,
-                ErrorCode::SignInUnavailable,
-            );
+            // The session has ended here and the browser forgets its cookie,
+            // but the store still holds it until its next write succeeds,
+            // and a restart before then would bring it back: say so.
+            let mut response = sessions_unavailable(&format!(
+                "a signed-out session could not be forgotten in the database: {error}"
+            ));
             forget_cookie(&mut response);
             return response;
         }
@@ -368,13 +376,41 @@ pub(crate) async fn sign_out(
 
 /// `DELETE /api/v1/sessions`: Sign out everywhere. Every browser's session
 /// ends, the one that asked included, and the store forgets them all; the
-/// browser that asked forgets its cookie. API tokens go on.
+/// browser that asked forgets its cookie. API tokens go on. Only a live
+/// session with its CSRF token reaches here (`enforce`); with sign-in off
+/// there is no session to end.
 pub(crate) async fn sign_out_everywhere(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
     State(build): State<BuildDto>,
 ) -> Response {
-    todo!()
+    let SignIn::On(access) = sign_in else {
+        return refused(StatusCode::CONFLICT, ErrorCode::SignInOff);
+    };
+    let mut response = match access.sign_out_everywhere().await {
+        Ok(()) => answer_signed_out(&access, exposure, build),
+        Err(error) => {
+            // Every session has ended here, but the store still holds them
+            // until its next write succeeds, and a restart before then
+            // would bring them back: say so.
+            sessions_unavailable(&format!(
+                "the sessions signed out everywhere could not be forgotten in the database: {error}"
+            ))
+        }
+    };
+    forget_cookie(&mut response);
+    response
+}
+
+/// The answer when the database could not keep or forget sessions: `line`,
+/// which names the database, goes to the log for whoever runs the daemon,
+/// not to whoever asked.
+pub(crate) fn sessions_unavailable(line: &str) -> Response {
+    log::warn!("{line}");
+    refused(
+        StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::SessionsUnavailable,
+    )
 }
 
 /// Has the browser forget the session cookie.
@@ -419,7 +455,10 @@ pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request
             return match set_admin_password(password.as_ref(), sessions.as_ref(), new_password)
                 .await
             {
-                Ok(_) => StatusCode::NO_CONTENT.into_response(),
+                Ok(set) => {
+                    say_sessions_left(set);
+                    StatusCode::NO_CONTENT.into_response()
+                }
                 Err(refusal) => set_refused(refusal),
             };
         }
@@ -444,7 +483,8 @@ pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request
         .change_password(peer.ip(), &current, new_password)
         .await
     {
-        Ok(_) => {
+        Ok(set) => {
+            say_sessions_left(set);
             let mut response = StatusCode::NO_CONTENT.into_response();
             forget_cookie(&mut response);
             response
@@ -462,8 +502,23 @@ pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request
                 ErrorCode::AdminPasswordUnavailable,
             )
         }
-        Err(PasswordChangeRefused::Current(SignInRefused::Store(_))) => todo!(),
+        // Not met: checking the current password keeps no session. Answered
+        // as a sign-in's would be.
+        Err(PasswordChangeRefused::Current(SignInRefused::Store(error))) => sessions_unavailable(
+            &format!("a session could not be kept in the database: {error}"),
+        ),
         Err(PasswordChangeRefused::New(refusal)) => set_refused(refusal),
+    }
+}
+
+/// Logs a new admin password whose store couldn't forget the sessions kept
+/// from before it: they have ended all the same, by the fingerprint, and the
+/// next start forgets them.
+fn say_sessions_left(set: PasswordSet) {
+    if let PasswordSet::SessionsLeft(error) = set {
+        log::warn!(
+            "the sessions kept from before the new admin password could not be forgotten; they have ended all the same, and the next start forgets them: {error}"
+        );
     }
 }
 

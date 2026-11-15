@@ -63,6 +63,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     AdminPasswordTooLong => msg::ERROR_ADMIN_PASSWORD_TOO_LONG,
     CurrentPasswordWrong => msg::ERROR_CURRENT_PASSWORD_WRONG,
     AdminPasswordUnavailable => msg::ERROR_ADMIN_PASSWORD_UNAVAILABLE,
+    SessionsUnavailable => msg::ERROR_SESSIONS_UNAVAILABLE,
     ConfigUnavailable => msg::ERROR_CONFIG_UNAVAILABLE,
     ConfigTooLarge => msg::ERROR_CONFIG_TOO_LARGE,
     ConfigInvalid => msg::ERROR_CONFIG_INVALID,
