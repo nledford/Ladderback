@@ -3,8 +3,18 @@
 //! The words are this store's own, equal today to `api`'s kebab-case codes but
 //! not tied to them: a database outlives the API's names. Writing matches
 //! every variant of the closed type, so a new one doesn't compile until it has
-//! a spelling; reading is strict, so a spelling this version never wrote is
-//! reported, not guessed at.
+//! a spelling. Reading is strict, so a spelling this version never wrote is
+//! reported, not guessed at, with one exception: a warning code this version
+//! doesn't know is a warning of another kind ([`WarningKind::Other`]), since a
+//! newer worker may have written it.
+//!
+//! An operation's kind and a warning's code are each written and read by one
+//! spelling, the writer's (`kind_text` here, [`WarningKind::code`] in the
+//! domain): reading goes through a table of the kinds (`KINDS`,
+//! `WARNING_KINDS`) by that same spelling, so the two directions can't drift
+//! apart. The tests walk every variant through both. The SQL behind I7 names
+//! the maintenance kinds again (`sql.rs`, the `one_maintenance_per_repo`
+//! index; §9).
 
 use api::MsgArg;
 use domain::execution::refusal::SettingRefusal;
@@ -15,6 +25,8 @@ use domain::execution::{
 use crate::error_args;
 use crate::report::shown;
 
+/// The word the log's `kind` column stores `kind` under, which
+/// [`kind_from_text`] reads by too.
 pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
     match kind {
         OperationKind::Fake => "fake",
@@ -29,8 +41,25 @@ pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
     }
 }
 
-pub(crate) fn kind_from_text(_text: &str) -> Option<OperationKind> {
-    todo!("read the kind through the table of every kind")
+/// Every operation kind, the table the `kind` column is read through. `Ls` is
+/// in it though a listing is a read the log never writes (§9): a stored `ls`
+/// reads back as one, as it always has.
+const KINDS: [OperationKind; 9] = [
+    OperationKind::Fake,
+    OperationKind::Identify,
+    OperationKind::Init,
+    OperationKind::Backup,
+    OperationKind::Forget,
+    OperationKind::Adopt,
+    OperationKind::Prune,
+    OperationKind::Check,
+    OperationKind::Ls,
+];
+
+/// The kind [`kind_text`] writes as `text`; none for a word no kind is
+/// written as, which the reader reports as corrupt.
+pub(crate) fn kind_from_text(text: &str) -> Option<OperationKind> {
+    KINDS.into_iter().find(|&kind| kind_text(kind) == text)
 }
 
 /// The trigger column's word for an operation an API token started: the one
@@ -89,10 +118,28 @@ pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
     }
 }
 
-/// A code this version doesn't know is a warning of another kind, as the
-/// domain has it: a newer worker may have written it.
-pub(crate) fn warning_kind_from_text(_text: &str) -> WarningKind {
-    todo!("read the code through the table of every kind of warning")
+/// Every kind of warning but [`WarningKind::Other`], the table the
+/// `op_warnings.code` column is read through, each by the code the domain
+/// writes for it ([`WarningKind::code`]).
+const WARNING_KINDS: [WarningKind; 8] = [
+    WarningKind::SourceUnreadable,
+    WarningKind::Hook,
+    WarningKind::MaintenancePartial,
+    WarningKind::CheckWarning,
+    WarningKind::CheckError,
+    WarningKind::OtherHosts,
+    WarningKind::LocationSkipped,
+    WarningKind::SecretFileReadable,
+];
+
+/// The kind of warning stored as `code`. A code this version doesn't know,
+/// `unknown` included, is a warning of another kind, as the domain has it: a
+/// newer worker may have written it.
+pub(crate) fn warning_kind_from_text(code: &str) -> WarningKind {
+    WARNING_KINDS
+        .into_iter()
+        .find(|kind| kind.code() == code)
+        .unwrap_or(WarningKind::Other)
 }
 
 fn transition_text(transition: Transition) -> &'static str {
