@@ -2,6 +2,17 @@
 
 This section decides how the web UI and the API are protected, how repository secrets are resolved and kept out of every output, and what an agent, a restore, an MCP client and a repository location may do.
 
+**Who is trusted** (§16, decision 99). Ladderback runs on a person's own computer, as a hub or an agent. The person, and every process running as their operating-system user, AI agents and development tools included, can already read and write the data folder: `config.toml`, the SQLite store, the admin password's hash, the logs. Ladderback doesn't try to protect its data from them, and a weakness that needs such a process first is not a security finding unless it reaches further than that user could already reach.
+
+What this section defends against instead:
+
+- other machines that can reach the address the daemon listens on;
+- other operating-system users of a shared machine;
+- the storage a repository lives on, and the services in between;
+- text from outside that a program acts on: an MCP client's calls, rustic's output.
+
+I4 is unchanged: argv and environments are visible to other users, and logs, templates, sync messages and the UI leave the person's control. The Justfile's recipes are development tools for contributors who know the risks; they may read the daemon's local state directly, and nothing in the product depends on them.
+
 ### 10.1 Web UI
 
 This section decides who may use the web UI and the API, what every request is checked for, and what the daemon says and refuses when it listens beyond the machine.

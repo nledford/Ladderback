@@ -162,6 +162,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [93](decisions/93-api-tokens.md) | API tokens |
 | [94](decisions/94-restart-from-settings.md) | Restarting from Settings |
 | [96](decisions/96-plans-edited-in-the-ui.md) | Creating, changing and deleting plans in the UI |
+| [99](decisions/99-who-is-trusted.md) | Who is trusted with Ladderback's local data |
 
 ## 17. Open questions
 
