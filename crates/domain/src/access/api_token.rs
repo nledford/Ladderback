@@ -8,6 +8,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::{PasswordFingerprint, TOKEN_BYTES};
 
@@ -165,8 +166,9 @@ impl ApiTokenLabel {
 }
 
 /// A token's secret: [`TOKEN_BYTES`] random bytes. Its `Debug` hides it, and
-/// it has no `==`: it is checked only through its SHA-256 (I4).
-#[derive(Clone)]
+/// it has no `==`: it is checked only through its SHA-256 (I4). It wipes its
+/// bytes when it is dropped (§10.2).
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct ApiTokenSecret([u8; TOKEN_BYTES]);
 
 impl ApiTokenSecret {
@@ -175,7 +177,8 @@ impl ApiTokenSecret {
     }
 
     fn digest(&self) -> ApiTokenDigest {
-        ApiTokenDigest(Sha256::digest(self.0).into())
+        // A slice, not `self.0`: that would copy the bytes out unwiped.
+        ApiTokenDigest(Sha256::digest(self.0.as_slice()).into())
     }
 }
 
@@ -184,14 +187,6 @@ impl std::fmt::Debug for ApiTokenSecret {
         f.write_str("ApiTokenSecret(***)")
     }
 }
-
-impl zeroize::Zeroize for ApiTokenSecret {
-    fn zeroize(&mut self) {
-        todo!()
-    }
-}
-
-impl zeroize::ZeroizeOnDrop for ApiTokenSecret {}
 
 /// The SHA-256 of a token's secret: all the daemon keeps of it. Compared only
 /// in constant time.
@@ -215,7 +210,9 @@ impl std::fmt::Debug for ApiTokenDigest {
 }
 
 /// A token's whole text, `ladderback_<id>_<secret>`, as shown once when it
-/// is created. Its `Debug` hides it (I4).
+/// is created. Its `Debug` hides it (I4), and it wipes its bytes when it is
+/// dropped (§10.2).
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct ApiTokenText(String);
 
 impl ApiTokenText {
@@ -251,14 +248,6 @@ impl std::fmt::Debug for ApiTokenText {
     }
 }
 
-impl zeroize::Zeroize for ApiTokenText {
-    fn zeroize(&mut self) {
-        todo!()
-    }
-}
-
-impl zeroize::ZeroizeOnDrop for ApiTokenText {}
-
 fn base64_char(sextet: u32) -> char {
     let index = usize::try_from(sextet & 63).unwrap_or(0);
     char::from(BASE64URL.get(index).copied().unwrap_or(b'A'))
@@ -289,9 +278,10 @@ impl PresentedApiToken {
         if encoded.len() != SECRET_CHARS {
             return None;
         }
-        let mut bytes = [0; TOKEN_BYTES];
+        // Decoded straight into the secret, which wipes itself if this fails.
+        let mut secret = ApiTokenSecret([0; TOKEN_BYTES]);
         let (quads, tail) = encoded.as_chunks::<4>();
-        let (triples, last) = bytes.as_chunks_mut::<3>();
+        let (triples, last) = secret.0.as_chunks_mut::<3>();
         for (triple, quad) in triples.iter_mut().zip(quads) {
             let mut bits = 0;
             for char in quad {
@@ -308,10 +298,7 @@ impl PresentedApiToken {
         let [_, _, high, low] = (bits >> 2).to_be_bytes();
         let [first, second] = last else { return None };
         (*first, *second) = (high, low);
-        Some(Self {
-            id,
-            secret: ApiTokenSecret(bytes),
-        })
+        Some(Self { id, secret })
     }
 
     pub fn id(&self) -> &ApiTokenId {

@@ -3,6 +3,8 @@
 
 use std::collections::BTreeMap;
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 mod command;
 mod go_print;
 mod inline;
@@ -65,8 +67,9 @@ pub const MAX_OPTIONS: usize = 64;
 pub const MAX_MASKED_BYTES: usize = 256 * 1024;
 
 /// A resolved secret, such as a repository password. Its `Debug` form never
-/// shows the value, so it can't leak through a log or a test failure.
-#[derive(Clone, PartialEq, Eq)]
+/// shows the value, so it can't leak through a log or a test failure, and it
+/// wipes its bytes when it is dropped, each clone its own (§10.2).
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct SecretValue(String);
 
 impl SecretValue {
@@ -85,14 +88,6 @@ impl std::fmt::Debug for SecretValue {
         f.write_str("SecretValue(***)")
     }
 }
-
-impl zeroize::Zeroize for SecretValue {
-    fn zeroize(&mut self) {
-        todo!()
-    }
-}
-
-impl zeroize::ZeroizeOnDrop for SecretValue {}
 
 /// What a secret is replaced with.
 pub const REDACTED: &str = "***";

@@ -196,8 +196,9 @@ wasm-bindgen-test = "0.3.80"
 web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "BinaryType", "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "RequestCredentials", "ScrollIntoViewOptions", "ScrollLogicalPosition", "UrlSearchParams", "WebSocket", "Window"] }
 # Wipes a resolved secret's bytes, the admin password and an API token's
 # secret when they are dropped (security §10.2); already in the tree through
-# `rustls` and `argon2`.
-zeroize = "1.9.1"
+# `rustls` and `keyring`. `derive` writes the wipe and the drop that runs it,
+# so the drop does what the tests run.
+zeroize = { version = "1.9.1", features = ["derive"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
