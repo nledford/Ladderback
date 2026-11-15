@@ -179,6 +179,9 @@ exclude_re = [
     # it is never sent. The other `!`s of the wait are not excluded and are
     # caught. Named by line, so a moved line brings the mutant back to judge.
     'crates/adapters/mcp/src/lib\.rs:429:31: delete ! in Server::wait_operation$',
+    # `FolderPath::top` is `Self::default()`, the path that names no folder:
+    # the mutant that returns `Default::default()` is the same code.
+    'crates/domain/src/browse\.rs.*: replace FolderPath::top -> Self with Default::default\(\)$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0

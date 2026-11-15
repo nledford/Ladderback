@@ -7,9 +7,10 @@
 //! `type` is an error.
 
 use app::ports::{
-    BackupSummary, CheckSummary, EngineResult, ForgetSummary, ProbeAnswer, PrunePlanSummary,
-    PruneSummary, RewriteSummary, SnapshotSummary,
+    BackupSummary, CheckSummary, EngineResult, FolderAnswer, ForgetSummary, ProbeAnswer,
+    PrunePlanSummary, PruneSummary, RewriteSummary, SnapshotSummary,
 };
+use domain::browse::FolderPage;
 use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -74,6 +75,13 @@ pub(crate) enum Summary {
     /// operation (decision 80), so no row holds this variant either.
     Probed {
         answer: Probed,
+    },
+    /// A read's result: a browse of a snapshot's folder is never logged as
+    /// an operation (§9), so no row holds this variant either. It keeps
+    /// only how many entries the folder holds, the least the format can
+    /// say of it.
+    Folder {
+        total: u64,
     },
 }
 
@@ -174,9 +182,12 @@ impl From<&EngineResult> for Summary {
                     })
                     .collect(),
             },
-            // A browse is a read, never written to the log (§9): what it
-            // stores as is still to decide (HANDOFF, next run).
-            EngineResult::Folder(_) => todo!("the summary of a browse"),
+            EngineResult::Folder(answer) => Self::Folder {
+                total: match answer {
+                    FolderAnswer::Page(page) => page.total,
+                    FolderAnswer::SnapshotUnknown | FolderAnswer::FolderUnknown => 0,
+                },
+            },
         }
     }
 }
@@ -282,6 +293,13 @@ impl From<Summary> for EngineResult {
                     })
                     .collect(),
             ),
+            // No row holds a browse (above): it reads back as the folder's
+            // count, with none of its entries.
+            Summary::Folder { total } => Self::Folder(FolderAnswer::Page(FolderPage {
+                entries: Vec::new(),
+                total,
+                next: None,
+            })),
         }
     }
 }

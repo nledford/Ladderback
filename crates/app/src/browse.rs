@@ -8,11 +8,12 @@
 use std::sync::Arc;
 
 use domain::browse::{FolderPage, FolderPath};
+use domain::execution::FailureReason;
 use domain::planning::RepositoryConfig;
 use domain::{OperationId, RepositoryAlias, SnapshotId};
 
-use crate::maintenance::MaintenanceError;
-use crate::ports::{Clock, Engine};
+use crate::maintenance::{MaintenanceError, run_read};
+use crate::ports::{BrowseJob, Clock, Engine, EngineResult, FolderAnswer, Job};
 use crate::secrets::{ResolveError, ResolveRepository};
 
 /// Reads a page of a snapshot's folder.
@@ -58,18 +59,34 @@ impl BrowseSnapshot {
         folder: FolderPath,
         from: u64,
     ) -> Result<FolderPage, BrowseError> {
-        let _ = (
-            op,
-            alias,
-            entry,
+        // `resolve_saved` gives the access the ID the entry records, so the
+        // engine refuses another repository at the location (§7.3).
+        let repository = self
+            .resolve
+            .resolve_saved(alias, entry)
+            .await
+            .map_err(BrowseError::Resolve)?
+            .access;
+        let job = Job::Browse(BrowseJob {
+            repository,
             snapshot,
             folder,
             from,
-            &self.engine,
-            &self.clock,
-            &self.resolve,
-        );
-        todo!("BrowseSnapshot::folder")
+        });
+        match run_read(self.engine.as_ref(), self.clock.as_ref(), op, job)
+            .await
+            .map_err(BrowseError::Read)?
+        {
+            EngineResult::Folder(FolderAnswer::Page(page)) => Ok(page),
+            EngineResult::Folder(FolderAnswer::SnapshotUnknown) => {
+                Err(BrowseError::SnapshotUnknown)
+            }
+            EngineResult::Folder(FolderAnswer::FolderUnknown) => Err(BrowseError::FolderUnknown),
+            // Any other answer is the engine stopping without its own.
+            _ => Err(BrowseError::Read(MaintenanceError::Failed(
+                FailureReason::EngineExited { exit_code: None },
+            ))),
+        }
     }
 }
 
@@ -232,7 +249,14 @@ mod tests {
     async fn the_next_page_is_read_from_the_position_asked_for() {
         let engine = scripted(Ok(FolderAnswer::Page(page())));
         let _ = use_case(Arc::clone(&engine))
-            .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 1_000)
+            .folder(
+                op(),
+                &alias(),
+                &entry(),
+                snapshot(),
+                FolderPath::top(),
+                1_000,
+            )
             .await;
         let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(Job::Browse(browse)) = seen.last() else {
@@ -266,6 +290,9 @@ mod tests {
         let read = use_case(scripted(Err(reason.clone())))
             .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 0)
             .await;
-        assert_eq!(read, Err(BrowseError::Read(MaintenanceError::Failed(reason))));
+        assert_eq!(
+            read,
+            Err(BrowseError::Read(MaintenanceError::Failed(reason)))
+        );
     }
 }

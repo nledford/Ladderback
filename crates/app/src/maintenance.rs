@@ -1420,7 +1420,7 @@ async fn list(
 /// Runs a read-only job to its end and reports its result. A read not
 /// answered within [`READ_TIMEOUT`] is given up: dropping the job stops the
 /// engine.
-async fn run_read(
+pub(crate) async fn run_read(
     engine: &dyn Engine,
     clock: &dyn Clock,
     op: OperationId,
