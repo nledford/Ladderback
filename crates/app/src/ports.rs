@@ -18,6 +18,7 @@ mod secrets;
 mod service;
 mod session_store;
 mod sources;
+mod stats_store;
 
 pub use admin_password::{AdminPassword, AdminPasswordError};
 pub use api_token_store::{Added, ApiTokenStore};
@@ -57,3 +58,4 @@ pub use secrets::{Resolved, SecretResolver};
 pub use service::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
 pub use session_store::SessionStore;
 pub use sources::{NormalizeSources, SourcesError};
+pub use stats_store::StatsStore;

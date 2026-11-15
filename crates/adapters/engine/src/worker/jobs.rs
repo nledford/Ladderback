@@ -22,7 +22,7 @@ use super::repository::{self as location, new_repository, open, repository_id};
 use super::{Context, Done};
 use crate::job::{
     BackupJobSpec, BrowseJobSpec, CheckJobSpec, FolderResult, ForgetJobSpec, ForgetResult,
-    OpResult, ProbeResult, PruneJobSpec, RepositorySpec, WorkerEvent,
+    OpResult, ProbeResult, PruneJobSpec, RepositorySpec, StatsResult, WorkerEvent,
 };
 use crate::job::{RewriteJobSpec, RewriteResult};
 
@@ -110,6 +110,42 @@ pub(crate) fn browse(ctx: &Context, job: &BrowseJobSpec) -> Result<Done, JobErro
         &tree.nodes,
         job.from,
     ))))
+}
+
+/// Reads the repository's stats (§16, decision 104). A read: it emits
+/// `Started` after the open, as `ls` does, then reads the snapshots and every
+/// index file. The total size adds up each snapshot's `total_bytes_processed`
+/// (a snapshot with no summary adds nothing); the stored and raw sizes add up
+/// every indexed blob's length in its pack and its length before
+/// compression, as `rustic repoinfo` does. Packs marked for deletion are left
+/// out, as rustic leaves them out of its totals. Sums saturate: the files
+/// read are outside input.
+pub(crate) fn stats(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
+    let repository = open(ctx, spec)?;
+    ctx.start(None, Some(&repository_id(&repository)?))?;
+    let snapshots = repository.get_all_snapshots()?;
+    let total_size = snapshots
+        .iter()
+        .filter_map(|snapshot| snapshot.summary.as_ref())
+        .fold(0_u64, |sum, summary| {
+            sum.saturating_add(summary.total_bytes_processed)
+        });
+    let index = repository.infos_index()?;
+    let (stored_size, raw_size) = index
+        .blobs
+        .iter()
+        .fold((0_u64, 0_u64), |(stored, raw), blob| {
+            (
+                stored.saturating_add(blob.size),
+                raw.saturating_add(blob.data_size),
+            )
+        });
+    Ok(Done::Result(OpResult::Stats(StatsResult {
+        snapshots: u64::try_from(snapshots.len()).unwrap_or(u64::MAX),
+        total_size,
+        stored_size,
+        raw_size,
+    })))
 }
 
 /// Removes exactly the snapshots the job names. Which snapshots those are

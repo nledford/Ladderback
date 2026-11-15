@@ -88,8 +88,11 @@ mod sign_in;
 // `settings/sign_in.rs` is its glue.
 mod sign_in_settings;
 // The Snapshots page's DOM glue; the decisions it sends and shows are
-// `maintenance.rs` and `wording.rs`.
+// `maintenance.rs`, `stats.rs` and `wording.rs`.
 mod snapshots;
+// What a repository's stats section shows and says, decided on the host;
+// `snapshots.rs` is its glue.
+mod stats;
 // Declared as `formatting` is, for the same reason.
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]

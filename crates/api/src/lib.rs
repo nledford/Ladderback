@@ -4248,6 +4248,36 @@ pub enum EntryKindDto {
     Other,
 }
 
+/// One reading of a repository's stats (§16, decision 104): when it was taken
+/// and its figures.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct StatsReadingDto {
+    /// RFC 3339, UTC: when the stats were read.
+    pub taken_at: String,
+    /// How many snapshots the repository holds.
+    pub snapshots: u64,
+    /// The sources the snapshots hold, added up, in bytes: a file that ten
+    /// snapshots hold counts ten times.
+    pub total_size: u64,
+    /// What the repository's packs store for them, in bytes, after
+    /// deduplication and compression.
+    pub stored_size: u64,
+    /// The share of the data's raw size compression saved, a whole percent
+    /// rounded down; absent when the repository stores nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression_saved_percent: Option<u8>,
+}
+
+/// A repository's stats as last read and kept: `latest` is absent when none
+/// have been read.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryStatsDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<StatsReadingDto>,
+}
+
 /// How many snapshots one group of [`SnapshotGroupsDto`] lists. An
 /// input-derived size, capped (§13.5): a repository can hold thousands of
 /// snapshots of one plan, and a page that lists them all is no use to the
@@ -5055,6 +5085,35 @@ mod catalog_dto_tests {
         };
         let wire = to_string(&list).unwrap();
         assert_eq!(from_str::<SnapshotsDto>(&wire).unwrap(), list);
+    }
+
+    #[test]
+    fn a_stats_reading_carries_its_own_field_names_and_leaves_out_no_compression() {
+        let reading = |compression_saved_percent| super::StatsReadingDto {
+            taken_at: "2026-11-15T09:00:00Z".to_owned(),
+            snapshots: 3,
+            total_size: 3000,
+            stored_size: 1200,
+            compression_saved_percent,
+        };
+        for (stats, wire) in [
+            (
+                super::RepositoryStatsDto {
+                    latest: Some(reading(Some(50))),
+                },
+                r#"{"latest":{"taken-at":"2026-11-15T09:00:00Z","snapshots":3,"total-size":3000,"stored-size":1200,"compression-saved-percent":50}}"#,
+            ),
+            (
+                super::RepositoryStatsDto {
+                    latest: Some(reading(None)),
+                },
+                r#"{"latest":{"taken-at":"2026-11-15T09:00:00Z","snapshots":3,"total-size":3000,"stored-size":1200}}"#,
+            ),
+            (super::RepositoryStatsDto { latest: None }, "{}"),
+        ] {
+            assert_eq!(to_string(&stats).unwrap(), wire);
+            assert_eq!(from_str::<super::RepositoryStatsDto>(wire).unwrap(), stats);
+        }
     }
 }
 

@@ -116,6 +116,10 @@ pub struct Finished {
     /// most four times. The last of them has no write after it to make it
     /// good.
     pub recording_errors: Vec<StoreError>,
+    /// Why the stats a check reads before its end is recorded couldn't be
+    /// read or kept (§16, decision 104); `None` for every other run. The
+    /// daemon notes it in its log, and the check's own outcome stands.
+    pub stats_failed: Option<crate::stats::StatsError>,
 }
 
 /// A run in progress.
@@ -222,6 +226,7 @@ impl RunOperation {
             operation: run.operation,
             result: None,
             recording_errors: run.recording_errors,
+            stats_failed: None,
         }
     }
 
@@ -244,6 +249,7 @@ impl RunOperation {
             operation: run.operation,
             result: None,
             recording_errors: run.recording_errors,
+            stats_failed: None,
         }
     }
 
@@ -273,6 +279,7 @@ impl RunOperation {
             operation: run.operation,
             result: run.result,
             recording_errors: run.recording_errors,
+            stats_failed: None,
         }
     }
 
@@ -312,6 +319,7 @@ impl RunOperation {
             operation: run.operation,
             result: run.result,
             recording_errors: run.recording_errors,
+            stats_failed: None,
         }
     }
 

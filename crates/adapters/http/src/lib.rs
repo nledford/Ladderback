@@ -157,6 +157,22 @@ pub trait Operations: Send + Sync {
         repository: String,
     ) -> Result<api::SnapshotGroupsDto, MaintenanceRefusal>;
 
+    /// The repository's stats as last read and kept (§16, decision 104): a
+    /// read of the history, never of the repository.
+    async fn stats(
+        &self,
+        repository: String,
+    ) -> Result<api::RepositoryStatsDto, MaintenanceRefusal>;
+
+    /// Reads the repository's stats now and keeps the reading: a read of the
+    /// repository like the groups, which takes no maintenance slot, is
+    /// refused for nothing that runs on it and writes nothing to the
+    /// operation log.
+    async fn read_stats(
+        &self,
+        repository: String,
+    ) -> Result<api::StatsReadingDto, MaintenanceRefusal>;
+
     /// One page of the operation history, newest first, including running
     /// operations. `after` continues from a page's `next`; `plan` lists one
     /// plan's operations only; `limit` is clamped, never an error.
@@ -497,6 +513,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/repositories/{alias}/groups",
             axum::routing::get(maintenance::groups),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/stats",
+            axum::routing::get(maintenance::stats).post(maintenance::read_stats),
         )
         .route(
             "/api/v1/repositories/{alias}/maintenance",
@@ -1057,6 +1077,17 @@ mod tests {
         .unwrap()
     }
 
+    /// The fake's reading of the stats of "demo", taken at `taken_at`.
+    fn demo_reading(taken_at: &str) -> api::StatsReadingDto {
+        api::StatsReadingDto {
+            taken_at: taken_at.to_owned(),
+            snapshots: 3,
+            total_size: 3000,
+            stored_size: 1200,
+            compression_saved_percent: Some(50),
+        }
+    }
+
     /// The refusal the fake stands for `repository` with: `None` for a
     /// repository it answers.
     fn refusal_of(repository: &str) -> Option<MaintenanceRefusal> {
@@ -1213,6 +1244,32 @@ mod tests {
                 unmanaged: Vec::new(),
                 warnings: Vec::new(),
             })
+        }
+
+        async fn stats(
+            &self,
+            repository: String,
+        ) -> Result<api::RepositoryStatsDto, MaintenanceRefusal> {
+            match refusal_of(&repository) {
+                Some(refusal) => Err(refusal),
+                // A repository never read has no reading.
+                None if repository == "never-read" => Ok(api::RepositoryStatsDto { latest: None }),
+                None if repository == "demo" => Ok(api::RepositoryStatsDto {
+                    latest: Some(demo_reading("2026-11-14T09:00:00Z")),
+                }),
+                None => Err(MaintenanceRefusal::UnknownRepository),
+            }
+        }
+
+        async fn read_stats(
+            &self,
+            repository: String,
+        ) -> Result<api::StatsReadingDto, MaintenanceRefusal> {
+            match refusal_of(&repository) {
+                Some(refusal) => Err(refusal),
+                None if repository == "demo" => Ok(demo_reading("2026-11-15T09:00:00Z")),
+                None => Err(MaintenanceRefusal::UnknownRepository),
+            }
         }
 
         async fn history(
@@ -1732,6 +1789,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_repositorys_stats_are_the_reading_kept_last_or_none() {
+        use serde_json::json;
+        for (alias, expected) in [
+            (
+                "demo",
+                json!({"latest": {
+                    "taken-at": "2026-11-14T09:00:00Z",
+                    "snapshots": 3,
+                    "total-size": 3000,
+                    "stored-size": 1200,
+                    "compression-saved-percent": 50,
+                }}),
+            ),
+            ("never-read", json!({})),
+        ] {
+            let response = get(&format!("/api/v1/repositories/{alias}/stats")).await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status, StatusCode::OK, "{alias}");
+            assert_eq!(answer, expected, "{alias}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reading_a_repositorys_stats_answers_the_new_reading() {
+        let response = request(ui(), Method::POST, "/api/v1/repositories/demo/stats", "{}").await;
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(answer["taken-at"], "2026-11-15T09:00:00Z");
+        assert_eq!(answer["snapshots"], 3);
+    }
+
+    #[tokio::test]
+    async fn a_read_of_the_stats_with_a_body_that_is_not_json_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/demo/stats",
+            "not json",
+        )
+        .await;
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(answer, serde_json::json!({"code": "invalid-body"}));
+    }
+
+    #[tokio::test]
     async fn each_preview_names_its_kind_and_what_the_run_would_do() {
         use serde_json::json;
         let snapshot = serde_json::to_value(demo_snapshot()).unwrap();
@@ -1889,12 +1992,22 @@ mod tests {
                 json!({"code": "engine-unavailable", "detail": "no worker program"}),
             ),
         ] {
-            // The groups, a preview and a start refuse alike.
+            // The groups, the stats, a preview and a start refuse alike.
             for (method, route, request_body) in [
                 (
                     Method::GET,
                     format!("/api/v1/repositories/{alias}/groups"),
                     "",
+                ),
+                (
+                    Method::GET,
+                    format!("/api/v1/repositories/{alias}/stats"),
+                    "",
+                ),
+                (
+                    Method::POST,
+                    format!("/api/v1/repositories/{alias}/stats"),
+                    "{}",
                 ),
                 (
                     Method::POST,

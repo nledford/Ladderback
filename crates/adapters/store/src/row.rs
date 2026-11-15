@@ -16,6 +16,7 @@ use domain::access::{KeptSession, PasswordFingerprint, SessionDigest, SessionLen
 use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
+use domain::maintenance::{RepositoryStats, StatsReading};
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -320,6 +321,40 @@ pub(crate) fn kept_session(row: &SqliteRow) -> Result<KeptSession, StoreError> {
         keep_signed_in: flag(&reader, "keep_signed_in")?,
         secure: flag(&reader, "secure")?,
     })
+}
+
+/// A reading of a repository's stats as `sql::LATEST_STATS` and
+/// `sql::STATS_HISTORY` read it. A report names it by its row.
+pub(crate) fn stats_reading(row: &SqliteRow) -> Result<StatsReading, StoreError> {
+    let mut reader = Reader {
+        row,
+        scope: "a stats reading".to_owned(),
+    };
+    if let Some(id) = reader.integer("id")? {
+        reader.scope = format!("stats reading {id}");
+    }
+    let alias = reader
+        .id_of("repo_alias", "repository alias", RepositoryAlias::parse)?
+        .ok_or_else(|| reader.corrupt("repo_alias", "is NULL"))?;
+    Ok(StatsReading {
+        alias,
+        repository: reader.id_of("repo_uuid", "repository ID", RepositoryId::parse)?,
+        taken_at: reader.required_time("taken_at")?,
+        stats: RepositoryStats {
+            snapshots: figure(&reader, "snapshots")?,
+            total_size: figure(&reader, "total_bytes")?,
+            stored_size: figure(&reader, "stored_bytes")?,
+            raw_size: figure(&reader, "raw_bytes")?,
+        },
+    })
+}
+
+/// A count or a size, which is never negative.
+fn figure(reader: &Reader<'_>, column: &str) -> Result<u64, StoreError> {
+    let value = reader
+        .integer(column)?
+        .ok_or_else(|| reader.corrupt(column, "is NULL"))?;
+    u64::try_from(value).map_err(|_| reader.corrupt(column, format!("{value} is below 0")))
 }
 
 /// A column that holds 1 for yes and 0 for no; anything else is corrupt.

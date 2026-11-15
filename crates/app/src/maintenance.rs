@@ -344,6 +344,8 @@ pub struct RunMaintenance {
     /// Chooses the location an in-process open of the repository uses, as
     /// the engine's own choice does for every job (decision 80).
     locations: Option<Arc<crate::locations::ChooseLocation>>,
+    /// Reads the stats after a check, when set.
+    stats: Option<Arc<crate::stats::ReadStats>>,
 }
 
 impl RunMaintenance {
@@ -374,6 +376,7 @@ impl RunMaintenance {
             sources,
             events: None,
             locations: None,
+            stats: None,
         }
     }
 
@@ -419,6 +422,13 @@ impl RunMaintenance {
     /// repository first; a cancelled run is not announced.
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
+        self
+    }
+
+    /// Reads the repository's stats after each check that ends with a
+    /// result, before its end is recorded (§16, decision 104).
+    pub fn with_stats(mut self, stats: Arc<crate::stats::ReadStats>) -> Self {
+        self.stats = Some(stats);
         self
     }
 
@@ -1081,6 +1091,15 @@ impl RunMaintenance {
         let mut recording_errors = Vec::new();
         let mut cancel = pin!(cancel.fuse());
         let ruled = crate::locations::ruled_positions(&job);
+        // The repository a check reads the stats of once it has a result.
+        let checked = match &job {
+            Job::Check(check) => check
+                .repository
+                .entry
+                .as_ref()
+                .map(|saved| (saved.alias.clone(), check.repository.clone())),
+            _ => None,
+        };
         let jobs = split(job);
         let total: usize = jobs.iter().map(names).sum();
         let last = jobs.len().saturating_sub(1);
@@ -1126,6 +1145,21 @@ impl RunMaintenance {
                 Played::Ended => break,
             }
         }
+        // A check that ended with a result reads the stats before its end is
+        // recorded, so it still holds the repository meanwhile (I7, decision
+        // 104). A read that fails is the daemon's to note, never the check's.
+        // A cancel meanwhile stops only the read: the check's outcome stands
+        // and is recorded at once.
+        let stats_failed = match (&self.stats, checked, &result) {
+            (Some(stats), Some((alias, access)), Some(_)) => {
+                let mut read = pin!(stats.read_with(operation.id(), &alias, access).fuse());
+                select_biased! {
+                    read = read => read.err(),
+                    () = cancel.as_mut() => None,
+                }
+            }
+            _ => None,
+        };
         self.record(&operation, &result, &mut recording_errors)
             .await;
         announce_end(self.events.as_deref(), &operation).await;
@@ -1133,6 +1167,7 @@ impl RunMaintenance {
             operation,
             result,
             recording_errors,
+            stats_failed,
         }
     }
 

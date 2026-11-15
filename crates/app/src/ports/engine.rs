@@ -150,6 +150,10 @@ pub enum Job {
     /// Reads one page of one folder of a snapshot (§16, decision 102). A
     /// read, like [`Ls`](Self::Ls): no I7 slot, no operation log row.
     Browse(BrowseJob),
+    /// Reads the repository's stats: its snapshots, then every index file
+    /// (§16, decision 104). A read, not an operation: it takes no I7 slot and
+    /// is never written to the operation log.
+    Stats(RepositoryAccess),
 }
 
 impl Job {
@@ -168,7 +172,8 @@ impl Job {
             | Self::PrunePlan(_)
             | Self::Check(_)
             | Self::Ls(_)
-            | Self::Browse(_) => None,
+            | Self::Browse(_)
+            | Self::Stats(_) => None,
         }
     }
 
@@ -185,8 +190,9 @@ impl Job {
             // A plan is never recorded; it names the kind it plans.
             Self::Prune(_) | Self::PrunePlan(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
-            // A browse is an `ls` of one folder (§4.1).
-            Self::Ls(_) | Self::Browse(_) => OperationKind::Ls,
+            // A browse is an `ls` of one folder (§4.1); a stats read is never
+            // recorded either: it reads as a listing.
+            Self::Ls(_) | Self::Browse(_) | Self::Stats(_) => OperationKind::Ls,
         }
     }
 
@@ -197,7 +203,8 @@ impl Job {
             Self::Identify(access)
             | Self::Probe(access)
             | Self::Init(access)
-            | Self::Ls(access) => Some(access),
+            | Self::Ls(access)
+            | Self::Stats(access) => Some(access),
             Self::Backup(job) => Some(&job.repository),
             Self::Forget(job) => Some(&job.repository),
             Self::Rewrite(job) => Some(&job.repository),
@@ -214,7 +221,8 @@ impl Job {
             Self::Identify(access)
             | Self::Probe(access)
             | Self::Init(access)
-            | Self::Ls(access) => Some(access),
+            | Self::Ls(access)
+            | Self::Stats(access) => Some(access),
             Self::Backup(job) => Some(&mut job.repository),
             Self::Forget(job) => Some(&mut job.repository),
             Self::Rewrite(job) => Some(&mut job.repository),
@@ -551,6 +559,8 @@ pub enum EngineResult {
     Probed(ProbeAnswer),
     /// What a [`Job::Browse`] found.
     Folder(FolderAnswer),
+    /// What a [`Job::Stats`] read.
+    Stats(domain::maintenance::RepositoryStats),
 }
 
 /// What a browse of a snapshot's folder found: the page, or that what it

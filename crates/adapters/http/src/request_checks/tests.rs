@@ -210,6 +210,20 @@ impl crate::Operations for NoOperations {
         Err(crate::MaintenanceRefusal::UnknownRepository)
     }
 
+    async fn stats(
+        &self,
+        _repository: String,
+    ) -> Result<api::RepositoryStatsDto, crate::MaintenanceRefusal> {
+        Err(crate::MaintenanceRefusal::UnknownRepository)
+    }
+
+    async fn read_stats(
+        &self,
+        _repository: String,
+    ) -> Result<api::StatsReadingDto, crate::MaintenanceRefusal> {
+        Err(crate::MaintenanceRefusal::UnknownRepository)
+    }
+
     async fn history(
         &self,
         _plan: Option<String>,

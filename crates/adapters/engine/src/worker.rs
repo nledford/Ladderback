@@ -362,6 +362,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         JobKind::Check(job) => jobs::check(&ctx, job),
         JobKind::Ls(repository) => jobs::ls(&ctx, repository),
         JobKind::Browse(job) => jobs::browse(&ctx, job),
+        JobKind::Stats(repository) => jobs::stats(&ctx, repository),
     };
     match outcome {
         Ok(Done::Result(result)) => {
@@ -404,7 +405,7 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
         JobKind::Identify(repository) | JobKind::Probe(repository) | JobKind::Init(repository) => {
             Some(repository)
         }
-        JobKind::Ls(repository) => Some(repository),
+        JobKind::Ls(repository) | JobKind::Stats(repository) => Some(repository),
         JobKind::Backup(job) => Some(&job.repo),
         JobKind::Forget(job) => Some(&job.repo),
         JobKind::Rewrite(job) => Some(&job.repo),

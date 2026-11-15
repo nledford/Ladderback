@@ -20,6 +20,7 @@ use app::ports::{
 use async_trait::async_trait;
 use domain::browse::{Entry, EntryName, FolderPage, PAGE_ENTRIES};
 use domain::execution::{FailureReason, Warning, WarningKind};
+use domain::maintenance::RepositoryStats;
 use domain::secrets::{MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
@@ -1421,6 +1422,12 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 errors: r.errors,
                 warnings: r.warnings,
             }),
+            OpResult::Stats(r) => EngineResult::Stats(RepositoryStats {
+                snapshots: r.snapshots,
+                total_size: r.total_size,
+                stored_size: r.stored_size,
+                raw_size: r.raw_size,
+            }),
             // The listing's end, which `Listing` turns into the list before
             // an event reaches here.
             OpResult::Snapshots { .. } => return None,
@@ -1595,7 +1602,9 @@ fn folder_answer(found: FolderResult) -> Result<FolderAnswer, String> {
 fn repository_id(job: &Job) -> Option<&RepositoryId> {
     match job {
         Job::Fake(_) => None,
-        Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access.id.as_ref(),
+        Job::Identify(access) | Job::Init(access) | Job::Ls(access) | Job::Stats(access) => {
+            access.id.as_ref()
+        }
         Job::Browse(job) => job.repository.id.as_ref(),
         // A probe names no repository, so it takes no cache slot: it opens
         // with no cache (decision 80).
@@ -1653,9 +1662,11 @@ fn without_cache(job: &Job, cache_root: bool, slot: bool) -> Option<NoCache> {
 fn access_of(job: &Job) -> Option<&RepositoryAccess> {
     match job {
         Job::Fake(_) => None,
-        Job::Identify(access) | Job::Probe(access) | Job::Init(access) | Job::Ls(access) => {
-            Some(access)
-        }
+        Job::Identify(access)
+        | Job::Probe(access)
+        | Job::Init(access)
+        | Job::Ls(access)
+        | Job::Stats(access) => Some(access),
         Job::Backup(job) => Some(&job.repository),
         Job::Forget(job) => Some(&job.repository),
         Job::Rewrite(job) => Some(&job.repository),
@@ -1824,6 +1835,7 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                 .collect(),
             from: job.from,
         }),
+        Job::Stats(access) => JobKind::Stats(repository_spec(access)),
         Job::Backup(job) => JobKind::Backup(BackupJobSpec {
             repo: repository_spec(job.repository),
             sources: job.sources,

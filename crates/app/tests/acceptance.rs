@@ -65,6 +65,8 @@ mod schedule_steps;
 mod scheduler_steps;
 #[path = "steps/sign_in.rs"]
 mod sign_in_steps;
+#[path = "steps/stats.rs"]
+mod stats_steps;
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -92,6 +94,7 @@ struct Agent {
     sign_in: sign_in_steps::SignInWorld,
     api_tokens: api_tokens_steps::ApiTokensWorld,
     plans: plans_steps::PlansWorld,
+    stats: stats_steps::StatsWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -138,6 +141,7 @@ impl Agent {
             preview: Default::default(),
             notifications: Default::default(),
             plans: Default::default(),
+            stats: Default::default(),
         }
     }
 

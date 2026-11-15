@@ -11,6 +11,7 @@ use app::ports::{
     PrunePlanSummary, PruneSummary, RewriteSummary, SnapshotSummary,
 };
 use domain::browse::FolderPage;
+use domain::maintenance::RepositoryStats;
 use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +83,15 @@ pub(crate) enum Summary {
     /// say of it.
     Folder {
         total: u64,
+    },
+    /// A read's result: a stats read is never logged as an operation; its
+    /// readings are kept in `repo_stats` (decision 104), so no row holds this
+    /// variant either.
+    Stats {
+        snapshots: u64,
+        total_size: u64,
+        stored_size: u64,
+        raw_size: u64,
     },
 }
 
@@ -188,6 +198,12 @@ impl From<&EngineResult> for Summary {
                     FolderAnswer::SnapshotUnknown | FolderAnswer::FolderUnknown => 0,
                 },
             },
+            EngineResult::Stats(stats) => Self::Stats {
+                snapshots: stats.snapshots,
+                total_size: stats.total_size,
+                stored_size: stats.stored_size,
+                raw_size: stats.raw_size,
+            },
         }
     }
 }
@@ -266,6 +282,17 @@ impl From<Summary> for EngineResult {
                 repository,
                 errors,
                 warnings,
+            }),
+            Summary::Stats {
+                snapshots,
+                total_size,
+                stored_size,
+                raw_size,
+            } => Self::Stats(RepositoryStats {
+                snapshots,
+                total_size,
+                stored_size,
+                raw_size,
             }),
             Summary::Probed { answer } => Self::Probed(match answer {
                 Probed::Holds { id } => ProbeAnswer::Holds(id),

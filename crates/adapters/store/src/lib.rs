@@ -19,6 +19,7 @@ mod report;
 mod row;
 mod sessions;
 mod sql;
+mod stats;
 mod summary;
 
 #[cfg(test)]

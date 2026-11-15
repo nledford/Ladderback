@@ -1,7 +1,8 @@
 //! The routes the Snapshots page speaks to for maintenance (technical design
-//! §4.2, §7.3): a repository's history grouped by who owns it, a preview of
-//! each run before it starts, and the start itself. A preview and the groups
-//! are reads: they take no maintenance slot and write nothing. A start that
+//! §4.2, §7.3): a repository's history grouped by who owns it, its stats
+//! (§16, decision 104), a preview of each run before it starts, and the start
+//! itself. A preview, the groups and the stats are reads: they take no
+//! maintenance slot and write nothing to the operation log. A start that
 //! carries the selection its preview named is refused when the repository has
 //! changed since.
 
@@ -147,6 +148,32 @@ fn unreadable(error: Unreadable) -> Response {
 pub(crate) async fn groups(State(state): State<AppState>, Path(alias): Path<String>) -> Response {
     match state.operations.groups(alias.clone()).await {
         Ok(groups) => (StatusCode::OK, Json(groups)).into_response(),
+        Err(error) => refusal(&alias, error),
+    }
+}
+
+/// The repository's stats as last read and kept (§16, decision 104), or none:
+/// read from the history, never from the repository.
+pub(crate) async fn stats(State(state): State<AppState>, Path(alias): Path<String>) -> Response {
+    match state.operations.stats(alias.clone()).await {
+        Ok(stats) => (StatusCode::OK, Json(stats)).into_response(),
+        Err(error) => refusal(&alias, error),
+    }
+}
+
+/// Reads the repository's stats now, keeps the reading and answers it. The
+/// body is an empty JSON object; a read like the groups, it takes no
+/// maintenance slot.
+pub(crate) async fn read_stats(
+    State(state): State<AppState>,
+    Path(alias): Path<String>,
+    body: Result<Json<serde_json::Value>, JsonRejection>,
+) -> Response {
+    if body.is_err() {
+        return unreadable(Unreadable::InvalidBody);
+    }
+    match state.operations.read_stats(alias.clone()).await {
+        Ok(reading) => (StatusCode::OK, Json(reading)).into_response(),
         Err(error) => refusal(&alias, error),
     }
 }
