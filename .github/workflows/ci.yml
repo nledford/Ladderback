@@ -264,6 +264,32 @@ jobs:
       - if: github.event_name == 'push'
         run: rm -rf target
 
+  # The red-first check (red-first.yml) installs all three engines in one job,
+  # under caches keyed on that set, and runs only on pull requests, whose
+  # caches no other pull request can restore: GitHub shares only the base
+  # branch's. So a push to main saves the set here, and each behaviour pull
+  # request's red-first run restores it instead of downloading three browsers
+  # and their system packages through Ubuntu's mirrors. Not a required check.
+  browser-cache:
+    name: Browser cache for the red-first check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui-tests/.nvmrc
+          cache: npm
+          cache-dependency-path: ui-tests/package-lock.json
+      - run: npm ci
+        working-directory: ui-tests
+      - uses: $/.github/actions/browser
+        with:
+          engines: chromium firefox webkit
+
   # The wasm-bindgen tests (`#[wasm_bindgen_test]`) under Node. Not a required
   # check: add it to the ruleset once it has proved stable. The wasm32 target
   # comes with the toolchain (rust-toolchain.toml). The test runner must be the

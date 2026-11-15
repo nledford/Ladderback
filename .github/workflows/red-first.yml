@@ -109,10 +109,14 @@ jobs:
         working-directory: ui-tests
       # `$/`: the action and its script from the commit this workflow runs,
       # the merge commit, not from the pull request's head checked out above,
-      # which may predate them.
+      # which may predate them. All three engines: the check runs each new @ui
+      # scenario in every one (development.md §13.1). Always installed, as the
+      # wasm runner is: from the caches it takes seconds per engine (11-15 s
+      # each in the UI journeys on #631), and only the script knows whether
+      # the test: commit adds an @ui scenario.
       - uses: $/.github/actions/browser
         with:
-          engines: chromium
+          engines: chromium firefox webkit
       - run: just red-first "origin/$BASE_REF"
         env:
           BASE_REF: ${{ github.base_ref }}

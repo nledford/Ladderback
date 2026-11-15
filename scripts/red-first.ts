@@ -24,10 +24,16 @@
 // That needs the wasm32 target and wasm-bindgen-cli at Cargo.lock's version
 // (`just setup`), and Node.
 // @ui scenarios build the UI with the tree's `just web-test` when it has one.
+// Each new @ui scenario runs in Chromium, Firefox and WebKit (Playwright's
+// three engines; LADDERBACK_UI_BROWSER picks one, once the tree's
+// ui-tests/support/world.ts reads it). It is red when it fails in Chromium, or
+// fails in another engine and passes in that engine at HEAD, which then gets
+// a run of its own: scripts/red-first-ui.ts says why.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { failureReason } from "./failure-reason.ts";
+import { countedRed, type Engine, enginesFor, headChecks, type Outcome, outcome } from "./red-first-ui.ts";
 import path from "node:path";
 import { parseMetadata, wasmTestPackages } from "./wasm-test-packages.ts";
 
@@ -353,7 +359,23 @@ function nameRegex(name: string): string {
     .join(".*")}$`;
 }
 
-function scenarioFails(dir: string, scenario: Scenario, uiReady: () => void): { failed: boolean; output: string } {
+/** One scenario's runs, by engine. */
+type Runs = Map<Engine, { outcome: Outcome; output: string }>;
+
+function outcomes(runs: Runs): Map<Engine, Outcome> {
+  return new Map([...runs].map(([engine, result]) => [engine, result.outcome]));
+}
+
+/**
+ * Runs one scenario by name in `dir`; an `@ui` one in `engine`, after
+ * `uiReady` has built what it needs. The outcome reads the runner's summary.
+ */
+function runScenario(
+  dir: string,
+  scenario: Scenario,
+  uiReady: () => void,
+  engine: Engine = "chromium",
+): { outcome: Outcome; output: string } {
   const regex = nameRegex(scenario.name);
   let result;
   if (scenario.runner === "acceptance") {
@@ -370,17 +392,16 @@ function scenarioFails(dir: string, scenario: Scenario, uiReady: () => void): { 
     const ui = path.join(dir, "ui-tests");
     const config = existsSync(path.join(ui, "cucumber.ts")) ? ["--config", "cucumber.ts"] : [];
     result = run("node_modules/.bin/cucumber-js", [...config, "--name", regex], ui, {
-      env: { LADDERBACK_BIN: path.join(targetDir("first"), "debug", "ladderback") },
+      env: { LADDERBACK_BIN: path.join(targetDir("first"), "debug", "ladderback"), LADDERBACK_UI_BROWSER: engine },
       timeout: TEST_TIMEOUT_MS,
     });
   }
-  // A filter that matched nothing passes, and an Outline can match several
-  // rows: insist that the summary reports scenarios and that all of them failed.
-  const summaries = [...result.output.matchAll(/(\d+) scenarios? \(([^)]*)\)/g)];
-  const summary = summaries.at(-1);
-  const total = summary ? Number(summary[1]) : 0;
-  const failedCount = Number(summary?.[2]?.match(/(\d+) failed/)?.[1] ?? 0);
-  return { failed: result.status !== 0 && total > 0 && failedCount === total, output: result.output };
+  return { outcome: outcome(result.status, result.output), output: result.output };
+}
+
+/** Why a red scenario failed, for its `failed at:` line. */
+function reason(runner: Runner, output: string): string {
+  return failureReason(runner, output) ?? "no failing step in the runner's output";
 }
 
 // --- Main ------------------------------------------------------------------
@@ -481,16 +502,83 @@ try {
     }
     uiBuilt = true;
   };
+  // An @ui scenario runs in each engine the tree's UI tests can drive. Its
+  // verdict waits for the head runs below (scripts/red-first-ui.ts).
+  const world = path.join(trees.first, "ui-tests", "support", "world.ts");
+  const engines = enginesFor(existsSync(world) ? readFileSync(world, "utf8") : undefined);
+  if (engines.length === 1 && newScenarios.some(([, scenario]) => scenario.runner === "ui")) {
+    console.log("red-first: the test: commit's UI tests predate LADDERBACK_UI_BROWSER; @ui scenarios run in Chromium alone");
+  }
+  const uiScenarios: { key: string; scenario: Scenario; atFirst: Runs; atHead: Runs }[] = [];
   for (const [key, scenario] of newScenarios) {
-    const result = scenarioFails(trees.first, scenario, uiReady);
-    console.log(`${result.failed ? "red " : "GREEN"} ${key} (${scenario.runner})`);
-    if (result.failed) {
+    if (scenario.runner === "ui") {
+      const atFirst: Runs = new Map(
+        engines.map((engine) => [engine, runScenario(trees.first, scenario, uiReady, engine)]),
+      );
+      uiScenarios.push({ key, scenario, atFirst, atHead: new Map() });
+      continue;
+    }
+    const result = runScenario(trees.first, scenario, uiReady);
+    const failed = result.outcome === "failed";
+    console.log(`${failed ? "red " : "GREEN"} ${key} (${scenario.runner})`);
+    if (failed) {
       // Why it is red: a scenario whose page never loaded and one whose
       // assertion failed are both red, and the log should say which this is.
-      const reason = failureReason(scenario.runner, result.output) ?? "no failing step in the runner's output";
-      console.log(`     failed at: ${reason}`);
+      console.log(`     failed at: ${reason(scenario.runner, result.output)}`);
     } else {
       fail(`${key} doesn't fail on the test: commit:\n${result.output}`);
+    }
+  }
+
+  // A scenario red only outside Chromium runs at the head in the engines it
+  // failed in. The first tree moves to the head, after every run at the test:
+  // commit, and builds into its own target dir: a third target dir would cost
+  // a third copy of the build on the runner's disk.
+  const pending = uiScenarios.filter(({ atFirst }) => headChecks(outcomes(atFirst)).length > 0);
+  if (pending.length > 0) {
+    const head = git("rev-parse", "HEAD");
+    console.log(`red-first: at the head (${head.slice(0, 12)}), the scenarios red only outside Chromium`);
+    // --force: a build at the test: commit may have rewritten a tracked file
+    // (a stale Cargo.lock), which a plain checkout refuses to overwrite.
+    git("-C", trees.first, "checkout", "--quiet", "--force", "--detach", head);
+    // A head whose UI tests no longer read the variable would run Chromium
+    // under every engine's name, and its pass would prove nothing.
+    if (enginesFor(existsSync(world) ? readFileSync(world, "utf8") : undefined).length === 1) {
+      throw new Error("the head's UI tests don't read LADDERBACK_UI_BROWSER, so they can't run Firefox or WebKit");
+    }
+    uiBuilt = false;
+    for (const { scenario, atFirst, atHead } of pending) {
+      for (const engine of headChecks(outcomes(atFirst))) {
+        atHead.set(engine, runScenario(trees.first, scenario, uiReady, engine));
+      }
+    }
+  }
+
+  for (const { key, atFirst, atHead } of uiScenarios) {
+    const red = countedRed(outcomes(atFirst), outcomes(atHead));
+    console.log(`${red.length > 0 ? "red " : "GREEN"} ${key} (ui)`);
+    for (const [engine, result] of atFirst) {
+      const label =
+        result.outcome === "failed"
+          ? `red, failed at: ${reason("ui", result.output)}`
+          : result.outcome === "passed"
+            ? "GREEN"
+            : "GREEN (didn't run cleanly: no match, a split outline, an undefined step or no browser)";
+      console.log(`     ${engine}: ${label}`);
+    }
+    for (const [engine, result] of atHead) {
+      console.log(`     ${engine} at the head: ${result.outcome === "passed" ? "passes" : "doesn't pass"}`);
+    }
+    if (red.length > 0) continue;
+    if (atHead.size > 0) {
+      const where = [...atHead.keys()].join(" and ");
+      fail(
+        `${key} fails on the test: commit only in ${where}, and doesn't pass there at the head either; ` +
+          `no required check runs ${where} at the head, so that red doesn't count:\n` +
+          [...atHead.values()].map((result) => result.output).join("\n"),
+      );
+    } else {
+      fail(`${key} doesn't fail on the test: commit in any engine it ran in:\n${atFirst.get("chromium")?.output ?? ""}`);
     }
   }
 } catch (error) {
