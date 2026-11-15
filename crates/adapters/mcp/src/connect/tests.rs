@@ -223,7 +223,7 @@ async fn an_answer_over_the_limit_is_daemon_answer_too_large() {
     let routes = Router::new().route(
         "/api/v1/operations/{id}",
         get(|| async {
-            let padding = " ".repeat(MAX_ANSWER_BYTES);
+            let padding = " ".repeat(8 * 1024 * 1024);
             format!(r#"{{"operation": {{}}{padding}}}"#)
         }),
     );
@@ -247,7 +247,7 @@ async fn an_answer_at_the_limit_is_read() {
         "/api/v1/session",
         get(|| async {
             let head = r#"{"sign-in": "off""#;
-            let padding = " ".repeat(MAX_ANSWER_BYTES - head.len() - 1);
+            let padding = " ".repeat(8 * 1024 * 1024 - head.len() - 1);
             format!("{head}{padding}}}")
         }),
     );
@@ -585,8 +585,7 @@ fn a_token_is_its_text_without_the_spaces_around_it_and_is_never_shown() {
     let token = ApiToken::parse(&format!("\t{TOKEN}\r\n")).expect("a token");
     assert_eq!(token.0.to_str().unwrap(), format!("Bearer {TOKEN}"));
     assert!(token.0.is_sensitive());
-    let shown = format!("{token:?}");
-    assert!(!shown.contains("abcdefghijkl"), "{shown}");
+    assert_eq!(format!("{token:?}"), "ApiToken(…)");
     for text in ["", " \n", "ladderback_a b", "ladderback_\u{e9}", "a\u{0}b"] {
         assert!(ApiToken::parse(text).is_none(), "{text:?}");
     }

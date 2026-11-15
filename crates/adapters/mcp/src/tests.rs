@@ -215,7 +215,7 @@ impl Client {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn discovery_names_the_three_revisions_served() {
     let mut client = connect(told());
     let answer = client.ask_current("server/discover", json!({})).await;
@@ -230,7 +230,7 @@ async fn discovery_names_the_three_revisions_served() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_handshake_agrees_to_each_earlier_revision_served() {
     for revision in ["2025-06-18", "2025-11-25"] {
         let mut client = connect(told());
@@ -244,7 +244,7 @@ async fn the_handshake_agrees_to_each_earlier_revision_served() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_handshake_of_an_older_revision_is_answered_with_one_served() {
     let mut client = connect(told());
     let answer = client.initialize("2025-03-26").await;
@@ -254,7 +254,7 @@ async fn a_handshake_of_an_older_revision_is_answered_with_one_served() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_request_of_an_older_revision_without_a_handshake_is_refused() {
     let mut client = connect(told());
     let mut meta = current();
@@ -266,7 +266,7 @@ async fn a_request_of_an_older_revision_without_a_handshake_is_refused() {
 /// The tools `tools/list` gives, as `tests/golden/tools-list.json` holds
 /// them: a change to a tool's name, description or schemas changes the file,
 /// so a review sees it.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_tools_listed_are_the_golden_files() {
     let mut client = connect(told());
     let answer = client.ask_current("tools/list", json!({})).await;
@@ -323,7 +323,7 @@ async fn the_tools_listed_are_the_golden_files() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn status_names_this_programs_build_field_by_field_and_what_the_backend_told() {
     let mut client = connect(told());
     let answer = client.call_status(json!({})).await;
@@ -354,7 +354,7 @@ async fn status_names_this_programs_build_field_by_field_and_what_the_backend_to
     assert_eq!(mirrored, result["structuredContent"]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_refusal_from_the_backend_is_a_result_marked_as_an_error() {
     let mut client = connect(Told(Err(ErrorDto::new(
         ErrorCode::SignInRequired,
@@ -377,7 +377,7 @@ fn refusal(answer: &Value) -> Value {
     serde_json::from_str(text).unwrap_or_else(|error| panic!("{error}: {text}"))
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn an_unknown_tool_is_invalid_params() {
     let mut client = connect(told());
     let answer = client
@@ -386,23 +386,38 @@ async fn an_unknown_tool_is_invalid_params() {
     assert_eq!(answer["error"]["code"], -32602, "{answer}");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn arguments_to_status_are_invalid_params() {
     let mut client = connect(told());
     let answer = client.call_status(json!({"plan": "home"})).await;
     assert_eq!(answer["error"]["code"], -32602, "{answer}");
 }
 
-#[tokio::test]
+/// A `tools/list` request with the ID `id`, padded so that its line, the
+/// line end included, is `bytes` long.
+fn padded(id: u64, bytes: usize) -> Value {
+    let mut meta = current();
+    meta["padding"] = json!("");
+    let mut message =
+        json!({"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": {"_meta": meta}});
+    let unpadded = message.to_string().len() + 1;
+    message["params"]["_meta"]["padding"] = json!("x".repeat(bytes - unpadded));
+    message
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_message_of_one_mebibyte_is_read() {
+    let mut client = connect(told());
+    client.send(&padded(99, 1024 * 1024)).await;
+    let answer = client.next_message().await;
+    assert_eq!(answer["id"], 99, "{answer}");
+    assert!(answer["result"]["tools"].is_array(), "{answer}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_message_over_the_limit_is_dropped_and_the_session_goes_on() {
     let mut client = connect(told());
-    let mut meta = current();
-    meta["padding"] = json!("x".repeat(MAX_MESSAGE_BYTES));
-    client
-        .send(
-            &json!({"jsonrpc": "2.0", "id": 99, "method": "tools/list", "params": {"_meta": meta}}),
-        )
-        .await;
+    client.send(&padded(99, 1024 * 1024 + 1)).await;
     for _ in 0..2 {
         let answer = client.ask_current("tools/list", json!({})).await;
         assert!(answer["result"]["tools"].is_array(), "{answer}");
@@ -417,7 +432,7 @@ async fn a_message_over_the_limit_is_dropped_and_the_session_goes_on() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_session_ends_when_the_client_closes_its_input() {
     let mut client = connect(told());
     client.ask_current("tools/list", json!({})).await;
@@ -426,7 +441,7 @@ async fn the_session_ends_when_the_client_closes_its_input() {
     assert!(matches!(ended, Ok(Ok(Ok(())))), "{ended:?}");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn input_closed_before_any_request_ends_the_session_quietly() {
     let mut client = connect(told());
     client.input.shutdown().await.unwrap();
@@ -639,7 +654,7 @@ fn ids<'a>(content: &'a Value, key: &str, id: &str) -> Vec<&'a str> {
         .collect()
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn list_plans_lists_a_page_of_the_limit_and_the_next_continues_after_its_cursor() {
     let mut client = connect(Lists {
         plans: plans(3),
@@ -655,7 +670,7 @@ async fn list_plans_lists_a_page_of_the_limit_and_the_next_continues_after_its_c
     assert_eq!(second["next"], Value::Null);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_page_of_exactly_what_is_left_has_no_next() {
     let mut client = connect(Lists {
         plans: plans(2),
@@ -666,7 +681,7 @@ async fn a_page_of_exactly_what_is_left_has_no_next() {
     assert_eq!(page["next"], Value::Null);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_page_lists_fifty_when_the_call_names_no_limit() {
     let mut client = connect(Lists {
         plans: plans(60),
@@ -677,7 +692,7 @@ async fn a_page_lists_fifty_when_the_call_names_no_limit() {
     assert_eq!(page["next"], "plan-049");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_limit_over_the_largest_page_lists_two_hundred_and_one_under_one_lists_one() {
     let mut client = connect(Lists {
         plans: plans(250),
@@ -692,7 +707,7 @@ async fn a_limit_over_the_largest_page_lists_two_hundred_and_one_under_one_lists
     assert_eq!(ids(&page, "plans", "id"), ["plan-000"]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn list_repositories_pages_by_alias_and_refuses_a_cursor_that_names_none() {
     let mut client = connect(Lists {
         repositories: vec![repository("nas"), repository("offsite")],
@@ -717,7 +732,7 @@ async fn list_repositories_pages_by_alias_and_refuses_a_cursor_that_names_none()
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn list_snapshots_reads_the_repository_named_and_pages_by_snapshot_id() {
     let lists = Lists {
         snapshots: vec![snapshot(1), snapshot(2), snapshot(3)],
@@ -745,7 +760,7 @@ async fn list_snapshots_reads_the_repository_named_and_pages_by_snapshot_id() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn list_snapshots_without_a_repository_is_invalid_params() {
     let mut client = connect(Lists::default());
     let answer = client.call("list_snapshots", json!({"limit": 2})).await;
@@ -765,7 +780,7 @@ fn snapshot_of(n: u8, plan: &str, host: &str) -> api::SnapshotDto {
     snapshot
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn list_snapshots_lists_only_those_of_the_plan_and_host_named_and_pages_what_it_keeps() {
     let lists = Lists {
         snapshots: vec![
@@ -857,7 +872,7 @@ fn a_snapshots_plan_is_the_one_its_first_plan_tag_names() {
     assert!(!on("na").keeps(&snapshot));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn list_operations_asks_for_the_plan_the_cursor_and_the_clamped_limit() {
     let page = OperationsPageDto {
         operations: vec![summary(2)],
@@ -887,7 +902,7 @@ async fn list_operations_asks_for_the_plan_the_cursor_and_the_clamped_limit() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn get_operation_lists_the_first_hundred_warnings_and_counts_the_rest() {
     let lists = Lists {
         detail: Some(OperationDetailDto {
@@ -911,7 +926,7 @@ async fn get_operation_lists_the_first_hundred_warnings_and_counts_the_rest() {
     assert_eq!(*asked.lock().unwrap(), [format!("operation {id}")]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn get_operation_with_every_warning_listed_counts_none_unlisted() {
     let mut client = connect(Lists {
         detail: Some(OperationDetailDto {
@@ -927,7 +942,7 @@ async fn get_operation_with_every_warning_listed_counts_none_unlisted() {
     assert_eq!(content["unlisted-warnings"], 0);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_missing_or_unknown_argument_is_invalid_params() {
     let mut client = connect(Lists::default());
     for (tool, arguments) in [
@@ -952,7 +967,7 @@ async fn a_missing_or_unknown_argument_is_invalid_params() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error() {
     let told = ErrorDto::new(
         ErrorCode::RepositoryUnknown,
@@ -1042,7 +1057,7 @@ fn keys_conform(content: &Value, schema: &Value) -> Result<(), String> {
 /// against the tool's output schema whether the result is an error or not,
 /// and throws when it doesn't conform, so a refusal carries none: no schema
 /// declares a refusal's shape.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn no_refusal_of_any_tool_carries_structured_content() {
     let schemas = golden_output_schemas();
     let told = ErrorDto::new(
@@ -1104,7 +1119,7 @@ fn every_tool_called() -> [(&'static str, Value); 13] {
 
 /// What each tool answers has every key its output schema requires and,
 /// where the schema takes no others, only those it names.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn every_tools_answer_has_the_keys_its_output_schema_names() {
     let schemas = golden_output_schemas();
     let mut status = connect(told());
@@ -1141,7 +1156,7 @@ async fn every_tools_answer_has_the_keys_its_output_schema_names() {
     assert_eq!(checked.len(), schemas.len(), "every tool listed is checked");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn run_plan_returns_the_id_of_the_backup_the_backend_queued() {
     let lists = Lists::default();
     let asked = Arc::clone(&lists.asked);
@@ -1151,7 +1166,7 @@ async fn run_plan_returns_the_id_of_the_backup_the_backend_queued() {
     assert_eq!(*asked.lock().unwrap(), ["run home"]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn cancel_operation_asks_the_backend_to_cancel_and_names_the_operation() {
     let lists = Lists::default();
     let asked = Arc::clone(&lists.asked);
@@ -1162,7 +1177,7 @@ async fn cancel_operation_asks_the_backend_to_cancel_and_names_the_operation() {
     assert_eq!(*asked.lock().unwrap(), [format!("cancel {id}")]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_cancel_the_backend_refuses_is_its_refusal_marked_as_an_error() {
     let mut client = connect(Lists {
         refusal: Some(not_cancellable()),
@@ -1192,7 +1207,7 @@ fn forget_preview() -> MaintenancePreviewDto {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_checks_ask_the_backend_with_their_arguments_and_return_what_it_told() {
     let lists = Lists {
         preview: Some(forget_preview()),
@@ -1235,7 +1250,7 @@ async fn the_checks_ask_the_backend_with_their_arguments_and_return_what_it_told
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn preview_forget_leaves_out_the_selection_only_a_forgets_start_takes() {
     let mut client = connect(Lists {
         preview: Some(forget_preview()),
@@ -1261,7 +1276,7 @@ async fn preview_forget_leaves_out_the_selection_only_a_forgets_start_takes() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_forget_preview_answered_with_another_kind_is_daemon_unreachable() {
     let mut client = connect(Lists {
         preview: Some(MaintenancePreviewDto::Check { read_data: false }),
@@ -1273,7 +1288,7 @@ async fn a_forget_preview_answered_with_another_kind_is_daemon_unreachable() {
     assert_eq!(refusal(&answer), json!({"code": "daemon-unreachable"}));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_acting_tools_refuse_a_missing_or_unknown_argument_as_invalid_params() {
     let mut client = connect(Lists::default());
     for (tool, arguments) in [
@@ -1288,10 +1303,15 @@ async fn the_acting_tools_refuse_a_missing_or_unknown_argument_as_invalid_params
     }
 }
 
+/// More summary reads than any wait makes: 121 in sixty seconds. A wait
+/// that goes on past its end without sleeping never lets paused time move,
+/// so the stand-in refuses from then on and the wait ends in an error.
+const MOST_READS: u32 = 1000;
+
 /// A stand-in whose one operation is running for its first `running`
 /// summary reads and has succeeded from then on; its detail tells what the
-/// last summary read told. It counts the reads of each and records any
-/// cancel asked of it.
+/// last summary read told. It counts the reads of each, refuses those after
+/// [`MOST_READS`] and records any cancel asked of it.
 #[derive(Default)]
 struct Running {
     running: u32,
@@ -1360,6 +1380,9 @@ impl Backend for Running {
 
     async fn summary(&self, _id: String) -> Result<OperationSummaryDto, ErrorDto> {
         let mut reads = self.reads.lock().unwrap();
+        if *reads >= MOST_READS {
+            return Err(untold());
+        }
         let running = *reads < self.running;
         *reads += 1;
         Ok(Running::state(running))
