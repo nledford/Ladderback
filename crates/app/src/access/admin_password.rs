@@ -59,9 +59,15 @@ pub async fn set_admin_password(
     sessions: &dyn SessionStore,
     typed: String,
 ) -> Result<PasswordSet, SetPasswordRefused> {
-    let _ = sessions;
     set_admin_password_leaving_sessions(kept, typed).await?;
-    Ok(PasswordSet::SessionsForgotten)
+    // After the password, never before: a refused one forgets nothing. A
+    // session kept between the two is forgotten too: one started under the
+    // old password has ended by its fingerprint anyway, and one signed in
+    // with the new password in that moment lives until the next restart.
+    Ok(match sessions.remove_all().await {
+        Ok(()) => PasswordSet::SessionsForgotten,
+        Err(error) => PasswordSet::SessionsLeft(error),
+    })
 }
 
 /// [`set_admin_password`] for a caller that can't reach the session store,

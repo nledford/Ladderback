@@ -36,12 +36,45 @@ pub struct Access {
     random: Arc<dyn Random>,
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
+    /// Held while the session length is set, so two set at once reach the
+    /// store and the sessions in the same order.
+    setting_length: futures::lock::Mutex<()>,
+    /// Held while a sign-in starts its session and the store keeps it, and
+    /// while Sign out everywhere ends every session and the store forgets
+    /// them, so the store never keeps a session Sign out everywhere ended. A
+    /// sign-in still checking its password takes it after, and its session
+    /// lives on.
+    adding_or_ending_all: futures::lock::Mutex<()>,
 }
 
 #[derive(Default)]
 struct State {
     sessions: Sessions,
     waits: SignInWaits,
+    /// The sessions forgotten here that the store may still keep: each
+    /// stays until a write that told the store returns, so a write that
+    /// fails, or a request dropped before it returns, leaves it for the
+    /// next write to tell again.
+    unkept: Vec<SessionDigest>,
+}
+
+impl State {
+    /// Every session the store is still to forget: the ones no write has
+    /// told it of yet, and the ones forgotten since. They stay until
+    /// [`Self::forgotten_by_store`].
+    fn still_to_forget(&mut self) -> Vec<SessionDigest> {
+        for digest in self.sessions.take_forgotten() {
+            if !self.unkept.contains(&digest) {
+                self.unkept.push(digest);
+            }
+        }
+        self.unkept.clone()
+    }
+
+    /// A write that told the store to forget `digests` returned.
+    fn forgotten_by_store(&mut self, digests: &[SessionDigest]) {
+        self.unkept.retain(|digest| !digests.contains(digest));
+    }
 }
 
 /// A session that has just started: the token of its cookie, the CSRF token
@@ -66,6 +99,7 @@ pub struct LiveSession {
     ends_in: Option<SignedDuration>,
     idle_limit: Option<SignedDuration>,
     renewed: Option<CookieLife>,
+    secure: bool,
 }
 
 impl LiveSession {
@@ -99,9 +133,11 @@ impl LiveSession {
         self.renewed
     }
 
-    /// Whether its cookie is marked `Secure`, as at its sign-in.
+    /// Whether its cookie is marked `Secure`: as the sign-in decided, so a
+    /// renewal sets it as the sign-in did, whatever the request renewing it
+    /// shows.
     pub fn secure(&self) -> bool {
-        todo!()
+        self.secure
     }
 
     fn of(session: &domain::access::Session, length: SessionLength, now: Timestamp) -> Self {
@@ -110,6 +146,7 @@ impl LiveSession {
             ends_in: session.ends_at(length).map(|end| end.duration_since(now)),
             idle_limit: session.idle_limit(length),
             renewed: None,
+            secure: session.secure(),
         }
     }
 }
@@ -190,16 +227,75 @@ impl Access {
             random,
             clock,
             state: Mutex::new(State::default()),
+            setting_length: futures::lock::Mutex::new(()),
+            adding_or_ending_all: futures::lock::Mutex::new(()),
         }
     }
 
     /// Brings back the sessions the store kept from before the daemon
     /// started, each with a new CSRF token; the ones that have ended since,
     /// or that started under another admin password, are forgotten, there
-    /// too, and so are the ones the store can't read.
+    /// too, and so are the ones the store can't read. The session length is
+    /// the one kept, as soon as it is read, whatever fails after; one that
+    /// can't be read is Until I close the browser, the shortest, for this
+    /// run. On an error no session is brought back and the store keeps
+    /// them all.
     pub async fn restore(&self) -> Result<Restored, RestoreFailed> {
-        let _ = &self.sessions;
-        todo!()
+        let length = match self.sessions.length().await {
+            Ok(length) => length.unwrap_or_default(),
+            Err(error) => {
+                self.measure_by(SessionLength::UntilBrowserCloses);
+                return Err(RestoreFailed::Store(error));
+            }
+        };
+        self.measure_by(length);
+        let under = self
+            .password
+            .fingerprint()
+            .map_err(RestoreFailed::Password)?;
+        let unreadable = self
+            .sessions
+            .forget_unreadable()
+            .await
+            .map_err(RestoreFailed::Store)?;
+        let kept = self.sessions.all().await.map_err(RestoreFailed::Store)?;
+        let csrfs = kept
+            .iter()
+            .map(|_| self.random.token().map(Token::from_bytes))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(RestoreFailed::Random)?;
+        let now = self.clock.now();
+        let (sessions, forget) = {
+            let mut state = self.lock();
+            for (session, csrf) in kept.into_iter().zip(csrfs) {
+                state.sessions.restore(session, csrf, under, now);
+            }
+            (state.sessions.len(), state.still_to_forget())
+        };
+        // One the store still keeps after this has ended all the same, and
+        // is forgotten again at the next start.
+        self.forget(forget).await.ok();
+        Ok(Restored {
+            sessions,
+            unreadable,
+        })
+    }
+
+    /// Measures the sessions by `length` from now on, for this run only.
+    fn measure_by(&self, length: SessionLength) {
+        let now = self.clock.now();
+        self.lock().sessions.set_length(length, now);
+    }
+
+    /// Tells the store to forget the sessions of `digests`; until it has,
+    /// they wait for the next write.
+    async fn forget(&self, digests: Vec<SessionDigest>) -> Result<(), StoreError> {
+        if digests.is_empty() {
+            return Ok(());
+        }
+        self.sessions.remove(&digests).await?;
+        self.lock().forgotten_by_store(&digests);
+        Ok(())
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -235,12 +331,14 @@ impl Access {
 
     /// Signs in from `address` with `attempt`, with no idle limit when
     /// `keep_signed_in` and the session length offers Keep me signed in on
-    /// this device. The attempt counts as failed before the password is
-    /// checked, so two sent at once are not both checked; one that succeeds
-    /// starts the address's waits over. The session is tied to the admin
-    /// password as it was before the check: a password set during the check
-    /// then ends the session at its first use, and never lets one started
-    /// under the old password outlive it.
+    /// this device, and its cookie marked `Secure` when `secure`, at every
+    /// renewal too. The attempt counts as failed before the password is
+    /// checked, so two sent at once are not both checked; once the password
+    /// is right and the session's tokens drawn, the address's waits start
+    /// over, even when the store can't keep the session. The session is tied
+    /// to the admin password as it was before the check: a password set
+    /// during the check then ends the session at its first use, and never
+    /// lets one started under the old password outlive it.
     pub async fn sign_in(
         &self,
         address: IpAddr,
@@ -258,18 +356,41 @@ impl Access {
         };
         let (token, csrf) = (draw()?, draw()?);
         let now = self.clock.now();
-        let mut state = self.lock();
-        state.waits.succeeded(client);
-        let length = state.sessions.length();
-        let session = state
-            .sessions
-            .start(token.clone(), csrf.clone(), under, keep_signed_in, secure, now);
+        let _adding = self.adding_or_ending_all.lock().await;
+        let (kept, forget, ends_in, idle_limit, cookie) = {
+            let mut state = self.lock();
+            // The password was right: no guess, whatever the store answers.
+            state.waits.succeeded(client);
+            let length = state.sessions.length();
+            let session = state.sessions.start(
+                token.clone(),
+                csrf.clone(),
+                under,
+                keep_signed_in,
+                secure,
+                now,
+            );
+            (
+                session.kept(token.digest()),
+                state.still_to_forget(),
+                session.ends_at(length).map(|end| end.duration_since(now)),
+                session.idle_limit(length),
+                session.cookie_at(now, length),
+            )
+        };
+        if let Err(error) = self.sessions.add(&kept, &forget).await {
+            // Ended here, and forgotten by the store at its next write, in
+            // case the write was kept after all.
+            self.lock().sessions.end(&token);
+            return Err(SignInRefused::Store(error));
+        }
+        self.lock().forgotten_by_store(&forget);
         Ok(SignedIn {
             token,
             csrf,
-            ends_in: session.ends_at(length).map(|end| end.duration_since(now)),
-            idle_limit: session.idle_limit(length),
-            cookie: session.cookie_at(now, length),
+            ends_in,
+            idle_limit,
+            cookie,
         })
     }
 
@@ -280,12 +401,28 @@ impl Access {
     pub async fn session(&self, token: &Token) -> Option<LiveSession> {
         let under = self.password.fingerprint().ok()?;
         let now = self.clock.now();
-        let mut state = self.lock();
-        let length = state.sessions.length();
-        state
-            .sessions
-            .use_at(token, under, now)
-            .map(|session| LiveSession::of(session, length, now))
+        let (live, used, forget) = {
+            let mut state = self.lock();
+            let length = state.sessions.length();
+            let live = state
+                .sessions
+                .use_at(token, under, now)
+                .map(|session| LiveSession::of(session, length, now));
+            let live = live.map(|live| LiveSession {
+                renewed: state.sessions.renew_cookie(token, now),
+                ..live
+            });
+            let used = state.sessions.use_to_keep(token);
+            (live, used, state.still_to_forget())
+        };
+        // A write that fails here is tried again at the next one.
+        self.forget(forget).await.ok();
+        if let Some((digest, at)) = used {
+            // A last use the store misses can only end the session sooner
+            // after a restart, never keep it longer.
+            self.sessions.record_use(&digest, at).await.ok();
+        }
+        live
     }
 
     /// The session of `token`, if it is live, without using it: the events
@@ -303,18 +440,33 @@ impl Access {
     }
 
     /// Ends the session of `token`, in memory and then in the store; an
-    /// error says the store still holds it.
+    /// error says the store still holds it, and is told again at its next
+    /// write.
     pub async fn sign_out(&self, token: &Token) -> Result<(), StoreError> {
-        self.lock().sessions.end(token);
-        Ok(())
+        let forget = {
+            let mut state = self.lock();
+            state.sessions.end(token);
+            state.still_to_forget()
+        };
+        self.forget(forget).await
     }
 
     /// Sign out everywhere: ends every session, in memory and then in the
     /// store, which forgets every one it keeps. API tokens are left alone.
     /// An error says the store still holds them, and is told again at its
-    /// next write.
+    /// next write. A sign-in already starting its session finishes first,
+    /// so the store never keeps its session once this has ended it; one
+    /// still checking its password starts its session after.
     pub async fn sign_out_everywhere(&self) -> Result<(), StoreError> {
-        todo!()
+        let _ending = self.adding_or_ending_all.lock().await;
+        let forget = {
+            let mut state = self.lock();
+            state.sessions.end_all();
+            state.still_to_forget()
+        };
+        self.sessions.remove_all().await?;
+        self.lock().forgotten_by_store(&forget);
+        Ok(())
     }
 
     /// How many addresses' failed sign-ins are remembered.
@@ -324,7 +476,7 @@ impl Access {
 
     /// The session length every session is measured by.
     pub fn session_length(&self) -> SessionLength {
-        todo!()
+        self.lock().sessions.length()
     }
 
     /// Whether the sign-in form offers Keep me signed in on this device.
@@ -336,8 +488,17 @@ impl Access {
     /// changes nothing. Then every session is measured by it, the ones open
     /// included, and a session it ends is forgotten at once.
     pub async fn set_session_length(&self, length: SessionLength) -> Result<(), StoreError> {
-        let _ = length;
-        todo!()
+        let _setting = self.setting_length.lock().await;
+        self.sessions.set_length(length).await?;
+        let now = self.clock.now();
+        let forget = {
+            let mut state = self.lock();
+            state.sessions.set_length(length, now);
+            state.still_to_forget()
+        };
+        // A write that fails here is tried again at the next one.
+        self.forget(forget).await.ok();
+        Ok(())
     }
 }
 
