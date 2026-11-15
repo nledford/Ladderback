@@ -23,6 +23,15 @@
 # Each package set is saved under its own key (the run's ID) and the newest one
 # that matches is restored, so when cached files fail to install and apt
 # replaces them, the next run gets apt's set instead of the broken one.
+#
+# Both caches are restored on every run and saved only from a push to main: a
+# pull request's entry is one no other pull request can read, and each copy of
+# the three-engine browsers is half a gigabyte (ci.yml's header comment has the
+# whole design). red-first.yml runs on pull requests alone, so ci.yml's
+# `browser-cache` job installs its set on main, where it saves it. Anything
+# that installs a set of engines for a pull request must have a job there that
+# installs the same set on main, and ci.yml's `cache-prune` job must list the
+# set's cache keys.
 name: Browsers for the UI journeys
 description: Installs the Playwright browser engines named and their system packages, from caches when it can.
 inputs:
@@ -47,7 +56,8 @@ runs:
         if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
           echo "debs=playwright-debs-$set-$ImageOS-$ImageVersion-$LOCK_HASH-" >> "$GITHUB_OUTPUT"
         fi
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    - id: browsers
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/ms-playwright
         key: ${{ steps.keys.outputs.browsers }}
@@ -68,8 +78,13 @@ runs:
       # refuses any word that doesn't name an engine.
       run: '"$GITHUB_ACTION_PATH/../../../scripts/install-browser.sh" $ENGINES'
     # Saved straight away, not when the job ends, so a failing journey later
-    # in the job still leaves the packages for the next run.
-    - if: steps.keys.outputs.debs != '' && steps.install.outputs.debs == 'saved'
+    # in the job still leaves the browsers and the packages for the next run.
+    - if: steps.browsers.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.keys.outputs.browsers }}
+    - if: steps.keys.outputs.debs != '' && steps.install.outputs.debs == 'saved' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/playwright-debs
