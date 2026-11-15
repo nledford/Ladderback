@@ -43,7 +43,7 @@ mod shutdown;
 
 #[derive(Parser)]
 #[command(
-    name = "ladderback",
+    name = build_info::PROGRAM,
     version = build_info::SHOWN.as_str(),
     about = "Self-hosted backup manager for rustic"
 )]
@@ -318,7 +318,7 @@ fn serve(
     plain: bool,
 ) -> ExitCode {
     logging::install(plain);
-    log::info!("ladderback {} starting", *build_info::SHOWN);
+    log::info!("{} starting", *build_info::NAMED);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     finish(
         &localizer,
