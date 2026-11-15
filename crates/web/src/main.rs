@@ -366,9 +366,8 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // new password, it is not said again on the next sign-in.
     let sign_out_failed = RwSignal::new(false);
     Effect::new(move |_| {
-        if shown.get() != Standing::SignedIn {
-            sign_out_failed.set(false);
-        }
+        let standing = shown.get();
+        sign_out_failed.update(|failed| *failed = standing.keeps_sign_out_failure(*failed));
     });
     let failure = Arc::clone(&localizer);
     let pages = Arc::clone(&localizer);

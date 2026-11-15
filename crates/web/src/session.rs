@@ -53,7 +53,7 @@ impl Standing {
     /// The failure is the session's, so the page forgets it once it has
     /// none, as after Sign out everywhere or a new password.
     pub(crate) fn keeps_sign_out_failure(self, failed: bool) -> bool {
-        todo!()
+        failed && self == Self::SignedIn
     }
 }
 
