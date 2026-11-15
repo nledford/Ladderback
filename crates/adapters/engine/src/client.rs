@@ -75,6 +75,8 @@ pub(crate) const MAX_CACHE_SLOTS: u32 = 64;
 ///
 /// What the worker writes to stderr is logged with the job's secrets masked,
 /// for the programs it starts write there too, unmasked.
+///
+/// [`RunningJob`]: app::ports::RunningJob
 pub struct WorkerEngine {
     program: PathBuf,
     args: Vec<OsString>,
@@ -126,6 +128,8 @@ impl WorkerEngine {
 
     /// How long [`JobControl::stop`] and [`Workers::stop`] wait after SIGTERM
     /// before SIGKILL: [`STOP_GRACE`] unless this says otherwise.
+    ///
+    /// [`JobControl::stop`]: app::ports::JobControl::stop
     #[must_use]
     pub fn with_stop_grace(mut self, grace: Duration) -> Self {
         self.stop_grace = grace;
@@ -164,6 +168,10 @@ impl WorkerEngine {
     /// so only the wait for the first line covers it; a write that fails is
     /// [`EngineError::Unavailable`], as ever. A timeout too long to
     /// represent, such as [`Duration::MAX`], never passes.
+    ///
+    /// [`Engine::run`]: app::ports::Engine::run
+    /// [`EngineError::StartTimedOut`]: app::ports::EngineError::StartTimedOut
+    /// [`EngineError::Unavailable`]: app::ports::EngineError::Unavailable
     #[must_use]
     pub fn with_start_timeout(mut self, timeout: Duration) -> Self {
         self.start_timeout = timeout;
@@ -186,6 +194,8 @@ impl WorkerEngine {
     /// Starts workers with `vars` as the environment they are scrubbed from
     /// (see [`environment`]) instead of this process's own. For tests, and
     /// for a composition root that has read its environment already.
+    ///
+    /// [`environment`]: crate::environment
     #[must_use]
     pub fn with_environment(
         mut self,
@@ -234,6 +244,8 @@ impl Workers {
     /// no end, which the daemon's stop records for it (decision 92). A job
     /// asked for from then on is never started nor answered: nothing would
     /// be left to stop it.
+    ///
+    /// [`JobControl::stop`]: app::ports::JobControl::stop
     pub fn stop(&self) -> impl Future<Output = ()> + Send + 'static {
         self.stopping.send_replace(true);
         let stopping = Arc::clone(&self.stopping);

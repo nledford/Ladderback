@@ -47,6 +47,8 @@ pub(super) async fn forward_stderr(
 /// may end in the start of a secret, which is masked as a whole one is
 /// ([`Redactor::redact_cut`]). (The worker's own events are masked before
 /// they are cut; see [`translate`] for what it can't mask.)
+///
+/// [`translate`]: super::translate::translate
 fn redacted_log_line(line: &[u8], cut: bool, redactor: &Redactor) -> String {
     if cut {
         redactor.redact_cut(line)
