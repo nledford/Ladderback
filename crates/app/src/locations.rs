@@ -348,84 +348,84 @@ impl ChooseLocation {
                     &Location::of(location).masked_address(),
                     MAX_RECORDED_ADDRESS_BYTES,
                 );
-                let mut source = None;
-                let outcome = if chosen.is_some() && reach == Reach::FirstUsed {
-                    LocationOutcome::NotTried
-                } else if verdict == RuleVerdict::NotMet {
-                    LocationOutcome::RuleNotMet
-                } else if verdict == RuleVerdict::Unknown {
-                    LocationOutcome::RuleUnknown
-                } else {
-                    let resolution = match resolved.get_mut(index).and_then(Option::take) {
-                        Some(resolution) => resolution,
-                        None => {
-                            probes
-                                .alongside(
-                                    self.resolve.resolve_location(location, password, &mut read),
-                                )
-                                .await
-                        }
-                    };
-                    match resolution {
-                        Err(error) => {
-                            let (outcome, named) = unusable(error)?;
-                            source = Some(named);
-                            outcome
-                        }
-                        Ok(resolution) => {
-                            for warning in resolution.warnings {
-                                if !warnings.contains(&warning) {
-                                    warnings.push(warning);
-                                }
-                            }
-                            let location = resolution.access;
-                            if let Some(cause) =
-                                ExposedCredentials::of_location(&location_of(&location))
-                            {
-                                (self.report)(LocationReport::ExposedCredentials {
-                                    alias: alias.clone(),
-                                    position: Some(position),
-                                    cause,
-                                });
-                            }
-                            let outcome = match probes.outcome(index).await {
-                                Some(outcome) => outcome,
-                                None => {
-                                    // Kept until the probe ends: it is wanted all along.
-                                    let (_wanted, unwanted) = oneshot::channel();
-                                    probes
-                                        .alongside(self.probe(
-                                            op,
-                                            position,
-                                            location.clone(),
-                                            expected,
-                                            phase,
-                                            unwanted,
-                                        ))
-                                        .await
-                                }
-                            };
-                            if outcome == LocationOutcome::OtherRepository {
-                                (self.report)(LocationReport::OtherRepository {
-                                    alias: alias.clone(),
-                                    position,
-                                });
-                            }
-                            if outcome == LocationOutcome::Used && chosen.is_none() {
-                                chosen = Some(location);
-                                if reach == Reach::FirstUsed {
-                                    probes.stop().await;
-                                }
-                            }
-                            outcome
-                        }
+                let after_chosen = chosen.is_some() && reach == Reach::FirstUsed;
+                if let Some(outcome) = passed_over(after_chosen, verdict) {
+                    tried.push(LocationTried {
+                        position,
+                        address,
+                        outcome,
+                        source: None,
+                    });
+                    continue;
+                }
+                let resolution = match resolved.get_mut(index).and_then(Option::take) {
+                    Some(resolution) => resolution,
+                    None => {
+                        probes
+                            .alongside(self.resolve.resolve_location(location, password, &mut read))
+                            .await
                     }
                 };
+                let resolution = match resolution {
+                    Ok(resolution) => resolution,
+                    Err(error) => {
+                        let (outcome, named) = unusable(error)?;
+                        tried.push(LocationTried {
+                            position,
+                            address,
+                            outcome,
+                            source: Some(named),
+                        });
+                        continue;
+                    }
+                };
+                for warning in resolution.warnings {
+                    if !warnings.contains(&warning) {
+                        warnings.push(warning);
+                    }
+                }
+                let location = resolution.access;
+                if let Some(cause) = ExposedCredentials::of_location(&location_of(&location)) {
+                    (self.report)(LocationReport::ExposedCredentials {
+                        alias: alias.clone(),
+                        position: Some(position),
+                        cause,
+                    });
+                }
+                let outcome = match probes.outcome(index).await {
+                    Some(outcome) => outcome,
+                    None => {
+                        // Kept until the probe ends: it is wanted all along.
+                        let (_wanted, unwanted) = oneshot::channel();
+                        probes
+                            .alongside(self.probe(
+                                op,
+                                position,
+                                location.clone(),
+                                expected,
+                                phase,
+                                unwanted,
+                            ))
+                            .await
+                    }
+                };
+                if outcome == LocationOutcome::OtherRepository {
+                    (self.report)(LocationReport::OtherRepository {
+                        alias: alias.clone(),
+                        position,
+                    });
+                }
+                if outcome == LocationOutcome::Used && chosen.is_none() {
+                    chosen = Some(location);
+                    if reach == Reach::FirstUsed {
+                        probes.stop().await;
+                    }
+                }
                 tried.push(LocationTried {
                     position,
                     address,
                     outcome,
-                    source,
+                    source: None,
                 });
             }
             Ok((LocationsRecord { locations: tried }, chosen, warnings))
@@ -648,6 +648,22 @@ pub(crate) fn ruled_positions(job: &Job) -> Vec<u8> {
 enum Reach {
     FirstUsed,
     Every,
+}
+
+/// The outcome of a location that is neither resolved nor probed: one
+/// `after_chosen`, after the first usable one of a choice that stops there,
+/// or one whose rule isn't met or can't be evaluated. `None` for a location
+/// to resolve and probe.
+fn passed_over(after_chosen: bool, verdict: RuleVerdict) -> Option<LocationOutcome> {
+    if after_chosen {
+        Some(LocationOutcome::NotTried)
+    } else if verdict == RuleVerdict::NotMet {
+        Some(LocationOutcome::RuleNotMet)
+    } else if verdict == RuleVerdict::Unknown {
+        Some(LocationOutcome::RuleUnknown)
+    } else {
+        None
+    }
 }
 
 /// Why a location whose settings didn't resolve is skipped, and what the

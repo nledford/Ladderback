@@ -1462,28 +1462,29 @@ mod tests {
     fn a_secret_of_short_pieces_shows_nowhere_in_the_url_it_prints() {
         let markers = ["Qx1", "Zy2", "Wv3"];
         let delimiters = ["@", "#", "?", "/", ":"];
-        let mut checked = 0;
-        for one in delimiters {
-            for two in delimiters {
-                let [first, second, third] = markers;
-                for secret in [
+        let [first, second, third] = markers;
+        let secrets = delimiters.into_iter().flat_map(|one| {
+            delimiters.into_iter().flat_map(move |two| {
+                [
                     format!("{first}{one}{second}"),
                     format!("{first}{one}{second}{two}{third}"),
-                ] {
-                    let redactor = redactor(&[&secret]);
-                    for place in PLACES {
-                        let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
-                            continue;
-                        };
-                        checked += 1;
-                        let printed = url.as_str();
-                        let redacted = redactor.redact(printed).to_lowercase();
-                        assert!(
-                            !redacted.contains("qx1") && !redacted.contains("zy2"),
-                            "{secret:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
-                        );
-                    }
-                }
+                ]
+            })
+        });
+        let mut checked = 0;
+        for secret in secrets {
+            let redactor = redactor(&[&secret]);
+            for place in PLACES {
+                let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                    continue;
+                };
+                checked += 1;
+                let printed = url.as_str();
+                let redacted = redactor.redact(printed).to_lowercase();
+                assert!(
+                    !redacted.contains("qx1") && !redacted.contains("zy2"),
+                    "{secret:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
+                );
             }
         }
         assert!(checked >= 100, "only {checked} cases ran");

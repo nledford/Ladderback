@@ -8,7 +8,7 @@ use domain::execution::{
     FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
 };
 use domain::planning::{HookEntry, OnFailure};
-use domain::{OperationId, SnapshotId};
+use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
@@ -16,7 +16,7 @@ use crate::announce::{announce_end, announce_start};
 use crate::log_write::save_within_bound;
 use crate::ports::{
     Clock, Engine, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome, HookPhase,
-    HookRunner, HookSetup, HookStatus, Job, OperationStore, RunningJob, StoreError,
+    HookRunner, HookSetup, HookStatus, Job, JobControl, OperationStore, RunningJob, StoreError,
 };
 use crate::queue::Place;
 
@@ -346,13 +346,7 @@ impl RunOperation {
             select_biased! {
                 event = events.next() => {
                     let Some(event) = event else {
-                        let reason = match deadline {
-                            Some(d) if d.has_passed(self.clock.now()) => {
-                                FailureReason::DeadlinePassed
-                            }
-                            _ => FailureReason::EngineExited { exit_code: None },
-                        };
-                        self.fail(run, reason);
+                        self.fail(run, self.reason_events_ended(deadline));
                         return;
                     };
                     let is_start = matches!(event, EngineEvent::Started { .. });
@@ -362,97 +356,25 @@ impl RunOperation {
                         EngineEvent::Started { repository, .. } => repository.clone(),
                         _ => None,
                     };
-                    if let EngineEvent::Started { index_read_at, .. } = &event
-                        && let Some(budget) = budget
-                        && timer.is_terminated()
-                    {
-                        let d = Deadline::after_index_read(*index_read_at, budget);
-                        deadline = Some(d);
-                        timer = self.clock.sleep_until(d.at()).fuse();
-                    }
-                    // A success's result is in the log on the running
-                    // operation before any ending hook runs: a backup's
-                    // snapshot is written by then, so an orderly stop that
-                    // ends the run in its after hooks keeps it on the record
-                    // (decision 92). A result the operation can't take, as
-                    // one before its start, is never written.
-                    if let EngineEvent::Succeeded(result) = &event
-                        && run.operation.status() == &OperationStatus::Running
-                    {
-                        let saved = save_within_bound(
-                            &*self.clock,
-                            &*self.store,
-                            &run.operation,
-                            Some(result),
-                        )
-                        .await;
-                        if let Err(error) = saved {
-                            run.recording_errors.push(error);
-                        }
-                    }
+                    self.arm_deadline(&event, budget, &mut deadline, &mut timer);
+                    self.keep_result(run, &event).await;
                     self.apply(run, event, &ruled);
                     if run.operation.status().is_finished() {
-                        // A result stands even past the deadline: the snapshot
-                        // it reports was written already. Dropping the job
-                        // stops whatever the engine still runs, but for a
-                        // backup the engine stopped at its deadline, which may
-                        // still be saving the index of its packs or finishing
-                        // a snapshot write it began before the deadline.
-                        if matches!(
-                            run.operation.status(),
-                            OperationStatus::Failed {
-                                reason: FailureReason::DeadlinePassed
-                            }
-                        ) {
-                            control.stop().await;
-                        }
+                        stop_past_deadline(run, &mut *control).await;
                         return;
                     }
                     if is_start {
-                        // The operation is running now. Nothing else it does
-                        // changes what the log shows until it finishes, so
-                        // progress and warnings aren't written one by one.
-                        // A cancel or the deadline doesn't wait for the
-                        // write: a log that stalls must not hold them.
-                        let written = {
-                            let write = save_within_bound(
-                                &*self.clock,
-                                &*self.store,
-                                &run.operation,
-                                run.result.as_ref(),
-                            );
-                            let mut write = pin!(write.fuse());
-                            select_biased! {
-                                saved = write => Written::Saved(saved),
-                                () = cancel => Written::Cancelled,
-                                () = timer => Written::DeadlinePassed,
-                            }
-                        };
-                        match written {
-                            // Told only once the log has it, or has refused
-                            // it: a page that reads the history on the news
-                            // finds the operation running there (#305).
-                            Written::Saved(saved) => {
-                                if let Err(error) = saved {
-                                    run.recording_errors.push(error);
-                                }
-                                announce_start(
-                                    self.events.as_deref(),
-                                    &run.operation,
-                                    opened.as_ref(),
-                                )
-                                .await;
-                            }
-                            Written::Cancelled => {
-                                control.stop().await;
-                                self.cancel(run);
-                                return;
-                            }
-                            Written::DeadlinePassed => {
-                                control.stop().await;
-                                self.fail(run, FailureReason::DeadlinePassed);
-                                return;
-                            }
+                        let announced = self
+                            .announce_running(
+                                run,
+                                opened.as_ref(),
+                                &mut *control,
+                                &mut cancel,
+                                &mut timer,
+                            )
+                            .await;
+                        if !announced {
+                            return;
                         }
                     }
                     // Checked on every event, so a stream that never pauses
@@ -477,6 +399,104 @@ impl RunOperation {
                     self.fail(run, FailureReason::DeadlinePassed);
                     return;
                 }
+            }
+        }
+    }
+
+    /// Why a run whose engine's events ended before it finished failed: its
+    /// deadline, if that has passed, or else the engine's exit.
+    fn reason_events_ended(&self, deadline: Option<Deadline>) -> FailureReason {
+        match deadline {
+            Some(d) if d.has_passed(self.clock.now()) => FailureReason::DeadlinePassed,
+            _ => FailureReason::EngineExited { exit_code: None },
+        }
+    }
+
+    /// Sets the run's deadline, once, when the engine says it read the
+    /// index of a job that has a deadline budget, and the timer that fires
+    /// at it.
+    fn arm_deadline<'a>(
+        &'a self,
+        event: &EngineEvent,
+        budget: Option<SignedDuration>,
+        deadline: &mut Option<Deadline>,
+        timer: &mut Fuse<BoxFuture<'a, ()>>,
+    ) {
+        if let EngineEvent::Started { index_read_at, .. } = event
+            && let Some(budget) = budget
+            && timer.is_terminated()
+        {
+            let d = Deadline::after_index_read(*index_read_at, budget);
+            *deadline = Some(d);
+            *timer = self.clock.sleep_until(d.at()).fuse();
+        }
+    }
+
+    /// A success's result is in the log on the running operation before any
+    /// ending hook runs: a backup's snapshot is written by then, so an
+    /// orderly stop that ends the run in its after hooks keeps it on the
+    /// record (decision 92). A result the operation can't take, as one
+    /// before its start, is never written.
+    async fn keep_result(&self, run: &mut Run, event: &EngineEvent) {
+        if let EngineEvent::Succeeded(result) = event
+            && run.operation.status() == &OperationStatus::Running
+        {
+            let saved =
+                save_within_bound(&*self.clock, &*self.store, &run.operation, Some(result)).await;
+            if let Err(error) = saved {
+                run.recording_errors.push(error);
+            }
+        }
+    }
+
+    /// Writes the operation that has just started running, then announces
+    /// it. The operation is running now. Nothing else it does changes what
+    /// the log shows until it finishes, so progress and warnings aren't
+    /// written one by one. A cancel or the deadline doesn't wait for the
+    /// write: a log that stalls must not hold them. Either one ends the run
+    /// here, and then this returns `false`.
+    async fn announce_running(
+        &self,
+        run: &mut Run,
+        opened: Option<&RepositoryId>,
+        control: &mut dyn JobControl,
+        mut cancel: &mut (impl FusedFuture<Output = ()> + Unpin + Send),
+        mut timer: &mut Fuse<BoxFuture<'_, ()>>,
+    ) -> bool {
+        let written = {
+            let write = save_within_bound(
+                &*self.clock,
+                &*self.store,
+                &run.operation,
+                run.result.as_ref(),
+            );
+            let mut write = pin!(write.fuse());
+            select_biased! {
+                saved = write => Written::Saved(saved),
+                () = cancel => Written::Cancelled,
+                () = timer => Written::DeadlinePassed,
+            }
+        };
+        match written {
+            // Told only once the log has it, or has refused it: a page that
+            // reads the history on the news finds the operation running
+            // there (#305).
+            Written::Saved(saved) => {
+                if let Err(error) = saved {
+                    run.recording_errors.push(error);
+                }
+                announce_start(self.events.as_deref(), &run.operation, opened).await;
+                true
+            }
+            Written::Cancelled => {
+                control.stop().await;
+                self.cancel(run);
+                false
+            }
+            Written::DeadlinePassed => {
+                control.stop().await;
+                self.fail(run, FailureReason::DeadlinePassed);
+                false
             }
         }
     }
@@ -630,6 +650,23 @@ impl RunOperation {
 
     fn fail(&self, run: &mut Run, reason: FailureReason) {
         let _ = run.operation.fail(reason, self.clock.now());
+    }
+}
+
+/// Stops the engine of a run that has just finished, if it finished by
+/// passing its deadline. A result stands even past the deadline: the
+/// snapshot it reports was written already. Dropping the job stops whatever
+/// the engine still runs, but for a backup the engine stopped at its
+/// deadline, which may still be saving the index of its packs or finishing a
+/// snapshot write it began before the deadline.
+async fn stop_past_deadline(run: &Run, control: &mut dyn JobControl) {
+    if matches!(
+        run.operation.status(),
+        OperationStatus::Failed {
+            reason: FailureReason::DeadlinePassed
+        }
+    ) {
+        control.stop().await;
     }
 }
 
