@@ -1,7 +1,6 @@
 docs/design/decisions/25-who-decides-a-forgets-deletions.md
 docs/design/decisions/26-what-an-adoption-writes.md
 docs/design/decisions/28-repositories-page-and-its-routes.md
-docs/design/decisions/29-config-history-symlinks-order-and-flushing.md
 docs/design/decisions/31-a-secret-a-url-parser-splits.md
 docs/design/decisions/33-body-limits-and-security-headers.md
 docs/design/decisions/34-a-hooks-output-after-the-hook.md
