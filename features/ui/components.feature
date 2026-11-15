@@ -3,7 +3,8 @@ Feature: The shared components in the gallery
   The shared component set (technical design §4.5) is exercised in the
   component gallery, a development page at /_gallery, with keyboard-only
   journeys: a dialog, a sortable data table, a form field with an announced
-  error, a checkbox, a progress bar a keyboard user can reach, whose changes
+  error, a multi-line form field that takes an entry a line, a checkbox, a
+  progress bar a keyboard user can reach, whose changes
   are never announced and are told at most every 30 seconds, and which shows
   no percentage while its size isn't known, a toast and the
   control that pauses live updates. Every demo state a
@@ -51,6 +52,20 @@ Feature: The shared components in the gallery
   Scenario: A form field with no known purpose turns the browser's autocomplete off
     When I open the component gallery
     Then the textbox "Repository name" has the autocomplete token "off"
+
+  Scenario: A multi-line form field takes an entry a line and shows its error as a form field does
+    When I open the component gallery
+    And I press Tab until focus is on the textbox "Demo folders"
+    And I type "/srv/demo/photos"
+    And I press Enter
+    And I type "/srv/demo/notes"
+    Then the textbox "Demo folders" holds the lines "/srv/demo/photos" and "/srv/demo/notes"
+    And the field "Demo folders" is described only by "One folder or file a line."
+    When I press Tab until focus is on the button "Check the demo folders"
+    And I press Enter
+    Then the field "Demo folders" shows the error "Enter at least one folder."
+    And the field "Demo folders" is marked invalid
+    And the polite region reads "Enter at least one folder."
 
   Scenario: A checkbox turns on and off by keyboard and is described by its hint
     When I open the component gallery
@@ -146,6 +161,7 @@ Feature: The shared components in the gallery
       | Dialog      |
       | Data table  |
       | Form field  |
+      | Multi-line form field |
       | Checkbox    |
       | Status badge |
       | Progress    |
@@ -162,6 +178,7 @@ Feature: The shared components in the gallery
       | Dialog      |
       | Data table  |
       | Form field  |
+      | Multi-line form field |
       | Checkbox    |
       | Status badge |
       | Progress    |

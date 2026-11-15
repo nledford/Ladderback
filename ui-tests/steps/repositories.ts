@@ -158,10 +158,11 @@ Then("no folder is where the profile's repository was moved to", async function 
   await assert.rejects(access(path.join(own.scratch, "moved")), "Create made the folder");
 });
 
-// {repo} is the scenario's scratch copy of the demo repository; {empty} and
-// {hot} are empty scratch folders, made when a step first names them.
+// {repo} is the scenario's scratch copy of the demo repository; {source} is
+// the folder a demo plan backs up (`serveDemoPlans`); {empty} and {hot} are
+// empty scratch folders. Each but {repo} is made when a step first names it.
 export async function expand(world: BrowserWorld, text: string): Promise<string> {
-  const places = /\{(repo|empty|hot)\}/g;
+  const places = /\{(repo|source|empty|hot)\}/g;
   const named = [...text.matchAll(places)].map((match) => match[1] ?? "");
   if (named.length === 0) {
     return text;

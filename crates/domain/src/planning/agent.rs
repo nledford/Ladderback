@@ -134,6 +134,19 @@ pub enum NotRecorded {
     SameRepository { other: RepositoryAlias },
 }
 
+/// Why [`AgentConfig::add_plan`], [`AgentConfig::change_plan`] or
+/// [`AgentConfig::remove_plan`] changed nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChangeRefused {
+    /// The configuration has no plan with this ID: one removed meanwhile, or
+    /// never there.
+    UnknownPlan(PlanId),
+    /// The configuration the change would make breaks a rule that reaches
+    /// across its parts, the rule [`AgentConfig::new`] or
+    /// [`AgentConfig::with_notifications`] reports.
+    Violation(Violation),
+}
+
 /// What an agent is configured to do. It is whole or it isn't there: the only
 /// way to build one is [`AgentConfig::new`], which checks the rules that
 /// reach across its parts, and the default, which is empty.
@@ -316,6 +329,54 @@ impl AgentConfig {
             entry.id = Some(id.clone());
         }
         Ok(recorded)
+    }
+
+    /// The configuration with `plan` added after its last plan, the rest of
+    /// it as it is, by the rules [`AgentConfig::new`] checks: a plan whose ID
+    /// another has is refused as [`Violation::DuplicatePlan`] at the end of
+    /// the list.
+    pub fn add_plan(&self, plan: Plan) -> Result<Self, ChangeRefused> {
+        let mut plans = self.plans.clone();
+        plans.push(plan);
+        self.with_plans(plans)
+    }
+
+    /// The configuration with `plan` in place of the plan with its ID, where
+    /// that plan stands, the rest of it as it is, by the rules
+    /// [`AgentConfig::new`] checks.
+    pub fn change_plan(&self, plan: Plan) -> Result<Self, ChangeRefused> {
+        let mut plans = self.plans.clone();
+        let Some(known) = plans.iter_mut().find(|known| known.id == plan.id) else {
+            return Err(ChangeRefused::UnknownPlan(plan.id));
+        };
+        *known = plan;
+        self.with_plans(plans)
+    }
+
+    /// The configuration without the plan `id`, the others in their order.
+    /// A plan a notification rule names is refused as
+    /// [`Violation::UnknownRulePlan`]: the rule would name a plan the
+    /// configuration doesn't have.
+    pub fn remove_plan(&self, id: &PlanId) -> Result<Self, ChangeRefused> {
+        if self.plan(id).is_none() {
+            return Err(ChangeRefused::UnknownPlan(id.clone()));
+        }
+        let mut plans = self.plans.clone();
+        plans.retain(|plan| &plan.id != id);
+        self.with_plans(plans)
+    }
+
+    /// The configuration with `plans` as its plans, the rest of it as it is,
+    /// checked whole as a loaded one is.
+    fn with_plans(&self, plans: Vec<Plan>) -> Result<Self, ChangeRefused> {
+        Self::new(
+            self.agent.clone(),
+            self.hooks.clone(),
+            self.repositories.clone(),
+            plans,
+        )
+        .and_then(|config| config.with_notifications(self.notifications.clone()))
+        .map_err(ChangeRefused::Violation)
     }
 }
 
@@ -1029,5 +1090,158 @@ mod tests {
 
     fn location(text: &str) -> RepositorySettings {
         at(text, None).settings
+    }
+
+    /// A rule `failures`, sending to a channel `ops`, for the plans `plans`.
+    fn notifications_for(plans: &[&str]) -> Notifications {
+        use crate::notifications::{Channel, ChannelKind, EventKind, Rule};
+        let ops = ChannelName::parse("ops").unwrap();
+        let channel = Channel::new(
+            ChannelKind::Ntfy,
+            SecretRef::Env("DEMO_TOPIC_URL".to_owned()),
+            None,
+        )
+        .unwrap();
+        let rule = Rule::new(
+            [EventKind::BackupFailed].into(),
+            ops.clone(),
+            plans.iter().map(|plan| id(plan)).collect(),
+            None,
+        )
+        .unwrap();
+        Notifications::new(
+            BTreeMap::from([(ops, channel)]),
+            BTreeMap::from([(RuleName::parse("failures").unwrap(), rule)]),
+        )
+        .unwrap()
+    }
+
+    /// A configuration with the repository `nas` and `plans` on it, in
+    /// order, and a rule for the plans `ruled`.
+    fn with_plans(plans: &[&str], ruled: &[&str]) -> AgentConfig {
+        config(
+            repositories(&["nas"]),
+            plans.iter().map(|name| plan(name, "nas")).collect(),
+        )
+        .unwrap()
+        .with_notifications(notifications_for(ruled))
+        .unwrap()
+    }
+
+    fn ids(config: &AgentConfig) -> Vec<&str> {
+        config.plans().iter().map(|plan| plan.id.as_str()).collect()
+    }
+
+    #[test]
+    fn an_added_plan_comes_last_and_the_rest_stays() {
+        let before = with_plans(&["home", "docs"], &["home"]);
+        let mut added = plan("media", "nas");
+        added.label = Some("Media".to_owned());
+        let after = before.add_plan(added.clone()).unwrap();
+        assert_eq!(ids(&after), ["home", "docs", "media"]);
+        assert_eq!(after.plan(&id("media")), Some(&added));
+        assert_eq!(after.repositories(), before.repositories());
+        assert_eq!(after.notifications(), &notifications_for(&["home"]));
+    }
+
+    #[test]
+    fn a_plan_whose_id_another_has_is_refused_at_the_end_of_the_list() {
+        let before = with_plans(&["home", "docs"], &[]);
+        assert_eq!(
+            before.add_plan(plan("home", "nas")),
+            Err(ChangeRefused::Violation(Violation::DuplicatePlan {
+                index: 2,
+                plan: id("home"),
+            }))
+        );
+    }
+
+    #[test]
+    fn an_added_plan_for_a_repository_the_configuration_lacks_is_refused() {
+        let before = with_plans(&["home"], &[]);
+        assert_eq!(
+            before.add_plan(plan("docs", "elsewhere")),
+            Err(ChangeRefused::Violation(Violation::UnknownRepository {
+                index: 1,
+                plan: id("docs"),
+                repository: alias("elsewhere"),
+            }))
+        );
+    }
+
+    #[test]
+    fn an_added_plan_that_backs_up_nothing_is_refused() {
+        let before = with_plans(&[], &[]);
+        assert_eq!(
+            before.add_plan(Plan::new(id("home"), alias("nas"), Vec::new())),
+            Err(ChangeRefused::Violation(Violation::NoSources {
+                index: 0,
+                plan: id("home"),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_changed_plan_stays_where_it_stands() {
+        let before = with_plans(&["home", "docs", "media"], &["docs"]);
+        let mut changed = plan("docs", "nas");
+        changed.sources = vec![Source::parse("/srv/docs").unwrap()];
+        let after = before.change_plan(changed.clone()).unwrap();
+        assert_eq!(ids(&after), ["home", "docs", "media"]);
+        assert_eq!(after.plan(&id("docs")), Some(&changed));
+        assert_eq!(after.plan(&id("home")), before.plan(&id("home")));
+        assert_eq!(after.notifications(), &notifications_for(&["docs"]));
+    }
+
+    #[test]
+    fn a_change_to_a_plan_the_configuration_lacks_is_refused() {
+        let before = with_plans(&["home"], &[]);
+        assert_eq!(
+            before.change_plan(plan("docs", "nas")),
+            Err(ChangeRefused::UnknownPlan(id("docs")))
+        );
+    }
+
+    #[test]
+    fn a_plan_changed_to_a_repository_the_configuration_lacks_is_refused_where_it_stands() {
+        let before = with_plans(&["home", "docs"], &[]);
+        assert_eq!(
+            before.change_plan(plan("docs", "elsewhere")),
+            Err(ChangeRefused::Violation(Violation::UnknownRepository {
+                index: 1,
+                plan: id("docs"),
+                repository: alias("elsewhere"),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_removed_plan_leaves_the_others_in_their_order() {
+        let before = with_plans(&["home", "docs", "media"], &["media"]);
+        let after = before.remove_plan(&id("docs")).unwrap();
+        assert_eq!(ids(&after), ["home", "media"]);
+        assert_eq!(after.repositories(), before.repositories());
+        assert_eq!(after.notifications(), &notifications_for(&["media"]));
+    }
+
+    #[test]
+    fn removing_a_plan_the_configuration_lacks_is_refused() {
+        let before = with_plans(&["home"], &[]);
+        assert_eq!(
+            before.remove_plan(&id("docs")),
+            Err(ChangeRefused::UnknownPlan(id("docs")))
+        );
+    }
+
+    #[test]
+    fn a_plan_a_notification_rule_names_is_not_removed() {
+        let before = with_plans(&["home", "docs"], &["docs"]);
+        assert_eq!(
+            before.remove_plan(&id("docs")),
+            Err(ChangeRefused::Violation(Violation::UnknownRulePlan {
+                rule: RuleName::parse("failures").unwrap(),
+                plan: id("docs"),
+            }))
+        );
     }
 }

@@ -186,6 +186,15 @@ Then("the field {string} is described only by {string}", async function (this: B
   );
 });
 
+// A multi-line field holds what was typed, each entry on its own line: Enter
+// started a line rather than submitting anything.
+Then(
+  "the textbox {string} holds the lines {string} and {string}",
+  async function (this: BrowserWorld, name: string, first: string, second: string) {
+    await expect(this.page.getByRole("textbox", { name })).toHaveValue(`${first}\n${second}`);
+  },
+);
+
 Then("the checkbox {string} is checked", async function (this: BrowserWorld, name: string) {
   await expect(this.page.getByRole("checkbox", { name, exact: true })).toBeChecked();
 });
@@ -356,6 +365,12 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph: The name of the repository to check.
 - paragraph:
   - button "Check the repository name"`,
+  "Multi-line form field": `- heading "Multi-line form field" [level=2]
+- text: Demo folders
+- textbox "Demo folders"
+- paragraph: One folder or file a line.
+- paragraph:
+  - button "Check the demo folders"`,
   Checkbox: `- heading "Checkbox" [level=2]
 - checkbox "Send a demo notification"
 - text: Send a demo notification

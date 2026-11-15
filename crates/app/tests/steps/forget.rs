@@ -158,6 +158,11 @@ impl Default for ForgetWorld {
 }
 
 impl ForgetWorld {
+    /// The configuration store the use case loads.
+    pub(super) fn store(&self) -> Arc<InMemoryConfigStore> {
+        self.store.clone()
+    }
+
     /// The engine the forget scenarios talk to: it answers an identify, a
     /// listing and a forget, holding one forget or rewrite job (the first,
     /// unless a scenario says otherwise) until it is released.

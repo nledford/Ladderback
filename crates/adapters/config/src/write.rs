@@ -412,7 +412,7 @@ fn rule_tables(rule: &LocationRule) -> Vec<AlternativeTable> {
         .collect()
 }
 
-fn plan(plan: &Plan) -> PlanTable {
+pub(crate) fn plan(plan: &Plan) -> PlanTable {
     let filter = &plan.filter;
     PlanTable {
         id: Some(plan.id.as_str().to_owned()),

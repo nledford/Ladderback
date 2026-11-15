@@ -23,6 +23,7 @@ mod keys;
 mod locate;
 #[cfg(test)]
 mod parity;
+mod plan;
 mod read;
 mod record;
 mod schema;
@@ -31,6 +32,7 @@ mod tables;
 mod write;
 mod zone;
 
+pub use plan::{plan_as, read_plan};
 pub use schema::{
     CURRENT_SCHEMA, KEPT_VERSIONS, MAX_CONFIG_BYTES, MigrationError, Parsed, Schemas, Step, parse,
     render,

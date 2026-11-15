@@ -239,7 +239,25 @@ error-unknown = An unexpected error occurred.
 
 # The request names a plan the configuration does not have.
 # $plan (text): the plan's ID, such as home.
-error-plan-unknown = There is no plan { $plan }. Add it to the configuration, or run a plan that exists.
+error-plan-unknown = There is no plan { $plan }. Add it to the configuration, or choose a plan that exists.
+
+# A plan sent from the Plans page is not one the configuration file would load, so nothing was saved.
+# $field (text): the plan's setting at fault, as its key in the configuration file, such as schedule.cron, id, repository or sources.
+# $problem (text): what is wrong with it, one of { "missing" }, { "unknown-key" }, { "wrong-type" }, { "invalid" }, { "taken" }, { "unknown-repository" } or { "no-sources" }.
+error-plan-invalid = { $problem ->
+    [missing] The plan needs its { $field }, so it was not saved. Fill it in, then save again.
+    [unknown-key] A plan has no setting { $field }, so it was not saved. Remove it, then save again.
+    [wrong-type] The plan's { $field } is not the kind of value that setting takes, so the plan was not saved. Correct it, then save again.
+    [taken] Another plan already has this { $field }, so the plan was not saved. Choose another, then save again.
+    [unknown-repository] The plan's { $field } is not a { -repository } { -brand-name } has, so the plan was not saved. Choose one that exists, then save again.
+    [no-sources] The plan's { $field } are empty, so it would back up nothing and was not saved. Add a folder or a file to back up, then save again.
+   *[invalid] The plan's { $field } is not a value that setting takes, so the plan was not saved. Correct it, then save again.
+  }
+
+# A plan was not deleted, because a notification rule names it: the configuration would no longer load.
+# $plan (text): the plan's ID, such as home.
+# $rule (text): the notification rule's name, such as failures.
+error-plan-in-use = The notification rule { $rule } names the plan { $plan }, so the plan was not deleted. Remove the plan from that rule, then delete it again.
 
 # The request names a repository the configuration does not have.
 # $alias (text): the repository's alias, such as demo.

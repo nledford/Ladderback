@@ -502,3 +502,35 @@ fn an_engine_that_left_no_exit_status_is_not_said_to_have_been_signalled() {
     let sent = localizer.error(ErrorCode::EngineExited, &code, None);
     assert!(sent.text().contains("exit status 3"), "{sent}");
 }
+
+#[test]
+fn each_plan_problem_has_its_own_words_naming_the_field() {
+    use api::PlanProblem::{
+        Invalid, Missing, NoSources, Taken, UnknownKey, UnknownRepository, WrongType,
+    };
+    let localizer = english();
+    let problems = [
+        Missing,
+        UnknownKey,
+        WrongType,
+        Invalid,
+        Taken,
+        UnknownRepository,
+        NoSources,
+    ];
+    let texts: BTreeSet<String> = problems
+        .iter()
+        .map(|problem| {
+            let args = [
+                ("field", MsgArg::Text("schedule.cron".to_owned())),
+                ("problem", MsgArg::Text(problem.as_str().to_owned())),
+            ];
+            let shown = localizer.error(ErrorCode::PlanInvalid, &args, None);
+            assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+            assert!(shown.text().contains("schedule.cron"), "{shown}");
+            shown.text().to_owned()
+        })
+        .collect();
+    // A name the message has no arm for would read as `invalid` does.
+    assert_eq!(texts.len(), problems.len(), "{texts:#?}");
+}

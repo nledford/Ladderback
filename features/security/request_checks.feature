@@ -5,7 +5,10 @@ Feature: Request checks
   rebinding or a cross-site POST. Ladderback checks every request, whether or not
   sign-in is on (§10.1). A request names the daemon's own loopback address as
   its Host unless a step says otherwise. In the examples, "{port}" stands for
-  the port the daemon is listening on.
+  the port the daemon is listening on. A changing request the checks let
+  through is sent to one operation's route, which takes no body, so what it
+  gets past them is the router's "no such method", never a route's refusal
+  of what it sent.
 
   Background:
     Given Ladderback is serving on loopback, configured for the host name "nas.demo.test"
@@ -79,13 +82,13 @@ Feature: Request checks
   Rule: A request that carries an Origin header must come from the UI's own origin
 
     Scenario: A request without an Origin header isn't affected by the Origin rule
-      Given a "POST" request for "/api/v1/plans"
+      Given a "POST" request for "/api/v1/operations/018f"
       And the request has the header "Content-Type: application/json"
       When the request is sent
       Then the request isn't refused by a request check
 
     Scenario Outline: A request from <origin> to <host> is served
-      Given a "POST" request for "/api/v1/plans"
+      Given a "POST" request for "/api/v1/operations/018f"
       And the request has the header "Host: <host>"
       And the request has the header "Origin: <origin>"
       And the request has the header "Content-Type: application/json"
@@ -166,7 +169,7 @@ Feature: Request checks
       Given the request comes from the UI's page
 
     Scenario Outline: A <method> request as <type> is served
-      Given a "<method>" request for "/api/v1/plans"
+      Given a "<method>" request for "/api/v1/operations/018f"
       And the request has the header "Content-Type: <type>"
       When the request is sent
       Then the request isn't refused by a request check
@@ -264,7 +267,7 @@ Feature: Request checks
         | DELETE |
 
     Scenario Outline: A <method> request as <type> without an Origin is served
-      Given a "<method>" request for "/api/v1/plans"
+      Given a "<method>" request for "/api/v1/operations/018f"
       And the request has the header "Content-Type: <type>"
       When the request is sent
       Then the request isn't refused by a request check

@@ -368,6 +368,15 @@ pub fn SortableTable(
 /// (1.3.5): `off` unless the field has a known purpose, such as
 /// `current-password` for the admin password, which a password manager then
 /// fills in (3.3.8).
+///
+/// `lines` makes it a multi-line field, a native `<textarea>` that many rows
+/// tall, for a list a person types an entry a line, such as a plan's folders:
+/// Enter starts a line there, and never submits the form. Its label,
+/// description and error are wired as a one-line field's are, and its `kind`
+/// does not apply. Focus brings the whole of it into view (2.4.11): a browser
+/// scrolls only far enough to show a textarea's caret, its first line, so a
+/// field that starts near the viewport's bottom edge would stay mostly below
+/// it.
 #[component]
 pub fn FormField(
     id: &'static str,
@@ -377,32 +386,62 @@ pub fn FormField(
     value: RwSignal<String>,
     #[prop(default = "text")] kind: &'static str,
     #[prop(default = "off")] autocomplete: &'static str,
+    #[prop(optional)] lines: Option<u32>,
 ) -> impl IntoView {
     let described_by = format!("{id}-description");
     let error_id = format!("{id}-error");
-    // Clones for the reactive closures, which outlive this scope.
-    let described_in_attr = described_by.clone();
     let error_in_error = error_id.clone();
-    let error_in_attr = error_id.clone();
-    view! {
-        <div class="field">
-            <label for=id>{label}</label>
+    // What describes the input: its description, and its error while it
+    // shows one.
+    let description_ids = {
+        let described_by = described_by.clone();
+        move || {
+            if error.get().is_some() {
+                format!("{described_by} {error_id}")
+            } else {
+                described_by.clone()
+            }
+        }
+    };
+    let invalid = move || error.get().is_some().then_some("true");
+    let input = match lines {
+        Some(rows) => view! {
+            <textarea
+                id=id
+                rows=rows
+                autocomplete=autocomplete
+                spellcheck="false"
+                prop:value=move || value.get()
+                on:input=move |event| value.set(event_target_value(&event))
+                on:focus=move |event| {
+                    let options = web_sys::ScrollIntoViewOptions::new();
+                    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                    event_target::<web_sys::Element>(&event)
+                        .scroll_into_view_with_scroll_into_view_options(&options);
+                }
+                aria-describedby=description_ids
+                aria-invalid=invalid
+            ></textarea>
+        }
+        .into_any(),
+        None => view! {
             <input
                 id=id
                 type=kind
                 autocomplete=autocomplete
                 prop:value=move || value.get()
                 on:input=move |event| value.set(event_target_value(&event))
-                aria-describedby=move || {
-                    if error.get().is_some() {
-                        format!("{described_in_attr} {error_in_attr}")
-                    } else {
-                        described_in_attr.clone()
-                    }
-                }
-                aria-invalid=move || error.get().is_some().then_some("true")
+                aria-describedby=description_ids
+                aria-invalid=invalid
             />
-            <p id=described_by.clone()>{description}</p>
+        }
+        .into_any(),
+    };
+    view! {
+        <div class="field">
+            <label for=id>{label}</label>
+            {input}
+            <p id=described_by>{description}</p>
             {move || {
                 error
                     .get()
@@ -585,7 +624,7 @@ pub(crate) fn address_view(address: &str) -> impl IntoView + use<> {
 
 /// Moves focus to the element with `id`, when the page has one that takes it.
 /// Whether focus is on it now.
-fn focus_element(id: &str) -> bool {
+pub(crate) fn focus_element(id: &str) -> bool {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return false;
     };

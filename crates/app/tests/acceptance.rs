@@ -53,6 +53,8 @@ mod hooks_steps;
 mod interop_steps;
 #[path = "steps/notifications.rs"]
 mod notifications_steps;
+#[path = "steps/plans.rs"]
+mod plans_steps;
 #[path = "steps/recovery.rs"]
 mod recovery_steps;
 #[path = "steps/repositories.rs"]
@@ -89,6 +91,7 @@ struct Agent {
     notifications: notifications_steps::NotificationsWorld,
     sign_in: sign_in_steps::SignInWorld,
     api_tokens: api_tokens_steps::ApiTokensWorld,
+    plans: plans_steps::PlansWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -134,6 +137,7 @@ impl Agent {
             announcement: Default::default(),
             preview: Default::default(),
             notifications: Default::default(),
+            plans: Default::default(),
         }
     }
 
