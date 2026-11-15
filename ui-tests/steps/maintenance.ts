@@ -14,7 +14,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
 import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
-import { type BrowserWorld, startServer } from "../support/world.ts";
+import { type BrowserWorld, evaluateAll, startServer } from "../support/world.ts";
 import { rowNamed, serveDemoPlans, table, untilCellLists } from "./live.ts";
 
 // The alias of the scratch repository every demo plan backs up to.
@@ -510,9 +510,12 @@ Then("the dialog {string} offers the button {string}", async function (this: Bro
 Then("the dialog {string} offers only the button {string}", async function (this: BrowserWorld, name: string, button: string) {
   const dialog = dialogOf(this, name);
   await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
-  const names = (await dialog.getByRole("button").allTextContents()).map((text) =>
-    text.replace(ISOLATION_MARKS, "").trim(),
+  const texts = await evaluateAll(
+    dialog.getByRole("button"),
+    (buttons) => buttons.map((b) => b.textContent ?? ""),
+    undefined,
   );
+  const names = texts.map((text) => text.replace(ISOLATION_MARKS, "").trim());
   assert.deepEqual(names, [button], `the buttons of the dialog "${name}"`);
 });
 

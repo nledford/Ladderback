@@ -25,6 +25,7 @@ import {
   type BrowserType,
   chromium,
   firefox,
+  type Locator,
   type Page,
   webkit,
 } from "playwright";
@@ -83,6 +84,36 @@ function chosenEngine(): Engine {
  *  this. */
 export const engine: Engine = chosenEngine();
 const browserType: BrowserType = engines[engine];
+
+/** `locator.evaluateAll(pageFunction, arg)`, which a step whose locator is
+ *  scoped by an accessible name calls instead. In Firefox that call crashed
+ *  the page (its content process ended on a segfault, Playwright's Firefox
+ *  1.65) for a dialog or table found by name, so there the elements are
+ *  gathered first and the function runs on them in a second call. */
+export async function evaluateAll<R, Arg, E extends SVGElement | HTMLElement = SVGElement | HTMLElement>(
+  locator: Locator,
+  pageFunction: (elements: E[], arg: Arg) => R | Promise<R>,
+  arg: Arg,
+): Promise<R> {
+  // Playwright types the function's argument as `Unboxed<Arg>`, which is
+  // `Arg` itself for an argument holding no handles, as every caller's is;
+  // TypeScript can't see that for a generic `Arg`.
+  const run = pageFunction as (elements: E[], arg: unknown) => R | Promise<R>;
+  if (engine !== "firefox") return locator.evaluateAll(run, arg);
+  const handles = await locator.elementHandles();
+  const elements = await locator.page().evaluateHandle((found) => found as E[], handles);
+  try {
+    const result = await elements.evaluate(run, arg);
+    // Two calls, not one: an element the page replaced in between would be
+    // read detached, with no boxes and no lines, and pass a check unseen.
+    if (await elements.evaluate((found) => found.some((el) => !el.isConnected))) {
+      throw new Error("the page replaced the elements while the step read them");
+    }
+    return result;
+  } finally {
+    await Promise.all([elements, ...handles].map((handle) => handle.dispose()));
+  }
+}
 
 let server: ChildProcess | undefined;
 let baseUrl: string;
@@ -282,8 +313,10 @@ export class BrowserWorld extends World {
    *  refuses, for the steps and the After hook to check. */
   #watch(page: Page): void {
     page.on("pageerror", (error) => this.scriptErrors.push(error.message));
+    // Chromium and WebKit write "Content Security Policy", Firefox
+    // "Content-Security-Policy".
     page.on("console", (message) => {
-      if (/Content Security Policy/i.test(message.text())) this.policyBlocks.push(message.text());
+      if (/Content[- ]Security[- ]Policy/i.test(message.text())) this.policyBlocks.push(message.text());
     });
   }
 }
