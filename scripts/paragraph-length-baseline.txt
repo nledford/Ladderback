@@ -45,7 +45,6 @@ docs/design/decisions/91-the-operations-a-start-ends-are-announced.md
 docs/design/decisions/92-the-daemons-stop-has-a-limit.md
 docs/design/development.md
 docs/design/multi-machine.md
-docs/design/operations.md
 docs/design/scheduling-and-config.md
 docs/design/technology.md
 docs/guide/install.md
