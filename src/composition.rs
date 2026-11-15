@@ -505,16 +505,35 @@ pub(crate) async fn daemon(
             password: kept,
             sessions: Arc::<SqliteStore>::clone(&daemon.log.store),
         },
-        SignInDecided::On(password) => SignIn::On(Arc::new(app::access::Access::new(
-            password,
-            random,
-            Arc::new(SystemClock),
-            Arc::<SqliteStore>::clone(&daemon.log.store),
-            Arc::<SqliteStore>::clone(&daemon.log.store),
-        ))),
+        SignInDecided::On(password) => {
+            let access = Arc::new(app::access::Access::new(
+                password,
+                random,
+                Arc::new(SystemClock),
+                Arc::<SqliteStore>::clone(&daemon.log.store),
+                Arc::<SqliteStore>::clone(&daemon.log.store),
+            ));
+            restore_sessions(&access).await;
+            SignIn::On(access)
+        }
     };
     daemon.state.exposure = exposure;
     Ok(daemon)
+}
+
+/// Brings back the sessions kept from before the start (§10.1): a failure
+/// starts the daemon with none, and says so in the log.
+async fn restore_sessions(access: &app::access::Access) {
+    match access.restore().await {
+        Ok(restored) if restored.unreadable > 0 => log::warn!(
+            "{} kept session(s) could not be read and were forgotten",
+            restored.unreadable
+        ),
+        Ok(_) => {}
+        Err(error) => {
+            log::warn!("the sessions kept from before the start were not brought back: {error:?}");
+        }
+    }
 }
 
 /// [`daemon`] with the folders supplied, for tests. The data folder is locked
