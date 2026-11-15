@@ -17,7 +17,6 @@ docs/design/decisions/51-what-a-checks-findings-are.md
 docs/design/decisions/54-early-release-builds.md
 docs/design/decisions/55-a-backup-stopped-at-its-deadline-winds-down.md
 docs/design/decisions/58-one-child-starts-at-a-time.md
-docs/design/decisions/64-installing-the-agent-as-a-user-service.md
 docs/design/decisions/68-the-start-of-an-operation-is-announced-from-the-run.md
 docs/design/decisions/69-a-save-edits-the-file-a-person-wrote.md
 docs/design/decisions/73-the-persistent-queue-and-the-scheduler-loop.md
