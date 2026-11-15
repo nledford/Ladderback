@@ -4,15 +4,20 @@
 //! it takes no I7 slot, writes nothing to the operation log, and runs
 //! alongside anything, as rustic reads alongside a write.
 
+use std::pin::pin;
 use std::sync::Arc;
 
 use domain::execution::FailureReason;
 use domain::maintenance::StatsReading;
 use domain::planning::RepositoryConfig;
-use domain::{OperationId, RepositoryAlias};
+use domain::{OperationId, RepositoryAlias, Timestamp};
+use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::maintenance::READ_TIMEOUT;
-use crate::ports::{Clock, Engine, EngineError, RepositoryAccess, StatsStore, StoreError};
+use crate::ports::{
+    Clock, Engine, EngineError, EngineEvent, EngineResult, Job, RepositoryAccess, RunningJob,
+    StatsStore, StoreError,
+};
 use crate::secrets::{ResolveError, ResolveRepository};
 
 /// Reads repositories' stats and keeps each reading.
@@ -61,8 +66,13 @@ impl ReadStats {
         alias: &RepositoryAlias,
         entry: &RepositoryConfig,
     ) -> Result<StatsReading, StatsError> {
-        let _ = (op, alias, entry, &self.resolve);
-        todo!()
+        let access = self
+            .resolve
+            .resolve_saved(alias, entry)
+            .await
+            .map_err(StatsError::Resolve)?
+            .access;
+        self.read_with(op, alias, access).await
     }
 
     /// Reads the stats of the repository `access` opens, under the run
@@ -74,8 +84,27 @@ impl ReadStats {
         alias: &RepositoryAlias,
         access: RepositoryAccess,
     ) -> Result<StatsReading, StatsError> {
-        let _ = (op, alias, access, &self.engine, &self.clock, &self.readings);
-        todo!()
+        let known = access.id.clone();
+        let give_up = self.clock.sleep_until(self.clock.now() + READ_TIMEOUT);
+        // The read first: one that is ready is never lost to the timer.
+        let (stats, opened) = select_biased! {
+            read = pin!(run(self.engine.as_ref(), op, Job::Stats(access)).fuse()) => read?,
+            () = pin!(give_up.fuse()) => return Err(StatsError::TimedOut),
+        };
+        // To the millisecond, as the history keeps it: the reading answered
+        // is the one a later look finds.
+        let now = self.clock.now();
+        let reading = StatsReading {
+            alias: alias.clone(),
+            repository: opened.or(known),
+            taken_at: Timestamp::from_millisecond(now.as_millisecond()).unwrap_or(now),
+            stats,
+        };
+        self.readings
+            .record(&reading)
+            .await
+            .map_err(StatsError::Store)?;
+        Ok(reading)
     }
 
     /// The reading of `alias` taken last, or `None` when none is kept or it
@@ -86,9 +115,46 @@ impl ReadStats {
         alias: &RepositoryAlias,
         entry: &RepositoryConfig,
     ) -> Result<Option<StatsReading>, StoreError> {
-        let _ = (alias, entry);
-        todo!()
+        Ok(self
+            .readings
+            .latest(alias)
+            .await?
+            .filter(|reading| reading.is_of(entry.id.as_ref())))
     }
+}
+
+/// Runs the stats job to its end: its figures, and the ID of the repository
+/// it opened, when the engine named one.
+async fn run(
+    engine: &dyn Engine,
+    op: OperationId,
+    job: Job,
+) -> Result<
+    (
+        domain::maintenance::RepositoryStats,
+        Option<domain::RepositoryId>,
+    ),
+    StatsError,
+> {
+    let RunningJob { events, .. } = engine.run(op, job).await.map_err(StatsError::Engine)?;
+    let mut events = events.fuse();
+    let mut opened = None;
+    while let Some(event) = events.next().await {
+        match event {
+            EngineEvent::Started { repository, .. } => opened = repository,
+            EngineEvent::Succeeded(EngineResult::Stats(stats)) => return Ok((stats, opened)),
+            // A refusal after an identify is answered as a refusal before it.
+            EngineEvent::Failed(reason) => {
+                return Err(EngineError::try_from(reason)
+                    .map_or_else(StatsError::Failed, StatsError::Engine));
+            }
+            _ => {}
+        }
+    }
+    // The stream ended without a result: the engine stopped without reporting.
+    Err(StatsError::Failed(FailureReason::EngineExited {
+        exit_code: None,
+    }))
 }
 
 #[cfg(test)]

@@ -85,7 +85,8 @@
 #
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
-# starts and the cancel; doing what `maintenance::Panel` decides (`Page::act`:
+# starts, the cancel and the stats' look and read; doing what
+# `maintenance::Panel` and `stats::StatsPanel` decide (`Page::act`:
 # say it, open or close the review, read the history again, wait for the run,
 # move focus); and drawing the elements, which includes leaving out what has
 # nothing to say (an unmanaged group's paths when it has none, the sentence
@@ -94,15 +95,17 @@
 # does not maintain, with the sentence that says why in their place); and
 # reading the offset of the viewer's clock from the browser's `Date`
 # (`viewer_offset`, which `formatting.rs` tests in `just test-wasm`). The
-# maintenance journeys of `features/ui/maintenance.feature` check it in
-# Chromium. Everything the page
+# maintenance journeys of `features/ui/maintenance.feature` and the stats
+# journeys of `features/ui/stats.feature` check it in Chromium. Everything
+# the page
 # decides is decided on the host and mutated there: the request and the review
 # of a preview, the rows, the adoptions, what shows of the history, what the
 # page holds while a request is out or a run goes on and what it does next,
 # the refusals that read the history again, whether the daemon is called
 # unreachable, and the pace and patience of the wait for a run
-# (`maintenance.rs`), and the message and arguments of every sentence
-# (`wording.rs`).
+# (`maintenance.rs`), the message and arguments of every sentence
+# (`wording.rs`), and the stats' rows, when they were taken and what the
+# section holds and says while a read is out (`stats.rs`).
 #
 # `crates/web/src/snapshot_page.rs` is the DOM glue of a snapshot's page
 # (§4.4): it reads the alias and snapshot from the address, sends each read of

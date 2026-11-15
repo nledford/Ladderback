@@ -6,7 +6,7 @@
 use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use app::fakes::{FakeRetention, FakeSecrets, FakeSources, InMemoryStatsStore};
+use app::fakes::{FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryStatsStore};
 use app::maintenance::{MaintenanceKind, PreparedMaintenance, RunMaintenance};
 use app::ports::{
     CheckSummary, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job,
@@ -181,11 +181,17 @@ impl StatsWorld {
     }
 
     fn read_stats(&self, agent: &Agent) -> ReadStats {
+        // A read never answered waits on a clock that stands still, not the
+        // agent's, which jumps to each deadline: only a cancel ends it.
+        let clock: Arc<dyn Clock> = match self.answer {
+            Answer::Unanswered => Arc::new(FakeClock::new(agent.clock.now())),
+            _ => agent.clock.clone(),
+        };
         ReadStats::new(
             self.engine(agent.store.clone()),
             ResolveRepository::new(Arc::new(FakeSecrets::default())),
             self.readings.clone(),
-            agent.clock.clone(),
+            clock,
         )
     }
 

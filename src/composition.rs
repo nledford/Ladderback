@@ -1949,6 +1949,13 @@ fn log_ended(finished: &Finished) {
         finished.operation.status()
     );
     log_recording_errors(finished);
+    if let Some(failed) = &finished.stats_failed {
+        log::warn!(
+            "operation {}: the repository's stats couldn't be read after the check ({}); the check's outcome stands",
+            finished.operation.id().as_uuid().hyphenated(),
+            stats_failure(failed)
+        );
+    }
 }
 
 /// Says in the log each write of `finished` the operation log refused, as
@@ -1960,6 +1967,19 @@ fn log_recording_errors(finished: &Finished) {
             "operation {operation}: a write to the operation log failed ({}); its history may be incomplete",
             refused.code()
         );
+    }
+}
+
+/// Why a stats read failed, for the daemon's log: by the code of the failure,
+/// never its own words, which nobody has checked for a value (I4).
+fn stats_failure(failed: &app::stats::StatsError) -> String {
+    use app::stats::StatsError as E;
+    match failed {
+        E::Resolve(_) => "its secrets couldn't be resolved".to_owned(),
+        E::Engine(_) => "the engine couldn't start the read".to_owned(),
+        E::Failed(reason) => format!("the read failed: {}", reason.code()),
+        E::TimedOut => "the read wasn't answered in time".to_owned(),
+        E::Store(error) => format!("the history refused the reading: {}", error.code()),
     }
 }
 

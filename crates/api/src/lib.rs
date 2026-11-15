@@ -4251,6 +4251,7 @@ pub enum EntryKindDto {
 /// One reading of a repository's stats (§16, decision 104): when it was taken
 /// and its figures.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct StatsReadingDto {
     /// RFC 3339, UTC: when the stats were read.
     pub taken_at: String,
@@ -4264,13 +4265,16 @@ pub struct StatsReadingDto {
     pub stored_size: u64,
     /// The share of the data's raw size compression saved, a whole percent
     /// rounded down; absent when the repository stores nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compression_saved_percent: Option<u8>,
 }
 
 /// A repository's stats as last read and kept: `latest` is absent when none
 /// have been read.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct RepositoryStatsDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest: Option<StatsReadingDto>,
 }
 

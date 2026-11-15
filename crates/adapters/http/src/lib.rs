@@ -515,6 +515,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::get(maintenance::groups),
         )
         .route(
+            "/api/v1/repositories/{alias}/stats",
+            axum::routing::get(maintenance::stats).post(maintenance::read_stats),
+        )
+        .route(
             "/api/v1/repositories/{alias}/maintenance",
             axum::routing::post(maintenance::start),
         )

@@ -3,6 +3,8 @@
 //! the reading shown was taken, and what the section holds and says while a
 //! read is out and once it is answered. `snapshots.rs` is its glue.
 
+use std::str::FromStr;
+
 use api::{IanaZone, MsgArg, RepositoryStatsDto, StatsReadingDto};
 use l10n::{MessageId, msg};
 
@@ -13,8 +15,7 @@ use crate::wording::Words;
 /// The route that tells a repository's stats as last read (`GET`), and
 /// reads them now (`POST`).
 pub(crate) fn stats_path(alias: &str) -> String {
-    let _ = alias;
-    todo!()
+    format!("/api/v1/repositories/{alias}/stats")
 }
 
 /// One row of the stats table: what it is, and its figure.
@@ -36,15 +37,42 @@ fn row(header: MessageId, figure: Words) -> Row {
 /// snapshots, their total size, the size stored and what compression saved.
 /// A repository that stores nothing has no compression to tell, and says so.
 pub(crate) fn rows(reading: &StatsReadingDto) -> Vec<Row> {
-    let _ = reading;
-    todo!()
+    let size = |bytes| words(msg::UI_STATS_SIZE, vec![("bytes", MsgArg::Bytes(bytes))]);
+    let compression = match reading.compression_saved_percent {
+        Some(percent) => words(
+            msg::UI_STATS_SAVED,
+            vec![("percent", MsgArg::Count(u64::from(percent)))],
+        ),
+        None => words(msg::UI_STATS_SAVED_NONE, Vec::new()),
+    };
+    vec![
+        row(
+            msg::UI_STATS_SNAPSHOTS,
+            words(
+                msg::UI_STATS_COUNT,
+                vec![("count", MsgArg::Count(reading.snapshots))],
+            ),
+        ),
+        row(msg::UI_STATS_TOTAL_SIZE, size(reading.total_size)),
+        row(msg::UI_STATS_STORED_SIZE, size(reading.stored_size)),
+        row(msg::UI_STATS_COMPRESSION, compression),
+    ]
 }
 
 /// When the reading was taken, read in the viewer's zone `zone` (§8.4); none
 /// when the daemon sent no time the page can read, rather than a guess.
 pub(crate) fn taken(reading: &StatsReadingDto, zone: Option<&IanaZone>) -> Option<Words> {
-    let _ = (reading, zone);
-    todo!()
+    let at = jiff::Timestamp::from_str(&reading.taken_at).ok()?;
+    Some(words(
+        msg::UI_STATS_TAKEN,
+        vec![(
+            "when",
+            MsgArg::Timestamp {
+                utc_ms: at.as_millisecond(),
+                zone: zone.cloned(),
+            },
+        )],
+    ))
 }
 
 /// What the section shows in place of its table.
@@ -103,74 +131,101 @@ pub(crate) struct StatsPanel {
 impl StatsPanel {
     /// What the section shows in place of its table.
     pub(crate) fn shown(&self) -> Shown {
-        let _ = (
-            &self.latest,
-            Kept::Loading,
-            Kept::Known,
-            Kept::Unknown,
-            self.kept,
-            Shown::Loading,
-            Shown::Never,
-            Shown::Table,
-            Shown::Nothing,
-        );
-        todo!()
+        match (&self.latest, self.kept) {
+            (Some(_), _) => Shown::Table,
+            (None, Kept::Known) => Shown::Never,
+            (None, Kept::Loading) => Shown::Loading,
+            (None, Kept::Unknown) => Shown::Nothing,
+        }
     }
 
     /// A look at the last reading kept is sent: its number, which its
     /// answer comes back with.
     pub(crate) fn look(&mut self) -> u64 {
-        let _ = (self.looks, self.looks_before_read);
-        todo!()
+        self.looks += 1;
+        self.looks
+    }
+
+    /// Whether the answer of the look numbered `look` can tell anything
+    /// newer than what is shown.
+    fn current(&self, look: u64) -> bool {
+        !self.reading && look > self.looks_before_read
     }
 
     /// The look numbered `look` was answered. A look sent before a read
     /// was answered, or answered while one is out, tells nothing newer than
     /// the read, so it changes nothing shown. A refusal a look showed goes.
     pub(crate) fn looked(&mut self, look: u64, stats: RepositoryStatsDto) {
-        let _ = (look, stats);
-        todo!()
+        if !self.current(look) {
+            return;
+        }
+        self.kept = Kept::Known;
+        self.latest = stats.latest;
+        if std::mem::take(&mut self.look_refused) {
+            self.refusal = None;
+        }
     }
 
     /// The look numbered `look` was refused: the refusal is shown, unless a
     /// read is out, whose own answer then tells, or was answered since. What
     /// was known of the reading kept stays.
     pub(crate) fn look_refused(&mut self, look: u64, refusal: Refusal) {
-        let _ = (look, refusal, self.look_refused);
-        todo!()
+        if !self.current(look) {
+            return;
+        }
+        self.look_unanswered();
+        self.refusal = Some(refusal);
+        self.look_refused = true;
     }
 
     /// A look got no answer: the page's heading says the daemon is out of
     /// reach, and the section stops loading. What was known stays.
     pub(crate) fn look_unanswered(&mut self) {
-        todo!()
+        if self.kept == Kept::Loading {
+            self.kept = Kept::Unknown;
+        }
     }
 
     /// A person asks to read the stats now: what to announce, politely, or
     /// `None` while a read is out, which is not asked twice. The refusal
     /// shown is stale once something new is asked.
     pub(crate) fn asks(&mut self) -> Option<Said> {
-        todo!()
+        if self.reading {
+            return None;
+        }
+        self.reading = true;
+        self.refusal = None;
+        Some(politely(msg::UI_STATS_READING))
     }
 
     /// The read was answered with `reading`, which the section shows from
     /// now on: what to announce, politely.
     pub(crate) fn read(&mut self, reading: StatsReadingDto) -> Said {
-        let _ = (reading, Politeness::Polite);
-        todo!()
+        self.reading = false;
+        self.latest = Some(reading);
+        self.looks_before_read = self.looks;
+        politely(msg::UI_STATS_DONE)
     }
 
     /// The read was refused: the refusal is shown, as an alert, and the
     /// reading shown before stays. A later look leaves it shown.
     pub(crate) fn refused(&mut self, refusal: Refusal) {
-        let _ = (refusal, &self.reading, &self.refusal);
-        todo!()
+        self.reading = false;
+        self.refusal = Some(refusal);
+        self.look_refused = false;
     }
 
     /// The read got no answer: the page's heading says the daemon is out of
     /// reach, and the section can be asked again.
     pub(crate) fn silent(&mut self) {
-        todo!()
+        self.reading = false;
+    }
+}
+
+fn politely(id: MessageId) -> Said {
+    Said {
+        politeness: Politeness::Polite,
+        words: words(id, Vec::new()),
     }
 }
 

@@ -223,3 +223,36 @@ pub(crate) const SET_SESSION_LENGTH: &str = concat!(
     "INSERT INTO sign_in_settings (id, session_length) VALUES (1, ?) ",
     "ON CONFLICT(id) DO UPDATE SET session_length = excluded.session_length"
 );
+
+/// Keeps a reading of a repository's stats. Parameters: `repo_alias`,
+/// `repo_uuid`, `taken_at`, `snapshots`, `total_bytes`, `stored_bytes`,
+/// `raw_bytes`.
+pub(crate) const INSERT_STATS: &str = concat!(
+    "INSERT INTO repo_stats ",
+    "(repo_alias, repo_uuid, taken_at, snapshots, total_bytes, stored_bytes, raw_bytes) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+);
+
+/// Drops the readings a newer one no longer keeps. Parameters: the alias,
+/// the oldest `taken_at` still kept.
+pub(crate) const DROP_OLD_STATS: &str =
+    "DELETE FROM repo_stats WHERE repo_alias = ? AND taken_at < ?";
+
+/// The columns `row::stats_reading` reads.
+macro_rules! select_stats {
+    ($tail:literal) => {
+        concat!(
+            "SELECT id, repo_alias, repo_uuid, taken_at, snapshots, total_bytes, stored_bytes, ",
+            "raw_bytes FROM repo_stats WHERE repo_alias = ?",
+            $tail
+        )
+    };
+}
+
+/// The reading of an alias taken last, the one kept last among equals.
+/// Parameter: the alias.
+pub(crate) const LATEST_STATS: &str = select_stats!(" ORDER BY taken_at DESC, id DESC LIMIT 1");
+
+/// Every reading of an alias, oldest first, in the order kept among equals.
+/// Parameter: the alias.
+pub(crate) const STATS_HISTORY: &str = select_stats!(" ORDER BY taken_at, id");

@@ -1,19 +1,22 @@
 //! The Snapshots page's DOM glue (technical design §4.4): the route
-//! `/snapshots`, one repository's history grouped by owner, and the
-//! maintenance that changes it, each run reviewed in a dialog before it
-//! starts. It decides nothing. What a request carries, what a review says,
-//! which group can be adopted, what the page holds while a request is out or a
-//! run goes on and what it does next (`maintenance::Panel`), what shows of the
-//! history and how a run's end is awaited are `maintenance.rs` and
-//! `wording.rs`, host-tested. What stays here is sending the requests, doing
-//! what the panel decides (`Page::act`) and drawing the elements; the
-//! journeys of `features/ui` run it in a browser, the `ws.rs` precedent.
+//! `/snapshots`, one repository's history grouped by owner, the maintenance
+//! that changes it, each run reviewed in a dialog before it starts, and the
+//! repository's stats. It decides nothing. What a request carries, what a
+//! review says, which group can be adopted, what the page holds while a
+//! request is out or a run goes on and what it does next
+//! (`maintenance::Panel`, `stats::StatsPanel`), what shows of the history
+//! and of the stats and how a run's end is awaited are `maintenance.rs`,
+//! `stats.rs` and `wording.rs`, host-tested. What stays here is sending the
+//! requests, doing what the panels decide (`Page::act`) and drawing the
+//! elements; the journeys of `features/ui` run it in a browser, the `ws.rs`
+//! precedent.
 
 use std::sync::Arc;
 
 use api::{
     MaintenancePreviewDto, MaintenanceRequestDto, MsgArg, OrphanedGroupDto, PlanGroupDto,
-    RepositoriesDto, SnapshotDto, SnapshotGroupsDto, UnmanagedGroupDto, WarningDto,
+    RepositoriesDto, RepositoryStatsDto, SnapshotDto, SnapshotGroupsDto, StatsReadingDto,
+    UnmanagedGroupDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
@@ -28,6 +31,7 @@ use crate::maintenance::{
 };
 use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with};
+use crate::stats::{self, StatsPanel};
 use crate::text;
 use crate::tree::snapshot_href;
 use crate::wording::{self, Adoption, Words};
@@ -36,6 +40,9 @@ use crate::ws::{self, Got, Posted};
 /// The heading of a repository's maintenance: where focus goes when the
 /// control that held it leaves the page with the history it showed.
 const MAINTENANCE_HEADING: &str = "maintenance-heading";
+
+/// The heading of a repository's stats, which also names their table.
+const STATS_HEADING: &str = "stats-heading";
 
 /// The buttons that ask for a review, which focus returns to when the review
 /// is closed.
@@ -75,6 +82,8 @@ struct Page {
     panel: RwSignal<Panel>,
     review: RwSignal<Option<Reviewing>>,
     open: RwSignal<bool>,
+    /// The repository's stats: the reading shown, and the read that is out.
+    stats: RwSignal<StatsPanel>,
 }
 
 impl Page {
@@ -96,6 +105,7 @@ impl Page {
             panel: RwSignal::new(Panel::default()),
             review: RwSignal::new(None),
             open: RwSignal::new(false),
+            stats: RwSignal::new(StatsPanel::default()),
         }
     }
 
@@ -188,6 +198,8 @@ impl Page {
             self.groups.set(None);
         }
         self.reading.set(true);
+        // The stats too: a check that ended read them.
+        self.look_at_stats();
         let url = self.url(maintenance::groups_path(&self.alias.get_value()));
         spawn_local(async move {
             let answer = ws::get::<SnapshotGroupsDto>(&url).await;
@@ -207,6 +219,67 @@ impl Page {
                     .panel
                     .update(|panel| panel.reports(Refusal { code, args, detail })),
                 None => {}
+            }
+        });
+    }
+
+    /// Reads the repository's stats as last read and kept.
+    fn look_at_stats(self) {
+        let Some(look) = self.stats.try_update(StatsPanel::look) else {
+            return;
+        };
+        let url = self.url(stats::stats_path(&self.alias.get_value()));
+        spawn_local(async move {
+            let answer = ws::get::<RepositoryStatsDto>(&url).await;
+            if !self.alive() {
+                return;
+            }
+            self.answered(answer.is_some());
+            match answer {
+                Some(Got::Read(kept)) => self.stats.update(|panel| panel.looked(look, kept)),
+                Some(Got::Refused(code, args, detail)) => self.stats.update(|panel| {
+                    panel.look_refused(look, Refusal { code, args, detail });
+                }),
+                None => self.stats.update(StatsPanel::look_unanswered),
+            }
+        });
+    }
+
+    /// Reads the repository's stats now, saying so while the read is out and
+    /// again once it is answered.
+    fn read_stats(self) {
+        let Some(said) = self.stats.try_update(StatsPanel::asks).flatten() else {
+            return;
+        };
+        say(said.politeness, &self.words(&said.words));
+        let url = self.url(stats::stats_path(&self.alias.get_value()));
+        spawn_local(async move {
+            let answer = ws::post(&url, &Empty {}).await;
+            if !self.alive() {
+                return;
+            }
+            match answer {
+                Some(Posted::Done(body)) => match serde_json::from_str::<StatsReadingDto>(&body) {
+                    Ok(reading) => {
+                        self.answered(true);
+                        if let Some(said) = self.stats.try_update(|panel| panel.read(reading)) {
+                            say(said.politeness, &self.words(&said.words));
+                        }
+                    }
+                    Err(_) => {
+                        self.answered(false);
+                        self.stats.update(StatsPanel::silent);
+                    }
+                },
+                Some(Posted::Refused(code, args, detail)) => {
+                    self.answered(true);
+                    self.stats
+                        .update(|panel| panel.refused(Refusal { code, args, detail }));
+                }
+                None => {
+                    self.answered(false);
+                    self.stats.update(StatsPanel::silent);
+                }
             }
         });
     }
@@ -456,8 +529,9 @@ fn Repository(
     });
     let heading = page.text(
         msg::UI_MAINTENANCE_HEADING,
-        &[("alias", MsgArg::Text(alias))],
+        &[("alias", MsgArg::Text(alias.clone()))],
     );
+    let stats_heading = page.text(msg::UI_STATS_HEADING, &[("alias", MsgArg::Text(alias))]);
     let intro = page.plain(if maintained {
         msg::UI_MAINTENANCE_BODY
     } else {
@@ -598,7 +672,76 @@ fn Repository(
                 (move || page.groups.get().map(|groups| groups_view(page, groups))).into_any()
             }
         }}
+        {stats_view(page, stats_heading)}
         {move || page.review.get().map(|reviewing| review_view(page, reviewing))}
+    }
+}
+
+/// The repository's stats, after its history: the table of the reading
+/// shown, when it was taken, and the button that reads them now, which keeps
+/// focus while the read is out and after (§16, decision 104).
+fn stats_view(page: Page, heading: String) -> impl IntoView {
+    let loading = page.plain(msg::UI_LOADING);
+    let never = page.plain(msg::UI_STATS_NONE);
+    let read = page.plain(msg::UI_STATS_READ);
+    let reading_now = page.plain(msg::UI_STATS_READING);
+    // A memo for each part, so a change of one does not draw the others
+    // again: an alert drawn again is announced again.
+    let shown = Memo::new(move |_| page.stats.with(StatsPanel::shown));
+    let latest = Memo::new(move |_| page.stats.with(|panel| panel.latest.clone()));
+    let reading = Memo::new(move |_| page.stats.with(|panel| panel.reading));
+    let refused = Memo::new(move |_| page.stats.with(|panel| panel.refusal.clone()));
+    view! {
+        <section aria-labelledby=STATS_HEADING>
+            <h2 id=STATS_HEADING>{heading}</h2>
+            {move || match shown.get() {
+                stats::Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+                stats::Shown::Never => view! { <p>{never.clone()}</p> }.into_any(),
+                stats::Shown::Table => {
+                    (move || latest.get().map(|reading| stats_table(page, reading))).into_any()
+                }
+                stats::Shown::Nothing => ().into_any(),
+            }}
+            <p class="actions">
+                <button type="button" on:click=move |_| page.read_stats()>
+                    {read}
+                </button>
+            </p>
+            {move || reading.get().then(|| view! { <p>{reading_now.clone()}</p> })}
+            {move || {
+                refused
+                    .get()
+                    .map(|refused| {
+                        view! {
+                            <p role="alert">{sentence_view(page.refused_sentence(&refused))}</p>
+                        }
+                    })
+            }}
+        </section>
+    }
+}
+
+/// The table of a reading, a row for each figure with its header, and when
+/// the reading was taken.
+fn stats_table(page: Page, reading: StatsReadingDto) -> impl IntoView {
+    let body = stats::rows(&reading)
+        .into_iter()
+        .map(|row| {
+            view! {
+                <tr>
+                    <th scope="row">{page.plain(row.header)}</th>
+                    <td>{page.words(&row.figure)}</td>
+                </tr>
+            }
+        })
+        .collect_view();
+    let taken = stats::taken(&reading, page.viewer.get_value().as_ref())
+        .map(|words| view! { <p>{page.words(&words)}</p> });
+    view! {
+        <table class="snapshots" aria-labelledby=STATS_HEADING>
+            <tbody>{body}</tbody>
+        </table>
+        {taken}
     }
 }
 

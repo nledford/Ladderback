@@ -32,7 +32,12 @@ impl RepositoryStats {
     /// a little to data that doesn't compress), and none when the repository
     /// stores no data.
     pub fn compression_saved_percent(&self) -> Option<u8> {
-        todo!()
+        if self.raw_size == 0 {
+            return None;
+        }
+        let saved = u128::from(self.raw_size.saturating_sub(self.stored_size));
+        // At most 100, for the saved bytes are at most the raw size.
+        u8::try_from(saved * 100 / u128::from(self.raw_size)).ok()
     }
 }
 
@@ -50,8 +55,12 @@ pub struct StatsReading {
 impl StatsReading {
     /// Whether a reading taken at `taken_at` is still kept once this one is.
     pub fn keeps(&self, taken_at: Timestamp) -> bool {
-        let _ = taken_at;
-        todo!()
+        // A reading taken so early that a year before it can't be written
+        // keeps everything before it.
+        self.taken_at
+            .checked_sub(READINGS_KEPT_FOR)
+            .ok()
+            .is_none_or(|oldest| taken_at >= oldest)
     }
 
     /// Whether this reading was taken of the repository whose ID is `id`,
@@ -59,8 +68,10 @@ impl StatsReading {
     /// the same alias, once that alias names this one, is not. A reading or
     /// an entry that recorded no ID can't be told apart, so it is.
     pub fn is_of(&self, id: Option<&RepositoryId>) -> bool {
-        let _ = id;
-        todo!()
+        match (&self.repository, id) {
+            (Some(taken_of), Some(id)) => taken_of == id,
+            _ => true,
+        }
     }
 }
 

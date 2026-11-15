@@ -1091,6 +1091,15 @@ impl RunMaintenance {
         let mut recording_errors = Vec::new();
         let mut cancel = pin!(cancel.fuse());
         let ruled = crate::locations::ruled_positions(&job);
+        // The repository a check reads the stats of once it has a result.
+        let checked = match &job {
+            Job::Check(check) => check
+                .repository
+                .entry
+                .as_ref()
+                .map(|saved| (saved.alias.clone(), check.repository.clone())),
+            _ => None,
+        };
         let jobs = split(job);
         let total: usize = jobs.iter().map(names).sum();
         let last = jobs.len().saturating_sub(1);
@@ -1136,7 +1145,21 @@ impl RunMaintenance {
                 Played::Ended => break,
             }
         }
-        let stats_failed = None;
+        // A check that ended with a result reads the stats before its end is
+        // recorded, so it still holds the repository meanwhile (I7, decision
+        // 104). A read that fails is the daemon's to note, never the check's.
+        // A cancel meanwhile stops only the read: the check's outcome stands
+        // and is recorded at once.
+        let stats_failed = match (&self.stats, checked, &result) {
+            (Some(stats), Some((alias, access)), Some(_)) => {
+                let mut read = pin!(stats.read_with(operation.id(), &alias, access).fuse());
+                select_biased! {
+                    read = read => read.err(),
+                    () = cancel.as_mut() => None,
+                }
+            }
+            _ => None,
+        };
         self.record(&operation, &result, &mut recording_errors)
             .await;
         announce_end(self.events.as_deref(), &operation).await;

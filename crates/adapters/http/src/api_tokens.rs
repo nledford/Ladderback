@@ -88,14 +88,16 @@ pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
     match segments.as_slice() {
         ["events" | "operations" | "plans" | "repositories" | "session"]
         | ["operations", _]
-        | ["repositories", _, "snapshots" | "groups"]
+        | ["repositories", _, "snapshots" | "groups" | "stats"]
         | ["plans", _, "profile"]
         | ["repositories", _, "snapshots", _, "folder"]
             if reads =>
         {
             Some(Scope::Read)
         }
-        ["operations"] | ["operations", _, "cancel"] | ["repositories", _, "test"]
+        // Reading a repository's stats now opens the repository, as a test
+        // does, and keeps the reading (§16, decision 104).
+        ["operations"] | ["operations", _, "cancel"] | ["repositories", _, "test" | "stats"]
             if method == Method::POST =>
         {
             Some(Scope::Run)

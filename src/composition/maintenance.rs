@@ -11,10 +11,11 @@ use app::maintenance::{
     Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, MaintenancePreview,
     RepositoryGroups, RunMaintenance,
 };
-use app::ports::{ConfigStore, StoreError};
+use app::ports::{ConfigStore, EngineError, StoreError};
 use app::secrets::ResolveError;
+use app::stats::{ReadStats, StatsError};
 use domain::execution::FailureReason;
-use domain::maintenance::{OtherHosts, SelectionToken, Snapshot, Tally};
+use domain::maintenance::{OtherHosts, SelectionToken, Snapshot, StatsReading, Tally};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use http_adapter::{MaintenanceRefusal, MaintenanceRequest};
 use platform::SystemClock;
@@ -37,11 +38,24 @@ impl PlanRunner {
             platform::hostname(),
             Arc::new(engine::RusticSources),
         )
-        .with_events(Arc::clone(&self.events));
+        .with_events(Arc::clone(&self.events))
+        .with_stats(Arc::new(self.stats_reader()));
         match &self.locations {
             Some(locations) => maintenance.with_locations(Arc::clone(locations)),
             None => maintenance,
         }
+    }
+
+    /// The stats use case over this runner's parts: it reads through the
+    /// runner's engine and keeps each reading in its store (§16, decision
+    /// 104).
+    fn stats_reader(&self) -> ReadStats {
+        ReadStats::new(
+            Arc::clone(&self.engine),
+            self.resolve.as_ref().clone(),
+            Arc::clone(&self.readings),
+            Arc::new(SystemClock),
+        )
     }
 }
 
@@ -187,8 +201,21 @@ pub(super) async fn stats(
     runner: &PlanRunner,
     repository: String,
 ) -> Result<api::RepositoryStatsDto, MaintenanceRefusal> {
-    let _ = (runner, repository);
-    todo!()
+    let (alias, entry) = configured(runner, &repository).await?;
+    let latest = match runner.stats_reader().latest(&alias, &entry).await {
+        Ok(latest) => latest,
+        Err(error) => {
+            return Err(refusal(
+                runner.config.as_ref(),
+                &alias,
+                MaintenanceError::Store(error),
+            )
+            .await);
+        }
+    };
+    Ok(api::RepositoryStatsDto {
+        latest: latest.as_ref().map(reading_dto),
+    })
 }
 
 /// Reads the stats of the repository `repository` names now, keeps the
@@ -197,8 +224,56 @@ pub(super) async fn read_stats(
     runner: &PlanRunner,
     repository: String,
 ) -> Result<api::StatsReadingDto, MaintenanceRefusal> {
-    let _ = (runner, repository);
-    todo!()
+    let (alias, entry) = configured(runner, &repository).await?;
+    let operation = OperationId::from_uuid(Uuid::now_v7());
+    match runner.stats_reader().read(operation, &alias, &entry).await {
+        Ok(reading) => Ok(reading_dto(&reading)),
+        Err(error) => Err(refusal(runner.config.as_ref(), &alias, maintenance_error(error)).await),
+    }
+}
+
+/// The repository's alias and its configuration entry, or the refusal of a
+/// configuration that can't be read or holds no such repository.
+async fn configured(
+    runner: &PlanRunner,
+    repository: &str,
+) -> Result<(RepositoryAlias, domain::planning::RepositoryConfig), MaintenanceRefusal> {
+    let alias = alias_of(repository)?;
+    let config = runner
+        .config
+        .load()
+        .await
+        .map_err(|error| super::config_unusable(error, unavailable))?;
+    let entry = config
+        .repository(&alias)
+        .ok_or(MaintenanceRefusal::UnknownRepository)?
+        .clone();
+    Ok((alias, entry))
+}
+
+/// A failed read of the stats, told as the maintenance reads' failures are.
+fn maintenance_error(error: StatsError) -> MaintenanceError {
+    match error {
+        StatsError::Resolve(error) => MaintenanceError::Resolve(error),
+        StatsError::Engine(EngineError::Unavailable { detail }) => {
+            MaintenanceError::Engine { detail }
+        }
+        StatsError::Engine(error) => MaintenanceError::Failed(FailureReason::from(error)),
+        StatsError::Failed(reason) => MaintenanceError::Failed(reason),
+        StatsError::TimedOut => MaintenanceError::TimedOut,
+        StatsError::Store(error) => MaintenanceError::Store(error),
+    }
+}
+
+/// A reading as the page is told of it.
+fn reading_dto(reading: &StatsReading) -> api::StatsReadingDto {
+    api::StatsReadingDto {
+        taken_at: reading.taken_at.to_string(),
+        snapshots: reading.stats.snapshots,
+        total_size: reading.stats.total_size,
+        stored_size: reading.stats.stored_size,
+        compression_saved_percent: reading.stats.compression_saved_percent(),
+    }
 }
 
 /// A snapshot as the page is told of it. One the wire can't carry is left
