@@ -55,6 +55,8 @@ mod cache_steps;
 mod cli_output_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
+#[path = "steps/install_restart.rs"]
+mod install_restart_steps;
 #[path = "steps/install_script.rs"]
 mod install_script_steps;
 #[path = "steps/interop.rs"]
@@ -119,6 +121,7 @@ struct Agent {
     cache: cache_steps::CacheE2e,
     service: service_steps::ServiceE2e,
     install: install_script_steps::InstallScriptE2e,
+    install_restart: install_restart_steps::InstallRestartE2e,
     notifications: notifications_steps::NotificationsE2e,
     api_tokens: api_tokens_steps::ApiTokensE2e,
     restarting: restart_from_settings_steps::Restarting,
@@ -170,6 +173,7 @@ impl Agent {
             cache: cache_steps::CacheE2e::default(),
             service: service_steps::ServiceE2e::default(),
             install: install_script_steps::InstallScriptE2e::default(),
+            install_restart: install_restart_steps::InstallRestartE2e::default(),
             maintenance: maintenance_steps::MaintenanceE2e::default(),
             notifications: notifications_steps::NotificationsE2e::default(),
             api_tokens: api_tokens_steps::ApiTokensE2e::default(),
