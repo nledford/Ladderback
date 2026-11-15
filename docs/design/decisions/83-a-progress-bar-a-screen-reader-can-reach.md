@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 83: A progress bar a screen reader can reach, and that never chatters
 
 **A running operation's progress bar is a focusable `role="progressbar"` named for what it measures and for its run, which draws every report but tells a screen reader its value (the step, the percentage, the amounts and the time left) at most every 30 s while the step stays the same, and at once when the step changes** (recorded 2026-11-12, §4.4, §4.5; #428). §4.5 described a focusable, throttled `<progress>` with a full value text; the component was a `div` outside the tab order whose `aria-valuetext` was only "N%" and changed at every report, so a screen reader that speaks value changes could speak four times a second.

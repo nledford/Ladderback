@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 55: A backup stopped at its deadline winds down
 
 **A backup still archiving at its deadline winds down as a cancelled one does (decision 50): no snapshot write starts once the worker notices the deadline, the index of every pack it wrote is saved, and the operation fails `deadline-passed`** (recorded 2026-11-11, §4.1; #209). Before, the worker's watchdog called `process::exit(75)` at once and the daemon killed the worker with no grace, so the packs written since rustic's last index save were left with no index listing them: `rustic check` warned about each until a prune removed them, and the next backup saved the same data again.

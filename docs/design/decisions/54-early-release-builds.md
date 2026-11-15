@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 54: Early release builds; the Linux archives published from 0.3.1
 
 **From M2, cargo-dist builds the release archives every night and on release PRs, and a smoke test checks each binary on clean systems; nothing is published until M5's release packaging** (recorded 2026-11-11). A release binary differs from a development build: no default features, the dist profile (release with thin LTO), the web UI built with `--release`, and the glibc of the machine that built it. Nothing built one before, so M5 would have met every problem at once.

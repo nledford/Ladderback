@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 76: Retries of a failed backup
 
 **A failed backup the schedule started is retried at most `attempts` times, the first `backoff` after the failure and each after twice the wait before it, at most an hour. A series stops at the plan's next scheduled run, when its attempts are spent, or at a success or a cancel. A retry takes its turn in the persistent queue under the concurrency limit, is skipped while a run of its plan is going, and a pending one outlives a restart. A backup a person or another program asked for is never retried** (recorded 2026-11-12, §5; #275). Builds on decision 73's persistent queue and decision 75's queue and overlap policy.

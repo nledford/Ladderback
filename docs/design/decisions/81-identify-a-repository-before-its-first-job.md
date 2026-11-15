@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 # Decision 81: A job of an entry that records no repository ID runs after an identify
 
 **A daemon job made from a saved entry that records no repository ID first runs an identify of that repository, which records the ID (decision 57), and then runs with the ID it found, so it gets a cache slot and its operation names the repository from its start; an identify that fails ends the job with its reason, and the job never runs without the ID** (recorded 2026-11-12, §4.1, §6.1, §9; #421). An entry written by `import-profile`, by hand or by 0.1.0 records no ID, and decision 57 recorded it only when the job that opened the repository started: too late for that job. The engine keeps a cache by the repository's ID (§4.1), so that job ran with none, reading the whole index and every tree of its parent snapshot from the repository, one request each; and its operation was queued naming no repository and kept naming none. On a real repository of about 895,000 files and 152 GiB behind a REST server, that first backup took 27 min 33 s, and the next one, with the ID recorded and the cache in its slot, 5 min 10 s.

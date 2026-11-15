@@ -1,3 +1,5 @@
+<!-- paragraph-length: exempt until restructured (#592) -->
+
 ## 5. Scheduling
 
 - **Schedule types:** cron expressions (`croner` syntax) or simple intervals ("every 1 h"), with optional **jitter** to spread load across machines. An interval is real time from the start of the last run, at least 1 minute and at most 366 days (`Interval`); a change of the clocks neither lengthens nor shortens it. A plan scheduled for the first time runs at its first moment after now.
