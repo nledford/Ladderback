@@ -105,6 +105,14 @@ enum Command {
     // Their descriptions are the catalog's (`cli-help-*`), set in `parse`.
     InstallService,
     RemoveService,
+    /// Serve the Model Context Protocol on standard input and output, for
+    /// AI agents and scripts: their tools read and drive Ladderback.
+    Mcp {
+        /// Drive the running daemon at this address through its API;
+        /// `http://127.0.0.1:9898` when no address follows.
+        #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = mcp::DEFAULT_DAEMON_URL)]
+        connect: String,
+    },
     /// Run one operation, read from stdin, and report events on stdout.
     /// Started by the agent; not for direct use.
     #[command(hide = true)]
@@ -179,7 +187,55 @@ fn main() -> ExitCode {
         Command::SetPassword => set_password::set_password(),
         Command::InstallService => service::install_service(),
         Command::RemoveService => service::remove_service(),
+        Command::Mcp { connect } => serve_mcp(&connect, plain),
         Command::Worker => engine::worker::main(),
+    }
+}
+
+fn serve_mcp(connect: &str, plain: bool) -> ExitCode {
+    logging::install(plain);
+    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    finish(&localizer, run_mcp(&localizer, connect))
+}
+
+/// Serves MCP on stdin and stdout until the client closes stdin (§4.6).
+/// Standard output carries protocol messages only: a refusal is said on
+/// stderr, and the session logs there.
+fn run_mcp(localizer: &Localizer, connect: &str) -> io::Result<ExitCode> {
+    // Checked here, in the catalog's words, like `--allowed-host`; exit
+    // status 2 is the parser's own for a value it rejects. The address isn't
+    // repeated: it may hold a password.
+    let Ok(daemon) = mcp::DaemonUrl::parse(connect) else {
+        say(localizer, msg::CLI_MCP_CONNECT_INVALID, &[])?;
+        return Ok(ExitCode::from(2));
+    };
+    let server = match composition::mcp_server::connect(daemon, None, None) {
+        Ok(server) => server,
+        Err(refused) => {
+            say(localizer, refused.message, &refused.args)?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            say(
+                localizer,
+                msg::CLI_CANNOT_START_RUNTIME,
+                &[("detail", text(error))],
+            )?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    let ended = runtime.block_on(server.serve(tokio::io::stdin(), tokio::io::stdout()));
+    // A read of stdin can't be cancelled: the runtime isn't waited for.
+    runtime.shutdown_background();
+    match ended {
+        Ok(()) => Ok(ExitCode::SUCCESS),
+        Err(error) => {
+            log::error!("the MCP session ended: {error}");
+            Ok(ExitCode::FAILURE)
+        }
     }
 }
 

@@ -1,4 +1,6 @@
-//! The MCP server's wiring (technical design §4.6).
+//! The MCP server's wiring (technical design §4.6): `ladderback mcp
+//! --connect` drives the daemon at the address it was given through the
+//! connect backend, and names this program's build.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -7,7 +9,7 @@ use api::MsgArg;
 use async_trait::async_trait;
 use l10n::msg;
 
-use super::Refused;
+use super::{Refused, text};
 
 /// The server for a session that drives the daemon at `daemon`, sending the
 /// API token of `token_file`, or else of `mcp-token` in the configuration
@@ -17,8 +19,15 @@ pub(crate) fn connect(
     token_file: Option<&Path>,
     config_dir: Option<&Path>,
 ) -> Result<::mcp::Server, Refused> {
-    let _ = (daemon, token_file, config_dir);
-    todo!()
+    let _ = (token_file, config_dir);
+    let backend = ::mcp::Connect::new(daemon).map_err(|error| Refused {
+        message: msg::CLI_MCP_CANNOT_START,
+        args: vec![("detail", text(error))],
+    })?;
+    Ok(::mcp::Server::new(
+        Arc::new(backend),
+        crate::build_info::running(),
+    ))
 }
 
 /// The API token connect mode sends: the one in `token_file`, which must be

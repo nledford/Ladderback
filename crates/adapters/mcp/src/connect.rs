@@ -51,7 +51,21 @@ impl DaemonUrl {
     /// It isn't an `http` or `https` URL with a host, or it holds a user
     /// name, a password, a query or a fragment.
     pub fn parse(text: &str) -> Result<Self, InvalidDaemonUrl> {
-        todo!()
+        let mut url = Url::parse(text).map_err(|_| InvalidDaemonUrl)?;
+        let plain = matches!(url.scheme(), "http" | "https")
+            && url.host().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none();
+        if !plain {
+            return Err(InvalidDaemonUrl);
+        }
+        if !url.path().ends_with('/') {
+            let path = format!("{}/", url.path());
+            url.set_path(&path);
+        }
+        Ok(Self(url))
     }
 
     /// The URL of `route`, a path relative to the API's root.
@@ -147,12 +161,7 @@ impl Connect {
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(query);
         }
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|_| no_answer())?;
+        let response = self.client.get(url).send().await.map_err(|_| no_answer())?;
         let succeeded = response.status().is_success();
         let body = read_capped(response).await.ok_or_else(no_answer)?;
         if succeeded {
@@ -184,7 +193,33 @@ async fn read_capped(mut response: reqwest::Response) -> Option<Vec<u8>> {
 #[async_trait]
 impl Backend for Connect {
     async fn status(&self) -> Result<BackendStatus, ErrorDto> {
-        todo!()
+        let session: SessionDto = self.get("api/v1/session", &[]).await?;
+        let listed: PlansDto = self.get("api/v1/plans", &[]).await?;
+        let mut plans = Vec::with_capacity(listed.plans.len());
+        for plan in listed.plans {
+            let page: OperationsPageDto = self
+                .get("api/v1/operations", &[("plan", &plan.id), ("limit", "1")])
+                .await?;
+            plans.push(PlanStatus {
+                last: page.operations.into_iter().next(),
+                plan,
+            });
+        }
+        let recent: OperationsPageDto = self.get("api/v1/operations", &[("limit", RECENT)]).await?;
+        let running = recent
+            .operations
+            .into_iter()
+            .filter(|operation| matches!(operation.status.as_str(), "queued" | "running"))
+            .collect();
+        Ok(BackendStatus {
+            access: Access::SignInOff,
+            daemon: Some(DaemonStatus {
+                build: session.build,
+                exposure: session.exposure,
+            }),
+            plans,
+            running,
+        })
     }
 }
 
