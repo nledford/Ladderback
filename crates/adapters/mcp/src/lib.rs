@@ -120,6 +120,49 @@ pub(crate) enum ToolName {
     ExportProfile,
 }
 
+impl ToolName {
+    /// Every tool.
+    const ALL: [Self; 13] = [
+        Self::Status,
+        Self::ListPlans,
+        Self::ListRepositories,
+        Self::ListSnapshots,
+        Self::ListOperations,
+        Self::GetOperation,
+        Self::RunPlan,
+        Self::WaitOperation,
+        Self::CancelOperation,
+        Self::TestRepository,
+        Self::PreviewForget,
+        Self::PreviewImport,
+        Self::ExportProfile,
+    ];
+
+    /// The tool named `name`, if there is one.
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tool| tool.name() == name)
+    }
+
+    /// The tool's name, as `tools/list` gives it.
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Status => STATUS,
+            Self::ListPlans => LIST_PLANS,
+            Self::ListRepositories => LIST_REPOSITORIES,
+            Self::ListSnapshots => LIST_SNAPSHOTS,
+            Self::ListOperations => LIST_OPERATIONS,
+            Self::GetOperation => GET_OPERATION,
+            Self::RunPlan => RUN_PLAN,
+            Self::WaitOperation => WAIT_OPERATION,
+            Self::CancelOperation => CANCEL_OPERATION,
+            Self::TestRepository => TEST_REPOSITORY,
+            Self::PreviewForget => PREVIEW_FORGET,
+            Self::PreviewImport => PREVIEW_IMPORT,
+            Self::ExportProfile => EXPORT_PROFILE,
+        }
+    }
+}
+
 /// How many of the newest operations `status` looks through for those
 /// queued or running: the history's largest page.
 pub const RECENT_OPERATIONS: u64 = 200;
@@ -345,7 +388,37 @@ impl Server {
         todo!()
     }
 
-    async fn status(&self) -> CallToolResult {
+    /// Runs `tool` with the arguments `given`: the one dispatch of
+    /// `tools/call` and of a one-shot call. `context` is the request's, over
+    /// MCP, which a wait watches for its cancellation and tells its
+    /// progress to.
+    async fn dispatch(
+        &self,
+        tool: ToolName,
+        given: Option<JsonObject>,
+        context: Option<&RequestContext<RoleServer>>,
+    ) -> Answer {
+        match tool {
+            ToolName::Status => match read::<NoArguments>(given) {
+                Ok(NoArguments {}) => self.status().await,
+                Err(error) => Answer::Refused(error),
+            },
+            ToolName::ListPlans => answered(self.list_plans(given).await),
+            ToolName::ListRepositories => answered(self.list_repositories(given).await),
+            ToolName::ListSnapshots => answered(self.list_snapshots(given).await),
+            ToolName::ListOperations => answered(self.list_operations(given).await),
+            ToolName::GetOperation => answered(self.get_operation(given).await),
+            ToolName::RunPlan => answered(self.run_plan(given).await),
+            ToolName::WaitOperation => answered(self.wait_operation(given, context).await),
+            ToolName::CancelOperation => answered(self.cancel_operation(given).await),
+            ToolName::TestRepository => answered(self.test_repository(given).await),
+            ToolName::PreviewForget => answered(self.preview_forget(given).await),
+            ToolName::PreviewImport => answered(self.preview_import(given).await),
+            ToolName::ExportProfile => answered(self.export_profile(given).await),
+        }
+    }
+
+    async fn status(&self) -> Answer {
         match self.backend.status().await {
             Ok(BackendStatus {
                 access,
@@ -359,7 +432,7 @@ impl Server {
                 plans,
                 running,
             }),
-            Err(error) => refused(&error),
+            Err(error) => Answer::Refused(error),
         }
     }
 
@@ -450,15 +523,15 @@ impl Server {
     async fn wait_operation(
         &self,
         given: Option<JsonObject>,
-        context: &RequestContext<RoleServer>,
+        context: Option<&RequestContext<RoleServer>>,
     ) -> Result<Waited, ErrorDto> {
         let arguments: WaitArguments = read(given)?;
         let length = wait_length(arguments.timeout);
         let began = tokio::time::Instant::now();
-        let progress = context.meta.get_progress_token();
+        let progress = context.and_then(|context| context.meta.get_progress_token());
         loop {
             let operation = self.backend.summary(arguments.operation.clone()).await?;
-            if context.ct.is_cancelled() {
+            if context.is_some_and(|context| context.ct.is_cancelled()) {
                 return Ok(Waited {
                     finished: !is_unfinished(&operation),
                     operation: Operation::unread(operation),
@@ -483,7 +556,7 @@ impl Server {
                     operation,
                 });
             }
-            if let Some(token) = &progress {
+            if let (Some(token), Some(context)) = (&progress, context) {
                 // The seconds waited, of the wait's length: they grow with
                 // each, as the protocol asks. A client gone is the
                 // session's end, which the wait sees through its token.
@@ -493,8 +566,16 @@ impl Server {
                         .with_message(operation.status);
                 let _ = context.peer.notify_progress(notification).await;
             }
+            // A one-shot call has no client to cancel it: its wait ends
+            // only when the operation does or its length has passed.
+            let cancelled = async {
+                match context {
+                    Some(context) => context.ct.cancelled().await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
-                () = context.ct.cancelled() => {}
+                () = cancelled => {}
                 () = tokio::time::sleep(WAIT_STEP.min(left)) => {}
             }
         }
@@ -541,33 +622,40 @@ impl Server {
     }
 }
 
-/// A tool's result: what it read or did, or the refusal, marked as an error.
-fn answered(result: Result<impl Serialize, ErrorDto>) -> CallToolResult {
+/// A tool's result: what it read or did, or its refusal.
+fn answered(result: Result<impl Serialize, ErrorDto>) -> Answer {
     match result {
         Ok(value) => structured(&value),
-        Err(error) => refused(&error),
+        Err(error) => Answer::Refused(error),
     }
 }
 
-/// A tool's result: `value` as `structuredContent`, mirrored as JSON text.
-fn structured(value: &impl Serialize) -> CallToolResult {
+/// What a tool read or did, as JSON.
+fn structured(value: &impl Serialize) -> Answer {
     match serde_json::to_value(value) {
-        Ok(value) => CallToolResult::structured(value),
+        Ok(value) => Answer::Done(value),
         // Only a map with keys that aren't text fails to serialize, and no
         // result holds one: said as a failure all the same, never a panic.
-        Err(error) => {
-            CallToolResult::error(vec![rmcp::model::ContentBlock::text(error.to_string())])
-        }
+        Err(error) => Answer::Unwritten(error.to_string()),
     }
 }
 
-/// A refusal: the `{code, args}` as JSON text, marked as an error, with no
-/// `structuredContent`. Clients check `structuredContent` against the tool's
-/// output schema, error or not, and a refusal isn't the shape it declares
-/// (§4.6).
-fn refused(error: &ErrorDto) -> CallToolResult {
-    let text = serde_json::to_string(error).unwrap_or_else(|error| error.to_string());
-    CallToolResult::error(vec![rmcp::model::ContentBlock::text(text)])
+impl From<Answer> for CallToolResult {
+    /// What `tools/call` answers: a result as `structuredContent`, mirrored
+    /// as JSON text. A refusal is its `{code, args}` as JSON text, marked as
+    /// an error, with no `structuredContent`: clients check
+    /// `structuredContent` against the tool's output schema, error or not,
+    /// and a refusal isn't the shape it declares (§4.6).
+    fn from(answer: Answer) -> Self {
+        let text = match answer {
+            Answer::Done(value) => return Self::structured(value),
+            Answer::Refused(error) => {
+                serde_json::to_string(&error).unwrap_or_else(|error| error.to_string())
+            }
+            Answer::Unwritten(why) => why,
+        };
+        Self::error(vec![rmcp::model::ContentBlock::text(text)])
+    }
 }
 
 /// The input schema of a tool that takes no arguments.
@@ -820,32 +908,14 @@ impl ServerHandler for Server {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        let given = request.arguments;
-        let result = match request.name.as_ref() {
-            STATUS => match read::<NoArguments>(given) {
-                Ok(NoArguments {}) => self.status().await,
-                Err(error) => refused(&error),
-            },
-            LIST_PLANS => answered(self.list_plans(given).await),
-            LIST_REPOSITORIES => answered(self.list_repositories(given).await),
-            LIST_SNAPSHOTS => answered(self.list_snapshots(given).await),
-            LIST_OPERATIONS => answered(self.list_operations(given).await),
-            GET_OPERATION => answered(self.get_operation(given).await),
-            RUN_PLAN => answered(self.run_plan(given).await),
-            WAIT_OPERATION => answered(self.wait_operation(given, &context).await),
-            CANCEL_OPERATION => answered(self.cancel_operation(given).await),
-            TEST_REPOSITORY => answered(self.test_repository(given).await),
-            PREVIEW_FORGET => answered(self.preview_forget(given).await),
-            PREVIEW_IMPORT => answered(self.preview_import(given).await),
-            EXPORT_PROFILE => answered(self.export_profile(given).await),
-            name => {
-                return Err(McpError::invalid_params(
-                    format!("no tool is named {name:?}"),
-                    None,
-                ));
-            }
+        let Some(tool) = ToolName::named(&request.name) else {
+            return Err(McpError::invalid_params(
+                format!("no tool is named {:?}", request.name.as_ref()),
+                None,
+            ));
         };
-        Ok(result.into())
+        let answer = self.dispatch(tool, request.arguments, Some(&context)).await;
+        Ok(CallToolResult::from(answer).into())
     }
 
     /// A request the SDK couldn't read as any it knows. A `tools/call` among
