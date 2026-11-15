@@ -115,6 +115,9 @@ pub enum JobKind {
     Check(CheckJobSpec),
     /// Lists the repository's snapshots. A read, never an operation.
     Ls(RepositorySpec),
+    /// Reads one page of one folder of a snapshot. A read, never an
+    /// operation.
+    Browse(BrowseJobSpec),
 }
 
 /// A repository and what it takes to open it.
@@ -249,6 +252,18 @@ pub struct PruneJobSpec {
 pub struct CheckJobSpec {
     pub repo: RepositorySpec,
     pub read_data: bool,
+}
+
+/// One page of one folder of a snapshot (§16, decision 102).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowseJobSpec {
+    pub repo: RepositorySpec,
+    pub snapshot: SnapshotId,
+    /// The names that lead from the snapshot's top to the folder, each as
+    /// rustic records it (its escaped form); none for the top.
+    pub folder: Vec<String>,
+    /// The position in the folder the page starts at.
+    pub from: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -387,6 +402,39 @@ pub enum OpResult {
     },
     /// What a [`JobKind::Probe`] found at a location that answered.
     Probed(ProbeResult),
+    /// What a [`JobKind::Browse`] found.
+    Folder(FolderResult),
+}
+
+/// What a browse found: one page of the folder, or that the snapshot or the
+/// folder isn't there. The page is one message: at most
+/// [`domain::browse::PAGE_ENTRIES`] entries, serialized to at most
+/// [`LISTING_BATCH_BYTES`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "found", rename_all = "snake_case")]
+pub enum FolderResult {
+    Page {
+        entries: Vec<EntryResult>,
+        /// How many entries the folder holds in all.
+        total: u64,
+        /// Where the next page starts; `None` on the last.
+        next: Option<u64>,
+    },
+    SnapshotUnknown,
+    FolderUnknown,
+}
+
+/// One entry of a folder's page, as the worker reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntryResult {
+    /// The name as rustic records it: its escaped form, the key a request
+    /// opens the entry by.
+    pub name: String,
+    /// The name as a person reads it; made visible again as it is read.
+    pub display: domain::browse::DisplayName,
+    pub kind: domain::browse::EntryKind,
+    pub size: Option<u64>,
+    pub modified: Option<Timestamp>,
 }
 
 /// What a probe found at a location that answered. A location that didn't

@@ -91,6 +91,9 @@ mod snapshots;
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod time_zones;
+// What a snapshot's tree shows and does, decided on the host;
+// `components.rs`'s `Tree` is its glue.
+mod tree;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
 mod ws;

@@ -298,7 +298,7 @@ Given("the repository {string} has been checked", async function (this: BrowserW
 
 /** The ID of the newest snapshot of `plan` in the scenario's repository, as
  *  the daemon lists the repository: newest first, each tagged with its plan. */
-async function latestSnapshotOf(world: BrowserWorld, plan: string): Promise<string> {
+export async function latestSnapshotOf(world: BrowserWorld, plan: string): Promise<string> {
   assert.ok(world.baseUrl, "this scenario's daemon was never started");
   const response = await fetch(new URL(`/api/v1/repositories/${ALIAS}/snapshots`, world.baseUrl), {
     headers: { Origin: new URL(world.baseUrl).origin },

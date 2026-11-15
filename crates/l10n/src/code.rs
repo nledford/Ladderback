@@ -99,6 +99,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     PlanInvalid => msg::ERROR_PLAN_INVALID,
     PlanInUse => msg::ERROR_PLAN_IN_USE,
     RepositoryUnknown => msg::ERROR_REPOSITORY_UNKNOWN,
+    SnapshotUnknown => msg::ERROR_SNAPSHOT_UNKNOWN,
+    FolderUnknown => msg::ERROR_FOLDER_UNKNOWN,
     InvalidBody => msg::ERROR_INVALID_BODY,
     BodyTooLarge => msg::ERROR_BODY_TOO_LARGE,
     OperationUnknown => msg::ERROR_OPERATION_UNKNOWN,

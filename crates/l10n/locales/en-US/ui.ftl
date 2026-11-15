@@ -323,6 +323,34 @@ ui-gallery-pause-demo = Pause the demo updates
 # counted while they are.
 ui-gallery-finish-demo-run = Finish a demo run
 
+# The heading of the gallery's demo of the tree (§4.5): a snapshot's folders
+# and files, each folder read as it is opened.
+ui-gallery-tree-heading = Tree
+
+# The name of the demo tree.
+ui-gallery-demo-tree = Demo snapshot
+
+# The names of the demo tree's folders and files: made-up names, as a
+# snapshot's would be.
+ui-gallery-tree-documents = documents
+ui-gallery-tree-empty = empty
+ui-gallery-tree-many = many
+ui-gallery-tree-slow = slow
+ui-gallery-tree-unreadable = unreadable
+ui-gallery-tree-readme = readme.txt
+ui-gallery-tree-notes = notes.txt
+ui-gallery-tree-report = report.txt
+ui-gallery-tree-alpha = alpha.txt
+ui-gallery-tree-bravo = bravo.txt
+ui-gallery-tree-charlie = charlie.txt
+ui-gallery-tree-delta = delta.txt
+ui-gallery-tree-echo = echo.txt
+ui-gallery-tree-latest = latest
+ui-gallery-tree-pipe = pipe
+
+# What the demo tree says when its folder "unreadable" is opened.
+ui-gallery-tree-unreadable-said = The demo folder could not be read.
+
 ## The review dialog (§4.5): what a run would do, shown in a dialog before it
 ## runs. The gallery's demos and the snapshots page both use its buttons.
 
@@ -853,6 +881,67 @@ ui-snapshots-more =
         [one] 1 more snapshot is not listed.
        *[other] { $count } more snapshots are not listed.
     }
+
+## A snapshot's page: its tree of folders and files, each folder read as it
+## is opened (§4.4, §4.5).
+
+# A snapshot's page's title, as the browser's tab and history show it.
+ui-snapshot-title = Snapshot – { -brand-name }
+
+# A snapshot's page's heading: its one main heading.
+# $snapshot (text): the snapshot's short ID, its first 8 hexadecimal digits.
+# $alias (text): the repository's alias, such as demo.
+ui-snapshot-heading = Snapshot { $snapshot } of { $alias }
+
+# A snapshot's page's text above its tree, saying how to use it.
+ui-snapshot-body = The folders and files the { -snapshot } holds, in the order it records them. Tab moves into the tree, where the arrow keys move from row to row and open and close folders, Home and End go to the first and last rows, and typing the first letters of a name goes to it.
+
+# The name of a snapshot's tree.
+ui-snapshot-tree = Folders and files
+
+# What a snapshot's page says in place of a tree when the snapshot holds nothing.
+ui-snapshot-empty = The { -snapshot } holds no folders or files.
+
+# The link from a snapshot's page back to the snapshots page.
+ui-snapshot-back = Back to the snapshots
+
+# What a row of a snapshot's tree says after its name, on screen and to a
+# screen reader, when the snapshot recorded no modification time.
+# $kind (text): what the entry is, and how far a folder is read: folder,
+# loading (a folder whose entries are on their way), empty (a folder read,
+# holding nothing), failed (a folder that could not be read), file, link or
+# other (a device, a pipe or a socket).
+# $size (bytes): a file's size, such as 2 KiB.
+ui-tree-entry =
+    { $kind ->
+        [folder] Folder
+        [loading] Folder, loading
+        [empty] Folder, empty
+        [failed] Folder that could not be read
+        [file] File, { $size }
+        [link] Link
+       *[other] Device, pipe or socket
+    }
+
+# What a row of a snapshot's tree says after its name, with when the entry
+# was last modified. $kind and $size are as in ui-tree-entry.
+# $modified (text): when, as the page writes an instant.
+ui-tree-entry-modified =
+    { $kind ->
+        [folder] Folder, modified { $modified }
+        [loading] Folder, loading, modified { $modified }
+        [empty] Folder, empty, modified { $modified }
+        [failed] Folder that could not be read, modified { $modified }
+        [file] File, { $size }, modified { $modified }
+        [link] Link, modified { $modified }
+       *[other] Device, pipe or socket, modified { $modified }
+    }
+
+# The last row of a folder in a snapshot's tree while more of it is to read:
+# activating it reads the next entries.
+# $shown (count): how many of the folder's entries are shown.
+# $total (count): how many it holds.
+ui-tree-more = Show more: { $shown } of { $total } shown
 
 # The heading of the section of history that no plan of this agent owns.
 ui-orphaned-heading = Orphaned history

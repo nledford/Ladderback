@@ -20,7 +20,8 @@ use super::listing;
 use super::repository::{self as location, new_repository, open, repository_id};
 use super::{Context, Done};
 use crate::job::{
-    BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, ProbeResult, PruneJobSpec,
+    BackupJobSpec, BrowseJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, ProbeResult,
+    PruneJobSpec,
     RepositorySpec, WorkerEvent,
 };
 use crate::job::{RewriteJobSpec, RewriteResult};
@@ -58,6 +59,15 @@ pub(crate) fn ls(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError>
         ctx.events.emit(&WorkerEvent::Snapshots { snapshots })
     })?;
     Ok(Done::Result(OpResult::Snapshots { count }))
+}
+
+/// Reads one page of one folder of a snapshot (§16, decision 102). A read:
+/// it emits `Started` before it reads the index, which holds the snapshot's
+/// trees, then one final result: the page, or that the snapshot or the
+/// folder isn't there.
+pub(crate) fn browse(ctx: &Context, job: &BrowseJobSpec) -> Result<Done, JobError> {
+    let _ = (ctx, job);
+    todo!("jobs::browse")
 }
 
 /// Removes exactly the snapshots the job names. Which snapshots those are

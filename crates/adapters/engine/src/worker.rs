@@ -11,6 +11,7 @@
 //! the passwords in URLs, in every text it writes. What the programs it
 //! starts write to stderr, it can't mask; the daemon does that.
 
+mod browse;
 mod cancel;
 mod convert;
 mod events;
@@ -341,6 +342,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         JobKind::PrunePlan(job) => jobs::prune_plan(&ctx, job),
         JobKind::Check(job) => jobs::check(&ctx, job),
         JobKind::Ls(repository) => jobs::ls(&ctx, repository),
+        JobKind::Browse(job) => jobs::browse(&ctx, job),
     };
     match outcome {
         Ok(Done::Result(result)) => {
@@ -390,6 +392,7 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
         JobKind::Prune(job) => Some(&job.repo),
         JobKind::PrunePlan(job) => Some(&job.repo),
         JobKind::Check(job) => Some(&job.repo),
+        JobKind::Browse(job) => Some(&job.repo),
     }
 }
 

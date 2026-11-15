@@ -174,6 +174,9 @@ impl From<&EngineResult> for Summary {
                     })
                     .collect(),
             },
+            // A browse is a read, never written to the log (§9): what it
+            // stores as is still to decide (HANDOFF, next run).
+            EngineResult::Folder(_) => todo!("the summary of a browse"),
         }
     }
 }

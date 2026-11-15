@@ -14,6 +14,7 @@
 )]
 
 pub mod access;
+pub mod browse;
 pub mod execution;
 mod ids;
 pub mod maintenance;

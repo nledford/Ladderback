@@ -280,6 +280,14 @@ error-plan-in-use = The notification rule { $rule } names the plan { $plan }, so
 # $alias (text): the repository's alias, such as demo.
 error-repository-unknown = There is no repository { $alias }. Add it to the configuration, or choose a repository that exists.
 
+# The repository holds no snapshot by the ID the request named.
+# $snapshot (text): the snapshot's ID, 64 hexadecimal digits.
+error-snapshot-unknown = The { -repository } has no { -snapshot } { $snapshot }. It may have been forgotten; open a { -snapshot } the list still shows.
+
+# The snapshot holds no folder at the path the request named.
+# $path (text): the folder's path in the snapshot, its names joined by "/", such as source/docs.
+error-folder-unknown = The { -snapshot } has no folder { $path }. Open a folder from the { -snapshot }'s tree.
+
 # A request's body was not the JSON the route takes.
 error-invalid-body = { -brand-name } could not read the request's body. Send the JSON the route takes.
 
