@@ -18,7 +18,16 @@ import {
   setWorldConstructor,
   World,
 } from "@cucumber/cucumber";
-import { type Browser, type BrowserContext, type BrowserContextOptions, chromium, type Page } from "playwright";
+import {
+  type Browser,
+  type BrowserContext,
+  type BrowserContextOptions,
+  type BrowserType,
+  chromium,
+  firefox,
+  type Page,
+  webkit,
+} from "playwright";
 
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
 
@@ -50,6 +59,30 @@ const entryPage = path.join(repoRoot, "crates/web/dist/index.html");
 // and copied into each scenario's scratch folder: the daemon backs up into it
 // for real, so the journeys see real progress and real snapshots.
 export const fixtureRepo = path.join(repoRoot, "ui-tests", "fixtures", "demo-repo");
+
+const engines = { chromium, firefox, webkit } satisfies Record<string, BrowserType>;
+
+/** One of Playwright's engines; a table keyed by it must name all three. */
+export type Engine = keyof typeof engines;
+
+// Own keys only: `constructor` or `toString` would find a method of Object.
+const isEngine = (name: string): name is Engine => Object.hasOwn(engines, name);
+
+function chosenEngine(): Engine {
+  const name = process.env.LADDERBACK_UI_BROWSER || "chromium";
+  if (!isEngine(name)) {
+    throw new Error(`LADDERBACK_UI_BROWSER is "${name}"; it must be one of ${Object.keys(engines).join(", ")}`);
+  }
+  return name;
+}
+
+/** The browser engine the run drives: `LADDERBACK_UI_BROWSER` (`chromium`,
+ *  `firefox` or `webkit`), Chromium when unset. `just test-ui <engine>` sets
+ *  it, and the red-first check (`scripts/red-first.ts`) runs a new scenario
+ *  under each. A step whose browser behaviour differs by engine branches on
+ *  this. */
+export const engine: Engine = chosenEngine();
+const browserType: BrowserType = engines[engine];
 
 let server: ChildProcess | undefined;
 let baseUrl: string;
@@ -138,7 +171,7 @@ BeforeAll(async function () {
     server.kill("SIGTERM");
     throw error;
   }
-  browser = await chromium.launch();
+  browser = await browserType.launch();
 });
 
 AfterAll(async function () {
