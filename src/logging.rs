@@ -10,7 +10,7 @@
 //! record is masked with that repository's secrets (`engine::Masked`, I4).
 
 use env_logger::{Builder, Logger, Target, WriteStyle};
-use log::{Level, LevelFilter, Log, Metadata};
+use log::{Level, LevelFilter, Log, Metadata, Record};
 
 /// What the daemon logs when `RUST_LOG` names no level. env_logger's own
 /// default is `error`, which would hide the warnings of a worker.
@@ -31,7 +31,7 @@ pub(crate) fn install(plain: bool) {
 /// Makes `logger` the process's logger, once, at the level it filters at,
 /// its records masked while the daemon has a repository open itself. Where
 /// a logger is set already, that one stays.
-fn set(logger: Logger) {
+fn set(logger: DaemonLog) {
     let level = logger.filter();
     if log::set_boxed_logger(Box::new(engine::Masked::new(logger))).is_ok() {
         log::set_max_level(level);
@@ -42,6 +42,49 @@ fn set(logger: Logger) {
 /// whole, a `preview_import`'s profile text and its password included (I4).
 const MCP_SDK: &str = "rmcp";
 
+/// The most the MCP SDK ([`MCP_SDK`]) logs, whatever `RUST_LOG` says.
+const MCP_SDK_MOST: Level = Level::Warn;
+
+/// The daemon's logger: env_logger's, which refuses every record of the MCP
+/// SDK below [`MCP_SDK_MOST`]. The cap checks each record's target rather
+/// than adding a directive: env_logger lets the directive for the longest
+/// matching name decide, so one for a module of the SDK
+/// (`rmcp::service=debug`) would outrank one for the whole SDK.
+pub(crate) struct DaemonLog(Logger);
+
+impl DaemonLog {
+    /// The most verbose level any record can pass at.
+    fn filter(&self) -> LevelFilter {
+        self.0.filter()
+    }
+}
+
+/// Whether `metadata` is a record of the MCP SDK, or of a module of it,
+/// below [`MCP_SDK_MOST`].
+fn sdk_verbose(metadata: &Metadata<'_>) -> bool {
+    let of_sdk = metadata
+        .target()
+        .strip_prefix(MCP_SDK)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"));
+    of_sdk && metadata.level() > MCP_SDK_MOST
+}
+
+impl Log for DaemonLog {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        !sdk_verbose(metadata) && self.0.enabled(metadata)
+    }
+
+    fn log(&self, record: &Record<'_>) {
+        if !sdk_verbose(record.metadata()) {
+            self.0.log(record);
+        }
+    }
+
+    fn flush(&self) {
+        self.0.flush();
+    }
+}
+
 /// The daemon's logger, writing to `target` in `style`, for the value of
 /// `RUST_LOG`, if that is set.
 ///
@@ -49,30 +92,20 @@ const MCP_SDK: &str = "rmcp";
 /// env_logger's directives (`debug`, `ladderback::worker=off`) go on top of
 /// that, so one for a target leaves the others at the default. An empty or
 /// blank `rust_log` says nothing, as none does. Whatever it says, the MCP
-/// SDK ([`MCP_SDK`]) logs at `warn` at most.
-pub(crate) fn logger(rust_log: Option<&str>, target: Target, style: WriteStyle) -> Logger {
-    // The SDK's level as `rust_log` sets it, capped: `warn`, `error` or none.
-    let probe = filtered(rust_log).build();
-    let sdk = [Level::Warn, Level::Error]
-        .into_iter()
-        .find(|level| probe.enabled(&Metadata::builder().level(*level).target(MCP_SDK).build()))
-        .map_or(LevelFilter::Off, |level| level.to_level_filter());
-    filtered(rust_log)
-        .filter_module(MCP_SDK, sdk)
-        .target(target)
-        .write_style(style)
-        .format_timestamp_millis()
-        .build()
-}
-
-/// A builder at [`DEFAULT_LEVEL`] with `rust_log`'s directives on top.
-fn filtered(rust_log: Option<&str>) -> Builder {
+/// SDK logs at [`MCP_SDK_MOST`] at most.
+pub(crate) fn logger(rust_log: Option<&str>, target: Target, style: WriteStyle) -> DaemonLog {
     let mut builder = Builder::new();
     builder.filter_level(DEFAULT_LEVEL);
     if let Some(rust_log) = rust_log {
         builder.parse_filters(rust_log);
     }
-    builder
+    DaemonLog(
+        builder
+            .target(target)
+            .write_style(style)
+            .format_timestamp_millis()
+            .build(),
+    )
 }
 
 /// How the daemon's log is styled: with no colour at all when plain output
@@ -93,10 +126,10 @@ mod tests {
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex, PoisonError};
 
-    use env_logger::{Logger, Target, WriteStyle};
+    use env_logger::{Target, WriteStyle};
     use log::{Level, Log, Record};
 
-    use super::{logger, write_style};
+    use super::{DaemonLog, logger, write_style};
 
     const LEVELS: [Level; 5] = [
         Level::Error,
@@ -133,7 +166,7 @@ mod tests {
 
     /// A logger set up like the daemon's for `rust_log`, and the pipe it
     /// writes to.
-    fn piped(rust_log: Option<&str>) -> (Logger, Pipe) {
+    fn piped(rust_log: Option<&str>) -> (DaemonLog, Pipe) {
         let pipe = Pipe::default();
         (
             logger(
@@ -145,7 +178,7 @@ mod tests {
         )
     }
 
-    fn log_to(logger: &Logger, level: Level, target: &str, message: &str) {
+    fn log_to(logger: &DaemonLog, level: Level, target: &str, message: &str) {
         logger.log(
             &Record::builder()
                 .level(level)
@@ -220,11 +253,19 @@ mod tests {
 
     /// The MCP SDK logs each request and result whole at debug level, a
     /// profile's password included (I4), so no `RUST_LOG` lets it under
-    /// `warn`; one that silences it more is kept.
+    /// `warn`, not even a directive for one of its modules; one that silences
+    /// it more is kept.
     #[test]
     fn the_mcp_sdk_never_logs_under_warn_whatever_rust_log_says() {
         let warnings = [Level::Error, Level::Warn];
-        for rust_log in [None, Some("debug"), Some("trace"), Some("rmcp=trace")] {
+        for rust_log in [
+            None,
+            Some("debug"),
+            Some("trace"),
+            Some("rmcp=trace"),
+            Some("rmcp::service=debug"),
+            Some("rmcp::service"),
+        ] {
             for target in ["rmcp", "rmcp::service"] {
                 assert_eq!(
                     written(rust_log, target),

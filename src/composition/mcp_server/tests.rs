@@ -1044,7 +1044,12 @@ async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
         .into_iter()
         .map(|(_, line)| line)
         .chain(crate::composition::captured_log::infos())
-        .chain(crate::composition::captured_log::written_under("debug"));
+        .chain(crate::composition::captured_log::written_under("debug"))
+        // A directive for one of the SDK's modules, which outranks one for
+        // the whole SDK.
+        .chain(crate::composition::captured_log::written_under(
+            "rmcp::service=debug",
+        ));
     for line in logged {
         for secret in &secrets {
             assert!(!line.contains(secret.as_str()), "the log: {line}");
