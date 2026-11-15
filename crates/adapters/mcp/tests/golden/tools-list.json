@@ -2331,7 +2331,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "Waits until an operation finishes or the timeout passes, then returns whether it finished and the operation as get_operation does. Sends progress notifications when the call asks for them. Cancelling the call stops the wait, not the operation.",
+    "description": "Waits until an operation finishes or the timeout passes, then returns whether it finished and the operation as get_operation does; when its warnings are too many to read, none are listed and its warning-codes still name them. Sends progress notifications when the call asks for them. Cancelling the call stops the wait, not the operation.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,

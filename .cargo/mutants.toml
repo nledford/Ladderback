@@ -151,7 +151,7 @@ exclude_re = [
     # `cancelling_a_wait_stops_the_wait_and_never_the_operation` checks that
     # it is never sent. The other `!`s of the wait are not excluded and are
     # caught. Named by line, so a moved line brings the mutant back to judge.
-    'crates/adapters/mcp/src/lib\.rs:428:31: delete ! in Server::wait_operation$',
+    'crates/adapters/mcp/src/lib\.rs:429:31: delete ! in Server::wait_operation$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0

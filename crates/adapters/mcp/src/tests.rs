@@ -1310,11 +1310,13 @@ const MOST_READS: u32 = 1000;
 
 /// A stand-in whose one operation is running for its first `running`
 /// summary reads and has succeeded from then on; its detail tells what the
-/// last summary read told. It counts the reads of each, refuses those after
-/// [`MOST_READS`] and records any cancel asked of it.
+/// last summary read told, or is `refused` with that refusal when set. It
+/// counts the reads of each, refuses those after [`MOST_READS`] and records
+/// any cancel asked of it.
 #[derive(Default)]
 struct Running {
     running: u32,
+    refused: Option<ErrorDto>,
     reads: Arc<Mutex<u32>>,
     details: Arc<Mutex<u32>>,
     cancels: Arc<Mutex<Vec<String>>>,
@@ -1371,6 +1373,9 @@ impl Backend for Running {
 
     async fn operation(&self, _id: String) -> Result<OperationDetailDto, ErrorDto> {
         *self.details.lock().unwrap() += 1;
+        if let Some(refusal) = &self.refused {
+            return Err(refusal.clone());
+        }
         let reads = *self.reads.lock().unwrap();
         Ok(OperationDetailDto {
             operation: Running::state(reads <= self.running),
@@ -1483,6 +1488,53 @@ async fn a_wait_that_times_out_returns_the_operation_unfinished() {
     let content = &answer["result"]["structuredContent"];
     assert_eq!(content["finished"], false, "{answer}");
     assert_eq!(content["operation"]["status"], "running", "{answer}");
+}
+
+/// An operation with too many warnings to read whole still tells how it
+/// ended: the wait answers with the summary it just read, no warnings
+/// listed, rather than refusing.
+#[tokio::test(start_paused = true)]
+async fn a_wait_whose_detail_is_too_large_to_read_returns_the_summary_it_read() {
+    let too_large = ErrorDto::new(
+        ErrorCode::DaemonAnswerTooLarge,
+        [("limit", api::MsgArg::Bytes(8 * 1024 * 1024))],
+        None,
+    );
+    for (running, finished, status) in [(1, true, "succeeded"), (u32::MAX, false, "running")] {
+        let running = Running {
+            running,
+            refused: Some(too_large.clone()),
+            ..Running::default()
+        };
+        let details = Arc::clone(&running.details);
+        let mut client = connect(running);
+        let answer = client.wait(Some(2), None).await;
+        assert_eq!(*details.lock().unwrap(), 1);
+        assert_eq!(answer["result"]["isError"], false, "{answer}");
+        let content = &answer["result"]["structuredContent"];
+        assert_eq!(content["finished"], finished, "{answer}");
+        assert_eq!(content["operation"]["status"], status, "{answer}");
+        assert_eq!(content["warnings"], json!([]), "{answer}");
+        assert_eq!(content["unlisted-warnings"], 0, "{answer}");
+    }
+}
+
+/// Only a detail too large to read falls back to the summary: any other
+/// refusal of it is handed on.
+#[tokio::test(start_paused = true)]
+async fn a_wait_whose_detail_is_refused_otherwise_is_that_refusal() {
+    let unreachable = ErrorDto::new(ErrorCode::DaemonUnreachable, [], None);
+    let mut client = connect(Running {
+        running: 1,
+        refused: Some(unreachable.clone()),
+        ..Running::default()
+    });
+    let answer = client.wait(None, None).await;
+    assert_eq!(answer["result"]["isError"], true, "{answer}");
+    assert_eq!(
+        refusal(&answer),
+        serde_json::to_value(&unreachable).unwrap()
+    );
 }
 
 #[tokio::test(start_paused = true)]

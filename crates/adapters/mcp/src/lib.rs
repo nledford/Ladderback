@@ -25,9 +25,9 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use api::{
-    BuildDto, ErrorDto, ExposureDto, LocationsTestDto, MaintenancePreviewDto, OperationDetailDto,
-    OperationSummaryDto, OperationsPageDto, PlanSummaryDto, PlansDto, ProfileExportDto,
-    ProfileImportDto, RepositoriesDto, SnapshotsDto,
+    BuildDto, ErrorCode, ErrorDto, ExposureDto, LocationsTestDto, MaintenancePreviewDto,
+    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanSummaryDto, PlansDto,
+    ProfileExportDto, ProfileImportDto, RepositoriesDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use rmcp::handler::server::tool::schema_for_output;
@@ -410,9 +410,10 @@ impl Server {
     /// Reads the operation's summary every [`WAIT_STEP`] until it has
     /// finished or the wait's length has passed, then its detail once,
     /// sending a progress notification after each read that finds it
-    /// unfinished when the call carried a progress token. A cancelled call
-    /// stops the wait, never the operation: the answer is dropped then, as
-    /// the protocol asks, so the detail isn't read for it.
+    /// unfinished when the call carried a progress token. A detail too large
+    /// to read is the summary just read, with no warnings listed. A
+    /// cancelled call stops the wait, never the operation: the answer is
+    /// dropped then, as the protocol asks, so the detail isn't read for it.
     async fn wait_operation(
         &self,
         arguments: WaitArguments,
@@ -431,10 +432,18 @@ impl Server {
             }
             let left = length.saturating_sub(began.elapsed());
             if !is_unfinished(&operation) || left.is_zero() {
-                let OperationDetailDto {
-                    operation,
-                    warnings,
-                } = self.backend.operation(arguments.id).await?;
+                let (operation, warnings) = match self.backend.operation(arguments.id).await {
+                    Ok(OperationDetailDto {
+                        operation,
+                        warnings,
+                    }) => (operation, warnings),
+                    // How it ended still reaches the agent, its warnings'
+                    // codes in the summary.
+                    Err(error) if error.code == ErrorCode::DaemonAnswerTooLarge => {
+                        (operation, Vec::new())
+                    }
+                    Err(error) => return Err(error),
+                };
                 return Ok(Waited {
                     finished: !is_unfinished(&operation),
                     operation: Operation::listing(operation, warnings),
@@ -650,8 +659,10 @@ fn tools() -> Vec<Tool> {
         Tool::new(
             WAIT_OPERATION,
             "Waits until an operation finishes or the timeout passes, then returns whether it \
-             finished and the operation as get_operation does. Sends progress notifications \
-             when the call asks for them. Cancelling the call stops the wait, not the operation.",
+             finished and the operation as get_operation does; when its warnings are too many \
+             to read, none are listed and its warning-codes still name them. Sends progress \
+             notifications when the call asks for them. Cancelling the call stops the wait, not \
+             the operation.",
             no_arguments(),
         )
         .with_title("Wait for operation")
