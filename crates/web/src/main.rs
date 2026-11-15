@@ -269,6 +269,9 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let notice = RwSignal::new(SignInOffNotice::None);
     let warning = RwSignal::new(false);
     let ended = RwSignal::new(false);
+    // Only a change shows or takes away the dialog that asks to sign in
+    // again: a request refused while it is open leaves it as it is.
+    let asking = Memo::new(move |_| ended.get());
     // The build the daemon runs, once it has told the page (decision 90).
     let build = RwSignal::new(None::<api::BuildDto>);
     provide_context(standing);
@@ -375,7 +378,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                 }}
             </main>
             {move || {
-                ended
+                asking
                     .get()
                     .then(|| view! { <SessionEnded localizer=Arc::clone(&dialog) ended=ended /> })
             }}

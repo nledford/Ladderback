@@ -85,6 +85,11 @@ export class ScriptedDaemon {
   /** The warnings this daemon adds to rows of the repositories list, by the
    *  repository's alias (`warnOfRepository`). */
   #repositoryWarnings = new Map<string, Warning[]>();
+  /** Whether the run's own daemon has ended every session (`endSessions`):
+   *  the history is then that daemon's to answer, which refuses it, until
+   *  the page signs in again; and how many readings it refused so. */
+  #sessionsEnded = false;
+  #readsRefused = 0;
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -177,6 +182,10 @@ export class ScriptedDaemon {
       if (route.request().method() !== "GET") return route.fallback();
       this.#historyReads += 1;
       this.#backgroundMarks.push(route.request().headers()["x-ladderback-background"] !== undefined);
+      if (this.#sessionsEnded) {
+        this.#readsRefused += 1;
+        return route.fallback();
+      }
       const json = { operations: structuredClone(this.#operations), next: null };
       if (this.#holdNext) {
         this.#holdNext = false;
@@ -187,6 +196,14 @@ export class ScriptedDaemon {
       if (this.#held !== null && open !== null) this.#readsBesideTheHeld += 1;
       await route.fulfill({ json });
       if (open !== null && open === this.#stream) this.#readsSinceTheOpening += 1;
+    });
+    // A sign-in that the run's own daemon accepts gives the history back to
+    // this script.
+    await context.route("**/api/v1/session", async (route) => {
+      if (route.request().method() !== "POST" || !this.#sessionsEnded) return route.fallback();
+      const response = await route.fetch();
+      if (response.ok()) this.#sessionsEnded = false;
+      await route.fulfill({ response });
     });
     await context.route("**/api/v1/plans", (route) =>
       route.fulfill({
@@ -279,6 +296,23 @@ export class ScriptedDaemon {
   /** How many events streams the page has opened so far. */
   get streamsOpened(): number {
     return this.#streamsOpened;
+  }
+
+  /** The run's own daemon has ended every session, as an admin password set
+   *  anew does: the page's readings of the history go on to it, which refuses
+   *  them, until the page signs in again. */
+  endSessions(): void {
+    this.#sessionsEnded = true;
+  }
+
+  /** Waits until the run's own daemon has refused a reading of the history
+   *  since the sessions ended, or says it never was asked. */
+  async untilAReadIsRefused(): Promise<void> {
+    const end = Date.now() + STREAM_PATIENCE_MS;
+    while (this.#readsRefused === 0) {
+      if (Date.now() > end) throw new Error("the page never read the history after its session ended");
+      await sleep(50);
+    }
   }
 
   /** How many times the page has read the history so far. */

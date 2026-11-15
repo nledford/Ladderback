@@ -15,6 +15,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 
 import { journey } from "../support/keyboard.ts";
 import { partsBrokenInside } from "../support/parts.ts";
+import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 import { api, ended } from "./maintenance.ts";
@@ -24,7 +25,6 @@ const PASSWORD = "demo-password";
 // the engine a moment, in a debug build more than one.
 const PATIENCE_MS = 25_000;
 const MAX_TABS = 80;
-const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** What the scenario knows of its repository's locations. */
@@ -50,8 +50,6 @@ function placeOf(world: BrowserWorld, name: string): string {
   assert.ok(found, `no location "${name}"`);
   return found[1];
 }
-
-const shown = async (text: Promise<string>) => (await text).replace(ISOLATION_MARKS, "");
 
 async function until(check: () => Promise<boolean>, what: string): Promise<void> {
   const end = Date.now() + PATIENCE_MS;
@@ -246,7 +244,7 @@ Then(
   async function (this: BrowserWorld, alias: string, first: string, second: string) {
     const items = locationList(this, alias).getByRole("listitem");
     await until(async () => (await items.count()) === 2, `the repository ${alias} lists two locations`);
-    const [one, two] = await Promise.all([0, 1].map((n) => shown(items.nth(n).innerText())));
+    const [one, two] = await Promise.all([0, 1].map((n) => said(items.nth(n))));
     assert.ok(one?.includes(placeOf(this, first)), `the first location is ${first}: ${one}`);
     assert.ok(one?.includes("tried first"), `the first location says it is tried first: ${one}`);
     assert.ok(two?.includes(placeOf(this, second)), `the second location is ${second}: ${two}`);
@@ -261,7 +259,7 @@ Then(
     const items = locationList(this, alias).getByRole("listitem");
     await until(async () => {
       if ((await items.count()) <= position) return false;
-      return (await shown(items.nth(position).innerText())).includes("May be tried on a wired network");
+      return (await said(items.nth(position))).includes("May be tried on a wired network");
     }, `the location ${name} says it may be tried on a wired network`);
   },
 );
@@ -283,7 +281,7 @@ Then("each location shows whether it answers", async function (this: BrowserWorl
   await until(async () => {
     const count = await items.count();
     if (count !== 2) return false;
-    const texts = await Promise.all([0, 1].map((n) => shown(items.nth(n).innerText())));
+    const texts = await Promise.all([0, 1].map((n) => said(items.nth(n))));
     return texts.every((text) => text.includes("Answers and holds the repository"));
   }, "each location shows that it answers");
 });
@@ -313,7 +311,7 @@ Then("each location of the repository {string} says {string}", async function (t
   await until(async () => {
     const count = await items.count();
     if (count !== 2) return false;
-    const texts = await Promise.all([0, 1].map((n) => shown(items.nth(n).innerText())));
+    const texts = await Promise.all([0, 1].map((n) => said(items.nth(n))));
     return texts.every((text) => text.includes(words));
   }, `each location of ${alias} says "${words}"`);
 });
@@ -322,7 +320,7 @@ Then("the row for the plan {string} says {string}", async function (this: Browse
   const rows = this.page.getByRole("row").filter({ hasText: plan });
   await until(async () => {
     if ((await rows.count()) === 0) return false;
-    return (await shown(rows.first().innerText())).includes(words);
+    return (await said(rows.first())).includes(words);
   }, `the newest row for ${plan} says "${words}"`);
 });
 
@@ -379,7 +377,7 @@ Then(
     const row = this.page.getByRole("row").filter({ hasText: alias });
     await until(async () => {
       if ((await row.count()) === 0) return false;
-      const text = await shown(row.first().innerText());
+      const text = await said(row.first());
       return (
         text.includes("can't read the name of the Wi-Fi network this machine is on") &&
         text.includes("doesn't apply here and the location is skipped")
@@ -417,7 +415,7 @@ Then(
     const row = this.page.getByRole("row").filter({ hasText: alias });
     await until(async () => {
       if ((await row.count()) === 0) return false;
-      const text = await shown(row.first().innerText());
+      const text = await said(row.first());
       return (
         text.includes("IPv4 by Wi-Fi and IPv6 by a wired network") &&
         text.includes("holds here only if it holds for both") &&
@@ -433,7 +431,7 @@ Then(
     const row = this.page.getByRole("row").filter({ hasText: alias });
     await until(async () => {
       if ((await row.count()) === 0) return false;
-      const text = await shown(row.first().innerText());
+      const text = await said(row.first());
       return (
         text.includes(`Location ${position} sends its credentials over plain HTTP`) &&
         text.includes("its rule can't tell the network it is meant for from one made to look like it") &&

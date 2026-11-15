@@ -19,7 +19,7 @@ use crate::components::{
     Checkbox, Confirmation, FolderLoader, FolderPage, FormField, ModalDialog, PauseUpdates,
     Progress, RadioGroup, ReviewDialog, SortableTable, StatusBadge, Toast, Tree, show_toast,
 };
-use crate::live::{modal_gone, open_modal, reply, say};
+use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
@@ -59,9 +59,9 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let dialog = NodeRef::<leptos::html::Dialog>::new();
     // Whether the announcer counts the dialog as an open modal. Taking the page
     // away while it is open, with the back button say, removes the dialog
-    // without a `close` event, so leaving the page ends the count too.
+    // without a `close` event, so leaving the page closes it and ends the count.
     let counted = RwSignal::new(false);
-    on_cleanup(move || modal_gone(counted));
+    close_modal_when_gone(dialog, counted);
     // The demos' state: a form-field error, the progress bar's percent and
     // the toast text.
     let form_error = RwSignal::<Option<String>>::new(None);

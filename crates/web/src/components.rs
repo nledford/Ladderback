@@ -23,7 +23,7 @@ use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsCast;
 
 use crate::focus::{FocusWrap, focus_wrap};
-use crate::live::{PageClock, modal_gone, open_modal, pause, reply, resume};
+use crate::live::{PageClock, close_modal_when_gone, modal_gone, open_modal, pause, reply, resume};
 use crate::progress::{
     Clear, Next, Teller, Told, Wake, percent, progress_text, value_text, wait_for,
 };
@@ -53,9 +53,9 @@ pub fn ModalDialog(
 ) -> impl IntoView {
     let dialog = NodeRef::<leptos::html::Dialog>::new();
     // Whether the announcer counts the dialog as an open modal, so leaving the
-    // page while it is open ends the count however the dialog went away.
+    // page while it is open closes it and ends the count however it went away.
     let counted = RwSignal::new(false);
-    on_cleanup(move || modal_gone(counted));
+    close_modal_when_gone(dialog, counted);
     let body = children();
     view! {
         <button
@@ -213,9 +213,9 @@ pub fn ReviewDialog(
     let dialog = NodeRef::<leptos::html::Dialog>::new();
     let dismiss = NodeRef::<leptos::html::Button>::new();
     // Whether the announcer counts the dialog as an open modal, so leaving the
-    // page while it is open ends the count however the dialog went away.
+    // page while it is open closes it and ends the count however it went away.
     let counted = RwSignal::new(false);
-    on_cleanup(move || modal_gone(counted));
+    close_modal_when_gone(dialog, counted);
     let (busy, status) = match working {
         Some(Working { active, status }) => (active, status),
         None => (Signal::stored(false), String::new()),

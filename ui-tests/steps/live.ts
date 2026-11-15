@@ -16,6 +16,7 @@ import { expect } from "playwright/test";
 
 import { ISOLATION, namePattern } from "../support/keyboard.ts";
 import { partsBrokenInside } from "../support/parts.ts";
+import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, evaluateAll, fixtureRepo, startServer } from "../support/world.ts";
 
@@ -396,6 +397,10 @@ Then("the page reads the history again", async function (this: BrowserWorld) {
   await scripted(this).untilAReadIsHeld();
 });
 
+Then("the daemon refuses the page's next reading of the history", async function (this: BrowserWorld) {
+  await scripted(this).untilAReadIsRefused();
+});
+
 When("the daemon's events stream drops", async function (this: BrowserWorld) {
   await scripted(this).dropTheStream();
 });
@@ -717,15 +722,16 @@ Then("the page shows the row {string}", async function (this: BrowserWorld, row:
 });
 
 /** What a reader hears of the cell of `row` under the column header `column`,
- *  once the row is there: its text without bidi isolation marks. */
+ *  once the row is there: its words, as `said` reads them. */
 export async function cellText(world: BrowserWorld, name: string, row: string, column: string): Promise<string> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   const found = rowNamed(world, name, row).first();
   await found.waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
-  const text = await found.evaluate((tr: HTMLTableRowElement, at) => tr.cells[at]?.innerText ?? null, index);
-  assert.ok(text !== null, `the row ${row} of the table ${name} has no cell under ${column}`);
-  return text.replace(/[\u2066-\u2069]/g, "");
+  // The row's cells in order, as `cellIndex` counts them.
+  const cells = found.locator(":scope > :is(td, th)");
+  assert.ok((await cells.count()) > index, `the row ${row} of the table ${name} has no cell under ${column}`);
+  return said(cells.nth(index));
 }
 
 /** Waits until the cell of `row` under `column` holds `expected`: a row that
@@ -806,9 +812,9 @@ async function cellOf(world: BrowserWorld, name: string, row: string, column: st
  *  that says `expected`: a reader hears what a run did as a list, one fact an
  *  item. */
 export async function untilCellLists(world: BrowserWorld, name: string, row: string, column: string, expected: string): Promise<void> {
-  const said = new RegExp([...expected].map(escape).join(ISOLATION));
+  const spoken = new RegExp([...expected].map(escape).join(ISOLATION));
   const cell = await cellOf(world, name, row, column);
-  const item = cell.getByRole("list").getByRole("listitem").filter({ hasText: said });
+  const item = cell.getByRole("list").getByRole("listitem").filter({ hasText: spoken });
   await expect(item, `the ${column} of the row ${row} lists "${expected}"`).toHaveCount(1, { timeout: ROW_PATIENCE_MS });
 }
 

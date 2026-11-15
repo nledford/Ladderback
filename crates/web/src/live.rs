@@ -169,3 +169,30 @@ pub(crate) fn modal_gone(counted: RwSignal<bool>) {
         modal_closed();
     }
 }
+
+/// Closes the dialog when the view that holds it goes while it is open, then
+/// tells the announcer it is gone as [`modal_gone`] does. It is a cleanup of
+/// the reactive view being built, which runs before that view takes the dialog
+/// off the page. A modal taken off the page while open leaves WebKit refusing
+/// focus to the page that takes its place until its next style update, so the
+/// heading of a page shown in its stead ([`crate::page::focus_on_arrival`])
+/// would not take focus, and focus would fall to the page itself.
+///
+/// The cleanup runs too when the closure that built the view runs again,
+/// and Leptos then builds the view anew on the same `<dialog>`, whose `close`
+/// event reaches the new view's handler as if the reader had closed it. So
+/// that closure must run only to show the dialog or take it away: one that
+/// reads a signal set again to the same value reads it through a `Memo`.
+pub(crate) fn close_modal_when_gone(
+    dialog: NodeRef<leptos::html::Dialog>,
+    counted: RwSignal<bool>,
+) {
+    on_cleanup(move || {
+        if let Some(dialog) = dialog.get_untracked()
+            && dialog.open()
+        {
+            dialog.close();
+        }
+        modal_gone(counted);
+    });
+}
