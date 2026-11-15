@@ -47,3 +47,20 @@ pub trait ReleaseFeed: Send + Sync {
     /// check, a day later, asks anew.
     async fn newest(&self) -> Result<Release, ReleaseFeedError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_failure_has_the_reason_the_log_line_names() {
+        for (error, reason) in [
+            (ReleaseFeedError::Unreachable, "unreachable"),
+            (ReleaseFeedError::TimedOut, "timed-out"),
+            (ReleaseFeedError::Rejected { status: 302 }, "rejected"),
+            (ReleaseFeedError::Unreadable, "unreadable"),
+        ] {
+            assert_eq!(error.reason(), reason, "{error:?}");
+        }
+    }
+}
