@@ -714,6 +714,9 @@ async fn state_over(
         queue: Arc::new(RunQueue::new()),
         ends: run_ends,
         runs: runs::Runs::default(),
+        // A repository's stats, read on request and after each check, are
+        // kept in the operation log's database (§16, decision 104).
+        readings: Arc::<SqliteStore>::clone(&log.store),
     });
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
@@ -1193,10 +1196,10 @@ fn log_location(report: LocationReport) {
 
 /// Whether the job is an operation, which the history has a row for, so a
 /// page can show its progress and warnings there (§4.4). The reads (the look
-/// that names a repository, a listing, a prune's plan) and the initialising
-/// of a repository answer their request and are written to no log (§9): a
-/// page told of their news would show it on no row, or on the row of the
-/// run that read, which keeps none of it (#308).
+/// that names a repository, a listing, a stats read, a prune's plan) and the
+/// initialising of a repository answer their request and are written to no
+/// log (§9): a page told of their news would show it on no row, or on the row
+/// of the run that read, which keeps none of it (#308).
 fn is_operation(job: &Job) -> bool {
     match job {
         Job::Identify(_)
@@ -1204,6 +1207,7 @@ fn is_operation(job: &Job) -> bool {
         | Job::Init(_)
         | Job::Ls(_)
         | Job::Browse(_)
+        | Job::Stats(_)
         | Job::PrunePlan(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
@@ -1277,6 +1281,9 @@ struct PlanRunner {
     /// What the daemon's orderly stop freezes: every run starts under it
     /// (decision 92).
     runs: runs::Runs,
+    /// Where each reading of a repository's stats is kept (§16, decision
+    /// 104): read on request, and after each check.
+    readings: Arc<dyn app::ports::StatsStore>,
 }
 
 impl PlanRunner {
@@ -1798,6 +1805,20 @@ impl Operations for PlanRunner {
         maintenance::groups(self, repository).await
     }
 
+    async fn stats(
+        &self,
+        repository: String,
+    ) -> Result<api::RepositoryStatsDto, MaintenanceRefusal> {
+        maintenance::stats(self, repository).await
+    }
+
+    async fn read_stats(
+        &self,
+        repository: String,
+    ) -> Result<api::StatsReadingDto, MaintenanceRefusal> {
+        maintenance::read_stats(self, repository).await
+    }
+
     async fn history(
         &self,
         plan: Option<String>,
@@ -2032,7 +2053,8 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         | EngineResult::PrunePlan(_)
         | EngineResult::Probed(_)
         | EngineResult::Snapshots(_)
-        | EngineResult::Folder(_) => None,
+        | EngineResult::Folder(_)
+        | EngineResult::Stats(_) => None,
     }
 }
 
@@ -5540,6 +5562,7 @@ mod tests {
             queue: Arc::new(RunQueue::new()),
             ends: app::retry::run_ends().0,
             runs: crate::composition::runs::Runs::default(),
+            readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         };
         (runner, entered, open_gate, scratch)
     }
@@ -5913,6 +5936,16 @@ mod tests {
                 Err(MaintenanceRefusal::UnknownRepository),
                 "the groups of {repository}"
             );
+            assert_eq!(
+                runner.stats(repository.to_owned()).await,
+                Err(MaintenanceRefusal::UnknownRepository),
+                "the stats of {repository}"
+            );
+            assert_eq!(
+                runner.read_stats(repository.to_owned()).await,
+                Err(MaintenanceRefusal::UnknownRepository),
+                "a read of the stats of {repository}"
+            );
         }
     }
 
@@ -5989,6 +6022,164 @@ mod tests {
                 warnings: Vec::new(),
             })
         );
+    }
+
+    /// How a [`ReadsStats`] engine answers a job.
+    type StatsAnswer = fn() -> Result<EngineEvent, EngineError>;
+
+    /// An engine that reads a repository's stats as the function says, and
+    /// answers every job so.
+    struct ReadsStats(StatsAnswer);
+
+    #[async_trait]
+    impl Engine for ReadsStats {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            let event = (self.0)()?;
+            Ok(RunningJob {
+                events: futures::stream::iter([event]).boxed(),
+                control: Box::new(Parked),
+            })
+        }
+    }
+
+    /// The figures [`ReadsStats`] reads: two snapshots of 2.3 MB each, which
+    /// the repository stores in 7 % of their raw size.
+    fn two_snapshots() -> Result<EngineEvent, EngineError> {
+        Ok(EngineEvent::Succeeded(EngineResult::Stats(
+            domain::maintenance::RepositoryStats {
+                snapshots: 2,
+                total_size: 4_600_005,
+                stored_size: 300_542,
+                raw_size: 4_300_005,
+            },
+        )))
+    }
+
+    /// The stats read through the daemon are kept, and from then on told as
+    /// the repository's last read: before any read, none are.
+    #[tokio::test]
+    async fn the_stats_read_are_kept_and_told_as_last_read() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(ReadsStats(two_snapshots));
+        assert_eq!(
+            runner.stats("demo".to_owned()).await,
+            Ok(api::RepositoryStatsDto { latest: None })
+        );
+
+        let read = runner
+            .read_stats("demo".to_owned())
+            .await
+            .expect("the stats are read");
+
+        assert_eq!(
+            (
+                read.snapshots,
+                read.total_size,
+                read.stored_size,
+                read.compression_saved_percent
+            ),
+            (2, 4_600_005, 300_542, Some(93))
+        );
+        assert!(
+            read.taken_at.parse::<domain::Timestamp>().is_ok(),
+            "taken at a time: {}",
+            read.taken_at
+        );
+        assert_eq!(
+            runner.stats("demo".to_owned()).await,
+            Ok(api::RepositoryStatsDto { latest: Some(read) })
+        );
+    }
+
+    /// A read the engine can't start, or one that fails, is refused as the
+    /// other maintenance reads are, and keeps nothing.
+    #[tokio::test]
+    async fn a_stats_read_that_fails_is_refused_and_keeps_nothing() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        let cases: [(StatsAnswer, MaintenanceRefusal); 2] = [
+            (
+                || {
+                    Err(EngineError::Unavailable {
+                        detail: "no worker".to_owned(),
+                    })
+                },
+                MaintenanceRefusal::Unavailable {
+                    code: ErrorCode::EngineUnavailable,
+                    args: Vec::new(),
+                    detail: Some("no worker".to_owned()),
+                },
+            ),
+            (
+                || {
+                    Ok(EngineEvent::Failed(FailureReason::EngineFailed {
+                        detail: "an index file can't be read".to_owned(),
+                    }))
+                },
+                MaintenanceRefusal::OperationFailed {
+                    detail: "an index file can't be read".to_owned(),
+                },
+            ),
+        ];
+        for (read, refused) in cases {
+            runner.engine = Arc::new(ReadsStats(read));
+            assert_eq!(runner.read_stats("demo".to_owned()).await, Err(refused));
+            assert_eq!(
+                runner.stats("demo".to_owned()).await,
+                Ok(api::RepositoryStatsDto { latest: None })
+            );
+        }
+    }
+
+    /// A history that refuses every reading and every look.
+    struct RefusingReadings;
+
+    #[async_trait]
+    impl app::ports::StatsStore for RefusingReadings {
+        async fn record(
+            &self,
+            _reading: &domain::maintenance::StatsReading,
+        ) -> Result<(), app::ports::StoreError> {
+            Err(refused_reading())
+        }
+
+        async fn latest(
+            &self,
+            _alias: &RepositoryAlias,
+        ) -> Result<Option<domain::maintenance::StatsReading>, app::ports::StoreError> {
+            Err(refused_reading())
+        }
+
+        async fn history(
+            &self,
+            _alias: &RepositoryAlias,
+        ) -> Result<Vec<domain::maintenance::StatsReading>, app::ports::StoreError> {
+            Err(refused_reading())
+        }
+    }
+
+    fn refused_reading() -> app::ports::StoreError {
+        app::ports::StoreError::Unavailable {
+            detail: "the disk is full".to_owned(),
+        }
+    }
+
+    /// A history that can't keep the reading, or tell the last one, is
+    /// refused in its own words: the stats read aren't answered as kept.
+    #[tokio::test]
+    async fn stats_the_history_refuses_are_refused_in_its_words() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(ReadsStats(two_snapshots));
+        runner.readings = Arc::new(RefusingReadings);
+        let refused = MaintenanceRefusal::Unavailable {
+            code: ErrorCode::OperationFailed,
+            args: Vec::new(),
+            detail: Some("the disk is full".to_owned()),
+        };
+        assert_eq!(
+            runner.read_stats("demo".to_owned()).await,
+            Err(refused.clone())
+        );
+        assert_eq!(runner.stats("demo".to_owned()).await, Err(refused));
     }
 
     /// One repository under two names never reaches the history view (I6,
@@ -6545,7 +6736,7 @@ mod tests {
 
     /// An engine whose jobs start and succeed at once, each with what its
     /// kind reports: the ID of the repository a read opens, the outcome of
-    /// a check.
+    /// a check, the stats of an empty repository.
     struct Completes;
 
     #[async_trait]
@@ -6559,6 +6750,9 @@ mod tests {
                     errors: 0,
                     warnings: 0,
                 }),
+                Job::Stats(_) => {
+                    EngineResult::Stats(domain::maintenance::RepositoryStats::default())
+                }
                 _ => EngineResult::Fake { steps_completed: 1 },
             };
             Answers(vec![started(), EngineEvent::Succeeded(result)])
@@ -7312,12 +7506,55 @@ mod tests {
             operation: running_backup(id),
             result: None,
             recording_errors: refused,
+            stats_failed: None,
         });
         let id = id.as_uuid().hyphenated().to_string();
         captured_log::lines()
             .into_iter()
             .filter(|(_, line)| line.contains(&id))
             .collect()
+    }
+
+    /// A stats read that failed after a check is one warning, named by the
+    /// code of its failure and never its words (I4).
+    #[test]
+    fn a_stats_read_that_failed_after_a_check_is_logged_by_its_code_and_never_its_words() {
+        let reason = domain::execution::FailureReason::EngineFailed {
+            detail: "canary-stats-detail".to_owned(),
+        };
+        let failures = [
+            app::stats::StatsError::Failed(reason.clone()),
+            app::stats::StatsError::Engine(EngineError::Unavailable {
+                detail: "canary-stats-detail".to_owned(),
+            }),
+        ];
+        for (n, failed) in (0x7101_u128..).zip(failures) {
+            captured_log::capture();
+            let id = OperationId::from_uuid(Uuid::from_u128(n));
+            log_ended(&Finished {
+                operation: running_backup(id),
+                result: None,
+                recording_errors: Vec::new(),
+                stats_failed: Some(failed),
+            });
+            let id = id.as_uuid().hyphenated().to_string();
+            let lines: Vec<_> = captured_log::lines()
+                .into_iter()
+                .filter(|(_, line)| line.contains(&id) && line.contains("stats"))
+                .collect();
+            let [(level, line)] = lines.as_slice() else {
+                panic!("one line of the stats: {lines:?}");
+            };
+            assert_eq!(*level, log::Level::Warn, "{line}");
+            assert!(!line.contains("canary"), "{line}");
+        }
+        let lines = captured_log::lines();
+        assert!(
+            lines
+                .iter()
+                .any(|(_, line)| line.contains(&format!("read failed: {}", reason.code()))),
+            "the failure's code: {lines:?}"
+        );
     }
 
     /// A log that took every write of a run has nothing to be warned of.
@@ -10939,6 +11176,7 @@ mod repository_service_tests {
                 queue: Arc::new(RunQueue::new()),
                 ends: app::retry::run_ends().0,
                 runs: crate::composition::runs::Runs::default(),
+                readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
             };
             let detail = detail.map(str::to_owned);
             assert_eq!(
@@ -10987,6 +11225,7 @@ mod repository_service_tests {
                 queue: Arc::new(RunQueue::new()),
                 ends: app::retry::run_ends().0,
                 runs: crate::composition::runs::Runs::default(),
+                readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
             };
 
             let place = runner
@@ -11080,6 +11319,7 @@ mod repository_service_tests {
             queue: Arc::new(RunQueue::new()),
             ends: app::retry::run_ends().0,
             runs: crate::composition::runs::Runs::default(),
+            readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         };
 
         let refused = runner
@@ -11332,6 +11572,7 @@ mod repository_service_tests {
             queue: Arc::new(RunQueue::new()),
             ends,
             runs: crate::composition::runs::Runs::default(),
+            readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         };
         (runner, heard, scripted, plan)
     }

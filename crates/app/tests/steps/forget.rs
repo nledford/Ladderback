@@ -262,6 +262,15 @@ impl ForgetWorld {
         self.save().await;
     }
 
+    /// Makes the repository's entry record `id` as the repository's ID.
+    pub async fn records_id(&mut self, id: RepositoryId) {
+        self.repositories
+            .get_mut(&alias())
+            .expect("the repository was added first")
+            .id = Some(id);
+        self.save().await;
+    }
+
     /// Gives the agent a hostname of its own.
     pub async fn name_agent(&mut self, hostname: &str) {
         self.hostname = Some(Hostname::parse(hostname).expect("a hostname"));
@@ -476,6 +485,7 @@ impl ForgetWorld {
                 Job::Probe(_) => "probe",
                 Job::Ls(_) => "ls",
                 Job::Browse(_) => "browse",
+                Job::Stats(_) => "stats",
                 Job::Forget(_) => "forget",
                 Job::Rewrite(_) => "adopt",
                 Job::Prune(_) => "prune",

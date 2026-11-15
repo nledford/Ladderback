@@ -22,8 +22,10 @@ use crate::{AgentId, Offset, PlanId, SnapshotId, Timestamp};
 mod other_hosts;
 #[cfg(test)]
 mod properties;
+mod stats;
 
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
+pub use stats::{READINGS_KEPT_FOR, RepositoryStats, StatsReading};
 
 /// One snapshot as the owner sees it: what a listing reports, minus what
 /// only the engine needs.

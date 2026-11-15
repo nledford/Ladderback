@@ -112,6 +112,19 @@ pub(crate) fn browse(ctx: &Context, job: &BrowseJobSpec) -> Result<Done, JobErro
     ))))
 }
 
+/// Reads the repository's stats (§16, decision 104). A read: it emits
+/// `Started` after the open, as `ls` does, then reads the snapshots and every
+/// index file. The total size adds up each snapshot's `total_bytes_processed`
+/// (a snapshot with no summary adds nothing); the stored and raw sizes add up
+/// every indexed blob's length in its pack and its length before
+/// compression, as `rustic repoinfo` does. Packs marked for deletion are left
+/// out, as rustic leaves them out of its totals. Sums saturate: the files
+/// read are outside input.
+pub(crate) fn stats(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
+    let _ = (ctx, spec);
+    todo!()
+}
+
 /// Removes exactly the snapshots the job names. Which snapshots those are
 /// was decided before the job ran, by the owner's own selection (I6); the
 /// job deletes them and nothing else.

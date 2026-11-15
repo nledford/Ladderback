@@ -140,6 +140,20 @@ impl crate::Operations for Recorder {
         Err(crate::MaintenanceRefusal::UnknownRepository)
     }
 
+    async fn stats(
+        &self,
+        _repository: String,
+    ) -> Result<api::RepositoryStatsDto, crate::MaintenanceRefusal> {
+        Err(crate::MaintenanceRefusal::UnknownRepository)
+    }
+
+    async fn read_stats(
+        &self,
+        _repository: String,
+    ) -> Result<api::StatsReadingDto, crate::MaintenanceRefusal> {
+        Err(crate::MaintenanceRefusal::UnknownRepository)
+    }
+
     async fn history(
         &self,
         _plan: Option<String>,
@@ -286,6 +300,8 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
             "/api/v1/repositories/home/snapshots/abcd/folder",
             Some(Read),
         ),
+        (Method::GET, "/api/v1/repositories/home/stats", Some(Read)),
+        (Method::POST, "/api/v1/repositories/home/stats", Some(Run)),
         (Method::POST, "/api/v1/operations", Some(Run)),
         (Method::POST, "/api/v1/operations/018f/cancel", Some(Run)),
         (Method::POST, "/api/v1/repositories/home/test", Some(Run)),

@@ -181,6 +181,26 @@ pub(super) async fn groups(
     Ok(groups_dto(&alias, &groups))
 }
 
+/// The stats of the repository `repository` names as last read and kept
+/// (§16, decision 104): read from the history, never from the repository.
+pub(super) async fn stats(
+    runner: &PlanRunner,
+    repository: String,
+) -> Result<api::RepositoryStatsDto, MaintenanceRefusal> {
+    let _ = (runner, repository);
+    todo!()
+}
+
+/// Reads the stats of the repository `repository` names now, keeps the
+/// reading and answers it: a read that takes no slot (§16, decision 104).
+pub(super) async fn read_stats(
+    runner: &PlanRunner,
+    repository: String,
+) -> Result<api::StatsReadingDto, MaintenanceRefusal> {
+    let _ = (runner, repository);
+    todo!()
+}
+
 /// A snapshot as the page is told of it. One the wire can't carry is left
 /// out of its list (and still counted there), as the snapshot listing does.
 fn snapshot_dto(alias: &RepositoryAlias, snapshot: &Snapshot) -> Option<api::SnapshotDto> {

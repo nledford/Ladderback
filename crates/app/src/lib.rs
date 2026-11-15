@@ -37,6 +37,7 @@ pub mod retry;
 pub mod schedule;
 pub mod secrets;
 pub mod snapshots;
+pub mod stats;
 
 #[cfg(feature = "fakes")]
 pub mod contract;

@@ -136,6 +136,29 @@ async fn in_memory_session_store_meets_the_session_store_contract() {
     contract::session_store::run(&InMemorySessions::default()).await;
 }
 
+/// The in-memory stats store: a new one for each `empty`, and the same one
+/// again for `reopened`, as the real store's file outlives its handle.
+#[derive(Default)]
+struct InMemoryStats(Mutex<Option<Arc<app::fakes::InMemoryStatsStore>>>);
+
+#[async_trait]
+impl contract::stats_store::StatsHarness for InMemoryStats {
+    async fn empty(&self) -> Arc<dyn app::ports::StatsStore> {
+        let store = Arc::new(app::fakes::InMemoryStatsStore::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&store));
+        store
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::StatsStore> {
+        self.0.lock().unwrap().clone().expect("a store was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_stats_store_meets_the_stats_store_contract() {
+    contract::stats_store::run(&InMemoryStats::default()).await;
+}
+
 #[test]
 fn seeded_randomness_meets_the_random_contract() {
     contract::random::run(&SeededRandom::new(0x5eed));

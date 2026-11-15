@@ -321,11 +321,16 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                 // catalog's to transform (§8.4). `the_helpers_that_write_...`
                 // has them. `ui-snapshot-time-offset` holds only its two
                 // values and "UTC", a string literal a pseudolocale leaves
-                // as it is: there is no text of the catalog's to transform.
+                // as it is, `ui-stats-count` only its number, written in the
+                // locale's digits, and `ui-stats-size` only its size, which
+                // the size helper writes: there is no text of the catalog's
+                // to transform.
                 if id == msg::SIZE
                     || id == msg::DURATION
                     || id == msg::UI_INSTANT
                     || id == msg::UI_SNAPSHOT_TIME_OFFSET
+                    || id == msg::UI_STATS_COUNT
+                    || id == msg::UI_STATS_SIZE
                 {
                     continue;
                 }

@@ -19,6 +19,7 @@ mod secrets;
 mod service;
 mod session_store;
 mod sources;
+mod stats_store;
 
 pub use admin_password::InMemoryAdminPassword;
 pub use api_token_store::InMemoryApiTokenStore;
@@ -38,3 +39,4 @@ pub use secrets::{FakeSecrets, Script};
 pub use service::FakeServiceManager;
 pub use session_store::InMemorySessionStore;
 pub use sources::FakeSources;
+pub use stats_store::InMemoryStatsStore;

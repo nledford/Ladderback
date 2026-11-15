@@ -118,6 +118,9 @@ pub enum JobKind {
     /// Reads one page of one folder of a snapshot. A read, never an
     /// operation.
     Browse(BrowseJobSpec),
+    /// Reads the repository's stats: the snapshots, then every index file.
+    /// A read, never an operation.
+    Stats(RepositorySpec),
 }
 
 /// A repository and what it takes to open it.
@@ -404,6 +407,8 @@ pub enum OpResult {
     Probed(ProbeResult),
     /// What a [`JobKind::Browse`] found.
     Folder(FolderResult),
+    /// What a [`JobKind::Stats`] read.
+    Stats(StatsResult),
 }
 
 /// What a browse found: one page of the folder, or that the snapshot or the
@@ -526,6 +531,16 @@ pub struct CheckResult {
     pub repository: RepositoryId,
     pub errors: u64,
     pub warnings: u64,
+}
+
+/// What a [`JobKind::Stats`] read: the snapshots, counted and their sources'
+/// sizes added up, and the index's blobs, their sizes in the packs and raw.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatsResult {
+    pub snapshots: u64,
+    pub total_size: u64,
+    pub stored_size: u64,
+    pub raw_size: u64,
 }
 
 /// A secret travels as the plain string it is: the protocol is the one place

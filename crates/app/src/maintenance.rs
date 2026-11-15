@@ -344,6 +344,8 @@ pub struct RunMaintenance {
     /// Chooses the location an in-process open of the repository uses, as
     /// the engine's own choice does for every job (decision 80).
     locations: Option<Arc<crate::locations::ChooseLocation>>,
+    /// Reads the stats after a check, when set.
+    stats: Option<Arc<crate::stats::ReadStats>>,
 }
 
 impl RunMaintenance {
@@ -374,6 +376,7 @@ impl RunMaintenance {
             sources,
             events: None,
             locations: None,
+            stats: None,
         }
     }
 
@@ -419,6 +422,13 @@ impl RunMaintenance {
     /// repository first; a cancelled run is not announced.
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
+        self
+    }
+
+    /// Reads the repository's stats after each check that ends with a
+    /// result, before its end is recorded (§16, decision 104).
+    pub fn with_stats(mut self, stats: Arc<crate::stats::ReadStats>) -> Self {
+        self.stats = Some(stats);
         self
     }
 
@@ -1126,6 +1136,7 @@ impl RunMaintenance {
                 Played::Ended => break,
             }
         }
+        let stats_failed = None;
         self.record(&operation, &result, &mut recording_errors)
             .await;
         announce_end(self.events.as_deref(), &operation).await;
@@ -1133,6 +1144,7 @@ impl RunMaintenance {
             operation,
             result,
             recording_errors,
+            stats_failed,
         }
     }
 

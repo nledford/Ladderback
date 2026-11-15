@@ -1113,6 +1113,55 @@ ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
 
+## A repository's stats at the end of the snapshots page (§4.4, §16 decision
+## 104): four figures as last read, and a button that reads them now.
+
+# The heading of the section of a repository's stats, named with the repository; it also names the table of the figures.
+ui-stats-heading = Stats of { $alias }
+
+# What the stats section shows of a repository whose stats have never been read.
+ui-stats-none = No stats have been read yet.
+
+# The stats table's row header of how many snapshots the repository holds.
+ui-stats-snapshots = Snapshots
+
+# The stats table's row header of the size of the sources the snapshots hold, added up: a file two snapshots hold counts twice.
+ui-stats-total-size = Total size
+
+# The stats table's row header of what the repository stores for the snapshots, after deduplication and compression.
+ui-stats-stored-size = Stored size
+
+# The stats table's row header of what compression saved.
+ui-stats-compression = Compression
+
+# The stats table's count of snapshots.
+# $count (number): how many snapshots the repository holds.
+ui-stats-count = { $count }
+
+# A size in the stats table.
+# $bytes (bytes): the size, as a size such as 1 MiB.
+ui-stats-size = { $bytes }
+
+# What compression saved, in the stats table.
+# $percent (number): the share of the data's raw size compression saved, a whole percent.
+ui-stats-saved = { NUMBER($percent) }% saved
+
+# What the stats table shows for compression when the repository stores no data, so compression saved nothing it could tell.
+ui-stats-saved-none = None: the repository stores no data yet.
+
+# When the stats shown were read, below their table, in the viewer's own zone.
+# $when (instant): when they were read.
+ui-stats-taken = Read { DATETIME($when, dateStyle: "short", timeStyle: "medium") }.
+
+# The button that reads the repository's stats now.
+ui-stats-read = Read the stats now
+
+# Shown, and announced politely, while the stats are being read.
+ui-stats-reading = Reading the stats…
+
+# Announced politely when the stats were read; the table then shows them.
+ui-stats-done = Stats read.
+
 ## Pausing live updates (§4.5, WCAG 2.2.2): a page that changes by itself
 ## holds still until the reader resumes it.
 
