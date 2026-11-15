@@ -3661,7 +3661,15 @@ pub struct SetAdminPasswordDto {
 
 impl std::fmt::Debug for SetAdminPasswordDto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("{f:p}")
+        let current = if self.current_password.is_some() {
+            "Some([hidden])"
+        } else {
+            "None"
+        };
+        write!(
+            f,
+            "SetAdminPasswordDto {{ current_password: {current}, new_password: [hidden] }}"
+        )
     }
 }
 

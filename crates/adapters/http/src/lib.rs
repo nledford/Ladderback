@@ -362,12 +362,13 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// plans, the repositories, one repository's snapshots — the routes that
 /// maintain a repository: its history by owner, a preview of each run and
 /// the start of one — the routes that test, connect and initialise a
-/// repository, and the session route that signs in and out. A request that
-/// fails `checks` never reaches a route; with sign-in on, neither does an
-/// API request without a live session, or a changed one without its CSRF
-/// token; and neither does one whose body is over the limit of its class of
-/// route (§10.1). Every response, a refusal included, carries the security
-/// headers. Serve it with `into_make_service_with_connect_info::<PeerAddr>()`
+/// repository, the session route that signs in and out, and the route that
+/// sets the admin password. A request that fails `checks` never reaches a
+/// route; with sign-in on, neither does an API request without a live
+/// session, or a changed one without its CSRF token; and neither does one
+/// whose body is over the limit of its class of route (§10.1). Every
+/// response, a refusal included, carries the security headers. Serve it
+/// with `into_make_service_with_connect_info::<PeerAddr>()`
 /// through a [`GatedListener`]: with sign-in on, a sign-in without its
 /// connection's address is refused.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
@@ -378,6 +379,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::get(sign_in::current)
                 .post(sign_in::sign_in)
                 .delete(sign_in::sign_out),
+        )
+        .route(
+            sign_in::ADMIN_PASSWORD_PATH,
+            axum::routing::post(sign_in::set_password),
         )
         .route(
             api_tokens::TOKENS_PATH,
