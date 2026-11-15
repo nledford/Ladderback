@@ -133,6 +133,12 @@ a {
   margin-inline: auto 0;
   padding-block: 0.25rem;
   color: var(--muted);
+  /* A flex item is no narrower than its longest unbreakable run unless told
+     otherwise. WebKit measured the version's run (`0.3.1+cedec1f`) unbroken
+     although `overflow-wrap: anywhere` breaks it, so on a narrow screen with
+     larger text, right to left, the line stuck out and the page scrolled
+     sideways (1.4.10). */
+  min-inline-size: 0;
 }
 
 /* The pages' links, in the header of every page; the current page is bold,
