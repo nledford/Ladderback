@@ -15,6 +15,10 @@ use nix::unistd::Pid;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, ChildStderr, ChildStdout, Command};
 use tokio::time::timeout;
+use zeroize::Zeroizing;
+
+/// Of stdout, one byte more than the limit is kept: that is already too much.
+const STDOUT_KEPT: usize = MAX_SECRET_BYTES + 1;
 
 /// Of what a command writes to stderr only the first line is used, and a
 /// line this long is cut short anyway.
@@ -107,7 +111,9 @@ pub(crate) async fn run_with(
         return Err(unreachable("the command's output is not piped".to_owned()));
     };
 
-    let mut out = Vec::new();
+    // Wiped when dropped, with room for all of it up front, so it never grows
+    // and leaves an unwiped copy of the secret behind.
+    let mut out = Zeroizing::new(Vec::with_capacity(STDOUT_KEPT));
     let mut err = Vec::new();
     let outcome = collect(
         &mut running.child,
@@ -269,8 +275,9 @@ async fn wait_draining(
 
 /// Reads `reader` to its end, or its first error, and keeps nothing.
 async fn discard(mut reader: impl AsyncRead + Unpin) {
-    let mut chunk = [0_u8; READ_CHUNK];
-    while matches!(reader.read(&mut chunk).await, Ok(read) if read > 0) {}
+    // Wiped: a command that is being stopped may still write its secret.
+    let mut chunk = Zeroizing::new([0_u8; READ_CHUNK]);
+    while matches!(reader.read(&mut chunk[..]).await, Ok(read) if read > 0) {}
 }
 
 enum Outcome {
@@ -306,8 +313,7 @@ async fn collect(
     out: &mut Vec<u8>,
     err: &mut Vec<u8>,
 ) -> io::Result<Outcome> {
-    // One byte more than the limit: that is already too much.
-    let mut out_read = pin!(read_capped(stdout, out, MAX_SECRET_BYTES + 1, true));
+    let mut out_read = pin!(read_capped(stdout, out, STDOUT_KEPT, true));
     let mut err_read = pin!(read_capped(stderr, err, STDERR_KEPT, false));
     // Set once stdout was read to its end, and only then.
     let mut out_done = false;
@@ -370,9 +376,10 @@ async fn read_capped(
     keep: usize,
     stop_when_full: bool,
 ) -> io::Result<End> {
-    let mut chunk = [0_u8; READ_CHUNK];
+    // Wiped: it held the last bytes read, which may be the secret's.
+    let mut chunk = Zeroizing::new([0_u8; READ_CHUNK]);
     loop {
-        let read = reader.read(&mut chunk).await?;
+        let read = reader.read(&mut chunk[..]).await?;
         if read == 0 {
             return Ok(End::Eof);
         }

@@ -132,8 +132,9 @@ pub const FORGET_AFTER: SignedDuration = SignedDuration::from_hours(24);
 pub const MAX_CLIENTS: usize = 1024;
 
 /// A password as typed, at the sign-in form or to `set-password`. Never
-/// shown: its `Debug` hides it (I4).
-#[derive(Clone)]
+/// shown: its `Debug` hides it (I4). It wipes its bytes when it is dropped,
+/// and so does a text [`Self::parse`] refuses (§10.2).
+#[derive(Clone, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct Password(String);
 
 /// Why a text is not a password Ladderback takes.
@@ -150,12 +151,14 @@ pub enum PasswordProblem {
 impl Password {
     /// A password attempt: anything from one byte to [`PASSWORD_MAX_BYTES`].
     pub fn parse(text: String) -> Result<Self, PasswordProblem> {
-        if text.is_empty() {
+        // A password from the start, so a text refused is wiped too.
+        let password = Self(text);
+        if password.0.is_empty() {
             Err(PasswordProblem::Empty)
-        } else if text.len() > PASSWORD_MAX_BYTES {
+        } else if password.0.len() > PASSWORD_MAX_BYTES {
             Err(PasswordProblem::TooLong)
         } else {
-            Ok(Self(text))
+            Ok(password)
         }
     }
 

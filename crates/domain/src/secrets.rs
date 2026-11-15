@@ -3,6 +3,8 @@
 
 use std::collections::BTreeMap;
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 mod command;
 mod go_print;
 mod inline;
@@ -65,8 +67,9 @@ pub const MAX_OPTIONS: usize = 64;
 pub const MAX_MASKED_BYTES: usize = 256 * 1024;
 
 /// A resolved secret, such as a repository password. Its `Debug` form never
-/// shows the value, so it can't leak through a log or a test failure.
-#[derive(Clone, PartialEq, Eq)]
+/// shows the value, so it can't leak through a log or a test failure, and it
+/// wipes its bytes when it is dropped, each clone its own (§10.2).
+#[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct SecretValue(String);
 
 impl SecretValue {
@@ -996,6 +999,25 @@ mod tests {
             "a masked value still shows: {debug}"
         );
         assert_eq!(secret.expose(), "hunter2");
+    }
+
+    /// A secret wipes its bytes when it is dropped (it is `ZeroizeOnDrop`).
+    /// What its drop does is done here to one still in scope, so what is
+    /// left of it can be looked at; a clone has bytes of its own and is
+    /// wiped on its own.
+    #[test]
+    fn a_secret_wiped_as_its_drop_wipes_it_keeps_none_of_its_bytes() {
+        fn wiped_on_drop(_: &impl zeroize::ZeroizeOnDrop) {}
+        let mut secret = SecretValue::new("canary-7f3a");
+        let mut clone = secret.clone();
+        wiped_on_drop(&secret);
+
+        zeroize::Zeroize::zeroize(&mut secret);
+
+        assert_eq!(secret.expose(), "");
+        assert_eq!(clone.expose(), "canary-7f3a");
+        zeroize::Zeroize::zeroize(&mut clone);
+        assert_eq!(clone.expose(), "");
     }
 
     #[test]

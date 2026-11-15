@@ -64,6 +64,23 @@ fn a_password_and_a_token_are_never_shown() {
     assert!(!format!("{:?}", token(0xab)).contains("ab"));
 }
 
+/// A password wipes its bytes when it is dropped (it is `ZeroizeOnDrop`);
+/// what its drop does is done here to one still in scope.
+#[test]
+fn a_password_wiped_as_its_drop_wipes_it_keeps_none_of_its_bytes() {
+    fn wiped_on_drop(_: &impl zeroize::ZeroizeOnDrop) {}
+    let mut password = Password::new_admin("demo-admin-pass".to_owned()).unwrap();
+    let mut clone = password.clone();
+    wiped_on_drop(&password);
+
+    zeroize::Zeroize::zeroize(&mut password);
+
+    assert_eq!(password.expose(), "");
+    assert_eq!(clone.expose(), "demo-admin-pass");
+    zeroize::Zeroize::zeroize(&mut clone);
+    assert_eq!(clone.expose(), "");
+}
+
 #[test]
 fn a_token_is_written_as_lower_case_hex_and_read_back() {
     let mut bytes = [0u8; TOKEN_BYTES];

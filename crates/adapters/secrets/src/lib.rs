@@ -27,6 +27,7 @@ use async_trait::async_trait;
 use domain::secrets::{
     FileRead, KeyringEntry, Problem, SecretError, SecretRef, SecretValue, SourceName, decode,
 };
+use zeroize::Zeroizing;
 
 use keyring_store::{Failure, KeyringStore};
 
@@ -174,7 +175,10 @@ impl SystemSecrets {
             source: source.clone(),
             problem,
         };
-        let reading = tokio::task::spawn_blocking(move || store.get(&service, &name));
+        // Wrapped where it is read, so the copy is wiped wherever it is
+        // dropped: here, or later for a read that outlived the time limit.
+        let reading =
+            tokio::task::spawn_blocking(move || store.get(&service, &name).map(Zeroizing::new));
         let got = self.limited(&source, reading).await?;
         match got {
             Ok(secret) => Ok(resolved(decode(&source, secret.as_bytes(), |text| text)?)),

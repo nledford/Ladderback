@@ -22,7 +22,7 @@ UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling,
 | Embedding UI | `rust-embed` |
 | Auth | `argon2` (RustCrypto), `subtle` for comparing tokens in constant time, and a small cookie-session layer in the HTTP adapter (§10.1, decision 70) |
 | Crypto / identity | `ed25519-dalek`, `rustls` |
-| Secrets | `keyring` (macOS Keychain, Secret Service on Linux) |
+| Secrets | `keyring` (macOS Keychain, Secret Service on Linux); `zeroize` wipes a resolved secret's bytes when it is dropped (§10.2) |
 | Notifications | `reqwest` (webhooks, ntfy, Gotify, healthchecks.io), `lettre` (SMTP) |
 | Localization | `fluent-bundle`, `fluent-langneg`, `unic-langid`; `icu` (ICU4X) for dates and numbers in daemon-rendered text (§8.4) |
 | CLI | `clap` |

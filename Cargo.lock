@@ -172,6 +172,7 @@ dependencies = [
  "blake2",
  "cpufeatures 0.2.17",
  "password-hash",
+ "zeroize",
 ]
 
 [[package]]
@@ -1620,6 +1621,7 @@ dependencies = [
  "subtle",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -6027,6 +6029,7 @@ dependencies = [
  "tempfile",
  "testkit",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
