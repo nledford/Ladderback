@@ -99,4 +99,4 @@ Released (0.1.0–0.3.1) and running on the author's own machines. There are no 
 
 - Rust, built on `rustic_core`. The web UI is Leptos (client-side rendered), embedded in the binary.
 - [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
-- `DESIGN.md` (visual design system): not written yet. The shipped web UI in `crates/web` is the incumbent visual source until it is.
+- [DESIGN.md](DESIGN.md): the web UI's visual design system, its tokens taken from `crates/web/style.css`.
