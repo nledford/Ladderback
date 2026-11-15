@@ -68,6 +68,8 @@ Each fact lives in one file. Link to it rather than copying it. The design docum
 - Resolved secrets never appear in argv, environments, logs, templates, sync messages or the UI (I4).
 - Forget deletes only snapshots a plan owns or the user explicitly selected (I6).
 
+**Who is trusted** ([decision 99](docs/design/decisions/99-who-is-trusted.md)): the person and every program running as their operating-system user, AI tools included, are trusted with Ladderback's local data, its files and its SQLite store. Security work defends the network, other users of the machine, a repository's storage and outside text, and I4 holds regardless. A finding that needs a program already running as that user isn't a vulnerability. The Justfile's recipes are development tools: they must be correct and fail safely, nothing more.
+
 ## Never crash
 
 The daemon runs unattended and owns the operation queue, so a panic silently stops backups. Rules and reasons: §13.5.
@@ -154,6 +156,7 @@ Several agents may work on the repository at once (§13.5). Whoever starts them 
 - edits files and runs commands only inside that worktree, never in the main checkout. If a tool resolves relative paths against the main checkout, pass absolute paths or the `.worktrees/<slug>/` prefix. A container that runs tests mounts the worktree, not the main checkout, which holds every other worktree;
 - passes `--jobs` to `just mutants` when several agents share the machine (the recipe unsets `CARGO_TARGET_DIR` and `CARGO_BUILD_TARGET_DIR`, so the jobs don't share one build folder), uses its own ports (never `just serve`'s 9898) and its own scratch folder (`just try` gives a daemon both), and never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace;
+- runs the `rustic` CLI itself (a fixture repository, a measurement) with `--no-cache` or a `--cache-dir` inside its scratch folder: otherwise rustic writes to the developer's real cache folder, which `just try` and the tests keep out of (§16, decision 59);
 - adds a new §16 decision as `docs/design/decisions/NN-<slug>.md` plus its index row in §16, and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
 
 ## Conventions
