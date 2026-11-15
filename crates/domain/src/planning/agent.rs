@@ -336,16 +336,21 @@ impl AgentConfig {
     /// another has is refused as [`Violation::DuplicatePlan`] at the end of
     /// the list.
     pub fn add_plan(&self, plan: Plan) -> Result<Self, ChangeRefused> {
-        let _ = plan;
-        todo!()
+        let mut plans = self.plans.clone();
+        plans.push(plan);
+        self.with_plans(plans)
     }
 
     /// The configuration with `plan` in place of the plan with its ID, where
     /// that plan stands, the rest of it as it is, by the rules
     /// [`AgentConfig::new`] checks.
     pub fn change_plan(&self, plan: Plan) -> Result<Self, ChangeRefused> {
-        let _ = plan;
-        todo!()
+        let mut plans = self.plans.clone();
+        let Some(known) = plans.iter_mut().find(|known| known.id == plan.id) else {
+            return Err(ChangeRefused::UnknownPlan(plan.id));
+        };
+        *known = plan;
+        self.with_plans(plans)
     }
 
     /// The configuration without the plan `id`, the others in their order.
@@ -353,8 +358,25 @@ impl AgentConfig {
     /// [`Violation::UnknownRulePlan`]: the rule would name a plan the
     /// configuration doesn't have.
     pub fn remove_plan(&self, id: &PlanId) -> Result<Self, ChangeRefused> {
-        let _ = id;
-        todo!()
+        if self.plan(id).is_none() {
+            return Err(ChangeRefused::UnknownPlan(id.clone()));
+        }
+        let mut plans = self.plans.clone();
+        plans.retain(|plan| &plan.id != id);
+        self.with_plans(plans)
+    }
+
+    /// The configuration with `plans` as its plans, the rest of it as it is,
+    /// checked whole as a loaded one is.
+    fn with_plans(&self, plans: Vec<Plan>) -> Result<Self, ChangeRefused> {
+        Self::new(
+            self.agent.clone(),
+            self.hooks.clone(),
+            self.repositories.clone(),
+            plans,
+        )
+        .and_then(|config| config.with_notifications(self.notifications.clone()))
+        .map_err(ChangeRefused::Violation)
     }
 }
 
