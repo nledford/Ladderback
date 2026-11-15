@@ -388,6 +388,45 @@ Then(
   },
 );
 
+// What the page says of a mixed link is the page's, on every OS: the
+// scripted daemon adds the note a daemon gives a repository with a rule while
+// the link it last read was mixed. That a mixed link gives the note is the
+// host tests' (src/composition.rs), and that each platform's reader reads
+// each family's default route apart is the contract suite's
+// (crates/adapters/platform/tests/conditions.rs).
+Given(
+  "the machine's IPv4 traffic leaves by Wi-Fi and its IPv6 traffic by a wired network",
+  function (this: BrowserWorld) {
+    const { alias } = locations(this);
+    const daemon = this.scriptedDaemon ?? new ScriptedDaemon();
+    daemon.warnOfRepository(alias, {
+      code: "location-rule-mixed-link",
+      args: {
+        ipv4: { type: "text", value: "wifi" },
+        ipv6: { type: "text", value: "wired" },
+        locations: { type: "text", value: "several" },
+      },
+    });
+    this.scriptedDaemon = daemon;
+  },
+);
+
+Then(
+  "the repository {string} says its rules hold only where they hold for both IPv4 and IPv6, and how to make one link carry both",
+  async function (this: BrowserWorld, alias: string) {
+    const row = this.page.getByRole("row").filter({ hasText: alias });
+    await until(async () => {
+      if ((await row.count()) === 0) return false;
+      const text = await shown(row.first().innerText());
+      return (
+        text.includes("IPv4 by Wi-Fi and IPv6 by a wired network") &&
+        text.includes("holds here only if it holds for both") &&
+        text.includes("ipv6.route-metric")
+      );
+    }, `the repository ${alias} says its rules hold only where they hold for both IPv4 and IPv6, and how to make one link carry both`);
+  },
+);
+
 Then(
   "the repository {string} says the rule of location {int} can't tell the network it is meant for from one made to look like it, and recommends HTTPS",
   async function (this: BrowserWorld, alias: string, position: number) {

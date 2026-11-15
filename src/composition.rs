@@ -48,8 +48,8 @@ use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Target, Trigger, WarningKind};
 use domain::planning::{
-    Location, LocationRule, Maintenance, NameFilter, NotRecorded, Plan, RepositoryConfig,
-    RepositoryField, RepositorySettings, RuleNote,
+    InterfaceKind, Link, Location, LocationRule, Maintenance, NameFilter, NotRecorded, Plan,
+    RepositoryConfig, RepositoryField, RepositorySettings, RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
@@ -2443,7 +2443,7 @@ impl Catalog for ConfigCatalog {
         });
         if names_asked {
             let link = Arc::clone(&self.link);
-            tokio::spawn(async move { link.check_once().await });
+            tokio::spawn(async move { link.check_once(true).await });
         }
         let reads_names = self.link.reads_names();
         Ok(api::RepositoriesDto {
@@ -3202,6 +3202,16 @@ fn config_unusable<R>(
             unavailable(ErrorCode::ConfigInvalid, args, detail)
         }
     }
+}
+
+/// The Repositories page's note on `repository` while `link`, the link the
+/// daemon last read, is mixed and the entry has a rule (decision 80): the
+/// kind of link each family's traffic leaves by, never an interface's name.
+fn mixed_link_note(
+    _repository: &RepositoryConfig,
+    _link: Option<Link>,
+) -> Option<api::WarningDto> {
+    todo!()
 }
 
 /// A configured entry as the repositories list shows it: its row, with the
@@ -4180,6 +4190,46 @@ mod tests {
         assert_eq!(row.locations, Vec::new());
         let wire = serde_json::to_value(&row).expect("a row is JSON");
         assert_eq!(wire.get("locations"), None, "{wire}");
+    }
+
+    /// The note names each family's kind of link, by its code, and says of
+    /// a repository of one location that it is one; an entry with no rule,
+    /// a link of one interface and a link not read are not noted.
+    #[test]
+    fn a_mixed_link_is_noted_by_the_kind_of_each_family_s_link() {
+        use domain::planning::NetworkKind;
+        let mixed = Some(Link::Mixed {
+            ipv4: InterfaceKind::WiFi,
+            ipv6: InterfaceKind::Other,
+        });
+        let mut entry = two_locations();
+        assert_eq!(mixed_link_note(&entry, mixed), None, "no rule");
+        entry.locations.further[0].when =
+            Some(LocationRule::new(vec![NetworkKind::Wired.into()]).expect("a rule"));
+        let args = |locations: &str| -> std::collections::BTreeMap<String, MsgArg> {
+            [
+                ("ipv4".to_owned(), MsgArg::Text("wifi".to_owned())),
+                ("ipv6".to_owned(), MsgArg::Text("other".to_owned())),
+                ("locations".to_owned(), MsgArg::Text(locations.to_owned())),
+            ]
+            .into()
+        };
+        assert_eq!(
+            mixed_link_note(&entry, mixed),
+            Some(api::WarningDto {
+                code: WarningCode::LocationRuleMixedLink,
+                args: args("several"),
+            })
+        );
+        for link in [Some(Link::WiFi), Some(Link::NoRoute), None] {
+            assert_eq!(mixed_link_note(&entry, link), None, "{link:?}");
+        }
+        entry.locations.first_when = entry.locations.further[0].when.clone();
+        entry.locations.further.clear();
+        assert_eq!(
+            mixed_link_note(&entry, mixed).map(|note| note.args),
+            Some(args("one"))
+        );
     }
 
     /// The page lists no locations for a repository of one, so neither its

@@ -1334,6 +1334,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::LocationEveryRuled
                 | WarningCode::LocationLastRuledNoRetry
                 | WarningCode::LocationRuleNameUnreadable
+                | WarningCode::LocationRuleMixedLink
                 // The daemon's notifier says it, never a worker.
                 | WarningCode::NotificationUndelivered
                 | WarningCode::Unknown => WarningKind::Other,

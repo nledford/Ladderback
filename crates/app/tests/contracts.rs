@@ -745,6 +745,48 @@ impl contract::network_link::NetworkLinkHarness for FakeNetworkLinkHarness {
             detail: "two networks".to_owned(),
         }))
     }
+
+    fn ipv4_only(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::WiFi))
+    }
+
+    fn ipv6_only(&self) -> Arc<dyn app::ports::NetworkLink> {
+        Self::saying(Ok(domain::planning::Link::Wired))
+    }
+
+    fn both_on_network(&self, name: &str) -> Arc<dyn app::ports::NetworkLink> {
+        self.on_network(name)
+    }
+
+    fn mixed(&self, name: &str) -> Arc<dyn app::ports::NetworkLink> {
+        use domain::planning::{CurrentNetworkName, Family, InterfaceKind, Link};
+        let link = Arc::new(app::fakes::FakeNetworkLink::new());
+        link.set(Ok(Link::Mixed {
+            ipv4: InterfaceKind::WiFi,
+            ipv6: InterfaceKind::Wired,
+        }));
+        link.set_name_of(
+            None,
+            Err(app::ports::PlatformError::Unreadable {
+                from: "fake".to_owned(),
+                detail: "a mixed link".to_owned(),
+            }),
+        );
+        link.set_name_of(
+            Some(Family::Ipv4),
+            Ok(CurrentNetworkName::new(name.as_bytes())),
+        );
+        link.set_name_of(Some(Family::Ipv6), Ok(None));
+        link
+    }
+
+    /// The fake lists no routes: it says the link they make.
+    fn carries_nothing(
+        &self,
+        _family: domain::planning::Family,
+    ) -> Vec<Arc<dyn app::ports::NetworkLink>> {
+        vec![self.wifi()]
+    }
 }
 
 #[tokio::test]

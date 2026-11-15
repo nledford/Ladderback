@@ -12,6 +12,7 @@ mod agent;
 mod duration;
 mod filter;
 mod hooks;
+mod link;
 mod local_paths;
 mod location;
 mod names;
@@ -27,11 +28,14 @@ pub use agent::{
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
 pub use filter::{NeverMatchingGlob, Placement, SourceFilter};
 pub use hooks::{HookEntry, Hooks, OnFailure};
+pub use link::{
+    DefaultRoute, DefaultRoutes, Family, InterfaceKind, Link, Outgoing, RouteState, WiFiNames,
+};
 pub(crate) use local_paths::is_relative_program;
 pub use local_paths::{RepositoryField, is_relative_location};
 pub use location::{
     ExposedCredentials, LOCATION_PROBE_SECONDS, Location, LocationWarning, Locations,
-    MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, RuleNote, check_location_count,
+    MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, MixedLinkNote, RuleNote, check_location_count,
 };
 pub use names::{GlobFile, Hostname, Locale, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
@@ -41,7 +45,7 @@ pub use repository::{
 };
 pub use retention::{KeepCount, KeepWithin, RetentionPolicy};
 pub use rule::{
-    Alternative, CurrentNetworkName, Link, LocationRule, MAX_NETWORK_NAME_BYTES, MAX_NETWORK_NAMES,
+    Alternative, CurrentNetworkName, LocationRule, MAX_NETWORK_NAME_BYTES, MAX_NETWORK_NAMES,
     MAX_RULE_ALTERNATIVES, NameFilter, NetworkKind, NetworkName, RuleVerdict,
 };
 pub use schedule::{

@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use app::ports::{NetworkLink, PlatformError};
 use async_trait::async_trait;
-use domain::planning::{CurrentNetworkName, Link};
+use domain::planning::{CurrentNetworkName, Family, Link};
 
 use crate::source::{self, Program, attribute, unrecognized};
 
@@ -112,7 +112,13 @@ impl NetworkLink for KernelLink {
 
     /// The kernel's tables, then NetworkManager, under one bound; a read
     /// given up names the one it was waiting on.
-    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+    async fn network_name(
+        &self,
+        family: Option<Family>,
+    ) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        if family.is_some() {
+            todo!()
+        }
         let given_up_at = tokio::time::Instant::now() + self.timeout;
         let reader = self.clone();
         let wifi = source::blocking(self.route.display(), self.timeout, move || {
@@ -390,7 +396,13 @@ impl NetworkLink for RouteLink {
     }
 
     /// `None` when the default route's interface isn't the Wi-Fi port.
-    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+    async fn network_name(
+        &self,
+        family: Option<Family>,
+    ) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        if family.is_some() {
+            todo!()
+        }
         let interface = self.interface().await?;
         let ports = self.ports.output().await?;
         if hardware_port(self.ports.path.as_path(), &ports, &interface)? != Port::WiFi {

@@ -27,9 +27,10 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::retry::RetrySchedule;
 use domain::execution::{Operation, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
-    AgentConfig, AgentSettings, Alternative, CurrentNetworkName, Hooks, Interval, KeepCount, Link,
-    Location, LocationRule, LocationWarning, Locations, Maintenance, NameFilter, NetworkKind,
-    NetworkName, Plan, RepositoryConfig, RepositorySettings, RetryPolicy, RuleNote, Schedule,
+    AgentConfig, AgentSettings, Alternative, CurrentNetworkName, DefaultRoute, DefaultRoutes,
+    Family, Hooks, InterfaceKind, Interval, KeepCount, Link, Location, LocationRule,
+    LocationWarning, Locations, Maintenance, MixedLinkNote, NameFilter, NetworkKind, NetworkName,
+    Plan, RepositoryConfig, RepositorySettings, RetryPolicy, RouteState, RuleNote, Schedule,
     Source, SourceFilter,
 };
 use domain::secrets::SecretRef;
@@ -96,6 +97,10 @@ pub struct LocationsWorld {
     /// The machine's network link, which the locations' rules are
     /// evaluated against.
     link: Arc<FakeNetworkLink>,
+    /// The default routes the machine lists, the link chosen from them, and
+    /// by interface the Wi-Fi network each has joined.
+    routes: Vec<DefaultRoute>,
+    joined: BTreeMap<String, CurrentNetworkName>,
     /// What a person's Test of the locations found.
     tested: Option<LocationsRecord>,
     /// Whether the plan "home" is scheduled, and if so whether it retries
@@ -1651,6 +1656,188 @@ fn link_unknown(agent: &mut Agent) {
             detail: "nothing to read".to_owned(),
         }),
     );
+}
+
+/// The interfaces of the machine whose default routes a scenario lists.
+const WIRED: &str = "eth0";
+const WIFI: &str = "wlan0";
+const SECOND_WIFI: &str = "wlan1";
+
+fn family(name: &str) -> Family {
+    match name {
+        "IPv4" => Family::Ipv4,
+        "IPv6" => Family::Ipv6,
+        other => panic!("no IP family {other}"),
+    }
+}
+
+/// A default route of `family` out of `interface`, which carries traffic.
+fn carrying(family: Family, interface: &str, kind: InterfaceKind) -> DefaultRoute {
+    DefaultRoute {
+        family,
+        metric: 100,
+        interface: interface.to_owned(),
+        state: RouteState::Carries(kind),
+    }
+}
+
+/// Changes the default routes the machine lists, and sets its link and the
+/// names of the Wi-Fi networks it is on as the platform reads them from
+/// those routes: for the scenario's rules and the scheduler's alike.
+fn machine_routes(agent: &mut Agent, change: impl FnOnce(&mut Vec<DefaultRoute>)) {
+    change(&mut agent.locations.routes);
+    let routes = DefaultRoutes::choose(agent.locations.routes.clone());
+    machine_on(agent, Ok(routes.link()));
+    for asked in [None, Some(Family::Ipv4), Some(Family::Ipv6)] {
+        let name = match routes.interface(asked) {
+            Some(out) if out.kind == InterfaceKind::WiFi => {
+                Ok(agent.locations.joined.get(&out.interface).cloned())
+            }
+            Some(_) => Ok(None),
+            None => Err(PlatformError::Unreadable {
+                from: "the demo machine".to_owned(),
+                detail: "no such route".to_owned(),
+            }),
+        };
+        agent.locations.link.set_name_of(asked, name.clone());
+        agent.scheduler.link().set_name_of(asked, name);
+    }
+}
+
+/// Lists a default route of `family` that carries traffic out of
+/// `interface`, joined to the Wi-Fi network `network` if one is given.
+fn leaves_by(
+    agent: &mut Agent,
+    family: Family,
+    interface: &str,
+    kind: InterfaceKind,
+    network: Option<&str>,
+) {
+    if let Some(network) = network {
+        let name = CurrentNetworkName::new(network.as_bytes()).expect("a network's name");
+        agent.locations.joined.insert(interface.to_owned(), name);
+    }
+    machine_routes(agent, |routes| {
+        routes.retain(|route| route.family != family);
+        routes.push(carrying(family, interface, kind));
+    });
+}
+
+/// The link the machine's default routes make.
+fn routes_link(agent: &Agent) -> Link {
+    DefaultRoutes::choose(agent.locations.routes.clone()).link()
+}
+
+#[given(regex = r"^the machine's (IPv4|IPv6) traffic leaves by a wired network$")]
+fn family_wired(agent: &mut Agent, name: String) {
+    leaves_by(agent, family(&name), WIRED, InterfaceKind::Wired, None);
+}
+
+#[given(regex = r"^the machine's (IPv4|IPv6) traffic leaves by Wi-Fi$")]
+fn family_wifi(agent: &mut Agent, name: String) {
+    leaves_by(agent, family(&name), WIFI, InterfaceKind::WiFi, None);
+}
+
+#[given(regex = r#"^the machine's (IPv4|IPv6) traffic leaves by Wi-Fi, on the network "([^"]+)"$"#)]
+fn family_named_wifi(agent: &mut Agent, name: String, network: String) {
+    leaves_by(
+        agent,
+        family(&name),
+        WIFI,
+        InterfaceKind::WiFi,
+        Some(&network),
+    );
+}
+
+#[given(
+    regex = r#"^the machine's (IPv4|IPv6) traffic leaves by a second Wi-Fi interface, on the network "([^"]+)"$"#
+)]
+fn family_second_wifi(agent: &mut Agent, name: String, network: String) {
+    leaves_by(
+        agent,
+        family(&name),
+        SECOND_WIFI,
+        InterfaceKind::WiFi,
+        Some(&network),
+    );
+}
+
+#[given(
+    expr = "the machine's IPv4 and IPv6 traffic leave by one Wi-Fi interface, on the network {string}"
+)]
+fn both_one_wifi(agent: &mut Agent, network: String) {
+    for family in [Family::Ipv4, Family::Ipv6] {
+        leaves_by(agent, family, WIFI, InterfaceKind::WiFi, Some(&network));
+    }
+}
+
+#[given("the machine's IPv4 and IPv6 traffic leave by one wired interface")]
+fn both_one_wired(agent: &mut Agent) {
+    for family in [Family::Ipv4, Family::Ipv6] {
+        leaves_by(agent, family, WIRED, InterfaceKind::Wired, None);
+    }
+}
+
+#[given(regex = r"^the machine has no (IPv4|IPv6) default route$")]
+fn no_family_route(agent: &mut Agent, name: String) {
+    let family = family(&name);
+    machine_routes(agent, |routes| {
+        routes.retain(|route| route.family != family);
+    });
+}
+
+#[given("the machine has no default route in either family")]
+fn no_route_at_all(agent: &mut Agent) {
+    machine_routes(agent, Vec::clear);
+}
+
+/// An IPv6 default route that carries nothing, listed with a lower metric
+/// than the IPv4 one, as an `unreachable` route of the kernel's is.
+#[given(regex = r"^the machine's only IPv6 default route (.+)$")]
+fn ipv6_route_carries_nothing(agent: &mut Agent, route: String) {
+    let (interface, state) = match route.as_str() {
+        "is unreachable" | "is a blackhole" | "is prohibited" => ("lo", RouteState::LeadsNowhere),
+        "leaves by a wired interface that is down"
+        | "leaves by a wired interface with no carrier" => (WIRED, RouteState::InterfaceDown),
+        other => panic!("no IPv6 default route that {other}"),
+    };
+    machine_routes(agent, |routes| {
+        routes.retain(|route| route.family != Family::Ipv6);
+        routes.push(DefaultRoute {
+            family: Family::Ipv6,
+            metric: 1,
+            interface: interface.to_owned(),
+            state,
+        });
+    });
+}
+
+#[given(expr = "the location {string} is eligible only on any Wi-Fi network")]
+fn eligible_any_wifi(agent: &mut Agent, name: String) {
+    agent.locations.change_location(&name, |location| {
+        location.when = Some(rule(&[NetworkKind::WiFi]));
+    });
+}
+
+#[then(
+    expr = "the repository {string} notes that this machine's IPv4 traffic leaves by Wi-Fi and its IPv6 traffic by a wired network"
+)]
+fn notes_mixed_link(agent: &mut Agent, name: String) {
+    let note = agent.locations.entries[&name].link_note(Some(routes_link(agent)));
+    assert_eq!(
+        note,
+        Some(MixedLinkNote {
+            ipv4: InterfaceKind::WiFi,
+            ipv6: InterfaceKind::Wired,
+        })
+    );
+}
+
+#[then(expr = "the repository {string} carries no note that the link is mixed")]
+fn notes_no_mixed_link(agent: &mut Agent, name: String) {
+    let link = routes_link(agent);
+    assert_eq!(link, Link::Wired, "the scenario's link is one interface");
+    assert_eq!(agent.locations.entries[&name].link_note(Some(link)), None);
 }
 
 #[given(expr = "a run of the plan {string} is queued while the machine is on a wired network")]

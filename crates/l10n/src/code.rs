@@ -134,6 +134,7 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     LocationEveryRuled => msg::WARNING_LOCATION_EVERY_RULED,
     LocationLastRuledNoRetry => msg::WARNING_LOCATION_LAST_RULED_NO_RETRY,
     LocationRuleNameUnreadable => msg::WARNING_LOCATION_RULE_NAME_UNREADABLE,
+    LocationRuleMixedLink => msg::WARNING_UNKNOWN,
     ProfileLocationsNotExported => msg::WARNING_PROFILE_LOCATIONS_NOT_EXPORTED,
     HookWarning => msg::WARNING_HOOK_WARNING,
     MaintenancePartial => msg::WARNING_MAINTENANCE_PARTIAL,
