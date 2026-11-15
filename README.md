@@ -55,7 +55,7 @@ The [technical design](docs/design/README.md#relationship-to-backrest) has the f
 
 ## Install
 
-On Linux, each release from 0.3.1 on has a download for `x86_64` and `aarch64` with its checksums: the [install guide](docs/guide/install.md#download-a-release-linux) has the commands. macOS has no download yet, so there, or on Linux if you prefer, one command builds the newest release from source:
+One command installs the newest release. On 64-bit Linux (x86_64 or aarch64, glibc 2.35 or newer) it downloads the release's archive and checks it against the release's checksums; on macOS, which has no download yet, and elsewhere, it builds the release from source:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash
@@ -69,7 +69,7 @@ less install.sh
 bash install.sh
 ```
 
-The script asks before it installs anything. The [install guide](docs/guide/install.md) says what it checks and installs, and has the steps to build by hand, how to update, how to run Ladderback as a service and what macOS asks for.
+To build from source on Linux too, pass `--from-source`: `curl -fsSL … | bash -s -- --from-source`, or `bash install.sh --from-source`. A build asks before it installs any tool. The [install guide](docs/guide/install.md) says what the script checks and installs, how to download a release or build one by hand, how to update, how to run Ladderback as a service and what macOS asks for.
 
 ## Quick start
 

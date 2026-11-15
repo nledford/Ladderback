@@ -145,7 +145,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [76](decisions/76-retries-of-a-failed-backup.md) | Retries of a failed backup |
 | [77](decisions/77-which-characters-go-prints.md) | Which characters Go prints |
 | [78](decisions/78-the-rust-toolchain-is-pinned.md) | The Rust toolchain is pinned, and the MSRV is the pin |
-| [79](decisions/79-a-from-source-install-script.md) | A from-source install script |
+| [79](decisions/79-a-from-source-install-script.md) | The install script: the Linux archive, or a build from source |
 | [80](decisions/80-repository-locations.md) | A repository reached at several locations |
 | [81](decisions/81-identify-a-repository-before-its-first-job.md) | A job of an entry that records no repository ID runs after an identify |
 | [82](decisions/82-the-step-a-running-operation-is-in.md) | How a page learns which step a running operation is in |

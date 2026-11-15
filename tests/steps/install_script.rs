@@ -14,10 +14,13 @@
 //! (`cargo install`, rustup's installer) are copied from
 //! `install/state/templates` into `~/.cargo/bin`, as the real ones would be.
 //! `curl` serves trunk's release archive from `install/state`: a tarball
-//! holding a trunk stand-in, built when a scenario removes trunk. The
-//! `sha256sum` stand-in gives that genuine archive the SHA-256 the script
-//! pins for the file's name, read from the script, and any other bytes
-//! another hash, so a tampered archive fails the script's check.
+//! holding a trunk stand-in, built when a scenario removes trunk. It serves
+//! Ladderback's newest release from `install/state/release`, the archives and
+//! `SHA256SUMS` a scenario wrote there, and answers 404, as GitHub does, for
+//! a file that isn't there. The `sha256sum` stand-in gives the genuine trunk
+//! archive the SHA-256 the script pins for the file's name, read from the
+//! script, and any other file its real SHA-256, so a tampered archive fails
+//! the script's check.
 //! `git` is the real one behind a stand-in that logs its calls, and the home
 //! folder's git configuration sends the script's clone of Ladderback's URL to
 //! `upstream`, a local repository with releases of the scenario's choosing.
@@ -25,12 +28,14 @@
 //! `LADDERBACK_INSTALL_TTY` names it, so no real terminal is ever asked.
 
 use std::assert_matches;
+use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use cucumber::{given, then, when};
+use sha2::{Digest, Sha256};
 
 use super::interop_steps::{Ran, ran};
 use super::{Agent, blocking};
@@ -84,19 +89,32 @@ esac
 
 /// Installs a `ladderback` that reports the version the checked-out
 /// `Cargo.toml` holds, into `bin` under `--root` or `~/.cargo`, as `cargo
-/// install --path .` would. Its arguments are `cargo install`'s.
+/// install --path .` would. Its arguments are `cargo install`'s. As cargo
+/// does, it lists what it installed in the root's `.crates.toml`, and
+/// refuses to overwrite a `ladderback` it didn't install, such as a release
+/// archive's, without `--force`.
 const INSTALL_LADDERBACK: &str = r#"root="$HOME/.cargo"
+force=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) root=$2; shift ;;
     --root=*) root=${1#--root=} ;;
+    --force) force=1 ;;
   esac
   shift
 done
+tracked=0
+if /usr/bin/grep -qx ladderback "$root/.crates.toml" 2>/dev/null; then tracked=1; fi
+if [ -e "$root/bin/ladderback" ] && [ "$tracked" = 0 ] && [ "$force" = 0 ]; then
+  echo 'error: binary `ladderback` already exists in destination' >&2
+  echo 'Add --force to overwrite' >&2
+  exit 101
+fi
 version=$(/usr/bin/sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)
 /bin/mkdir -p "$root/bin"
 printf '#!/bin/sh\necho "ladderback %s"\n' "$version" > "$root/bin/ladderback"
 /bin/chmod 755 "$root/bin/ladderback"
+[ "$tracked" = 1 ] || echo ladderback >> "$root/.crates.toml"
 "#;
 
 /// `cargo +stable install --locked [-j <n>] <tool>…` installs the tools'
@@ -256,10 +274,12 @@ const UNAME: &str = r#"case "$1" in
 esac
 "#;
 
-/// `getconf`: the glibc, the processors online, and the free memory in
-/// pages of 4 KiB.
+/// `getconf`: the glibc (none, as on musl, without `install/state/glibc`),
+/// the width of the system's programs, the processors online, and the free
+/// memory in pages of 4 KiB.
 const GETCONF: &str = r#"case "$1" in
-  GNU_LIBC_VERSION) printf 'glibc %s\n' "$(/bin/cat "$state/glibc")" ;;
+  GNU_LIBC_VERSION) [ -f "$state/glibc" ] || exit 1; printf 'glibc %s\n' "$(/bin/cat "$state/glibc")" ;;
+  LONG_BIT) /bin/cat "$state/long-bit" ;;
   _NPROCESSORS_ONLN) /bin/cat "$state/processors" ;;
   _AVPHYS_PAGES) /bin/cat "$state/free-pages" ;;
   PAGESIZE) echo 4096 ;;
@@ -267,34 +287,53 @@ const GETCONF: &str = r#"case "$1" in
 esac
 "#;
 
-/// Saves trunk's release archive for a URL under trunk's releases, and
-/// rustup's installer, the `rustup-init` stand-in, for any other, where `-o`
-/// says. A URL that starts with the one `install/state/curl-stalls` names
-/// stalls: given a stall limit (`--speed-limit` and `--speed-time`), it is
-/// cut off as the real curl cuts it off, exit 28 and curl's message;
-/// without one, the real download would never end, which the stand-in
-/// reports as an exit of its own rather than hang the scenario.
+/// Saves trunk's release archive for a URL under trunk's releases, a file of
+/// Ladderback's newest release for a URL under its releases, and rustup's
+/// installer, the `rustup-init` stand-in, for any other, where `-o` says. A
+/// release file that isn't there is a 404, as `--fail` reports it from
+/// GitHub with curl 8.7 over HTTP/2: exit 56, not the 22 curl's manual gives.
+/// With `--write-out`, it prints the HTTP status, as `%{http_code}` does.
+/// A URL that starts with the one `install/state/curl-stalls` names stalls:
+/// given a stall limit (`--speed-limit` and `--speed-time`), it is cut off
+/// as the real curl cuts it off, exit 28 and curl's message, leaving the
+/// part it got in the file; without one, the real download would never end,
+/// which the stand-in reports as an exit of its own rather than hang the
+/// scenario. One that starts with the URL `install/state/curl-fails` names
+/// gets a server error, after curl's retries. Where `install/state/release-http`
+/// is a folder, a release URL redirects to plain HTTP, which serves that
+/// folder's files: curl follows it, unless `--proto` allows only HTTPS,
+/// which holds for redirects too, when it refuses as the real curl 8.7.1
+/// does, exit 1, the redirect's status as the last one.
 const CURL: &str = r#"out=''
 url=''
 speed_limit=''
 speed_time=''
+write_out=''
+proto=''
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift ;;
     --speed-limit) speed_limit=$2; shift ;;
     --speed-time) speed_time=$2; shift ;;
+    --write-out) write_out=$2; shift ;;
+    --proto) proto=$2; shift ;;
     https://*) url=$1 ;;
   esac
   shift
 done
 [ -n "$out" ] || exit 64
+status() {
+  [ -z "$write_out" ] || printf '%s' "$1"
+}
 stalls=''
 [ ! -f "$state/curl-stalls" ] || stalls=$(/bin/cat "$state/curl-stalls")
 if [ -n "$stalls" ]; then
   case "$url" in
     "$stalls"*)
       if [ -n "$speed_limit" ] && [ -n "$speed_time" ]; then
+        printf 'the first bytes' > "$out"
         printf 'curl: (28) Operation too slow. Less than %s bytes/sec transferred the last %s seconds\n' "$speed_limit" "$speed_time" >&2
+        status 000
         exit 28
       fi
       echo "the curl stand-in: with no --speed-limit and --speed-time this stalled download would never end" >&2
@@ -302,20 +341,49 @@ if [ -n "$stalls" ]; then
       ;;
   esac
 fi
+fails=''
+[ ! -f "$state/curl-fails" ] || fails=$(/bin/cat "$state/curl-fails")
+if [ -n "$fails" ]; then
+  case "$url" in
+    "$fails"*)
+      echo 'curl: (22) The requested URL returned error: 503' >&2
+      status 503
+      exit 22
+      ;;
+  esac
+fi
 case "$url" in
+  https://github.com/nledford/Ladderback/releases/latest/download/*)
+    file="$state/release/${url##*/}"
+    if [ -d "$state/release-http" ]; then
+      if [ "$proto" = '=https' ]; then
+        echo 'curl: (1) Protocol "http" disabled (in redirect)' >&2
+        status 302
+        exit 1
+      fi
+      file="$state/release-http/${url##*/}"
+    fi
+    if [ ! -f "$file" ]; then
+      echo 'curl: (56) The requested URL returned error: 404' >&2
+      status 404
+      exit 56
+    fi
+    /bin/cp "$file" "$out" ;;
   https://github.com/trunk-rs/trunk/releases/download/*) /bin/cp "$state/trunk-served.tar.gz" "$out" ;;
   *) /bin/cp "$state/templates/rustup-init" "$out" ;;
-esac
+esac || exit 1
+status 200
 "#;
 
 /// The genuine trunk archive has the SHA-256 the script pins for the file's
-/// name (`install/state/pinned/<name>`); any other bytes hash to something
-/// else.
+/// name (`install/state/pinned/<name>`); any other file its real SHA-256.
 const SHA256SUM: &str = r#"pinned="$state/pinned/${1##*/}"
 if /usr/bin/cmp -s "$1" "$state/trunk-genuine.tar.gz" && [ -f "$pinned" ]; then
   printf '%s  %s\n' "$(/bin/cat "$pinned")" "$1"
+elif [ -x /usr/bin/sha256sum ]; then
+  /usr/bin/sha256sum "$1"
 else
-  printf '%s  %s\n' 0000000000000000000000000000000000000000000000000000000000000000 "$1"
+  /usr/bin/shasum -a 256 "$1"
 fi
 "#;
 
@@ -353,8 +421,15 @@ const PACKAGE_MANAGERS: &[&str] = &["brew", "apt-get", "dnf", "pacman"];
 /// Real tools the script and its stand-ins need, linked into the stand-ins'
 /// folder.
 const REAL_TOOLS: &[&str] = &[
-    "sh", "cat", "mkdir", "mktemp", "rm", "tar", "gzip", "install",
+    "sh", "cat", "mkdir", "mktemp", "mv", "rm", "tar", "gzip", "install",
 ];
+
+/// Real tools linked in where the test's system has them: GNU tar needs xz
+/// to unpack a `.tar.xz`, which macOS's tar unpacks itself.
+const REAL_TOOLS_IF_ANY: &[&str] = &["xz"];
+
+/// Where the newest release's files are, for the `curl` stand-in to serve.
+const RELEASE_URL: &str = "https://github.com/nledford/Ladderback/releases/";
 
 fn home(agent: &Agent) -> PathBuf {
     agent.scratch().join("home")
@@ -402,11 +477,14 @@ fn expand(agent: &Agent, text: &str) -> String {
 
 /// `name`'s full path, from the test's own `PATH`.
 fn real(name: &str) -> PathBuf {
+    real_if_any(name).unwrap_or_else(|| panic!("{name} is on the PATH"))
+}
+
+fn real_if_any(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH").expect("a PATH");
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())
-        .unwrap_or_else(|| panic!("{name} is on the PATH"))
 }
 
 /// Writes a runnable file. Written while no child starts: a child forked
@@ -612,6 +690,11 @@ fn every_tool_installed(agent: &mut Agent) {
         std::os::unix::fs::symlink(real(name), bin(agent).join(name))
             .expect("a real tool is linked");
     }
+    for name in REAL_TOOLS_IF_ANY {
+        if let Some(path) = real_if_any(name) {
+            std::os::unix::fs::symlink(path, bin(agent).join(name)).expect("a real tool is linked");
+        }
+    }
     // The oldest Node.js the script accepts, so every scenario that installs
     // shows that it is enough.
     set(agent, "node-version", "26.0.0");
@@ -620,6 +703,7 @@ fn every_tool_installed(agent: &mut Agent) {
     set(agent, "uname-s", "Linux");
     set(agent, "uname-m", "x86_64");
     set(agent, "glibc", "2.39");
+    set(agent, "long-bit", "64");
     fs::create_dir_all(state(agent).join("toolchains")).expect("rustup's toolchains");
     fs::write(pinned_rust(agent), pinned_rust_components(None))
         .expect("rustup has the Rust the release pins");
@@ -659,6 +743,23 @@ fn system_on(agent: &mut Agent, os: String, machine: String) {
         if os == "macOS" { "Darwin" } else { "Linux" },
     );
     set(agent, "uname-m", &machine);
+}
+
+/// A musl system's getconf knows no glibc.
+#[given(expr = "the system is Linux on {string} with musl, not glibc")]
+fn linux_with_musl(agent: &mut Agent, machine: String) {
+    set(agent, "uname-s", "Linux");
+    set(agent, "uname-m", &machine);
+    fs::remove_file(state(agent).join("glibc")).expect("the stand-in's glibc");
+}
+
+/// 32-bit Raspberry Pi OS: a 64-bit kernel, whose `uname -m` says
+/// `aarch64`, running 32-bit programs.
+#[given(expr = "the system is Linux on {string}, running 32-bit programs")]
+fn linux_running_32_bit(agent: &mut Agent, machine: String) {
+    set(agent, "uname-s", "Linux");
+    set(agent, "uname-m", &machine);
+    set(agent, "long-bit", "32");
 }
 
 #[given(expr = "the system is Linux on {string} with {int} processors and {int} GB of free memory")]
@@ -731,7 +832,7 @@ async fn trunk_removed(agent: &Agent) {
     remove_tool(agent, "trunk");
     let archive = state(agent).join("trunk-genuine.tar.gz");
     let trunk = stand_in(agent, RELEASED_TRUNK);
-    trunk_archive(agent, "trunk-release", &trunk, archive.clone()).await;
+    trunk_archive(agent, "trunk-release", &trunk, &archive).await;
     fs::copy(&archive, state(agent).join("trunk-served.tar.gz")).expect("the served archive");
     let pinned = state(agent).join("pinned");
     fs::create_dir_all(&pinned).expect("the pinned SHA-256s' folder");
@@ -743,17 +844,23 @@ async fn trunk_removed(agent: &Agent) {
 /// Writes `archive`, a gzipped tarball holding `trunk` alone, as trunk's
 /// release archives do, with `text` in it; `folder` is the scratch folder,
 /// under the state folder, it is packed from.
-async fn trunk_archive(agent: &Agent, folder: &str, text: &str, archive: PathBuf) {
+async fn trunk_archive(agent: &Agent, folder: &str, text: &str, archive: &Path) {
     let folder = state(agent).join(folder);
     fs::create_dir_all(&folder).expect("the archive's folder");
     write_runnable(&folder.join("trunk"), text);
+    pack(archive, "-czf", &folder, "trunk").await;
+}
+
+/// Packs `member` of `folder` into `archive` with the real tar, `create`
+/// saying how (`-czf`, `-cJf`).
+async fn pack(archive: &Path, create: &str, folder: &Path, member: &str) {
     let mut command = Command::new(real("tar"));
     command
-        .arg("-czf")
-        .arg(&archive)
+        .arg(create)
+        .arg(archive)
         .arg("-C")
-        .arg(&folder)
-        .arg("trunk")
+        .arg(folder)
+        .arg(member)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
@@ -805,7 +912,7 @@ fn trunk_pins() -> (Option<String>, Vec<(String, String)>) {
 async fn trunk_replaced(agent: &mut Agent) {
     let other = stand_in(agent, "echo 'trunk (not from its release)'\n");
     let served = state(agent).join("trunk-served.tar.gz");
-    trunk_archive(agent, "trunk-other", &other, served).await;
+    trunk_archive(agent, "trunk-other", &other, &served).await;
 }
 
 #[given("trunk's release can't be downloaded")]
@@ -814,14 +921,166 @@ fn trunk_unavailable(agent: &mut Agent) {
 }
 
 /// The `curl` stand-in stalls on every URL that starts with this one.
-#[given(regex = r"^the download of (trunk's release|rustup's installer) stalls$")]
+#[given(
+    regex = r"^the download of (trunk's release|rustup's installer|the release's archive) stalls$"
+)]
 fn download_stalls(agent: &mut Agent, download: String) {
-    let url = if download == "trunk's release" {
-        "https://github.com/trunk-rs/trunk/releases/"
-    } else {
-        "https://sh.rustup.rs"
+    let url = match download.as_str() {
+        "trunk's release" => "https://github.com/trunk-rs/trunk/releases/".to_owned(),
+        "rustup's installer" => "https://sh.rustup.rs".to_owned(),
+        _ => format!("{RELEASE_URL}latest/download/ladderback-"),
     };
-    set(agent, "curl-stalls", url);
+    set(agent, "curl-stalls", &url);
+}
+
+/// The `curl` stand-in gets a server error for every URL that starts with
+/// this one.
+#[given("the download of the release's archive fails with a server error")]
+fn release_download_fails(agent: &mut Agent) {
+    set(
+        agent,
+        "curl-fails",
+        &format!("{RELEASE_URL}latest/download/ladderback-"),
+    );
+}
+
+/// The targets each release publishes an archive for.
+const ARCHIVE_TARGETS: [&str; 2] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"];
+
+/// A release with an archive for each Linux target, as the release attaches
+/// them: `ladderback-<target>.tar.xz`, holding `ladderback-<target>/ladderback`,
+/// a stand-in that reports the tag's version, and `SHA256SUMS`, their
+/// checksums as `sha256sum` writes them, for the `curl` stand-in to serve.
+#[given(
+    expr = "Ladderback has since released {string}, with archives for Linux and their checksums"
+)]
+async fn has_since_released_with_archives(agent: &mut Agent, tag: String) {
+    release(agent, &tag).await;
+    let version = tag.trim_start_matches('v');
+    let mut sums = String::new();
+    for target in ARCHIVE_TARGETS {
+        let binary = stand_in(
+            agent,
+            &format!("# The release's binary for {target}.\necho 'ladderback {version}'\n"),
+        );
+        let archive = release_archive(agent, "release-build", "release", target, &binary).await;
+        let digest = Sha256::digest(fs::read(&archive).expect("the release's archive"));
+        writeln!(sums, "{digest:x}  ladderback-{target}.tar.xz").expect("a line of SHA256SUMS");
+    }
+    fs::write(state(agent).join("release/SHA256SUMS"), sums).expect("the release's SHA256SUMS");
+}
+
+/// The owner's install from the release's archive, on the stand-ins' x86_64
+/// Linux, checked as it is in a scenario of its own.
+#[given(expr = "the owner has installed {string} from the release's archive")]
+async fn has_installed_archive(agent: &mut Agent, tag: String) {
+    has_since_released_with_archives(agent, tag).await;
+    run_script(agent, &[]).await;
+    let ran = ran(agent);
+    assert_eq!(ran.code, Some(0), "the first run: {}", ran.stderr);
+    release_archive_installed(
+        agent,
+        "x86_64-unknown-linux-gnu".to_owned(),
+        "{home}/.cargo/bin".to_owned(),
+    );
+}
+
+/// A release published before its archives are attached: the `curl`
+/// stand-in has none of its files to serve, nor an earlier release's, as
+/// `releases/latest` names the new one.
+#[given(expr = "Ladderback has since released {string}, whose archives aren't attached yet")]
+async fn has_since_released_without_archives(agent: &mut Agent, tag: String) {
+    release(agent, &tag).await;
+    match fs::remove_dir_all(state(agent).join("release")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            panic!("an earlier release's files: {error}")
+        }
+        _ => {}
+    }
+}
+
+/// A release part way through attaching its files: SHA256SUMS is there, the
+/// archive for `target` isn't yet.
+#[given(
+    expr = "Ladderback has since released {string}, with its SHA256SUMS attached but not the archive for {string}"
+)]
+async fn has_since_released_without_archive(agent: &mut Agent, tag: String, target: String) {
+    has_since_released_with_archives(agent, tag).await;
+    fs::remove_file(state(agent).join(format!("release/ladderback-{target}.tar.xz")))
+        .expect("the archive is taken away");
+}
+
+/// The archive served instead is a well-formed one, with another binary in
+/// it, so only the checksum tells it apart.
+#[given(
+    expr = "the release's archive for {string} has been replaced by another with another binary in it"
+)]
+async fn release_archive_replaced(agent: &mut Agent, target: String) {
+    let binary = stand_in(agent, "echo 'ladderback (not the release's)'\n");
+    release_archive(agent, "release-other", "release", &target, &binary).await;
+}
+
+#[given(expr = "the release's SHA256SUMS lists no checksum for {string}")]
+fn sums_without(agent: &mut Agent, target: String) {
+    let file = state(agent).join("release/SHA256SUMS");
+    let sums = fs::read_to_string(&file).expect("the release's SHA256SUMS");
+    let archive = format!("ladderback-{target}.tar.xz");
+    let kept: String = sums
+        .lines()
+        .filter(|line| !line.ends_with(&archive))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    assert_ne!(kept, sums, "SHA256SUMS listed no {archive}");
+    fs::write(&file, kept).expect("the release's SHA256SUMS");
+}
+
+/// A redirect that downgrades the release's downloads to plain HTTP, where
+/// anyone on the way can swap the archive and SHA256SUMS together: the
+/// HTTP side serves another binary's archive with a checksum that matches
+/// it.
+#[given(
+    "the release's downloads are redirected to plain HTTP, which serves another archive and its checksum"
+)]
+async fn release_redirected_to_http(agent: &mut Agent) {
+    let target = "x86_64-unknown-linux-gnu";
+    let binary = stand_in(agent, "echo 'ladderback (not the release's)'\n");
+    let archive = release_archive(agent, "release-other", "release-http", target, &binary).await;
+    let digest = Sha256::digest(fs::read(&archive).expect("the other archive"));
+    fs::write(
+        state(agent).join("release-http/SHA256SUMS"),
+        format!("{digest:x}  ladderback-{target}.tar.xz\n"),
+    )
+    .expect("the other SHA256SUMS");
+}
+
+/// Writes the release's archive for `target`, with `binary` in it, packed
+/// from `folder` under the state folder into `served` there, where the
+/// `curl` stand-in serves the release from, and returns its path.
+async fn release_archive(
+    agent: &Agent,
+    folder: &str,
+    served: &str,
+    target: &str,
+    binary: &str,
+) -> PathBuf {
+    let name = format!("ladderback-{target}");
+    let folder = state(agent).join(folder);
+    fs::create_dir_all(folder.join(&name)).expect("the archive's folder");
+    write_runnable(&folder.join(&name).join("ladderback"), binary);
+    let served = state(agent).join(served);
+    fs::create_dir_all(&served).expect("the release's folder");
+    let archive = served.join(format!("{name}.tar.xz"));
+    pack(&archive, "-cJf", &folder, &name).await;
+    archive
+}
+
+#[given("none of the build's tools is installed")]
+fn no_build_tools(agent: &mut Agent) {
+    for tool in [
+        "cc", "git", "node", "npm", "rustup", "cargo", "rustc", "just", "trunk",
+    ] {
+        remove_tool(agent, tool);
+    }
 }
 
 #[given("Rust isn't installed")]
@@ -1056,9 +1315,12 @@ fn installs(agent: &Agent) -> Vec<String> {
         .collect()
 }
 
+/// The owner's options come after `--force`, which every build from source
+/// passes: cargo won't overwrite a binary it didn't install, such as one an
+/// earlier install took from the release's archive.
 #[then(expr = "the release was installed with {string}")]
 fn installed_with(agent: &mut Agent, args: String) {
-    let expected = format!("just install {}", expand(agent, &args));
+    let expected = format!("just install --force {}", expand(agent, &args));
     assert_eq!(installs(agent), [expected], "{:?}", calls_since_run(agent));
 }
 
@@ -1084,12 +1346,15 @@ fn no_sudo(agent: &mut Agent) {
     assert!(ran.is_empty(), "these ran: {ran:?}");
 }
 
+/// Looking for the newest release's archive, and finding none, fetches
+/// nothing: the scratch folder it downloads into is deleted.
 #[then("nothing was installed, fetched or built")]
 fn nothing_done(agent: &mut Agent) {
     nothing_installed_or_built(agent, true);
 }
 
-/// Downloading trunk's release installs nothing until it has been checked.
+/// Downloading trunk's release installs nothing until it has been checked,
+/// nor the release's archive.
 #[then("nothing was installed or built")]
 fn nothing_installed(agent: &mut Agent) {
     nothing_installed_or_built(agent, false);
@@ -1105,7 +1370,7 @@ fn nothing_installed_or_built(agent: &Agent, nor_fetched: bool) {
                 name == "git" && words.any(|word| ["clone", "fetch", "checkout"].contains(&word));
             changes_git
                 || name == "cargo"
-                || (nor_fetched && name == "curl")
+                || (nor_fetched && name == "curl" && !call.contains(RELEASE_URL))
                 || call.starts_with("rustup toolchain install")
                 || name.starts_with("rustup-init")
                 || call.starts_with("just install")
@@ -1162,6 +1427,61 @@ fn not_built(agent: &mut Agent, tool: String) {
     assert!(built.is_empty(), "{tool} was built: {built:?}");
 }
 
+#[then(expr = "the release's archive for {string} was installed into {string}")]
+fn release_archive_installed(agent: &mut Agent, target: String, folder: String) {
+    let calls = calls_since_run(agent);
+    for file in [
+        "SHA256SUMS".to_owned(),
+        format!("ladderback-{target}.tar.xz"),
+    ] {
+        let url = format!("{RELEASE_URL}latest/download/{file}");
+        assert!(
+            calls
+                .iter()
+                .any(|call| call.starts_with("curl ") && call.split(' ').any(|word| word == url)),
+            "{url} wasn't downloaded: {calls:?}"
+        );
+    }
+    let installed = PathBuf::from(expand(agent, &folder)).join("ladderback");
+    let text = fs::read_to_string(&installed)
+        .unwrap_or_else(|error| panic!("{} can't be read: {error}", installed.display()));
+    let released = state(agent).join(format!("release-build/ladderback-{target}/ladderback"));
+    assert_eq!(
+        text,
+        fs::read_to_string(released).expect("the release's binary"),
+        "{} isn't the release's binary for {target}",
+        installed.display()
+    );
+    let mode = fs::metadata(&installed)
+        .expect("the installed binary")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o111, 0o111, "the binary isn't runnable: {mode:o}");
+}
+
+/// Nothing that builds or fetches the source ran.
+#[then("nothing was built")]
+fn nothing_built(agent: &mut Agent) {
+    let built: Vec<String> = calls_since_run(agent)
+        .into_iter()
+        .filter(|call| {
+            let name = call.split(' ').next().unwrap_or_default();
+            ["cargo", "just", "git", "rustup", "trunk"].contains(&name)
+                || name.starts_with("rustup-init")
+        })
+        .collect();
+    assert!(built.is_empty(), "these ran: {built:?}");
+}
+
+#[then("nothing was downloaded from Ladderback's releases")]
+fn release_not_downloaded(agent: &mut Agent) {
+    let downloads: Vec<String> = calls_since_run(agent)
+        .into_iter()
+        .filter(|call| call.starts_with("curl ") && call.contains(RELEASE_URL))
+        .collect();
+    assert!(downloads.is_empty(), "{downloads:?}");
+}
+
 #[then("trunk's release wasn't downloaded")]
 fn trunk_not_downloaded(agent: &mut Agent) {
     let downloads: Vec<String> = calls_since_run(agent)
@@ -1182,7 +1502,11 @@ fn downloads_bounded(agent: &mut Agent) {
         .into_iter()
         .filter(|call| call.starts_with("curl "))
         .collect();
-    for url in ["https://github.com/trunk-rs/", "https://sh.rustup.rs"] {
+    for url in [
+        "https://github.com/trunk-rs/",
+        "https://sh.rustup.rs",
+        RELEASE_URL,
+    ] {
         assert!(
             downloads.iter().any(|call| call.contains(url)),
             "nothing was downloaded from {url}: {downloads:?}"

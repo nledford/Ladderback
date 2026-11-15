@@ -1,19 +1,21 @@
 @e2e
 Feature: Install Ladderback with one command
-  Until releases come with binaries (decision 54), a person installs
-  Ladderback by building it from source. The install script does that in one
-  command, piped from the web into bash (docs/guide/install.md, "The
-  install script"; decision 79): it checks the tools the build needs,
-  installs the ones that need no administrator rights after asking once,
-  keeps Ladderback's source in a folder of its own, checks out the newest
-  release and installs it. It never runs sudo, and running it again updates
-  to the newest release.
+  A person installs Ladderback with one command, piped from the web into
+  bash (docs/guide/install.md, "The install script"; decision 79). On 64-bit
+  Linux with glibc 2.35 or newer it installs the newest release from the
+  release's archive, checked against the release's SHA256SUMS. On macOS, and
+  wherever there is no archive, it builds the release from source: it checks
+  the tools the build needs, installs the ones that need no administrator
+  rights after asking once, keeps Ladderback's source in a folder of its own,
+  checks out the newest release and installs it. It never runs sudo, and
+  running it again updates to the newest release.
 
   In the examples the home folder is a scratch folder, Ladderback's source
-  comes from a local copy with releases of its own, the script is read from
-  standard input as `curl … | bash` gives it, and every tool the build needs
-  is a stand-in that keeps a list of how it was called: nothing is
-  downloaded or built, and no real terminal is asked anything.
+  comes from a local copy with releases of its own, the release's archives
+  are local files, the script is read from standard input as `curl … | bash`
+  gives it, and every tool the build needs is a stand-in that keeps a list of
+  how it was called: nothing is downloaded or built, and no real terminal is
+  asked anything.
 
   Background:
     Given Ladderback has released "v0.1.0", "v0.2.0" and "v0.3.0-rc.1"
@@ -52,6 +54,133 @@ Feature: Install Ladderback with one command
       Then the command exits with status 1
       And standard error says "no release"
       And no release was installed
+
+  Rule: On Linux it installs the release's archive, and builds from source only where there is none
+    Each release from 0.3.1 on has an archive for 64-bit Linux, x86_64 and
+    aarch64 with glibc 2.35 or newer, and a SHA256SUMS file with their
+    checksums. Where the newest release has an archive for the system, the
+    script downloads it and SHA256SUMS, checks the one against the other,
+    and installs the binary where a build from source puts it, so an update
+    either way replaces the same binary, which a service goes on running. It
+    needs none of the build's tools. Elsewhere it builds from source and
+    says why in one line. An archive that doesn't match its checksum is
+    damaged or isn't the release's: the script stops, and never builds
+    instead. The archive and SHA256SUMS come through the same redirects, so
+    a redirect that leaves HTTPS is refused rather than followed.
+
+    Scenario Outline: On Linux on <machine> the release's archive is installed, with none of the build's tools
+      Given the system is Linux on "<machine>" with glibc "2.35"
+      And Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      And none of the build's tools is installed
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the release's archive for "<target>" was installed into "{home}/.cargo/bin"
+      And nothing was built
+      And standard output says "ladderback 0.3.1"
+      And standard output says "ladderback install-service"
+
+      Examples:
+        | machine | target                    |
+        | x86_64  | x86_64-unknown-linux-gnu  |
+        | aarch64 | aarch64-unknown-linux-gnu |
+
+    Scenario: An install built from source is updated from the archive, in the same place
+      Given the owner has run the install script, and its build rewrote the web UI's stylesheet
+      And Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the release's archive for "x86_64-unknown-linux-gnu" was installed into "{home}/.cargo/bin"
+      And nothing was built
+
+    Scenario: An install from the release's archive is updated by a build from source, in the same place
+      Given the owner has installed "v0.3.1" from the release's archive
+      And Ladderback has since released "v0.3.2", whose archives aren't attached yet
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the source folder holds the release "v0.3.2"
+      And the release was installed
+      And standard output says "ladderback 0.3.2"
+
+    Scenario: The archive's binary goes into the folder --root names
+      Given Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      When the owner runs the install script with "-- --root {home}/apps"
+      Then the command exits with status 0
+      And the release's archive for "x86_64-unknown-linux-gnu" was installed into "{home}/apps/bin"
+      And nothing was built
+
+    Scenario Outline: On <system>, which has no release archive, it builds from source and says why
+      Given the system is <system>
+      And Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      When the owner runs the install script
+      Then the command exits with status 0
+      And standard output says "<why>"
+      And the source folder holds the release "v0.3.1"
+      And the release was installed
+      And nothing was downloaded from Ladderback's releases
+
+      Examples:
+        | system                                      | why                                                  |
+        | macOS                                       | Releases have no archive for macOS yet               |
+        | Linux on "armv7l" with glibc "2.36"         | Releases have no archive for Linux on armv7l         |
+        | Linux on "aarch64", running 32-bit programs | This system runs 32-bit programs                     |
+        | Linux on "x86_64" with glibc "2.31"         | glibc 2.35 or newer, and this system has glibc 2.31  |
+        | Linux on "x86_64" with musl, not glibc      | glibc 2.35 or newer, which this system doesn't have  |
+
+    Scenario Outline: A release <attached> is built from source
+      Given Ladderback has since released "v0.3.1", <attached>
+      When the owner runs the install script
+      Then the command exits with status 0
+      And standard output says "has no archive for x86_64-unknown-linux-gnu yet"
+      And the source folder holds the release "v0.3.1"
+      And the release was installed
+
+      Examples:
+        | attached                                                                        |
+        | whose archives aren't attached yet                                              |
+        | with its SHA256SUMS attached but not the archive for "x86_64-unknown-linux-gnu" |
+
+    Scenario: --from-source builds from source where the release has an archive
+      Given Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      When the owner runs the install script with "--from-source"
+      Then the command exits with status 0
+      And the source folder holds the release "v0.3.1"
+      And the release was installed
+      And nothing was downloaded from Ladderback's releases
+
+    Scenario Outline: An archive that <fails> is refused, and nothing is built instead
+      Given Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      And <changed>
+      When the owner runs the install script
+      Then the command exits with status 1
+      And standard error says "ladderback-x86_64-unknown-linux-gnu.tar.xz doesn't match the checksum in the release's SHA256SUMS"
+      And nothing was installed or built
+
+      Examples:
+        | fails                      | changed                                                                                                      |
+        | doesn't match its checksum | the release's archive for "x86_64-unknown-linux-gnu" has been replaced by another with another binary in it |
+        | has no checksum            | the release's SHA256SUMS lists no checksum for "x86_64-unknown-linux-gnu"                                    |
+
+    Scenario Outline: A download of the release's archive that <fails> stops, and suggests building from source
+      Given Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      And the download of the release's archive <fails>
+      When the owner runs the install script
+      Then the command exits with status 1
+      And standard error says "<says>"
+      And standard error says "--from-source"
+      And nothing was installed or built
+
+      Examples:
+        | fails                     | says                                                                       |
+        | stalls                    | the download of ladderback-x86_64-unknown-linux-gnu.tar.xz stalled         |
+        | fails with a server error | ladderback-x86_64-unknown-linux-gnu.tar.xz couldn't be downloaded          |
+
+    Scenario: A download of the release redirected to plain HTTP is refused, and nothing is built instead
+      Given Ladderback has since released "v0.3.1", with archives for Linux and their checksums
+      And the release's downloads are redirected to plain HTTP, which serves another archive and its checksum
+      When the owner runs the install script
+      Then the command exits with status 1
+      And standard error says "couldn't be downloaded"
+      And nothing was installed or built
 
   Rule: It never installs what needs administrator rights, and says how
 
@@ -284,6 +413,7 @@ Feature: Install Ladderback with one command
       When the owner runs the install script with "--yes"
       Then the command exits with status 1
       And standard error says "curl, to download"
+      And standard output says "curl isn't installed, to download the release's archive"
       And nothing was installed, fetched or built
 
     Scenario Outline: Where trunk publishes no release, it is built with one job per 2 GB of free memory
