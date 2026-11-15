@@ -163,6 +163,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [94](decisions/94-restart-from-settings.md) | Restarting from Settings |
 | [95](decisions/95-the-mcp-server-build.md) | The MCP server as built |
 | [96](decisions/96-plans-edited-in-the-ui.md) | Creating, changing and deleting plans in the UI |
+| [97](decisions/97-red-first-in-every-engine.md) | Red-first in every engine |
 | [99](decisions/99-who-is-trusted.md) | Who is trusted with Ladderback's local data |
 | [101](decisions/101-japanese-and-the-translation-workflow.md) | Japanese, and how a translation is kept |
 

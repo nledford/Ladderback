@@ -34,7 +34,7 @@ alias t := test
 alias v := verify
 
 # Installs the wasm target, the cargo tools (needs cargo-binstall), the UI test
-# dependencies and the test browser.
+# dependencies and the three test browsers (Chromium, Firefox, WebKit).
 [doc('Install the build, test and release tools.')]
 [group('setup')]
 setup:
@@ -46,7 +46,7 @@ setup:
     scripts/install-actionlint.sh
     scripts/install-dist.sh
     cd ui-tests && npm ci
-    cd ui-tests && node_modules/.bin/playwright install chromium
+    cd ui-tests && node_modules/.bin/playwright install chromium firefox webkit
 
 # Format Rust code: leptosfmt formats the `view!` blocks, which rustfmt leaves
 # alone, then rustfmt the rest. leptosfmt goes first because rustfmt settles
@@ -81,14 +81,16 @@ clippy:
 
 # Lint: `clippy`, clippy on the web UI (wasm32), the type check of the
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
-# dev-dependency), the journey lint, the check that every path AGENTS.md and
+# dev-dependency), the tooling's own tests (`scripts/*.test.ts`, under Node's
+# built-in runner), the journey lint, the check that every path AGENTS.md and
 # CLAUDE.md name exists, then the check that no paragraph in docs/ runs over
 # 150 words (the baseline lists the files exempt for now).
-[doc('Clippy on the host and the web UI, the TypeScript type check, the journey lint, the AGENTS.md path check, and the docs paragraph-length check.')]
+[doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, and the docs paragraph-length check.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json
+    node --test scripts/*.test.ts
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
     node scripts/check-paragraph-length.ts
@@ -286,13 +288,16 @@ try *args: build
 # gallery, not the release one `build` makes. The scenarios run the binary
 # cargo just built, wherever its target directory is (`CARGO_TARGET_DIR`, as
 # each worktree sets its own; `ui-tests/support/world.ts` asks cargo), unless
-# `LADDERBACK_BIN` names another.
-[doc('Run the @ui scenarios in Chromium against a fresh build with the gallery.')]
+# `LADDERBACK_BIN` names another. A first argument that names one of
+# Playwright's engines (`chromium`, `firefox`, `webkit`) picks the browser, as
+# in `just test-ui webkit --name 'Sign in'`; without one, `LADDERBACK_UI_BROWSER`
+# picks it, and Chromium when that is unset. The rest go to cucumber-js.
+[doc('Run the @ui scenarios in a browser engine (default chromium) against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: web-test _ui-deps
     cargo build
-    cd ui-tests && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
+    cd ui-tests && case "${1:-}" in chromium | firefox | webkit) export LADDERBACK_UI_BROWSER="$1"; shift ;; esac && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
 
 # Installs the UI test dependencies when they are missing or older than the
 # lockfile, as in a new worktree: node_modules isn't tracked.
