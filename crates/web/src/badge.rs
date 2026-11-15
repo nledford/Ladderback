@@ -41,13 +41,28 @@ impl BadgeState {
     /// The pill the badge is drawn on, the `badge-{pill}` class of
     /// `style.css`.
     pub fn pill(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Running => "loading",
+            Self::Succeeded | Self::SucceededWithWarnings => "success",
+            Self::Failed => "error",
+            Self::Queued | Self::Cancelled | Self::Empty => "empty",
+        }
     }
 
     /// The icon beside the label, its shape the state's own (the
     /// maintainer's choice on #384).
     pub fn glyph(self) -> LucideGlyph {
-        todo!()
+        match self {
+            Self::Queued => LucideGlyph::Clock,
+            Self::Running => LucideGlyph::LoaderCircle,
+            Self::Succeeded => LucideGlyph::CircleCheck,
+            // Lucide's `triangle-exclamation-point`, by the earlier name the
+            // crate's Lucide release gives it.
+            Self::SucceededWithWarnings => LucideGlyph::TriangleAlert,
+            Self::Failed => LucideGlyph::CircleX,
+            Self::Cancelled => LucideGlyph::CircleSlash,
+            Self::Empty => LucideGlyph::CircleDashed,
+        }
     }
 }
 

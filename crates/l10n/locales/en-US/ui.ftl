@@ -232,17 +232,8 @@ ui-gallery-demo-monthly = Every month
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge
 
-# The loading badge of the status badge demo.
-ui-gallery-badge-loading = Loading
-
-# The empty badge of the status badge demo.
+# The empty badge of the status badge demo: a badge with nothing to tell.
 ui-gallery-badge-empty = Empty
-
-# The error badge of the status badge demo.
-ui-gallery-badge-error = Error
-
-# The success badge of the status badge demo.
-ui-gallery-badge-success = Success
 
 # The heading of the gallery's progress demo.
 ui-gallery-progress-heading = Progress

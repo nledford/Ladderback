@@ -2170,7 +2170,7 @@ mod tests {
     }
 
     #[test]
-    fn a_status_is_badged_by_its_pill_and_its_text_and_an_unknown_one_stands_as_it_came() {
+    fn a_status_is_badged_by_its_state_and_its_text_and_an_unknown_one_stands_as_it_came() {
         let localizer = Localizer::new(&[]);
         assert_eq!(
             badge_of(&localizer, "running"),
@@ -2191,7 +2191,7 @@ mod tests {
     }
 
     #[test]
-    fn every_status_the_store_names_has_its_pill_and_its_message() {
+    fn every_status_the_store_names_has_its_state_and_its_message() {
         let states = [
             ("queued", BadgeState::Queued, msg::UI_STATUS_QUEUED),
             ("running", BadgeState::Running, msg::UI_STATUS_RUNNING),

@@ -294,10 +294,17 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <section>
             <h2>{t(msg::UI_GALLERY_BADGE_HEADING)}</h2>
             <p class="flex flex-wrap gap-2">
-                <StatusBadge state=BadgeState::Running label=t(msg::UI_GALLERY_BADGE_LOADING) />
+                // Every state a badge can show, each with its own icon.
+                <StatusBadge state=BadgeState::Queued label=t(msg::UI_STATUS_QUEUED) />
+                <StatusBadge state=BadgeState::Running label=t(msg::UI_STATUS_RUNNING) />
+                <StatusBadge state=BadgeState::Succeeded label=t(msg::UI_STATUS_SUCCEEDED) />
+                <StatusBadge
+                    state=BadgeState::SucceededWithWarnings
+                    label=t(msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS)
+                />
+                <StatusBadge state=BadgeState::Failed label=t(msg::UI_STATUS_FAILED) />
+                <StatusBadge state=BadgeState::Cancelled label=t(msg::UI_STATUS_CANCELLED) />
                 <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
-                <StatusBadge state=BadgeState::Failed label=t(msg::UI_GALLERY_BADGE_ERROR) />
-                <StatusBadge state=BadgeState::Succeeded label=t(msg::UI_GALLERY_BADGE_SUCCESS) />
             </p>
         </section>
         <section>
