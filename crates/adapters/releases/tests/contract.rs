@@ -101,7 +101,7 @@ async fn read_request(stream: &mut TcpStream) -> Option<Received> {
         if read == 0 || bytes.len() > MAX_REQUEST {
             return None;
         }
-        bytes.extend_from_slice(&chunk[..read]);
+        bytes.extend_from_slice(chunk.get(..read)?);
     }
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let mut lines = text.split("\r\n");

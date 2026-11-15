@@ -26,7 +26,9 @@ use std::time::Duration;
 use app::ports::{ReleaseFeed, ReleaseFeedError};
 use async_trait::async_trait;
 use domain::updates::{Release, Version};
-use reqwest::{Client, Url};
+use reqwest::header::{ACCEPT, HeaderValue};
+use reqwest::{Client, Url, redirect};
+use serde::Deserialize;
 
 /// Where Ladderback's newest release is read.
 pub const LATEST_RELEASE: &str = "https://api.github.com/repos/nledford/Ladderback/releases/latest";
@@ -35,6 +37,9 @@ pub const LATEST_RELEASE: &str = "https://api.github.com/repos/nledford/Ladderba
 /// with its notes and a dozen assets is a few tens of kilobytes; an answer
 /// past this cap is unreadable, never read whole.
 pub const MAX_ANSWER_BYTES: usize = 1024 * 1024;
+
+/// The media type GitHub documents for its REST API.
+const GITHUB_JSON: &str = "application/vnd.github+json";
 
 /// The HTTP client couldn't be built, or the feed's address isn't an `http`
 /// or `https` URL. Holds no text of the library's.
@@ -59,13 +64,70 @@ impl GitHubReleases {
     /// A feed that asks `url` (normally [`LATEST_RELEASE`]) as Ladderback
     /// `running` does, each request ending within `timeout`.
     pub fn new(url: &str, running: &Version, timeout: Duration) -> Result<Self, ClientError> {
-        todo!("{url} {running} {timeout:?} {:?}", MAX_ANSWER_BYTES)
+        let url = Url::parse(url).map_err(|_| ClientError)?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(ClientError);
+        }
+        let client = Client::builder()
+            .timeout(timeout)
+            .connect_timeout(timeout)
+            .redirect(redirect::Policy::none())
+            .referer(false)
+            .user_agent(format!("ladderback/{running}"))
+            .build()
+            .map_err(|_| ClientError)?;
+        Ok(Self { client, url })
     }
+}
+
+/// The part of GitHub's answer read: everything else is left unread.
+#[derive(Deserialize)]
+struct Answer {
+    tag_name: String,
+    prerelease: bool,
+    draft: bool,
 }
 
 #[async_trait]
 impl ReleaseFeed for GitHubReleases {
     async fn newest(&self) -> Result<Release, ReleaseFeedError> {
-        todo!("{:?} {:?}", self.url, self.client)
+        let mut response = self
+            .client
+            .get(self.url.clone())
+            .header(ACCEPT, HeaderValue::from_static(GITHUB_JSON))
+            .send()
+            .await
+            .map_err(|error| failure(&error))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ReleaseFeedError::Rejected {
+                status: status.as_u16(),
+            });
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| failure(&error))? {
+            if body.len().saturating_add(chunk.len()) > MAX_ANSWER_BYTES {
+                return Err(ReleaseFeedError::Unreadable);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let answer: Answer =
+            serde_json::from_slice(&body).map_err(|_| ReleaseFeedError::Unreadable)?;
+        let version =
+            Version::of_tag(&answer.tag_name).map_err(|_| ReleaseFeedError::Unreadable)?;
+        Ok(Release {
+            version,
+            // A draft is no published release: it counts as a prerelease.
+            prerelease: answer.prerelease || answer.draft,
+        })
+    }
+}
+
+/// Why a request that got no whole answer failed.
+fn failure(error: &reqwest::Error) -> ReleaseFeedError {
+    if error.is_timeout() {
+        ReleaseFeedError::TimedOut
+    } else {
+        ReleaseFeedError::Unreachable
     }
 }
