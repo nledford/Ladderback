@@ -142,3 +142,18 @@ fn the_status_says_a_restart_waits_or_the_daemon_restarts() {
         assert_eq!(status_of(quiet, true), None, "{quiet:?}");
     }
 }
+
+// While the page waits, a proxy before the stopped daemon answers in its
+// place; only Ladderback's own answer, a session or one of its refusals,
+// is the daemon back.
+#[test]
+fn only_ladderbacks_own_answer_counts_as_the_daemon_back() {
+    assert!(is_ladderback(200, r#"{"sign-in":"signed-out"}"#));
+    assert!(is_ladderback(503, r#"{"code":"sign-in-unavailable"}"#));
+    assert!(!is_ladderback(502, "<html><body>Bad Gateway</body></html>"));
+    assert!(!is_ladderback(504, ""));
+    assert!(!is_ladderback(200, "<html><body>Maintenance</body></html>"));
+    assert!(!is_ladderback(503, r#"{"error":"upstream"}"#));
+    // A session's JSON under a gateway status is the proxy's, not ours.
+    assert!(!is_ladderback(502, r#"{"sign-in":"signed-out"}"#));
+}

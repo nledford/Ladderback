@@ -375,9 +375,10 @@ pub(crate) async fn poll<T: DeserializeOwned>(url: &str, patience: Duration) -> 
     read_as(url, Asked::OnItsOwn, Some(patience)).await
 }
 
-/// Whether the daemon answers at all, within `patience`: the page's own read
-/// of the session route, which any answer counts for, signed in or not, as
-/// from a daemon just started with sign-in newly on.
+/// Whether the daemon answers, within `patience`: the page's own read of the
+/// session route, whose answer counts signed in or not, as from a daemon
+/// just started with sign-in newly on, but only as Ladderback's own
+/// (`restart::is_ladderback`), never a proxy's for a daemon that is down.
 pub(crate) async fn answers(patience: Duration) -> bool {
     let url = format!("{}{SESSION_PATH}", origin());
     send(Some(patience), Asked::OnItsOwn, |_, signal| {
@@ -388,7 +389,7 @@ pub(crate) async fn answers(patience: Duration) -> bool {
             .ok()
     })
     .await
-    .is_some()
+    .is_some_and(|(status, text)| crate::restart::is_ladderback(status, &text))
 }
 
 /// Posts `body` as JSON to `url` (the JSON-body rule applies to every

@@ -171,6 +171,18 @@ impl Wait {
     }
 }
 
+/// Whether an answer with `status` and `body` is Ladderback's own, as the
+/// page asks while it waits: the session route's JSON, or one of its
+/// refusals. A proxy before a daemon that is down answers too, with a 502,
+/// 503 or 504 of its own, which isn't the daemon back.
+pub(crate) fn is_ladderback(status: u16, body: &str) -> bool {
+    if status == 200 {
+        serde_json::from_str::<api::SessionDto>(body).is_ok()
+    } else {
+        serde_json::from_str::<api::ErrorDto>(body).is_ok()
+    }
+}
+
 /// What the section says in its status for `stage`: whether a restart waits,
 /// or the wait, and `not_back` once that has lasted too long. `None` says
 /// nothing.
