@@ -35,7 +35,6 @@ docs/design/decisions/79-a-from-source-install-script.md
 docs/design/decisions/80-repository-locations.md
 docs/design/decisions/81-identify-a-repository-before-its-first-job.md
 docs/design/decisions/82-the-step-a-running-operation-is-in.md
-docs/design/decisions/83-a-progress-bar-a-screen-reader-can-reach.md
 docs/design/decisions/91-the-operations-a-start-ends-are-announced.md
 docs/design/decisions/92-the-daemons-stop-has-a-limit.md
 docs/design/development.md
