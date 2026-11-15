@@ -23,8 +23,9 @@ Feature: Start page
 
   # The focus ring is checked here as everywhere (3:1 against what it sits on,
   # 1.4.11), so Firefox's own forced-colors Highlight, #3399ff, which is 2.94:1
-  # on white, fails. A scenario of its own, not a row of the one above, because
-  # red-first needs every row of a scenario to fail in the engine.
+  # on white, failed it until the ring took the text's color. A scenario of
+  # its own, not a row of the one above, because red-first needs every row of
+  # a scenario to fail in the engine.
   Scenario: The start page works when the browser asks for forced colors
     Given the browser asks for "forced colors"
     When I open the web UI

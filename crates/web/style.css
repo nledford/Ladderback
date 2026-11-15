@@ -80,9 +80,12 @@ a {
   outline-offset: 2px;
 }
 
+/* The ring takes the text's color, which the reader's colors set apart from
+   the page's (Canvas). Highlight need not be: Firefox's own is #3399ff, 2.9:1
+   on white, short of 3:1 (1.4.11). */
 @media (forced-colors: active) {
   :focus-visible {
-    outline-color: Highlight;
+    outline-color: CanvasText;
   }
 }
 
