@@ -46,5 +46,4 @@ docs/design/decisions/92-the-daemons-stop-has-a-limit.md
 docs/design/development.md
 docs/design/multi-machine.md
 docs/design/scheduling-and-config.md
-docs/design/technology.md
 docs/guide/install.md
