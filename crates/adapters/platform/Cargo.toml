@@ -25,8 +25,9 @@ uuid = { workspace = true, features = ["v7"] }
 
 [target.'cfg(unix)'.dependencies]
 # `term`: the password prompt turns echo off. `user`: the user's ID, as a
-# launchd agent lives in the `gui/<uid>` domain.
-nix = { workspace = true, features = ["term", "user"] }
+# launchd agent lives in the `gui/<uid>` domain. `resource` and `process`:
+# the core-dump limit and, on Linux, the dumpable flag (decision 98).
+nix = { workspace = true, features = ["process", "resource", "term", "user"] }
 
 # The Wi-Fi network's name from NetworkManager (decision 80). `vendored`
 # builds libdbus from source, as `secrets` does, so a bare toolchain image

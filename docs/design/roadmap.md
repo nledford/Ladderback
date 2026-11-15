@@ -164,6 +164,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [95](decisions/95-the-mcp-server-build.md) | The MCP server as built |
 | [96](decisions/96-plans-edited-in-the-ui.md) | Creating, changing and deleting plans in the UI |
 | [97](decisions/97-red-first-in-every-engine.md) | Red-first in every engine |
+| [98](decisions/98-no-core-dumps-or-debugger-attach.md) | No core dumps or debugger attach for the daemon and its workers |
 | [99](decisions/99-who-is-trusted.md) | Who is trusted with Ladderback's local data |
 | [101](decisions/101-japanese-and-the-translation-workflow.md) | Japanese, and how a translation is kept |
 | [103](decisions/103-status-badge-icons.md) | Status badge icons |
