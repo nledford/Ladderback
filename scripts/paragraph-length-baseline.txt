@@ -26,7 +26,6 @@ docs/design/decisions/51-what-a-checks-findings-are.md
 docs/design/decisions/53-creating-an-imported-repository-from-its-row.md
 docs/design/decisions/54-early-release-builds.md
 docs/design/decisions/55-a-backup-stopped-at-its-deadline-winds-down.md
-docs/design/decisions/57-recording-the-id-of-a-repository-a-job-opened.md
 docs/design/decisions/58-one-child-starts-at-a-time.md
 docs/design/decisions/64-installing-the-agent-as-a-user-service.md
 docs/design/decisions/66-the-server-accepts-through-the-spawn-gate.md
