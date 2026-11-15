@@ -4,7 +4,7 @@ Feature: Restarting Ladderback from Settings
   on) with no terminal: the admin asks for it in Settings. The daemon then
   makes the same orderly stop as when it is told to stop
   (`features/execution/shutdown.feature`), and exits with the status its
-  service manager starts it again on (decision NN).
+  service manager starts it again on (decision 94).
 
   The admin chooses when. Once the running operations finish is the
   default: from then on the daemon starts no new operation, neither a queued

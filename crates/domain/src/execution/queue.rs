@@ -37,7 +37,7 @@ pub struct BackupQueue {
     running: BTreeMap<Ticket, PlanId>,
     /// By ticket, so oldest first.
     waiting: BTreeMap<Ticket, PlanId>,
-    /// Held for a restart: no waiting run starts again (decision NN).
+    /// Held for a restart: no waiting run starts again (decision 94).
     held: bool,
 }
 
@@ -125,7 +125,7 @@ impl BackupQueue {
 
     /// Holds the queue for a restart that waits for the running backups to
     /// end: from now on no waiting run starts, and a run that asks for a
-    /// place waits, for the daemon that starts next to run (decision NN).
+    /// place waits, for the daemon that starts next to run (decision 94).
     /// The restart ends the hold, or [`Self::release`] when it is cancelled.
     pub fn hold(&mut self) {
         self.held = true;

@@ -15,7 +15,7 @@ import { Given, Then } from "@cucumber/cucumber";
 
 import { type BrowserWorld, startServer } from "../support/world.ts";
 
-// The status a service manager starts the daemon again on (decision NN).
+// The status a service manager starts the daemon again on (decision 94).
 const RESTART_STATUS = 75;
 
 // How long the daemon may take to stop in order with nothing running, with

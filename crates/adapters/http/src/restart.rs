@@ -1,4 +1,4 @@
-//! The restart route, `/api/v1/restart` (§4.2, decision NN): Settings asks
+//! The restart route, `/api/v1/restart` (§4.2, decision 94): Settings asks
 //! the daemon to restart, now or once its running operations finish, and
 //! reads whether one is offered and whether one waits. The daemon only
 //! stops, with the status its service manager starts it again on, so a

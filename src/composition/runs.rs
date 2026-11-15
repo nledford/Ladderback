@@ -14,7 +14,7 @@ use tokio::sync::watch;
 /// it was running is killed at once, as the runtime's end once killed it.
 /// Clones share one switch, and one count of the maintenance runs going,
 /// which a restart that waits for the running operations counts with the
-/// queue's running backups and holds, so none starts meanwhile (decision NN).
+/// queue's running backups and holds, so none starts meanwhile (decision 94).
 #[derive(Clone)]
 pub(crate) struct Runs {
     frozen: Arc<watch::Sender<bool>>,
@@ -109,7 +109,7 @@ impl Drop for Maintaining {
 }
 
 /// What a restart that waits for the running operations counts and holds
-/// (decision NN): the queue's running backups, whose waiting ones it starts
+/// (decision 94): the queue's running backups, whose waiting ones it starts
 /// no more, and the maintenance runs going, of which it starts no new one.
 pub(crate) struct Work {
     pub(crate) queue: Arc<app::queue::RunQueue>,

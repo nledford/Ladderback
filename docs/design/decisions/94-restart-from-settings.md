@@ -1,4 +1,4 @@
-# Decision NN: Restarting from Settings
+# Decision 94: Restarting from Settings
 
 **Settings restarts Ladderback: the daemon makes its orderly stop (decision 92) and exits with status 75, which its service file has the service manager answer by starting it again. So a restart is offered only to a daemon whose service file runs `serve --service-managed`. The admin restarts once the running operations finish, the default, which starts no new operation meanwhile and can be cancelled, or now, which stops them** (recorded 2026-11-15, §4.2, §4.5, §12; decided by the maintainer on #611). It amends decision 64's service files.
 
@@ -11,7 +11,7 @@
 - **Down for a while: 10 s on Linux.** The unit's `RestartSec=10` keeps the daemon down 10 s after it exits; launchd starts an agent at most once every 10 s, so a daemon restarted soon after it started waits out the rest. The page asks every 250 ms whether it answers, reloads once it has seen it go down and answer again, and after a minute says where to look, still asking.
 - **Once they finish, holding new work.** A restart that waits holds the backup queue, so no waiting run starts (`BackupQueue::hold`); a backup asked for meanwhile is queued for the next start (decision 73). A maintenance run asked for meanwhile is refused `503 restart-pending`. The hold is taken with the request, in one step, so nothing starts between the count and the hold. The restart comes once no operation runs, looked at every 500 ms.
 - **Now, as any stop.** A restart now freezes every run at once, and each operation still running ends `daemon-shut-down`, as a stop by signal does. It replaces a restart that waits; once asked for, it can't be cancelled.
-- **A restart that waits can be cancelled.** `DELETE /api/v1/restart` ends it and lets go of the hold, so the queued backups start again and maintenance is accepted. A second request is harmless.
+- **A restart that waits can be cancelled until it comes.** `DELETE /api/v1/restart` ends it and lets go of the hold, so the queued backups start again and maintenance is accepted. Once no operation runs the restart has come, and a cancel then leaves it and its hold as they are and answers that it is still pending. A second request is harmless.
 - **For a session only.** The route is not in the API tokens' scope table (decision 93), so with sign-in on only the admin's session, with its CSRF token, reaches it; with sign-in off, anyone who can reach the daemon may, as on every route. The `stopping (…)` line in the daemon's log says which.
 - **The dialog says what stops.** The button reads the route first, then opens the review dialog with the running count: one Restart button when none runs, otherwise "Restart once they finish" and "Restart now", and what becomes of queued operations.
 

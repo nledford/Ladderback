@@ -480,7 +480,7 @@ pub(crate) fn sign_in() -> Result<SignInDecided, Refused> {
 /// session route tells the page. With sign-in on, the sessions draw their
 /// tokens from `random`, and the API tokens are kept in the daemon's store.
 /// A restart is offered when `service_managed`: a service manager runs the
-/// daemon, and starts it again once it exits (decision NN).
+/// daemon, and starts it again once it exits (decision 94).
 pub(crate) async fn daemon(
     sign_in: SignInDecided,
     random: Arc<dyn Random>,

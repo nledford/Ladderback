@@ -301,10 +301,10 @@ pub enum ErrorCode {
     SignInOff,
     /// A restart was asked for, but no service manager runs the daemon to
     /// start it again: its service file didn't pass `--service-managed`, as
-    /// with `ladderback serve` started by hand (decision NN).
+    /// with `ladderback serve` started by hand (decision 94).
     RestartUnavailable,
     /// A maintenance run was asked for while a restart waits for the running
-    /// operations to finish: it starts no new one meanwhile (decision NN).
+    /// operations to finish: it starts no new one meanwhile (decision 94).
     RestartPending,
     /// An API token's label is empty, blank, holds a control character, or is
     /// longer than `max` characters.
@@ -3497,7 +3497,7 @@ pub struct SessionDto {
 }
 
 /// What `GET /api/v1/restart` answers, and `POST` once it has taken a
-/// request (decision NN): whether Settings offers a restart, which it does
+/// request (decision 94): whether Settings offers a restart, which it does
 /// only when a service manager runs the daemon and starts it again once it
 /// exits; whether a restart asked for once the running operations finish is
 /// pending, neither come nor cancelled, whatever runs (it stays pending

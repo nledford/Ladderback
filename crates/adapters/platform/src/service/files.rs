@@ -19,7 +19,7 @@ pub const LAUNCHD_MARK: &str =
 /// cache folder is the one systemd makes for it, private to the user, which
 /// the agent is pointed at (decision 59). systemd waits [`KILL_AFTER`] for it
 /// to stop, and starts it again after a failure or a restart's
-/// [`RESTART_STATUS`], which doesn't mark the unit failed (decision NN).
+/// [`RESTART_STATUS`], which doesn't mark the unit failed (decision 94).
 pub fn systemd_unit(program: &ServicePath) -> String {
     format!(
         "{SYSTEMD_MARK}\n\

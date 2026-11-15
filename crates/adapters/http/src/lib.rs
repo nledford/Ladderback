@@ -83,7 +83,7 @@ pub struct AppState {
     /// The build the daemon runs, which the session route tells a page that
     /// may see the pages (decision 90).
     pub build: api::BuildDto,
-    /// Whether a restart is offered, and the one asked for (decision NN).
+    /// Whether a restart is offered, and the one asked for (decision 94).
     pub restart: Restart,
 }
 

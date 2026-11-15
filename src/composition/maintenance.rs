@@ -99,7 +99,7 @@ pub(super) async fn start(
     selection: Option<String>,
 ) -> Result<String, MaintenanceRefusal> {
     // Counted from the request on, so a restart asked for from now on waits
-    // for it; a restart that already waits starts no new run (decision NN).
+    // for it; a restart that already waits starts no new run (decision 94).
     let Some(maintaining) = runner.runs.maintaining() else {
         return Err(unavailable(ErrorCode::RestartPending, Vec::new(), None));
     };

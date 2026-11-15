@@ -1,5 +1,5 @@
 //! The decisions behind restarting Ladderback from Settings (§4.4, decision
-//! NN): what the section offers for what the daemon says, what the dialog
+//! 94): what the section offers for what the daemon says, what the dialog
 //! says and sends, and the wait for the daemon to come back, which reloads
 //! the page only once it has seen the daemon go down and answer again, so the
 //! page never reloads into the daemon that is stopping. Host-tested here; the

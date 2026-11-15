@@ -203,7 +203,7 @@ fn serve(
 /// a startup line that nobody reads stops it, as anything that prints does.
 /// Once it serves it only logs, and the logger drops what it cannot write.
 /// A stop asked for as a restart ends with the status the service manager
-/// starts it again on (decision NN).
+/// starts it again on (decision 94).
 fn run_daemon(
     localizer: &Localizer,
     listen: SocketAddr,
@@ -485,7 +485,7 @@ fn text(value: impl std::fmt::Display) -> MsgArg {
 enum Cause {
     /// Ctrl-C (`SIGINT`) or `SIGTERM`, what systemd and launchd send.
     Signal(&'static str),
-    /// A restart asked for in Settings, by whom (decision NN).
+    /// A restart asked for in Settings, by whom (decision 94).
     Restart(http_adapter::RestartAsker),
     /// The server ended of itself.
     ServerEnded,

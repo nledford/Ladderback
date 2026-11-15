@@ -1,6 +1,6 @@
 //! The Settings page, the route `/settings` (§4.4): its API tokens (security
 //! §10.1, decision 93), listed, created and revoked in a session, and the
-//! restart of Ladderback (decision NN). What the form lacks, the request it
+//! restart of Ladderback (decision 94). What the form lacks, the request it
 //! sends, which field a refusal is about and how a token's row reads are
 //! `api_tokens.rs`'s, and what the restart section offers and waits for is
 //! `restart.rs`'s, all host-tested; this is the DOM glue, which the `@ui`
@@ -764,7 +764,7 @@ impl RestartState {
     }
 }
 
-/// The restart section (decision NN): offered only when a service manager
+/// The restart section (decision 94): offered only when a service manager
 /// runs the daemon, and otherwise says why not. Its button reads how many
 /// operations run and opens the dialog that asks. While a restart waits for
 /// them it says so and offers to cancel it; once the daemon restarts it says
