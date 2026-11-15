@@ -110,9 +110,28 @@ impl axum::extract::FromRef<AppState> for Exposure {
     }
 }
 
-impl axum::extract::FromRef<AppState> for api::BuildDto {
+/// What a page that may see the pages is told of the daemon (#502): the
+/// build it runs, and the update its release check found, when there is
+/// one (decision NN). The address of the update's notes is built from its
+/// version, never taken from the release feed's answer.
+#[derive(Clone, Debug)]
+pub(crate) struct Running {
+    pub(crate) build: api::BuildDto,
+    pub(crate) update: Option<api::AvailableUpdateDto>,
+}
+
+impl axum::extract::FromRef<AppState> for Running {
     fn from_ref(state: &AppState) -> Self {
-        state.build.clone()
+        Self {
+            build: state.build.clone(),
+            update: state
+                .updates
+                .available()
+                .map(|version| api::AvailableUpdateDto {
+                    version: version.to_string(),
+                    release_notes: version.release_notes(),
+                }),
+        }
     }
 }
 

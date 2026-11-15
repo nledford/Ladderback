@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
+use api::BuildDto;
 use app::fakes::{FakeClock, InMemoryAdminPassword, InMemorySessionStore, SeededRandom};
 use app::ports::{AdminPassword, AdminPasswordError};
 use async_trait::async_trait;
