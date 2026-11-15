@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Installs Playwright's Chromium for the UI journeys on a Linux runner, with the
-# system packages it needs. .github/actions/chromium runs it in ui-tests, the
-# folder whose `npm ci` installed Playwright.
+# Installs Playwright's browser engines for the UI journeys on a Linux runner,
+# with the system packages they need: `install-browser.sh chromium`, or any of
+# `chromium`, `firefox` and `webkit` (`install-browser.sh chromium firefox
+# webkit`). .github/actions/browser runs it in ui-tests, the folder whose
+# `npm ci` installed Playwright.
 #
 # $HOME/.cache/playwright-debs holds the .deb files a past install downloaded
 # and a `complete` marker; the action's cache restores it. With the marker, the
@@ -18,17 +20,32 @@
 set -euo pipefail
 shopt -s nullglob
 
+if [ $# -eq 0 ]; then
+    echo "install-browser: name the engines to install: chromium, firefox or webkit" >&2
+    exit 2
+fi
+engines=("$@")
+for engine in "${engines[@]}"; do
+    case "$engine" in
+        chromium | firefox | webkit) ;;
+        *)
+            echo "install-browser: '$engine' isn't an engine; name chromium, firefox or webkit" >&2
+            exit 2
+            ;;
+    esac
+done
+
 debs="$HOME/.cache/playwright-debs"
 fallback=false
 
 if [ -e "$debs/complete" ]; then
     cached=("$debs"/*.deb)
-    echo "install-chromium: ${#cached[@]} system packages from the cache"
+    echo "install-browser: ${#cached[@]} system packages from the cache"
     if [ ${#cached[@]} -eq 0 ] || sudo dpkg --install --skip-same-version "${cached[@]}"; then
-        npx playwright install chromium
+        npx playwright install "${engines[@]}"
         exit 0
     fi
-    echo "install-chromium: the cached packages didn't install; using apt" >&2
+    echo "install-browser: the cached packages didn't install; using apt" >&2
     fallback=true
 fi
 
@@ -47,7 +64,7 @@ prefer_quad9() {
         link=$(ip route show default 2> /dev/null | awk '{ print $5; exit }') || link=''
     fi
     if [ -z "$link" ]; then
-        echo "install-chromium: no systemd-resolved link to give Quad9; using the runner's DNS" >&2
+        echo "install-browser: no systemd-resolved link to give Quad9; using the runner's DNS" >&2
         return 0
     fi
     # "Link 2 (eth0): 168.63.129.16" -> "168.63.129.16"
@@ -55,15 +72,15 @@ prefer_quad9() {
     # Word splitting is wanted: one argument per server.
     # shellcheck disable=SC2086
     if sudo resolvectl dns "$link" 9.9.9.9 149.112.112.112 $servers; then
-        echo "install-chromium: DNS on $link: Quad9, then ${servers:-nothing else}"
+        echo "install-browser: DNS on $link: Quad9, then ${servers:-nothing else}"
     else
-        echo "install-chromium: couldn't give Quad9 to $link; using the runner's DNS" >&2
+        echo "install-browser: couldn't give Quad9 to $link; using the runner's DNS" >&2
     fi
 }
 
 # apt's own archive folder won't do: some images (Debian's Docker image) delete
 # its files after every install. This setting lasts for this install only.
-conf=/etc/apt/apt.conf.d/99-ladderback-chromium-debs
+conf=/etc/apt/apt.conf.d/99-ladderback-playwright-debs
 trap 'sudo rm -f "$conf"' EXIT
 # After a failed install the cached files stay: apt checks each against its
 # hash and downloads only the ones that don't match, so the set it leaves is
@@ -82,10 +99,10 @@ apt_install() {
         # done, and apt refuses other work until they are finished.
         sudo apt-get update && sudo apt-get install --fix-broken --yes
     fi
-    npx playwright install --with-deps chromium
+    npx playwright install --with-deps "${engines[@]}"
 }
 if ! apt_install; then
-    echo "install-chromium: apt failed; trying once more in 30 s" >&2
+    echo "install-browser: apt failed; trying once more in 30 s" >&2
     sudo resolvectl flush-caches 2> /dev/null || true
     sleep 30
     apt_install
@@ -97,5 +114,5 @@ sudo chown -R "$(id -u):$(id -g)" "$debs"
 rm -rf "$debs/partial" "$debs/lock"
 touch "$debs/complete"
 downloaded=("$debs"/*.deb)
-echo "install-chromium: keeping ${#downloaded[@]} system packages for the cache"
+echo "install-browser: keeping ${#downloaded[@]} system packages for the cache"
 echo "debs=saved" >> "${GITHUB_OUTPUT:-/dev/null}"
