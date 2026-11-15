@@ -75,8 +75,9 @@ fn warn(localizer: &Localizer, notice: &Notice) -> io::Result<()> {
     ))
 }
 
-/// What `import-profile --json` prints when the import saved the profile.
-fn import_document(imported: Imported) -> api::ProfileImportDto {
+/// What `import-profile --json` prints when the import saved the profile,
+/// and what a preview of the import answers.
+pub(crate) fn import_document(imported: Imported) -> api::ProfileImportDto {
     api::ProfileImportDto {
         repository: imported.repository.as_str().to_owned(),
         plans: imported

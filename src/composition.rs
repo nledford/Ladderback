@@ -531,8 +531,9 @@ async fn daemon_at(
     let lock = DataDirLock::acquire(&data_dir).map_err(|error| lock_refused(&data_dir, error))?;
     // The configuration next: a file this build cannot read is a refusal,
     // whatever the rest of the machine says.
+    let config_file = config_dir.join("config.toml");
     let config: Arc<dyn ConfigStore> = Arc::new(FileConfigStore::new(
-        config_dir.join("config.toml"),
+        config_file.clone(),
         Arc::new(SystemClock),
     ));
     let loaded = config.load().await.map_err(config_refused)?;
@@ -556,6 +557,7 @@ async fn daemon_at(
     // leaves it as tidy as one that served and stopped.
     match state_over(
         config,
+        config_file,
         &data_dir,
         cache_dir,
         recorded,
@@ -584,6 +586,7 @@ async fn daemon_at(
 /// tidied first, keeping the caches of the repositories `recorded` names.
 async fn state_over(
     config: Arc<dyn ConfigStore>,
+    config_file: std::path::PathBuf,
     data_dir: &std::path::Path,
     cache_dir: Option<std::path::PathBuf>,
     recorded: Recorded,
@@ -692,7 +695,12 @@ async fn state_over(
         Arc::clone(&store),
         writes,
     ));
-    let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService);
+    let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService::new(
+        Arc::clone(&config),
+        config_file,
+        agent_id,
+        Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
+    ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog {
         config: Arc::clone(&config),
         engine,

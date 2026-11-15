@@ -4,8 +4,13 @@
 //! `rustic` reads. Both are reads: neither changes the configuration.
 
 use async_trait::async_trait;
-#[cfg(test)]
+use axum::Json;
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+
+use crate::AppState;
 
 /// What the profile routes ask of the daemon, each from a request as it
 /// came, before anything in it was read as a domain value.
@@ -47,6 +52,68 @@ pub enum ProfilesError {
         args: Vec<(&'static str, api::MsgArg)>,
         detail: Option<String>,
     },
+}
+
+impl ProfilesError {
+    /// The refusal as the API answers it, and the status it is answered
+    /// with: a body that can't be read is 400; a plan the configuration
+    /// doesn't hold 404; a profile or plan that can't be carried over 422;
+    /// and a configuration that can't be read now 503.
+    fn answer(self) -> (StatusCode, api::ErrorDto) {
+        use api::{ErrorCode, ErrorDto, MsgArg};
+        match self {
+            Self::InvalidBody => (
+                StatusCode::BAD_REQUEST,
+                ErrorDto::new(ErrorCode::InvalidBody, [], None),
+            ),
+            Self::PlanUnknown { plan } => (
+                StatusCode::NOT_FOUND,
+                ErrorDto::new(ErrorCode::PlanUnknown, [("plan", MsgArg::Text(plan))], None),
+            ),
+            Self::Refused { code, args, detail } => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ErrorDto::new(code, args, detail),
+            ),
+            Self::Unavailable { code, args, detail } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorDto::new(code, args, detail),
+            ),
+        }
+    }
+
+    /// The refusal as the API answers it.
+    pub fn error(self) -> api::ErrorDto {
+        self.answer().1
+    }
+}
+
+impl IntoResponse for ProfilesError {
+    fn into_response(self) -> Response {
+        let (status, error) = self.answer();
+        (status, Json(error)).into_response()
+    }
+}
+
+/// What importing the profile in the body would add.
+pub(crate) async fn preview(
+    State(state): State<AppState>,
+    body: Result<Json<api::ProfilePreviewDto>, JsonRejection>,
+) -> Response {
+    let Ok(Json(request)) = body else {
+        return ProfilesError::InvalidBody.into_response();
+    };
+    match state.profiles.preview(request).await {
+        Ok(preview) => (StatusCode::OK, Json(preview)).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+/// The plan the path names as a profile.
+pub(crate) async fn export(State(state): State<AppState>, Path(plan): Path<String>) -> Response {
+    match state.profiles.export(plan).await {
+        Ok(exported) => (StatusCode::OK, Json(exported)).into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 #[cfg(test)]

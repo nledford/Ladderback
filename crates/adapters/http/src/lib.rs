@@ -408,6 +408,18 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         )
         .route("/api/v1/plans", axum::routing::get(list_plans))
         .route(
+            "/api/v1/plans/{id}/profile",
+            axum::routing::get(profiles::export),
+        )
+        // `body_limit` bounds this body by its own class, over the 2 MiB
+        // axum's JSON extractor would otherwise allow.
+        .route(
+            body_limit::PROFILE_PREVIEW_PATH,
+            axum::routing::post(profiles::preview).layer(axum::extract::DefaultBodyLimit::max(
+                usize::try_from(body_limit::PROFILE_BODY_LIMIT).unwrap_or(usize::MAX),
+            )),
+        )
+        .route(
             "/api/v1/repositories",
             axum::routing::get(list_repositories).post(repositories::connect_repository),
         )

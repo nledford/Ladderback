@@ -38,6 +38,9 @@ pub(crate) const UI_BODY_LIMIT: u64 = 0;
 
 /// The limit of the class of route `path` belongs to.
 pub(crate) fn limit_for(path: &str) -> u64 {
+    if path == PROFILE_PREVIEW_PATH {
+        return PROFILE_BODY_LIMIT;
+    }
     match path.strip_prefix("/api/v1") {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => API_BODY_LIMIT,
         _ => UI_BODY_LIMIT,

@@ -6,8 +6,9 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use api::{
-    ErrorCode, ErrorDto, MsgArg, OperationDetailDto, OperationsPageDto, PlansDto, RepositoriesDto,
-    SessionDto, SignInStateDto, SnapshotsDto,
+    ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, OperationDetailDto,
+    OperationsPageDto, PlansDto, ProfileExportDto, ProfileImportDto, RepositoriesDto, SessionDto,
+    SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
@@ -27,8 +28,10 @@ pub const DEFAULT_DAEMON_URL: &str = "http://127.0.0.1:9898";
 /// How long the daemon may take to accept a connection.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// How long one request may take, answer included. Every route connect mode
-/// reads answers from the daemon's store or memory.
+/// How long one request may take, answer included. Most routes connect
+/// mode calls answer from the daemon's store or memory; a snapshot listing,
+/// a test and a forget preview read the repository, and one that takes
+/// longer is `daemon-unreachable`, which a read can ask again (§4.6).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The largest answer read, in bytes: a full history page with every
@@ -238,13 +241,15 @@ impl Connect {
     /// The daemon's answer to `POST route/segments` with the JSON `body`,
     /// read as `T`. A refusal is the daemon's own `{code, args}`; no
     /// connection is `daemon-unreachable`. Anything else, once the request
-    /// may have reached the daemon, is `daemon-answer-lost`: whether it took
-    /// effect is unknown, so it is never sent again (§4.6).
+    /// may have reached the daemon, is `lost()`: `daemon-answer-lost` for a
+    /// request that changes something, as whether it took effect is unknown
+    /// and it is never sent again (§4.6); `daemon-unreachable` for a read.
     async fn post<T: DeserializeOwned>(
         &self,
         route: &str,
         segments: &[&str],
         body: &serde_json::Value,
+        lost: fn() -> ErrorDto,
     ) -> Result<T, ErrorDto> {
         let url = self
             .daemon
@@ -262,15 +267,15 @@ impl Connect {
             if error.is_connect() {
                 no_answer()
             } else {
-                answer_lost()
+                lost()
             }
         })?;
         let succeeded = response.status().is_success();
-        let body = read_capped(response).await.ok_or_else(answer_lost)?;
+        let body = read_capped(response).await.ok_or_else(lost)?;
         if succeeded {
-            serde_json::from_slice(&body).map_err(|_| answer_lost())
+            serde_json::from_slice(&body).map_err(|_| lost())
         } else {
-            Err(serde_json::from_slice(&body).unwrap_or_else(|_| answer_lost()))
+            Err(serde_json::from_slice(&body).unwrap_or_else(|_| lost()))
         }
     }
 }
@@ -278,6 +283,16 @@ impl Connect {
 /// `daemon-unreachable`: no answer from a Ladderback API at the address.
 fn no_answer() -> ErrorDto {
     ErrorDto::new(ErrorCode::DaemonUnreachable, [], None)
+}
+
+/// `repository-unknown` for `alias`, which names no repository a daemon
+/// could hold.
+fn unknown_repository(alias: String) -> ErrorDto {
+    ErrorDto::new(
+        ErrorCode::RepositoryUnknown,
+        [("alias", MsgArg::Text(alias))],
+        None,
+    )
 }
 
 /// `daemon-answer-lost`: a request that changes something may have reached
@@ -354,11 +369,7 @@ impl Backend for Connect {
 
     async fn snapshots(&self, repository: String) -> Result<SnapshotsDto, ErrorDto> {
         let Some(alias) = segment(&repository) else {
-            return Err(ErrorDto::new(
-                ErrorCode::RepositoryUnknown,
-                [("alias", MsgArg::Text(repository))],
-                None,
-            ));
+            return Err(unknown_repository(repository));
         };
         self.get("api/v1/repositories", &[alias, "snapshots"], &[])
             .await
@@ -394,6 +405,7 @@ impl Backend for Connect {
                 "api/v1/operations",
                 &[],
                 &serde_json::json!({ "plan": plan }),
+                answer_lost,
             )
             .await?;
         Ok(started.operation)
@@ -418,9 +430,61 @@ impl Backend for Connect {
                 "api/v1/operations",
                 &[segment, "cancel"],
                 &serde_json::json!({}),
+                answer_lost,
             )
             .await?;
         Ok(())
+    }
+
+    async fn test_repository(&self, repository: String) -> Result<LocationsTestDto, ErrorDto> {
+        let Some(alias) = segment(&repository) else {
+            return Err(unknown_repository(repository));
+        };
+        self.post(
+            "api/v1/repositories",
+            &[alias, "test"],
+            &serde_json::json!({}),
+            no_answer,
+        )
+        .await
+    }
+
+    async fn preview_forget(&self, repository: String) -> Result<MaintenancePreviewDto, ErrorDto> {
+        let Some(alias) = segment(&repository) else {
+            return Err(unknown_repository(repository));
+        };
+        self.post(
+            "api/v1/repositories",
+            &[alias, "maintenance", "preview"],
+            &serde_json::json!({ "kind": "forget" }),
+            no_answer,
+        )
+        .await
+    }
+
+    async fn preview_import(
+        &self,
+        content: String,
+        repository: String,
+    ) -> Result<ProfileImportDto, ErrorDto> {
+        self.post(
+            "api/v1/profiles/preview",
+            &[],
+            &serde_json::json!({ "content": content, "repository": repository }),
+            no_answer,
+        )
+        .await
+    }
+
+    async fn export_profile(&self, plan: String) -> Result<ProfileExportDto, ErrorDto> {
+        let Some(segment) = segment(&plan) else {
+            return Err(ErrorDto::new(
+                ErrorCode::PlanUnknown,
+                [("plan", MsgArg::Text(plan))],
+                None,
+            ));
+        };
+        self.get("api/v1/plans", &[segment, "profile"], &[]).await
     }
 }
 

@@ -105,11 +105,12 @@ impl ProfileReader for FileProfileReader {
 
     fn read_text(
         &self,
-        _name: &str,
-        _text: &str,
-        _repository: &RepositoryAlias,
+        name: &str,
+        text: &str,
+        repository: &RepositoryAlias,
     ) -> Result<ImportedProfile, ProfileError> {
-        todo!()
+        let resolved = resolve::resolve_text(name, text)?;
+        map::map(resolved, repository, &self.variables, name)
     }
 }
 

@@ -194,15 +194,31 @@ pub(crate) fn secret_refusal(secret: &SecretRefusal) -> Response {
     )
 }
 
-/// The typed refusal of `error`, with the status of its kind: a body that
-/// can't be read is 400; a name the configuration doesn't hold, or a location
-/// that holds no repository, 404; a name the configuration can't take, or a
-/// job the engine ran and failed, 422; something that is already there, or a
-/// Create its row doesn't offer, 409; and the daemon not being able to do it
-/// now, 503.
+impl RepositoriesError {
+    /// The refusal as the API answers it.
+    pub fn error(&self) -> api::ErrorDto {
+        answer(self).1
+    }
+}
+
+/// The typed refusal of `error`, with the status of its kind.
 fn refusal(error: &RepositoriesError) -> Response {
+    let (status, error) = answer(error);
+    (status, Json(error)).into_response()
+}
+
+/// The refusal of `error` as the API answers it, and its status: a body
+/// that can't be read is 400; a name the configuration doesn't hold, or a
+/// location that holds no repository, 404; a name the configuration can't
+/// take, or a job the engine ran and failed, 422; something that is already
+/// there, or a Create its row doesn't offer, 409; and the daemon not being
+/// able to do it now, 503.
+fn answer(error: &RepositoriesError) -> (StatusCode, api::ErrorDto) {
     use api::{ErrorCode, MsgArg};
     let text = |name, value: &String| vec![(name, MsgArg::Text(value.clone()))];
+    let refused = |status, code, args: Vec<(&'static str, MsgArg)>, detail| {
+        (status, api::ErrorDto::new(code, args, detail))
+    };
     match error {
         RepositoriesError::InvalidBody => refused(
             StatusCode::BAD_REQUEST,
@@ -258,7 +274,12 @@ fn refusal(error: &RepositoriesError) -> Response {
             text("field", field),
             None,
         ),
-        RepositoriesError::SecretRefused(secret) => secret_refusal(secret),
+        RepositoriesError::SecretRefused(secret) => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            secret.code,
+            secret.args.clone(),
+            secret.detail.clone(),
+        ),
         RepositoriesError::OperationFailed { detail } => refused(
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::OperationFailed,
