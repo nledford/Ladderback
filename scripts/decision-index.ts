@@ -25,8 +25,34 @@ export interface Decision {
 
 const FILE = /^(\d+)-[a-z0-9-]+\.md$/;
 const HEADING = /^# Decision (\d+): (.+)$/;
+const SUPERSEDED = /^\*\*Superseded by decision (\d+)\*\*/;
+const CONFLICT = /^(<{7}|>{7}|\|{7})( |$)|^={7}$/;
+const FENCE = /^(`{3,}|~{3,})/;
 const SECTION = "## 16. Decisions";
 const TABLE_HEAD = ["| # | Question |", "|---|---|"];
+
+/** The lines of `markdown` outside fenced code, with their 1-based numbers. */
+function proseLines(markdown: string): { line: string; number: number }[] {
+  const out: { line: string; number: number }[] = [];
+  let fence: string | null = null;
+  markdown.split(/\r?\n/).forEach((line, i) => {
+    const open = FENCE.exec(line)?.[1];
+    if (fence === null && open) {
+      fence = open;
+    } else if (fence !== null && line.startsWith(fence)) {
+      fence = null;
+    } else if (fence === null) {
+      out.push({ line, number: i + 1 });
+    }
+  });
+  return out;
+}
+
+/** The 1-based number of the first line of `markdown` that is a merge-conflict marker, if any. */
+function conflictLine(markdown: string): number | null {
+  const i = markdown.split(/\r?\n/).findIndex((line) => CONFLICT.test(line));
+  return i < 0 ? null : i + 1;
+}
 
 /** The decision `markdown` (the text of `file`) records, or why it can't be read as one. */
 export function parseDecision(file: string, markdown: string): Decision | string {
@@ -34,17 +60,26 @@ export function parseDecision(file: string, markdown: string): Decision | string
   if (!name?.[1]) {
     return `${file}: a decision file is named NN-<slug>.md`;
   }
-  const heading = markdown.split(/\r?\n/).find((line) => line.startsWith("# "));
+  const conflict = conflictLine(markdown);
+  if (conflict !== null) {
+    return `${file}:${conflict}: a merge-conflict marker: resolve the conflict first`;
+  }
+  const prose = proseLines(markdown);
+  const heading = prose.find(({ line }) => line.startsWith("# "))?.line;
   const parts = heading === undefined ? null : HEADING.exec(heading);
-  if (!parts?.[1] || !parts[2]) {
+  const asked = parts?.[2]?.trim();
+  if (!parts?.[1] || !asked) {
     return `${file}: its heading must read "# Decision ${Number(name[1])}: <question>"`;
   }
   if (Number(parts[1]) !== Number(name[1])) {
     return `${file}: its heading says decision ${parts[1]}, its name ${Number(name[1])}`;
   }
+  if (asked.includes("|")) {
+    return `${file}: its heading has a "|", which would split its row in the index`;
+  }
   // A decision a later one replaced says so in a paragraph of its own, and its row says so too.
-  const superseded = /^\*\*Superseded by decision (\d+)\*\*/m.exec(markdown)?.[1];
-  const question = parts[2].trim() + (superseded ? ` (superseded by decision ${superseded})` : "");
+  const superseded = prose.map(({ line }) => SUPERSEDED.exec(line)?.[1]).find((n) => n !== undefined);
+  const question = asked + (superseded ? ` (superseded by decision ${superseded})` : "");
   return { number: Number(name[1]), file, question };
 }
 
@@ -62,23 +97,29 @@ export function renderIndex(decisions: readonly Decision[]): { lines: string[]; 
   return { lines: [...TABLE_HEAD, ...rows], problems };
 }
 
-/** `roadmap` with §16's table replaced by `table`, or null when §16 has no table. */
-export function replaceIndex(roadmap: string, table: readonly string[]): string | null {
-  const lines = roadmap.split("\n");
-  const section = lines.indexOf(SECTION);
-  if (section < 0) {
-    return null;
+/** `roadmap` with §16's table replaced by `table`, or why it can't be. */
+export function replaceIndex(roadmap: string, table: readonly string[]): { text: string } | string {
+  const conflict = conflictLine(roadmap);
+  if (conflict !== null) {
+    return `docs/design/roadmap.md:${conflict}: a merge-conflict marker: take either side of the conflict, then run \`just decision-index\``;
   }
-  const start = lines.findIndex((line, i) => i > section && line === TABLE_HEAD[0]);
-  const next = lines.findIndex((line, i) => i > section && line.startsWith("## "));
-  if (start < 0 || (next >= 0 && start > next)) {
-    return null;
+  const lines = roadmap.split(/\r?\n/);
+  const section = lines.indexOf(SECTION);
+  const start = lines.findIndex((line, i) => section >= 0 && i > section && line === TABLE_HEAD[0]);
+  const found = lines.findIndex((line, i) => section >= 0 && i > section && line.startsWith("## "));
+  const next = found < 0 ? lines.length : found;
+  if (start < 0 || start > next) {
+    return `docs/design/roadmap.md: no "${TABLE_HEAD[0]}" table under "${SECTION}"`;
   }
   let end = start;
   while (end < lines.length && lines[end]?.startsWith("|")) {
     end++;
   }
-  return [...lines.slice(0, start), ...table, ...lines.slice(end)].join("\n");
+  const stray = lines.findIndex((line, i) => i >= end && i < next && line.startsWith("|"));
+  if (stray >= 0) {
+    return `docs/design/roadmap.md:${stray + 1}: a table row after the §16 index: the index is one table, with no blank line in it`;
+  }
+  return { text: [...lines.slice(0, start), ...table, ...lines.slice(end)].join("\n") };
 }
 
 // Run as a script, not imported (the real path: `import.meta.url` is one).
@@ -99,14 +140,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   const index = renderIndex(decisions);
   problems.push(...index.problems);
   const roadmap = readFileSync(roadmapPath, "utf8");
-  const written = replaceIndex(roadmap, index.lines);
-  if (written === null) {
-    problems.push(`docs/design/roadmap.md: no "${TABLE_HEAD[0]}" table under "${SECTION}"`);
+  const replaced = replaceIndex(roadmap, index.lines);
+  if (typeof replaced === "string") {
+    problems.push(replaced);
   }
-  if (problems.length > 0) {
-    process.stderr.write(`${problems.join("\n")}\nerror: the decision index can't be written until the decision files are fixed\n`);
+  if (problems.length > 0 || typeof replaced === "string") {
+    process.stderr.write(`${problems.join("\n")}\nerror: the §16 decision index can't be checked or written until the problems above are fixed\n`);
     process.exit(1);
   }
+  const written = replaced.text;
   if (written === roadmap) {
     process.stdout.write(`ok: the §16 index lists all ${decisions.length} decisions\n`);
   } else if (process.argv.includes("--write")) {
