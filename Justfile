@@ -39,7 +39,7 @@ alias v := verify
 [group('setup')]
 setup:
     rustup target add wasm32-unknown-unknown
-    cargo binstall --no-confirm trunk cargo-deny cargo-mutants cargo-nextest release-plz zizmor
+    cargo binstall --no-confirm trunk cargo-deny cargo-mutants cargo-nextest release-plz zizmor cargo-auditable
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
     cargo binstall --no-confirm --version '{{ leptosfmt_version }}' leptosfmt
     scripts/install-rustic.sh
@@ -409,7 +409,8 @@ web-release:
 # into Cargo's bin folder (`~/.cargo/bin`, or `bin` under `--root <dir>`). It is
 # built as a release archive is (§12.1): with `release_flags`, so it has no
 # pseudolocales and no gallery, and with the `dist` profile (the `release`
-# profile with thin LTO), so the installed binary matches the archives. It
+# profile with thin LTO), so the installed binary runs as the archives' does,
+# though without the dependency list cargo-auditable embeds in them. It
 # embeds the web UI that `web-release` builds first: `cargo install` from a git
 # URL can't build that UI, so this checkout is the way in. The daemon starts its
 # own workers, so this one binary is all an installation needs. Arguments go to
@@ -442,7 +443,8 @@ install-restart *args:
 # to `target/distrib` (dist's folder, whatever CARGO_TARGET_DIR says), with
 # dist's manifest as `release-build-manifest.json` beside them. The binary's
 # dynamic libraries go to the log as a table. Needs dist
-# (scripts/install-dist.sh). It publishes nothing.
+# (scripts/install-dist.sh) and cargo-auditable, which dist builds with
+# (`just setup` installs it). It publishes nothing.
 [doc('Build the release archive for a target with cargo-dist; publishes nothing.')]
 [group('release')]
 release-build target: web-release

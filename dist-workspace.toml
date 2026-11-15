@@ -22,3 +22,7 @@ default-features = false
 # `cargo build --package ladderback`, not `--workspace`: the features are the
 # daemon's alone, as `just architecture` checks them.
 precise-builds = true
+# `cargo auditable build`, not `cargo build`: the binary embeds its dependency
+# list, which `cargo audit bin` checks against advisories published after the
+# release (§16 decision 54). dist stops if cargo-auditable isn't installed.
+cargo-auditable = true
