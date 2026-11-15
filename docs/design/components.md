@@ -674,7 +674,7 @@ Accessibility is designed in from the first screen, not audited in at the end. T
 
   A password set in Settings clears the fields, and the section's "no admin password yet" gives way to the restart message above, which the page shows even when its read after the set fails, since the daemon has said the password is set. A changed one ends the page's session, so the sign-in page shows, saying "Admin password changed. Sign in with the new password." under its heading, and signing in returns to Settings. A reader who leaves Settings before the change is answered still gets that sign-in page next: forgetting the session is the page's step, not the section's.
 
-**The shared component set** in `web` is the only place widgets are built. Each component has an accessibility contract and tests for it:
+**The shared component set** in `web` is where widgets are built: a page uses the set's component wherever it has one, and native elements (above) where it has none. Each component has an accessibility contract and tests for it, and a new one meets WCAG 2.2 AA in full when it merges (§13.7.5):
 
 | Component | Contract |
 |---|---|
@@ -688,6 +688,8 @@ Accessibility is designed in from the first screen, not audited in at the end. T
 | Tabs, menus, disclosures | Their WAI-ARIA patterns, or native `<details>` where it suffices |
 | Toast | Spoken through the announcer and never steals focus. Never the only place a failure appears: failures also stay on the page |
 | Pause control (a page that follows the daemon live) | A toggle `<button aria-pressed>` whose name stays the same pressed or not. While it is pressed, the page holds still and a banner beside it, not a live region, describes it (`aria-describedby`) and counts the changes waiting. Focus never moves. Pressing it again shows every change at once, and the announcer says once what changed |
+
+**Exceptions.** A page that builds its own version of a widget the set has gives the reason in its pull request and lists it here, with where it lives. None is listed yet.
 
 **Live updates (A3).** `UiEvent`s update the page visually, but only the **announcer** talks to screen readers.
 
