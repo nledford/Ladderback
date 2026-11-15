@@ -16,7 +16,9 @@ use crate::backend::{
     reconnect_backoff, succeeded,
 };
 use crate::maintenance::{self, Kind, Next, Watch, Watched};
-use crate::session::{Answer, Lease, Resend, Signed, Stand, wait_ms};
+use crate::session::{
+    Answer, Lease, Resend, Signed, Stand, keep_signed_in_offered, signed_out_all_the_same, wait_ms,
+};
 use crate::visit::Visit;
 use api::{
     BuildDto, ErrorCode, MsgArg, OperationDetailDto, OperationsPageDto, SessionDto, SignInDto,
@@ -24,7 +26,7 @@ use api::{
 };
 use futures::channel::oneshot;
 use futures::{FutureExt, Sink, StreamExt};
-use gloo_net::http::Request;
+use gloo_net::http::{Request, RequestBuilder};
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::{Message, State};
 use leptos::prelude::{RwSignal, Set, Update};
@@ -35,6 +37,9 @@ use serde::{Deserialize, Serialize};
 /// The route that says where the page stands with sign-in, signs in and
 /// signs out (security §10.1).
 const SESSION_PATH: &str = "/api/v1/session";
+
+/// The route that signs out everywhere: every browser's session ends.
+const SESSIONS_PATH: &str = "/api/v1/sessions";
 
 /// The header a changed request carries its session's CSRF token in.
 const CSRF_HEADER: &str = "x-csrf-token";
@@ -94,7 +99,9 @@ pub(crate) fn origin() -> String {
 /// token its changed requests carry, its lease and the timer that looks at
 /// it again, the signals that show the warning before it ends unused and the
 /// dialog asking to sign in again, the requests waiting for that sign-in,
-/// and whether the reader signed out, after which the sign-in page asks.
+/// whether the reader signed out, after which the sign-in page asks, and
+/// whether the sign-in form offers **Keep me signed in on this device**, as
+/// the daemon's last signed-out answer said.
 #[derive(Default)]
 struct Session {
     csrf: Option<String>,
@@ -103,6 +110,7 @@ struct Session {
     warning: Option<RwSignal<bool>>,
     ended: Option<RwSignal<bool>>,
     build: Option<RwSignal<Option<BuildDto>>>,
+    keep_offered: Option<RwSignal<bool>>,
     waiting: Vec<oneshot::Sender<bool>>,
     signed_out: bool,
 }
@@ -122,16 +130,19 @@ pub(crate) fn now_ms() -> i64 {
 /// The page shows the warning that its session is about to end unused while
 /// `warning` is `true`, and the dialog asking to sign in again while `ended`
 /// is; the session's lease and a request refused for want of a session set
-/// them.
+/// them. The sign-in form offers **Keep me signed in on this device** while
+/// `keep_offered` is `true`, which each signed-out answer sets.
 pub(crate) fn watch_session(
     warning: RwSignal<bool>,
     ended: RwSignal<bool>,
     build: RwSignal<Option<BuildDto>>,
+    keep_offered: RwSignal<bool>,
 ) {
     SESSION.with_borrow_mut(|session| {
         session.warning = Some(warning);
         session.ended = Some(ended);
         session.build = Some(build);
+        session.keep_offered = Some(keep_offered);
     });
 }
 
@@ -143,6 +154,17 @@ fn told(build: Option<BuildDto>) {
         && let Some(shown) = SESSION.with_borrow(|session| session.build)
     {
         shown.try_set(Some(build));
+    }
+}
+
+/// The daemon said where the page stands: a signed-out answer says whether
+/// the sign-in form offers **Keep me signed in on this device**
+/// (`keep_signed_in_offered` decides); any other leaves it as it was.
+fn heard(read: &SessionDto) {
+    if let Some(offered) = keep_signed_in_offered(read)
+        && let Some(keep_offered) = SESSION.with_borrow(|session| session.keep_offered)
+    {
+        keep_offered.try_set(offered);
     }
 }
 
@@ -396,22 +418,23 @@ pub(crate) async fn answers(patience: Duration) -> bool {
 /// mutating method, §4.2), with the session's CSRF token when sign-in is on,
 /// and sorts the answer.
 pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
-    let (status, text) = send(None, Asked::ByPerson, |csrf, _| {
-        let builder = Request::post(url);
-        let builder = match csrf {
-            Some(csrf) => builder.header(CSRF_HEADER, csrf),
-            None => builder,
-        };
-        builder.json(body).ok()
-    })
-    .await?;
-    sorted(status, &text)
+    change(Request::post, url, body).await
 }
 
-/// Puts `body` as JSON to `url`, as [`post`] posts it.
+/// Puts `body` as JSON at `url`, as [`post`] posts it.
 pub(crate) async fn put<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
+    change(Request::put, url, body).await
+}
+
+/// Sends `body` as JSON to `url` with the method `start` begins, with the
+/// session's CSRF token when sign-in is on, and sorts the answer.
+async fn change<S: Serialize>(
+    start: fn(&str) -> RequestBuilder,
+    url: &str,
+    body: &S,
+) -> Option<Posted> {
     let (status, text) = send(None, Asked::ByPerson, |csrf, _| {
-        let builder = Request::put(url);
+        let builder = start(url);
         let builder = match csrf {
             Some(csrf) => builder.header(CSRF_HEADER, csrf),
             None => builder,
@@ -452,7 +475,8 @@ fn sorted(status: u16, text: &str) -> Option<Posted> {
 
 /// Where the page stands with sign-in: `GET /api/v1/session`, which uses a
 /// live session. A live session's CSRF token and lease are the page's from
-/// then on. `None` is no answer the page could read.
+/// then on; a signed-out answer says whether the sign-in form offers Keep me
+/// signed in. `None` is no answer the page could read.
 pub(crate) async fn session() -> Option<SessionDto> {
     let sent = now_ms();
     let response = Request::get(&format!("{}{SESSION_PATH}", origin()))
@@ -463,11 +487,36 @@ pub(crate) async fn session() -> Option<SessionDto> {
         return None;
     }
     let read = response.json::<SessionDto>().await.ok()?;
+    heard(&read);
     match Signed::of(&read, sent) {
         Some(signed) => signed_in(Some(signed)),
         None => told(read.build.clone()),
     }
     Some(read)
+}
+
+/// Whether the sign-in form offers Keep me signed in, as a page with no
+/// session hears it: `GET /api/v1/session` without the session's cookie.
+/// The dialog asking to sign in again asks so once the page's clock has
+/// ended the session, a moment before the daemon's does (`Lease`): with the
+/// cookie, that read would use the session, keeping it another 12 hours,
+/// and give the page its lease again, closing the dialog, so a page left
+/// open would never let its session end unused (security §10.1). Any
+/// answer but a signed-out one says nothing of the form.
+pub(crate) async fn hear_keep_offered() {
+    let Ok(response) = Request::get(&format!("{}{SESSION_PATH}", origin()))
+        .credentials(web_sys::RequestCredentials::Omit)
+        .send()
+        .await
+    else {
+        return;
+    };
+    if response.status() != 200 {
+        return;
+    }
+    if let Ok(read) = response.json::<SessionDto>().await {
+        heard(&read);
+    }
 }
 
 /// The reader chose to stay signed in: asking where the page stands is a
@@ -488,12 +537,13 @@ pub(crate) async fn stay_signed_in() -> bool {
     true
 }
 
-/// Signs in with `password`: `POST /api/v1/session`. A session that starts
-/// gives its CSRF token to every changed request from then on.
-pub(crate) async fn sign_in(password: String) -> Answer {
+/// Signs in with `password`, kept on this device past the idle limit when
+/// `keep_signed_in`: `POST /api/v1/session`. A session that starts gives its
+/// CSRF token to every changed request from then on.
+pub(crate) async fn sign_in(password: String, keep_signed_in: bool) -> Answer {
     let body = SignInDto {
         password,
-        keep_signed_in: false,
+        keep_signed_in,
     };
     let Ok(request) = Request::post(&format!("{}{SESSION_PATH}", origin())).json(&body) else {
         return Answer::Unreadable;
@@ -512,24 +562,41 @@ pub(crate) async fn sign_in(password: String) -> Answer {
 /// Signs out: `DELETE /api/v1/session`, a changed request, so it says its
 /// body is JSON (§4.2) and carries the session's CSRF token, read afresh
 /// once if the session has another (`send`). Once the daemon has ended the
-/// session, the page forgets its token and its lease. `false` is no answer:
-/// the session may still be live.
+/// session, the page forgets its token and its lease: when it is done, and
+/// when the database could not forget the session, which has ended all the
+/// same. `false` is no answer, or another refusal: the session may still be
+/// live.
 pub(crate) async fn sign_out() -> bool {
-    let url = format!("{}{SESSION_PATH}", origin());
-    let answer = send(None, Asked::ByPerson, |csrf, _| {
-        let builder = Request::delete(&url).header("content-type", "application/json");
-        let builder = match csrf {
-            Some(csrf) => builder.header(CSRF_HEADER, csrf),
-            None => builder,
-        };
-        builder.build().ok()
-    })
-    .await;
-    if !answer.is_some_and(|(status, _)| succeeded(status)) {
-        return false;
+    match end_sessions(SESSION_PATH).await {
+        Some(Posted::Done(_)) => true,
+        Some(Posted::Refused(code, ..)) if signed_out_all_the_same(code) => {
+            forget_session();
+            true
+        }
+        Some(Posted::Refused(..)) | None => false,
     }
-    forget_session();
-    true
+}
+
+/// Signs out everywhere: `DELETE /api/v1/sessions`, which ends every
+/// browser's session, this page's included, sent as [`sign_out`] sends its
+/// request. Done, the page forgets its session; a refusal is the daemon's to
+/// say, and `None` is no answer.
+pub(crate) async fn sign_out_everywhere() -> Option<Posted> {
+    end_sessions(SESSIONS_PATH).await
+}
+
+/// Sends `DELETE` to `path`, which ends this page's session and perhaps
+/// others. Done, the page forgets its session, and the signed-out answer
+/// says whether the sign-in form offers Keep me signed in.
+async fn end_sessions(path: &str) -> Option<Posted> {
+    let posted = delete(&format!("{}{path}", origin())).await?;
+    if let Posted::Done(text) = &posted {
+        if let Ok(read) = serde_json::from_str::<SessionDto>(text) {
+            heard(&read);
+        }
+        forget_session();
+    }
+    Some(posted)
 }
 
 /// Forgets the page's session, which the daemon has ended: its CSRF token

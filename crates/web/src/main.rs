@@ -248,7 +248,11 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     provide_context(standing);
     provide_context(notice);
     provide_context(sign_in::PasswordChanged(RwSignal::new(false)));
-    ws::watch_session(warning, ended, build);
+    // Offered until a signed-out answer says otherwise, as a daemon from
+    // before the choice reads it.
+    let keep_offered = RwSignal::new(true);
+    provide_context(sign_in::KeepOffered(keep_offered));
+    ws::watch_session(warning, ended, build, keep_offered);
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
         let read = ws::session().await;

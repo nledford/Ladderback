@@ -23,38 +23,60 @@ pub(crate) const LENGTH_GROUP: &str = "session-length";
 
 /// The choices of **Stay signed in for**, in the order the section offers
 /// them: shortest first.
-pub(crate) const LENGTHS: &[SessionLengthDto] = &[];
+pub(crate) const LENGTHS: &[SessionLengthDto] = &[
+    SessionLengthDto::UntilBrowserCloses,
+    SessionLengthDto::SevenDays,
+    SessionLengthDto::ThirtyDays,
+    SessionLengthDto::NinetyDays,
+    SessionLengthDto::OneYear,
+    SessionLengthDto::UntilSignOut,
+];
 
 /// The words a choice is shown in.
 pub(crate) fn length_label(length: SessionLengthDto) -> MessageId {
-    let _ = length;
-    todo!()
+    match length {
+        SessionLengthDto::UntilBrowserCloses => msg::UI_SESSION_LENGTH_UNTIL_BROWSER_CLOSES,
+        SessionLengthDto::SevenDays => msg::UI_SESSION_LENGTH_7_DAYS,
+        SessionLengthDto::ThirtyDays => msg::UI_SESSION_LENGTH_30_DAYS,
+        SessionLengthDto::NinetyDays => msg::UI_SESSION_LENGTH_90_DAYS,
+        SessionLengthDto::OneYear => msg::UI_SESSION_LENGTH_1_YEAR,
+        SessionLengthDto::UntilSignOut => msg::UI_SESSION_LENGTH_UNTIL_SIGN_OUT,
+    }
 }
 
 /// The name the wire gives a choice, which is also its radio button's value.
 pub(crate) fn length_value(length: SessionLengthDto) -> &'static str {
-    let _ = length;
-    todo!()
+    match length {
+        SessionLengthDto::UntilBrowserCloses => "until-browser-closes",
+        SessionLengthDto::SevenDays => "7-days",
+        SessionLengthDto::ThirtyDays => "30-days",
+        SessionLengthDto::NinetyDays => "90-days",
+        SessionLengthDto::OneYear => "1-year",
+        SessionLengthDto::UntilSignOut => "until-sign-out",
+    }
 }
 
 /// The choice a radio button's value names, if it names one.
 fn length_of(value: &str) -> Option<SessionLengthDto> {
-    let _ = value;
-    todo!()
+    LENGTHS
+        .iter()
+        .copied()
+        .find(|length| length_value(*length) == value)
 }
 
 /// The radio buttons of **Stay signed in for**, in order: each choice's
 /// value and its words, worded by `say`.
 pub(crate) fn options(say: impl Fn(MessageId) -> String) -> Vec<(&'static str, String)> {
-    let _ = say;
-    todo!()
+    LENGTHS
+        .iter()
+        .map(|length| (length_value(*length), say(length_label(*length))))
+        .collect()
 }
 
 /// The request that saves the radio button whose value is `chosen`, or
 /// none when it names no choice (before the settings are read).
 pub(crate) fn request(chosen: &str) -> Option<SignInSettingsDto> {
-    let _ = (chosen, length_of);
-    todo!()
+    length_of(chosen).map(|session_length| SignInSettingsDto { session_length })
 }
 
 /// What the section asked of the daemon.
@@ -100,8 +122,16 @@ pub(crate) fn steps(
     shown: bool,
     say: impl Fn(MessageId) -> String,
 ) -> Vec<Step> {
-    let _ = (change, answer, shown, say);
-    todo!()
+    match (change, answer) {
+        (Change::SignOutEverywhere, Answer::Done) => vec![Step::SignIn],
+        _ if !shown => Vec::new(),
+        (Change::Save, Answer::Done) => vec![Step::SaySaved],
+        (_, Answer::Refused(sentence)) => vec![Step::Show(sentence)],
+        (_, Answer::Unreachable) => vec![Step::Show(Sentence::new(
+            &say(msg::UI_SESSION_UNREACHABLE),
+            None,
+        ))],
+    }
 }
 
 #[cfg(test)]

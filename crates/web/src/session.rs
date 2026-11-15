@@ -102,16 +102,15 @@ pub(crate) fn waiting_password(read: Option<&SessionDto>) -> Option<MessageId> {
 /// daemon then reads it. `None` is an answer that isn't signed out, which
 /// says nothing of the form.
 pub(crate) fn keep_signed_in_offered(read: &SessionDto) -> Option<bool> {
-    let _ = read;
-    todo!()
+    (read.sign_in == SignInStateDto::SignedOut)
+        .then_some(read.keep_signed_in_offered != Some(false))
 }
 
 /// Whether a sign-in asks to be kept: only when the box is `checked` and
 /// the form still `offered` it. A box checked while it was offered asks for
 /// nothing once it isn't.
 pub(crate) fn asks_to_keep(checked: bool, offered: bool) -> bool {
-    let _ = (checked, offered);
-    todo!()
+    checked && offered
 }
 
 /// What the page's title says once its standing has changed.
@@ -223,7 +222,9 @@ pub(crate) struct Signed {
 impl Signed {
     /// The live session `read` says the page has, in answer to a request
     /// sent at `sent`; `None` when it says the page has none, or leaves out
-    /// its CSRF token or how long it lasts.
+    /// its CSRF token. A session with no idle limit (kept signed in) or no
+    /// end after its sign-in (Until I sign out, Until I close the browser)
+    /// leaves that out, and lasts as long as can be counted by it.
     pub(crate) fn of(read: &SessionDto, sent: i64) -> Option<Self> {
         if read.sign_in != SignInStateDto::SignedIn {
             return None;
@@ -231,8 +232,8 @@ impl Signed {
         Some(Self {
             csrf: read.csrf_token.clone()?,
             lease: Lease::new(
-                millis(read.idle_seconds?),
-                millis(read.ends_in_seconds?),
+                read.idle_seconds.map_or(i64::MAX, millis),
+                read.ends_in_seconds.map_or(i64::MAX, millis),
                 sent,
             ),
             build: read.build.clone(),
@@ -366,7 +367,7 @@ pub(crate) fn about_the_password(code: ErrorCode) -> bool {
 /// the page forgets it too and shows the sign-in page. Any other refusal
 /// left the session live.
 pub(crate) fn signed_out_all_the_same(code: ErrorCode) -> bool {
-    todo!("{code:?}")
+    code == ErrorCode::SessionsUnavailable
 }
 
 #[cfg(test)]
@@ -669,7 +670,11 @@ mod tests {
     #[test]
     fn a_session_kept_signed_in_until_sign_out_never_ends_by_the_page_s_clock() {
         let lease = lease_of("");
-        for now in [SIGNED_IN_AT, SIGNED_IN_AT + IDLE, SIGNED_IN_AT + 20 * LIFETIME] {
+        for now in [
+            SIGNED_IN_AT,
+            SIGNED_IN_AT + IDLE,
+            SIGNED_IN_AT + 20 * LIFETIME,
+        ] {
             assert_eq!(lease.at(now), Stand::Quiet { until: i64::MAX });
             assert_eq!(wait_ms(now, i64::MAX), LONGEST_WAIT_MS);
         }

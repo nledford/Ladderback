@@ -14,8 +14,10 @@
 //! left, clears it from the page (I4).
 
 mod password;
+mod sign_in;
 
 use password::AdminPassword;
+use sign_in::SignInSection;
 
 use std::sync::Arc;
 
@@ -66,8 +68,9 @@ const SECRET_ID: &str = "api-token-secret";
 /// The Settings page. With sign-in off, it asks the daemon on opening whether
 /// an admin password has been set since it started, which waits for a restart
 /// to turn sign-in on (decision 70), and says so above the sections. The
-/// admin password's section is offered with sign-in off and in a session;
-/// with the daemon unread, the page can't say which form it would be.
+/// admin password's and the signing-in sections are offered with sign-in off
+/// and in a session; with the daemon unread, the page can't say which form
+/// they would be.
 #[component]
 pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_SETTINGS_HEADING);
@@ -81,7 +84,10 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
         });
     }
     let password = matches!(standing, Some(Standing::Off | Standing::SignedIn)).then(|| {
-        view! { <AdminPassword localizer=Arc::clone(&localizer) on=!off waiting=waiting /> }
+        view! {
+            <AdminPassword localizer=Arc::clone(&localizer) on=!off waiting=waiting />
+            <SignInSection localizer=Arc::clone(&localizer) on=!off />
+        }
     });
     let waiting_localizer = Arc::clone(&localizer);
     let restart_localizer = Arc::clone(&localizer);
