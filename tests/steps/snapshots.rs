@@ -410,6 +410,7 @@ async fn open(agent: &mut Agent, folder: FolderPath, from: u64) {
         agent.engine.clone(),
         Arc::new(SystemClock),
         ResolveRepository::new(Arc::new(SystemSecrets::new())),
+        Arc::default(),
     );
     let entry = agent.snapshot_entry();
     let snapshot = agent

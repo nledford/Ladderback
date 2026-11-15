@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
-use app::browse::{BrowseError, BrowseSnapshot};
+use app::browse::{BrowseError, BrowseSnapshot, FolderReads};
 use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
@@ -743,6 +743,7 @@ async fn state_over(
         schedules: Arc::clone(&schedules),
         link: Arc::clone(&conditions.link),
         sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
+        reads: Arc::default(),
     });
     let background = Background {
         runner,
@@ -2409,6 +2410,9 @@ struct ConfigCatalog {
     /// A plan's sources as the backup walks them, which its globs are read
     /// against (#510).
     sources: Arc<dyn NormalizeSources>,
+    /// The turns to read a folder of a snapshot, which every browse shares
+    /// (decision 102).
+    reads: Arc<FolderReads>,
 }
 
 #[async_trait]
@@ -2593,6 +2597,7 @@ impl Catalog for ConfigCatalog {
             Arc::new(SystemClock),
             ResolveRepository::new(Arc::new(SystemSecrets::default()))
                 .telling(Arc::new(log_secret_warning)),
+            Arc::clone(&self.reads),
         )
         .folder(
             OperationId::from_uuid(Uuid::now_v7()),
@@ -6076,6 +6081,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6156,6 +6162,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6254,6 +6261,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6965,6 +6973,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -10199,6 +10208,7 @@ mod repository_service_tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -10238,6 +10248,7 @@ mod repository_service_tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules,
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -10871,6 +10882,7 @@ mod repository_service_tests {
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
+                reads: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -10907,6 +10919,7 @@ mod repository_service_tests {
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
+                reads: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -11777,6 +11790,7 @@ mod repository_service_tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11915,6 +11929,7 @@ mod repository_service_tests {
             operations,
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
