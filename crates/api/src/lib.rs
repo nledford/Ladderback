@@ -339,8 +339,9 @@ pub enum ErrorCode {
     /// unknown, so it is never sent again (§4.6).
     DaemonAnswerLost,
     /// `ladderback mcp --connect` read an answer larger than the most it
-    /// reads, `limit`, and left it unread: an operation's detail, when it
-    /// recorded many long warnings (§4.6).
+    /// reads, `limit`, and left it unread: a long list, or an operation's
+    /// detail when it recorded many long warnings, which then names the
+    /// `operation` (§4.6).
     DaemonAnswerTooLarge,
     #[serde(other)]
     Unknown,
@@ -784,11 +785,23 @@ impl ErrorCode {
                 kind: ArgKind::Count,
                 optional: false,
             }],
-            Self::BodyTooLarge | Self::DaemonAnswerTooLarge => &[ArgSpec {
+            Self::BodyTooLarge => &[ArgSpec {
                 name: "limit",
                 kind: ArgKind::Bytes,
                 optional: false,
             }],
+            Self::DaemonAnswerTooLarge => &[
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Bytes,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "operation",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
             Self::ConfigTooLarge => &[
                 ArgSpec {
                     name: "file",
