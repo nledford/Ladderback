@@ -193,7 +193,7 @@ fn read(file: &str, text: &str, doc: &Doc<'_>, located: bool) -> Result<AgentCon
 
 /// A table that doesn't have the shape of the format: a key it doesn't have,
 /// or a value of another type than the key takes.
-fn strict(reader: &Reader<'_, '_>, error: &toml::de::Error) -> ConfigError {
+pub(crate) fn strict(reader: &Reader<'_, '_>, error: &toml::de::Error) -> ConfigError {
     let message = error.message();
     let found = error.span().and_then(|span| path_of(reader.doc, &span));
     let (path, spot) = found.map_or((KeyPath::default(), Spot::Value), |(path, is_key)| {
