@@ -18,6 +18,8 @@ schemars = { workspace = true, optional = true }
 serde.workspace = true
 
 [dev-dependencies]
+# The tests check the schemas the `schemars` feature writes.
+api = { workspace = true, features = ["schemars"] }
 serde_json.workspace = true
 
 [lints]
