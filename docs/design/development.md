@@ -177,6 +177,8 @@ A code isn't done until a person can read it in their own language (§8.4). Thre
 
 `just test` fails for a code with no message, a message with no code, a message that reads a variable its code doesn't declare, and a catalog message that no product code names.
 
+A warning the operation log keeps is a domain `WarningKind` too: its code goes in `WarningKind::code`, its row in the store's `WARNING_KINDS` (`crates/adapters/store/src/codec.rs`, §9) and its literal code in the codec's test match, which doesn't compile until it has one.
+
 #### 13.7.2 A port
 
 1. The trait in `crates/app/src/ports/`, in the ubiquitous language, returning typed errors.

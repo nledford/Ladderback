@@ -3,8 +3,18 @@
 //! The words are this store's own, equal today to `api`'s kebab-case codes but
 //! not tied to them: a database outlives the API's names. Writing matches
 //! every variant of the closed type, so a new one doesn't compile until it has
-//! a spelling; reading is strict, so a spelling this version never wrote is
-//! reported, not guessed at.
+//! a spelling. Reading is strict, so a spelling this version never wrote is
+//! reported, not guessed at, with one exception: a warning code this version
+//! doesn't know is a warning of another kind ([`WarningKind::Other`]), since a
+//! newer worker may have written it.
+//!
+//! An operation's kind and a warning's code are each written and read by one
+//! spelling, the writer's (`kind_text` here, [`WarningKind::code`] in the
+//! domain): reading goes through a table of the kinds (`KINDS`,
+//! `WARNING_KINDS`) by that same spelling, so the two directions can't drift
+//! apart. The tests walk every variant through both. The SQL behind I7 names
+//! the maintenance kinds again (`sql.rs`, the `one_maintenance_per_repo`
+//! index; §9).
 
 use api::MsgArg;
 use domain::execution::refusal::SettingRefusal;
@@ -15,6 +25,8 @@ use domain::execution::{
 use crate::error_args;
 use crate::report::shown;
 
+/// The word the log's `kind` column stores `kind` under, which
+/// [`kind_from_text`] reads by too.
 pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
     match kind {
         OperationKind::Fake => "fake",
@@ -29,19 +41,25 @@ pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
     }
 }
 
+/// Every operation kind, the table the `kind` column is read through. `Ls` is
+/// in it though a listing is a read the log never writes (§9): a stored `ls`
+/// reads back as one, as it always has.
+const KINDS: [OperationKind; 9] = [
+    OperationKind::Fake,
+    OperationKind::Identify,
+    OperationKind::Init,
+    OperationKind::Backup,
+    OperationKind::Forget,
+    OperationKind::Adopt,
+    OperationKind::Prune,
+    OperationKind::Check,
+    OperationKind::Ls,
+];
+
+/// The kind [`kind_text`] writes as `text`; none for a word no kind is
+/// written as, which the reader reports as corrupt.
 pub(crate) fn kind_from_text(text: &str) -> Option<OperationKind> {
-    match text {
-        "fake" => Some(OperationKind::Fake),
-        "identify" => Some(OperationKind::Identify),
-        "init" => Some(OperationKind::Init),
-        "backup" => Some(OperationKind::Backup),
-        "forget" => Some(OperationKind::Forget),
-        "adopt" => Some(OperationKind::Adopt),
-        "prune" => Some(OperationKind::Prune),
-        "check" => Some(OperationKind::Check),
-        "ls" => Some(OperationKind::Ls),
-        _ => None,
-    }
+    KINDS.into_iter().find(|&kind| kind_text(kind) == text)
 }
 
 /// The trigger column's word for an operation an API token started: the one
@@ -100,20 +118,28 @@ pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
     }
 }
 
-/// A code this version doesn't know is a warning of another kind, as the
-/// domain has it: a newer worker may have written it.
-pub(crate) fn warning_kind_from_text(text: &str) -> WarningKind {
-    match text {
-        "source-unreadable" => WarningKind::SourceUnreadable,
-        "hook-warning" => WarningKind::Hook,
-        "maintenance-partial" => WarningKind::MaintenancePartial,
-        "check-warning" => WarningKind::CheckWarning,
-        "check-error" => WarningKind::CheckError,
-        "maintenance-other-hosts" => WarningKind::OtherHosts,
-        "location-skipped" => WarningKind::LocationSkipped,
-        "secret-file-readable" => WarningKind::SecretFileReadable,
-        _ => WarningKind::Other,
-    }
+/// Every kind of warning but [`WarningKind::Other`], the table the
+/// `op_warnings.code` column is read through, each by the code the domain
+/// writes for it ([`WarningKind::code`]).
+const WARNING_KINDS: [WarningKind; 8] = [
+    WarningKind::SourceUnreadable,
+    WarningKind::Hook,
+    WarningKind::MaintenancePartial,
+    WarningKind::CheckWarning,
+    WarningKind::CheckError,
+    WarningKind::OtherHosts,
+    WarningKind::LocationSkipped,
+    WarningKind::SecretFileReadable,
+];
+
+/// The kind of warning stored as `code`. A code this version doesn't know,
+/// `unknown` included, is a warning of another kind, as the domain has it: a
+/// newer worker may have written it.
+pub(crate) fn warning_kind_from_text(code: &str) -> WarningKind {
+    WARNING_KINDS
+        .into_iter()
+        .find(|kind| kind.code() == code)
+        .unwrap_or(WarningKind::Other)
 }
 
 fn transition_text(transition: Transition) -> &'static str {
@@ -468,50 +494,136 @@ fn transition(args: &[(String, MsgArg)]) -> Result<Transition, BadColumn> {
 mod tests {
     use super::*;
 
-    /// Every kind round-trips: what the log writes for an operation is what
-    /// it reads back, `init` included.
-    #[test]
-    fn every_kind_round_trips() {
-        for kind in [
-            OperationKind::Fake,
-            OperationKind::Identify,
-            OperationKind::Init,
-            OperationKind::Backup,
-            OperationKind::Prune,
-            OperationKind::Check,
-        ] {
-            let text = kind_text(kind);
-            assert_eq!(kind_from_text(text), Some(kind), "{text} reads back");
+    /// Every variant of a field-less enum, from its derived `Deserialize`,
+    /// which names them all: a list nobody keeps by hand, so a variant added
+    /// later is in it, whether or not a table has a row for it. A variant
+    /// marked `#[serde(skip)]` or `skip_deserializing` isn't named, so it
+    /// isn't walked; one with fields, or an enum that isn't derived as
+    /// externally tagged, fails here.
+    fn every<T: serde::de::DeserializeOwned>() -> Vec<T> {
+        use serde::de::value::{Error, StrDeserializer};
+        use serde::de::{Deserializer, Error as _, Visitor};
+
+        /// Asked for an enum, keeps the names of its variants and reads nothing.
+        struct Names(&'static [&'static str]);
+
+        impl<'de> Deserializer<'de> for &mut Names {
+            type Error = Error;
+
+            fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Error> {
+                Err(Error::custom("only an enum's variants are asked for"))
+            }
+
+            fn deserialize_enum<V: Visitor<'de>>(
+                self,
+                _: &'static str,
+                variants: &'static [&'static str],
+                _: V,
+            ) -> Result<V::Value, Error> {
+                self.0 = variants;
+                Err(Error::custom("the variants' names are all that is read"))
+            }
+
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+                bytes byte_buf option unit unit_struct newtype_struct seq tuple
+                tuple_struct map struct identifier ignored_any
+            }
+        }
+
+        let mut names = Names(&[]);
+        assert!(T::deserialize(&mut names).is_err(), "nothing is read");
+        assert!(!names.0.is_empty(), "the enum names its variants");
+        names
+            .0
+            .iter()
+            .map(
+                |name| match T::deserialize(StrDeserializer::<Error>::new(name)) {
+                    Ok(variant) => variant,
+                    Err(error) => panic!("{name} is a variant without fields: {error}"),
+                },
+            )
+            .collect()
+    }
+
+    /// The word the log stores each kind under, spelled here apart from the
+    /// codec, through a match with no wildcard: a kind added later doesn't
+    /// compile until it has a word here.
+    fn stored_kind(kind: OperationKind) -> &'static str {
+        match kind {
+            OperationKind::Fake => "fake",
+            OperationKind::Identify => "identify",
+            OperationKind::Init => "init",
+            OperationKind::Backup => "backup",
+            OperationKind::Forget => "forget",
+            OperationKind::Adopt => "adopt",
+            OperationKind::Prune => "prune",
+            OperationKind::Check => "check",
+            OperationKind::Ls => "ls",
         }
     }
 
-    /// Every kind of warning round-trips, a partial maintenance run and other
-    /// hosts included.
+    /// Every kind is written under its own word and read back from it as
+    /// that kind, so no stored operation becomes unreadable.
     #[test]
-    fn every_warning_kind_round_trips() {
-        for kind in [
-            WarningKind::SourceUnreadable,
-            WarningKind::Hook,
-            WarningKind::MaintenancePartial,
-            WarningKind::LocationSkipped,
-            WarningKind::OtherHosts,
-            WarningKind::Other,
-        ] {
-            let text = kind.code();
-            assert_eq!(warning_kind_from_text(text), kind, "{text} reads back");
+    fn every_kind_is_written_under_its_word_and_read_back_from_it() {
+        for kind in every::<OperationKind>() {
+            let word = stored_kind(kind);
+            assert_eq!(kind_text(kind), word, "{kind:?} is written as {word}");
+            assert_eq!(kind_from_text(word), Some(kind), "{word} reads back");
         }
     }
 
-    /// A check's findings are kept under the codes the wire names them by,
-    /// so a log written by this version reads back as what the check found.
+    /// A word no kind is written as is no kind: the reader reports the row as
+    /// corrupt rather than guess at it.
     #[test]
-    fn a_checks_findings_round_trip_under_their_wire_codes() {
-        for (kind, text) in [
-            (WarningKind::CheckWarning, "check-warning"),
-            (WarningKind::CheckError, "check-error"),
-        ] {
-            assert_eq!(kind.code(), text);
-            assert_eq!(warning_kind_from_text(text), kind, "{text} reads back");
+    fn a_word_no_kind_is_written_as_reads_as_no_kind() {
+        for word in ["", "restore", "Backup", " backup", "backup ", "unknown"] {
+            assert_eq!(kind_from_text(word), None, "{word:?}");
+        }
+    }
+
+    /// A listing is a read the log never writes (§9), yet a stored `ls`
+    /// reads back as one, as it always has, and not as corruption.
+    #[test]
+    fn a_stored_listing_reads_back_as_one() {
+        assert_eq!(kind_from_text("ls"), Some(OperationKind::Ls));
+    }
+
+    /// The code the log keeps each kind of warning under, spelled here apart
+    /// from the domain, through a match with no wildcard: a kind added later
+    /// doesn't compile until it has a code here.
+    fn stored_warning(kind: WarningKind) -> &'static str {
+        match kind {
+            WarningKind::SourceUnreadable => "source-unreadable",
+            WarningKind::Hook => "hook-warning",
+            WarningKind::MaintenancePartial => "maintenance-partial",
+            WarningKind::CheckWarning => "check-warning",
+            WarningKind::CheckError => "check-error",
+            WarningKind::OtherHosts => "maintenance-other-hosts",
+            WarningKind::LocationSkipped => "location-skipped",
+            WarningKind::SecretFileReadable => "secret-file-readable",
+            WarningKind::Other => "unknown",
+        }
+    }
+
+    /// Every kind of warning is kept under its own code, the one the domain
+    /// writes, and read back from it as that kind.
+    #[test]
+    fn every_warning_kind_is_kept_under_its_code_and_read_back_from_it() {
+        for kind in every::<WarningKind>() {
+            let code = stored_warning(kind);
+            assert_eq!(kind.code(), code, "{kind:?} is kept as {code}");
+            assert_eq!(warning_kind_from_text(code), kind, "{code} reads back");
+        }
+    }
+
+    /// A code this version never wrote is a warning of another kind, not a
+    /// corrupt row: a newer worker may have written it.
+    #[test]
+    fn a_warning_code_this_version_never_wrote_reads_as_another_kind() {
+        for code in ["", "restore-skipped", "Hook-warning", "hook", "other"] {
+            assert_eq!(warning_kind_from_text(code), WarningKind::Other, "{code:?}");
         }
     }
 
