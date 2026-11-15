@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{Ownership, Snapshot};
+use super::{OwnerTag, Ownership, Snapshot};
 use crate::execution::{Warning, WarningKind};
 use crate::planning::AgentConfig;
 use crate::{AgentId, RepositoryAlias, SignedDuration, Timestamp};
@@ -44,10 +44,11 @@ impl OtherHosts {
     /// It is another host's when another agent tagged it in the
     /// [`OTHER_AGENT_RECENCY`] up to `now` (or later, by a clock ahead of
     /// this one), whatever host it records, since two machines can share one
-    /// name. Else it is this host's when its host is one this agent records:
-    /// the machine's own name, the agent's `hostname`, or the `host` of any
-    /// of its plans. Only a repository whose entry asks for `local`
-    /// maintenance has any.
+    /// name; so is one whose agent tags disagree, which this agent's tag
+    /// alone no longer proves was made here. Else it is this host's when its
+    /// host is one this agent records: the machine's own name, the agent's
+    /// `hostname`, or the `host` of any of its plans. Only a repository whose
+    /// entry asks for `local` maintenance has any.
     pub fn of<'a>(
         config: &AgentConfig,
         alias: &RepositoryAlias,
@@ -80,8 +81,8 @@ impl OtherHosts {
         let others: BTreeSet<&str> = snapshots
             .into_iter()
             .filter(|snapshot| match snapshot.agent() {
-                Some(tagger) if tagger == own => false,
-                Some(_) if snapshot.time >= recent_since => true,
+                OwnerTag::One(tagger) if tagger == own => false,
+                OwnerTag::One(_) | OwnerTag::Disagree if snapshot.time >= recent_since => true,
                 _ => !this_host.contains(snapshot.hostname.as_str()),
             })
             .map(|snapshot| snapshot.hostname.as_str())

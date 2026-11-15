@@ -361,8 +361,9 @@ impl Rows {
 }
 
 /// How an orphaned group names the plan and agent that owned it: by both
-/// tags, by one, or by neither. A group is orphaned for a tag it carries, so
-/// neither is not expected, but the wire can say it.
+/// tags, by one, or by neither. The daemon leaves out a tag the group's
+/// snapshots carry none of, or two of that disagree, so neither is a group
+/// whose agent tags and plan tags both disagree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Owner<'a> {
     Both { agent: &'a str, plan: &'a str },

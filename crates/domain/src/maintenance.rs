@@ -43,18 +43,48 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// The plan this snapshot's `ladderback-plan:` tag names, if it has one.
-    pub fn plan(&self) -> Option<&str> {
+    /// The plan this snapshot's `ladderback-plan:` tags name.
+    pub fn plan(&self) -> OwnerTag<'_> {
         self.tagged_by(plan_tags::PLAN_TAG_PREFIX)
     }
 
-    /// The agent this snapshot's `ladderback-agent:` tag names, if it has one.
-    pub fn agent(&self) -> Option<&str> {
+    /// The agent this snapshot's `ladderback-agent:` tags name.
+    pub fn agent(&self) -> OwnerTag<'_> {
         self.tagged_by(plan_tags::AGENT_TAG_PREFIX)
     }
 
-    fn tagged_by(&self, prefix: &str) -> Option<&str> {
-        self.tags.iter().find_map(|tag| tag.strip_prefix(prefix))
+    fn tagged_by(&self, prefix: &str) -> OwnerTag<'_> {
+        let mut texts = self.tags.iter().filter_map(|tag| tag.strip_prefix(prefix));
+        match texts.next() {
+            None => OwnerTag::Absent,
+            Some(first) if texts.all(|text| text == first) => OwnerTag::One(first),
+            Some(_) => OwnerTag::Disagree,
+        }
+    }
+}
+
+/// What a snapshot's owner tags of one kind, `ladderback-agent:` or
+/// `ladderback-plan:`, say about who owns it. Tags are compared exactly, so
+/// two that differ only in case or spacing disagree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnerTag<'a> {
+    /// The snapshot carries no tag of the kind.
+    Absent,
+    /// Every tag of the kind carries this text, however many there are.
+    One(&'a str),
+    /// Two tags of the kind carry different texts, as a hand edit can
+    /// leave them: they name no owner, so no plan owns the snapshot and it
+    /// is orphaned, whichever tag comes first (I6).
+    Disagree,
+}
+
+impl<'a> OwnerTag<'a> {
+    /// The text the tags agree on, if they carry one.
+    pub fn named(self) -> Option<&'a str> {
+        match self {
+            OwnerTag::One(text) => Some(text),
+            OwnerTag::Absent | OwnerTag::Disagree => None,
+        }
     }
 }
 
@@ -73,12 +103,13 @@ pub struct ManagedGroup {
 }
 
 /// Snapshots a `ladderback-` tag owns that no plan of this agent does:
-/// another agent's plan, or a plan this configuration no longer has. Forget
-/// leaves them alone (I6).
+/// another agent's plan, a plan this configuration no longer has, or owner
+/// tags that disagree on whose they are. Forget leaves them alone (I6).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrphanedGroup {
-    /// The agent tag's text and the plan tag's text, either possibly absent
-    /// from the group's snapshots, never both.
+    /// The text the agent tags agree on and the text the plan tags agree
+    /// on, each absent when the group's snapshots carry no such tag or two
+    /// that disagree ([`OwnerTag`]).
     pub agent: Option<String>,
     pub plan: Option<String>,
     pub snapshots: Vec<Snapshot>,
@@ -139,8 +170,10 @@ impl ForgetSelection {
     /// Splits `snapshots` by who owns them: the plans of this agent, another
     /// owner (`orphaned`), or nobody (`unmanaged`). A snapshot with no
     /// `ladderback-` tag is unmanaged whatever else it carries; a snapshot
-    /// tagged by this agent and a plan in `plans` is managed; anything else
-    /// tagged is orphaned. Each group's snapshots are newest first.
+    /// whose agent tags agree on this agent and whose plan tags agree on a
+    /// plan in `plans` is managed; anything else tagged, a snapshot whose
+    /// owner tags disagree among them, is orphaned. Each group's snapshots
+    /// are newest first.
     pub fn partition(snapshots: &[Snapshot], agent: &AgentId, plans: &[ManagedPlan]) -> Partition {
         let own = agent.as_uuid().hyphenated().to_string();
         let mut partition = Partition::default();
@@ -150,8 +183,8 @@ impl ForgetSelection {
             let mut group: Vec<Snapshot> = snapshots
                 .iter()
                 .filter(|snapshot| {
-                    snapshot.agent() == Some(own.as_str())
-                        && snapshot.plan() == Some(plan.plan.as_str())
+                    snapshot.agent() == OwnerTag::One(own.as_str())
+                        && snapshot.plan() == OwnerTag::One(plan.plan.as_str())
                 })
                 .cloned()
                 .collect();
@@ -166,11 +199,12 @@ impl ForgetSelection {
         let mut orphaned = Vec::new();
         let mut unmanaged = Vec::new();
         for snapshot in snapshots {
-            let tagged = snapshot.agent().is_some() || snapshot.plan().is_some();
-            let managed = snapshot.agent() == Some(own.as_str())
+            let tagged =
+                snapshot.agent() != OwnerTag::Absent || snapshot.plan() != OwnerTag::Absent;
+            let managed = snapshot.agent() == OwnerTag::One(own.as_str())
                 && plans
                     .iter()
-                    .any(|plan| snapshot.plan() == Some(plan.plan.as_str()));
+                    .any(|plan| snapshot.plan() == OwnerTag::One(plan.plan.as_str()));
             if !tagged {
                 unmanaged.push(snapshot.clone());
             } else if !managed {
@@ -188,15 +222,15 @@ fn sort_newest_first(snapshots: &mut [Snapshot]) {
     snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.time));
 }
 
-/// Tagged snapshots by their `(agent, plan)` tag pair, ordered by agent
-/// then plan, each group newest first.
+/// Tagged snapshots by the texts their agent and plan tags agree on, ordered
+/// by agent then plan, each group newest first.
 fn grouped_by_tag(snapshots: Vec<Snapshot>) -> Vec<OrphanedGroup> {
     let mut groups: BTreeMap<(Option<String>, Option<String>), Vec<Snapshot>> = BTreeMap::new();
     for snapshot in snapshots {
         groups
             .entry((
-                snapshot.agent().map(str::to_owned),
-                snapshot.plan().map(str::to_owned),
+                snapshot.agent().named().map(str::to_owned),
+                snapshot.plan().named().map(str::to_owned),
             ))
             .or_default()
             .push(snapshot);
