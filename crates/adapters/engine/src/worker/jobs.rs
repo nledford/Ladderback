@@ -11,6 +11,7 @@ use rustic_core::{
     SnapshotOptions, StringList,
 };
 
+use super::browse;
 use super::cancel::CancellableSource;
 use super::convert::{
     JobError, backup_options, backup_result, check_result, errors_first, prune_options,
@@ -20,8 +21,8 @@ use super::listing;
 use super::repository::{self as location, new_repository, open, repository_id};
 use super::{Context, Done};
 use crate::job::{
-    BackupJobSpec, CheckJobSpec, ForgetJobSpec, ForgetResult, OpResult, ProbeResult, PruneJobSpec,
-    RepositorySpec, WorkerEvent,
+    BackupJobSpec, BrowseJobSpec, CheckJobSpec, FolderResult, ForgetJobSpec, ForgetResult,
+    OpResult, ProbeResult, PruneJobSpec, RepositorySpec, WorkerEvent,
 };
 use crate::job::{RewriteJobSpec, RewriteResult};
 
@@ -58,6 +59,57 @@ pub(crate) fn ls(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError>
         ctx.events.emit(&WorkerEvent::Snapshots { snapshots })
     })?;
     Ok(Done::Result(OpResult::Snapshots { count }))
+}
+
+/// Reads one page of one folder of a snapshot (§16, decision 102). A read:
+/// it emits `Started` before it reads the index, which holds the snapshot's
+/// trees, then one final result: the page, or that the snapshot or the
+/// folder isn't there. Each name of the folder's path is matched against
+/// the names the trees record, so a folder is only ever reached through the
+/// trees, one level at a time.
+pub(crate) fn browse(ctx: &Context, job: &BrowseJobSpec) -> Result<Done, JobError> {
+    let id: RusticSnapshotId =
+        job.snapshot.as_str().parse().map_err(|_| {
+            JobError::failed(format!("not a snapshot ID: {}", job.snapshot.as_str()))
+        })?;
+    let repository = open(ctx, &job.repo)?;
+    ctx.start(None, Some(&repository_id(&repository)?))?;
+    // Listed rather than looked up, so a snapshot that isn't there is an
+    // answer, not one of the many errors a lookup gives.
+    if !repository
+        .list::<RusticSnapshotId>()?
+        .any(|listed| listed == id)
+    {
+        return Ok(Done::Result(OpResult::Folder(
+            FolderResult::SnapshotUnknown,
+        )));
+    }
+    let Some(snapshot) = repository
+        .get_snapshots(&[job.snapshot.as_str()])?
+        .into_iter()
+        .next()
+    else {
+        return Ok(Done::Result(OpResult::Folder(
+            FolderResult::SnapshotUnknown,
+        )));
+    };
+    let repository = repository.to_indexed_ids()?;
+    let mut tree = repository.get_tree(&snapshot.tree)?;
+    for name in &job.folder {
+        let Some(subtree) = tree
+            .nodes
+            .iter()
+            .find(|node| node.is_dir() && node.name == *name)
+            .and_then(|node| node.subtree)
+        else {
+            return Ok(Done::Result(OpResult::Folder(FolderResult::FolderUnknown)));
+        };
+        tree = repository.get_tree(&subtree)?;
+    }
+    Ok(Done::Result(OpResult::Folder(browse::page(
+        &tree.nodes,
+        job.from,
+    ))))
 }
 
 /// Removes exactly the snapshots the job names. Which snapshots those are

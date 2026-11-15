@@ -104,6 +104,17 @@
 # (`maintenance.rs`), and the message and arguments of every sentence
 # (`wording.rs`).
 #
+# `crates/web/src/snapshot_page.rs` is the DOM glue of a snapshot's page
+# (§4.4): it reads the alias and snapshot from the address, sends each read of
+# a folder and turns its answer into a page of entries or a refusal's
+# sentence, and draws the heading and the tree. The `Tree` component it draws
+# is `components.rs`'s glue too. The address of each read (`folder_url`), the
+# link to the page (`snapshot_href`), the tree's rows, keys, type-ahead, tab
+# stop, pages and refusals are `tree.rs`'s, the page's title is `routes.rs`'s
+# and a refusal's sentence is `refused_sentence`'s, all mutated on the host;
+# the `@ui` scenarios of `features/ui/snapshot_browser.feature` and the tree
+# scenarios of `features/ui/components.feature` run the glue in Chromium.
+#
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
 # `main.rs`), and their tests run in `just test-wasm`.
@@ -116,6 +127,7 @@ exclude_globs = [
     "crates/web/src/gallery.rs",
     "crates/web/src/ws.rs",
     "crates/web/src/snapshots.rs",
+    "crates/web/src/snapshot_page.rs",
     "crates/web/src/sign_in.rs",
     "crates/web/src/settings.rs",
     "crates/web/src/plans_page.rs",
@@ -179,6 +191,9 @@ exclude_re = [
     # it is never sent. The other `!`s of the wait are not excluded and are
     # caught. Named by line, so a moved line brings the mutant back to judge.
     'crates/adapters/mcp/src/lib\.rs:429:31: delete ! in Server::wait_operation$',
+    # `FolderPath::top` is `Self::default()`, the path that names no folder:
+    # the mutant that returns `Default::default()` is the same code.
+    'crates/domain/src/browse\.rs.*: replace FolderPath::top -> Self with Default::default\(\)$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0

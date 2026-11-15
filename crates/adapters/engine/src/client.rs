@@ -13,11 +13,12 @@ use std::time::Duration;
 use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob,
-    ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, ProbeAnswer, ProgressEvent,
-    ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary, RepositoryAccess, RewriteJob,
-    RewriteSummary, RunningJob, SnapshotSummary,
+    FolderAnswer, ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, ProbeAnswer,
+    ProgressEvent, ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary,
+    RepositoryAccess, RewriteJob, RewriteSummary, RunningJob, SnapshotSummary,
 };
 use async_trait::async_trait;
+use domain::browse::{Entry, EntryName, FolderPage, PAGE_ENTRIES};
 use domain::execution::{FailureReason, Warning, WarningKind};
 use domain::secrets::{MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId};
@@ -29,10 +30,10 @@ use tokio::sync::{mpsc, watch};
 use crate::cache_lock::CacheLock;
 use crate::environment;
 use crate::job::{
-    BackupJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning, ForgetJobSpec, JobKind,
-    JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult,
-    ProbeResult, ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec,
-    TRUNCATED, WorkerEvent, exit_code,
+    BackupJobSpec, BrowseJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning,
+    FolderResult, ForgetJobSpec, JobKind, JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS,
+    MAX_MESSAGE_BYTES, OpResult, ProbeResult, ProgressKind, PruneJobSpec, RepositorySpec,
+    RewriteJobSpec, SourceFilterSpec, TRUNCATED, WorkerEvent, exit_code,
 };
 use crate::step::step_of;
 use domain::planning::{GlobFile, SourceFilter};
@@ -1374,6 +1375,14 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 ProbeResult::NotARepository => ProbeAnswer::NotARepository,
                 ProbeResult::PasswordNotAccepted => ProbeAnswer::PasswordNotAccepted,
             }),
+            // A page the daemon can't take fails the read, as an event line
+            // it can't read does.
+            OpResult::Folder(found) => match folder_answer(found) {
+                Ok(answer) => EngineResult::Folder(answer),
+                Err(detail) => {
+                    return Some(EngineEvent::Failed(FailureReason::EngineFailed { detail }));
+                }
+            },
             OpResult::Backup(r) => EngineResult::Backup(BackupSummary {
                 repository: r.repository,
                 snapshot: r.snapshot,
@@ -1511,6 +1520,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::PlanInvalid
                 | ErrorCode::PlanInUse
                 | ErrorCode::RepositoryUnknown
+                | ErrorCode::SnapshotUnknown
+                | ErrorCode::FolderUnknown
                 | ErrorCode::MaintenanceBusy
                 | ErrorCode::MaintenanceNotOwner
                 | ErrorCode::RetentionKeepsNothing
@@ -1541,10 +1552,50 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
     })
 }
 
+/// A browse's answer as the daemon takes it: each name parsed as an entry
+/// name, and a page of no more than a page's entries (an input-derived
+/// size, §13.5). Anything else is the worker's fault, said in the detail.
+fn folder_answer(found: FolderResult) -> Result<FolderAnswer, String> {
+    let (entries, total, next) = match found {
+        FolderResult::SnapshotUnknown => return Ok(FolderAnswer::SnapshotUnknown),
+        FolderResult::FolderUnknown => return Ok(FolderAnswer::FolderUnknown),
+        FolderResult::Page {
+            entries,
+            total,
+            next,
+        } => (entries, total, next),
+    };
+    if entries.len() > PAGE_ENTRIES {
+        return Err(format!(
+            "the worker sent a page of {} entries, more than {PAGE_ENTRIES}",
+            entries.len()
+        ));
+    }
+    let entries = entries
+        .into_iter()
+        .map(|entry| {
+            Ok(Entry {
+                name: EntryName::parse(&entry.name)
+                    .map_err(|error| format!("the worker sent a page in which {error}"))?,
+                display: entry.display,
+                kind: entry.kind,
+                size: entry.size,
+                modified: entry.modified,
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(FolderAnswer::Page(FolderPage {
+        entries,
+        total,
+        next,
+    }))
+}
+
 fn repository_id(job: &Job) -> Option<&RepositoryId> {
     match job {
         Job::Fake(_) => None,
         Job::Identify(access) | Job::Init(access) | Job::Ls(access) => access.id.as_ref(),
+        Job::Browse(job) => job.repository.id.as_ref(),
         // A probe names no repository, so it takes no cache slot: it opens
         // with no cache (decision 80).
         Job::Probe(_) => None,
@@ -1609,6 +1660,7 @@ fn access_of(job: &Job) -> Option<&RepositoryAccess> {
         Job::Rewrite(job) => Some(&job.repository),
         Job::Prune(job) | Job::PrunePlan(job) => Some(&job.repository),
         Job::Check(job) => Some(&job.repository),
+        Job::Browse(job) => Some(&job.repository),
     }
 }
 
@@ -1760,6 +1812,17 @@ fn job_kind(job: Job) -> Result<JobKind, EngineError> {
         Job::Probe(access) => JobKind::Probe(repository_spec(access)),
         Job::Init(access) => JobKind::Init(repository_spec(access)),
         Job::Ls(access) => JobKind::Ls(repository_spec(access)),
+        Job::Browse(job) => JobKind::Browse(BrowseJobSpec {
+            repo: repository_spec(job.repository),
+            snapshot: job.snapshot,
+            folder: job
+                .folder
+                .names()
+                .iter()
+                .map(|name| name.as_str().to_owned())
+                .collect(),
+            from: job.from,
+        }),
         Job::Backup(job) => JobKind::Backup(BackupJobSpec {
             repo: repository_spec(job.repository),
             sources: job.sources,
@@ -1874,6 +1937,73 @@ mod tests {
 
     use super::*;
     use crate::job::MAX_MESSAGE_BYTES;
+
+    fn entry_named(name: &str) -> crate::job::EntryResult {
+        crate::job::EntryResult {
+            name: name.to_owned(),
+            display: domain::browse::DisplayName::new(name),
+            kind: domain::browse::EntryKind::File,
+            size: Some(1),
+            modified: None,
+        }
+    }
+
+    #[test]
+    fn a_folder_page_is_taken_with_its_entries_and_where_the_next_starts() {
+        let answer = folder_answer(FolderResult::Page {
+            entries: vec![entry_named("readme.txt")],
+            total: 1_001,
+            next: Some(1_000),
+        });
+        let Ok(FolderAnswer::Page(page)) = answer else {
+            panic!("a page: {answer:?}");
+        };
+        assert_eq!(page.entries[0].name.as_str(), "readme.txt");
+        assert_eq!(page.entries[0].size, Some(1));
+        assert_eq!((page.total, page.next), (1_001, Some(1_000)));
+    }
+
+    #[test]
+    fn a_snapshot_or_folder_that_is_not_there_is_taken_as_such() {
+        assert_eq!(
+            folder_answer(FolderResult::SnapshotUnknown),
+            Ok(FolderAnswer::SnapshotUnknown)
+        );
+        assert_eq!(
+            folder_answer(FolderResult::FolderUnknown),
+            Ok(FolderAnswer::FolderUnknown)
+        );
+    }
+
+    #[test]
+    fn a_page_with_a_name_no_entry_has_is_refused() {
+        for name in ["", "a/b"] {
+            let answer = folder_answer(FolderResult::Page {
+                entries: vec![entry_named(name)],
+                total: 1,
+                next: None,
+            });
+            assert!(answer.is_err(), "{name:?}: {answer:?}");
+        }
+    }
+
+    #[test]
+    fn a_page_longer_than_a_page_holds_is_refused() {
+        let most = domain::browse::PAGE_ENTRIES;
+        let entries = |n: usize| (0..n).map(|at| entry_named(&format!("f{at}"))).collect();
+        let fits = folder_answer(FolderResult::Page {
+            entries: entries(most),
+            total: most as u64,
+            next: None,
+        });
+        assert!(fits.is_ok(), "{fits:?}");
+        let over = folder_answer(FolderResult::Page {
+            entries: entries(most + 1),
+            total: most as u64 + 1,
+            next: None,
+        });
+        assert!(over.is_err());
+    }
 
     fn failed(code: ErrorCode) -> WorkerEvent {
         WorkerEvent::Failed {

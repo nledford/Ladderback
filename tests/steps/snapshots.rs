@@ -1,5 +1,6 @@
-//! Steps for the `@e2e` scenarios of `features/snapshots/list.feature`: the
-//! `ListSnapshots` use case runs against the real worker and real scratch
+//! Steps for the `@e2e` scenarios of `features/snapshots/list.feature` and
+//! `features/snapshots/browse.feature`: the `ListSnapshots` and
+//! `BrowseSnapshot` use cases run against the real worker and real scratch
 //! repositories. The repositories are made and inspected with `rustic_core`
 //! itself, never through Ladderback, so the checks don't trust the code
 //! under test.
@@ -8,11 +9,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
+use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
+use domain::browse::{EntryKind, FolderPage, FolderPath};
 use domain::planning::RepositorySettings;
 use domain::secrets::{SecretRef, SecretValue};
-use domain::{OperationId, Uuid};
+use domain::{OperationId, SnapshotId, Uuid};
 use rustic_backend::BackendOptions;
 use rustic_core::repofile::SnapshotFile;
 use rustic_core::{
@@ -20,9 +24,11 @@ use rustic_core::{
     SnapshotOptions,
 };
 
+use app::browse::{BrowseError, BrowseSnapshot};
 use app::ports::SnapshotSummary;
 use app::secrets::ResolveRepository;
 use app::snapshots::{ListSnapshots, SnapshotError};
+use platform::SystemClock;
 use secrets::SystemSecrets;
 
 use super::{Agent, blocking};
@@ -78,12 +84,16 @@ async fn init(cold: &Path) {
     .await;
 }
 
-/// What the scenarios set up, and what the listing gave.
+/// What the scenarios set up, and what the listing or the browse gave.
 #[derive(Default)]
 pub struct SnapshotsSetup {
     cold: Option<PathBuf>,
     settings: Option<RepositorySettings>,
     listed: Option<Result<Vec<SnapshotSummary>, SnapshotError>>,
+    /// The snapshot a browse opens.
+    snapshot: Option<SnapshotId>,
+    /// The folder the last browse opened, and the page it gave.
+    opened: Option<(FolderPath, Result<FolderPage, BrowseError>)>,
 }
 
 impl Agent {
@@ -104,6 +114,24 @@ impl Agent {
     fn next_snapshot_op(&mut self) -> OperationId {
         self.runs += 1;
         OperationId::from_uuid(Uuid::from_u128(self.runs))
+    }
+
+    /// The configuration's entry for the scenario's repository, under an
+    /// alias of its own, recording no ID: a read opens whatever is at the
+    /// location.
+    fn snapshot_entry(&self) -> domain::planning::RepositoryConfig {
+        domain::planning::RepositoryConfig {
+            locations: Default::default(),
+            settings: self
+                .snapshots
+                .settings
+                .clone()
+                .expect("the scenario set a location"),
+            id: None,
+            maintenance: domain::planning::Maintenance::None,
+            group_by: Default::default(),
+            hooks: Default::default(),
+        }
     }
 }
 
@@ -210,25 +238,11 @@ fn a_wrong_password(agent: &mut Agent) {
 
 #[when("the agent lists the repository's snapshots")]
 async fn lists(agent: &mut Agent) {
-    let settings = agent
-        .snapshots
-        .settings
-        .clone()
-        .expect("the scenario set a location");
     let use_case = ListSnapshots::new(
         agent.engine.clone(),
         ResolveRepository::new(Arc::new(SystemSecrets::new())),
     );
-    // A repository the scenario gave, under an alias of its own, recording
-    // no ID: the listing opens whatever is at the location.
-    let entry = domain::planning::RepositoryConfig {
-        locations: Default::default(),
-        settings,
-        id: None,
-        maintenance: domain::planning::Maintenance::None,
-        group_by: Default::default(),
-        hooks: Default::default(),
-    };
+    let entry = agent.snapshot_entry();
     let alias = domain::RepositoryAlias::parse("demo").expect("an alias");
     agent.snapshots.listed = Some(
         use_case
@@ -291,4 +305,281 @@ fn is_empty(agent: &mut Agent) {
 fn fails(agent: &mut Agent) {
     let listed = agent.snapshots.listed.take().expect("the listing ran");
     assert!(listed.is_err(), "the listing was {listed:?}");
+}
+
+/// The source the browse scenarios back up, under `source`: `docs` with two
+/// files of known size and modification time and a folder, an empty folder,
+/// a folder of 1,001 files, one more than a page holds, and `names`, whose
+/// entries' names rustic writes in its escaped form: a quote, a backslash,
+/// an accent, a line feed, a tab and a right-to-left override, and a folder
+/// `say "hi"` holding a folder `inner`. (A byte that isn't UTF-8 is a unit
+/// test's: APFS refuses such a name.)
+fn source_tree(source: &Path) {
+    let docs = source.join("docs");
+    fs::create_dir_all(docs.join("drafts")).expect("the docs folder");
+    fs::create_dir_all(source.join("empty")).expect("the empty folder");
+    let many = source.join("many");
+    fs::create_dir_all(&many).expect("the folder of many files");
+    for (name, content, modified) in [
+        ("notes.md", "hello", "2026-11-01T12:00:00Z"),
+        ("report.txt", "hello world", "2026-11-02T08:30:00Z"),
+    ] {
+        let path = docs.join(name);
+        fs::write(&path, content).expect("a file to back up");
+        let modified: domain::Timestamp = modified.parse().expect("an RFC 3339 instant");
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .expect("the file")
+            .set_modified(SystemTime::from(modified))
+            .expect("its modification time");
+    }
+    for at in 0..1_001 {
+        fs::write(many.join(format!("file-{at:04}.txt")), b"x").expect("a file to back up");
+    }
+    let names = source.join("names");
+    fs::create_dir_all(names.join("say \"hi\"").join("inner")).expect("the folder of names");
+    for name in [
+        "back\\slash.txt",
+        "café.txt",
+        "new\nline.txt",
+        "tab\there.txt",
+        "abc\u{202e}txt.exe",
+    ] {
+        fs::write(names.join(name), b"x").expect("a file to back up");
+    }
+}
+
+#[given("a repository with a snapshot of a source folder")]
+async fn a_repository_with_a_snapshot_of_a_source_folder(agent: &mut Agent) {
+    let cold = agent.scratch().join("repo");
+    init(&cold).await;
+    let source = agent.scratch().join("source");
+    let at = cold.clone();
+    let snapshot = blocking(move || {
+        source_tree(&source);
+        let repo = repository(&at)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .to_indexed_ids()
+            .expect("the scratch repository indexes");
+        let paths = PathList::from_iter([&source])
+            .sanitize()
+            .expect("the paths");
+        let options = SnapshotOptions::default().host("demo-host".to_owned());
+        // Backed up as `/source`, so the snapshot's top folder holds `source`.
+        repo.backup(
+            &BackupOptions::default().as_path(PathBuf::from("/source")),
+            &paths,
+            options.to_snapshot().expect("the snapshot options"),
+        )
+        .expect("a plain rustic backup")
+    })
+    .await;
+    agent.snapshots.snapshot =
+        Some(SnapshotId::parse(&snapshot.id.to_hex()).expect("a snapshot ID"));
+    agent.snapshots.cold = Some(cold.clone());
+    agent.snapshot_settings().repository = text(&cold);
+}
+
+#[given("the snapshot has been forgotten")]
+async fn the_snapshot_has_been_forgotten(agent: &mut Agent) {
+    let cold = agent.snapshots.cold.clone().expect("the location");
+    let id: rustic_core::repofile::SnapshotId = agent
+        .snapshots
+        .snapshot
+        .as_ref()
+        .expect("the scenario made a snapshot")
+        .as_str()
+        .parse()
+        .expect("rustic reads its own IDs");
+    blocking(move || {
+        repository(&cold)
+            .open(&credentials())
+            .expect("the scratch repository opens")
+            .delete_snapshots(&[id])
+            .expect("rustic forgets the snapshot");
+    })
+    .await;
+}
+
+/// Opens the page of `folder` of the scenario's snapshot that starts at
+/// `from`, through the browse use case and the real worker.
+async fn open(agent: &mut Agent, folder: FolderPath, from: u64) {
+    let use_case = BrowseSnapshot::new(
+        agent.engine.clone(),
+        Arc::new(SystemClock),
+        ResolveRepository::new(Arc::new(SystemSecrets::new())),
+        Arc::default(),
+    );
+    let entry = agent.snapshot_entry();
+    let snapshot = agent
+        .snapshots
+        .snapshot
+        .clone()
+        .expect("the scenario made a snapshot");
+    let alias = domain::RepositoryAlias::parse("demo").expect("an alias");
+    let op = agent.next_snapshot_op();
+    let page = use_case
+        .folder(op, &alias, &entry, snapshot, folder.clone(), from)
+        .await;
+    agent.snapshots.opened = Some((folder, page));
+}
+
+#[when("the agent opens the snapshot")]
+async fn opens_the_snapshot(agent: &mut Agent) {
+    open(agent, FolderPath::top(), 0).await;
+}
+
+#[when(expr = "the agent opens the folder {string} of the snapshot")]
+async fn opens_the_folder(agent: &mut Agent, path: String) {
+    open(agent, FolderPath::parse(&path).expect("a folder path"), 0).await;
+}
+
+#[when("the agent opens the next page of the folder")]
+async fn opens_the_next_page(agent: &mut Agent) {
+    let (folder, page) = agent.snapshots.opened.take().expect("a folder was opened");
+    let next = page
+        .expect("the folder opened")
+        .next
+        .expect("the page says where the next starts");
+    open(agent, folder, next).await;
+}
+
+#[when(expr = "the agent opens the folder it shows as {string} in {string}")]
+async fn opens_the_folder_shown_as(agent: &mut Agent, shown: String, path: String) {
+    let parent = FolderPath::parse(&path).expect("a folder path");
+    open(agent, parent.clone(), 0).await;
+    let page = agent.page();
+    let key = page
+        .entries
+        .iter()
+        .find(|entry| entry.display.as_str() == shown)
+        .unwrap_or_else(|| panic!("{shown} shown in {page:?}"))
+        .name
+        .clone();
+    open(agent, parent.join(key).expect("a folder path"), 0).await;
+}
+
+impl Agent {
+    /// The page the last browse gave, which must have opened.
+    fn page(&self) -> &FolderPage {
+        let (folder, page) = self.snapshots.opened.as_ref().expect("a folder was opened");
+        match page {
+            Ok(page) => page,
+            Err(error) => panic!("the folder {folder:?} didn't open: {error:?}"),
+        }
+    }
+}
+
+#[then(expr = "the folder lists {string} as a folder")]
+fn lists_a_folder(agent: &mut Agent, name: String) {
+    let page = agent.page();
+    let entry = page
+        .entries
+        .iter()
+        .find(|entry| entry.name.as_str() == name)
+        .unwrap_or_else(|| panic!("{name} in {page:?}"));
+    assert_eq!(entry.kind, EntryKind::Folder, "{entry:?}");
+    assert_eq!(entry.size, None, "a folder has no size of its own");
+}
+
+#[then(expr = "the folder lists {string} as a file of {int} bytes modified at {string}")]
+fn lists_a_file(agent: &mut Agent, name: String, size: u64, modified: String) {
+    let page = agent.page();
+    let entry = page
+        .entries
+        .iter()
+        .find(|entry| entry.name.as_str() == name)
+        .unwrap_or_else(|| panic!("{name} in {page:?}"));
+    let modified: domain::Timestamp = modified.parse().expect("an RFC 3339 instant");
+    assert_eq!(entry.kind, EntryKind::File, "{entry:?}");
+    assert_eq!(entry.size, Some(size), "{entry:?}");
+    assert_eq!(entry.modified, Some(modified), "{entry:?}");
+}
+
+#[then("the folder is read in one page")]
+fn is_one_page(agent: &mut Agent) {
+    let page = agent.page();
+    assert_eq!(page.next, None, "{page:?}");
+    assert_eq!(page.total, page.entries.len() as u64, "{page:?}");
+}
+
+#[then("the folder is empty")]
+fn the_folder_is_empty(agent: &mut Agent) {
+    let page = agent.page();
+    assert!(page.entries.is_empty(), "{page:?}");
+    assert_eq!((page.total, page.next), (0, None), "{page:?}");
+}
+
+#[then("the folder shows its entries as:")]
+fn shows_entries_as(agent: &mut Agent, step: &Step) {
+    let page = agent.page();
+    let table = step.table.as_ref().expect("the step has a table");
+    let mut shown: Vec<(&str, &str)> = page
+        .entries
+        .iter()
+        .map(|entry| {
+            let kind = match entry.kind {
+                EntryKind::Folder => "folder",
+                EntryKind::File => "file",
+                EntryKind::Link => "link",
+                EntryKind::Other => "other",
+            };
+            (entry.display.as_str(), kind)
+        })
+        .collect();
+    let mut expected: Vec<(&str, &str)> = table
+        .rows
+        .iter()
+        .skip(1)
+        .map(|row| (row[0].as_str(), row[1].as_str()))
+        .collect();
+    shown.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(shown, expected, "{page:?}");
+}
+
+#[then(expr = "the page lists {int} of the folder's {int} entries and says where the next starts")]
+fn lists_a_page_of_more(agent: &mut Agent, listed: usize, total: u64) {
+    let page = agent.page();
+    assert_eq!(page.entries.len(), listed);
+    assert_eq!(page.total, total);
+    assert_eq!(
+        page.next,
+        Some(listed as u64),
+        "the next page starts after this one"
+    );
+    let first = page.entries.first().map(|entry| entry.name.as_str());
+    assert_eq!(first, Some("file-0000.txt"), "in the folder's order");
+}
+
+#[then(expr = "the page lists {int} of the folder's {int} entries and is the folder's last")]
+fn lists_the_last_page(agent: &mut Agent, listed: usize, total: u64) {
+    let page = agent.page();
+    assert_eq!(page.entries.len(), listed);
+    assert_eq!(page.total, total);
+    assert_eq!(page.next, None, "{page:?}");
+    let last = page.entries.last().map(|entry| entry.name.as_str());
+    assert_eq!(last, Some("file-1000.txt"), "the entry the first page left");
+}
+
+#[then("the snapshot is said to be unknown")]
+fn the_snapshot_is_unknown(agent: &mut Agent) {
+    let (_, page) = agent
+        .snapshots
+        .opened
+        .as_ref()
+        .expect("a folder was opened");
+    assert_eq!(page, &Err(BrowseError::SnapshotUnknown));
+}
+
+#[then("the folder is said to be unknown")]
+fn the_folder_is_unknown(agent: &mut Agent) {
+    let (_, page) = agent
+        .snapshots
+        .opened
+        .as_ref()
+        .expect("a folder was opened");
+    assert_eq!(page, &Err(BrowseError::FolderUnknown));
 }

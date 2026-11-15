@@ -19,6 +19,7 @@ use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsValue;
+use leptos_router::components::A;
 
 use crate::components::{Confirmation, ReviewDialog, Working, recover_focus, sentence_view};
 use crate::live::say;
@@ -28,6 +29,7 @@ use crate::maintenance::{
 use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with};
 use crate::text;
+use crate::tree::snapshot_href;
 use crate::wording::{self, Adoption, Words};
 use crate::ws::{self, Got, Posted};
 
@@ -673,9 +675,12 @@ fn snapshots_view(page: Page, caption: String, snapshots: Vec<SnapshotDto>, rows
                 viewer_offset,
                 writes_instants,
             );
+            let href = snapshot_href(&page.alias.get_value(), &snapshot.id);
             view! {
                 <tr>
-                    <td>{short_id(&snapshot.id)}</td>
+                    <td>
+                        <A href=href>{short_id(&snapshot.id)}</A>
+                    </td>
                     <td title=snapshot.time>{shown}</td>
                 </tr>
             }

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use domain::browse::{FolderPage, FolderPath};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
@@ -146,6 +147,9 @@ pub enum Job {
     /// operation: it takes no I7 slot and is never written to the operation
     /// log (§9).
     Ls(RepositoryAccess),
+    /// Reads one page of one folder of a snapshot (§16, decision 102). A
+    /// read, like [`Ls`](Self::Ls): no I7 slot, no operation log row.
+    Browse(BrowseJob),
 }
 
 impl Job {
@@ -163,7 +167,8 @@ impl Job {
             | Self::Prune(_)
             | Self::PrunePlan(_)
             | Self::Check(_)
-            | Self::Ls(_) => None,
+            | Self::Ls(_)
+            | Self::Browse(_) => None,
         }
     }
 
@@ -180,7 +185,8 @@ impl Job {
             // A plan is never recorded; it names the kind it plans.
             Self::Prune(_) | Self::PrunePlan(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
-            Self::Ls(_) => OperationKind::Ls,
+            // A browse is an `ls` of one folder (§4.1).
+            Self::Ls(_) | Self::Browse(_) => OperationKind::Ls,
         }
     }
 
@@ -197,6 +203,7 @@ impl Job {
             Self::Rewrite(job) => Some(&job.repository),
             Self::Prune(job) | Self::PrunePlan(job) => Some(&job.repository),
             Self::Check(job) => Some(&job.repository),
+            Self::Browse(job) => Some(&job.repository),
         }
     }
 
@@ -213,6 +220,7 @@ impl Job {
             Self::Rewrite(job) => Some(&mut job.repository),
             Self::Prune(job) | Self::PrunePlan(job) => Some(&mut job.repository),
             Self::Check(job) => Some(&mut job.repository),
+            Self::Browse(job) => Some(&mut job.repository),
         }
     }
 
@@ -389,6 +397,16 @@ pub struct RewriteJob {
     pub tags: PlanTags,
 }
 
+/// One page of one folder of a snapshot, from position `from` of the
+/// folder's entries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BrowseJob {
+    pub repository: RepositoryAccess,
+    pub snapshot: SnapshotId,
+    pub folder: FolderPath,
+    pub from: u64,
+}
+
 /// A scripted job: count `steps`, waiting `step_delay` before each, report
 /// `warnings` right after starting, then end as `end` says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -531,6 +549,21 @@ pub enum EngineResult {
     Snapshots(Vec<SnapshotSummary>),
     /// What a [`Job::Probe`] found at its location.
     Probed(ProbeAnswer),
+    /// What a [`Job::Browse`] found.
+    Folder(FolderAnswer),
+}
+
+/// What a browse of a snapshot's folder found: the page, or that what it
+/// names isn't there. Neither absence is the engine failing: the repository
+/// opened and answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FolderAnswer {
+    Page(FolderPage),
+    /// The repository holds no snapshot by that ID: it was forgotten, or
+    /// never there.
+    SnapshotUnknown,
+    /// The snapshot holds no folder at that path.
+    FolderUnknown,
 }
 
 /// What a probe found at a location that answered. A location that didn't

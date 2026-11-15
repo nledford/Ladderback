@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
+use app::browse::{BrowseError, BrowseSnapshot, FolderReads};
 use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
@@ -43,6 +44,7 @@ use app::snapshots::{ListSnapshots, SnapshotError};
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::RepositoryAlias;
+use domain::browse::FolderPath;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
@@ -55,13 +57,13 @@ use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SecretWarning, Template,
 };
-use domain::{AgentId, OperationId, PlanId, RepositoryId};
+use domain::{AgentId, OperationId, PlanId, RepositoryId, SnapshotId};
 use engine::{Recorded, RemovedKind, WorkerEngine};
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
 use http_adapter::{
-    AppState, Catalog, CatalogError, MaintenanceRefusal, Operations, Plans, Repositories,
-    RepositoriesError, SecretRefusal, SignIn, SnapshotsError, StartError,
+    AppState, Catalog, CatalogError, FolderError, MaintenanceRefusal, Operations, Plans,
+    Repositories, RepositoriesError, SecretRefusal, SignIn, SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
 use notify_adapter::HttpNotifier;
@@ -741,6 +743,7 @@ async fn state_over(
         schedules: Arc::clone(&schedules),
         link: Arc::clone(&conditions.link),
         sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
+        reads: Arc::default(),
     });
     let background = Background {
         runner,
@@ -1196,7 +1199,12 @@ fn log_location(report: LocationReport) {
 /// run that read, which keeps none of it (#308).
 fn is_operation(job: &Job) -> bool {
     match job {
-        Job::Identify(_) | Job::Probe(_) | Job::Init(_) | Job::Ls(_) | Job::PrunePlan(_) => false,
+        Job::Identify(_)
+        | Job::Probe(_)
+        | Job::Init(_)
+        | Job::Ls(_)
+        | Job::Browse(_)
+        | Job::PrunePlan(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
@@ -2023,7 +2031,8 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         | EngineResult::Repository { .. }
         | EngineResult::PrunePlan(_)
         | EngineResult::Probed(_)
-        | EngineResult::Snapshots(_) => None,
+        | EngineResult::Snapshots(_)
+        | EngineResult::Folder(_) => None,
     }
 }
 
@@ -2401,6 +2410,9 @@ struct ConfigCatalog {
     /// A plan's sources as the backup walks them, which its globs are read
     /// against (#510).
     sources: Arc<dyn NormalizeSources>,
+    /// The turns to read a folder of a snapshot, which every browse shares
+    /// (decision 102).
+    reads: Arc<FolderReads>,
 }
 
 #[async_trait]
@@ -2560,6 +2572,107 @@ impl Catalog for ConfigCatalog {
             })
             .collect();
         Ok(api::SnapshotsDto { snapshots })
+    }
+
+    async fn folder(
+        &self,
+        alias: String,
+        snapshot: SnapshotId,
+        folder: FolderPath,
+        from: u64,
+    ) -> Result<api::FolderDto, FolderError> {
+        use app::maintenance::MaintenanceError;
+        // The repository is refused as its listing is (`snapshots`).
+        let unknown = || FolderError::Repository(SnapshotsError::Unknown);
+        let alias = RepositoryAlias::parse(&alias).map_err(|_| unknown())?;
+        let config = self.config.load().await.map_err(|error| {
+            FolderError::Repository(config_unusable(error, |code, args, detail| {
+                SnapshotsError::Unavailable { code, args, detail }
+            }))
+        })?;
+        let repository = config.repository(&alias).ok_or_else(unknown)?;
+        let path = folder.to_string();
+        let read = BrowseSnapshot::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            ResolveRepository::new(Arc::new(SystemSecrets::default()))
+                .telling(Arc::new(log_secret_warning)),
+            Arc::clone(&self.reads),
+        )
+        .folder(
+            OperationId::from_uuid(Uuid::now_v7()),
+            &alias,
+            repository,
+            snapshot,
+            folder,
+            from,
+        )
+        .await;
+        // A secret: its code and the words a command or the platform gave,
+        // masked of every secret of the repository, in the log as in the
+        // answer (I4).
+        let refused = |refusal: SecretRefusal| {
+            log::warn!(
+                "a folder of a snapshot of {} could not be read: {:?}{}",
+                alias.as_str(),
+                refusal.code,
+                refusal
+                    .detail
+                    .as_deref()
+                    .map_or_default(|detail| format!(" ({detail})"))
+            );
+            FolderError::Repository(SnapshotsError::SecretRefused(refusal))
+        };
+        let page = match read {
+            Ok(page) => page,
+            Err(BrowseError::SnapshotUnknown) => return Err(FolderError::SnapshotUnknown),
+            Err(BrowseError::FolderUnknown) => return Err(FolderError::FolderUnknown),
+            Err(BrowseError::Resolve(error)) => {
+                return Err(refused(
+                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await,
+                ));
+            }
+            Err(BrowseError::Read(MaintenanceError::Failed(
+                FailureReason::SecretsTooLargeToMask { field, limit },
+            ))) => return Err(refused(too_much_to_mask(field, limit))),
+            Err(error) => {
+                let said = failure_redactor(&repository.settings, &SystemSecrets::default())
+                    .await
+                    .redact(&format!("{error:?}"));
+                log::warn!(
+                    "a folder of a snapshot of {} could not be read: {said}",
+                    alias.as_str()
+                );
+                return Err(FolderError::Repository(SnapshotsError::Unavailable {
+                    code: ErrorCode::EngineUnavailable,
+                    args: Vec::new(),
+                    detail: None,
+                }));
+            }
+        };
+        Ok(api::FolderDto {
+            path,
+            entries: page.entries.into_iter().map(entry_dto).collect(),
+            total: page.total,
+            next: page.next,
+        })
+    }
+}
+
+/// An entry of a snapshot's folder as the page is told of it.
+fn entry_dto(entry: domain::browse::Entry) -> api::EntryDto {
+    use domain::browse::EntryKind;
+    api::EntryDto {
+        name: entry.name.into(),
+        display: entry.display.into(),
+        kind: match entry.kind {
+            EntryKind::Folder => api::EntryKindDto::Folder,
+            EntryKind::File => api::EntryKindDto::File,
+            EntryKind::Link => api::EntryKindDto::Link,
+            EntryKind::Other => api::EntryKindDto::Other,
+        },
+        size: entry.size,
+        modified: entry.modified.map(|at| at.to_string()),
     }
 }
 
@@ -5968,6 +6081,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6048,6 +6162,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6146,6 +6261,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6857,6 +6973,7 @@ mod tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -10091,6 +10208,7 @@ mod repository_service_tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -10130,6 +10248,7 @@ mod repository_service_tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules,
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -10259,6 +10378,260 @@ mod repository_service_tests {
             "{logged}"
         );
         assert!(!logged.contains("CANARY-rclone-log"), "{logged}");
+    }
+
+    use app::ports::FolderAnswer;
+
+    /// An engine that answers every browse with `answer`, and keeps the
+    /// jobs it was given.
+    struct Browsing {
+        answer: FolderAnswer,
+        seen: Mutex<Vec<Job>>,
+    }
+
+    #[async_trait]
+    impl Engine for Browsing {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            Ok(RunningJob {
+                events: futures::stream::iter([EngineEvent::Succeeded(EngineResult::Folder(
+                    self.answer.clone(),
+                ))])
+                .boxed(),
+                control: Box::new(Stop),
+            })
+        }
+    }
+
+    fn browsing(answer: FolderAnswer) -> Arc<Browsing> {
+        Arc::new(Browsing {
+            answer,
+            seen: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn a_snapshot() -> SnapshotId {
+        SnapshotId::parse(&"ab".repeat(32)).expect("a snapshot ID")
+    }
+
+    fn docs() -> FolderPath {
+        FolderPath::parse("source/docs").expect("a folder path")
+    }
+
+    /// The lines logged so far about a browse of `alias`.
+    fn logged_about_browsing(alias: &str) -> Vec<String> {
+        captured_log::lines()
+            .into_iter()
+            .map(|(_, line)| line)
+            .filter(|line| line.contains(&format!("a snapshot of {alias} could not be read")))
+            .collect()
+    }
+
+    /// A page is told with its folder's path, each entry's name, kind, size
+    /// and modification time, the folder's total and where the next page
+    /// starts; the engine is asked for that snapshot, folder and position.
+    #[tokio::test]
+    async fn a_page_of_a_snapshot_s_folder_is_told_entry_by_entry() {
+        use domain::browse::{DisplayName, Entry, EntryKind, EntryName, FolderPage};
+        // Each shown name differs from its key, so the page can't swap them.
+        let entry = |name: &str, kind, size, modified: Option<i64>| Entry {
+            name: EntryName::parse(name).expect("a name"),
+            display: DisplayName::from(name.to_uppercase()),
+            kind,
+            size,
+            modified: modified
+                .map(|second| domain::Timestamp::from_second(second).expect("a time")),
+        };
+        let engine = browsing(FolderAnswer::Page(FolderPage {
+            entries: vec![
+                entry("drafts", EntryKind::Folder, None, None),
+                entry("notes.md", EntryKind::File, Some(5), Some(1_793_534_400)),
+                entry("latest", EntryKind::Link, None, None),
+                entry("pipe", EntryKind::Other, None, None),
+            ],
+            total: 1_004,
+            next: Some(1_004),
+        }));
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("demo", "echo not-a-real-password", engine.clone())
+                .await;
+        let page = catalog
+            .folder("demo".to_owned(), a_snapshot(), docs(), 1_000)
+            .await
+            .expect("the page");
+        let entry = |name: &str, kind, size, modified: Option<&str>| api::EntryDto {
+            name: name.to_owned(),
+            display: name.to_uppercase(),
+            kind,
+            size,
+            modified: modified.map(str::to_owned),
+        };
+        assert_eq!(
+            page,
+            api::FolderDto {
+                path: "source/docs".to_owned(),
+                entries: vec![
+                    entry("drafts", api::EntryKindDto::Folder, None, None),
+                    entry(
+                        "notes.md",
+                        api::EntryKindDto::File,
+                        Some(5),
+                        Some("2026-11-01T12:00:00Z")
+                    ),
+                    entry("latest", api::EntryKindDto::Link, None, None),
+                    entry("pipe", api::EntryKindDto::Other, None, None),
+                ],
+                total: 1_004,
+                next: Some(1_004),
+            }
+        );
+        let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let [Job::Browse(job)] = seen.as_slice() else {
+            panic!("one browse, not {seen:?}");
+        };
+        assert_eq!(
+            (&job.snapshot, &job.folder, job.from),
+            (&a_snapshot(), &docs(), 1_000)
+        );
+    }
+
+    /// A snapshot or a folder that isn't there is told as such, not as an
+    /// engine that failed.
+    #[tokio::test]
+    async fn a_snapshot_or_folder_that_is_not_there_is_told_as_unknown() {
+        for (answer, refused) in [
+            (FolderAnswer::SnapshotUnknown, FolderError::SnapshotUnknown),
+            (FolderAnswer::FolderUnknown, FolderError::FolderUnknown),
+        ] {
+            let (catalog, _scratch) = catalog_with_a_password_command(
+                "demo",
+                "echo not-a-real-password",
+                browsing(answer),
+            )
+            .await;
+            let read = catalog
+                .folder("demo".to_owned(), a_snapshot(), docs(), 0)
+                .await;
+            assert_eq!(read, Err(refused));
+        }
+    }
+
+    /// An alias the configuration doesn't hold, or no alias could be, is an
+    /// unknown repository; the engine isn't asked.
+    #[tokio::test]
+    async fn a_folder_of_a_repository_the_configuration_does_not_hold_is_unknown() {
+        let engine = browsing(FolderAnswer::FolderUnknown);
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("demo", "echo not-a-real-password", engine.clone())
+                .await;
+        for alias in ["other", "not an alias!"] {
+            let read = catalog
+                .folder(alias.to_owned(), a_snapshot(), docs(), 0)
+                .await;
+            assert_eq!(
+                read,
+                Err(FolderError::Repository(SnapshotsError::Unknown)),
+                "{alias}"
+            );
+        }
+        assert!(
+            engine
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty()
+        );
+    }
+
+    /// A browse whose password command fails is refused with the code of
+    /// the failure, and neither the answer nor the log holds a secret of
+    /// the repository (I4).
+    #[tokio::test]
+    async fn a_browse_whose_password_command_fails_is_refused_with_its_code_and_masks_the_secrets()
+    {
+        capture();
+        let (catalog, _scratch) = catalog_with_a_password_command(
+            "failing-browse",
+            "sh -c 'echo canary-inline canary-from-a-file >&2; exit 3'",
+            browsing(FolderAnswer::FolderUnknown),
+        )
+        .await;
+        let refused = catalog
+            .folder("failing-browse".to_owned(), a_snapshot(), docs(), 0)
+            .await
+            .expect_err("the browse is refused");
+        let FolderError::Repository(SnapshotsError::SecretRefused(refusal)) = refused else {
+            panic!("a secret refusal, not {refused:?}");
+        };
+        assert_eq!(refusal.code, ErrorCode::SecretCommandFailed);
+        let said = format!("{refusal:?}");
+        let logged = logged_about_browsing("failing-browse").join("\n");
+        for line in [&said, &logged] {
+            assert!(!line.contains("canary-inline"), "{line}");
+            assert!(!line.contains("canary-from-a-file"), "{line}");
+        }
+        assert!(logged.contains("SecretCommandFailed"), "{logged}");
+        assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
+    }
+
+    /// An engine that can't be started is told by its code alone, and what
+    /// it said reaches the log with the repository's secrets masked (I4).
+    #[tokio::test]
+    async fn the_log_of_a_browse_the_engine_refused_masks_the_secrets_of_the_repository() {
+        capture();
+        let engine = engine();
+        *engine
+            .refuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(EngineError::Unavailable {
+            detail: "could not start with canary-inline and canary-from-a-file".to_owned(),
+        });
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("browse-down", "echo not-a-real-password", engine)
+                .await;
+        let refused = catalog
+            .folder("browse-down".to_owned(), a_snapshot(), docs(), 0)
+            .await;
+        assert_eq!(refused, Err(FolderError::Repository(engine_unavailable())));
+        let logged = logged_about_browsing("browse-down").join("\n");
+        assert!(logged.contains(domain::secrets::REDACTED), "{logged}");
+        assert!(!logged.contains("canary-inline"), "{logged}");
+        assert!(!logged.contains("canary-from-a-file"), "{logged}");
+    }
+
+    /// A browse the engine refused for more secrets than it masks is
+    /// refused with that code (§10.2).
+    #[tokio::test]
+    async fn a_browse_the_engine_refused_for_too_much_to_mask_is_refused_with_its_code() {
+        let engine = engine();
+        *engine
+            .refuses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(EngineError::SecretsTooLargeToMask {
+            field: Some("HTTPS_PROXY".to_owned()),
+            limit: 262_144,
+        });
+        let (catalog, _scratch) =
+            catalog_with_a_password_command("too-much", "echo not-a-real-password", engine).await;
+        let refused = catalog
+            .folder("too-much".to_owned(), a_snapshot(), docs(), 0)
+            .await;
+        assert_eq!(
+            refused,
+            Err(FolderError::Repository(SnapshotsError::SecretRefused(
+                SecretRefusal {
+                    code: ErrorCode::SecretsTooLargeToMask,
+                    args: vec![
+                        ("limit", MsgArg::Bytes(262_144)),
+                        ("field", MsgArg::Text("HTTPS_PROXY".to_owned())),
+                    ],
+                    detail: None,
+                }
+            )))
+        );
     }
 
     /// A command's line cut at the cap can end in the beginning of a secret
@@ -10509,6 +10882,7 @@ mod repository_service_tests {
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
+                reads: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -10545,6 +10919,7 @@ mod repository_service_tests {
                 operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
+                reads: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -11415,6 +11790,7 @@ mod repository_service_tests {
             operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11553,6 +11929,7 @@ mod repository_service_tests {
             operations,
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
+            reads: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},

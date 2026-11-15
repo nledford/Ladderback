@@ -218,6 +218,17 @@ pub trait Catalog: Send + Sync {
 
     /// One repository's snapshots, newest first.
     async fn snapshots(&self, alias: String) -> Result<api::SnapshotsDto, SnapshotsError>;
+
+    /// The page of the folder `folder` of the snapshot `snapshot`, in the
+    /// repository `alias`, that starts at position `from` (§16, decision
+    /// 102), read live.
+    async fn folder(
+        &self,
+        alias: String,
+        snapshot: domain::SnapshotId,
+        folder: domain::browse::FolderPath,
+        from: u64,
+    ) -> Result<api::FolderDto, FolderError>;
 }
 
 /// Why a catalog request couldn't be answered.
@@ -252,6 +263,18 @@ pub enum SnapshotsError {
         args: Vec<(&'static str, api::MsgArg)>,
         detail: Option<String>,
     },
+}
+
+/// Why a folder of a snapshot couldn't be read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FolderError {
+    /// Refused as a listing of the repository's snapshots would be: no
+    /// repository by that name, a secret, or nothing to read it with.
+    Repository(SnapshotsError),
+    /// The repository holds no snapshot by that ID.
+    SnapshotUnknown,
+    /// The snapshot holds no folder at that path.
+    FolderUnknown,
 }
 
 /// Why a history request couldn't be answered.
@@ -466,6 +489,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/repositories/{alias}/snapshots",
             axum::routing::get(list_snapshots),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/snapshots/{snapshot}/folder",
+            axum::routing::get(read_folder),
         )
         .route(
             "/api/v1/repositories/{alias}/groups",
@@ -755,6 +782,82 @@ async fn list_snapshots(
         Err(SnapshotsError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
         Err(SnapshotsError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
+}
+
+/// The query the folder route takes: the folder's path in the snapshot, its
+/// names joined by `/` (none for the top), and the position the page starts
+/// at (none for the first). Both optional.
+#[derive(Deserialize, Default)]
+struct FolderParams {
+    path: Option<String>,
+    from: Option<String>,
+}
+
+/// One page of one folder of a snapshot, read live like the listing (§9).
+/// The snapshot's ID and the folder's path are parsed here, where they
+/// enter: one no snapshot or folder could have is as unknown as one the
+/// snapshot happens not to hold.
+async fn read_folder(
+    State(state): State<AppState>,
+    axum::extract::Path((alias, snapshot)): axum::extract::Path<(String, String)>,
+    axum::extract::Query(params): axum::extract::Query<FolderParams>,
+) -> Response {
+    let from = match params.from {
+        None => 0,
+        Some(cursor) => match cursor.parse::<u64>() {
+            Ok(from) => from,
+            Err(_) => {
+                return refused_with(
+                    StatusCode::BAD_REQUEST,
+                    api::ErrorCode::InvalidCursor,
+                    vec![("cursor", api::MsgArg::Text(cursor))],
+                );
+            }
+        },
+    };
+    let Ok(id) = domain::SnapshotId::parse(&snapshot) else {
+        return snapshot_unknown(snapshot);
+    };
+    let path = params.path.unwrap_or_default();
+    let Ok(folder) = domain::browse::FolderPath::parse(&path) else {
+        return folder_unknown(path);
+    };
+    match state.catalog.folder(alias.clone(), id, folder, from).await {
+        Ok(page) => (StatusCode::OK, axum::Json(page)).into_response(),
+        Err(FolderError::SnapshotUnknown) => snapshot_unknown(snapshot),
+        Err(FolderError::FolderUnknown) => folder_unknown(path),
+        Err(FolderError::Repository(SnapshotsError::Unknown)) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::RepositoryUnknown,
+            vec![("alias", api::MsgArg::Text(alias))],
+        ),
+        Err(FolderError::Repository(SnapshotsError::SecretRefused(secret))) => {
+            repositories::secret_refusal(&secret)
+        }
+        Err(FolderError::Repository(SnapshotsError::Unavailable { code, args, detail })) => {
+            unavailable(code, args, detail)
+        }
+    }
+}
+
+/// The refusal of a snapshot the repository doesn't hold, naming it as the
+/// request did.
+fn snapshot_unknown(snapshot: String) -> Response {
+    refused_with(
+        StatusCode::NOT_FOUND,
+        api::ErrorCode::SnapshotUnknown,
+        vec![("snapshot", api::MsgArg::Text(snapshot))],
+    )
+}
+
+/// The refusal of a folder the snapshot doesn't hold, naming it as the
+/// request did.
+fn folder_unknown(path: String) -> Response {
+    refused_with(
+        StatusCode::NOT_FOUND,
+        api::ErrorCode::FolderUnknown,
+        vec![("path", api::MsgArg::Text(path))],
+    )
 }
 
 /// A typed refusal (§10.1) with `status`.
@@ -1206,6 +1309,66 @@ mod tests {
                     snapshots: vec![demo_snapshot()],
                 }),
             }
+        }
+
+        /// The folder `source/docs` of the snapshot `ab…` holds one file of
+        /// a folder of 1,001 entries; the top holds `source`. The page
+        /// echoes the path and continues from where it started.
+        async fn folder(
+            &self,
+            alias: String,
+            snapshot: domain::SnapshotId,
+            folder: domain::browse::FolderPath,
+            from: u64,
+        ) -> Result<api::FolderDto, FolderError> {
+            match alias.as_str() {
+                "missing" => return Err(FolderError::Repository(SnapshotsError::Unknown)),
+                "engine-down" => {
+                    return Err(FolderError::Repository(SnapshotsError::Unavailable {
+                        code: api::ErrorCode::EngineUnavailable,
+                        args: Vec::new(),
+                        detail: None,
+                    }));
+                }
+                "no-secret" => {
+                    return Err(FolderError::Repository(SnapshotsError::SecretRefused(
+                        SecretRefusal {
+                            code: api::ErrorCode::SecretMissing,
+                            args: vec![
+                                ("field", api::MsgArg::Text("password".to_owned())),
+                                ("source", api::MsgArg::Text("PW".to_owned())),
+                            ],
+                            detail: None,
+                        },
+                    )));
+                }
+                _ => {}
+            }
+            if snapshot.as_str() != "ab".repeat(32) {
+                return Err(FolderError::SnapshotUnknown);
+            }
+            let entry = |name: &str, kind, size| api::EntryDto {
+                name: name.to_owned(),
+                display: name.to_owned(),
+                kind,
+                size,
+                modified: Some("2026-11-01T12:00:00Z".to_owned()),
+            };
+            let (entries, total) = match folder.to_string().as_str() {
+                "" => (vec![entry("source", api::EntryKindDto::Folder, None)], 1),
+                "source/docs" => (
+                    vec![entry("notes.md", api::EntryKindDto::File, Some(5))],
+                    1_001,
+                ),
+                _ => return Err(FolderError::FolderUnknown),
+            };
+            let next = from.checked_add(1_000).filter(|next| *next < total);
+            Ok(api::FolderDto {
+                path: folder.to_string(),
+                entries,
+                total,
+                next,
+            })
         }
     }
 
@@ -2203,6 +2366,21 @@ mod tests {
             let (code, args, detail) = mistake();
             Err(SnapshotsError::Unavailable { code, args, detail })
         }
+
+        async fn folder(
+            &self,
+            _alias: String,
+            _snapshot: domain::SnapshotId,
+            _folder: domain::browse::FolderPath,
+            _from: u64,
+        ) -> Result<api::FolderDto, FolderError> {
+            let (code, args, detail) = mistake();
+            Err(FolderError::Repository(SnapshotsError::Unavailable {
+                code,
+                args,
+                detail,
+            }))
+        }
     }
 
     /// Every route that reads the configuration refuses a mistake in it with
@@ -2215,6 +2393,11 @@ mod tests {
             (Method::GET, "/api/v1/plans", ""),
             (Method::GET, "/api/v1/repositories", ""),
             (Method::GET, "/api/v1/repositories/demo/snapshots", ""),
+            (
+                Method::GET,
+                "/api/v1/repositories/demo/snapshots/abababababababababababababababababababababababababababababababab/folder",
+                "",
+            ),
             (Method::POST, "/api/v1/operations", r#"{"plan":"mistaken"}"#),
         ] {
             let state = AppState {
@@ -2279,6 +2462,133 @@ mod tests {
             body(response).await,
             r#"{"code":"repository-unknown","args":{"alias":{"type":"text","value":"missing"}}}"#
         );
+    }
+
+    /// The snapshot every folder test opens.
+    fn folder_route(alias: &str, query: &str) -> String {
+        format!(
+            "/api/v1/repositories/{alias}/snapshots/{}/folder{query}",
+            "ab".repeat(32)
+        )
+    }
+
+    /// A page of a folder carries its path, its entries with their kind,
+    /// size and modification time, the folder's total and where the next
+    /// page starts, from the position the request named.
+    #[tokio::test]
+    async fn a_page_of_a_snapshot_s_folder_starts_where_the_request_says() {
+        let response = get(&folder_route("demo", "?path=source/docs&from=0")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "path": "source/docs",
+                "entries": [{
+                    "name": "notes.md",
+                    "display": "notes.md",
+                    "kind": "file",
+                    "size": 5,
+                    "modified": "2026-11-01T12:00:00Z",
+                }],
+                "total": 1001,
+                "next": 1000,
+            })
+        );
+        let last = get(&folder_route("demo", "?path=source/docs&from=1000")).await;
+        assert_eq!(last.status(), StatusCode::OK);
+        let wire: serde_json::Value = serde_json::from_str(&body(last).await).unwrap();
+        assert_eq!(wire.get("next"), None, "the last page names no next");
+    }
+
+    /// No path is the snapshot's top folder, and no position its first page.
+    #[tokio::test]
+    async fn a_folder_request_naming_nothing_opens_the_top_folder_s_first_page() {
+        let response = get(&folder_route("demo", "")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+        assert_eq!(wire["path"], "");
+        assert_eq!(wire["entries"][0]["name"], "source");
+        assert_eq!(wire["entries"][0]["kind"], "folder");
+        assert_eq!(wire["entries"][0].get("size"), None);
+    }
+
+    /// A position that is no count of entries is refused as an invalid
+    /// cursor, naming it.
+    #[tokio::test]
+    async fn a_folder_position_that_is_no_count_is_an_invalid_cursor() {
+        for from in ["abc", "-1", "1.5", "18446744073709551616"] {
+            let response = get(&folder_route("demo", &format!("?from={from}"))).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{from}");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body(response).await).unwrap(),
+                serde_json::json!({
+                    "code": "invalid-cursor",
+                    "args": {"cursor": {"type": "text", "value": from}},
+                }),
+                "{from}"
+            );
+        }
+    }
+
+    /// An ID no snapshot could have is as unknown as one the repository
+    /// doesn't hold; both are named.
+    #[tokio::test]
+    async fn a_snapshot_the_repository_does_not_hold_is_a_typed_refusal() {
+        for snapshot in ["nope".to_owned(), "cd".repeat(32)] {
+            let response = get(&format!(
+                "/api/v1/repositories/demo/snapshots/{snapshot}/folder"
+            ))
+            .await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{snapshot}");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body(response).await).unwrap(),
+                serde_json::json!({
+                    "code": "snapshot-unknown",
+                    "args": {"snapshot": {"type": "text", "value": snapshot}},
+                }),
+            );
+        }
+    }
+
+    /// A path no folder could have (an empty name) is as unknown as one the
+    /// snapshot doesn't hold; both are named as they were asked for.
+    #[tokio::test]
+    async fn a_folder_the_snapshot_does_not_hold_is_a_typed_refusal() {
+        for (query, path) in [
+            ("?path=source//docs", "source//docs"),
+            ("?path=/source", "/source"),
+            ("?path=source/gone", "source/gone"),
+        ] {
+            let response = get(&folder_route("demo", query)).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body(response).await).unwrap(),
+                serde_json::json!({
+                    "code": "folder-unknown",
+                    "args": {"path": {"type": "text", "value": path}},
+                }),
+            );
+        }
+    }
+
+    /// The repository is refused as its listing would be: unknown, a secret
+    /// that can't be resolved, or an engine that can't start.
+    #[tokio::test]
+    async fn a_folder_of_a_repository_that_cannot_be_read_is_refused_as_its_listing_is() {
+        let missing = get(&folder_route("missing", "")).await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            body(missing).await,
+            r#"{"code":"repository-unknown","args":{"alias":{"type":"text","value":"missing"}}}"#
+        );
+        let secret = get(&folder_route("no-secret", "")).await;
+        assert_eq!(secret.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let wire: serde_json::Value = serde_json::from_str(&body(secret).await).unwrap();
+        assert_eq!(wire["code"], "secret-missing");
+        let down = get(&folder_route("engine-down", "")).await;
+        assert_eq!(down.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body(down).await, r#"{"code":"engine-unavailable"}"#);
     }
 
     /// Answers by the location a request names, and counts the requests

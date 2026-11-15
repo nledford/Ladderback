@@ -1860,6 +1860,18 @@ pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
     title_in(localizer, path, cfg!(feature = "gallery"))
 }
 
+/// Whether `path` is a snapshot's page: `/snapshots/{alias}/{snapshot}`,
+/// neither name empty.
+fn is_snapshot_page(path: &str) -> bool {
+    path.strip_prefix("/snapshots/").is_some_and(|rest| {
+        let mut names = rest.split('/');
+        matches!(
+            (names.next(), names.next(), names.next()),
+            (Some(alias), Some(snapshot), None) if !alias.is_empty() && !snapshot.is_empty()
+        )
+    })
+}
+
 /// [`title`] for a build that has the gallery or not, so that both are tested
 /// whichever one the tests are built as.
 fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
@@ -1877,6 +1889,8 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_SNAPSHOTS_TITLE
     } else if path == "/settings" {
         msg::UI_SETTINGS_TITLE
+    } else if is_snapshot_page(path) {
+        msg::UI_SNAPSHOT_TITLE
     } else {
         msg::UI_NOT_FOUND_TITLE
     };
@@ -1958,6 +1972,28 @@ mod tests {
     fn a_path_that_only_starts_like_a_page_is_not_that_page() {
         assert_eq!(title_of("/_gallery-2"), "Page not found – Ladderback");
         assert_eq!(title_of("//"), "Page not found – Ladderback");
+    }
+
+    #[test]
+    fn a_snapshot_s_page_is_titled_with_the_product_name() {
+        assert_eq!(title_of("/snapshots/demo/ab12"), "Snapshot – Ladderback");
+        assert_eq!(
+            title_of("/snapshots/my%20repo/ab12"),
+            "Snapshot – Ladderback"
+        );
+    }
+
+    #[test]
+    fn a_path_under_snapshots_that_names_no_snapshot_is_not_its_page() {
+        for path in [
+            "/snapshots/demo",
+            "/snapshots/demo/",
+            "/snapshots//ab12",
+            "/snapshots/demo/ab12/more",
+            "/snapshotsx/demo/ab12",
+        ] {
+            assert_eq!(title_of(path), "Page not found – Ladderback", "{path}");
+        }
     }
 
     #[test]

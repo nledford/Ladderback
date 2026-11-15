@@ -475,6 +475,7 @@ impl ForgetWorld {
                 Job::Identify(_) => "identify",
                 Job::Probe(_) => "probe",
                 Job::Ls(_) => "ls",
+                Job::Browse(_) => "browse",
                 Job::Forget(_) => "forget",
                 Job::Rewrite(_) => "adopt",
                 Job::Prune(_) => "prune",
