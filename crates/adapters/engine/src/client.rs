@@ -1498,6 +1498,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::SessionsUnavailable
                 | ErrorCode::DaemonUnreachable
                 | ErrorCode::DaemonAnswerLost
+                | ErrorCode::DaemonAnswerTooLarge
                 | ErrorCode::ConfigUnavailable
                 | ErrorCode::ConfigTooLarge
                 | ErrorCode::ConfigInvalid

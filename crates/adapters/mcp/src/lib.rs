@@ -148,6 +148,11 @@ pub trait Backend: Send + Sync + 'static {
     /// recorded.
     async fn operation(&self, id: String) -> Result<OperationDetailDto, ErrorDto>;
 
+    /// The summary alone of the operation whose ID is `id`: what a cancel
+    /// and each step of a wait read, the same size however many warnings
+    /// the operation recorded.
+    async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto>;
+
     /// Queues a backup of the plan whose ID is `plan` now, under the plan's
     /// overlap policy, and returns its operation's ID. The trigger recorded
     /// is the backend's: `mcp` in this process, and through a daemon an API
@@ -402,11 +407,12 @@ impl Server {
         Ok(Started { operation })
     }
 
-    /// Reads the operation every [`WAIT_STEP`] until it has finished or the
-    /// wait's length has passed, sending a progress notification after each
-    /// read that finds it unfinished when the call carried a progress token.
-    /// A cancelled call stops the wait, never the operation: the answer is
-    /// dropped then, as the protocol asks.
+    /// Reads the operation's summary every [`WAIT_STEP`] until it has
+    /// finished or the wait's length has passed, then its detail once,
+    /// sending a progress notification after each read that finds it
+    /// unfinished when the call carried a progress token. A cancelled call
+    /// stops the wait, never the operation: the answer is dropped then, as
+    /// the protocol asks, so the detail isn't read for it.
     async fn wait_operation(
         &self,
         arguments: WaitArguments,
@@ -416,15 +422,21 @@ impl Server {
         let began = tokio::time::Instant::now();
         let progress = context.meta.get_progress_token();
         loop {
-            let OperationDetailDto {
-                operation,
-                warnings,
-            } = self.backend.operation(arguments.id.clone()).await?;
-            let finished = !is_unfinished(&operation);
-            let left = length.saturating_sub(began.elapsed());
-            if finished || left.is_zero() || context.ct.is_cancelled() {
+            let operation = self.backend.summary(arguments.id.clone()).await?;
+            if context.ct.is_cancelled() {
                 return Ok(Waited {
-                    finished,
+                    finished: !is_unfinished(&operation),
+                    operation: Operation::listing(operation, Vec::new()),
+                });
+            }
+            let left = length.saturating_sub(began.elapsed());
+            if !is_unfinished(&operation) || left.is_zero() {
+                let OperationDetailDto {
+                    operation,
+                    warnings,
+                } = self.backend.operation(arguments.id).await?;
+                return Ok(Waited {
+                    finished: !is_unfinished(&operation),
                     operation: Operation::listing(operation, warnings),
                 });
             }

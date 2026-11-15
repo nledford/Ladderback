@@ -66,6 +66,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     SessionsUnavailable => msg::ERROR_SESSIONS_UNAVAILABLE,
     DaemonUnreachable => msg::ERROR_DAEMON_UNREACHABLE,
     DaemonAnswerLost => msg::ERROR_DAEMON_ANSWER_LOST,
+    DaemonAnswerTooLarge => msg::ERROR_DAEMON_ANSWER_TOO_LARGE,
     ConfigUnavailable => msg::ERROR_CONFIG_UNAVAILABLE,
     ConfigTooLarge => msg::ERROR_CONFIG_TOO_LARGE,
     ConfigInvalid => msg::ERROR_CONFIG_INVALID,

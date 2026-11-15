@@ -207,6 +207,10 @@ error-daemon-unreachable = No { -brand-name } answered at the address { "ladderb
 # `ladderback mcp --connect` sent a request that changes something, and its answer was lost on the way back.
 error-daemon-answer-lost = The request was sent to { -brand-name }, but no answer came back, so whether it took effect is unknown. It wasn't sent again: list the operations to see whether it did.
 
+# `ladderback mcp --connect` read an answer from the daemon larger than the most it reads, and left it unread.
+# $limit (bytes): the most it reads, as a size such as 8 MiB.
+error-daemon-answer-too-large = { -brand-name } answered with more than { $limit }, the most { "ladderback mcp" } reads, so the answer was left unread. An operation with that many warnings can be read in the web UI.
+
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.
 # $detail (text): the platform's message. It is shown as it came.

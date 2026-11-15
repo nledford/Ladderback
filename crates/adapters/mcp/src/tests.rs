@@ -59,6 +59,10 @@ impl Backend for Told {
         Err(untold())
     }
 
+    async fn summary(&self, _id: String) -> Result<OperationSummaryDto, ErrorDto> {
+        Err(untold())
+    }
+
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
         Err(untold())
     }
@@ -498,6 +502,11 @@ impl Backend for Lists {
     async fn operation(&self, id: String) -> Result<OperationDetailDto, ErrorDto> {
         self.ask(format!("operation {id}"));
         self.told(self.detail.as_ref().expect("a detail to tell"))
+    }
+
+    async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto> {
+        self.ask(format!("summary of {id}"));
+        self.told(&self.detail.as_ref().expect("a detail to tell").operation)
     }
 
     async fn run(&self, plan: String) -> Result<String, ErrorDto> {
@@ -1279,13 +1288,15 @@ async fn the_acting_tools_refuse_a_missing_or_unknown_argument_as_invalid_params
     }
 }
 
-/// A stand-in whose one operation is running for its first `running` reads
-/// and has succeeded from then on. It counts the reads and records any
+/// A stand-in whose one operation is running for its first `running`
+/// summary reads and has succeeded from then on; its detail tells what the
+/// last summary read told. It counts the reads of each and records any
 /// cancel asked of it.
 #[derive(Default)]
 struct Running {
     running: u32,
     reads: Arc<Mutex<u32>>,
+    details: Arc<Mutex<u32>>,
     cancels: Arc<Mutex<Vec<String>>>,
 }
 
@@ -1296,6 +1307,18 @@ impl Running {
             running: u32::MAX,
             ..Self::default()
         }
+    }
+
+    /// The operation's summary, `running` or succeeded.
+    fn state(running: bool) -> OperationSummaryDto {
+        let mut operation = summary(1);
+        if running {
+            operation.status = "running".to_owned();
+            operation.finished_at = None;
+        } else {
+            operation.status = "succeeded".to_owned();
+        }
+        operation
     }
 }
 
@@ -1327,20 +1350,19 @@ impl Backend for Running {
     }
 
     async fn operation(&self, _id: String) -> Result<OperationDetailDto, ErrorDto> {
+        *self.details.lock().unwrap() += 1;
+        let reads = *self.reads.lock().unwrap();
+        Ok(OperationDetailDto {
+            operation: Running::state(reads <= self.running),
+            warnings: vec![warning(1)],
+        })
+    }
+
+    async fn summary(&self, _id: String) -> Result<OperationSummaryDto, ErrorDto> {
         let mut reads = self.reads.lock().unwrap();
         let running = *reads < self.running;
         *reads += 1;
-        let mut operation = summary(1);
-        if running {
-            operation.status = "running".to_owned();
-            operation.finished_at = None;
-        } else {
-            operation.status = "succeeded".to_owned();
-        }
-        Ok(OperationDetailDto {
-            operation,
-            warnings: vec![warning(1)],
-        })
+        Ok(Running::state(running))
     }
 
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
@@ -1401,18 +1423,21 @@ impl Client {
     }
 }
 
+/// The wait polls the operation's summary, bounded however many warnings
+/// it recorded, and reads its detail, warnings and all, once at the end.
 #[tokio::test(start_paused = true)]
-async fn wait_operation_reads_every_half_second_until_the_operation_finishes() {
+async fn wait_operation_reads_the_summary_every_half_second_until_it_finishes_then_the_detail() {
     let running = Running {
         running: 3,
         ..Running::default()
     };
-    let reads = Arc::clone(&running.reads);
+    let (reads, details) = (Arc::clone(&running.reads), Arc::clone(&running.details));
     let mut client = connect(running);
     let began = tokio::time::Instant::now();
     let answer = client.wait(None, None).await;
     assert_eq!(began.elapsed(), Duration::from_millis(1500));
     assert_eq!(*reads.lock().unwrap(), 4);
+    assert_eq!(*details.lock().unwrap(), 1);
     let content = &answer["result"]["structuredContent"];
     assert_eq!(content["finished"], true, "{answer}");
     assert_eq!(content["operation"]["status"], "succeeded", "{answer}");
@@ -1423,13 +1448,14 @@ async fn wait_operation_reads_every_half_second_until_the_operation_finishes() {
 #[tokio::test(start_paused = true)]
 async fn a_wait_that_times_out_returns_the_operation_unfinished() {
     let running = Running::forever();
-    let reads = Arc::clone(&running.reads);
+    let (reads, details) = (Arc::clone(&running.reads), Arc::clone(&running.details));
     let mut client = connect(running);
     let began = tokio::time::Instant::now();
     let answer = client.wait(Some(2), None).await;
     assert_eq!(began.elapsed(), Duration::from_secs(2));
     // At 0, 0.5, 1, 1.5 and 2 seconds.
     assert_eq!(*reads.lock().unwrap(), 5);
+    assert_eq!(*details.lock().unwrap(), 1);
     assert_eq!(answer["result"]["isError"], false, "{answer}");
     let content = &answer["result"]["structuredContent"];
     assert_eq!(content["finished"], false, "{answer}");
@@ -1439,12 +1465,13 @@ async fn a_wait_that_times_out_returns_the_operation_unfinished() {
 #[tokio::test(start_paused = true)]
 async fn a_wait_of_no_seconds_reads_the_operation_once() {
     let running = Running::forever();
-    let reads = Arc::clone(&running.reads);
+    let (reads, details) = (Arc::clone(&running.reads), Arc::clone(&running.details));
     let mut client = connect(running);
     let began = tokio::time::Instant::now();
     let answer = client.wait(Some(0), None).await;
     assert_eq!(began.elapsed(), Duration::ZERO);
     assert_eq!(*reads.lock().unwrap(), 1);
+    assert_eq!(*details.lock().unwrap(), 1);
     assert_eq!(answer["result"]["structuredContent"]["finished"], false);
 }
 
@@ -1483,7 +1510,11 @@ async fn a_wait_sends_no_progress_when_the_call_carries_no_token() {
 #[tokio::test(start_paused = true)]
 async fn cancelling_a_wait_stops_the_wait_and_never_the_operation() {
     let running = Running::forever();
-    let (reads, cancels) = (Arc::clone(&running.reads), Arc::clone(&running.cancels));
+    let (reads, details, cancels) = (
+        Arc::clone(&running.reads),
+        Arc::clone(&running.details),
+        Arc::clone(&running.cancels),
+    );
     let mut client = connect(running);
     client.next += 1;
     let waiting = client.next;
@@ -1519,6 +1550,8 @@ async fn cancelling_a_wait_stops_the_wait_and_never_the_operation() {
         "the wait went on after its call was cancelled: {after} reads"
     );
     assert!(cancels.lock().unwrap().is_empty(), "{cancels:?}");
+    // Its answer is dropped, so the detail isn't read for it.
+    assert_eq!(*details.lock().unwrap(), 0);
     // The session goes on, and the cancelled call is never answered.
     let answer = client.ask_current("tools/list", json!({})).await;
     assert!(answer["result"]["tools"].is_array(), "{answer}");
