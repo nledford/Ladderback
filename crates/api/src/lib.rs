@@ -1998,6 +1998,7 @@ mod tests {
             ends_in_seconds: Some(60),
             exposure: ExposureDto::Loopback,
             admin_password: None,
+            keep_signed_in_offered: None,
             build: None,
         };
         assert_eq!(
@@ -2016,6 +2017,7 @@ mod tests {
             ends_in_seconds: None,
             exposure: ExposureDto::Loopback,
             admin_password: None,
+            keep_signed_in_offered: None,
             build: None,
         };
         assert_eq!(
@@ -2090,6 +2092,7 @@ mod tests {
             ends_in_seconds: None,
             exposure: ExposureDto::Loopback,
             admin_password: None,
+            keep_signed_in_offered: None,
             build: Some(build(Some(COMMIT), true, false)),
         };
         let written = serde_json::json!({
@@ -3597,17 +3600,23 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// `GET /api/v1/session` and a sign-in's answer (§10.1): whether sign-in is
 /// on, and whether the request's session is live. A live session's answer
 /// carries the CSRF token its changed requests send as `x-csrf-token`, how
-/// long the session lasts unused (`idle-seconds`), and how long it has left
-/// however it is used (`ends-in-seconds`): the web UI warns before the
-/// first ends it (components §4.5). `exposure` is `network` when the daemon
-/// listens beyond loopback, and left out on loopback, as before it existed:
-/// with sign-in off, the web UI then warns on every page. With sign-in off,
-/// `admin-password` says an admin password `ladderback set-password` has kept
-/// since the daemon started, looked for as the route is read: sign-in turns
-/// on only at the next start (decision 70), and it is left out while none is
-/// kept. The build the daemon runs (`version`, `commit`, `dirty`, `release`)
-/// is told to a page that may see the pages, with sign-in off or a live
-/// session, and left out for a page that has yet to sign in.
+/// long the session lasts unused (`idle-seconds`, left out for a session
+/// signed in with Keep me signed in on this device, which has no idle
+/// limit), and how long it has left however it is used (`ends-in-seconds`,
+/// left out when nothing but its idle limit, a sign-out or a new admin
+/// password ends it): the web UI warns before the first ends it (components
+/// §4.5). A signed-out answer says whether the sign-in form offers Keep me
+/// signed in on this device (`keep-signed-in-offered`), which it doesn't
+/// under Stay signed in for Until I close the browser. `exposure` is
+/// `network` when the daemon listens beyond loopback, and left out on
+/// loopback, as before it existed: with sign-in off, the web UI then warns
+/// on every page. With sign-in off, `admin-password` says an admin password
+/// `ladderback set-password` has kept since the daemon started, looked for as
+/// the route is read: sign-in turns on only at the next start (decision 70),
+/// and it is left out while none is kept. The build the daemon runs
+/// (`version`, `commit`, `dirty`, `release`) is told to a page that may see
+/// the pages, with sign-in off or a live session, and left out for a page
+/// that has yet to sign in.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
@@ -3622,6 +3631,8 @@ pub struct SessionDto {
     pub exposure: ExposureDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin_password: Option<AdminPasswordDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_signed_in_offered: Option<bool>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildDto>,
 }
@@ -3738,17 +3749,24 @@ impl ExposureDto {
     }
 }
 
-/// `POST /api/v1/session`: the password, as typed. Never logged or shown
-/// (I4): its `Debug` hides it.
+/// `POST /api/v1/session`: the password, as typed, and whether to **Keep me
+/// signed in on this device** (`keep-signed-in`, false when left out). The
+/// password is never logged or shown (I4): its `Debug` hides it.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SignInDto {
     pub password: String,
+    #[serde(default)]
+    pub keep_signed_in: bool,
 }
 
 impl std::fmt::Debug for SignInDto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SignInDto { password: [hidden] }")
+        write!(
+            f,
+            "SignInDto {{ password: [hidden], keep_signed_in: {} }}",
+            self.keep_signed_in
+        )
     }
 }
 
@@ -3776,6 +3794,32 @@ impl std::fmt::Debug for SetAdminPasswordDto {
             "SetAdminPasswordDto {{ current_password: {current}, new_password: [hidden] }}"
         )
     }
+}
+
+/// The session length, as **Stay signed in for** names it (§10.1): how long
+/// every session lasts after its sign-in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionLengthDto {
+    #[serde(rename = "until-browser-closes")]
+    UntilBrowserCloses,
+    #[serde(rename = "7-days")]
+    SevenDays,
+    #[serde(rename = "30-days")]
+    ThirtyDays,
+    #[serde(rename = "90-days")]
+    NinetyDays,
+    #[serde(rename = "1-year")]
+    OneYear,
+    #[serde(rename = "until-sign-out")]
+    UntilSignOut,
+}
+
+/// `GET` and `PUT /api/v1/settings/sign-in`: the sign-in settings, which
+/// only a session reads or changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SignInSettingsDto {
+    pub session_length: SessionLengthDto,
 }
 
 /// A scope of an API token (§10.1, decision 93), as the token routes name it.
@@ -4842,7 +4886,8 @@ mod repository_request_tests {
         let shown = format!(
             "{:?}",
             super::SignInDto {
-                password: "demo-admin-pass".into()
+                password: "demo-admin-pass".into(),
+                keep_signed_in: true,
             }
         );
         assert!(!shown.contains("demo-admin-pass"), "{shown}");

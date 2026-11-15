@@ -28,6 +28,7 @@ fn access_over(
         Arc::new(SeededRandom::new(7)),
         clock.clone(),
         tokens,
+        Arc::new(crate::fakes::InMemorySessionStore::new()),
     )
 }
 

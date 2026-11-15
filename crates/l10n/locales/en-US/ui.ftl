@@ -211,6 +211,24 @@ ui-gallery-demo-notification-hint = A demo choice: turning it on changes nothing
 # The label of the demo checkbox that starts on. It has no description.
 ui-gallery-demo-log = Keep the demo log
 
+# The heading of the gallery's radio group demo.
+ui-gallery-radio-heading = Radio group
+
+# The legend of the demo radio group, which names the group.
+ui-gallery-demo-frequency = Demo check frequency
+
+# The description under the demo radio group's legend.
+ui-gallery-demo-frequency-hint = A demo choice: choosing one changes nothing.
+
+# The first choice of the demo radio group.
+ui-gallery-demo-daily = Every day
+
+# The second choice of the demo radio group, the one chosen as the demo opens.
+ui-gallery-demo-weekly = Every week
+
+# The third choice of the demo radio group.
+ui-gallery-demo-monthly = Every month
+
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge
 
@@ -1316,6 +1334,12 @@ ui-sign-in-password-hint = The password set with { "ladderback set-password" }. 
 # The button that sends the admin password.
 ui-sign-in-submit = Sign in
 
+# The checkbox under the admin password that lifts the 12-hour limit on a session left unused. The form leaves it out when the session length is Until I close the browser.
+ui-sign-in-keep = Keep me signed in on this device
+
+# The description under that checkbox.
+ui-sign-in-keep-hint = Only on a device no one else uses: this browser then stays signed in however long it goes unused, until the session length chosen in Settings ends it.
+
 # Shown when the form is sent with the field empty, in the error summary and under the field.
 ui-sign-in-password-required = Enter the admin password.
 
@@ -1480,6 +1504,63 @@ ui-admin-password-mismatch = The two new passwords differ. Type the same passwor
 
 # Shown on the sign-in page once the admin password has been changed in Settings, which signed every browser out.
 ui-admin-password-changed = Admin password changed. Sign in with the new password.
+
+# The heading of the section of Settings about signing in: how long a session lasts, and signing out every browser at once.
+ui-signing-in-heading = Signing in
+
+# What that section says while sign-in is off, in place of its choice and its button.
+ui-signing-in-off-body = Stay signed in for applies once sign-in is on, and so does Sign out everywhere.
+
+# The legend of the choice of how long every session lasts after its sign-in (the session length).
+ui-session-length-legend = Stay signed in for
+
+# The description under that legend.
+ui-session-length-hint = How long a browser stays signed in after it signs in, however much it is used. A shorter choice also signs out the browsers that signed in longer ago, this one included. Until I close the browser ends a session when the browser closes, or after 12 hours unused.
+
+# A choice of the session length: the session ends when the browser closes, or after 12 hours unused.
+ui-session-length-until-browser-closes = Until I close the browser
+
+# A choice of the session length.
+ui-session-length-7-days = 7 days
+
+# A choice of the session length, the one chosen until the admin chooses another.
+ui-session-length-30-days = 30 days
+
+# A choice of the session length.
+ui-session-length-90-days = 90 days
+
+# A choice of the session length.
+ui-session-length-1-year = 1 year
+
+# A choice of the session length: the session ends only at a sign-out, or after 12 hours unused without Keep me signed in.
+ui-session-length-until-sign-out = Until I sign out
+
+# The button that saves the session length chosen.
+ui-session-length-save = Save the session length
+
+# Said while the daemon saves the session length.
+ui-session-length-saving = Saving the session length…
+
+# Shown and said once the daemon has saved the session length.
+ui-session-length-saved = Saved. Stay signed in for now applies to every session, the ones already open included.
+
+# What the section says about the button below it.
+ui-sign-out-everywhere-body = Sign out everywhere ends the session of every browser signed in to { -brand-name }, this one included. { -api-token(form: "other") } keep working.
+
+# The button that asks before every browser's session is ended.
+ui-sign-out-everywhere = Sign out everywhere
+
+# The title of the dialog that asks before every browser's session is ended.
+ui-sign-out-everywhere-title = Sign out everywhere?
+
+# What that dialog says.
+ui-sign-out-everywhere-confirm-body = Every browser signed in to { -brand-name }, this one included, is signed out and has to sign in again. { -api-token(form: "other") } keep working.
+
+# The dialog's button that ends every browser's session. Cancel comes first.
+ui-sign-out-everywhere-confirm = Sign out every browser
+
+# Said in the dialog while the daemon ends every session.
+ui-sign-out-everywhere-working = Signing out every browser…
 
 # The heading of the section of Settings that lists the API tokens and creates them. It names the table of tokens too.
 ui-api-tokens-heading = { -api-token(form: "other") }

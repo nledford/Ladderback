@@ -4,7 +4,7 @@ Feature: The shared components in the gallery
   component gallery, a development page at /_gallery, with keyboard-only
   journeys: a dialog, a sortable data table, a form field with an announced
   error, a multi-line form field that takes an entry a line, a checkbox, a
-  progress bar a keyboard user can reach, whose changes
+  radio group, a progress bar a keyboard user can reach, whose changes
   are never announced and are told at most every 30 seconds, and which shows
   no percentage while its size isn't known, a toast and the
   control that pauses live updates. Every demo state a
@@ -76,6 +76,19 @@ Feature: The shared components in the gallery
     Then the checkbox "Send a demo notification" is checked
     When I press Space
     Then the checkbox "Send a demo notification" is not checked
+
+  Scenario: A radio group is one stop for Tab, which lands on the choice made, and the arrow keys choose within it
+    When I open the component gallery
+    And I press Tab until focus is on the radio "Every week"
+    Then the radio "Every week" of the group "Demo check frequency" is checked
+    And the group "Demo check frequency" is described by "A demo choice: choosing one changes nothing."
+    When I press the down arrow until focus is on the radio "Every month"
+    Then the radio "Every month" of the group "Demo check frequency" is checked
+    And the radio "Every week" of the group "Demo check frequency" is not checked
+    When I press Tab
+    Then focus has left the group "Demo check frequency"
+    When I press Shift+Tab
+    Then focus is on the radio "Every month"
 
   Scenario: The progress bar is reached by keyboard and its value changes without any announcement
     Given the page's clock can be moved on
@@ -163,6 +176,7 @@ Feature: The shared components in the gallery
       | Form field  |
       | Multi-line form field |
       | Checkbox    |
+      | Radio group |
       | Status badge |
       | Progress    |
       | Toast       |
@@ -180,6 +194,7 @@ Feature: The shared components in the gallery
       | Form field  |
       | Multi-line form field |
       | Checkbox    |
+      | Radio group |
       | Status badge |
       | Progress    |
       | Toast       |

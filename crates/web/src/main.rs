@@ -81,6 +81,9 @@ mod settings;
 mod session;
 // The sign-in page and dialog's DOM glue; `session.rs` decides for them.
 mod sign_in;
+// The choices of Settings' Signing in section, decided on the host;
+// `settings/sign_in.rs` is its glue.
+mod sign_in_settings;
 // The Snapshots page's DOM glue; the decisions it sends and shows are
 // `maintenance.rs` and `wording.rs`.
 mod snapshots;

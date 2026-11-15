@@ -501,11 +501,15 @@ pub(crate) async fn daemon(
         }),
     );
     daemon.state.sign_in = match sign_in {
-        SignInDecided::Off(kept) => SignIn::Off(kept),
+        SignInDecided::Off(kept) => SignIn::Off {
+            password: kept,
+            sessions: Arc::<SqliteStore>::clone(&daemon.log.store),
+        },
         SignInDecided::On(password) => SignIn::On(Arc::new(app::access::Access::new(
             password,
             random,
             Arc::new(SystemClock),
+            Arc::<SqliteStore>::clone(&daemon.log.store),
             Arc::<SqliteStore>::clone(&daemon.log.store),
         ))),
     };
@@ -725,7 +729,10 @@ async fn state_over(
             catalog,
             repositories,
             plans,
-            sign_in: SignIn::Off(Arc::new(FileAdminPassword::in_data_dir(data_dir))),
+            sign_in: SignIn::Off {
+                password: Arc::new(FileAdminPassword::in_data_dir(data_dir)),
+                sessions: Arc::<SqliteStore>::clone(&log.store),
+            },
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
             restart: http_adapter::Restart::default(),

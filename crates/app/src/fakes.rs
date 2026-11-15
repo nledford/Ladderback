@@ -17,6 +17,7 @@ mod retention;
 mod schedule_store;
 mod secrets;
 mod service;
+mod session_store;
 mod sources;
 
 pub use admin_password::InMemoryAdminPassword;
@@ -35,4 +36,5 @@ pub use retention::FakeRetention;
 pub use schedule_store::InMemoryScheduleStore;
 pub use secrets::{FakeSecrets, Script};
 pub use service::FakeServiceManager;
+pub use session_store::InMemorySessionStore;
 pub use sources::FakeSources;

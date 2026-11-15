@@ -272,6 +272,7 @@ fn read(admin_password: Option<AdminPasswordDto>) -> SessionDto {
         exposure: ExposureDto::Loopback,
         build: None,
         admin_password,
+        keep_signed_in_offered: None,
     }
 }
 

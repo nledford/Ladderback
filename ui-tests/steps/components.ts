@@ -209,6 +209,24 @@ Then("the checkbox {string} is described by {string}", async function (this: Bro
   await expect(this.page.getByRole("checkbox", { name, exact: true })).toHaveAccessibleDescription(description);
 });
 
+// A radio button found within its group, which names what it chooses.
+function radioOfGroup(world: BrowserWorld, name: string, group: string) {
+  return world.page.getByRole("group", { name: group, exact: true }).getByRole("radio", { name, exact: true });
+}
+
+Then("the radio {string} of the group {string} is checked", async function (this: BrowserWorld, name: string, group: string) {
+  await expect(radioOfGroup(this, name, group)).toBeChecked();
+});
+
+Then("the radio {string} of the group {string} is not checked", async function (this: BrowserWorld, name: string, group: string) {
+  await expect(radioOfGroup(this, name, group)).not.toBeChecked();
+});
+
+// What a screen reader reads after the group's name as it enters the group.
+Then("the group {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
+  await expect(this.page.getByRole("group", { name, exact: true })).toHaveAccessibleDescription(description);
+});
+
 // A browser draws a form control's text in its own fixed size (13.33 px in
 // Chromium) unless the page says otherwise, so the label stays put when the
 // reader's text size doubles the rest of the page (1.4.4). Compared with the
@@ -377,6 +395,16 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph: "A demo choice: turning it on changes nothing."
 - checkbox "Keep the demo log" [checked]
 - text: Keep the demo log`,
+  "Radio group": `- heading "Radio group" [level=2]
+- group "Demo check frequency":
+  - text: Demo check frequency
+  - paragraph: "A demo choice: choosing one changes nothing."
+  - radio "Every day"
+  - text: Every day
+  - radio "Every week" [checked]
+  - text: Every week
+  - radio "Every month"
+  - text: Every month`,
   "Status badge": `- heading "Status badge" [level=2]
 - paragraph: Loading Empty Error Success`,
   Progress: `- heading "Progress" [level=2]

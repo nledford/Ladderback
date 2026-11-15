@@ -491,7 +491,10 @@ pub(crate) async fn stay_signed_in() -> bool {
 /// Signs in with `password`: `POST /api/v1/session`. A session that starts
 /// gives its CSRF token to every changed request from then on.
 pub(crate) async fn sign_in(password: String) -> Answer {
-    let body = SignInDto { password };
+    let body = SignInDto {
+        password,
+        keep_signed_in: false,
+    };
     let Ok(request) = Request::post(&format!("{}{SESSION_PATH}", origin())).json(&body) else {
         return Answer::Unreadable;
     };

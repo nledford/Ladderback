@@ -113,6 +113,29 @@ async fn in_memory_api_token_store_meets_the_api_token_store_contract() {
     contract::api_token_store::run(&InMemoryApiTokens::default()).await;
 }
 
+/// The in-memory session store: a new one for each `empty`, and the same one
+/// again for `reopened`, as the real store's file outlives its handle.
+#[derive(Default)]
+struct InMemorySessions(Mutex<Option<Arc<app::fakes::InMemorySessionStore>>>);
+
+#[async_trait]
+impl contract::session_store::SessionHarness for InMemorySessions {
+    async fn empty(&self) -> Arc<dyn app::ports::SessionStore> {
+        let store = Arc::new(app::fakes::InMemorySessionStore::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&store));
+        store
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::SessionStore> {
+        self.0.lock().unwrap().clone().expect("a store was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_session_store_meets_the_session_store_contract() {
+    contract::session_store::run(&InMemorySessions::default()).await;
+}
+
 #[test]
 fn seeded_randomness_meets_the_random_contract() {
     contract::random::run(&SeededRandom::new(0x5eed));

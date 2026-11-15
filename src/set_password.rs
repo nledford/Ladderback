@@ -8,7 +8,7 @@ use std::io;
 use std::process::ExitCode;
 
 use api::MsgArg;
-use app::access::{SetPasswordRefused, set_admin_password};
+use app::access::{PasswordSet, SetPasswordRefused, set_admin_password_leaving_sessions};
 use domain::access::{PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::admin_password::{FILE, FileAdminPassword};
@@ -44,7 +44,7 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
         }
     };
     let kept = FileAdminPassword::in_data_dir(&data_dir);
-    match runtime.block_on(set_admin_password(&kept, typed)) {
+    match runtime.block_on(set_admin_password_leaving_sessions(&kept, typed)) {
         Ok(()) => {
             say(localizer, msg::CLI_SET_PASSWORD_DONE, &[])?;
             Ok(ExitCode::SUCCESS)
@@ -124,5 +124,38 @@ fn read_line(localizer: &Localizer) -> io::Result<Result<String, ExitCode>> {
             )?;
             Ok(Err(ExitCode::FAILURE))
         }
+    }
+}
+
+/// What `set` leaves to say: nothing once the store forgot every session,
+/// or the database's own message when it couldn't.
+fn sessions_left(_set: PasswordSet) -> Option<String> {
+    todo!()
+}
+
+#[cfg(test)]
+mod tests {
+    use app::access::PasswordSet;
+    use app::ports::StoreError;
+
+    use super::sessions_left;
+
+    #[test]
+    fn sessions_the_store_couldnt_forget_are_said_in_the_database_s_own_words() {
+        let detail = "/demo/ladderback.db: disk I/O error";
+        for error in [
+            StoreError::Unavailable {
+                detail: detail.to_owned(),
+            },
+            StoreError::Corrupt {
+                detail: detail.to_owned(),
+            },
+        ] {
+            assert_eq!(
+                sessions_left(PasswordSet::SessionsLeft(error)),
+                Some(detail.to_owned())
+            );
+        }
+        assert_eq!(sessions_left(PasswordSet::SessionsForgotten), None);
     }
 }

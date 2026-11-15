@@ -29,7 +29,10 @@ async fn send(request: Request<Body>) -> Response {
 
 /// Sign-in off, with no admin password kept since the start.
 pub(crate) fn sign_in_off() -> crate::SignIn {
-    crate::SignIn::Off(Arc::new(app::fakes::InMemoryAdminPassword::default()))
+    crate::SignIn::Off {
+        password: Arc::new(app::fakes::InMemoryAdminPassword::default()),
+        sessions: Arc::new(app::fakes::InMemorySessionStore::new()),
+    }
 }
 
 /// A state with the in-memory event bus: these tests only check the checks.

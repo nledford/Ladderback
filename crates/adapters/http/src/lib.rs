@@ -386,6 +386,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
                 .delete(sign_in::sign_out),
         )
         .route(
+            sign_in::SESSIONS_PATH,
+            axum::routing::delete(sign_in::sign_out_everywhere),
+        )
+        .route(
             sign_in::ADMIN_PASSWORD_PATH,
             axum::routing::post(sign_in::set_password),
         )
@@ -396,6 +400,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/tokens/{id}",
             axum::routing::delete(api_tokens::revoke),
+        )
+        .route(
+            sign_in::settings::SETTINGS_PATH,
+            axum::routing::get(sign_in::settings::read).put(sign_in::settings::change),
         )
         .route(sign_in::EVENTS_PATH, axum::routing::get(events))
         .route(

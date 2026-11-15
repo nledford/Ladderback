@@ -20,16 +20,14 @@ use app::access::{
     Access, PasswordChangeRefused, PasswordWaiting, SetPasswordRefused, SignInRefused,
     set_admin_password,
 };
-use app::ports::AdminPassword;
+use app::ports::{AdminPassword, SessionStore};
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, HOST, ORIGIN, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use domain::SignedDuration;
-use domain::access::{
-    PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS, Password, SESSION_IDLE, SESSION_LIFETIME, Token,
-};
+use domain::access::{CookieLife, PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS, Password, Token};
 
 use crate::{Exposure, refused, refused_with};
 
@@ -42,6 +40,10 @@ pub const CSRF_HEADER: HeaderName = HeaderName::from_static("x-csrf-token");
 /// The route that tells a page where it stands, signs in and signs out. It
 /// answers without a session: it is how one starts.
 pub(crate) const SESSION_PATH: &str = "/api/v1/session";
+
+/// The route that signs out everywhere: every browser's session ends. Only
+/// a session reaches it, with its CSRF token, like any other change.
+pub(crate) const SESSIONS_PATH: &str = "/api/v1/sessions";
 
 /// The events stream's route. Its stream stays open while a page does, so
 /// opening it is never a use of the session.
@@ -56,10 +58,14 @@ const BACKGROUND: HeaderName = HeaderName::from_static(api::BACKGROUND_HEADER);
 /// Whether sign-in is on, decided when the daemon starts: on when an admin
 /// password is kept, with the sessions it has started; off with where one
 /// would be kept, which the session route looks at to say that one set since
-/// waits for a restart (decision 70).
+/// waits for a restart (decision 70), and the store of the sessions kept
+/// from when it was on, which a password set then has forget them.
 #[derive(Clone)]
 pub enum SignIn {
-    Off(Arc<dyn AdminPassword>),
+    Off {
+        password: Arc<dyn AdminPassword>,
+        sessions: Arc<dyn SessionStore>,
+    },
     On(Arc<Access>),
 }
 
@@ -138,22 +144,52 @@ pub(crate) async fn enforce(
     let session = if on_its_own(&request) {
         access.peek(&token)
     } else {
-        access.session(&token)
+        access.session(&token).await
     };
     let Some(session) = session else {
         return refused(StatusCode::UNAUTHORIZED, ErrorCode::SignInRequired);
     };
-    if !reads_only(request.method())
+    // A use that renews the cookie says so on whatever answers it, unless
+    // the route sets the cookie itself, as a new admin password forgets it.
+    let renewed = session
+        .renewed_cookie()
+        .and_then(|life| session_cookie(&token, life, over_https(request.headers())));
+    let mut response = if !reads_only(request.method())
         && !csrf_token(request.headers()).is_some_and(|presented| session.accepts(&presented))
     {
-        return refused(StatusCode::FORBIDDEN, ErrorCode::CsrfTokenInvalid);
+        refused(StatusCode::FORBIDDEN, ErrorCode::CsrfTokenInvalid)
+    } else {
+        request.extensions_mut().insert(SessionOf { access, token });
+        next.run(request).await
+    };
+    if let Some(cookie) = renewed
+        && !response.headers().contains_key(SET_COOKIE)
+    {
+        response.headers_mut().insert(SET_COOKIE, cookie);
     }
-    request.extensions_mut().insert(SessionOf { access, token });
-    next.run(request).await
+    response
+}
+
+/// The session cookie of `token`, lasting `life`. It can't be read by the
+/// page's scripts and is never sent by another site; it is marked `Secure`
+/// when `secure`.
+fn session_cookie(token: &Token, life: CookieLife, secure: bool) -> Option<HeaderValue> {
+    let max_age = match life {
+        CookieLife::UntilBrowserCloses => String::new(),
+        CookieLife::Lasts(lasts) => format!("; Max-Age={}", whole_seconds(lasts)),
+    };
+    HeaderValue::from_str(&format!(
+        "{COOKIE_NAME}={}; Path=/{max_age}; HttpOnly; SameSite=Strict{}",
+        token.to_text(),
+        if secure { "; Secure" } else { "" }
+    ))
+    .ok()
 }
 
 /// `GET /api/v1/session`: whether sign-in is on, and whether the request's
-/// session is live, with its CSRF token when it is.
+/// session is live, with its CSRF token when it is, and the cookie renewed
+/// when asking renewed it; a signed-out answer says whether the sign-in form
+/// offers Keep me signed in on this device.
 pub(crate) async fn current(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
@@ -162,18 +198,48 @@ pub(crate) async fn current(
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
-        SignIn::Off(kept) => return answer_off(kept.as_ref(), exposure, build),
+        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, build),
     };
-    match session_token(&headers).and_then(|token| access.session(&token)) {
-        Some(session) => answer(
-            SignInStateDto::SignedIn,
-            Some((session.csrf().to_text(), session.ends_in())),
-            None,
-            exposure,
-            build,
-        ),
-        None => answer(SignInStateDto::SignedOut, None, None, exposure, build),
+    let token = session_token(&headers);
+    let live = match &token {
+        Some(token) => access.session(token).await,
+        None => None,
+    };
+    let (Some(session), Some(token)) = (live, token) else {
+        return answer_signed_out(&access, exposure, build);
+    };
+    let mut response = answer(
+        SignInStateDto::SignedIn,
+        Some(LiveAnswer {
+            csrf: session.csrf().to_text(),
+            ends_in: session.ends_in(),
+            idle_limit: session.idle_limit(),
+        }),
+        None,
+        None,
+        exposure,
+        build,
+    );
+    if let Some(cookie) = session
+        .renewed_cookie()
+        .and_then(|life| session_cookie(&token, life, over_https(&headers)))
+    {
+        response.headers_mut().insert(SET_COOKIE, cookie);
     }
+    response
+}
+
+/// The session route's answer to a page with no live session, saying
+/// whether the sign-in form offers Keep me signed in on this device.
+fn answer_signed_out(access: &Access, exposure: Exposure, build: BuildDto) -> Response {
+    answer(
+        SignInStateDto::SignedOut,
+        None,
+        None,
+        Some(access.offers_keep_signed_in()),
+        exposure,
+        build,
+    )
 }
 
 /// `POST /api/v1/session`: signs in with the admin password. A session's
@@ -188,7 +254,7 @@ pub(crate) async fn sign_in(
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
-        SignIn::Off(kept) => return answer_off(kept.as_ref(), exposure, build),
+        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, build),
     };
     // Each client's sign-ins wait on their own, keyed by the connection's
     // address (§10.1). A server that didn't hand it over would put every
@@ -215,7 +281,11 @@ pub(crate) async fn sign_in(
         Ok(body) => body,
         Err(_) => return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody),
     };
-    let Ok(SignInDto { password }) = serde_json::from_slice::<SignInDto>(&body) else {
+    let Ok(SignInDto {
+        password,
+        keep_signed_in,
+    }) = serde_json::from_slice::<SignInDto>(&body)
+    else {
         return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
     };
     // Empty, or longer than any admin password: not the admin password,
@@ -223,24 +293,22 @@ pub(crate) async fn sign_in(
     let Ok(password) = Password::parse(password) else {
         return refused(StatusCode::UNAUTHORIZED, ErrorCode::SignInFailed);
     };
-    match access.sign_in(address, &password).await {
+    match access.sign_in(address, &password, keep_signed_in, secure).await {
         Ok(signed_in) => {
-            // A session that has just started has all its lifetime left.
             let mut response = answer(
                 SignInStateDto::SignedIn,
-                Some((signed_in.csrf.to_text(), SESSION_LIFETIME)),
+                Some(LiveAnswer {
+                    csrf: signed_in.csrf.to_text(),
+                    ends_in: signed_in.ends_in,
+                    idle_limit: signed_in.idle_limit,
+                }),
+                None,
                 None,
                 exposure,
                 build,
             );
-            let cookie = format!(
-                "{COOKIE_NAME}={}; Path=/; Max-Age={}; HttpOnly; SameSite=Strict{}",
-                signed_in.token.to_text(),
-                SESSION_LIFETIME.as_secs(),
-                if secure { "; Secure" } else { "" }
-            );
-            if let Ok(value) = HeaderValue::from_str(&cookie) {
-                response.headers_mut().insert(SET_COOKIE, value);
+            if let Some(cookie) = session_cookie(&signed_in.token, signed_in.cookie, secure) {
+                response.headers_mut().insert(SET_COOKIE, cookie);
             }
             response
         }
@@ -257,6 +325,7 @@ pub(crate) async fn sign_in(
                 ErrorCode::SignInUnavailable,
             )
         }
+        Err(SignInRefused::Store(_)) => todo!(),
     }
 }
 
@@ -272,7 +341,7 @@ pub(crate) async fn sign_out(
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
-        SignIn::Off(kept) => return answer_off(kept.as_ref(), exposure, build),
+        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, build),
     };
     if let Some(token) = session_token(&headers)
         && let Some(session) = access.peek(&token)
@@ -280,11 +349,32 @@ pub(crate) async fn sign_out(
         if !csrf_token(&headers).is_some_and(|presented| session.accepts(&presented)) {
             return refused(StatusCode::FORBIDDEN, ErrorCode::CsrfTokenInvalid);
         }
-        access.sign_out(&token);
+        if let Err(error) = access.sign_out(&token).await {
+            // The session has ended here, but the store still holds it, and
+            // a restart would bring it back: say so, so the page can retry.
+            log::warn!("a signed-out session could not be forgotten: {error}");
+            let mut response = refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorCode::SignInUnavailable,
+            );
+            forget_cookie(&mut response);
+            return response;
+        }
     }
-    let mut response = answer(SignInStateDto::SignedOut, None, None, exposure, build);
+    let mut response = answer_signed_out(&access, exposure, build);
     forget_cookie(&mut response);
     response
+}
+
+/// `DELETE /api/v1/sessions`: Sign out everywhere. Every browser's session
+/// ends, the one that asked included, and the store forgets them all; the
+/// browser that asked forgets its cookie. API tokens go on.
+pub(crate) async fn sign_out_everywhere(
+    State(sign_in): State<SignIn>,
+    State(exposure): State<Exposure>,
+    State(build): State<BuildDto>,
+) -> Response {
+    todo!()
 }
 
 /// Has the browser forget the session cookie.
@@ -325,9 +415,11 @@ pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request
     };
     let access = match sign_in {
         SignIn::On(access) => access,
-        SignIn::Off(kept) => {
-            return match set_admin_password(kept.as_ref(), new_password).await {
-                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        SignIn::Off { password, sessions } => {
+            return match set_admin_password(password.as_ref(), sessions.as_ref(), new_password)
+                .await
+            {
+                Ok(_) => StatusCode::NO_CONTENT.into_response(),
                 Err(refusal) => set_refused(refusal),
             };
         }
@@ -352,7 +444,7 @@ pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request
         .change_password(peer.ip(), &current, new_password)
         .await
     {
-        Ok(()) => {
+        Ok(_) => {
             let mut response = StatusCode::NO_CONTENT.into_response();
             forget_cookie(&mut response);
             response
@@ -370,6 +462,7 @@ pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request
                 ErrorCode::AdminPasswordUnavailable,
             )
         }
+        Err(PasswordChangeRefused::Current(SignInRefused::Store(_))) => todo!(),
         Err(PasswordChangeRefused::New(refusal)) => set_refused(refusal),
     }
 }
@@ -445,18 +538,29 @@ fn answer_off(kept: &dyn AdminPassword, exposure: Exposure, build: BuildDto) -> 
         PasswordWaiting::Set => AdminPasswordDto::Set,
         PasswordWaiting::Unreadable => AdminPasswordDto::Unreadable,
     });
-    answer(SignInStateDto::Off, None, waiting, exposure, build)
+    answer(SignInStateDto::Off, None, waiting, None, exposure, build)
+}
+
+/// What the session route says of a live session: its CSRF token, how long
+/// it has left however it is used, and how long it may go unused; `None`
+/// for either when nothing limits it so.
+struct LiveAnswer {
+    csrf: String,
+    ends_in: Option<SignedDuration>,
+    idle_limit: Option<SignedDuration>,
 }
 
 /// The session route's answer: where the request stands, who can reach the
 /// daemon (so the page can say who can use it with sign-in off), for a live
-/// session its CSRF token and how long it has left however it is used, with
-/// sign-in off an admin password that waits for a restart, and, for a page
-/// that may see the pages, the `build` the daemon runs.
+/// session what [`LiveAnswer`] holds, with sign-in off an admin password
+/// that waits for a restart, signed out whether the sign-in form offers Keep
+/// me signed in on this device, and, for a page that may see the pages, the
+/// `build` the daemon runs.
 fn answer(
     sign_in: SignInStateDto,
-    live: Option<(String, SignedDuration)>,
+    live: Option<LiveAnswer>,
     admin_password: Option<AdminPasswordDto>,
+    keep_signed_in_offered: Option<bool>,
     exposure: Exposure,
     build: BuildDto,
 ) -> Response {
@@ -464,10 +568,10 @@ fn answer(
     // version (#502).
     let build = matches!(sign_in, SignInStateDto::Off | SignInStateDto::SignedIn).then_some(build);
     let (csrf_token, idle_seconds, ends_in_seconds) = match live {
-        Some((csrf, ends_in)) => (
-            Some(csrf),
-            Some(whole_seconds(SESSION_IDLE)),
-            Some(whole_seconds(ends_in)),
+        Some(live) => (
+            Some(live.csrf),
+            live.idle_limit.map(whole_seconds),
+            live.ends_in.map(whole_seconds),
         ),
         None => (None, None, None),
     };
@@ -483,6 +587,7 @@ fn answer(
                 Exposure::Network => ExposureDto::Network,
             },
             admin_password,
+            keep_signed_in_offered,
             build,
         }),
     )
@@ -493,6 +598,8 @@ fn answer(
 fn whole_seconds(duration: SignedDuration) -> u64 {
     u64::try_from(duration.as_secs()).unwrap_or(0)
 }
+
+pub(crate) mod settings;
 
 #[cfg(test)]
 mod tests;

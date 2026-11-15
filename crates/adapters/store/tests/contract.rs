@@ -7,7 +7,7 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use app::contract;
-use app::ports::{ApiTokenStore, ScheduleStore};
+use app::ports::{ApiTokenStore, ScheduleStore, SessionStore};
 use async_trait::async_trait;
 use support::*;
 
@@ -86,6 +86,17 @@ impl contract::api_token_store::ApiTokenHarness for SqliteFiles {
     }
 }
 
+#[async_trait]
+impl contract::session_store::SessionHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn SessionStore> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn SessionStore> {
+        Arc::new(self.last_store().await)
+    }
+}
+
 #[tokio::test]
 async fn sqlite_store_meets_the_schedule_store_contract() {
     within(
@@ -112,6 +123,16 @@ async fn sqlite_store_meets_the_api_token_store_contract() {
         120,
         "the API token store contract suite",
         contract::api_token_store::run(&SqliteFiles::default()),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_store_meets_the_session_store_contract() {
+    within(
+        120,
+        "the session store contract suite",
+        contract::session_store::run(&SqliteFiles::default()),
     )
     .await;
 }

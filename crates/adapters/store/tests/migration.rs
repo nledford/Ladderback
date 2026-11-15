@@ -231,7 +231,8 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
             (6, true),
             (7, true),
             (8, true),
-            (9, true)
+            (9, true),
+            (10, true)
         ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
@@ -291,7 +292,8 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
             (6, true),
             (7, true),
             (8, true),
-            (9, true)
+            (9, true),
+            (10, true)
         ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
@@ -349,7 +351,8 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
             (6, true),
             (7, true),
             (8, true),
-            (9, true)
+            (9, true),
+            (10, true)
         ]
     );
     let check = store
@@ -438,7 +441,8 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (6, true),
             (7, true),
             (8, true),
-            (9, true)
+            (9, true),
+            (10, true)
         ]
     );
     let index: Option<String> = sqlx::query_scalar(
@@ -453,4 +457,49 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             && index.contains("WHERE status IN ('succeeded', 'succeeded_with_warnings')"),
         "{index}"
     );
+}
+
+/// The API tokens' columns, as text, to compare a row before and after.
+async fn api_token_row(conn: &mut SqliteConnection) -> Vec<String> {
+    let row = sqlx::query(
+        "SELECT id, label, hex(digest), scopes, password, created_at, \
+         ifnull(last_used_at, 'NULL') FROM api_tokens",
+    )
+    .fetch_one(conn)
+    .await
+    .expect("the API token is readable");
+    (0..7)
+        .map(|column| {
+            row.try_get::<String, _>(column)
+                .or_else(|_| row.try_get::<i64, _>(column).map(|n| n.to_string()))
+                .expect("a column reads as text or a number")
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_database_at_version_9_gains_no_session_and_no_session_length_and_keeps_its_api_tokens() {
+    let scratch = Scratch::new();
+    let mut old = database_at_version(&scratch, 9).await;
+    sqlx::query(
+        "INSERT INTO api_tokens (id, label, digest, scopes, password, created_at, last_used_at) \
+         VALUES ('t-1', 'demo-token', x'0101', 'read', -5, 1800000000000, NULL)",
+    )
+    .execute(&mut old)
+    .await
+    .expect("an API token of version 9");
+    let before = api_token_row(&mut old).await;
+    old.close().await.expect("the old database is closed");
+
+    let store = scratch.open().await;
+    let sessions = app::ports::SessionStore::all(&store).await;
+    assert!(
+        matches!(&sessions, Ok(none) if none.is_empty()),
+        "{sessions:?}"
+    );
+    let length = app::ports::SessionStore::length(&store).await;
+    assert!(matches!(length, Ok(None)), "{length:?}");
+    let mut raw = scratch.raw().await;
+    assert_eq!(api_token_row(&mut raw).await, before);
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(10, true)));
 }

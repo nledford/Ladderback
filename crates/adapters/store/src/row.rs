@@ -9,10 +9,11 @@
 use std::fmt::Display;
 
 use app::ports::{EngineResult, OperationRecord, PendingRetry, PlannedRun, StoreError};
-use domain::access::PasswordFingerprint;
+
 use domain::access::api_token::{
     ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, Scope, Scopes,
 };
+use domain::access::PasswordFingerprint;
 use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
