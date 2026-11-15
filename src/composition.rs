@@ -60,7 +60,7 @@ use engine::{Recorded, RemovedKind, WorkerEngine};
 use futures::stream::StreamExt;
 use hooks::ProcessHookRunner;
 use http_adapter::{
-    AppState, Catalog, CatalogError, MaintenanceRefusal, Operations, Repositories,
+    AppState, Catalog, CatalogError, MaintenanceRefusal, Operations, Plans, Repositories,
     RepositoriesError, SecretRefusal, SignIn, SnapshotsError, StartError,
 };
 use l10n::{MessageId, msg};
@@ -74,6 +74,7 @@ use store::SqliteStore;
 use uuid::Uuid;
 
 mod maintenance;
+mod plans;
 mod runs;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
@@ -311,6 +312,9 @@ pub(crate) struct Background {
     /// How each backup ended, which the scheduler reads to retry a failed
     /// one (§5).
     ends: app::retry::RunEnds,
+    /// The changes of the configuration a request saved, which wake the
+    /// scheduler to read it again at once (decision 96).
+    changes: app::schedule::ConfigChanges,
 }
 
 impl Background {
@@ -348,6 +352,7 @@ impl Background {
             zone: domain::TimeZone::system(),
             ends: self.ends,
             events,
+            changes: self.changes,
         }
         .run()
         .await;
@@ -638,8 +643,8 @@ async fn state_over(
     }
     let stopping = workers.workers();
     // One lock for every write of the configuration the daemon makes: a
-    // connection, a creation and the record of an opened repository's ID
-    // (§6.1, decision 57).
+    // connection, a creation, the record of an opened repository's ID and a
+    // plan's change (§6.1, decisions 57 and 96).
     let writes = Arc::new(ConfigWrites::default());
     let resolve = Arc::new(
         ResolveRepository::new(Arc::new(SystemSecrets::default()))
@@ -688,7 +693,12 @@ async fn state_over(
         resolve.as_ref().clone(),
         Arc::clone(&config),
         Arc::clone(&store),
-        writes,
+        Arc::clone(&writes),
+    ));
+    let (changed, changes) = app::schedule::config_changes();
+    let plans: Arc<dyn Plans> = Arc::new(plans::PlanService::new(
+        Arc::clone(&config),
+        app::plans::EditPlans::new(Arc::clone(&config), writes, changed),
     ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog {
         config: Arc::clone(&config),
@@ -706,6 +716,7 @@ async fn state_over(
         store,
         conditions,
         ends,
+        changes,
     };
     Ok((
         AppState {
@@ -713,6 +724,7 @@ async fn state_over(
             operations,
             catalog,
             repositories,
+            plans,
             sign_in: SignIn::Off(Arc::new(FileAdminPassword::in_data_dir(data_dir))),
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),

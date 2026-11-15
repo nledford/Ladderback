@@ -15,6 +15,7 @@ mod api_tokens;
 mod body_limit;
 mod listener;
 mod maintenance;
+mod plans;
 mod repositories;
 mod request_checks;
 mod response_headers;
@@ -46,6 +47,7 @@ use serde::{Deserialize, Serialize};
 
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
+pub use plans::{Plans, PlansError};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
     Exposure, InvalidHostName, RequestChecks, StartupRefusal, proxied_hosts, startup_rule,
@@ -75,6 +77,8 @@ pub struct AppState {
     pub catalog: Arc<dyn Catalog>,
     /// How a request tests, connects and initialises a repository.
     pub repositories: Arc<dyn Repositories>,
+    /// How a request reads, creates, changes and deletes a plan.
+    pub plans: Arc<dyn Plans>,
     /// Whether sign-in is on, and the sessions it has started (§10.1).
     pub sign_in: SignIn,
     /// Who can reach the daemon at the address it listens on, which the
@@ -362,8 +366,9 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// plans, the repositories, one repository's snapshots — the routes that
 /// maintain a repository: its history by owner, a preview of each run and
 /// the start of one — the routes that test, connect and initialise a
-/// repository, the session route that signs in and out, and the route that
-/// sets the admin password. A request that fails `checks` never reaches a
+/// repository, the routes that read, create, change and delete a plan, the
+/// session route that signs in and out, and the route that sets the admin
+/// password. A request that fails `checks` never reaches a
 /// route; with sign-in on, neither does an API request without a live
 /// session, or a changed one without its CSRF token; and neither does one
 /// whose body is over the limit of its class of route (§10.1). Every
@@ -402,7 +407,16 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             "/api/v1/operations/{id}/cancel",
             axum::routing::post(cancel_operation),
         )
-        .route("/api/v1/plans", axum::routing::get(list_plans))
+        .route(
+            "/api/v1/plans",
+            axum::routing::get(list_plans).post(plans::create),
+        )
+        .route(
+            "/api/v1/plans/{id}",
+            axum::routing::get(plans::read)
+                .put(plans::change)
+                .delete(plans::delete),
+        )
         .route(
             "/api/v1/repositories",
             axum::routing::get(list_repositories).post(repositories::connect_repository),
@@ -1176,6 +1190,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
+            plans: Arc::new(crate::request_checks::tests::NoPlans),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -1215,6 +1230,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
+            plans: Arc::new(crate::request_checks::tests::NoPlans),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -2386,6 +2402,7 @@ mod tests {
             operations: Arc::new(Plans),
             catalog: Arc::new(DemoCatalog),
             repositories: repos.clone(),
+            plans: Arc::new(crate::request_checks::tests::NoPlans),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),

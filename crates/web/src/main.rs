@@ -63,6 +63,8 @@ mod page;
 mod repositories;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
+// What the Plans page shows, sends and says, decided on the host.
+mod plans;
 // What a progress bar tells a screen reader, and when, decided on the host;
 // `components.rs`'s `Progress` is its glue.
 mod progress;

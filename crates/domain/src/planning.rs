@@ -21,7 +21,9 @@ mod retention;
 mod rule;
 mod schedule;
 
-pub use agent::{AgentConfig, AgentSettings, Concurrency, Nice, NotRecorded, Violation};
+pub use agent::{
+    AgentConfig, AgentSettings, ChangeRefused, Concurrency, Nice, NotRecorded, Violation,
+};
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
 pub use filter::{NeverMatchingGlob, Placement, SourceFilter};
 pub use hooks::{HookEntry, Hooks, OnFailure};

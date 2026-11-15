@@ -39,6 +39,7 @@ pub(crate) fn test_state() -> AppState {
         operations: Arc::new(NoOperations),
         catalog: Arc::new(EmptyCatalog),
         repositories: Arc::new(NoRepositories),
+        plans: Arc::new(NoPlans),
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
@@ -94,6 +95,32 @@ impl crate::Repositories for NoRepositories {
         _alias: String,
     ) -> Result<api::LocationsTestDto, crate::RepositoriesError> {
         Err(crate::RepositoriesError::InvalidBody)
+    }
+}
+
+/// Does nothing: the checks never reach a route.
+pub(crate) struct NoPlans;
+
+#[async_trait]
+impl crate::Plans for NoPlans {
+    async fn plan(&self, _id: String) -> Result<api::PlanDto, crate::PlansError> {
+        Err(crate::PlansError::InvalidBody)
+    }
+
+    async fn create(&self, _plan: api::PlanDto) -> Result<api::PlanDto, crate::PlansError> {
+        Err(crate::PlansError::InvalidBody)
+    }
+
+    async fn change(
+        &self,
+        _id: String,
+        _plan: api::PlanDto,
+    ) -> Result<api::PlanDto, crate::PlansError> {
+        Err(crate::PlansError::InvalidBody)
+    }
+
+    async fn delete(&self, _id: String) -> Result<(), crate::PlansError> {
+        Err(crate::PlansError::InvalidBody)
     }
 }
 
@@ -360,7 +387,7 @@ async fn requests_without_an_origin_aren_t_subject_to_the_origin_rule() {
     assert_served(
         request(
             "POST",
-            "/api/v1/plans",
+            CHECKED,
             &[
                 ("host", "localhost:9898"),
                 ("content-type", "application/json"),
@@ -385,7 +412,7 @@ async fn the_uis_own_origin_is_served() {
         assert_served(
             request(
                 "POST",
-                "/api/v1/plans",
+                CHECKED,
                 &[
                     ("host", host),
                     ("origin", origin),
@@ -538,6 +565,11 @@ const OWN: [(&str, &str); 2] = [
     ("origin", "http://localhost:9898"),
 ];
 
+/// A route that takes no body and has no mutating method: what a mutating
+/// request to it gets past the checks is the router's 405, never a route's
+/// refusal.
+const CHECKED: &str = "/api/v1/operations/018f";
+
 fn from_the_page(method: &str, extra: &[(&str, &str)]) -> Request<Body> {
     let headers = [OWN.as_slice(), extra].concat();
     request(method, "/api/v1/plans", &headers)
@@ -560,7 +592,11 @@ async fn a_mutating_request_from_the_page_must_be_json() {
             "application/json ; charset=utf-8",
         ] {
             assert_served(
-                from_the_page(method, &[("content-type", content_type)]),
+                request(
+                    method,
+                    CHECKED,
+                    &[OWN.as_slice(), &[("content-type", content_type)]].concat(),
+                ),
                 &format!("{method} as {content_type}"),
             )
             .await;
@@ -634,7 +670,7 @@ async fn a_mutating_request_needs_json_even_without_an_origin() {
             let mut headers = vec![("host", "localhost:9898")];
             headers.extend(content_type.map(|value| ("content-type", value)));
             assert_json_required(
-                request(method, "/api/v1/plans", &headers),
+                request(method, CHECKED, &headers),
                 &format!("{method} as {content_type:?} without Origin"),
             )
             .await;
@@ -643,7 +679,7 @@ async fn a_mutating_request_needs_json_even_without_an_origin() {
             assert_served(
                 request(
                     method,
-                    "/api/v1/plans",
+                    CHECKED,
                     &[("host", "localhost:9898"), ("content-type", content_type)],
                 ),
                 &format!("{method} as {content_type} without Origin"),

@@ -26,6 +26,7 @@ pub mod locations;
 pub mod log_write;
 pub mod maintenance;
 pub mod notifications;
+pub mod plans;
 pub mod ports;
 pub mod progress;
 pub mod queue;

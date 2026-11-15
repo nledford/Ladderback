@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::pin::pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use api::UiEvent;
 use async_trait::async_trait;
@@ -32,6 +32,8 @@ use domain::planning::{
     AgentConfig, LocationRule, NoNextRun, Overlap, RetryPolicy, Schedule, ScheduleZone,
 };
 use domain::{OperationId, PlanId, SignedDuration, TimeZone, Timestamp};
+use futures::StreamExt;
+use futures::channel::mpsc;
 use futures::future::{Either, select};
 
 use crate::conditions::{
@@ -110,6 +112,51 @@ pub enum ScheduleReport {
     RetriesEnded { plan: PlanId, why: NoRetry },
 }
 
+/// Tells the scheduler that the configuration changed, so it reads it again
+/// now rather than at its next wake check (scheduling-and-config §5): a plan
+/// created or changed on the Plans page shows its next run at once. Told
+/// again before the scheduler has heard it, it is still one change, read
+/// once.
+pub struct ConfigChanged(Mutex<mpsc::Sender<()>>);
+
+impl ConfigChanged {
+    pub fn tell(&self) {
+        // Full when a change is told and not yet heard, which this one joins;
+        // gone only once the scheduler is, and nobody is left to plan.
+        let _ = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .try_send(());
+    }
+}
+
+/// The changes told, which the scheduler hears.
+pub struct ConfigChanges(Mutex<mpsc::Receiver<()>>);
+
+impl ConfigChanges {
+    /// Waits for a change told; `None` once its teller is gone.
+    pub(crate) async fn next(&self) -> Option<()> {
+        futures::future::poll_fn(|context| {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .poll_next_unpin(context)
+        })
+        .await
+    }
+}
+
+/// A teller of configuration changes, and the changes the scheduler hears.
+pub fn config_changes() -> (ConfigChanged, ConfigChanges) {
+    // Room for one change: the sender's own place in the channel.
+    let (sender, receiver) = mpsc::channel(0);
+    (
+        ConfigChanged(Mutex::new(sender)),
+        ConfigChanges(Mutex::new(receiver)),
+    )
+}
+
 /// The loop that runs scheduled plans (§5). It owns nothing but its ports;
 /// the composition root spawns [`run`](Self::run) once the daemon serves and
 /// drops it when the daemon stops.
@@ -134,6 +181,9 @@ pub struct Scheduler {
     pub ends: RunEnds,
     /// Where the scheduler announces a retry it plans (`backup.retrying`).
     pub events: Arc<dyn EventBus>,
+    /// The configuration changes the daemon makes, each of which wakes the
+    /// scheduler to read the configuration again.
+    pub changes: ConfigChanges,
 }
 
 /// A scheduled plan, as the loop holds it.
@@ -183,10 +233,10 @@ impl Scheduler {
     /// Runs scheduled plans until the future is dropped. On start it asks
     /// `NextRun` what becomes of each planned run kept from before, and
     /// takes up each retry kept pending; then, at least every
-    /// [`WAKE_CHECK_EVERY`], whenever a run or a retry is due and whenever a
-    /// backup ends, it reads the configuration again, checks for a wake,
-    /// hears how the backups ended, and starts the runs and retries that
-    /// are due.
+    /// [`WAKE_CHECK_EVERY`], whenever a run or a retry is due, whenever a
+    /// backup ends and whenever a configuration change is told, it reads
+    /// the configuration again, checks for a wake, hears how the backups
+    /// ended, and starts the runs and retries that are due.
     pub async fn run(&self) {
         let mut watch = WakeWatch::new(Arc::clone(&self.clock));
         let mut plans = Plans {
@@ -821,6 +871,7 @@ mod tests {
             zone: TimeZone::UTC,
             ends: crate::retry::run_ends().1,
             events: Arc::new(crate::fakes::InMemoryEventBus::new()),
+            changes: super::config_changes().1,
         }
     }
 
@@ -1161,6 +1212,94 @@ mod tests {
         )
         .await;
         assert_eq!(woke, Ok(Some(end)), "the end never woke the sleep");
+    }
+
+    #[tokio::test]
+    async fn a_change_told_wakes_the_sleep_and_two_told_before_it_heard_are_one() {
+        let (changed, changes) = super::config_changes();
+        let scheduler = Scheduler {
+            changes,
+            ..scheduler("2026-06-10T03:20:00Z", Arc::new(Started::default()))
+        };
+        assert_eq!(
+            scheduler
+                .sleep(SignedDuration::from_hours(1))
+                .now_or_never(),
+            None,
+            "nothing told, the sleep goes on"
+        );
+        changed.tell();
+        changed.tell();
+        assert_eq!(
+            scheduler
+                .sleep(SignedDuration::from_hours(1))
+                .now_or_never(),
+            Some(None)
+        );
+        assert_eq!(
+            scheduler
+                .sleep(SignedDuration::from_hours(1))
+                .now_or_never(),
+            None,
+            "two changes told before the scheduler heard are one"
+        );
+    }
+
+    // A loop that never sleeps spins inside one poll, which no timeout in
+    // its own task can end, so the test binary would hang rather than fail.
+    // The loop runs on a thread of its own, and five real seconds bound the
+    // wait for it, as the sleep's own test does.
+    #[test]
+    fn a_plan_saved_while_the_loop_sleeps_is_planned_once_the_change_is_told() {
+        let (sender, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let checked = std::panic::catch_unwind(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(plan_saved_while_the_loop_sleeps())
+            });
+            let _ = sender.send(checked);
+        });
+        match finished.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(Ok(())) => {}
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(_) => panic!("the loop never slept: it spins inside one poll"),
+        }
+    }
+
+    async fn plan_saved_while_the_loop_sleeps() {
+        let (changed, changes) = super::config_changes();
+        let scheduler = Scheduler {
+            changes,
+            ..scheduler("2026-06-10T02:40:00Z", Arc::new(Started::default()))
+        };
+        let (config, schedules) = (scheduler.config.clone(), scheduler.schedules.clone());
+        let mut serving = std::pin::pin!(scheduler.run());
+        assert!(futures::poll!(serving.as_mut()).is_pending());
+        let unscheduled = home_retries_docs_does_not();
+        let mut scheduled = unscheduled.plan(&home()).unwrap().clone();
+        scheduled.schedule = Some(daily());
+        config
+            .save(&unscheduled.change_plan(scheduled).unwrap())
+            .await
+            .unwrap();
+        assert!(futures::poll!(serving.as_mut()).is_pending());
+        assert_eq!(
+            schedules.planned_runs().await.unwrap(),
+            vec![],
+            "the loop sleeps until its wake check"
+        );
+        changed.tell();
+        assert!(futures::poll!(serving.as_mut()).is_pending());
+        assert_eq!(
+            schedules.planned_runs().await.unwrap(),
+            vec![crate::ports::PlannedRun {
+                plan: home(),
+                at: at("2026-06-10T03:00:00Z"),
+            }]
+        );
     }
 
     #[tokio::test]

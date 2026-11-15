@@ -7,8 +7,8 @@ import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // More Tab presses than any page has stops: the gallery's, the longest, and
-// the skip link and the navigation's three links before it.
-const MAX_TABS = 30;
+// the skip link and the navigation's five links before it.
+const MAX_TABS = 40;
 
 // A polite message waits up to two seconds for company, and its text is set a
 // moment after the region is cleared (§4.5); five seconds is generous.

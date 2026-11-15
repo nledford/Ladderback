@@ -184,6 +184,21 @@ ui-gallery-check-repository = Check the repository name
 # The error the demo form field shows when its input is empty.
 ui-gallery-repository-required = A repository name is required.
 
+# The heading of the gallery's multi-line form field demo.
+ui-gallery-lines-heading = Multi-line form field
+
+# The label of the demo multi-line form field, which takes one entry a line.
+ui-gallery-demo-folders = Demo folders
+
+# The hint under the demo multi-line form field, describing its input.
+ui-gallery-demo-folders-hint = One folder or file a line.
+
+# The button that checks the demo multi-line form field.
+ui-gallery-check-folders = Check the demo folders
+
+# The error the demo multi-line form field shows.
+ui-gallery-folders-required = Enter at least one folder.
+
 # The heading of the gallery's checkbox demo.
 ui-gallery-checkbox-heading = Checkbox
 
@@ -1039,6 +1054,9 @@ ui-nav-label = Pages
 # The navigation's link to the operations page.
 ui-nav-operations = Operations
 
+# The navigation's link to the Plans page.
+ui-nav-plans = Plans
+
 # The navigation's link to the snapshots page.
 ui-nav-snapshots = Snapshots
 
@@ -1592,3 +1610,169 @@ ui-api-token-copied = Copied.
 
 # Said in the dialog when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
 ui-api-token-copy-failed = The browser would not let the page copy it. Select the token in the field and copy it yourself.
+
+## The Plans page (§4.4): the plans of the configuration file, created,
+## changed and deleted in a form whose every change is written to the file.
+
+# The Plans page's title, as the browser's tab and history show it.
+ui-plans-title = Plans – { -brand-name }
+
+# The Plans page's heading: its one main heading, which also names the table of plans.
+ui-plans-heading = Plans
+
+# What the Plans page is for, under its heading.
+ui-plans-body = A plan says what to back up, to which { -repository }, when, and which { -snapshot(form: "other") } to keep. Each change you save here is written to the configuration file, and the file keeps its comments.
+
+# Said in the table's place when the configuration file has no plan.
+ui-plans-none = There are no plans yet.
+
+# The header of the column of each plan's repository.
+ui-plans-column-repository = Repository
+
+# The button that opens the form for a new plan.
+ui-plan-add = Add a plan
+
+# The button that opens the form that changes a plan, named for it.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-change = Change { $plan }
+
+# The button that asks before a plan is deleted, named for it.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-delete = Delete { $plan }
+
+# The heading of the form for a new plan.
+ui-plan-form-new = New plan
+
+# The heading of the form that changes a plan.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-form-change = Change the plan { $plan }
+
+# The legend of the form's group of what a plan backs up and leaves out.
+ui-plan-group-sources = What to back up
+
+# The legend of the form's group of when a plan runs on its own.
+ui-plan-group-schedule = When to back up
+
+# The legend of the form's group of which snapshots forget keeps.
+ui-plan-group-retention = Which { -snapshot(form: "other") } to keep
+
+# The legend of the form's group of the commands run around each backup.
+ui-plan-group-hooks = Commands to run
+
+# The label of each of the plan form's fields.
+# $field (text): the field, one of { "name" }, { "repository" }, { "sources" }, { "globs" }, { "iglobs" }, { "exclude-if-present" }, { "git-ignore" }, { "cron" }, { "keep-last" }, { "keep-hourly" }, { "keep-daily" }, { "keep-weekly" }, { "keep-monthly" }, { "keep-yearly" }, { "run-before" }, { "run-after" }, { "run-failed" } or { "run-finally" }.
+ui-plan-field-label = { $field ->
+    [repository] Repository
+    [sources] Folders to back up
+    [globs] Leave out what matches
+    [iglobs] Leave out what matches, whatever its case
+    [exclude-if-present] Leave out folders holding
+    [git-ignore] Leave out what { ".gitignore" } files name
+    [cron] Cron schedule
+    [keep-last] Keep the last
+    [keep-hourly] Keep one an hour for
+    [keep-daily] Keep one a day for
+    [keep-weekly] Keep one a week for
+    [keep-monthly] Keep one a month for
+    [keep-yearly] Keep one a year for
+    [run-before] Before each backup
+    [run-after] After each backup that succeeds
+    [run-failed] After each backup that fails
+    [run-finally] After every backup
+   *[name] Name
+  }
+
+# The hint under each of the plan form's fields, describing its input.
+# $field (text): the field, as for ui-plan-field-label.
+ui-plan-field-hint = { $field ->
+    [repository] The alias of the { -repository } the backups go to, as the Repositories page lists it.
+    [sources] One folder or file a line.
+    [globs] One glob a line, as the { "globs" } setting of rustic takes them.
+    [iglobs] One glob a line, matched whatever the case of its letters, as the { "iglobs" } setting of rustic takes them.
+    [exclude-if-present] One file name a line: a folder that holds a file of that name is left out, with everything in it.
+    [git-ignore] What each { ".gitignore" } file in the folders names is left out of the backup.
+    [cron] Five fields, minute, hour, day of the month, month and day of the week, such as { "0 3 * * *" } for each night at 3:00. Leave it empty to run the plan only when it is started.
+    [keep-last] How many of the newest { -snapshot(form: "other") } forget keeps.
+    [keep-hourly] For how many of the latest hours forget keeps the newest { -snapshot } of each.
+    [keep-daily] For how many of the latest days forget keeps the newest { -snapshot } of each.
+    [keep-weekly] For how many of the latest weeks forget keeps the newest { -snapshot } of each.
+    [keep-monthly] For how many of the latest months forget keeps the newest { -snapshot } of each.
+    [keep-yearly] For how many of the latest years forget keeps the newest { -snapshot } of each.
+    [run-before] One command line a line, run in order before the backup starts.
+    [run-after] One command line a line, run in order once the backup has succeeded.
+    [run-failed] One command line a line, run in order once the backup has failed.
+    [run-finally] One command line a line, run in order once the backup has ended, however it ended.
+   *[name] Up to 64 lower-case letters, digits and hyphens, starting with a letter or a digit. It is the plan's ID, which tags its { -snapshot(form: "other") }, and can't be changed once the plan is saved.
+  }
+
+# The button that saves the plan form.
+ui-plan-save = Save the plan
+
+# Said while the daemon saves the plan.
+ui-plan-saving = Saving the plan…
+
+# The button that closes the plan form without saving it.
+ui-plan-cancel = Close without saving
+
+# Announced once a plan is saved.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-saved = The plan { $plan } is saved.
+
+# Announced once a plan that had a schedule is saved without one: from then on it runs only when it is started by hand.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-saved-unscheduled = The plan { $plan } is saved. It has no schedule now, so it runs only when you start it.
+
+# The heading of the list of what is wrong with the plan form, which takes focus when the form is refused.
+# $count (number): how many problems the list names.
+ui-plan-problems = { $count ->
+    [one] There is { $count } problem with the form
+   *[other] There are { $count } problems with the form
+  }
+
+# The form's own words when the daemon refused the plan's cron schedule.
+ui-plan-cron-invalid = Enter a cron schedule of five fields, such as { "0 3 * * *" }.
+
+# The form's own words when the plan has no name.
+ui-plan-name-missing = Enter a name for the plan.
+
+# The form's own words when another plan already has the plan's name.
+ui-plan-name-taken = Another plan already has this name. Enter another.
+
+# The form's own words when the plan's name is not one a plan can have.
+ui-plan-name-invalid = Enter a name of up to 64 lower-case letters, digits and hyphens, starting with a letter or a digit, such as { "home-docs" }.
+
+# The form's own words when the plan names no repository.
+ui-plan-repository-missing = Enter the alias of a { -repository }, as the Repositories page lists it.
+
+# The form's own words when the plan names a repository the configuration doesn't have.
+ui-plan-repository-unknown = No { -repository } has this alias. Enter one the Repositories page lists.
+
+# The form's own words when the plan has nothing to back up.
+ui-plan-sources-missing = Enter at least one folder or file to back up, one a line.
+
+# The form's own words when a number of snapshots to keep is not a whole number.
+ui-plan-count-invalid = Enter a whole number, such as { "7" }, or leave it empty.
+
+# The title of the dialog that asks before a plan is deleted.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-delete-title = Delete the plan { $plan }?
+
+# What that dialog says first: deleting a plan leaves its snapshots where they are.
+ui-plan-delete-stay = Its { -snapshot(form: "other") } stay in the { -repository }.
+
+# What that dialog says next: forget removes only what a plan owns, so nothing forgets these snapshots by itself; the Snapshots page can, when they are selected.
+ui-plan-delete-forget = Nothing forgets them on its own any more. You can still forget them by selecting them on the Snapshots page.
+
+# What that dialog says last: a plan with the same ID would own these snapshots again.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-delete-successor = A new plan with the ID { $plan } would take these { -snapshot(form: "other") } over and apply its own retention to them.
+
+# The button in that dialog that deletes the plan.
+ui-plan-delete-confirm = Delete the plan
+
+# Said in that dialog while the daemon deletes the plan.
+ui-plan-deleting = Deleting the plan…
+
+# Announced once a plan is deleted.
+# $plan (text): the plan's ID, such as demo-home.
+ui-plan-deleted = The plan { $plan } is deleted. Its { -snapshot(form: "other") } stay in the { -repository }.
