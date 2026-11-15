@@ -103,7 +103,7 @@ The skeleton (M0), the backup engine (M1a), the single-machine MVP (M1b, release
 - [ ] **M3: Browse, restore and automation.** Snapshot browser, restore into a new folder or in place, downloads as tar or zip, repository stats; scoped API tokens and an MCP server for AI agents; on macOS, builds from source that keep their Full Disk Access across upgrades.
 - [ ] **M4: Hub, visibility.** Pair machines with a hub; one dashboard for all of them; offline alerts.
 - [ ] **M5: Hub, control and maintenance.** Repository ownership; forget, prune and check managed from the hub; remote run and cancel; opt-in restores from the hub.
-- [ ] **M6: Polish.** Run conditions (AC power, metered networks), charts, Docker image, release packages, database rebuild, user docs.
+- [ ] **M6: Polish.** A run condition for metered networks (running only on AC power, and waiting for the network after a wake, came in 0.2.0), charts, Docker image, release packages, database rebuild, user docs.
 
 Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` commands (use the CLI).
 
