@@ -126,7 +126,11 @@ exclude_globs = [
 exclude_re = [
     # Core error types implement Display only because `Error` requires it; they
     # carry codes and values, and adapters render them (technical design §8.4).
-    "<impl std::fmt::Display for ",
+    # Named one by one: a value's Display (`ClockOffset`, which writes the
+    # offset onto the wire, or `KeyringEntry`) says something a test can check,
+    # so its mutants are judged. A new error type joins this list only when its
+    # Display is there for `Error` alone.
+    "<impl std::fmt::Display for (ClientUnavailable|SessionFailed|ClientError|OpenError|InvalidZone|InvalidOffset|InvalidSnapshot|InvalidOperation|ConfigError|StoreError|ProfileError|ExportRefusal|SourcesError|ResolveError|LifecycleError|KeepDeleteTooShort|ReservedTag|InvalidId|InvalidValue|Violation|NoNextRun|CommandLineError|SecretError|NotAKeyringEntry|TemplateError)>",
     # `web`'s `main` mounts the app into the page's `#app` through `web-sys`,
     # which only works in a browser: on the host the mutant builds and nothing
     # calls `main`. The `@ui` scenarios run it in Chromium, where a `main` that
