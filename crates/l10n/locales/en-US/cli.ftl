@@ -281,6 +281,11 @@ cli-mcp-connect-invalid = the address after { "--connect" } isn't an http or htt
 # $detail (text): the HTTP library's own message. It is shown as it came.
 cli-mcp-cannot-start = cannot start the MCP server's client of the daemon: { $detail }
 
+# `ladderback mcp --scratch` could not make or seed its scratch folder, so it did not start. Nothing of the folder is left.
+# $path (text): the temporary folder the scratch folder was to be made in.
+# $detail (text): the operating system's or the configuration's own message. It is shown as it came.
+cli-mcp-scratch-unavailable = cannot make a scratch folder in { $path }: { $detail }
+
 # `ladderback mcp --connect --token-file` named a file that isn't there, so it did not start. Without the flag, a missing default token file means no token is sent.
 # $file (text): the token file's path, as it was given. It is shown as it is.
 cli-mcp-token-file-missing = the token file { $file } that { "--token-file" } names isn't there

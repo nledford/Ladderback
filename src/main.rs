@@ -107,11 +107,20 @@ enum Command {
     RemoveService,
     /// Serve the Model Context Protocol on standard input and output, for
     /// AI agents and scripts: their tools read and drive Ladderback.
+    #[command(group(clap::ArgGroup::new("mode").required(true).args(["connect", "headless", "scratch"])))]
     Mcp {
         /// Drive the running daemon at this address through its API;
         /// `http://127.0.0.1:9898` when no address follows.
         #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = mcp::DEFAULT_DAEMON_URL)]
-        connect: String,
+        connect: Option<String>,
+        /// Run a session of its own on Ladderback's folders, without a
+        /// daemon: refused while a daemon or another session uses them.
+        #[arg(long)]
+        headless: bool,
+        /// Run a session of its own in a new private folder, seeded with a
+        /// plan over a few generated files, and delete the folder at the end.
+        #[arg(long)]
+        scratch: bool,
     },
     /// Run one operation, read from stdin, and report events on stdout.
     /// Started by the agent; not for direct use.
@@ -187,34 +196,54 @@ fn main() -> ExitCode {
         Command::SetPassword => set_password::set_password(),
         Command::InstallService => service::install_service(),
         Command::RemoveService => service::remove_service(),
-        Command::Mcp { connect } => serve_mcp(&connect, plain),
+        Command::Mcp {
+            connect, scratch, ..
+        } => serve_mcp(McpMode::of(connect, scratch), plain),
         Command::Worker => engine::worker::main(),
     }
 }
 
-fn serve_mcp(connect: &str, plain: bool) -> ExitCode {
+/// What `ladderback mcp` drives: a running daemon at an address, a session
+/// of its own on Ladderback's folders, or one in a scratch folder (§4.6).
+enum McpMode {
+    Connect(String),
+    Headless,
+    Scratch,
+}
+
+impl McpMode {
+    /// The mode the flags name; the parser lets exactly one through.
+    fn of(connect: Option<String>, scratch: bool) -> Self {
+        match (connect, scratch) {
+            (Some(address), _) => Self::Connect(address),
+            (None, true) => Self::Scratch,
+            (None, false) => Self::Headless,
+        }
+    }
+}
+
+fn serve_mcp(mode: McpMode, plain: bool) -> ExitCode {
     logging::install(plain);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
-    finish(&localizer, run_mcp(&localizer, connect))
+    finish(&localizer, run_mcp(&localizer, mode))
 }
 
 /// Serves MCP on stdin and stdout until the client closes stdin (§4.6).
 /// Standard output carries protocol messages only: a refusal is said on
 /// stderr, and the session logs there.
-fn run_mcp(localizer: &Localizer, connect: &str) -> io::Result<ExitCode> {
+fn run_mcp(localizer: &Localizer, mode: McpMode) -> io::Result<ExitCode> {
     // Checked here, in the catalog's words, like `--allowed-host`; exit
     // status 2 is the parser's own for a value it rejects. The address isn't
     // repeated: it may hold a password.
-    let Ok(daemon) = mcp::DaemonUrl::parse(connect) else {
-        say(localizer, msg::CLI_MCP_CONNECT_INVALID, &[])?;
-        return Ok(ExitCode::from(2));
-    };
-    let server = match composition::mcp_server::connect(daemon, None, None) {
-        Ok(server) => server,
-        Err(refused) => {
-            say(localizer, refused.message, &refused.args)?;
-            return Ok(ExitCode::FAILURE);
-        }
+    let daemon = match &mode {
+        McpMode::Connect(address) => match mcp::DaemonUrl::parse(address) {
+            Ok(daemon) => Some(daemon),
+            Err(_) => {
+                say(localizer, msg::CLI_MCP_CONNECT_INVALID, &[])?;
+                return Ok(ExitCode::from(2));
+            }
+        },
+        McpMode::Headless | McpMode::Scratch => None,
     };
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
@@ -227,9 +256,38 @@ fn run_mcp(localizer: &Localizer, connect: &str) -> io::Result<ExitCode> {
             return Ok(ExitCode::FAILURE);
         }
     };
+    // A session of its own holds the data folder from here, as `serve` does;
+    // connect mode has its address parsed above.
+    let started = match (daemon, mode) {
+        (Some(daemon), _) => {
+            composition::mcp_server::connect(daemon, None, None).map(|server| (server, None))
+        }
+        (None, McpMode::Scratch) => runtime
+            .block_on(composition::mcp_server::scratch(&OsRandom))
+            .map(|(server, held)| (server, Some(held))),
+        (None, _) => runtime
+            .block_on(composition::mcp_server::headless())
+            .map(|(server, held)| (server, Some(held))),
+    };
+    let (server, held) = match started {
+        Ok(started) => started,
+        Err(refused) => {
+            say(localizer, refused.message, &refused.args)?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
     let ended = runtime.block_on(server.serve(tokio::io::stdin(), tokio::io::stdout()));
+    // The log closes inside the runtime, so a write in flight ends as it
+    // would have.
+    if let Some(held) = &held {
+        runtime.block_on(held.log.close());
+    }
     // A read of stdin can't be cancelled: the runtime isn't waited for.
     runtime.shutdown_background();
+    // The data folder is let go once nothing of the session can touch it.
+    if let Some(held) = held {
+        held.release();
+    }
     match ended {
         Ok(()) => Ok(ExitCode::SUCCESS),
         Err(error) => {
