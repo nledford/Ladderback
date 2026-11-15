@@ -431,17 +431,20 @@ impl ForgetWorld {
         self.jobs().iter().filter(|&&name| name == "forget").count()
     }
 
-    /// The IDs of the snapshots the plan `plan` owns, newest first.
+    /// The IDs of the snapshots the plan `plan` owns, newest first: tagged
+    /// with it and this agent, and with no other plan or agent.
     pub fn plan_snapshots(&self, plan: &str) -> Vec<SnapshotId> {
+        let plan_tag = format!("{PLAN_TAG_PREFIX}{plan}");
+        let agent_tag = format!("{AGENT_TAG_PREFIX}{}", self_agent().as_uuid().hyphenated());
         self.snapshots
             .iter()
             .filter(|snapshot| {
-                snapshot
-                    .tags
-                    .iter()
-                    .any(|tag| tag == &format!("{PLAN_TAG_PREFIX}{plan}"))
-                    && snapshot.tags.iter().any(|tag| {
-                        tag == &format!("{AGENT_TAG_PREFIX}{}", self_agent().as_uuid().hyphenated())
+                snapshot.tags.contains(&plan_tag)
+                    && snapshot.tags.contains(&agent_tag)
+                    && snapshot.tags.iter().all(|tag| {
+                        !(tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(AGENT_TAG_PREFIX))
+                            || tag == &plan_tag
+                            || tag == &agent_tag
                     })
             })
             .map(|snapshot| snapshot.id.clone())
@@ -796,6 +799,41 @@ async fn another_agents_snapshots(agent: &mut Agent, count: u64, plan: String) {
         .await;
 }
 
+/// The plan tag of `plan` and this agent's tag.
+fn own_tags(plan: &str) -> Vec<String> {
+    vec![
+        format!("{PLAN_TAG_PREFIX}{plan}"),
+        format!("{AGENT_TAG_PREFIX}{}", self_agent().as_uuid().hyphenated()),
+    ]
+}
+
+#[given(expr = "the repository holds {int} snapshots of the plan {string} carrying its tags twice")]
+async fn snapshots_tagged_twice(agent: &mut Agent, count: u64, plan: String) {
+    let tags = [own_tags(&plan), own_tags(&plan)].concat();
+    agent.forget.snapshots_tagged(count, &tags, "/home/demo");
+}
+
+#[given(
+    expr = "the repository holds {int} snapshots of the plan {string} also tagged with the plan {string}"
+)]
+async fn snapshots_of_two_plans(agent: &mut Agent, count: u64, plan: String, second: String) {
+    let mut tags = own_tags(&plan);
+    tags.push(format!("{PLAN_TAG_PREFIX}{second}"));
+    agent.forget.snapshots_tagged(count, &tags, "/home/demo");
+}
+
+#[given(
+    expr = "the repository holds {int} snapshots of the plan {string} also tagged by another agent"
+)]
+async fn snapshots_of_two_agents(agent: &mut Agent, count: u64, plan: String) {
+    let mut tags = own_tags(&plan);
+    tags.push(format!(
+        "{AGENT_TAG_PREFIX}{}",
+        other_agent().as_uuid().hyphenated()
+    ));
+    agent.forget.snapshots_tagged(count, &tags, "/home/demo");
+}
+
 #[given("the engine cannot be reached")]
 async fn engine_unreachable(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Unreachable);
@@ -1117,6 +1155,35 @@ async fn other_agents_survive(agent: &mut Agent, count: usize) {
     assert!(
         removed.iter().all(|id| !other.contains(id)),
         "no snapshot of another agent's plan is removed: {removed:?}"
+    );
+}
+
+#[then(expr = "the repository still holds the {int} snapshots whose owner tags disagree")]
+async fn disagreeing_survive(agent: &mut Agent, count: usize) {
+    let removed = agent.forget.removed();
+    let disagree = |snapshot: &SnapshotSummary, prefix: &str| {
+        let mut texts: Vec<&String> = snapshot
+            .tags
+            .iter()
+            .filter(|tag| tag.starts_with(prefix))
+            .collect();
+        texts.sort_unstable();
+        texts.dedup();
+        texts.len() > 1
+    };
+    let disagreeing: Vec<SnapshotId> = agent
+        .forget
+        .snapshots
+        .iter()
+        .filter(|snapshot| {
+            disagree(snapshot, PLAN_TAG_PREFIX) || disagree(snapshot, AGENT_TAG_PREFIX)
+        })
+        .map(|snapshot| snapshot.id.clone())
+        .collect();
+    assert_eq!(disagreeing.len(), count);
+    assert!(
+        removed.iter().all(|id| !disagreeing.contains(id)),
+        "no snapshot whose owner tags disagree is removed: {removed:?}"
     );
 }
 

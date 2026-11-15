@@ -3961,10 +3961,10 @@ pub struct PlanGroupDto {
 #[serde(rename_all = "kebab-case")]
 pub struct OrphanedGroupDto {
     /// The `ladderback-agent:` tag's text, `null` when the snapshots carry
-    /// none.
+    /// none, or two that disagree.
     pub agent: Option<String>,
     /// The `ladderback-plan:` tag's text, `null` when the snapshots carry
-    /// none.
+    /// none, or two that disagree.
     pub plan: Option<String>,
     pub count: u64,
     pub snapshots: Vec<SnapshotDto>,

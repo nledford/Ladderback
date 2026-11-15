@@ -3,7 +3,10 @@
 //! events none of which is longer than the protocol's cap (technical design
 //! §4.1), instead of as one message that a large repository outgrows.
 
+use std::collections::BTreeSet;
 use std::io;
+
+use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 
 use rustic_core::repofile::SnapshotFile;
 
@@ -64,14 +67,30 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
     );
     // The tags that say whose a snapshot is go first: a forget decides who
     // owns a snapshot by them, so a snapshot with many tags must never lose
-    // them to the cut.
-    let (owning, others): (Vec<&String>, Vec<&String>) = snapshot
+    // them to the cut. The exact owner tags come first and each once, then
+    // the other `ladderback-` tags, then the rest: two that disagree make
+    // the snapshot orphaned (#286), and if the cut falls among the owner
+    // tags it keeps more than two different ones, so two of one kind that
+    // disagree are among them.
+    let names_owner =
+        |tag: &&String| tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(AGENT_TAG_PREFIX);
+    let mut seen = BTreeSet::new();
+    let owners = snapshot
         .tags
         .iter()
-        .partition(|tag| tag.starts_with(OWNING_TAG_PREFIX));
+        .filter(names_owner)
+        .filter(|tag| seen.insert(*tag));
+    let reserved = snapshot
+        .tags
+        .iter()
+        .filter(|tag| !names_owner(tag) && tag.starts_with(OWNING_TAG_PREFIX));
+    let others = snapshot
+        .tags
+        .iter()
+        .filter(|tag| !tag.starts_with(OWNING_TAG_PREFIX));
     let (tags, tags_truncated) = cut_all(
-        owning
-            .into_iter()
+        owners
+            .chain(reserved)
             .chain(others)
             .collect::<Vec<_>>()
             .into_iter(),
@@ -213,6 +232,25 @@ mod tests {
         assert!(result.tags_truncated);
         assert!(result.tags.contains(&"ladderback-agent:0000".to_owned()));
         assert!(result.tags.contains(&"ladderback-plan:home".to_owned()));
+    }
+
+    #[test]
+    fn owner_tags_that_disagree_survive_a_cut_however_many_ladderback_tags_come_first() {
+        let agent = "ladderback-agent:0000".to_owned();
+        let home = "ladderback-plan:home".to_owned();
+        let photos = "ladderback-plan:photos".to_owned();
+        // 63 other `ladderback-` tags before the disagreeing plan tag.
+        let mut tags = vec![home.clone(), agent.clone()];
+        tags.extend(numbered("ladderback-note:", api::MAX_SNAPSHOT_TAGS - 1));
+        tags.push(photos.clone());
+        let result = snapshot_result(&file(&[], &tags)).expect("converts");
+        assert!(result.tags_truncated);
+        assert!(result.tags.contains(&photos), "{:?}", result.tags);
+        // The same owner tag repeated past the cap can't push it out either.
+        let mut tags = vec![agent; api::MAX_SNAPSHOT_TAGS];
+        tags.extend([home.clone(), home, photos.clone()]);
+        let result = snapshot_result(&file(&[], &tags)).expect("converts");
+        assert!(result.tags.contains(&photos), "{:?}", result.tags);
     }
 
     #[test]

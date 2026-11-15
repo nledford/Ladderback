@@ -2,6 +2,8 @@
 
 **A snapshot another agent tagged in the last 30 days, or dated later, comes from another host, whatever host it records** (recorded 2026-11-11, §7.3; #214). A repository this agent maintains warns of other hosts (`maintenance-other-hosts`, §7.3) when it holds such a snapshot, as it does of one whose host is none of this agent's. One another agent tagged longer ago than that is judged by its host alone, as before.
 
+**Amended 2026-11-15 (#286):** a snapshot whose `ladderback-agent:` tags disagree counts as another agent's, even when one names this agent: that tag alone no longer proves it was made here (decision 8).
+
 Why:
 
 - **Two machines can share one host name.** Two `raspberrypi`, each running its own agent and each maintaining one repository locally, record the same host, and the host alone can't tell their snapshots apart: neither was warned that a second maintainer exists (I1). Their agent IDs differ, unless one machine was cloned with the other's data folder (below), and every Ladderback backup carries its agent's (decision 8).

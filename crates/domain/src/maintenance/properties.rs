@@ -1,7 +1,9 @@
 //! Properties of [`ForgetSelection`] and the forget it decides (invariant
 //! I6): every snapshot of a listing is in exactly one group, the one its tags
 //! put it in, and a forget names only snapshots a plan of this agent owns,
-//! each under that plan, whatever a retention evaluation answers.
+//! each under that plan, whatever a retention evaluation answers. Two owner
+//! tags of one kind that disagree name no owner, so no plan owns the
+//! snapshot and it is orphaned (#286).
 
 use proptest::prelude::*;
 use proptest::sample::{select, subsequence};
@@ -33,19 +35,22 @@ fn plan_id(plan: &str) -> PlanId {
     PlanId::parse(plan).expect("a plan ID")
 }
 
-/// A tag a snapshot may carry: this agent's, another's, or one that names
-/// no agent; a plan of the configuration's or not, or none; or a tag that
-/// isn't an owner's at all. A snapshot may carry any number of them, both
-/// tags of an owner, one, neither, or two that disagree.
+/// A tag a snapshot may carry: this agent's, another's, one that names no
+/// agent or this agent's text spaced differently; a plan of the
+/// configuration's, one cased or spaced differently, one no configuration
+/// has, or none; or a tag that isn't an owner's at all. A snapshot may carry
+/// any number of them, both tags of an owner, one, neither, the same one
+/// twice, or two that disagree.
 fn tag() -> impl Strategy<Value = String> {
     let agents = vec![
         own_text(),
         agent(2).as_uuid().hyphenated().to_string(),
         "not-an-agent".to_owned(),
+        format!(" {}", own_text()),
     ];
     let plans: Vec<String> = PLANS
         .iter()
-        .chain(&[RETIRED, ""])
+        .chain(&[RETIRED, "", "Home", "home "])
         .map(|&plan| plan.to_owned())
         .collect();
     prop_oneof![
@@ -67,8 +72,9 @@ fn snapshot_id(number: usize) -> SnapshotId {
 /// groups share them.
 fn snapshots() -> impl Strategy<Value = Vec<Snapshot>> {
     // A third of the snapshots carry both tags of a plan of this agent, in
-    // either order and among others, so that most listings have managed
-    // groups, several plans' among them; the rest carry any tags.
+    // either order and before others, which may repeat or contradict them,
+    // so that most listings have managed groups, several plans' among them;
+    // the rest carry any tags.
     let managed = (
         select(PLANS.to_vec()),
         prop::collection::vec(tag(), 0..=2),
@@ -145,25 +151,33 @@ fn removals() -> impl Strategy<Value = Vec<(PlanId, Vec<SnapshotId>)>> {
     )
 }
 
-/// The text of `snapshot`'s first tag that starts with `prefix`: the first
-/// of two that disagree wins.
-fn first_tag<'a>(snapshot: &'a Snapshot, prefix: &str) -> Option<&'a str> {
-    snapshot
+/// What `snapshot`'s tags that start with `prefix` name: the one text they
+/// all carry, or none when it carries no such tag or two that disagree.
+fn agreed_tag<'a>(snapshot: &'a Snapshot, prefix: &str) -> Option<&'a str> {
+    let mut texts: Vec<&str> = snapshot
         .tags
         .iter()
-        .find(|tag| tag.starts_with(prefix))
+        .filter(|tag| tag.starts_with(prefix))
         .map(|tag| &tag[prefix.len()..])
+        .collect();
+    texts.sort_unstable();
+    texts.dedup();
+    match texts.as_slice() {
+        &[one] => Some(one),
+        _ => None,
+    }
 }
 
-/// The agent and plan `snapshot`'s tags name.
+/// The agent and plan `snapshot`'s tags name, each only if its tags agree.
 fn owner_tags(snapshot: &Snapshot) -> (Option<&str>, Option<&str>) {
     (
-        first_tag(snapshot, AGENT_TAG_PREFIX),
-        first_tag(snapshot, PLAN_TAG_PREFIX),
+        agreed_tag(snapshot, AGENT_TAG_PREFIX),
+        agreed_tag(snapshot, PLAN_TAG_PREFIX),
     )
 }
 
-/// The plan that owns `snapshot` by its tags, if one of `plans` does.
+/// The plan that owns `snapshot` by its tags, if one of `plans` does: both
+/// its agent tags and its plan tags agree, on this agent and on that plan.
 fn owner<'a>(snapshot: &Snapshot, plans: &'a [ManagedPlan]) -> Option<&'a PlanId> {
     let (agent, plan) = owner_tags(snapshot);
     if agent != Some(own_text().as_str()) {
@@ -175,8 +189,12 @@ fn owner<'a>(snapshot: &Snapshot, plans: &'a [ManagedPlan]) -> Option<&'a PlanId
         .find(|configured| plan == Some(configured.as_str()))
 }
 
+/// Whether `snapshot` carries an owner tag of either kind, agreeing or not.
 fn tagged(snapshot: &Snapshot) -> bool {
-    owner_tags(snapshot) != (None, None)
+    snapshot
+        .tags
+        .iter()
+        .any(|tag| tag.starts_with(AGENT_TAG_PREFIX) || tag.starts_with(PLAN_TAG_PREFIX))
 }
 
 /// Every snapshot of every group, by ID.
