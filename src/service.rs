@@ -3,18 +3,17 @@
 //! says what came of it, in the catalog's words. What a command did goes to
 //! stdout; why it did nothing, or stopped, goes to stderr, and it ends with 1.
 
-use std::io;
+use std::io::{self, Read as _};
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use api::MsgArg;
-use app::ports::{ConfigStore, Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
-use config_adapter::FileConfigStore;
+use app::ports::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
+use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
 use domain::service::{ServicePath, ServicePathProblem};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
+use platform::dirs;
 use platform::service::{Unavailable, UserService, program_path};
-use platform::{SystemClock, dirs};
 
 use crate::output::{to_stderr, to_stdout};
 use crate::{finish, said, say, text};
@@ -41,9 +40,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
     let Some(runtime) = runtime(localizer)? else {
         return Ok(ExitCode::FAILURE);
     };
-    // Read before the install starts the service, whose own load may
-    // migrate the file meanwhile.
-    let keyring = keyring_passwords(&runtime);
+    let keyring = keyring_passwords();
     match runtime.block_on(service.install(&program)) {
         Ok(Installed { file, replaced }) => {
             let id = if replaced {
@@ -101,15 +98,28 @@ fn remove(localizer: &Localizer) -> io::Result<ExitCode> {
 
 /// How many repositories of the configuration read their password from the
 /// keyring: none when there is no configuration, or it can't be read, which
-/// the service says itself when it starts.
-fn keyring_passwords(runtime: &tokio::runtime::Runtime) -> usize {
+/// the service says itself when it starts. The file is only read, never
+/// migrated: a daemon may be running on it, and only the one that holds the
+/// data folder's lock may rewrite it.
+fn keyring_passwords() -> usize {
     let Some(folder) = dirs::config_dir() else {
         return 0;
     };
-    let config = FileConfigStore::new(folder.join("config.toml"), Arc::new(SystemClock));
-    runtime
-        .block_on(config.load())
-        .map_or(0, |config| config.keyring_passwords())
+    let file = folder.join("config.toml");
+    let Ok(opened) = std::fs::File::open(&file) else {
+        return 0;
+    };
+    let mut text = String::new();
+    if opened
+        .take(MAX_CONFIG_BYTES.saturating_add(1))
+        .read_to_string(&mut text)
+        .is_err()
+        || u64::try_from(text.len()).unwrap_or(u64::MAX) > MAX_CONFIG_BYTES
+    {
+        return 0;
+    }
+    parse(&file, &text, &Schemas::production())
+        .map_or(0, |parsed| parsed.config.keyring_passwords())
 }
 
 /// The line that says a lingering service can't read the `keyring`
