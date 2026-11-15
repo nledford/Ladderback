@@ -22,7 +22,6 @@ docs/design/decisions/58-one-child-starts-at-a-time.md
 docs/design/decisions/64-installing-the-agent-as-a-user-service.md
 docs/design/decisions/68-the-start-of-an-operation-is-announced-from-the-run.md
 docs/design/decisions/69-a-save-edits-the-file-a-person-wrote.md
-docs/design/decisions/72-a-schedule-s-interval-and-time-zone-and-a-plan-s-overlap-policy.md
 docs/design/decisions/73-the-persistent-queue-and-the-scheduler-loop.md
 docs/design/decisions/76-retries-of-a-failed-backup.md
 docs/design/decisions/80-repository-locations.md
