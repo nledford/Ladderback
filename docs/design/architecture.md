@@ -71,7 +71,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Source filter | What a plan leaves out of its backup: glob patterns, glob files, ignore files such as `.gitignore`, marker files, extended attributes and other file systems (`SourceFilter`, §6.1). rustic reads a glob with a slash in the middle from the root of the file system; one written from a source reaches none and is a never-matching glob (`NeverMatchingGlob`, warned of as `glob-never-matches`, #510) |
 | Plan tags | `ladderback-plan:<id>` and `ladderback-agent:<id>`; they make a snapshot **managed** by a plan. Two tags of one kind that carry different text name no owner, and the snapshot is orphaned (§7.3) |
 | Unmanaged group | Untagged snapshots, grouped by the repository's `group-by` |
-| Orphaned group | Tagged snapshots whose plan or agent no longer exists, or whose plan tags disagree |
+| Orphaned group | Tagged snapshots whose plan or agent no longer exists, or whose agent tags or plan tags disagree |
 | Adopt | Retag an unmanaged or orphaned group into a plan |
 | Maintenance owner | The single party that runs forget, prune and check for a repository |
 | Claim / Grant / Lease | An agent's request to own maintenance; the hub's acceptance; the time-limited, epoch-numbered form of that acceptance |
