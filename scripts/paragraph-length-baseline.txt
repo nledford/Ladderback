@@ -23,7 +23,6 @@ docs/design/decisions/46-the-toolings-language.md
 docs/design/decisions/48-who-maintains-a-saved-repository.md
 docs/design/decisions/49-one-name-per-repository.md
 docs/design/decisions/51-what-a-checks-findings-are.md
-docs/design/decisions/54-early-release-builds.md
 docs/design/decisions/55-a-backup-stopped-at-its-deadline-winds-down.md
 docs/design/decisions/57-recording-the-id-of-a-repository-a-job-opened.md
 docs/design/decisions/58-one-child-starts-at-a-time.md
