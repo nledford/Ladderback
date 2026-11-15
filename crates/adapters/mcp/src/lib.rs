@@ -67,10 +67,24 @@ pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The `status` tool's name.
 const STATUS: &str = "status";
 
+/// How many of the newest operations `status` looks through for those
+/// queued or running: the history's largest page.
+pub const RECENT_OPERATIONS: u64 = 200;
+
+/// Those of `operations` that are queued or running, in their order: what
+/// `status` lists of the newest [`RECENT_OPERATIONS`], in either mode.
+pub fn unfinished(operations: Vec<OperationSummaryDto>) -> Vec<OperationSummaryDto> {
+    operations
+        .into_iter()
+        .filter(|operation| matches!(operation.status.as_str(), "queued" | "running"))
+        .collect()
+}
+
 /// What the tools reach Ladderback through: a running daemon in connect
-/// mode. Each method is one tool's reading or action; a failure is the
-/// `{code, args}` the API returns (§8.4), which the tool hands on as a
-/// result with `isError`.
+/// mode, or a session of this process's own in headless and scratch modes,
+/// wired by the composition root. Each method is one tool's reading or
+/// action; a failure is the `{code, args}` the API returns (§8.4), which
+/// the tool hands on as a result with `isError`.
 #[async_trait]
 pub trait Backend: Send + Sync + 'static {
     /// Ladderback's state as `status` shows it, without this program's build.

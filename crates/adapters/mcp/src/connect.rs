@@ -10,7 +10,10 @@ use reqwest::header::HeaderValue;
 use reqwest::{Client, Url, redirect};
 use serde::de::DeserializeOwned;
 
-use crate::{Access, Backend, BackendStatus, DaemonStatus, PlanStatus, not_cancellable};
+use crate::{
+    Access, Backend, BackendStatus, DaemonStatus, PlanStatus, RECENT_OPERATIONS, not_cancellable,
+    unfinished,
+};
 
 /// The daemon `--connect` reaches when it names none: `serve`'s default
 /// address.
@@ -26,10 +29,6 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// The largest answer read, in bytes: a full history page with every
 /// location tried is far below it.
 const MAX_ANSWER_BYTES: usize = 8 * 1024 * 1024;
-
-/// How many of the newest operations `status` looks through for those
-/// queued or running: the history's largest page.
-const RECENT: &str = "200";
 
 /// The address of a daemon's API: `http` or `https`, with a host, and no
 /// user name, password, query or fragment. A password in the address would
@@ -205,12 +204,10 @@ impl Backend for Connect {
                 plan,
             });
         }
-        let recent: OperationsPageDto = self.get("api/v1/operations", &[("limit", RECENT)]).await?;
-        let running = recent
-            .operations
-            .into_iter()
-            .filter(|operation| matches!(operation.status.as_str(), "queued" | "running"))
-            .collect();
+        let recent = RECENT_OPERATIONS.to_string();
+        let recent: OperationsPageDto =
+            self.get("api/v1/operations", &[("limit", &recent)]).await?;
+        let running = unfinished(recent.operations);
         Ok(BackendStatus {
             access: Access::SignInOff,
             daemon: Some(DaemonStatus {
