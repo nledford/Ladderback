@@ -796,6 +796,16 @@ warning-notification-undelivered = { $reason ->
    *[other] The rule { $rule } sent { $event } to { $channel }, but the channel refused it. Check the channel's URL and its token or password.
   }
 
+# The daemon or a worker could not turn off its core dumps as it started, and went on without that protection.
+# $detail (text): the operating system's own words, in English.
+warning-core-dumps-on = { -brand-name } could not turn off core dumps for itself, so if it crashes, the passwords it holds may be written to disk. It went on without that protection. Check whether a security policy of this system refuses it.
+    .with-detail = { -brand-name } could not turn off core dumps for itself ({ $detail }), so if it crashes, the passwords it holds may be written to disk. It went on without that protection. Check whether a security policy of this system refuses it.
+
+# The daemon or a worker could not stop other programs of the same user from reading its memory as it started, and went on without that protection.
+# $detail (text): the operating system's own words, in English.
+warning-debugger-attach-allowed = { -brand-name } could not stop other programs run by the same user from attaching a debugger to it, so they could read the passwords it holds. It went on without that protection. Check whether a security policy of this system refuses it.
+    .with-detail = { -brand-name } could not stop other programs run by the same user from attaching a debugger to it ({ $detail }), so they could read the passwords it holds. It went on without that protection. Check whether a security policy of this system refuses it.
+
 ## Command-line codes: what a command says when it cannot start (technical design §4.5)
 
 # The command has no folder to keep the configuration in.

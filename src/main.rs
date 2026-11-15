@@ -34,6 +34,7 @@ use shutdown::{REQUESTS_BOUND, Step, Stopping, WORKERS_BOUND};
 
 mod build_info;
 mod composition;
+mod dumps;
 mod logging;
 mod output;
 mod profiles;
