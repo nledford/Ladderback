@@ -81,11 +81,13 @@ multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
 # Time goes through `jiff` (§16, decision 22). `chrono` reaches the build only
-# through `rustic_backend`'s OpenDAL FTP service: `suppaftp` depends on it, and
-# that service can't be turned off. `wrappers` names that one crate, so a
+# as a dependency's own dependency, through crates that can't drop it:
+# `suppaftp` (`rustic_backend`'s OpenDAL FTP service, which can't be turned
+# off), and `rmcp` and `schemars` (the MCP SDK depends on `chrono` outright and
+# turns on `schemars`' `chrono04`). `wrappers` names exactly these, so a
 # Ladderback crate, or any other dependency, that starts to use `chrono` fails.
 deny = [
-    { crate = "chrono", wrappers = ["suppaftp"], reason = "Time goes through jiff (§16, decision 22); chrono is allowed only as suppaftp's dependency, through rustic_backend's OpenDAL FTP service" },
+    { crate = "chrono", wrappers = ["suppaftp", "rmcp", "schemars"], reason = "Time goes through jiff (§16, decision 22); chrono is allowed only as a dependency of suppaftp (rustic_backend's OpenDAL FTP service), rmcp and schemars (the MCP SDK)" },
 ]
 
 [sources]
