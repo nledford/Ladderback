@@ -154,7 +154,7 @@ Each state is a text token on a background token, swapped between schemes rather
 
 ## Layout
 
-One column, `main` centered at up to 60rem with 1rem padding. The site header spans the page: the brand on its own line, then the navigation, with the running version at the end of the line, wrapping under the navigation on a narrow screen.
+One column, `main` centered at up to 60rem with 1rem padding. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
 
 Spacing steps are 0.25, 0.5, 0.75 and 1rem; forms stack fields 1rem apart, and an `.actions` row puts its buttons 0.5rem apart, wrapping. Inputs fill their line up to 32rem (40rem for a token).
 
@@ -185,7 +185,7 @@ Every component is plain and exact: a control looks like what the browser makes 
 ### Buttons
 
 - **Shape and color:** the browser's native button. No custom fill, border or radius.
-- **Size:** at least 2rem tall in action rows, 0.75rem inline padding.
+- **Size:** at least 2rem tall in action rows and in the header (Sign out), 0.75rem inline padding.
 - **Disabled:** stays focusable (`aria-disabled="true"`), at 60 % opacity with a not-allowed cursor.
 - **Pressed (toggle):** bold text and an inset border, with a banner that says it in words.
 - **Focus:** the global 3 px Ladder Blue ring, 2 px offset; `CanvasText` under forced colors.
@@ -205,6 +205,8 @@ Every component is plain and exact: a control looks like what the browser makes 
 
 - **Style:** a wrapping row of plain links in the Ladder Blue link color on the Ledger Gray header, 1rem apart.
 - **Current page:** bold, with `aria-current="page"`.
+- **Brand:** the product's mark before its name, as tall as the name's letters, hidden from screen readers; under forced colors it takes `CanvasText` and `Canvas`.
+- **Sign out:** a native button after the running version, outside the navigation's list, since it isn't a page. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
 - A skip link is the first focusable element and appears at the top of the page on focus.
 
 ### Tables
