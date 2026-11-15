@@ -58,6 +58,18 @@
 # mutated on the host; the `@ui` scenarios of
 # `features/security/admin_password.feature` run the glue in Chromium.
 #
+# `crates/web/src/plans_page.rs` is the DOM glue of the Plans page (§4.4,
+# decision 96): it sends the list, plan, save and delete requests, holds the
+# form's signals and the summary, opens and closes the form and the delete
+# dialog, reads the list again while a saved plan waits for its next run,
+# and moves focus back to the button that opened the form. What each field
+# shows, the plan a form sends, the plan a new form starts from, which field
+# a refusal is about and in whose words, which ID a save's answer names,
+# whether a saved plan still waits for its next run and how often and how
+# long it is read again, and the words of each button, announcement and
+# dialog are `plans.rs`'s, mutated on the host; the `@ui` scenarios of
+# `features/ui/plans.feature` run the glue in Chromium.
+#
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
 # starts and the cancel; doing what `maintenance::Panel` decides (`Page::act`:
@@ -93,6 +105,7 @@ exclude_globs = [
     "crates/web/src/snapshots.rs",
     "crates/web/src/sign_in.rs",
     "crates/web/src/settings.rs",
+    "crates/web/src/plans_page.rs",
     "crates/web/src/settings/password.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
