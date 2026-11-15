@@ -326,13 +326,24 @@ fn answer_lost() -> ErrorDto {
 /// `daemon-answer-too-large`: the daemon answered with more than
 /// [`MAX_ANSWER_BYTES`], which was left unread.
 fn too_large() -> ErrorDto {
+    ErrorDto::new(ErrorCode::DaemonAnswerTooLarge, [answer_limit()], None)
+}
+
+/// [`too_large`] for the detail of the operation whose ID is `id`, which
+/// the message names and points to in the web UI.
+fn too_large_operation(id: String) -> ErrorDto {
     ErrorDto::new(
         ErrorCode::DaemonAnswerTooLarge,
-        [(
-            "limit",
-            MsgArg::Bytes(u64::try_from(MAX_ANSWER_BYTES).unwrap_or(u64::MAX)),
-        )],
+        [answer_limit(), ("operation", MsgArg::Text(id))],
         None,
+    )
+}
+
+/// The `limit` argument of `daemon-answer-too-large`: [`MAX_ANSWER_BYTES`].
+fn answer_limit() -> (&'static str, MsgArg) {
+    (
+        "limit",
+        MsgArg::Bytes(u64::try_from(MAX_ANSWER_BYTES).unwrap_or(u64::MAX)),
     )
 }
 
@@ -435,7 +446,14 @@ impl Backend for Connect {
         let Some(segment) = segment(&id) else {
             return Err(unknown_operation(id));
         };
-        self.get("api/v1/operations", &[segment], &[]).await
+        let answer = self.get("api/v1/operations", &[segment], &[]).await;
+        answer.map_err(|error| {
+            if error.code == ErrorCode::DaemonAnswerTooLarge {
+                too_large_operation(id)
+            } else {
+                error
+            }
+        })
     }
 
     /// The first of the history page of one just past `id`: the history is

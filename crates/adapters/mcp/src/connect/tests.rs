@@ -217,7 +217,7 @@ async fn an_answer_that_isnt_the_apis_is_daemon_unreachable() {
 }
 
 /// An operation that recorded many long warnings can have a detail larger
-/// than is read: told as such, never as no answer.
+/// than is read: told as such, never as no answer, naming the operation.
 #[tokio::test]
 async fn an_answer_over_the_limit_is_daemon_answer_too_large() {
     let routes = Router::new().route(
@@ -231,6 +231,35 @@ async fn an_answer_over_the_limit_is_daemon_answer_too_large() {
     let refusal = connect
         .operation("00000000-0000-7000-8000-000000000001".to_owned())
         .await;
+    assert_eq!(
+        refusal,
+        Err(ErrorDto::new(
+            ErrorCode::DaemonAnswerTooLarge,
+            [
+                ("limit", api::MsgArg::Bytes(8 * 1024 * 1024)),
+                (
+                    "operation",
+                    api::MsgArg::Text("00000000-0000-7000-8000-000000000001".to_owned())
+                ),
+            ],
+            None
+        ))
+    );
+}
+
+/// A list too large to read names no operation, so its message doesn't
+/// point to an operation's page in the web UI.
+#[tokio::test]
+async fn a_list_over_the_limit_is_daemon_answer_too_large_naming_no_operation() {
+    let routes = Router::new().route(
+        "/api/v1/repositories/{alias}/snapshots",
+        get(|| async {
+            let padding = " ".repeat(8 * 1024 * 1024);
+            format!(r#"{{"snapshots": []{padding}}}"#)
+        }),
+    );
+    let connect = Connect::new(daemon(routes).await).unwrap();
+    let refusal = connect.snapshots("demo".to_owned()).await;
     assert_eq!(
         refusal,
         Err(ErrorDto::new(

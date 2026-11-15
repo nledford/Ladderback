@@ -209,7 +209,11 @@ error-daemon-answer-lost = The request was sent to { -brand-name }, but no answe
 
 # `ladderback mcp --connect` read an answer from the daemon larger than the most it reads, and left it unread.
 # $limit (bytes): the most it reads, as a size such as 8 MiB.
-error-daemon-answer-too-large = { -brand-name } answered with more than { $limit }, the most { "ladderback mcp" } reads, so the answer was left unread. An operation with that many warnings can be read in the web UI.
+# $operation (text): the ID of the operation whose detail was too large. The sender leaves it out for any other answer, a list of snapshots for one, and the program then supplies the text none.
+error-daemon-answer-too-large = { $operation ->
+    [none] { -brand-name } answered with more than { $limit }, the most { "ladderback mcp" } reads, so the answer was left unread.
+   *[other] { -brand-name } answered with more than { $limit }, the most { "ladderback mcp" } reads, so operation { $operation } was left unread. An operation with that many warnings can be read in the web UI.
+  }
 
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.

@@ -534,3 +534,32 @@ fn each_plan_problem_has_its_own_words_naming_the_field() {
     // A name the message has no arm for would read as `invalid` does.
     assert_eq!(texts.len(), problems.len(), "{texts:#?}");
 }
+
+/// Only an operation's detail grows with its warnings, which the web UI
+/// shows; a list or a profile too large to read isn't pointed there.
+#[test]
+fn an_answer_too_large_points_to_the_web_ui_only_for_an_operation() {
+    let localizer = english();
+    let limit = ("limit", MsgArg::Bytes(8 * 1024 * 1024));
+    let list = localizer.error(
+        ErrorCode::DaemonAnswerTooLarge,
+        std::slice::from_ref(&limit),
+        None,
+    );
+    assert!(list.problems().is_empty(), "{:?}", list.problems());
+    assert!(list.text().contains("8 MiB"), "{list}");
+    assert!(!list.text().contains("web UI"), "{list}");
+    let operation = (
+        "operation",
+        MsgArg::Text("0190a1b2-0000-7000-8000-000000000001".to_owned()),
+    );
+    let detail = localizer.error(ErrorCode::DaemonAnswerTooLarge, &[limit, operation], None);
+    assert!(detail.problems().is_empty(), "{:?}", detail.problems());
+    assert!(
+        detail
+            .text()
+            .contains("0190a1b2-0000-7000-8000-000000000001")
+            && detail.text().contains("web UI"),
+        "{detail}"
+    );
+}
