@@ -92,10 +92,21 @@ impl ScheduleStore for InMemoryScheduleStore {
     }
 
     async fn release_check(&self) -> Result<Option<ReleaseCheck>, StoreError> {
-        todo!("{:?}", self.release_check)
+        Ok(self
+            .release_check
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone())
     }
 
     async fn keep_release_check(&self, check: &ReleaseCheck) -> Result<(), StoreError> {
-        todo!("{check:?}")
+        *self
+            .release_check
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(ReleaseCheck {
+            at: to_the_millisecond(check.at),
+            update: check.update.clone(),
+        });
+        Ok(())
     }
 }

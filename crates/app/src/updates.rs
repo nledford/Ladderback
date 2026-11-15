@@ -10,11 +10,13 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::updates::Version;
+use domain::Timestamp;
+use domain::planning::UpdateCheck;
+use domain::updates::{Release, Version, available_update, next_check};
 
 use crate::ports::{
-    Clock, ConfigError, ConfigStore, Random, ReleaseFeed, ReleaseFeedError, ScheduleStore,
-    StoreError,
+    Clock, ConfigError, ConfigStore, Random, ReleaseCheck, ReleaseFeed, ReleaseFeedError,
+    ScheduleStore, StoreError,
 };
 
 /// The available update the header shows, shared between the release
@@ -85,6 +87,83 @@ impl CheckForUpdates {
     /// shows nothing and asks nothing, and reads the configuration again a
     /// day later.
     pub async fn run(&self) {
-        todo!("{:?}", self.running)
+        let kept = self.kept().await;
+        let mut last = kept.as_ref().map(|check| check.at);
+        // The kept update shows only while it is still newer than the
+        // version that runs: after an upgrade to it, it is none.
+        let mut update = kept.and_then(|check| {
+            let version = check.update?;
+            available_update(
+                &self.running,
+                &Release {
+                    version,
+                    prerelease: false,
+                },
+            )
+        });
+        if self.is_on().await {
+            self.notice.show(update.clone());
+        }
+        loop {
+            let at = next_check(last, self.clock.now(), self.random.draw());
+            self.clock.sleep_until(at).await;
+            let now = self.clock.now();
+            last = Some(now);
+            if self.is_on().await {
+                update = self.check(now, update).await;
+            } else {
+                self.notice.show(None);
+            }
+        }
+    }
+
+    /// The release check last kept, or `None`, told, when it can't be read.
+    async fn kept(&self) -> Option<ReleaseCheck> {
+        self.schedules
+            .release_check()
+            .await
+            .unwrap_or_else(|error| {
+                (self.reports)(ReleaseCheckReport::Store(error));
+                None
+            })
+    }
+
+    /// Whether the configuration has the check on; off, told, when it can't
+    /// be read.
+    async fn is_on(&self) -> bool {
+        match self.config.load().await {
+            Ok(config) => config.agent().update_check == UpdateCheck::On,
+            Err(error) => {
+                (self.reports)(ReleaseCheckReport::Config(error));
+                false
+            }
+        }
+    }
+
+    /// Asks for the newest release at `now`, shows the update it is (or
+    /// `previous`, when the answer can't be read) and keeps the check.
+    async fn check(&self, now: Timestamp, previous: Option<Version>) -> Option<Version> {
+        let found = match self.feed.newest().await {
+            Ok(release) => available_update(&self.running, &release),
+            Err(error) => {
+                (self.reports)(ReleaseCheckReport::Failed(error));
+                previous.clone()
+            }
+        };
+        if let Some(version) = found
+            .as_ref()
+            .filter(|found| previous.as_ref() != Some(*found))
+        {
+            (self.reports)(ReleaseCheckReport::UpdateAvailable(version.clone()));
+        }
+        self.notice.show(found.clone());
+        let check = ReleaseCheck {
+            at: now,
+            update: found.clone(),
+        };
+        if let Err(error) = self.schedules.keep_release_check(&check).await {
+            (self.reports)(ReleaseCheckReport::Store(error));
+        }
+        found
     }
 }

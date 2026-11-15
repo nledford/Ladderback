@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::Timestamp;
-use domain::updates::Release;
+use domain::updates::{Release, Version};
 
 use crate::ports::{Clock, ReleaseFeed, ReleaseFeedError};
 
@@ -31,12 +31,22 @@ impl ScriptedReleaseFeed {
     /// `prerelease` is; a tag that isn't `v` and a version is
     /// [`ReleaseFeedError::Unreadable`].
     pub fn release(&self, tag: &str, prerelease: bool) {
-        todo!("{tag} {prerelease} {:?}", self.answer)
+        let answer = Version::of_tag(tag)
+            .map(|version| Release {
+                version,
+                prerelease,
+            })
+            .map_err(|_| ReleaseFeedError::Unreadable);
+        self.answer_with(answer);
     }
 
     /// Every request from now on fails with `error`.
     pub fn fail(&self, error: ReleaseFeedError) {
-        todo!("{error:?}")
+        self.answer_with(Err(error));
+    }
+
+    fn answer_with(&self, answer: Result<Release, ReleaseFeedError>) {
+        *self.answer.lock().unwrap_or_else(PoisonError::into_inner) = answer;
     }
 
     /// When it was asked, in order.
@@ -51,6 +61,13 @@ impl ScriptedReleaseFeed {
 #[async_trait]
 impl ReleaseFeed for ScriptedReleaseFeed {
     async fn newest(&self) -> Result<Release, ReleaseFeedError> {
-        todo!("{:?}", self.clock.now())
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(self.clock.now());
+        self.answer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
