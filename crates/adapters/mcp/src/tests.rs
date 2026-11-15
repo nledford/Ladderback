@@ -1031,10 +1031,10 @@ fn keys_conform(content: &Value, schema: &Value) -> Result<(), String> {
 
 /// A client such as the official TypeScript SDK checks `structuredContent`
 /// against the tool's output schema whether the result is an error or not,
-/// and throws when it doesn't conform, so a refusal must never carry a
-/// `structuredContent` its tool's schema doesn't take.
+/// and throws when it doesn't conform, so a refusal carries none: no schema
+/// declares a refusal's shape.
 #[tokio::test]
-async fn no_refusal_of_any_tool_carries_structured_content_its_output_schema_doesnt_take() {
+async fn no_refusal_of_any_tool_carries_structured_content() {
     let schemas = golden_output_schemas();
     let told = ErrorDto::new(
         ErrorCode::PlanUnknown,
@@ -1052,7 +1052,28 @@ async fn no_refusal_of_any_tool_carries_structured_content_its_output_schema_doe
         ..Lists::default()
     });
     let mut checked = Vec::new();
-    for (tool, arguments) in [
+    for (tool, arguments) in every_tool_called() {
+        let answer = if tool == "status" {
+            status.call(tool, arguments).await
+        } else {
+            client.call(tool, arguments).await
+        };
+        let result = &answer["result"];
+        assert_eq!(result["isError"], true, "{tool}: {answer}");
+        assert_eq!(result.get("structuredContent"), None, "{tool}: {answer}");
+        assert_eq!(
+            refusal(&answer),
+            serde_json::to_value(&told).unwrap(),
+            "{tool}"
+        );
+        checked.push(tool);
+    }
+    assert_eq!(checked.len(), schemas.len(), "every tool listed is checked");
+}
+
+/// Each tool, with arguments it takes.
+fn every_tool_called() -> [(&'static str, Value); 13] {
+    [
         ("status", json!({})),
         ("list_plans", json!({})),
         ("list_repositories", json!({})),
@@ -1069,27 +1090,43 @@ async fn no_refusal_of_any_tool_carries_structured_content_its_output_schema_doe
             json!({"content": "[repository]\n", "repository": "nas"}),
         ),
         ("export_profile", json!({"plan": "home"})),
-    ] {
-        let answer = if tool == "status" {
-            status.call(tool, arguments).await
+    ]
+}
+
+/// What each tool answers has every key its output schema requires and,
+/// where the schema takes no others, only those it names.
+#[tokio::test]
+async fn every_tools_answer_has_the_keys_its_output_schema_names() {
+    let schemas = golden_output_schemas();
+    let mut status = connect(told());
+    let mut client = connect(Lists {
+        plans: plans(1),
+        repositories: vec![repository("nas")],
+        snapshots: vec![snapshot(1)],
+        page: Some(OperationsPageDto {
+            operations: vec![summary(1)],
+            next: None,
+        }),
+        detail: Some(OperationDetailDto {
+            operation: summary(1),
+            warnings: vec![warning(1)],
+        }),
+        preview: Some(forget_preview()),
+        ..Lists::default()
+    });
+    let mut checked = Vec::new();
+    for (tool, arguments) in every_tool_called() {
+        let content = if tool == "status" {
+            status.listed(tool, arguments).await
         } else {
-            client.call(tool, arguments).await
+            client.listed(tool, arguments).await
         };
-        let result = &answer["result"];
-        assert_eq!(result["isError"], true, "{tool}: {answer}");
-        if let Some(content) = result.get("structuredContent") {
-            let schema = schemas
-                .get(tool)
-                .unwrap_or_else(|| panic!("no schema for {tool}"));
-            if let Err(why) = keys_conform(content, schema) {
-                panic!("{tool}: {why}");
-            }
+        let schema = schemas
+            .get(tool)
+            .unwrap_or_else(|| panic!("no schema for {tool}"));
+        if let Err(why) = keys_conform(&content, schema) {
+            panic!("{tool}: {why}");
         }
-        assert_eq!(
-            refusal(&answer),
-            serde_json::to_value(&told).unwrap(),
-            "{tool}"
-        );
         checked.push(tool);
     }
     assert_eq!(checked.len(), schemas.len(), "every tool listed is checked");
