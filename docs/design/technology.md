@@ -9,6 +9,8 @@
 
 UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling, and Ladderback's own small component set for every widget, built to the accessibility contracts in §4.5. Tailwind arrives with that component set in M1b; M0's hello page uses one plain stylesheet with the color, focus and motion tokens. Charts (snapshot sizes over time, durations) use SVG rendered in Leptos, with no JS chart library.
 
+Icons: Lucide's, from `lepticons-data`, which holds each icon's shapes without a renderer, with the default features off and only the categories the icons in use are in (§16, decision 103). Every icon of an enabled category is compiled in, used or not, so a new icon from another category turns that category on in the workspace `Cargo.toml` and is measured as below. *Size:* the status badges' seven icons (`notifications`, `time`, `cursors`, `shapes` and `math`, 267 icons) add 80,224 B (2.7%) to the release `web` wasm built with `--no-default-features`, 3,013,400 B before and 3,093,624 B after, and 17,110 B (2.4%) to its brotli, 711,271 B before and 728,381 B after. Measured on macOS arm64 at `7c4ac062` and after with `(cd crates/web && trunk build --release --no-default-features --dist <dir>)` and `brotli -q 11`.
+
 ### 8.2 Backend crates
 
 | Concern | Crate |
