@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use api::{EntryDto, FolderDto};
+use api::{EntryDto, EntryKindDto, FolderDto};
 
 use crate::repositories::Sentence;
 
@@ -39,6 +39,7 @@ pub(crate) enum Load {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Node {
     pub(crate) entry: EntryDto,
+    parent: usize,
     /// Its `aria-level`: 1 for an entry of the top folder.
     pub(crate) level: u32,
     /// Its `aria-posinset`: where its folder lists it, from 1.
@@ -54,8 +55,22 @@ pub(crate) struct Node {
 }
 
 impl Node {
+    fn new(entry: EntryDto, parent: usize, level: u32, position: u64) -> Node {
+        Node {
+            entry,
+            parent,
+            level,
+            position,
+            open: false,
+            children: Vec::new(),
+            total: 0,
+            next: None,
+            load: Load::Unread,
+        }
+    }
+
     pub(crate) fn is_folder(&self) -> bool {
-        todo!()
+        self.entry.kind == EntryKindDto::Folder
     }
 }
 
@@ -104,7 +119,15 @@ pub(crate) enum State {
 impl State {
     /// The value of the `$kind` argument of `ui-tree-entry`.
     pub(crate) fn kind(self) -> &'static str {
-        todo!()
+        match self {
+            State::Folder => "folder",
+            State::Loading => "loading",
+            State::Empty => "empty",
+            State::Failed => "failed",
+            State::File => "file",
+            State::Link => "link",
+            State::Other => "other",
+        }
     }
 }
 
@@ -142,16 +165,16 @@ pub(crate) struct Views {
 
 impl Views {
     /// What a shown row says; nothing for a row not shown.
-    pub(crate) fn get(&self, _row: Row) -> Option<RowView> {
-        todo!()
+    pub(crate) fn get(&self, row: Row) -> Option<RowView> {
+        self.by_row.get(&row).copied()
     }
 }
 
 /// How many steps of indentation a row at `level` takes: one for each level
 /// below the first, up to `INDENT_CAP`, so a deep folder's rows still fit a
 /// narrow screen (1.4.10, Reflow). `aria-level` says the exact level.
-pub(crate) fn indent_steps(_level: u32) -> u32 {
-    todo!()
+pub(crate) fn indent_steps(level: u32) -> u32 {
+    level.saturating_sub(1).min(INDENT_CAP)
 }
 
 /// The most steps a row is indented by.
@@ -170,121 +193,493 @@ pub(crate) struct Tree {
     nodes: Vec<Node>,
     focus: Option<Row>,
     typed: String,
+    typed_at: f64,
+    failure: Option<Sentence>,
+}
+
+impl Default for Tree {
+    fn default() -> Tree {
+        Tree::new()
+    }
 }
 
 impl Tree {
     /// A tree whose top folder is not read yet.
     pub(crate) fn new() -> Tree {
-        todo!()
+        let top = EntryDto {
+            name: String::new(),
+            display: String::new(),
+            kind: EntryKindDto::Folder,
+            size: None,
+            modified: None,
+        };
+        Tree {
+            nodes: vec![Node::new(top, 0, 0, 0)],
+            focus: None,
+            typed: String::new(),
+            typed_at: f64::NEG_INFINITY,
+            failure: None,
+        }
     }
 
     /// Opens the top folder: the first page of it to ask for.
     pub(crate) fn start(&mut self) -> Option<Request> {
-        todo!()
+        self.open(0)
     }
 
-    /// Opens a folder; its first page to ask for, unless it is read or on
-    /// its way.
-    fn open(&mut self, _index: usize) -> Option<Request> {
-        todo!()
-    }
-
-    /// A row was clicked: focus goes to it, a folder opens or closes, and
-    /// the row that reads the next page reads it.
-    pub(crate) fn activate(&mut self, _row: Row) -> Option<Request> {
-        todo!()
-    }
-
-    pub(crate) fn node(&self, _index: usize) -> Option<&Node> {
-        todo!()
+    pub(crate) fn node(&self, index: usize) -> Option<&Node> {
+        self.nodes.get(index)
     }
 
     /// Whether the top folder is read and holds nothing.
     pub(crate) fn is_empty(&self) -> bool {
-        todo!()
+        self.nodes
+            .first()
+            .is_some_and(|top| top.load == Load::Read && top.children.is_empty())
     }
 
     /// The refusal of the page asked for last, until another is asked for.
     pub(crate) fn failure(&self) -> Option<&Sentence> {
-        todo!()
+        self.failure.as_ref()
     }
 
-    /// The rows shown, top to bottom.
+    /// The rows shown, top to bottom: each open folder's entries under it,
+    /// then the row that reads its next page while one is left.
     pub(crate) fn rows(&self) -> Vec<Row> {
-        todo!()
+        #[cfg(test)]
+        WALKS.with(|walks| walks.set(walks.get() + 1));
+        let mut rows = Vec::new();
+        self.push_rows(0, &mut rows);
+        rows
     }
 
     /// Every shown row and what it says (`Views`).
     pub(crate) fn views(&self) -> Views {
-        todo!()
+        let rows = self.rows();
+        let stop = Self::stop_in(self.focus, &rows);
+        let by_row = rows
+            .iter()
+            .map(|&row| {
+                let (expanded, state, shown) = match row {
+                    Row::Entry(index) => {
+                        let expanded = self
+                            .nodes
+                            .get(index)
+                            .filter(|node| node.is_folder())
+                            .map(|node| node.open);
+                        (expanded, self.state(index), 0)
+                    }
+                    Row::More(folder) => {
+                        let shown = self
+                            .nodes
+                            .get(folder)
+                            .map_or(0, |node| node.children.len() as u64);
+                        (None, None, shown)
+                    }
+                };
+                let view = RowView {
+                    position: self.place(row).1,
+                    set_size: self.set_size(row),
+                    expanded,
+                    busy: self.busy(row),
+                    stop: stop == Some(row),
+                    state,
+                    shown,
+                };
+                (row, view)
+            })
+            .collect();
+        Views { rows, by_row }
     }
 
-    /// The row that holds the tree's one tab stop.
+    fn push_rows(&self, folder: usize, rows: &mut Vec<Row>) {
+        let Some(node) = self.nodes.get(folder) else {
+            return;
+        };
+        for &child in &node.children {
+            rows.push(Row::Entry(child));
+            if self.nodes.get(child).is_some_and(|child| child.open) {
+                self.push_rows(child, rows);
+            }
+        }
+        if node.next.is_some() {
+            rows.push(Row::More(folder));
+        }
+    }
+
+    /// The row that holds the tree's one tab stop: the one focus was last
+    /// on while it is shown, else the first.
     pub(crate) fn tab_stop(&self) -> Option<Row> {
-        todo!()
+        Self::stop_in(self.focus, &self.rows())
     }
 
-    /// A row's `aria-level` and `aria-posinset`.
-    pub(crate) fn place(&self, _row: Row) -> (u32, u64) {
-        todo!()
+    fn stop_in(focus: Option<Row>, rows: &[Row]) -> Option<Row> {
+        focus
+            .filter(|focus| rows.contains(focus))
+            .or_else(|| rows.first().copied())
     }
 
-    /// A row's `aria-setsize`.
-    pub(crate) fn set_size(&self, _row: Row) -> u64 {
-        todo!()
+    /// A row's `aria-level` and `aria-posinset`: the row that reads a
+    /// folder's next page stands where that page's first entry will.
+    pub(crate) fn place(&self, row: Row) -> (u32, u64) {
+        match row {
+            Row::Entry(index) => self
+                .nodes
+                .get(index)
+                .map_or((0, 0), |node| (node.level, node.position)),
+            Row::More(folder) => self.nodes.get(folder).map_or((0, 0), |node| {
+                (
+                    node.level.saturating_add(1),
+                    (node.children.len() as u64).saturating_add(1),
+                )
+            }),
+        }
     }
 
-    /// Whether a row waits for a page.
-    pub(crate) fn busy(&self, _row: Row) -> bool {
-        todo!()
+    /// A row's `aria-setsize`: how many entries its folder holds in all.
+    pub(crate) fn set_size(&self, row: Row) -> u64 {
+        let folder = match row {
+            Row::Entry(index) => self.nodes.get(index).map_or(0, |node| node.parent),
+            Row::More(folder) => folder,
+        };
+        self.nodes.get(folder).map_or(0, |node| node.total)
+    }
+
+    /// Whether a row waits for a page: a folder for its first, the row that
+    /// reads the next page for that one.
+    pub(crate) fn busy(&self, row: Row) -> bool {
+        match row {
+            Row::Entry(index) => self
+                .nodes
+                .get(index)
+                .is_some_and(|node| node.load == Load::Loading { from: 0 }),
+            Row::More(folder) => self
+                .nodes
+                .get(folder)
+                .is_some_and(|node| matches!(node.load, Load::Loading { .. })),
+        }
     }
 
     /// Whether the top folder's first page is on its way.
     pub(crate) fn starting(&self) -> bool {
-        todo!()
+        self.busy(Row::Entry(0))
     }
 
     /// What a row says after its name.
-    pub(crate) fn state(&self, _index: usize) -> Option<State> {
-        todo!()
+    pub(crate) fn state(&self, index: usize) -> Option<State> {
+        let node = self.nodes.get(index)?;
+        Some(match node.entry.kind {
+            EntryKindDto::Folder => match node.load {
+                Load::Loading { .. } if node.children.is_empty() => State::Loading,
+                Load::Read if node.children.is_empty() && node.next.is_none() => State::Empty,
+                Load::Failed => State::Failed,
+                _ => State::Folder,
+            },
+            EntryKindDto::File => State::File,
+            EntryKindDto::Link => State::Link,
+            EntryKindDto::Other => State::Other,
+        })
     }
 
-    /// The path of a node in the snapshot, its names joined by `/`.
-    pub(crate) fn path(&self, _index: usize) -> String {
-        todo!()
+    /// The path of a node in the snapshot, its names joined by `/`; empty
+    /// for the top folder. The top folder is its own parent, so the walk up
+    /// takes at most a step per node: no parent link can hold it.
+    pub(crate) fn path(&self, index: usize) -> String {
+        let mut names = Vec::new();
+        let mut at = index;
+        for _ in 0..self.nodes.len() {
+            if at == 0 {
+                break;
+            }
+            let Some(node) = self.nodes.get(at) else {
+                break;
+            };
+            names.push(node.entry.name.as_str());
+            at = node.parent;
+        }
+        names.reverse();
+        names.join("/")
     }
 
-    /// Does what `key` does on the focused row, `now_ms` being when.
-    pub(crate) fn key(&mut self, _key: &str, _rtl: bool, _now_ms: f64) -> Pressed {
-        todo!()
+    /// Opens a folder; its first page to ask for, unless it is read or on
+    /// its way.
+    fn open(&mut self, index: usize) -> Option<Request> {
+        let node = self.nodes.get_mut(index)?;
+        if index != 0 && !node.is_folder() {
+            return None;
+        }
+        node.open = true;
+        match node.load {
+            Load::Unread | Load::Failed => {
+                node.load = Load::Loading { from: 0 };
+                self.failure = None;
+                Some(Request {
+                    folder: index,
+                    path: self.path(index),
+                    from: 0,
+                })
+            }
+            Load::Loading { .. } | Load::Read => None,
+        }
     }
 
-    /// Takes the daemon's answer to `request`.
-    pub(crate) fn answered(&mut self, _request: &Request, _answer: Result<FolderDto, Sentence>) {
-        todo!()
+    /// Asks for the next page of a folder, unless a page of it is on its way.
+    fn more(&mut self, folder: usize) -> Option<Request> {
+        let node = self.nodes.get_mut(folder)?;
+        let from = node.next.filter(|_| node.load == Load::Read)?;
+        node.load = Load::Loading { from };
+        self.failure = None;
+        Some(Request {
+            folder,
+            path: self.path(folder),
+            from,
+        })
     }
-}
 
-/// `text` with every byte but an unreserved one (RFC 3986) percent-encoded.
-fn encoded(_text: &str) -> String {
-    todo!()
+    /// A row was clicked: focus goes to it, a folder opens or closes, and
+    /// the row that reads the next page reads it.
+    pub(crate) fn activate(&mut self, row: Row) -> Option<Request> {
+        self.focus = Some(row);
+        match row {
+            Row::Entry(index) => self.toggle(index),
+            Row::More(folder) => self.more(folder),
+        }
+    }
+
+    fn toggle(&mut self, index: usize) -> Option<Request> {
+        let node = self.nodes.get_mut(index)?;
+        if node.open {
+            node.open = false;
+            None
+        } else {
+            self.open(index)
+        }
+    }
+
+    /// Does what `key` (a `KeyboardEvent.key` pressed without Ctrl, Alt or
+    /// Meta) does on the focused row, `now_ms` being when. In a page that runs
+    /// right to left the left arrow opens and the right arrow closes.
+    pub(crate) fn key(&mut self, key: &str, rtl: bool, now_ms: f64) -> Pressed {
+        let rows = self.rows();
+        let Some(at) = Self::stop_in(self.focus, &rows) else {
+            return Pressed::default();
+        };
+        let index = rows.iter().position(|row| *row == at).unwrap_or_default();
+        let (forward, back) = if rtl {
+            ("ArrowLeft", "ArrowRight")
+        } else {
+            ("ArrowRight", "ArrowLeft")
+        };
+        let mut request = None;
+        match key {
+            "ArrowDown" => self.focus_on(rows.get(index.saturating_add(1)).copied().or(Some(at))),
+            "ArrowUp" => {
+                self.focus_on(
+                    index
+                        .checked_sub(1)
+                        .and_then(|before| rows.get(before))
+                        .copied()
+                        .or(Some(at)),
+                );
+            }
+            "Home" => self.focus_on(rows.first().copied()),
+            "End" => self.focus_on(rows.last().copied()),
+            "Enter" | " " => {
+                self.focus = Some(at);
+                request = match at {
+                    Row::Entry(node) => self.toggle(node),
+                    Row::More(folder) => self.more(folder),
+                };
+            }
+            _ if key == forward => {
+                self.focus = Some(at);
+                if let Row::Entry(node) = at {
+                    request = self.forward(node, rows.get(index.saturating_add(1)).copied());
+                }
+            }
+            _ if key == back => self.back(at),
+            _ => {
+                let mut chars = key.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(typed), None) if !typed.is_control() => {
+                        self.type_ahead(typed, now_ms, &rows, index);
+                    }
+                    _ => return Pressed::default(),
+                }
+            }
+        }
+        Pressed {
+            handled: true,
+            request,
+        }
+    }
+
+    fn focus_on(&mut self, row: Option<Row>) {
+        self.focus = row;
+    }
+
+    /// Right in a left-to-right page: opens a closed folder, and moves into
+    /// an open one, to `after`, the row below it, when that is in it.
+    fn forward(&mut self, index: usize, after: Option<Row>) -> Option<Request> {
+        let node = self.nodes.get(index)?;
+        if !node.is_folder() {
+            return None;
+        }
+        if !node.open {
+            return self.open(index);
+        }
+        let inside = match after {
+            Some(Row::Entry(child)) => self
+                .nodes
+                .get(child)
+                .is_some_and(|child| child.parent == index),
+            Some(Row::More(folder)) => folder == index,
+            None => false,
+        };
+        if inside {
+            self.focus = after;
+        }
+        None
+    }
+
+    /// Left in a left-to-right page: closes an open folder, and otherwise
+    /// moves to the folder the row is in.
+    fn back(&mut self, at: Row) {
+        let parent = match at {
+            Row::Entry(index) => {
+                let Some(node) = self.nodes.get_mut(index) else {
+                    return;
+                };
+                if node.open {
+                    node.open = false;
+                    self.focus = Some(at);
+                    return;
+                }
+                node.parent
+            }
+            Row::More(folder) => folder,
+        };
+        self.focus = Some(if parent == 0 { at } else { Row::Entry(parent) });
+    }
+
+    /// Moves focus to the next entry whose name starts with what was typed:
+    /// a character typed within [`TYPE_AHEAD_MS`] of the last adds to the
+    /// search, which then starts at the focused row; one typed later starts
+    /// a new search after it. The search wraps, and ignores case.
+    fn type_ahead(&mut self, typed: char, now_ms: f64, rows: &[Row], index: usize) {
+        let elapsed = now_ms - self.typed_at;
+        let fresh = elapsed.is_nan() || elapsed > TYPE_AHEAD_MS;
+        if fresh {
+            self.typed.clear();
+        }
+        self.typed_at = now_ms;
+        if self.typed.chars().count() < TYPED_MAX {
+            self.typed.extend(typed.to_lowercase());
+        }
+        let start = if fresh {
+            index.saturating_add(1)
+        } else {
+            index
+        };
+        let found = (0..rows.len())
+            .filter_map(|step| rows.get(start.saturating_add(step) % rows.len()))
+            .find(|row| match row {
+                Row::Entry(node) => self
+                    .nodes
+                    .get(*node)
+                    .is_some_and(|node| node.entry.display.to_lowercase().starts_with(&self.typed)),
+                Row::More(_) => false,
+            });
+        if let Some(found) = found {
+            self.focus = Some(*found);
+        }
+    }
+
+    /// Takes the daemon's answer to `request`. An answer to a request the
+    /// tree no longer waits for is left alone. A page's entries join their
+    /// folder; focus on the row that read it moves to the first of them. A
+    /// refused first page closes its folder, to be asked again on opening;
+    /// either refusal is kept for the page to say.
+    pub(crate) fn answered(&mut self, request: &Request, answer: Result<FolderDto, Sentence>) {
+        let Some(node) = self.nodes.get(request.folder) else {
+            return;
+        };
+        if node.load != (Load::Loading { from: request.from }) {
+            return;
+        }
+        let level = node.level.saturating_add(1);
+        match answer {
+            Ok(folder) => {
+                let first = self.nodes.len();
+                for (offset, entry) in (1_u64..).zip(folder.entries) {
+                    let position = request.from.saturating_add(offset);
+                    self.nodes
+                        .push(Node::new(entry, request.folder, level, position));
+                }
+                let added = first..self.nodes.len();
+                let Some(node) = self.nodes.get_mut(request.folder) else {
+                    return;
+                };
+                node.children.extend(added.clone());
+                node.total = folder.total.max(node.children.len() as u64);
+                node.next = folder.next.filter(|next| *next > request.from);
+                node.load = Load::Read;
+                if self.focus == Some(Row::More(request.folder)) {
+                    self.focus = if added.is_empty() {
+                        (request.folder != 0).then_some(Row::Entry(request.folder))
+                    } else {
+                        Some(Row::Entry(first))
+                    };
+                }
+            }
+            Err(refusal) => {
+                let Some(node) = self.nodes.get_mut(request.folder) else {
+                    return;
+                };
+                if request.from == 0 {
+                    node.load = Load::Failed;
+                    node.open = false;
+                } else {
+                    node.load = Load::Read;
+                }
+                self.failure = Some(refusal);
+            }
+        }
+    }
 }
 
 /// The address of a page of a folder of snapshot `snapshot` of repository
-/// `alias`, under `base`.
-pub(crate) fn folder_url(
-    _base: &str,
-    _alias: &str,
-    _snapshot: &str,
-    _path: &str,
-    _from: u64,
-) -> String {
-    todo!()
+/// `alias`, under `base`: each name percent-encoded, so no name a snapshot
+/// records can change which route or which folder is asked for.
+pub(crate) fn folder_url(base: &str, alias: &str, snapshot: &str, path: &str, from: u64) -> String {
+    let mut url = format!(
+        "{base}/api/v1/repositories/{}/snapshots/{}/folder?path={}",
+        encoded(alias),
+        encoded(snapshot),
+        encoded(path)
+    );
+    if from != 0 {
+        url.push_str(&format!("&from={from}"));
+    }
+    url
+}
+
+/// `text` with every byte but an unreserved one (RFC 3986) percent-encoded.
+fn encoded(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// The address of the page of snapshot `snapshot` of repository `alias`.
-pub(crate) fn snapshot_href(_alias: &str, _snapshot: &str) -> String {
-    todo!()
+pub(crate) fn snapshot_href(alias: &str, snapshot: &str) -> String {
+    format!("/snapshots/{}/{}", encoded(alias), encoded(snapshot))
 }
 
 #[cfg(test)]

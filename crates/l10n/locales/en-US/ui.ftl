@@ -339,6 +339,14 @@ ui-gallery-tree-echo = echo.txt
 ui-gallery-tree-latest = latest
 ui-gallery-tree-pipe = pipe
 
+# The shown name of a demo file whose name holds U+202E, which would show
+# its "txt.exe" reversed: the daemon makes the character visible (decision
+# 102), and the row is named by this, not by the file's key.
+ui-gallery-tree-shown = abc[U+202E]txt.exe
+
+# The name of a demo file written right to left: "notes.txt" in Hebrew.
+ui-gallery-tree-written-rtl = הערות.txt
+
 # What the demo tree says when its folder "unreadable" is opened.
 ui-gallery-tree-unreadable-said = The demo folder could not be read.
 

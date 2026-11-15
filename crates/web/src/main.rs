@@ -98,6 +98,8 @@ mod status_badge;
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod time_zones;
+// A snapshot's page's DOM glue; `tree.rs` decides for its tree.
+mod snapshot_page;
 // What a snapshot's tree shows and does, decided on the host;
 // `components.rs`'s `Tree` is its glue.
 mod tree;
@@ -120,6 +122,7 @@ use routes::{NotFound, Operations, Repositories, Start};
 use session::{SignInOffNotice, Standing, Title};
 use settings::Settings;
 use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut};
+use snapshot_page::Snapshot;
 use snapshots::Snapshots;
 
 /// The text of message `id` in the page's language.
@@ -164,6 +167,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let operations = Arc::clone(&localizer);
     let plans = Arc::clone(&localizer);
     let snapshots = Arc::clone(&localizer);
+    let snapshot = Arc::clone(&localizer);
     let repositories = Arc::clone(&localizer);
     let settings = Arc::clone(&localizer);
     view! {
@@ -182,6 +186,10 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
             <Route
                 path=path!("/snapshots")
                 view=move || view! { <Snapshots localizer=Arc::clone(&snapshots) /> }
+            />
+            <Route
+                path=path!("/snapshots/:alias/:snapshot")
+                view=move || view! { <Snapshot localizer=Arc::clone(&snapshot) /> }
             />
             <Route
                 path=path!("/repositories")

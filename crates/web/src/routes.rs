@@ -1862,8 +1862,14 @@ pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
 
 /// Whether `path` is a snapshot's page: `/snapshots/{alias}/{snapshot}`,
 /// neither name empty.
-fn is_snapshot_page(_path: &str) -> bool {
-    todo!()
+fn is_snapshot_page(path: &str) -> bool {
+    path.strip_prefix("/snapshots/").is_some_and(|rest| {
+        let mut names = rest.split('/');
+        matches!(
+            (names.next(), names.next(), names.next()),
+            (Some(alias), Some(snapshot), None) if !alias.is_empty() && !snapshot.is_empty()
+        )
+    })
 }
 
 /// [`title`] for a build that has the gallery or not, so that both are tested
