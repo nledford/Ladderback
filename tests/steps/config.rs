@@ -12,11 +12,11 @@ use config_adapter::{FileConfigStore, MigrationError, Schemas};
 use cucumber::gherkin::Step;
 use cucumber::{given, then, when};
 use domain::planning::{
-    AgentConfig, AgentSettings, Cadence, Concurrency, GroupBy, Hooks, Interval, Maintenance,
-    Overlap, Plan, RepositoryConfig, RepositorySettings, ValueKind,
+    AgentConfig, AgentSettings, Cadence, Concurrency, GroupBy, Hooks, Interval, Location,
+    Maintenance, Overlap, Plan, RepositoryConfig, RepositorySettings, ValueKind,
 };
 use domain::secrets::SecretRef;
-use domain::{PlanId, RepositoryAlias, SignedDuration};
+use domain::{PlanId, RepositoryAlias, RepositoryId, SignedDuration};
 use platform::SystemClock;
 
 use super::Agent;
@@ -191,11 +191,9 @@ async fn saves_changed(
     store(agent).save(&config).await.expect("the save");
 }
 
-#[when(
-    expr = "the agent saves the configuration it loaded with the repository {string} at {string} added"
-)]
-async fn saves_with_repository(agent: &mut Agent, alias: String, location: String) {
-    let entry = RepositoryConfig {
+/// A repository at `location`, its password read from `DEMO_PASSWORD`.
+fn repository_at(location: String) -> RepositoryConfig {
+    RepositoryConfig {
         locations: Default::default(),
         settings: RepositorySettings {
             repository: location,
@@ -209,7 +207,36 @@ async fn saves_with_repository(agent: &mut Agent, alias: String, location: Strin
         maintenance: Maintenance::default(),
         group_by: GroupBy::default(),
         hooks: Hooks::default(),
-    };
+    }
+}
+
+#[when(
+    expr = "the agent saves the configuration it loaded with the repository {string} at {string} added"
+)]
+async fn saves_with_repository(agent: &mut Agent, alias: String, location: String) {
+    let entry = repository_at(location);
+    let alias = RepositoryAlias::parse(&alias).expect("an alias");
+    saves_changed(agent, |_, repositories, _| {
+        repositories.insert(alias, entry);
+    })
+    .await;
+}
+
+/// A repository with further locations records its ID, as the reader
+/// requires of one.
+#[when(
+    expr = "the agent saves the configuration it loaded with the repository {string} at {string} added, with its ID {string} and a further location at {string}"
+)]
+async fn saves_with_repository_in_two_places(
+    agent: &mut Agent,
+    alias: String,
+    location: String,
+    id: String,
+    further: String,
+) {
+    let mut entry = repository_at(location);
+    entry.id = Some(RepositoryId::parse(&id).expect("a repository ID"));
+    entry.locations.further = vec![Location::of(&repository_at(further).settings)];
     let alias = RepositoryAlias::parse(&alias).expect("an alias");
     saves_changed(agent, |_, repositories, _| {
         repositories.insert(alias, entry);

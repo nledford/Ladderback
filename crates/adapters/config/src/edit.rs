@@ -523,11 +523,11 @@ mod tests {
 
     use domain::planning::{
         AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks,
-        Hostname, KeepCount, Maintenance, Overlap, Plan, RepositoryConfig, RepositorySettings,
-        RetentionPolicy, Schedule, Source,
+        Hostname, KeepCount, Location, Maintenance, Overlap, Plan, RepositoryConfig,
+        RepositorySettings, RetentionPolicy, Schedule, Source,
     };
     use domain::secrets::SecretRef;
-    use domain::{PlanId, RepositoryAlias, TimeZoneDatabase};
+    use domain::{PlanId, RepositoryAlias, RepositoryId, TimeZoneDatabase};
 
     use super::saved;
     use crate::schema::{CURRENT_SCHEMA, MAX_CONFIG_BYTES, Schemas, parse, render_as};
@@ -784,6 +784,50 @@ keep-daily = 7
             Some(WRITTEN.replace(
                 "  options = { timeout = \"60s\" }\n",
                 "  options = { timeout = \"60s\" }\n\n[repositories.cloud]\nrepository = \"/srv/demo-cloud\"\npassword-env = \"DEMO_PASSWORD\"\n"
+            ))
+        );
+    }
+
+    /// `usb`, reached at a second location too, which makes it record its
+    /// ID.
+    fn usb_in_two_places() -> RepositoryConfig {
+        let mut usb = entry_at("/Volumes/demo-usb/repo");
+        usb.id = Some(RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"));
+        usb.locations.further = vec![Location::of(&entry_at("/srv/demo-usb-copy").settings)];
+        usb
+    }
+
+    /// `usb_in_two_places` in the daemon's layout, after the blank line
+    /// before it.
+    const USB: &str = "\n[repositories.usb]\nrepository = \"/Volumes/demo-usb/repo\"\nrepository-id = \"0707070707070707070707070707070707070707070707070707070707070707\"\npassword-env = \"DEMO_PASSWORD\"\n\n[[repositories.usb.locations]]\nrepository = \"/srv/demo-usb-copy\"\n";
+
+    #[test]
+    fn a_repository_a_save_adds_comes_with_its_further_locations_before_the_plans() {
+        let saved = changed(WRITTEN, |parts| {
+            parts.repositories.insert(alias("usb"), usb_in_two_places());
+        });
+        assert_eq!(
+            saved,
+            Some(WRITTEN.replace(
+                "  options = { timeout = \"60s\" }\n",
+                &format!("  options = {{ timeout = \"60s\" }}\n{USB}"),
+            ))
+        );
+    }
+
+    /// A plan added first follows the last table before the plans: the
+    /// further locations of a repository added with it are among those.
+    #[test]
+    fn a_plan_a_save_adds_first_follows_the_further_locations_of_a_repository_it_adds() {
+        let saved = changed(WRITTEN, |parts| {
+            parts.repositories.insert(alias("usb"), usb_in_two_places());
+            parts.plans.insert(0, docs());
+        });
+        assert_eq!(
+            saved,
+            Some(WRITTEN.replace(
+                "  options = { timeout = \"60s\" }\n",
+                &format!("  options = {{ timeout = \"60s\" }}\n{USB}{DOCS}"),
             ))
         );
     }

@@ -447,6 +447,56 @@ Feature: An agent's configuration
         """
       And the history of the config file holds the old file exactly as it was written
 
+    Scenario: A repository a save adds comes with its further locations, before the plans and their comments
+      Given a config file holding:
+        """
+        schema = 1
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        # The home folder, every night.
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+
+        # How long the history goes back.
+        [plans.retention]
+        keep-daily = 7
+        """
+      When the agent loads the config file
+      And the agent saves the configuration it loaded with the repository "usb" at "/Volumes/demo-usb/repo" added, with its ID "0707070707070707070707070707070707070707070707070707070707070707" and a further location at "/srv/demo-usb-copy"
+      Then the config file reads:
+        """
+        schema = 1
+
+        # The NAS in the hall cupboard.
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [repositories.usb]
+        repository = "/Volumes/demo-usb/repo"
+        repository-id = "0707070707070707070707070707070707070707070707070707070707070707"
+        password-env = "DEMO_PASSWORD"
+
+        [[repositories.usb.locations]]
+        repository = "/srv/demo-usb-copy"
+
+        # The home folder, every night.
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+
+        # How long the history goes back.
+        [plans.retention]
+        keep-daily = 7
+        """
+
     Scenario: A setting a save changes is changed where it is written, beside its comment
       Given a config file holding:
         """
