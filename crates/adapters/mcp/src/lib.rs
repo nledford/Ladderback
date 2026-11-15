@@ -5,7 +5,7 @@
 //! [`Backend`] trait, which connect mode implements as a client of a running
 //! daemon's API ([`Connect`]).
 //!
-//! The protocol is the `rmcp` SDK's (decision NN). It serves the revisions
+//! The protocol is the `rmcp` SDK's (decision 95). It serves the revisions
 //! `2025-06-18` and `2025-11-25`, which start with `initialize`, and
 //! `2026-07-28`, whose requests each name their revision and whose clients
 //! may ask `server/discover` first; anything older is refused, because

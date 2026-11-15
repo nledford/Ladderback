@@ -1,4 +1,4 @@
-# Decision NN: The MCP server as built
+# Decision 95: The MCP server as built
 
 **`ladderback mcp` is built on the official Rust SDK, `rmcp` 3.10, pinned, inside `adapters/mcp` alone; its tools' output schemas come from the `api` types through `schemars`; there is no `operation_log` tool for now; connect mode gets two new HTTP routes so it offers every tool, reads an API token from a file only its owner can read and sends it only to `https` or loopback; a `read`-scope token may read the daemon's build; headless mode takes `serve`'s folders and their variables, with no folder flags; a scratch folder is locked before it is named; `wait_operation` polls every 500 ms; a change whose answer is lost is `daemon-answer-lost`, never resent; and a headless session stops at EOF as `serve` does, leaving its queue to the next `serve`** (recorded 2026-11-14, §4.6, §10.5; decided by the maintainer on #517).
 

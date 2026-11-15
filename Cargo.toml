@@ -152,7 +152,7 @@ proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 # through `rustic_backend`, with these features and more, so it adds no
 # package.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
-# The MCP server's protocol layer (`adapters/mcp`, decision NN): the official
+# The MCP server's protocol layer (`adapters/mcp`, decision 95): the official
 # SDK, which serves clients of the revisions before 2026-07-28 and after it.
 # Pinned exactly: its majors come months apart and break, so an upgrade is a
 # change of its own. No defaults: no macros; `server` and `transport-io`
@@ -165,7 +165,7 @@ rust-embed = "8.13.0"
 rustic_backend = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284ac43d34bde9334210bcd40f824a0d8c69" }
 rustic_core = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284ac43d34bde9334210bcd40f824a0d8c69" }
 # JSON schemas of the `api` wire types, behind its `schemars` feature, for
-# the MCP server's output schemas (decision NN). Already in the tree through
+# the MCP server's output schemas (decision 95). Already in the tree through
 # `rmcp`, so it adds no package.
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
