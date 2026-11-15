@@ -107,7 +107,8 @@ A change is done when:
 - any new port has a contract test run against both fake and real adapter;
 - every invariant in §0 it touches has a test;
 - for UI changes: axe-core is clean, the journey works by keyboard alone, and new components have contract tests; the milestone's screen-reader pass covers them (§4.5);
-- docs are updated, and `fmt` and `clippy` are clean, which includes the robustness rules (§13.5).
+- docs are updated, and `fmt` and `clippy` are clean, which includes the robustness rules (§13.5);
+- paragraphs and list items in `docs/` stay under 150 words, which `just lint` checks (`scripts/check-paragraph-length.ts`; a file in `scripts/paragraph-length-baseline.txt` is exempt until its restructure, and its line goes then).
 
 ### 13.5 Robustness rules
 
