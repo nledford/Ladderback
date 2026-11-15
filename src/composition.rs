@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
+use app::browse::{BrowseError, BrowseSnapshot};
 use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::history::{GetOperation, ListOperations};
@@ -43,6 +44,7 @@ use app::snapshots::{ListSnapshots, SnapshotError};
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::RepositoryAlias;
+use domain::browse::FolderPath;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
@@ -55,7 +57,6 @@ use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SecretWarning, Template,
 };
-use domain::browse::FolderPath;
 use domain::{AgentId, OperationId, PlanId, RepositoryId, SnapshotId};
 use engine::{Recorded, RemovedKind, WorkerEngine};
 use futures::stream::StreamExt;
@@ -2576,8 +2577,97 @@ impl Catalog for ConfigCatalog {
         folder: FolderPath,
         from: u64,
     ) -> Result<api::FolderDto, FolderError> {
-        let _ = (alias, snapshot, folder, from);
-        todo!("ConfigCatalog::folder")
+        use app::maintenance::MaintenanceError;
+        // The repository is refused as its listing is (`snapshots`).
+        let unknown = || FolderError::Repository(SnapshotsError::Unknown);
+        let alias = RepositoryAlias::parse(&alias).map_err(|_| unknown())?;
+        let config = self.config.load().await.map_err(|error| {
+            FolderError::Repository(config_unusable(error, |code, args, detail| {
+                SnapshotsError::Unavailable { code, args, detail }
+            }))
+        })?;
+        let repository = config.repository(&alias).ok_or_else(unknown)?;
+        let path = folder.to_string();
+        let read = BrowseSnapshot::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            ResolveRepository::new(Arc::new(SystemSecrets::default()))
+                .telling(Arc::new(log_secret_warning)),
+        )
+        .folder(
+            OperationId::from_uuid(Uuid::now_v7()),
+            &alias,
+            repository,
+            snapshot,
+            folder,
+            from,
+        )
+        .await;
+        // A secret: its code and the words a command or the platform gave,
+        // masked of every secret of the repository, in the log as in the
+        // answer (I4).
+        let refused = |refusal: SecretRefusal| {
+            log::warn!(
+                "a folder of a snapshot of {} could not be read: {:?}{}",
+                alias.as_str(),
+                refusal.code,
+                refusal
+                    .detail
+                    .as_deref()
+                    .map_or_default(|detail| format!(" ({detail})"))
+            );
+            FolderError::Repository(SnapshotsError::SecretRefused(refusal))
+        };
+        let page = match read {
+            Ok(page) => page,
+            Err(BrowseError::SnapshotUnknown) => return Err(FolderError::SnapshotUnknown),
+            Err(BrowseError::FolderUnknown) => return Err(FolderError::FolderUnknown),
+            Err(BrowseError::Resolve(error)) => {
+                return Err(refused(
+                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await,
+                ));
+            }
+            Err(BrowseError::Read(MaintenanceError::Failed(
+                FailureReason::SecretsTooLargeToMask { field, limit },
+            ))) => return Err(refused(too_much_to_mask(field, limit))),
+            Err(error) => {
+                let said = failure_redactor(&repository.settings, &SystemSecrets::default())
+                    .await
+                    .redact(&format!("{error:?}"));
+                log::warn!(
+                    "a folder of a snapshot of {} could not be read: {said}",
+                    alias.as_str()
+                );
+                return Err(FolderError::Repository(SnapshotsError::Unavailable {
+                    code: ErrorCode::EngineUnavailable,
+                    args: Vec::new(),
+                    detail: None,
+                }));
+            }
+        };
+        Ok(api::FolderDto {
+            path,
+            entries: page.entries.into_iter().map(entry_dto).collect(),
+            total: page.total,
+            next: page.next,
+        })
+    }
+}
+
+/// An entry of a snapshot's folder as the page is told of it.
+fn entry_dto(entry: domain::browse::Entry) -> api::EntryDto {
+    use domain::browse::EntryKind;
+    api::EntryDto {
+        name: entry.name.into(),
+        display: entry.display.into(),
+        kind: match entry.kind {
+            EntryKind::Folder => api::EntryKindDto::Folder,
+            EntryKind::File => api::EntryKindDto::File,
+            EntryKind::Link => api::EntryKindDto::Link,
+            EntryKind::Other => api::EntryKindDto::Other,
+        },
+        size: entry.size,
+        modified: entry.modified.map(|at| at.to_string()),
     }
 }
 

@@ -802,8 +802,62 @@ async fn read_folder(
     axum::extract::Path((alias, snapshot)): axum::extract::Path<(String, String)>,
     axum::extract::Query(params): axum::extract::Query<FolderParams>,
 ) -> Response {
-    let _ = (state, alias, snapshot, params);
-    todo!("read_folder")
+    let from = match params.from {
+        None => 0,
+        Some(cursor) => match cursor.parse::<u64>() {
+            Ok(from) => from,
+            Err(_) => {
+                return refused_with(
+                    StatusCode::BAD_REQUEST,
+                    api::ErrorCode::InvalidCursor,
+                    vec![("cursor", api::MsgArg::Text(cursor))],
+                );
+            }
+        },
+    };
+    let Ok(id) = domain::SnapshotId::parse(&snapshot) else {
+        return snapshot_unknown(snapshot);
+    };
+    let path = params.path.unwrap_or_default();
+    let Ok(folder) = domain::browse::FolderPath::parse(&path) else {
+        return folder_unknown(path);
+    };
+    match state.catalog.folder(alias.clone(), id, folder, from).await {
+        Ok(page) => (StatusCode::OK, axum::Json(page)).into_response(),
+        Err(FolderError::SnapshotUnknown) => snapshot_unknown(snapshot),
+        Err(FolderError::FolderUnknown) => folder_unknown(path),
+        Err(FolderError::Repository(SnapshotsError::Unknown)) => refused_with(
+            StatusCode::NOT_FOUND,
+            api::ErrorCode::RepositoryUnknown,
+            vec![("alias", api::MsgArg::Text(alias))],
+        ),
+        Err(FolderError::Repository(SnapshotsError::SecretRefused(secret))) => {
+            repositories::secret_refusal(&secret)
+        }
+        Err(FolderError::Repository(SnapshotsError::Unavailable { code, args, detail })) => {
+            unavailable(code, args, detail)
+        }
+    }
+}
+
+/// The refusal of a snapshot the repository doesn't hold, naming it as the
+/// request did.
+fn snapshot_unknown(snapshot: String) -> Response {
+    refused_with(
+        StatusCode::NOT_FOUND,
+        api::ErrorCode::SnapshotUnknown,
+        vec![("snapshot", api::MsgArg::Text(snapshot))],
+    )
+}
+
+/// The refusal of a folder the snapshot doesn't hold, naming it as the
+/// request did.
+fn folder_unknown(path: String) -> Response {
+    refused_with(
+        StatusCode::NOT_FOUND,
+        api::ErrorCode::FolderUnknown,
+        vec![("path", api::MsgArg::Text(path))],
+    )
 }
 
 /// A typed refusal (§10.1) with `status`.
