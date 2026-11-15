@@ -1,6 +1,6 @@
 # Decision NN: The MCP server as built
 
-**`ladderback mcp` is built on the official Rust SDK, `rmcp` 3.10, pinned, inside `adapters/mcp` alone; its tools' output schemas come from the `api` types through `schemars`; there is no `operation_log` tool for now; connect mode gets two new HTTP routes so it offers every tool; and a `read`-scope token may read the daemon's build** (recorded 2026-11-14, §4.6, §10.5; decided by the maintainer on #517). It amends decision 20, which planned the protocol and the tool list before revision `2026-07-28` existed, and decision 93, whose `GET /api/v1/session` was for a session only.
+**`ladderback mcp` is built on the official Rust SDK, `rmcp` 3.10, pinned, inside `adapters/mcp` alone; its tools' output schemas come from the `api` types through `schemars`; there is no `operation_log` tool for now; connect mode gets two new HTTP routes so it offers every tool; a `read`-scope token may read the daemon's build; headless mode takes `serve`'s folders and their variables, with no folder flags; and a scratch folder is locked before it is named** (recorded 2026-11-14, §4.6, §10.5; decided by the maintainer on #517). It amends decision 20, which planned the protocol and the tool list before revision `2026-07-28` existed, and decision 93, whose `GET /api/v1/session` was for a session only.
 
 ## Why
 
@@ -13,10 +13,12 @@
 
 ## Decided
 
-1. **Placement:** one crate, `adapters/mcp`, an inbound adapter beside `http`. Its tools call the `Backend` trait the crate defines; connect mode's implementation is an HTTP client that depends on `api` alone (§3.2).
+1. **Placement:** one crate, `adapters/mcp`, an inbound adapter beside `http`. Its tools call the `Backend` trait the crate defines; connect mode's implementation is an HTTP client that depends on `api` alone (§3.2). The in-process implementation, for headless and scratch modes, lives in the composition root and calls the handles `serve`'s router reads, so the two modes can differ only in transport, which the parity suite checks.
 2. **Stdio:** an incoming message over 1 MiB is dropped unread and the session goes on; standard output carries protocol messages only; the session ends when standard input closes.
 3. **`status`:** this program's build, then in connect mode the daemon's build, sign-in state and exposure, each plan with its next run and last operation, and the operations queued or running among the newest 200.
 4. **No answer from the daemon,** or an answer that isn't the API's, is the tool error `daemon-unreachable`; a refusal from the daemon is handed on as its own `{code, args}`.
 5. **`--connect`** takes an `http` or `https` address of a host, with no user name, password, query or fragment: a password there would be on the command line.
+6. **`--headless`** opens the folders `serve` opens, `LADDERBACK_CONFIG_DIR`, `LADDERBACK_DATA_DIR` and `LADDERBACK_CACHE_DIR` included, and takes no `--config` or `--data` flag: one way to name the folders for both commands, and the data-dir lock (§9) keeps a session off a data dir `serve` or another session holds.
+7. **`--scratch`** makes its folder under a hidden staging name, mode 0700, takes that folder's data-dir lock, then renames it to `ladderback-scratch-<random>`, so no sweep ever sees it unlocked. A sweep deletes only folders with that prefix, not links, whose lock it can take: a crashed session's, never a live one's, nor another user's in a shared temporary folder.
 
 Left out: proposal tools (#518), the hub's `agent` argument (M5), and a per-operation log.
