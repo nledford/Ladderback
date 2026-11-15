@@ -21,7 +21,6 @@ docs/design/decisions/44-reviewing-maintenance-before-it-runs.md
 docs/design/decisions/45-masking-a-text-cut-at-a.md
 docs/design/decisions/46-the-toolings-language.md
 docs/design/decisions/48-who-maintains-a-saved-repository.md
-docs/design/decisions/49-one-name-per-repository.md
 docs/design/decisions/51-what-a-checks-findings-are.md
 docs/design/decisions/53-creating-an-imported-repository-from-its-row.md
 docs/design/decisions/54-early-release-builds.md
