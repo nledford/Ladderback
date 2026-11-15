@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
+use crate::badge::BadgeState;
 use crate::components::{
     Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
     address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
@@ -933,13 +934,13 @@ fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
     rows.into_iter().map(|row| row.summary.id.clone()).collect()
 }
 
-/// A status as its badge shows it: which pill, and its text. A status this
-/// build doesn't know is the empty pill with the status as it came, never a
+/// A status as its badge shows it: its state, and its text. A status this
+/// build doesn't know is the empty state with the status as it came, never a
 /// blank cell.
-fn badge_of(localizer: &Localizer, status: &str) -> (&'static str, String) {
+fn badge_of(localizer: &Localizer, status: &str) -> (BadgeState, String) {
     match status_display(status) {
         Some((state, label)) => (state, text(localizer, label)),
-        None => ("empty", status.to_owned()),
+        None => (BadgeState::Empty, status.to_owned()),
     }
 }
 
@@ -952,17 +953,20 @@ fn key(row: &OperationRow) -> &str {
         .unwrap_or(&row.summary.queued_at)
 }
 
-/// A status as the badge and the label show it: which pill, and which
+/// A status as the badge and the label show it: which state, and which
 /// message; `None` for a status this build doesn't know, which `badge_of`
 /// shows as it came.
-fn status_display(status: &str) -> Option<(&'static str, MessageId)> {
+fn status_display(status: &str) -> Option<(BadgeState, MessageId)> {
     match status {
-        "queued" => Some(("empty", msg::UI_STATUS_QUEUED)),
-        "running" => Some(("loading", msg::UI_STATUS_RUNNING)),
-        "succeeded" => Some(("success", msg::UI_STATUS_SUCCEEDED)),
-        "succeeded-with-warnings" => Some(("success", msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS)),
-        "failed" => Some(("error", msg::UI_STATUS_FAILED)),
-        "cancelled" => Some(("empty", msg::UI_STATUS_CANCELLED)),
+        "queued" => Some((BadgeState::Queued, msg::UI_STATUS_QUEUED)),
+        "running" => Some((BadgeState::Running, msg::UI_STATUS_RUNNING)),
+        "succeeded" => Some((BadgeState::Succeeded, msg::UI_STATUS_SUCCEEDED)),
+        "succeeded-with-warnings" => Some((
+            BadgeState::SucceededWithWarnings,
+            msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS,
+        )),
+        "failed" => Some((BadgeState::Failed, msg::UI_STATUS_FAILED)),
+        "cancelled" => Some((BadgeState::Cancelled, msg::UI_STATUS_CANCELLED)),
         _ => None,
     }
 }
@@ -2170,35 +2174,38 @@ mod tests {
         let localizer = Localizer::new(&[]);
         assert_eq!(
             badge_of(&localizer, "running"),
-            ("loading", "Running".to_owned())
+            (BadgeState::Running, "Running".to_owned())
         );
         assert_eq!(
             badge_of(&localizer, "succeeded-with-warnings"),
-            ("success", "Succeeded with warnings".to_owned())
+            (
+                BadgeState::SucceededWithWarnings,
+                "Succeeded with warnings".to_owned()
+            )
         );
         assert_eq!(
             badge_of(&localizer, "pausing"),
-            ("empty", "pausing".to_owned()),
+            (BadgeState::Empty, "pausing".to_owned()),
             "a status this build doesn't know is never a blank cell"
         );
     }
 
     #[test]
     fn every_status_the_store_names_has_its_pill_and_its_message() {
-        let pills = [
-            ("queued", "empty", msg::UI_STATUS_QUEUED),
-            ("running", "loading", msg::UI_STATUS_RUNNING),
-            ("succeeded", "success", msg::UI_STATUS_SUCCEEDED),
+        let states = [
+            ("queued", BadgeState::Queued, msg::UI_STATUS_QUEUED),
+            ("running", BadgeState::Running, msg::UI_STATUS_RUNNING),
+            ("succeeded", BadgeState::Succeeded, msg::UI_STATUS_SUCCEEDED),
             (
                 "succeeded-with-warnings",
-                "success",
+                BadgeState::SucceededWithWarnings,
                 msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS,
             ),
-            ("failed", "error", msg::UI_STATUS_FAILED),
-            ("cancelled", "empty", msg::UI_STATUS_CANCELLED),
+            ("failed", BadgeState::Failed, msg::UI_STATUS_FAILED),
+            ("cancelled", BadgeState::Cancelled, msg::UI_STATUS_CANCELLED),
         ];
-        for (status, pill, label) in pills {
-            assert_eq!(status_display(status), Some((pill, label)), "{status}");
+        for (status, state, label) in states {
+            assert_eq!(status_display(status), Some((state, label)), "{status}");
         }
         assert_eq!(
             status_display("pausing"),

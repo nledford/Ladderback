@@ -1026,6 +1026,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1af709f1f33454bf52eadfc8c78b3b9ef9cb26fb54d16dc9cd9a7299f899fd1b"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "convert_case_extras"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2508,10 +2517,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "285b05858fe7d58c5eff059f7b46c228fd86996d996c59eb35fc0340d174f640"
 dependencies = [
  "futures",
+ "js-sys",
  "or_poisoned",
  "pin-project-lite",
  "serde",
  "throw_error",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3297,6 +3308,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 dependencies = [
  "spin 0.9.9",
+]
+
+[[package]]
+name = "lepticons-data"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d184a65a39fd9bb88363023805524910dff0a54bf4eede1dca994307a1efb9d7"
+dependencies = [
+ "convert_case 0.12.0",
+ "strum 0.28.0",
+ "strum_macros 0.28.0",
 ]
 
 [[package]]
@@ -6326,6 +6348,7 @@ dependencies = [
  "futures",
  "gloo-net",
  "http",
+ "inventory",
  "js-sys",
  "or_poisoned",
  "pin-project-lite",
@@ -7823,6 +7846,7 @@ dependencies = [
  "jiff",
  "js-sys",
  "l10n",
+ "lepticons-data",
  "leptos",
  "leptos_router",
  "serde",

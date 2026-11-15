@@ -154,6 +154,15 @@ Feature: Each row of the Operations page names its operation and says what it di
     Then the row "demo-home" of the table "Operations" shows "Succeeded" in its "Status" column
     And the row "demo-home" of the table "Operations" lists "3 files" in its "Result" column
 
+  Scenario: A backup that ends while its row is open changes its status badge's icon
+    Given the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the icon of the status badge of the row "demo-home" of the table "Operations" is noted
+    And the daemon reports that the backup of "demo-home" has succeeded with 3 files
+    Then the row "demo-home" of the table "Operations" shows "Succeeded" in its "Status" column
+    And the status badge of the row "demo-home" of the table "Operations" draws another icon than the one noted
+
   Scenario: Runs that end while the page reads its history and reconnects each show what they did
     Given the daemon reports running backups of "demo-home" and "demo-docs"
     When I open the address "/operations"

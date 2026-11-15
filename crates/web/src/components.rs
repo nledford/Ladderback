@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use crate::announcer::{Clock, Politeness};
+use crate::badge::BadgeState;
 use l10n::Localizer;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
@@ -761,10 +762,10 @@ where
 /// pill follows them in place, as a live row's does.
 #[component]
 pub fn StatusBadge(
-    #[prop(into)] state: Signal<&'static str>,
+    #[prop(into)] state: Signal<BadgeState>,
     #[prop(into)] label: Signal<String>,
 ) -> impl IntoView {
-    view! { <span class=move || format!("badge badge-{}", state.get())>{move || label.get()}</span> }
+    view! { <span class=move || format!("badge badge-{}", state.get().pill())>{move || label.get()}</span> }
 }
 /// A progress bar (§4.5; §16, decision 83): `role="progressbar"`, named
 /// `label`, and a stop in the tab order, so a keyboard user reaches it and

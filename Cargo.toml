@@ -137,6 +137,14 @@ jiff = { version = "0.2.40", features = ["serde", "tzdb-bundle-always"] }
 # numbers and instants with (technical design §8.4).
 js-sys = "0.3.107"
 keyring = { version = "3.6.3", default-features = false }
+# Lucide's icons for the status badges (technical design §4.5), as data: a
+# typed enum and each icon's SVG shapes, without a renderer. Every icon of an
+# enabled category is compiled into the wasm, used or not, so the defaults
+# (all 42 categories) are off and only the smallest set holding the badges'
+# icons is on, 267 icons: `notifications` (circle-check, triangle-alert),
+# `time` (clock), `cursors` (loader-circle), `shapes` (circle-dashed) and
+# `math` (circle-x, circle-slash).
+lepticons-data = { version = "0.1.2", default-features = false, features = ["notifications", "time", "cursors", "shapes", "math"] }
 leptos = { version = "0.8.23", features = ["csr"] }
 leptos_router = "0.8"
 log = "0.4.35"
