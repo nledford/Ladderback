@@ -81,15 +81,17 @@ clippy:
 
 # Lint: `clippy`, clippy on the web UI (wasm32), the type check of the
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
-# dev-dependency), the journey lint, then the check that every path AGENTS.md
-# and CLAUDE.md name exists.
-[doc('Clippy on the host and the web UI, the TypeScript type check, the journey lint, and the AGENTS.md path check.')]
+# dev-dependency), the journey lint, the check that every path AGENTS.md and
+# CLAUDE.md name exists, then the check that no paragraph in docs/ runs over
+# 150 words (the baseline lists the files exempt for now).
+[doc('Clippy on the host and the web UI, the TypeScript type check, the journey lint, the AGENTS.md path check, and the docs paragraph-length check.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
+    node scripts/check-paragraph-length.ts
 
 # Lint the GitHub Actions workflows and the repository's own actions:
 # actionlint for the workflows' syntax, expressions and shell steps, zizmor for
