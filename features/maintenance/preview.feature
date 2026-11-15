@@ -58,6 +58,13 @@ Feature: A maintenance preview tells what a run would do before it does anything
     Then the preview says the plan "home" would lose 2 of its 3 snapshots
     And the preview lists the plans "home" in that order
 
+  Scenario: A forget preview of a plan that keeps everything names nothing to remove
+    Given a plan "home" with no policy set
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner previews forgetting the repository
+    Then the preview says the plan "home" would lose 0 of its 3 snapshots
+    And the engine was never asked to remove anything
+
   Scenario: A forget preview takes no slot and logs nothing
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots of the plan "home"

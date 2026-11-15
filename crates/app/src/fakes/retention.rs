@@ -1,8 +1,9 @@
 //! A `Retention` fake for the acceptance runner: it keeps the newest
 //! `keep-last` snapshots and lets the rest go, and refuses a policy that
-//! uses anything else, `keep-within` included (the shared contract suite
-//! checks it against the real adapter, which is rustic's own retention,
-//! on the `keep-last` path).
+//! uses anything else, `keep-within` included, and a policy that sets
+//! nothing, as rustic's retention does (the shared contract suite checks it
+//! against the real adapter, which is rustic's own retention, on the
+//! `keep-last` path and on the empty policy).
 
 use async_trait::async_trait;
 use domain::SnapshotId;
@@ -33,8 +34,11 @@ impl Retention for FakeRetention {
         {
             return Err(RetentionError::InvalidPolicy);
         }
+        // Rustic refuses a policy that sets no `keep-*` option, so the fake
+        // does too: the use case decides an empty policy keeps everything,
+        // and never asks.
         let Some(keep_last) = keep_last else {
-            return Ok(Vec::new());
+            return Err(RetentionError::InvalidPolicy);
         };
         if keep_last.is_all() {
             return Ok(Vec::new());
