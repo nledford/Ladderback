@@ -22,13 +22,13 @@ pub(super) struct ServiceE2e {
 }
 
 /// The service's name: the systemd unit or the launchd label.
-const NAME: &str = if cfg!(target_os = "macos") {
+pub(super) const NAME: &str = if cfg!(target_os = "macos") {
     "io.github.nledford.ladderback"
 } else {
     "ladderback.service"
 };
 
-fn managers(agent: &Agent) -> &FakeServiceManagers {
+pub(super) fn managers(agent: &Agent) -> &FakeServiceManagers {
     agent
         .service
         .managers

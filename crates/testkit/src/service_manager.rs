@@ -5,18 +5,22 @@
 //! [`FakeServiceManagers::bin`] first, or alone, on the `PATH` of what it
 //! runs never reaches the real managers.
 //!
-//! Each knows only the calls Ladderback makes: `systemctl --user` with
-//! `daemon-reload`, `enable <file>`, `restart <unit>` and `disable --now
-//! <unit>`; `launchctl` with `print`, `enable`, `bootstrap` and `bootout` in
-//! the `gui/<uid>` domain; `loginctl show-user <uid> -p Linger`. They answer
+//! Each knows only the calls Ladderback and `just install-restart` make:
+//! `systemctl --user` with `daemon-reload`, `enable <file>`, `restart
+//! <unit>`, `disable --now <unit>` and `show -p MainPID --value <unit>`;
+//! `launchctl` with `print`, `enable`, `bootstrap` and `bootout` in the
+//! `gui/<uid>` domain; `loginctl show-user <uid> -p Linger`. They answer
 //! what the real ones answer to a call that can't succeed: an `enable` of a
 //! missing file, a `bootstrap` of a service already running, a `bootout` of
-//! one that isn't. Told to, the `launchctl` keeps an agent it booted out for
-//! a while, as the real one does while the agent's program is still
-//! stopping ([`FakeServiceManagers::stop_slowly`]), the `systemctl` takes a
-//! while to return from a call that stops the unit, as the real one waits
-//! for the stop ([`FakeServiceManagers::stop_taking`]), and the `loginctl`
-//! says the user lingers ([`FakeServiceManagers::linger`]) or fails
+//! one that isn't. Each start of a service gives it a new process ID, which
+//! `show` and `print` name as the real ones do, unless told to keep the one
+//! it had ([`FakeServiceManagers::keep_process_on_restart`]). Told to, the
+//! `launchctl` keeps an agent it booted out for a while, as the real one does
+//! while the agent's program is still stopping
+//! ([`FakeServiceManagers::stop_slowly`]), the `systemctl` takes a while to
+//! return from a call that stops the unit, as the real one waits for the stop
+//! ([`FakeServiceManagers::stop_taking`]), and the `loginctl` says the user
+//! lingers ([`FakeServiceManagers::linger`]) or fails
 //! ([`FakeServiceManagers::refuse_linger_check`]).
 
 use std::fs;
@@ -31,9 +35,18 @@ pub struct FakeServiceManagers {
 
 /// Every call, its arguments on one line, then its environment as `export
 /// -p` prints it. Then, when told to, it hangs or refuses, ending with the
-/// refusal's code (1 unless told otherwise).
+/// refusal's code (1 unless told otherwise). `start` runs the service it
+/// names with the next process ID, or the last one again when told to keep
+/// it, and writes the ID in the service's `runs-` file.
 const PRELUDE: &str = r#"#!/bin/sh
 state='@STATE@'
+start() {
+  pid=4100
+  [ ! -f "$state/last-pid" ] || read -r pid < "$state/last-pid"
+  [ -f "$state/same-pid" ] || pid=$((pid + 1))
+  printf '%s\n' "$pid" > "$state/last-pid"
+  printf '%s\n' "$pid" > "$state/runs-$1"
+}
 { printf '%s' "${0##*/}"; printf ' %s' "$@"; printf '\n'; export -p; } >> "$state/calls"
 if [ -f "$state/hang" ]; then exec /bin/sleep 60; fi
 if [ -f "$state/refusal" ]; then
@@ -54,11 +67,14 @@ case "$2" in
   restart)
     [ -f "$state/enabled-$3" ] || { echo "Failed to restart $3: Unit $3 not found." >&2; exit 5; }
     [ ! -f "$state/stop-takes" ] || { read -r took < "$state/stop-takes"; /bin/sleep "$took"; }
-    : > "$state/runs-$3" ;;
+    start "$3" ;;
   disable)
     [ "$3" = --now ] || { echo "only disable --now is faked" >&2; exit 64; }
     [ ! -f "$state/stop-takes" ] || { read -r took < "$state/stop-takes"; /bin/sleep "$took"; }
     /bin/rm -f "$state/enabled-$4" "$state/runs-$4" ;;
+  show)
+    [ "$3" = -p ] && [ "$4" = MainPID ] && [ "$5" = --value ] || { echo "only show -p MainPID --value is faked" >&2; exit 64; }
+    if [ -f "$state/runs-$6" ]; then /bin/cat "$state/runs-$6"; else echo 0; fi ;;
   *) echo "unknown command $2" >&2; exit 64 ;;
 esac
 "#;
@@ -74,13 +90,15 @@ const LAUNCHCTL: &str = r#"case "$1" in
         /bin/rm -f "$state/stopping-$label" "$state/runs-$label"
       fi
     fi
-    [ -f "$state/runs-$label" ] || { echo "Could not find service \"$label\" in domain for user gui" >&2; exit 113; } ;;
+    [ -f "$state/runs-$label" ] || { echo "Could not find service \"$label\" in domain for user gui" >&2; exit 113; }
+    read -r pid < "$state/runs-$label"
+    printf '%s = {\n\tstate = running\n\tpid = %s\n}\n' "$2" "$pid" ;;
   enable) ;;
   bootstrap)
     [ -f "$3" ] || { echo "Bootstrap failed: 2: No such file or directory" >&2; exit 2; }
     label=${3##*/}; label=${label%.plist}
     [ ! -f "$state/runs-$label" ] || { echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; }
-    : > "$state/runs-$label" ;;
+    start "$label" ;;
   bootout)
     [ -f "$state/runs-${2##*/}" ] || { echo "Boot-out failed: 3: No such process" >&2; exit 3; }
     if [ -f "$state/stop-slowly" ]; then
@@ -167,6 +185,39 @@ impl FakeServiceManagers {
     /// (`ladderback.service`) or a launchd label.
     pub fn runs(&self, name: &str) -> bool {
         self.state().join(format!("runs-{name}")).exists()
+    }
+
+    /// The process ID the service `name` runs under, while it runs.
+    pub fn process(&self, name: &str) -> Option<u32> {
+        fs::read_to_string(self.state().join(format!("runs-{name}")))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    /// Ends the service `name`'s process, as when it crashed and its manager
+    /// gave up starting it again.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn end(&self, name: &str) {
+        match fs::remove_file(self.state().join(format!("runs-{name}"))) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("the service's process ends: {error}"),
+        }
+    }
+
+    /// Makes each start from now on keep the process ID the last one gave,
+    /// as if the restart never happened.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn keep_process_on_restart(&self) {
+        fs::write(self.state().join("same-pid"), "").expect("the kept process");
     }
 
     /// Makes every call from now on fail with exit code 1, saying `words` on
