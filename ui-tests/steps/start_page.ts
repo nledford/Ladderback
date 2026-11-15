@@ -228,6 +228,32 @@ Then("the page has a content security policy", async function (this: BrowserWorl
   assert.doesNotMatch(policy, /unsafe-inline/);
 });
 
+// The tab shows the icon outside the page, where Playwright can't look, so
+// the step asks the daemon for each icon the page links, then has the page
+// load it as an image, under its content security policy.
+Then(
+  "the page names an icon for the browser tab, served as an image the browser keeps",
+  async function (this: BrowserWorld) {
+    const icons = await this.page
+      .locator('link[rel~="icon"]')
+      .evaluateAll((links) => links.map((link) => (link as HTMLLinkElement).href));
+    assert.notEqual(icons.length, 0, "the page links no icon");
+    for (const icon of icons) {
+      const response = await this.page.request.get(icon);
+      assert.equal(response.status(), 200, icon);
+      assert.match(response.headers()["content-type"] ?? "", /^image\//, icon);
+      // Trunk names the file by its content, so the daemon lets the browser
+      // keep it until a release changes it.
+      assert.match(response.headers()["cache-control"] ?? "", /immutable/, icon);
+      await this.page.evaluate(async (href) => {
+        const image = new Image();
+        image.src = href;
+        await image.decode();
+      }, icon);
+    }
+  },
+);
+
 Then("the browser blocked nothing the page asked for", async function (this: BrowserWorld) {
   assert.deepEqual(this.policyBlocks, []);
 });

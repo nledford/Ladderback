@@ -1916,6 +1916,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn only_files_named_by_their_content_are_cached_for_good() {
+        // Names as `trunk build` writes them: a content hash of 16 hex digits,
+        // or fewer for the script and the module when the hash starts with
+        // zeros, since Trunk doesn't pad theirs.
+        let hashed = [
+            "web-3fb4055f36b2f8e4.js",
+            "web-10133c38bd221a27_bg.wasm",
+            "web-fb4055f36b2f8e4.js",
+            "web-fb405512.js",
+            "style-d60c77a651c609fd.css",
+            "favicon-31b6d255c3714cba.svg",
+            "favicon-32-73b3bd9fb011307a.png",
+        ];
+        let unhashed = [
+            "favicon.svg",
+            "favicon-32.png",
+            "icon-maskable-512.png",
+            "web-fb40551.js",
+            "web-03fb4055f36b2f8e4.js",
+            "icon-deadbeefxl.png",
+            "snippets/web-a1b2c3d4e5f60718/inline0.js",
+        ];
+        let assets: Arc<dyn AssetSource> = Arc::new(Files(
+            hashed
+                .iter()
+                .chain(&unhashed)
+                .map(|name| (*name, "x"))
+                .collect(),
+        ));
+        for name in hashed {
+            let response = request(Arc::clone(&assets), Method::GET, &format!("/{name}"), "").await;
+            assert_eq!(response.status(), StatusCode::OK, "{name}");
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                "public, max-age=31536000, immutable",
+                "{name}: a new build gives a changed file a new name"
+            );
+        }
+        for name in unhashed {
+            let response = request(Arc::clone(&assets), Method::GET, &format!("/{name}"), "").await;
+            assert_eq!(response.status(), StatusCode::OK, "{name}");
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                "no-cache",
+                "{name}: a file that keeps its name across builds must be revalidated"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn client_side_routes_get_the_entry_page() {
         let response = get("/machines/laptop").await;
         assert_eq!(response.status(), StatusCode::OK);

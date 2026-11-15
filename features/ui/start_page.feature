@@ -117,6 +117,11 @@ Feature: Start page
     Then the page has a content security policy
     And the browser blocked nothing the page asked for
 
+  Scenario: The browser tab shows Ladderback's icon
+    When I open the web UI
+    Then the page names an icon for the browser tab, served as an image the browser keeps
+    And the browser blocked nothing the page asked for
+
   Scenario: The browser refuses a script the page doesn't carry
     When I open the web UI
     And a script the page doesn't carry is added to it
