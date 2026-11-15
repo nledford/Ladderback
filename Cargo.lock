@@ -3601,6 +3601,7 @@ dependencies = [
  "api",
  "async-trait",
  "axum",
+ "domain",
  "reqwest",
  "rmcp",
  "serde",

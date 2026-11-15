@@ -11,6 +11,8 @@ publish.workspace = true
 # The wire types, with their JSON schemas for the tools' output schemas.
 api = { workspace = true, features = ["schemars"] }
 async-trait.workspace = true
+# The tag that names a snapshot's plan, which `list_snapshots` filters by.
+domain.workspace = true
 # Connect mode's client of the daemon's API (§4.6): no defaults, rustls for an
 # `https` daemon.
 reqwest.workspace = true

@@ -1,8 +1,9 @@
 //! The MCP server's wiring (technical design §4.6): `ladderback mcp
 //! --connect` drives the daemon at the address it was given through the
-//! connect backend; `--headless` runs a session of its own on Ladderback's
-//! folders, and `--scratch` one in a scratch folder it seeds and deletes,
-//! both through the in-process backend. Each names this program's build.
+//! connect backend, with the API token of its token file when there is one;
+//! `--headless` runs a session of its own on Ladderback's folders, and
+//! `--scratch` one in a scratch folder it seeds and deletes, both through
+//! the in-process backend. Each names this program's build.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -61,11 +62,20 @@ pub(crate) fn connect(
     token_file: Option<&Path>,
     config_dir: Option<&Path>,
 ) -> Result<::mcp::Server, Refused> {
-    let _ = (token_file, config_dir);
+    let token = api_token(token_file, config_dir)?;
     let backend = ::mcp::Connect::new(daemon).map_err(|error| Refused {
         message: msg::CLI_MCP_CANNOT_START,
         args: vec![("detail", text(error))],
     })?;
+    let backend = match token {
+        Some(token) => backend
+            .with_token(token)
+            .map_err(|::mcp::TokenOverPlainHttp| Refused {
+                message: msg::CLI_MCP_TOKEN_OVER_PLAIN_HTTP,
+                args: Vec::new(),
+            })?,
+        None => backend,
+    };
     Ok(::mcp::Server::new(
         Arc::new(backend),
         crate::build_info::running(),
@@ -84,8 +94,29 @@ fn api_token(
     token_file: Option<&Path>,
     config_dir: Option<&Path>,
 ) -> Result<Option<::mcp::ApiToken>, Refused> {
-    let _ = (token_file, config_dir);
-    todo!()
+    let path: PathBuf = match (token_file, config_dir) {
+        (Some(path), _) => path.to_owned(),
+        (None, Some(folder)) => folder.join(platform::token_file::DEFAULT_NAME),
+        (None, None) => return Ok(None),
+    };
+    let unreadable = |detail: String| Refused {
+        message: msg::CLI_MCP_TOKEN_FILE_UNREADABLE,
+        args: vec![("file", text(path.display())), ("detail", text(detail))],
+    };
+    let held = match platform::token_file::read(&path) {
+        Ok(Some(held)) => held,
+        Ok(None) if token_file.is_some() => {
+            return Err(Refused {
+                message: msg::CLI_MCP_TOKEN_FILE_MISSING,
+                args: vec![("file", text(path.display()))],
+            });
+        }
+        Ok(None) => return Ok(None),
+        Err(error) => return Err(unreadable(error.detail)),
+    };
+    ::mcp::ApiToken::parse(&held)
+        .map(Some)
+        .ok_or_else(|| unreadable("it holds no API token".to_owned()))
 }
 
 /// The server for a headless session on Ladderback's folders, which it

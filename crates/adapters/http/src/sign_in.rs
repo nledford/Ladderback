@@ -153,17 +153,23 @@ pub(crate) async fn enforce(
 }
 
 /// `GET /api/v1/session`: whether sign-in is on, and whether the request's
-/// session is live, with its CSRF token when it is.
+/// session is live, with its CSRF token when it is. A request with a `read`
+/// token is judged by the token alone, its cookie ignored (decision 93): it
+/// has no session, and is told the build, as a signed-in page is.
 pub(crate) async fn current(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
     State(build): State<BuildDto>,
+    token: Option<axum::Extension<crate::api_tokens::TokenOf>>,
     headers: HeaderMap,
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
         SignIn::Off(kept) => return answer_off(kept.as_ref(), exposure, build),
     };
+    if token.is_some() {
+        return answer_told(SignInStateDto::SignedOut, None, None, exposure, Some(build));
+    }
     match session_token(&headers).and_then(|token| access.session(&token)) {
         Some(session) => answer(
             SignInStateDto::SignedIn,
@@ -463,6 +469,17 @@ fn answer(
     // A page yet to sign in isn't told the build, as it isn't shown the
     // version (#502).
     let build = matches!(sign_in, SignInStateDto::Off | SignInStateDto::SignedIn).then_some(build);
+    answer_told(sign_in, live, admin_password, exposure, build)
+}
+
+/// [`answer`], telling `build` when there is one.
+fn answer_told(
+    sign_in: SignInStateDto,
+    live: Option<(String, SignedDuration)>,
+    admin_password: Option<AdminPasswordDto>,
+    exposure: Exposure,
+    build: Option<BuildDto>,
+) -> Response {
     let (csrf_token, idle_seconds, ends_in_seconds) = match live {
         Some((csrf, ends_in)) => (
             Some(csrf),
