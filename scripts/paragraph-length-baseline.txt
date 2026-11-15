@@ -1,7 +1,6 @@
 docs/design/data-model.md
 docs/design/decisions/25-who-decides-a-forgets-deletions.md
 docs/design/decisions/26-what-an-adoption-writes.md
-docs/design/decisions/27-profile-interop-what-an-import-refuses.md
 docs/design/decisions/28-repositories-page-and-its-routes.md
 docs/design/decisions/29-config-history-symlinks-order-and-flushing.md
 docs/design/decisions/30-time-zone-data.md
