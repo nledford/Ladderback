@@ -27,7 +27,7 @@ Without a manager, each machine runs rustic from its own cron job or timer. Fail
 - **Safe maintenance on shared repositories.** Backups never wait for a lock. One machine you choose maintains each repository, and Ladderback warns when it sees snapshots from other hosts in it.
 - **No lock-in.** Import existing rustic profiles and export any plan back to one, so the `rustic` CLI always stays an option.
 - **One self-contained program.** It runs headless on servers and as a user service on desktops and laptops. It is accessible (WCAG 2.2 AA) and localization-ready.
-- **Scriptable by AI agents.** `ladderback mcp` is an MCP server over stdio. An agent can read status, plans, repositories, snapshots and history, run a plan and wait for it, cancel a backup, test a repository, preview a forget or a profile import, and export a plan as a profile. It drives a running instance, with a scoped API token when sign-in is on; a headless session of its own when none is running; or a throwaway scratch setup to try it on. It can't restore, delete or change the configuration.
+- **Scriptable by AI agents.** `ladderback mcp` is an MCP server over stdio. An agent can read status, plans, repositories, snapshots and history, run a plan and wait for it, cancel a backup, test a repository, preview a forget or a profile import, and export a plan as a profile. It drives a running instance, with a scoped API token when sign-in is on; a headless session of its own when none is running; or a throwaway scratch setup to try it on. It can't restore, delete or change the configuration. `ladderback mcp call` runs the same tools from a shell or a script without an MCP client, printing each result as a line of JSON.
 
 **Later** (see the [roadmap](#roadmap)):
 

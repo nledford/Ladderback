@@ -17,7 +17,8 @@ Feature: The command line's output
   `import-profile` reports what it added, so it has `--json`. `export-profile`
   writes the profile itself on standard output, and `serve` is the daemon,
   whose standard error is its log: neither has a state to report, and neither
-  takes `--json`.
+  takes `--json`. `mcp call` prints one JSON line for each call whatever is
+  asked, so it has no `--json` either.
 
   In the examples, a rustic profile is the file `nas.toml` in the folder the
   command runs in, and "colour is forced" means `CLICOLOR_FORCE` is set, which
