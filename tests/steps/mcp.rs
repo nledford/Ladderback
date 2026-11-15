@@ -29,16 +29,16 @@ use super::{
 
 /// How long the server may take to answer one request: a status reads the
 /// daemon over loopback.
-const ANSWER: Duration = Duration::from_secs(10);
+pub(super) const ANSWER: Duration = Duration::from_secs(10);
 
 /// How long `wait_operation` is asked to wait for an operation to finish:
 /// a backup of a few small files takes seconds.
-const OPERATION_WAIT: Duration = Duration::from_secs(60);
+pub(super) const OPERATION_WAIT: Duration = Duration::from_secs(60);
 
 /// How long a session may take to end once its input closes: a session
 /// with its own folders stops its workers and closes its operation log,
 /// which takes well under a second even with a backup running.
-const STOP: Duration = Duration::from_secs(10);
+pub(super) const STOP: Duration = Duration::from_secs(10);
 
 /// The prefix of a scratch folder's name, in the temporary folder.
 const SCRATCH_PREFIX: &str = "ladderback-scratch-";
@@ -81,7 +81,7 @@ struct Session {
 /// scenario's own temporary folder (where a scratch folder goes), saying
 /// what it says on standard error into a file of its own, whose path is
 /// returned.
-fn mcp_command(scratch: &Path, root: &Path, args: &[&str]) -> (Command, PathBuf) {
+pub(super) fn mcp_command(scratch: &Path, root: &Path, args: &[&str]) -> (Command, PathBuf) {
     let log = scratch.join(format!(
         "mcp-{}.log",
         STARTED.fetch_add(1, Ordering::Relaxed)
@@ -103,7 +103,7 @@ fn mcp_command(scratch: &Path, root: &Path, args: &[&str]) -> (Command, PathBuf)
 }
 
 /// The temporary folder the scenario's MCP servers are given.
-fn temporary_folder(scratch: &Path) -> PathBuf {
+pub(super) fn temporary_folder(scratch: &Path) -> PathBuf {
     scratch.join("tmp")
 }
 
@@ -232,7 +232,7 @@ async fn start(agent: &mut Agent, url: String, token_file: Option<PathBuf>) {
 
 /// Writes `token` into the file at `path`, as a person saves one: readable
 /// by its owner alone, unless `shared`, when other users can read it too.
-fn save_token(path: &Path, token: &str, shared: bool) {
+pub(super) fn save_token(path: &Path, token: &str, shared: bool) {
     use std::os::unix::fs::PermissionsExt;
     let folder = path.parent().expect("a token file's folder");
     std::fs::create_dir_all(folder).expect("the token file's folder");
@@ -252,7 +252,7 @@ async fn start_serving(agent: &mut Agent, root: PathBuf, args: &'static [&'stati
 
 /// The folders a headless server of the scenario runs on: those of the
 /// daemon the scenario starts, so the two share a data folder.
-fn headless_root(agent: &Agent) -> PathBuf {
+pub(super) fn headless_root(agent: &Agent) -> PathBuf {
     Events::root(agent)
 }
 
@@ -322,7 +322,7 @@ fn refusal_of(result: &Value) -> Value {
 /// The address of the daemon the scenario started: the one `Ladderback is
 /// serving on loopback` started, or the one started with a plan, which the
 /// operation steps drive.
-fn daemon_url(agent: &Agent) -> String {
+pub(super) fn daemon_url(agent: &Agent) -> String {
     let addr = match agent.web.server.as_ref() {
         Some(server) => server.addr,
         None => agent.events.addr(),

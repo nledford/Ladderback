@@ -12,6 +12,12 @@ Feature: AI agents and scripts use Ladderback through MCP
   client of the two revisions before it starts with one, and both are
   served. Standard output holds protocol messages only.
 
+  `ladderback mcp call` runs tools once, without a client: the same tools,
+  with the same checks and results, each call's outcome printed as one JSON
+  line, a result or a refusal. With no mode named, it connects to a running
+  Ladderback; headless and in a scratch folder it holds a session of its
+  own, for as long as its calls take, so a script of calls shares one.
+
   Scenario: A client of the current revision asks what the server offers
     Given Ladderback is serving on loopback
     And an MCP server connected to it
@@ -405,3 +411,131 @@ Feature: AI agents and scripts use Ladderback through MCP
     Given an MCP server running in a scratch folder
     When the MCP client exports the plan "scratch" as a profile
     Then the exported profile reads the repository's password from a file
+
+  Scenario: A one-shot call prints the tool's result as one JSON line
+    Given Ladderback is serving on loopback with the plan "home"
+    When an agent runs "mcp call list_plans limit=10 --connect {daemon}"
+    Then the command exits with status 0
+    And standard output has 1 line
+    And line 1 says the tool "list_plans" answered, listing the plan "home"
+
+  Scenario Outline: An argument a one-shot call can't take is refused as over MCP, naming it
+    Given Ladderback is serving on loopback
+    When an agent runs 'mcp call list_plans <arguments> --connect {daemon}'
+    Then the command exits with status 1
+    And standard output has 1 line
+    And line 1 says the tool "list_plans" refused with "invalid-arguments", naming the argument "<argument>" as "<problem>"
+
+    Examples:
+      | arguments               | argument | problem     |
+      | limit=many              | limit    | invalid     |
+      | --args {"limit":"many"} | limit    | invalid     |
+      | plan=home               | plan     | unknown-key |
+
+  Scenario Outline: A one-shot call line that can't be read is refused before any call
+    When an agent runs "mcp call <call line>"
+    Then the command exits with status 2
+    And standard output is empty
+    And standard error says "<words>"
+
+    Examples:
+      | call line                    | words               |
+      | list_plans limit             | isn't written as    |
+      | list_plans limit=1 limit=2   | more than once      |
+      | list_plans --args [1]        | one JSON object     |
+      | list_plans limit=1 --args {} | cannot be used with |
+      | restore                      | no tool named       |
+      | status --headless --scratch  | cannot be used with |
+      | status --json                | '--json'            |
+      | status --connect not-a-url   | isn't an http       |
+
+  Scenario: A token without the scope to run is refused for a run, and never shown
+    Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
+    And the admin has signed in over HTTP with "demo-admin-pass"
+    And the admin has created an API token over HTTP with the scopes "read" and the label "agent"
+    And that API token in a token file
+    When an agent runs "mcp call run_plan plan=home --connect {daemon} --token-file {token file}"
+    Then the command exits with status 1
+    And standard output has 1 line
+    And line 1 says the tool "run_plan" refused with "api-token-scope", naming the scope "run"
+    And nothing the command printed holds the token
+
+  Scenario: A one-shot call never sends a token over plain HTTP to another machine, nor shows it
+    Given a token nobody created in a token file
+    When an agent runs "mcp call status --connect http://nas.example.com:9898/ --token-file {token file}"
+    Then the command exits with status 1
+    And standard output is empty
+    And standard error says "never over plain"
+    And nothing the command printed holds the token
+
+  Scenario: A headless one-shot call is refused while Ladderback serves from the same folders
+    Given Ladderback is serving on loopback with the plan "home"
+    When an agent runs "mcp call status --headless"
+    Then the command exits with status 1
+    And standard output is empty
+    And the call is refused, naming the data folder and the process that holds it
+
+  Scenario Outline: A run on its own is refused before it starts when the call's own session would stop it
+    When an agent runs "mcp call run_plan plan=home <session>"
+    Then the command exits with status 2
+    And standard output is empty
+    And standard error says "wait_operation"
+    And no scratch folder is left
+
+    Examples:
+      | session    |
+      | --headless |
+      | --scratch  |
+
+  Scenario: A script of calls shares one scratch session, so a run can be waited for
+    Given an agent runs a script of calls from its standard input in a scratch folder
+    When the script calls "run_plan" with '{"plan": "scratch"}'
+    And the script calls "wait_operation" with the operation the run returned
+    And the script ends
+    Then the command exits with status 0
+    And standard output has 2 lines
+    And line 2 says the tool "wait_operation" answered that the operation finished as "succeeded"
+    And no scratch folder is left
+
+  Scenario Outline: A failed call stops a script of calls, unless it is to keep going
+    Given a file of calls "calls.jsonl" holding:
+      """
+      {"tool": "run_plan", "arguments": {"plan": "nowhere"}}
+      {"tool": "list_plans"}
+      """
+    When an agent runs "mcp call --scratch --script {scratch}/calls.jsonl <keep going>"
+    Then the command exits with status 1
+    And standard output has <lines>
+    And line 1 says the tool "run_plan" refused with "plan-unknown"
+    And no scratch folder is left
+
+    Examples:
+      | keep going   | lines   |
+      |              | 1 line  |
+      | --keep-going | 2 lines |
+
+  Scenario: A script's lines that aren't calls are said by their numbers, never their text
+    Given a file of calls "calls.jsonl" holding:
+      """
+      ["status"]
+
+      {"tool": "erase_everything", "arguments": {"password": "canary-script-password"}}
+      {"tool": "list_plans"}
+      """
+    When an agent runs "mcp call --scratch --script {scratch}/calls.jsonl --keep-going"
+    Then the command exits with status 1
+    And standard output has 1 line
+    And standard error says "line 1 of the script isn't a call"
+    And standard error says "line 3 of the script names no tool that exists"
+    And standard error never says "erase_everything"
+    And standard error never says "canary-script-password"
+    And no scratch folder is left
+
+  Scenario: A script of calls that can't be read is named by its path
+    Given a folder "calls.d" where a file of calls would be
+    When an agent runs "mcp call --scratch --script {scratch}/calls.d"
+    Then the command exits with status 1
+    And standard output is empty
+    And standard error says "cannot read the script of calls"
+    And standard error says "calls.d"
+    And no scratch folder is left

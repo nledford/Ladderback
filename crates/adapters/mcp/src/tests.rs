@@ -133,9 +133,13 @@ struct Client {
 }
 
 fn connect(backend: impl Backend) -> Client {
+    connect_to(Arc::new(backend))
+}
+
+fn connect_to(backend: Arc<dyn Backend>) -> Client {
     let (client, server) = tokio::io::duplex(64 * 1024);
     let (server_input, server_output) = tokio::io::split(server);
-    let server = Server::new(Arc::new(backend), build());
+    let server = Server::new(backend, build());
     let session = tokio::spawn(server.serve(server_input, server_output));
     let (output, input) = tokio::io::split(client);
     Client {
@@ -1805,4 +1809,273 @@ async fn cancelling_a_wait_stops_the_wait_and_never_the_operation() {
         "the cancelled call was answered: {:?}",
         client.others
     );
+}
+
+// One-shot calls (§4.6): `ladderback mcp call`, through the dispatch
+// `tools/call` uses.
+
+fn words(given: &[&str]) -> Vec<String> {
+    given.iter().map(|&word| word.to_owned()).collect()
+}
+
+fn object(value: Value) -> JsonObject {
+    match value {
+        Value::Object(object) => object,
+        other => panic!("not an object: {other}"),
+    }
+}
+
+#[test]
+fn words_are_read_as_the_tools_input_schema_types_them() {
+    let call = Call::of_words(
+        "list_operations",
+        &words(&["limit=10", "plan=123", "cursor=a=b"]),
+    )
+    .unwrap();
+    assert_eq!(call.tool(), "list_operations");
+    assert_eq!(
+        Value::Object(call.arguments().clone()),
+        json!({"limit": 10, "plan": "123", "cursor": "a=b"})
+    );
+}
+
+#[test]
+fn a_word_for_an_integer_that_isnt_one_stays_text_for_the_tool_to_refuse() {
+    for (word, value) in [
+        ("limit=many", json!("many")),
+        ("limit=1.5", json!("1.5")),
+        ("limit=", json!("")),
+        ("limit=-3", json!(-3)),
+        ("limit=18446744073709551615", json!(u64::MAX)),
+    ] {
+        let call = Call::of_words("list_plans", &words(&[word])).unwrap();
+        assert_eq!(call.arguments().get("limit"), Some(&value), "{word}");
+    }
+}
+
+#[test]
+fn a_value_is_read_as_the_type_the_schema_gives_its_argument_and_as_text_otherwise() {
+    let schema = object(json!({
+        "type": "object",
+        "properties": {
+            "count": {"type": "integer"},
+            "verbose": {"type": "boolean"},
+            "name": {"type": "string"},
+        },
+    }));
+    for (name, value, typed_as) in [
+        ("count", "7", json!(7)),
+        ("count", "seven", json!("seven")),
+        ("verbose", "true", json!(true)),
+        ("verbose", "false", json!(false)),
+        ("verbose", "yes", json!("yes")),
+        ("name", "7", json!("7")),
+        ("name", "true", json!("true")),
+        ("other", "7", json!("7")),
+    ] {
+        assert_eq!(
+            one_shot::typed(&schema, name, value),
+            typed_as,
+            "{name}={value}"
+        );
+    }
+}
+
+#[test]
+fn a_word_that_isnt_a_pair_is_refused_by_its_position() {
+    assert_eq!(
+        Call::of_words("list_plans", &words(&["limit=1", "cursor"])),
+        Err(CallRefused::NotAPair(2))
+    );
+    assert_eq!(
+        Call::of_words("list_plans", &words(&["=1"])),
+        Err(CallRefused::NotAPair(1))
+    );
+}
+
+#[test]
+fn an_argument_given_twice_is_refused_naming_it() {
+    assert_eq!(
+        Call::of_words("list_plans", &words(&["limit=1", "cursor=a", "limit=2"])),
+        Err(CallRefused::Repeated("limit".to_owned()))
+    );
+}
+
+#[test]
+fn no_words_call_the_tool_with_no_arguments() {
+    let call = Call::of_words("status", &[]).unwrap();
+    assert_eq!(call.tool(), "status");
+    assert!(call.arguments().is_empty());
+}
+
+#[test]
+fn a_tool_that_isnt_there_is_refused_before_its_arguments_are_read() {
+    assert_eq!(
+        Call::of_words("restore", &words(&["x"])),
+        Err(CallRefused::NoTool)
+    );
+    assert_eq!(Call::of_object("restore", "[1]"), Err(CallRefused::NoTool));
+    assert_eq!(
+        Call::of_line(r#"{"tool": "restore"}"#),
+        Err(CallRefused::NoTool)
+    );
+}
+
+#[test]
+fn arguments_as_json_are_one_object_taken_as_given() {
+    let call = Call::of_object("list_plans", r#"{"limit": "5", "cursor": "a"}"#).unwrap();
+    assert_eq!(call.tool(), "list_plans");
+    assert_eq!(
+        Value::Object(call.arguments().clone()),
+        json!({"limit": "5", "cursor": "a"})
+    );
+    for given in ["[1]", "5", "\"limit\"", "null", "{", ""] {
+        assert_eq!(
+            Call::of_object("list_plans", given),
+            Err(CallRefused::NotAnObject),
+            "{given}"
+        );
+    }
+}
+
+#[test]
+fn a_script_line_is_a_tool_and_its_arguments() {
+    let call = Call::of_line(r#"{"tool": "list_plans", "arguments": {"limit": 2}}"#).unwrap();
+    assert_eq!(call.tool(), "list_plans");
+    assert_eq!(Value::Object(call.arguments().clone()), json!({"limit": 2}));
+    let call = Call::of_line(r#"{"tool": "status"}"#).unwrap();
+    assert_eq!(call.tool(), "status");
+    assert!(call.arguments().is_empty());
+    for line in [
+        r#"{"tool": "status", "args": {}}"#,
+        r#"{"tool": "list_plans", "arguments": [2]}"#,
+        r#"{"arguments": {}}"#,
+        r#"["status"]"#,
+        "status",
+    ] {
+        assert_eq!(Call::of_line(line), Err(CallRefused::NotACall), "{line}");
+    }
+}
+
+#[test]
+fn every_tool_listed_can_be_called_by_its_name() {
+    for tool in tools() {
+        let call = Call::of_words(&tool.name, &[]).unwrap();
+        assert_eq!(call.tool(), tool.name, "{}", tool.name);
+    }
+}
+
+#[test]
+fn a_calls_line_is_its_tool_with_its_result_or_its_refusal() {
+    let done = Answer::Done(json!({"plans": []}));
+    assert!(done.is_ok());
+    assert_eq!(
+        serde_json::to_value(done.outcome("list_plans")).unwrap(),
+        json!({"tool": "list_plans", "ok": true, "result": {"plans": []}})
+    );
+    let refused = Answer::Refused(ErrorDto::new(ErrorCode::SignInRequired, [], None));
+    assert!(!refused.is_ok());
+    assert_eq!(
+        serde_json::to_value(refused.outcome("status")).unwrap(),
+        json!({"tool": "status", "ok": false, "error": {"code": "sign-in-required"}})
+    );
+    let unwritten = Answer::Unwritten("key must be a string".to_owned());
+    assert!(!unwritten.is_ok());
+    assert_eq!(
+        serde_json::to_value(unwritten.outcome("status")).unwrap(),
+        json!({"tool": "status", "ok": false, "error": "key must be a string"})
+    );
+}
+
+/// A client of a session, and a server for one-shot calls, both over
+/// `backend`.
+fn both_over(backend: impl Backend) -> (Client, Server) {
+    let backend: Arc<dyn Backend> = Arc::new(backend);
+    let server = Server::new(Arc::clone(&backend), build());
+    (connect_to(backend), server)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_one_shot_call_answers_as_a_tools_call_does() {
+    let (mut client, server) = both_over(Lists {
+        plans: plans(3),
+        repositories: vec![repository("nas")],
+        snapshots: vec![snapshot(1)],
+        detail: Some(OperationDetailDto {
+            operation: summary(1),
+            warnings: vec![warning(1)],
+        }),
+        preview: Some(forget_preview()),
+        ..Lists::default()
+    });
+    let id = summary(1).id;
+    for (tool, arguments) in [
+        ("status", json!({})),
+        ("status", json!({"plan": "home"})),
+        ("list_plans", json!({"limit": 2})),
+        ("list_plans", json!({"limit": "many"})),
+        ("list_plans", json!({"cursor": "nowhere"})),
+        ("list_repositories", json!({})),
+        ("list_snapshots", json!({"repository": "nas"})),
+        ("list_operations", json!({"plan": "home"})),
+        ("get_operation", json!({"operation": id})),
+        ("run_plan", json!({"plan": "home"})),
+        ("run_plan", json!({})),
+        ("wait_operation", json!({"operation": id, "timeout": 0})),
+        ("cancel_operation", json!({"operation": id})),
+        ("test_repository", json!({"repository": "nas"})),
+        ("preview_forget", json!({"repository": "nas"})),
+        (
+            "preview_import",
+            json!({"content": "[repository]\n", "repository": "nas"}),
+        ),
+        ("export_profile", json!({"plan": "home"})),
+    ] {
+        let answer = client.call(tool, arguments.clone()).await;
+        let call =
+            Call::of_line(&json!({"tool": tool, "arguments": arguments}).to_string()).unwrap();
+        match server.call(call).await {
+            Answer::Done(result) => {
+                assert_eq!(answer["result"]["isError"], false, "{tool}: {answer}");
+                assert_eq!(answer["result"]["structuredContent"], result, "{tool}");
+            }
+            Answer::Refused(error) => {
+                assert_eq!(
+                    refusal(&answer),
+                    serde_json::to_value(&error).unwrap(),
+                    "{tool}"
+                );
+            }
+            Answer::Unwritten(why) => panic!("{tool}: unwritten: {why}"),
+        }
+    }
+}
+
+/// A one-shot wait has no client to cancel it or to tell its progress: it
+/// waits its length, then answers what it last read.
+#[tokio::test(start_paused = true)]
+async fn a_one_shot_wait_waits_its_length_with_no_client() {
+    let mut running = summary(1);
+    running.status = "running".to_owned();
+    let id = running.id.clone();
+    let lists = Lists {
+        detail: Some(OperationDetailDto {
+            operation: running,
+            warnings: Vec::new(),
+        }),
+        ..Lists::default()
+    };
+    let server = Server::new(Arc::new(lists), build());
+    let call = Call::of_line(
+        &json!({"tool": "wait_operation", "arguments": {"operation": id, "timeout": 3}})
+            .to_string(),
+    )
+    .unwrap();
+    let began = tokio::time::Instant::now();
+    let Answer::Done(waited) = server.call(call).await else {
+        panic!("the wait was refused")
+    };
+    assert_eq!(began.elapsed(), Duration::from_secs(3));
+    assert_eq!(waited["finished"], false, "{waited}");
+    assert_eq!(waited["operation"]["status"], "running", "{waited}");
 }

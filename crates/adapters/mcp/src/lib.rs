@@ -50,6 +50,7 @@ mod actions;
 mod arguments;
 mod checks;
 mod connect;
+mod one_shot;
 mod pages;
 
 pub use actions::{CANCELLABLE_KIND, DEFAULT_WAIT, MAX_WAIT, WAIT_STEP, not_cancellable};
@@ -57,6 +58,7 @@ pub use connect::{
     ApiToken, ClientUnavailable, Connect, DEFAULT_DAEMON_URL, DaemonUrl, InvalidDaemonUrl,
     TokenOverPlainHttp,
 };
+pub use one_shot::{Answer, Call, CallRefused, Outcome};
 pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 
 use actions::{
@@ -99,6 +101,24 @@ const TEST_REPOSITORY: &str = "test_repository";
 const PREVIEW_FORGET: &str = "preview_forget";
 const PREVIEW_IMPORT: &str = "preview_import";
 const EXPORT_PROFILE: &str = "export_profile";
+
+/// A tool, as a call names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolName {
+    Status,
+    ListPlans,
+    ListRepositories,
+    ListSnapshots,
+    ListOperations,
+    GetOperation,
+    RunPlan,
+    WaitOperation,
+    CancelOperation,
+    TestRepository,
+    PreviewForget,
+    PreviewImport,
+    ExportProfile,
+}
 
 /// How many of the newest operations `status` looks through for those
 /// queued or running: the history's largest page.
@@ -316,6 +336,13 @@ impl Server {
             Err(ServerInitializeError::ConnectionClosed(_)) => Ok(()),
             Err(error) => Err(SessionFailed(error.to_string())),
         }
+    }
+
+    /// Calls `call`'s tool as `tools/call` does, with no client to tell its
+    /// progress or to cancel it: a one-shot call (§4.6).
+    pub async fn call(&self, call: Call) -> Answer {
+        let _ = call;
+        todo!()
     }
 
     async fn status(&self) -> CallToolResult {

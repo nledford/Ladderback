@@ -272,6 +272,15 @@ fn stderr_says(agent: &mut Agent, text: String) {
     );
 }
 
+#[then(expr = "standard error never says {string}")]
+fn stderr_never_says(agent: &mut Agent, text: String) {
+    let stderr = &ran(agent).stderr;
+    assert!(
+        !stderr.contains(&text),
+        "standard error {stderr:?} says {text:?}"
+    );
+}
+
 #[then("standard output is empty")]
 fn stdout_is_empty(agent: &mut Agent) {
     let stdout = &ran(agent).stdout;
