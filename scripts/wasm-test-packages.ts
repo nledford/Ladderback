@@ -25,14 +25,16 @@ export function wasmTestPackages(metadata: Metadata): string[] {
 }
 
 /**
- * The parsed `cargo metadata` JSON in `output`. Cargo's own notes (or a
- * wrapper's) can share the stream; the JSON is the line that opens with a brace.
+ * The parsed `cargo metadata` JSON in `output`, as the part of it `T` reads
+ * (`Metadata` here; `scripts/check-crate-graph.ts` reads more). Cargo's own
+ * notes (or a wrapper's) can share the stream; the JSON is the line that
+ * opens with a brace.
  */
-export function parseMetadata(output: string): Metadata {
+export function parseMetadata<T = Metadata>(output: string): T {
   const json = output.split("\n").find((line) => line.startsWith("{"));
   if (json === undefined) throw new Error("no cargo metadata JSON in the output");
-  // Cargo's JSON is trusted to have the shape `Metadata` reads.
-  return JSON.parse(json) as Metadata;
+  // Cargo's JSON is trusted to have the shape `T` reads.
+  return JSON.parse(json) as T;
 }
 
 // Run as a script, not imported (the real path: `import.meta.url` is one).

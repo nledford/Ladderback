@@ -17,8 +17,12 @@
 #     release flags these checks use (technical design §12.1).
 #   - the build has one version of `dbus-secret-service`, the error type
 #     `secrets` downcasts `keyring`'s Secret Service failures to.
-# Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
-# support) may be a dev-dependency only.
+#   - the workspace crates depend on each other only as the crate graph
+#     allows, only its owners depend on each foreign model, and `domain` has
+#     no `async` (scripts/check-crate-graph.ts, from `cargo metadata`).
+# Dev-dependencies are excluded, so tests may use a runtime (the crate graph
+# alone checks them too). `testkit` (test support) may be a dev-dependency
+# only.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -109,6 +113,13 @@ done
 if ((daemon_has_icu)); then
   echo "ok: ladderback builds with ICU4X"
 fi
+
+# The crate graph, the owners of foreign models and no `async` in `domain`
+# (technical design §3.2): scripts/check-crate-graph.ts reads them from
+# `cargo metadata`, which needs no build. Separate from the script: a failing
+# `cargo metadata` must stop this one.
+metadata=$(cargo metadata --no-deps --format-version 1)
+node scripts/check-crate-graph.ts <<<"$metadata" || status=1
 
 # testkit is test support: a dev-dependency only. `cargo tree --invert` lists
 # the crates that depend on it through normal or build edges, which includes
@@ -257,13 +268,23 @@ if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   status=1
 fi
 
+# The banned-call list lives in those two clippy.toml files. Where a
+# .clippy.toml sits beside one, clippy reads it instead and ignores the list.
+for ring in domain app; do
+  if [[ -e crates/$ring/.clippy.toml ]]; then
+    echo "error: crates/$ring/.clippy.toml takes the place of crates/$ring/clippy.toml, whose banned-call list clippy would then ignore" >&2
+    status=1
+  fi
+done
+
 # Production code never crashes (technical design §13.5). Clippy reads the
-# nearest clippy.toml only, so the root one and the two inner rings' must
-# all let tests unwrap, expect and panic; and every production crate root
-# must deny the panicking lints. `testkit` is test support, not production.
+# nearest clippy.toml (or .clippy.toml) only, so the root one and every
+# crate's must all let tests unwrap, expect and panic; and every production
+# crate root must deny the panicking lints. `testkit` is test support, not
+# production.
 no_panic_lints=(unwrap_used expect_used panic unimplemented todo unreachable)
 no_panic_ok=1
-for file in clippy.toml $(find crates -name clippy.toml | sort); do
+for file in clippy.toml $(find . -maxdepth 1 -name .clippy.toml) $(find crates \( -name clippy.toml -o -name .clippy.toml \) | sort); do
   for setting in allow-unwrap-in-tests allow-expect-in-tests allow-panic-in-tests; do
     if ! grep -qx "$setting = true" "$file"; then
       echo "error: $file lacks '$setting = true'" >&2

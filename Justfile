@@ -118,7 +118,9 @@ lint-workflows:
     actionlint
     zizmor --no-progress .github/workflows .github/actions
 
-# Check the dependency rule: banned crates in domain and app, domain on wasm32.
+# Check the dependency rule: banned crates in domain and app, the crate graph,
+# the owners of foreign models and no async in domain (from `cargo metadata`,
+# with Node), domain on wasm32.
 [group('quality')]
 architecture:
     RELEASE_FLAGS='{{ release_flags }}' scripts/check-architecture.sh

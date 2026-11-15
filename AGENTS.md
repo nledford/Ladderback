@@ -14,7 +14,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 |---|---|
 | `just verify` | Everything CI checks except mutants, red-first and `deny` |
 | `just lint` | Clippy `-D warnings`, `tsc` over the TypeScript tooling (`tsconfig.json`), the tooling's own tests (`node --test`), the journey lint, then `scripts/check-doc-paths.sh`: every repository path `AGENTS.md` and `CLAUDE.md` name exists, written in full, then `scripts/check-paragraph-length.ts`: no paragraph or list item in `docs/` runs over 150 words, except in a file that opens with its exemption marker (CI runs both on docs-only pull requests too) |
-| `just architecture` | Dependency and build rules: banned crates in `domain` and `app`, pseudolocales in a default build and out of a release build, the `gallery` feature in neither, the no-panic settings, `testkit` only as a dev-dependency |
+| `just architecture` | Dependency and build rules: banned crates in `domain` and `app`, the allowed graph of workspace crates and the owners of foreign models (`scripts/check-crate-graph.ts`), no `async` in `domain`, pseudolocales in a default build and out of a release build, the `gallery` feature in neither, the no-panic settings, `testkit` only as a dev-dependency |
 | `just deny` | `cargo deny` (§13.6). Needs the network; a new advisory can fail it with no change of yours. Not a required check |
 | `just test [args]` | Unit and contract tests (nextest; `args` go to it), doc tests, the acceptance and `@e2e` runners, then the skipped-test list. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
 | `just test-release [args]` | `l10n` and daemon tests built with `--no-default-features`, which `just test` can't run |
@@ -113,7 +113,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 - Use the ubiquitous language from §3.1 exactly, in code, tests, UI copy and docs. A new domain term goes into the glossary first.
 - Respect the bounded contexts and aggregates in §3.1. Invariants live on the aggregate or domain service that owns them, not in adapters or handlers.
 - Parse outside input into domain types once, where it enters (an adapter or `api`); the core takes those types, never raw strings, and a type that can't hold an invalid value beats a check plus its test (§3.1).
-- Keep the hexagonal dependency rule (§3.2): `app` depends only on `domain`, which has no I/O, no async and no ambient time or randomness; time and randomness reach `app` through the `Clock` and `Random` ports. Foreign models stay behind their anti-corruption layers (the table above).
+- Keep the hexagonal dependency rule (§3.2): `app` depends only on `domain` and the wire types in `api`; `domain` has no I/O, no async and no ambient time or randomness; time and randomness reach `app` through the `Clock` and `Random` ports. Foreign models stay behind their anti-corruption layers (the table above).
 - The core returns typed errors and codes, never user-facing sentences. Text is produced through `l10n` (§8.4).
 
 **Test first (TDD).**
