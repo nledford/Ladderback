@@ -123,10 +123,10 @@ The worker keeps its own lines under the cap: it cuts each text field (log messa
 
     A worker that took its job and then says nothing is killed with its group by the job's event stream, which ends with a single `Failed(EngineStartTimedOut)`; `run` doesn't wait for it, because that would delay a user's cancel until the first event. Either way the operation fails as `EngineStartTimedOut` without having started.
 
-    After its first line a worker is not on this clock: how long it takes from there is for the job's deadline and for cancel. A timeout too long to represent, such as `Duration::MAX`, never passes.
+    After its first line a worker is not on this clock: how long it takes from there is for the job's deadline and for cancel.
   - Once a worker's event stream has ended, the process has 10 s to exit (`with_exit_timeout`): one that stays alive is killed, and the operation fails as `EngineExitTimedOut`.
 
-    The wait inside `Control::stop()` after SIGKILL has no timeout of its own: its signature can't fail, and a SIGKILL can't be refused short of an uninterruptible sleep.
+  A timeout too long to represent, such as `Duration::MAX`, never passes. The wait inside `Control::stop()` after SIGKILL has no timeout of its own: its signature can't fail, and a SIGKILL can't be refused short of an uninterruptible sleep.
 - Backup chooses the parent with `PlanTags::parent`: explicit `ParentOptions.parents`, or rustic's own match when it returns `None`. Extra tags are `UserTag`s, which never start with the reserved `ladderback-` prefix in any case, so they can't make a snapshot look like another plan's (I6); the worker refuses such a tag in a spec too.
 - Prune always runs with `instant_delete = false` and `early_delete_index = false`, and `keep_delete` is a `KeepDelete`, never under rustic's 23 h default; the worker refuses a shorter one too. Its summary counts `packs_marked = unused + repack`, `packs_deleted = packs_to_delete.remove` and `packs_recovered = packs_to_delete.recover`.
 - Check sends each finding as a warning of its level (`check-warning` for rustic's `Warn`, `check-error` for anything else) in rustic's own words, masked and cut like every warning, the errors first so that the operation's cap on warnings never keeps a tidy-up in place of an error, then counts the findings by level; a check that ran to its end succeeds, with warnings when it found anything (§16, decision 51).
