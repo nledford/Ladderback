@@ -89,10 +89,10 @@ Free and open source under MIT OR Apache-2.0.
 
 ## Evidence on Hand
 
-None yet: Ladderback is in the design stage. There are no users, screenshots, testimonials or benchmarks, and none may be invented.
+Released (0.1.0–0.3.1) and running on the author's own machines. There are no outside users, testimonials, benchmarks or published screenshots, and none may be invented.
 
 ## Stack
 
 - Rust, built on `rustic_core`. The web UI is Leptos (client-side rendered), embedded in the binary.
 - [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
-- `DESIGN.md` (visual design system): not written yet. It will be recorded once the first UI screen exists.
+- [DESIGN.md](DESIGN.md): the web UI's visual design system, its tokens taken from `crates/web/style.css`.
