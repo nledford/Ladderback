@@ -268,13 +268,23 @@ if ! cmp -s crates/domain/clippy.toml crates/app/clippy.toml; then
   status=1
 fi
 
+# The banned-call list lives in those two clippy.toml files. Where a
+# .clippy.toml sits beside one, clippy reads it instead and ignores the list.
+for ring in domain app; do
+  if [[ -e crates/$ring/.clippy.toml ]]; then
+    echo "error: crates/$ring/.clippy.toml takes the place of crates/$ring/clippy.toml, whose banned-call list clippy would then ignore" >&2
+    status=1
+  fi
+done
+
 # Production code never crashes (technical design §13.5). Clippy reads the
-# nearest clippy.toml only, so the root one and the two inner rings' must
-# all let tests unwrap, expect and panic; and every production crate root
-# must deny the panicking lints. `testkit` is test support, not production.
+# nearest clippy.toml (or .clippy.toml) only, so the root one and every
+# crate's must all let tests unwrap, expect and panic; and every production
+# crate root must deny the panicking lints. `testkit` is test support, not
+# production.
 no_panic_lints=(unwrap_used expect_used panic unimplemented todo unreachable)
 no_panic_ok=1
-for file in clippy.toml $(find crates -name clippy.toml | sort); do
+for file in clippy.toml $(find . -maxdepth 1 -name .clippy.toml) $(find crates \( -name clippy.toml -o -name .clippy.toml \) | sort); do
   for setting in allow-unwrap-in-tests allow-expect-in-tests allow-panic-in-tests; do
     if ! grep -qx "$setting = true" "$file"; then
       echo "error: $file lacks '$setting = true'" >&2
