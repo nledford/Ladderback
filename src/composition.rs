@@ -773,6 +773,7 @@ async fn state_over(
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
             restart: http_adapter::Restart::default(),
+            updates: Arc::default(),
         },
         background,
         stopping,

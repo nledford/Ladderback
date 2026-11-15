@@ -48,6 +48,7 @@ pub(crate) fn test_state() -> AppState {
         exposure: crate::Exposure::Loopback,
         build: test_build(),
         restart: crate::Restart::default(),
+        updates: Arc::default(),
     }
 }
 

@@ -93,6 +93,9 @@ pub struct AppState {
     pub build: api::BuildDto,
     /// Whether a restart is offered, and the one asked for (decision 94).
     pub restart: Restart,
+    /// The available update the release check found, which the session
+    /// route tells with the build (decision NN).
+    pub updates: Arc<app::updates::UpdateNotice>,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {
@@ -1441,6 +1444,7 @@ mod tests {
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
             restart: Restart::default(),
+            updates: Arc::default(),
         }
     }
 
@@ -1482,6 +1486,7 @@ mod tests {
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
             restart: Restart::default(),
+            updates: Arc::default(),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -2858,6 +2863,7 @@ mod tests {
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
             restart: Restart::default(),
+            updates: Arc::default(),
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(

@@ -74,6 +74,18 @@ pub struct AgentSettings {
     pub allow_hub_restore: bool,
     /// The language of its notifications, when it isn't the system's (§8.4).
     pub locale: Option<Locale>,
+    /// Whether it asks for Ladderback's newest release once a day.
+    pub update_check: UpdateCheck,
+}
+
+/// Whether the agent asks for Ladderback's newest release once a day, to
+/// show an available update in the header (decision NN): on unless
+/// `[agent] check-for-updates = false` turns it off.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UpdateCheck {
+    #[default]
+    On,
+    Off,
 }
 
 /// A rule that only the whole configuration can break. `index` is the
@@ -509,6 +521,7 @@ mod tests {
         assert_eq!(settings.nice, None);
         assert!(!settings.allow_hub_restore);
         assert_eq!(settings.locale, None);
+        assert_eq!(settings.update_check, UpdateCheck::On);
     }
 
     #[test]
@@ -529,6 +542,7 @@ mod tests {
             nice: Some(Nice::new(10).unwrap()),
             allow_hub_restore: true,
             locale: Some(Locale::parse("en-US").unwrap()),
+            update_check: UpdateCheck::Off,
         };
         let hooks = Hooks {
             run_before: vec![crate::planning::HookEntry::parse("true").unwrap()],

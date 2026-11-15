@@ -90,6 +90,35 @@ async fn in_memory_schedule_store_keeps_each_plans_pending_retry() {
     contract::schedule_store::run_retries(&InMemorySchedules::default()).await;
 }
 
+#[tokio::test]
+async fn in_memory_schedule_store_keeps_the_last_release_check() {
+    contract::schedule_store::run_release_check(&InMemorySchedules::default()).await;
+}
+
+/// The scripted feed, told each answer as the real one's server is.
+struct ScriptedFeeds;
+
+impl contract::release_feed::ReleaseFeedHarness for ScriptedFeeds {
+    fn feed(&self, answer: contract::release_feed::Answer) -> Arc<dyn app::ports::ReleaseFeed> {
+        use app::ports::ReleaseFeedError;
+        use contract::release_feed::Answer;
+        let feed = app::fakes::ScriptedReleaseFeed::new(Arc::new(FakeClock::new(epoch())));
+        match answer {
+            Answer::Release { tag, prerelease } => feed.release(tag, prerelease),
+            Answer::Status(status) => feed.fail(ReleaseFeedError::Rejected { status }),
+            Answer::Garbage | Answer::Oversized => feed.fail(ReleaseFeedError::Unreadable),
+            Answer::Refuses => feed.fail(ReleaseFeedError::Unreachable),
+            Answer::Hangs => feed.fail(ReleaseFeedError::TimedOut),
+        }
+        Arc::new(feed)
+    }
+}
+
+#[tokio::test]
+async fn scripted_release_feed_meets_the_release_feed_contract() {
+    contract::release_feed::run(&ScriptedFeeds).await;
+}
+
 /// The in-memory token store: a new one for each `empty`, and the same one
 /// again for `reopened`, as the real store's file outlives its handle.
 #[derive(Default)]

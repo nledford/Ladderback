@@ -676,6 +676,7 @@ fn answer_told(
             admin_password,
             keep_signed_in_offered,
             build,
+            available_update: None,
         }),
     )
         .into_response()

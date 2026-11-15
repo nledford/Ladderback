@@ -23,7 +23,8 @@ mod rule;
 mod schedule;
 
 pub use agent::{
-    AgentConfig, AgentSettings, ChangeRefused, Concurrency, Nice, NotRecorded, Violation,
+    AgentConfig, AgentSettings, ChangeRefused, Concurrency, Nice, NotRecorded, UpdateCheck,
+    Violation,
 };
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
 pub use filter::{NeverMatchingGlob, Placement, SourceFilter};

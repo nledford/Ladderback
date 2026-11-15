@@ -118,7 +118,7 @@ fn stretch(
 /// that `draw` is of every `u64`: the draw times the stretch's milliseconds
 /// plus one, shifted down by 64 bits, which is below the milliseconds plus
 /// one for every draw.
-fn share(stretch: SignedDuration, draw: RandomDraw) -> SignedDuration {
+pub(crate) fn share(stretch: SignedDuration, draw: RandomDraw) -> SignedDuration {
     let millis = u64::try_from(stretch.as_millis()).unwrap_or(0);
     let share = (u128::from(draw.0) * (u128::from(millis) + 1)) >> 64;
     SignedDuration::from_millis(i64::try_from(share).unwrap_or(0))

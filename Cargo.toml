@@ -14,6 +14,7 @@ members = [
     "crates/adapters/mcp",
     "crates/adapters/notify",
     "crates/adapters/platform",
+    "crates/adapters/releases",
     "crates/adapters/secrets",
     "crates/adapters/store",
     "crates/spawn-gate",
@@ -34,6 +35,7 @@ default-members = [
     "crates/adapters/mcp",
     "crates/adapters/notify",
     "crates/adapters/platform",
+    "crates/adapters/releases",
     "crates/adapters/secrets",
     "crates/adapters/store",
     "crates/spawn-gate",
@@ -61,6 +63,7 @@ config-adapter = { path = "crates/adapters/config" }
 engine = { path = "crates/adapters/engine" }
 hooks = { path = "crates/adapters/hooks" }
 notify-adapter = { path = "crates/adapters/notify" }
+releases-adapter = { path = "crates/adapters/releases" }
 interop = { path = "crates/adapters/interop" }
 mcp = { path = "crates/adapters/mcp" }
 http-adapter = { path = "crates/adapters/http" }

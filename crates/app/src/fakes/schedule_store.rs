@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use domain::execution::retry::RetryScheduled;
 use domain::{PlanId, Timestamp};
 
-use crate::ports::{PendingRetry, PlannedRun, ScheduleStore, StoreError};
+use crate::ports::{PendingRetry, PlannedRun, ReleaseCheck, ScheduleStore, StoreError};
 
 /// The planned runs and pending retries, kept in memory, for use-case tests
 /// and acceptance scenarios. It keeps what the real store keeps, to the
@@ -14,6 +14,7 @@ use crate::ports::{PendingRetry, PlannedRun, ScheduleStore, StoreError};
 pub struct InMemoryScheduleStore {
     kept: Mutex<BTreeMap<PlanId, Timestamp>>,
     retries: Mutex<BTreeMap<PlanId, RetryScheduled>>,
+    release_check: Mutex<Option<ReleaseCheck>>,
 }
 
 impl InMemoryScheduleStore {
@@ -88,5 +89,13 @@ impl ScheduleStore for InMemoryScheduleStore {
     async fn drop_retry(&self, plan: &PlanId) -> Result<(), StoreError> {
         self.retries().remove(plan);
         Ok(())
+    }
+
+    async fn release_check(&self) -> Result<Option<ReleaseCheck>, StoreError> {
+        todo!("{:?}", self.release_check)
+    }
+
+    async fn keep_release_check(&self, check: &ReleaseCheck) -> Result<(), StoreError> {
+        todo!("{check:?}")
     }
 }

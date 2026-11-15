@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::execution::retry::RetryScheduled;
-use domain::{PlanId, Timestamp};
+use domain::updates::Version;
+use domain::{PlanId, SignedDuration, Timestamp};
 
-use crate::ports::{PendingRetry, PlannedRun, ScheduleStore};
+use crate::ports::{PendingRetry, PlannedRun, ReleaseCheck, ScheduleStore};
 
 /// Opens a schedule store: a new, empty one, or the one before opened again
 /// on the same place.
@@ -29,6 +30,56 @@ pub async fn run(harness: &dyn ScheduleHarness) {
     a_plan_with_no_planned_run_can_be_unplanned(harness).await;
     a_planned_run_is_kept_to_the_millisecond(harness).await;
     a_planned_run_outlives_the_daemon(harness).await;
+}
+
+/// The checks of the last release check (decision NN), apart from the
+/// planned runs.
+pub async fn run_release_check(harness: &dyn ScheduleHarness) {
+    let store = harness.empty().await;
+    let none = store.release_check().await;
+    assert_eq!(none, Ok(None), "a new store keeps no release check");
+
+    let update = Version::parse("0.3.0").ok();
+    assert!(update.is_some(), "the suite's own version is valid");
+    let first = ReleaseCheck {
+        at: at(60) + SignedDuration::from_micros(1_999),
+        update: update.clone(),
+    };
+    let kept = store.keep_release_check(&first).await;
+    assert!(kept.is_ok(), "the store keeps the check: {kept:?}");
+    let cut = ReleaseCheck {
+        at: at(60) + SignedDuration::from_millis(1),
+        update,
+    };
+    assert_eq!(
+        store.release_check().await,
+        Ok(Some(cut)),
+        "kept to the millisecond, cut, never rounded up"
+    );
+
+    let last = ReleaseCheck {
+        at: at(120),
+        update: None,
+    };
+    let kept = store.keep_release_check(&last).await;
+    assert!(kept.is_ok(), "the store keeps the check: {kept:?}");
+    assert_eq!(
+        store.release_check().await,
+        Ok(Some(last.clone())),
+        "the last check kept replaces the one before"
+    );
+    assert_eq!(
+        store.planned_runs().await,
+        Ok(Vec::new()),
+        "a release check is no planned run"
+    );
+
+    let reopened = harness.reopened().await;
+    assert_eq!(
+        reopened.release_check().await,
+        Ok(Some(last)),
+        "the release check outlives the daemon"
+    );
 }
 
 fn plan(name: &str) -> Option<PlanId> {

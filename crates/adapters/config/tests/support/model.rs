@@ -55,6 +55,7 @@ pub fn expected() -> AgentConfig {
         nice: Some(Nice::new(10).expect("a nice")),
         allow_hub_restore: true,
         locale: Some(Locale::parse("en-US").expect("a locale")),
+        update_check: domain::planning::UpdateCheck::Off,
     };
     let hooks = Hooks {
         run_before: vec![hook("echo 'agent starting'")],

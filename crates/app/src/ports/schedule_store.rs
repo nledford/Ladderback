@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use domain::execution::retry::RetryScheduled;
+use domain::updates::Version;
 use domain::{PlanId, Timestamp};
 
 use crate::ports::StoreError;
@@ -22,6 +23,17 @@ pub struct PendingRetry {
     pub retry: RetryScheduled,
 }
 
+/// The agent's last release check, as it keeps it between its starts
+/// (§5, §9 `release_check`; decision NN): when it last asked for the newest
+/// release, and the available update it knew of then, so that it asks at
+/// most once a day and the header shows the update at once after a restart.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReleaseCheck {
+    /// Kept to the millisecond.
+    pub at: Timestamp,
+    pub update: Option<Version>,
+}
+
 /// Keeps each scheduled plan's planned run between the agent's starts, so a
 /// run that passed while the agent was off is made up for when it comes back
 /// (§5, decision 60), and each plan's pending retry, so a retry planned
@@ -40,6 +52,9 @@ pub struct PendingRetry {
 ///   do the same for each plan's pending retry, its attempt as kept and its
 ///   times cut to the millisecond, apart from the planned runs: forgetting
 ///   the one leaves the other.
+/// - [`release_check`](Self::release_check) returns the release check last
+///   kept, its time cut to the millisecond, or `None` before the first;
+///   [`keep_release_check`](Self::keep_release_check) replaces it.
 /// - What is kept outlives the handle: a store opened again on the same
 ///   place returns it.
 #[async_trait]
@@ -63,4 +78,10 @@ pub trait ScheduleStore: Send + Sync {
     /// Forgets `plan`'s pending retry: it started, or the plan's retries
     /// ended. A plan with none is no error.
     async fn drop_retry(&self, plan: &PlanId) -> Result<(), StoreError>;
+
+    /// The last release check kept, or `None` when none was.
+    async fn release_check(&self) -> Result<Option<ReleaseCheck>, StoreError>;
+
+    /// Keeps `check` as the last release check, in place of any kept before.
+    async fn keep_release_check(&self, check: &ReleaseCheck) -> Result<(), StoreError>;
 }

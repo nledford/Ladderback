@@ -389,6 +389,7 @@ mod tests {
             ends_in_seconds: None,
             exposure: api::ExposureDto::Loopback,
             build: None,
+            available_update: None,
             admin_password: None,
             keep_signed_in_offered: None,
         }

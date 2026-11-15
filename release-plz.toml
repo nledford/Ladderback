@@ -55,6 +55,10 @@ git_release_type = "auto"
 name = "mcp"
 git_tag_name = "unreleased-mcp-v{{ version }}"
 
+[[package]]
+name = "releases-adapter"
+git_tag_name = "unreleased-releases-adapter-v{{ version }}"
+
 [changelog]
 header = """# Changelog
 

@@ -130,6 +130,16 @@ async fn sqlite_store_keeps_each_plans_pending_retry() {
 }
 
 #[tokio::test]
+async fn sqlite_store_keeps_the_last_release_check() {
+    within(
+        120,
+        "the release check contract suite",
+        contract::schedule_store::run_release_check(&SqliteFiles::default()),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_store_meets_the_api_token_store_contract() {
     within(
         120,

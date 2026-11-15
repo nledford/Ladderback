@@ -181,6 +181,7 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
         nice,
         allow_hub_restore: table.allow_hub_restore.unwrap_or(false),
         locale,
+        update_check: domain::planning::UpdateCheck::On,
     })
 }
 

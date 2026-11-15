@@ -147,6 +147,56 @@ Then("the page doesn't show the running version", async function (this: BrowserW
   await expect(this.page.getByText(await workspaceVersion())).toHaveCount(0);
 });
 
+// The release check never asks the network under test, so the session's
+// answer is given the update it would have found, only where it tells the
+// build, as the daemon does.
+Given("the daemon has found that version {string} is available", function (this: BrowserWorld, version: string) {
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/session", async (route) => {
+      const answer = await route.fetch();
+      const body = (await answer.json()) as Record<string, unknown>;
+      if (typeof body.version === "string") {
+        body["available-update"] = {
+          version,
+          "release-notes": `https://github.com/nledford/Ladderback/releases/tag/v${version}`,
+        };
+      }
+      await route.fulfill({ response: answer, json: body });
+    });
+  });
+});
+
+// The notice follows the running version in reading order, and is no live
+// region of its own: only the announcer talks (A3). Its link opens the
+// release's notes without telling GitHub the page it came from.
+Then(
+  "the header links to the notes of version {string} after the running version",
+  async function (this: BrowserWorld, version: string) {
+    const banner = this.page.getByRole("banner");
+    const running = banner.getByText(namePattern(`Version ${await runningBuild()}`));
+    const link = banner.getByRole("link", { name: namePattern(`Version ${version} is available`) });
+    await expect(link).toHaveCount(1);
+    await expect(banner.getByRole("status")).toHaveCount(0);
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", `https://github.com/nledford/Ladderback/releases/tag/v${version}`);
+    const rel = ((await link.getAttribute("rel")) ?? "").split(/\s+/);
+    assert.ok(rel.includes("noreferrer"), `the link's rel is "${rel.join(" ")}"`);
+    const follows = await running.evaluate(
+      (shown, notice) => (shown.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      await link.elementHandle(),
+    );
+    assert.ok(follows, "the notice comes before the running version in reading order");
+    const [linkBox, runningBox] = [await link.boundingBox(), await running.boundingBox()];
+    assert.ok(linkBox && runningBox);
+    const overlaps =
+      linkBox.x < runningBox.x + runningBox.width &&
+      runningBox.x < linkBox.x + linkBox.width &&
+      linkBox.y < runningBox.y + runningBox.height &&
+      runningBox.y < linkBox.y + linkBox.height;
+    assert.equal(overlaps, false, "the notice overlaps the running version");
+  },
+);
+
 Then("focus is in the main content", async function (this: BrowserWorld) {
   const keys = journey(this.page);
   await keys.assertFocused(keys.byRole("main"), "the main landmark");
