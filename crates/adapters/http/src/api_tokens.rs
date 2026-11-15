@@ -90,6 +90,7 @@ pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
         | ["operations", _]
         | ["repositories", _, "snapshots" | "groups"]
         | ["plans", _, "profile"]
+        | ["repositories", _, "snapshots", _, "folder"]
             if reads =>
         {
             Some(Scope::Read)
