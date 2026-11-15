@@ -1,11 +1,73 @@
 # Decision 45: Masking a text cut at a cap
 
-**A text cut at a cap is masked as a cut text (`Redactor::redact_cut`): every whole secret as anywhere else, and the end of what was kept from where it begins any form of a secret, with the bytes of a character the cut went through left out; a text another side cut and marked with `…` is masked so up to the mark, which stays unless it ends a whole secret (`Redactor::redact_clipped`)** (recorded 2026-11-10, §10.2, I4; #158). The places that cut and then mask: a secret command's stderr (8 KiB kept; masked as cut when it fills them), a hook's stdout and stderr (64 KiB each, when the truncated flag is set), a worker's stderr line cut at the message cap, the text of a worker's events (prefix, title, item, detail, log message, failure detail) and a command's detail in a refusal (both marked `…`). The worker's own events are masked before it cuts them, but without the proxy credentials of its environment, which only the daemon masks; the daemon masks any event text that ends in `…` as cut text, which also covers any other secret the worker doesn't know. A tail that only looks like the start of a secret is masked too: more is masked than needs be, never less. Text that is masked first and cut after (`Problem::command_failed`'s 512 bytes, the app's fakes) needs nothing more. Rejected: dropping as many bytes of a cut text as the longest secret has, less one, before masking (the rule this replaces), because it also cut a whole secret that ended within those bytes and left its start behind; and giving the worker the proxy credentials to mask before its cut, because the daemon-side rule covers them and every other secret the worker lacks in one place.
+**A text cut at a cap is masked as a cut text (`Redactor::redact_cut`): every whole secret as anywhere else, and the end of what was kept from where it begins any form of a secret, with the bytes of a character the cut went through left out; a text another side cut and marked with `…` is masked so up to the mark, which stays unless it ends a whole secret (`Redactor::redact_clipped`)** (recorded 2026-11-10, §10.2, I4; #158).
 
-**Output cut by time is a cut text too** (added 2026-11-11, #159). A secret reaches the reader of a pipe in parts when it is written in several writes (a buffered writer flushes when its buffer is full, a script prints it piece by piece) or in one write larger than the pipe passes whole (`PIPE_BUF`), so a stream whose read stopped before its end can end partway through a secret, as a capped one can. A stream not read to its end is masked as cut: a secret command's stderr that something it started still held open when the pipe grace ran out, or whose read failed; a hook's stdout or stderr when the hook was stopped at its timeout, when the grace after its exit ran out, or when a read failed. A worker's last stderr line that the stream ended without its newline (a kill partway through a write) is masked and marked `…` as a line cut at the cap is: the worker writes its stderr in lines, so a line without its end is a cut one. Whether a stream was read to its end is known only where it is read, so the adapters that read the pipes decide it, and the hook output's truncated flag keeps meaning that the cap dropped something. Not covered then: a hook's or command's output that its writer's own end cut short (a signal Ladderback didn't send, a tool a hook runs under a timeout of its own) reached its end and was taken as whole; the next paragraph covers it.
+The places that cut and then mask:
 
-**Hook output and a secret command's stderr are a cut text whoever cut them** (added 2026-11-11, #232). They are masked with `Redactor::redact_cut` however they ended: the cap, the timeout, the grace, a failed read, or the writer itself, which can stop partway through a secret and exit on its own with nothing in what was read to say so. This replaces the two rules above for these streams (masked as cut when the cap or Ladderback's read stopped them), and the adapters no longer track whether such a stream was read to its end; `command_failure` takes no `stderr_cut`, and the hook output's truncated flag still means only the cap. `redact_cut` masks a tail only where it begins a secret, so output that ends nowhere near one is kept as it is: it masks more than a secret, never less, as with a capped text. Rejected: telling a writer's own cut by a missing last newline or an exit on a signal, which is more code and still a guess, since hook and helper output need not end in a newline. A worker's stderr is unchanged: it is read in lines, and a line with its newline is whole.
+- a secret command's stderr (8 KiB kept; masked as cut when it fills them);
+- a hook's stdout and stderr (64 KiB each, when the truncated flag is set);
+- a worker's stderr line cut at the message cap;
+- the text of a worker's events (prefix, title, item, detail, log message, failure detail) and a command's detail in a refusal (both marked `…`).
 
-**A secret command's stdout that the grace cut quotes nothing** (added 2026-11-11, #233). A failed command's detail is its stderr masked against what it printed on stdout. When something the command started holds stdout open and the pipe grace cuts it, what was read is only part of the secret, and stderr masked against that part shows the rest of a secret it quotes (`***nary` for `canary`). Such a stdout is passed to `command_failure` as left open (`Stdout::LeftOpen`, since #237), and the error has its status and an empty detail. A stdout cut at the cap is `TooLarge`, which quotes nothing, unless it reaches the cap after the command exited while something it started holds stderr open past the grace: then it is a stdout the grace cut, and quotes nothing either. Rejected: masking the detail as a cut text against the part, since `redact_cut` masks a tail that begins a needle, not the rest of a secret that follows a partial needle inside the text, so it leaves that rest; a rule that masked from each partial needle on would need a primitive of its own and hide no less. The cost: a failed helper whose stdout a daemon it started holds open past the grace loses its detail. Left for #237 (next paragraph): a failed helper's stdout that its own end cut short (killed partway through printing the secret) reaches its end and was taken as whole, so stderr was masked against the part, and a quote of the whole secret on stderr showed its rest; and a helper that succeeds with a stdout the grace cut gave its partial first line as the secret, a wrong value rather than a leak.
+The worker's own events are masked before it cuts them, but without the proxy credentials of its environment, which only the daemon masks; the daemon masks any event text that ends in `…` as cut text, which also covers any other secret the worker doesn't know.
 
-**A secret command's stdout that ends partway through a line is cut too** (added 2026-11-11, #237). A secret is the first line of what a command prints, and a line read with its newline is whole however the command ended; one that ends without it can't be told from a cut. The adapter says how far stdout was read (`domain::secrets::Stdout`: `ReadToEnd`, or `LeftOpen` when the grace ran out), and `command_failure` and `command_secret` decide from that and the bytes. A failed command's stdout is masked against only when it was read to its end and is empty or ends with a newline; otherwise the error has its status and an empty detail, as for a stdout the grace cut. A command that succeeds with a stdout left open gives its first line once that line's newline was read; before that it fails as `OutputCut`, refused with a code of its own, `secret-command-output-open`, which quotes nothing it printed, and nothing it printed is used. The size and UTF-8 checks of every source come first, and a blank first line that did end is still `Missing`. Read to its end, a successful command's output needs no newline (`printf %s`, password managers that print none): the command closed it there itself. The code is its own because the command exited successfully: `secret-command-failed` says to run the command to see why it failed, and run by hand it succeeds; what the user does is make it print a newline after the secret, or close its output before it exits. Rejected: telling a cut by an exit on a signal as well, which adds nothing to the newline (a signal after a whole first line cut nothing of the secret, and one before it leaves no newline). The cost, accepted to fail closed: a failed helper that prints something without a newline (a prompt) loses its detail, and a helper that prints its secret without a newline and leaves a daemon holding stdout past the grace is refused, until it prints the newline.
+A tail that only looks like the start of a secret is masked too: more is masked than needs be, never less. Text that is masked first and cut after (`Problem::command_failed`'s 512 bytes, the app's fakes) needs nothing more.
+
+Rejected:
+
+- dropping as many bytes of a cut text as the longest secret has, less one, before masking (the rule this replaces), because it also cut a whole secret that ended within those bytes and left its start behind;
+- giving the worker the proxy credentials to mask before its cut, because the daemon-side rule covers them and every other secret the worker lacks in one place.
+
+**Output cut by time is a cut text too** (added 2026-11-11, #159). A secret reaches the reader of a pipe in parts when it is written in several writes (a buffered writer flushes when its buffer is full, a script prints it piece by piece) or in one write larger than the pipe passes whole (`PIPE_BUF`), so a stream whose read stopped before its end can end partway through a secret, as a capped one can.
+
+A stream not read to its end is masked as cut:
+
+- a secret command's stderr that something it started still held open when the pipe grace ran out, or whose read failed;
+- a hook's stdout or stderr when the hook was stopped at its timeout, when the grace after its exit ran out, or when a read failed.
+
+A worker's last stderr line that the stream ended without its newline (a kill partway through a write) is masked and marked `…` as a line cut at the cap is: the worker writes its stderr in lines, so a line without its end is a cut one.
+
+Whether a stream was read to its end is known only where it is read, so the adapters that read the pipes decide it, and the hook output's truncated flag keeps meaning that the cap dropped something.
+
+Not covered then: a hook's or command's output that its writer's own end cut short (a signal Ladderback didn't send, a tool a hook runs under a timeout of its own) reached its end and was taken as whole; the next paragraph covers it.
+
+**Hook output and a secret command's stderr are a cut text whoever cut them** (added 2026-11-11, #232). They are masked with `Redactor::redact_cut` however they ended: the cap, the timeout, the grace, a failed read, or the writer itself, which can stop partway through a secret and exit on its own with nothing in what was read to say so.
+
+This replaces the two rules above for these streams (masked as cut when the cap or Ladderback's read stopped them), and the adapters no longer track whether such a stream was read to its end; `command_failure` takes no `stderr_cut`, and the hook output's truncated flag still means only the cap.
+
+`redact_cut` masks a tail only where it begins a secret, so output that ends nowhere near one is kept as it is: it masks more than a secret, never less, as with a capped text.
+
+Rejected: telling a writer's own cut by a missing last newline or an exit on a signal, which is more code and still a guess, since hook and helper output need not end in a newline.
+
+A worker's stderr is unchanged: it is read in lines, and a line with its newline is whole.
+
+**A secret command's stdout that the grace cut quotes nothing** (added 2026-11-11, #233). A failed command's detail is its stderr masked against what it printed on stdout. When something the command started holds stdout open and the pipe grace cuts it, what was read is only part of the secret, and stderr masked against that part shows the rest of a secret it quotes (`***nary` for `canary`).
+
+Such a stdout is passed to `command_failure` as left open (`Stdout::LeftOpen`, since #237), and the error has its status and an empty detail. A stdout cut at the cap is `TooLarge`, which quotes nothing, unless it reaches the cap after the command exited while something it started holds stderr open past the grace: then it is a stdout the grace cut, and quotes nothing either.
+
+Rejected: masking the detail as a cut text against the part, since `redact_cut` masks a tail that begins a needle, not the rest of a secret that follows a partial needle inside the text, so it leaves that rest; a rule that masked from each partial needle on would need a primitive of its own and hide no less.
+
+The cost: a failed helper whose stdout a daemon it started holds open past the grace loses its detail.
+
+Left for #237 (next paragraph):
+
+- a failed helper's stdout that its own end cut short (killed partway through printing the secret) reaches its end and was taken as whole, so stderr was masked against the part, and a quote of the whole secret on stderr showed its rest;
+- a helper that succeeds with a stdout the grace cut gave its partial first line as the secret, a wrong value rather than a leak.
+
+**A secret command's stdout that ends partway through a line is cut too** (added 2026-11-11, #237). A secret is the first line of what a command prints, and a line read with its newline is whole however the command ended; one that ends without it can't be told from a cut.
+
+The adapter says how far stdout was read (`domain::secrets::Stdout`: `ReadToEnd`, or `LeftOpen` when the grace ran out), and `command_failure` and `command_secret` decide from that and the bytes:
+
+- **Failed command.** A failed command's stdout is masked against only when it was read to its end and is empty or ends with a newline; otherwise the error has its status and an empty detail, as for a stdout the grace cut.
+- **Successful command, stdout left open.** A command that succeeds with a stdout left open gives its first line once that line's newline was read; before that it fails as `OutputCut`, refused with a code of its own, `secret-command-output-open`, which quotes nothing it printed, and nothing it printed is used.
+- **Checks first.** The size and UTF-8 checks of every source come first, and a blank first line that did end is still `Missing`.
+- **Successful command, read to its end.** Read to its end, a successful command's output needs no newline (`printf %s`, password managers that print none): the command closed it there itself.
+
+The code is its own because the command exited successfully: `secret-command-failed` says to run the command to see why it failed, and run by hand it succeeds; what the user does is make it print a newline after the secret, or close its output before it exits.
+
+Rejected: telling a cut by an exit on a signal as well, which adds nothing to the newline (a signal after a whole first line cut nothing of the secret, and one before it leaves no newline).
+
+The cost, accepted to fail closed:
+
+- a failed helper that prints something without a newline (a prompt) loses its detail;
+- a helper that prints its secret without a newline and leaves a daemon holding stdout past the grace is refused, until it prints the newline.
