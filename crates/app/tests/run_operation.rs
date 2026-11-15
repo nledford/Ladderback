@@ -806,9 +806,58 @@ async fn an_engine_that_stops_itself_after_its_deadline_failed_the_deadline() {
     );
 }
 
-/// The worker's own watchdog may report the deadline first. The backup it
-/// stopped may still be saving the index of its packs, so the engine is
-/// given its grace period to end rather than killed (§4.1).
+/// The deadline passes as the engine's events end, before the timer has its
+/// turn: the run failed the deadline, not the engine.
+#[tokio::test]
+async fn an_engine_whose_events_end_as_its_deadline_passes_failed_the_deadline() {
+    let clock = Arc::new(FakeClock::new(t(0)));
+    let engine = Arc::new(Live::new());
+    let use_case = RunOperation::new(engine.clone(), clock.clone(), log());
+    let budget = Some(SignedDuration::from_secs(60));
+    let running = tokio::spawn(async move {
+        use_case
+            .run(id(), Trigger::Manual, fake_job(budget), future::pending())
+            .await
+    });
+    engine.send(started());
+    settle().await;
+    // Both before the run's next turn, so it finds its events ended first.
+    engine.sender.close_channel();
+    clock.advance(SignedDuration::from_secs(60));
+    let op = finished(running).await.operation;
+    assert_eq!(
+        op.status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::DeadlinePassed
+        }
+    );
+}
+
+/// Events that end before the deadline mean the engine exited, deadline or
+/// not.
+#[tokio::test]
+async fn an_engine_whose_events_end_before_its_deadline_exited() {
+    let budget = Some(SignedDuration::from_secs(60));
+    let op = RunOperation::new(
+        Arc::new(Scripted::new(vec![started()])),
+        Arc::new(FakeClock::new(t(59))),
+        log(),
+    )
+    .run(id(), Trigger::Manual, fake_job(budget), future::pending())
+    .await
+    .operation;
+    assert_eq!(
+        op.status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::EngineExited { exit_code: None }
+        }
+    );
+}
+
+/// The worker's own watchdog may report the deadline first, before this
+/// side's clock says it passed. The backup it stopped may still be saving
+/// the index of its packs, so the engine is given its grace period to end
+/// rather than killed (§4.1).
 #[tokio::test]
 async fn an_engine_that_reports_its_deadline_is_given_its_grace_to_wind_down() {
     let budget = Some(SignedDuration::from_secs(60));
@@ -816,7 +865,7 @@ async fn an_engine_that_reports_its_deadline_is_given_its_grace_to_wind_down() {
         started(),
         EngineEvent::Failed(FailureReason::DeadlinePassed),
     ]));
-    let op = RunOperation::new(engine.clone(), Arc::new(FakeClock::new(t(60))), log())
+    let op = RunOperation::new(engine.clone(), Arc::new(FakeClock::new(t(59))), log())
         .run(id(), Trigger::Manual, fake_job(budget), future::pending())
         .await
         .operation;
