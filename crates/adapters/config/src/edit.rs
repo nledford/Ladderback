@@ -1137,6 +1137,39 @@ keep-daily = 7
         });
         assert_eq!(saved, None);
     }
+
+    /// Text holding what TOML writes only escaped: a carriage return alone
+    /// and before a line feed, a form feed, NUL, the last C0 control and
+    /// DEL, with a line feed, which makes the string one of several lines.
+    const CONTROLS: &str = "a\rb\r\nc\u{c}d\0e\u{1f}f\u{7f}g\n";
+
+    /// A save that sets, adds and adds a table with text holding control
+    /// characters edits the file in place, which reads back as the
+    /// configuration saved (`saved` keeps only an edit that does), and
+    /// what it didn't change stays as written.
+    #[test]
+    fn text_with_control_characters_is_edited_in_and_the_rest_stays_as_written() {
+        let config = rebuilt(&read(WRITTEN), |parts| {
+            let nas = parts.repositories.get_mut(&alias("nas")).expect("nas");
+            nas.settings.repository = format!("/srv/{CONTROLS}");
+            nas.settings
+                .options
+                .insert(CONTROLS.to_owned(), CONTROLS.to_owned());
+            plan_mut(parts, "home").label = Some(CONTROLS.to_owned());
+            parts
+                .repositories
+                .insert(alias("usb"), entry_at(&format!("local:/{CONTROLS}")));
+        });
+        let saved = saved_as(WRITTEN, &config).expect("edited in place");
+        for unchanged in [
+            "# The demo laptop's agent, written by hand.\nschema = 1\n\n[agent]\nconcurrency = 1        # how many operations run at once\nnice    =   10\n\n# The NAS in the hall cupboard.\n[repositories.nas]\n",
+            "  password-env = \"DEMO_PASSWORD\"\n  maintenance = \"none\"   # the hub may own it later\n",
+            "sources = [\n  \"/home/demo\",        # everything\n  \"/srv/demo-shared\",  # and the shared folder\n]\nschedule = { cron = \"0 * * * *\", jitter = \"5 minutes\" }\n",
+            "\n# How long the history goes back.\n[plans.retention]\nkeep-daily = 7\n",
+        ] {
+            assert!(saved.contains(unchanged), "lost {unchanged:?} in:\n{saved}");
+        }
+    }
 }
 
 #[cfg(test)]
