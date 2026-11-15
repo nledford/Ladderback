@@ -708,3 +708,10 @@ Then("the page shows an alert containing {string}", async function (this: Browse
     .first()
     .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
 });
+
+// Nothing the page says now: an alert drawn with the page is there at once.
+Then("the page shows no alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  const heard = [...needle].map(escape).join(ISOLATION);
+  const alerts = this.page.getByRole("alert").filter({ hasText: new RegExp(heard) });
+  assert.equal(await alerts.count(), 0, `the page shows an alert containing "${needle}"`);
+});

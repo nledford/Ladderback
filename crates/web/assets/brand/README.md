@@ -6,7 +6,7 @@ The mark is a ladder-back chair's back: two posts and three slats, white on the 
 
 | File | Use |
 |---|---|
-| `icon.svg` | The master icon, a rounded square |
+| `icon.svg` | The master icon, a rounded square. The web UI's header draws its shapes inline beside the name (`BrandMark` in `crates/web/src/main.rs`), so a change to them is made there too |
 | `icon-maskable.svg` | Full-bleed, with the mark inside the maskable safe zone, for Android's adaptive icons |
 | `favicon.svg`, `favicon-16.png`, `favicon-32.png`, `favicon.ico` | Browser tabs; the SVG has heavier strokes, so it reads at 16 px |
 | `apple-touch-icon.png` (180), `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` | Home-screen and app icons (#394) |

@@ -523,7 +523,7 @@ Feature: Sign-in
       And the row "demo-home" of the table "Operations" lists "3 files" in its "Result" column
 
   @ui
-  Rule: While sign-in is on, the navigation offers Sign out
+  Rule: While sign-in is on, the header offers Sign out
 
     Scenario: Signing out by keyboard alone lands on the sign-in page with focus on its heading
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
