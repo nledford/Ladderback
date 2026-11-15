@@ -15,9 +15,9 @@
 # `actions: write` in GH_TOKEN. GITHUB_REPOSITORY names the repository.
 # PRUNE_REF (default refs/heads/main) is the ref whose entries are pruned.
 #
-# Families must not overlap: an entry that two of them match would be counted
-# in both, and the older of two entries could stay. Anchor each expression at
-# the key's start, and end its stem with the separator that follows it.
+# Families must not overlap: an entry that two of them match makes the script
+# exit with status 2 before it deletes anything. Anchor each expression at the
+# key's start, and end its stem with the separator that follows it.
 set -euo pipefail
 
 repo="${GITHUB_REPOSITORY:?prune-cache: GITHUB_REPOSITORY is not set}"
@@ -28,14 +28,11 @@ if [ $# -eq 0 ]; then
     exit 2
 fi
 
-# One JSON document per page; -s gathers them. The `ref` filter makes the
-# server list only the entries main's own runs saved, so a pull request's
-# entry is never counted, nor deleted here.
-caches=$(gh api --paginate "repos/$repo/actions/caches?ref=$ref&per_page=100" | jq -s '[.[].actions_caches[]]')
-
-failed=0
+# The families and how many entries each keeps, read before anything is listed
+# or deleted, so a bad argument deletes nothing.
+families=()
+keeps=()
 keep=1
-unclaimed="$caches"
 while [ $# -gt 0 ]; do
     if [ "$1" = "--keep" ]; then
         case "${2:-}" in
@@ -48,9 +45,36 @@ while [ $# -gt 0 ]; do
         shift 2
         continue
     fi
-    family=$1
+    families+=("$1")
+    keeps+=("$keep")
     shift
+done
+if [ ${#families[@]} -eq 0 ]; then
+    echo "prune-cache: --keep needs a family after it" >&2
+    exit 2
+fi
 
+# One JSON document per page; -s gathers them. The `ref` filter makes the
+# server list only the entries main's own runs saved, so a pull request's
+# entry is never counted, nor deleted here.
+caches=$(gh api --paginate "repos/$repo/actions/caches?ref=$ref&per_page=100" | jq -s '[.[].actions_caches[]]')
+
+# An entry two families match would be pruned as part of both, and could be
+# deleted as the older one of a family it is the newest of. Refuse, before any
+# delete, so that a pattern that grew too wide fails the run instead.
+overlapping=$(jq -r --argjson res "$(printf '%s\n' "${families[@]}" | jq -R . | jq -s .)" \
+    '.[] | .key as $key | select([$res[] | select(. as $re | $key | test($re))] | length > 1) | .key' <<< "$caches")
+if [ -n "$overlapping" ]; then
+    echo "prune-cache: these keys match more than one family, so nothing was deleted:" >&2
+    echo "$overlapping" >&2
+    exit 2
+fi
+
+failed=0
+unclaimed="$caches"
+for i in "${!families[@]}"; do
+    family=${families[$i]}
+    keep=${keeps[$i]}
     matching=$(jq -c --arg re "$family" '[.[] | select(.key | test($re))] | sort_by(.created_at, .id) | reverse' <<< "$caches")
     unclaimed=$(jq -c --arg re "$family" '[.[] | select(.key | test($re) | not)]' <<< "$unclaimed")
     count=$(jq 'length' <<< "$matching")

@@ -6,7 +6,9 @@
 # included, and a pull request's entry is one no other pull request can read.
 # This restores on every run and saves only from a push to main, which is the
 # one entry every pull request reads (ci.yml's header comment has the whole
-# design). The key is setup-node's, so an entry it saved still restores.
+# design). The key is setup-node's, but GitHub's version of an entry hashes the
+# path too, so the entry setup-node saved misses once; the first push to main
+# saves this action's, and cache-prune deletes the old one.
 #
 # A job that shares main's push with another job that saves this cache sets
 # `save: "false"`, so the two don't race for the same key.

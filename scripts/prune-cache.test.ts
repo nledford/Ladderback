@@ -174,6 +174,99 @@ test("--keep takes a positive number", () => {
   }
 });
 
+test("an entry two families match fails the run before anything is deleted", () => {
+  const result = prune(
+    [[entry(1, "a-1", "2026-11-11T10:00:00Z"), entry(2, "a-2", "2026-11-12T10:00:00Z"), entry(3, "ab-1", "2026-11-12T10:00:00Z")]],
+    ["^a-", "^a"],
+  );
+  assert.equal(result.status, 2);
+  assert.deepEqual(result.deleted, []);
+});
+
+test("--keep with no family after it fails", () => {
+  assert.equal(prune([[]], ["^a-", "--keep", "2"]).status, 0);
+  assert.equal(prune([[]], ["--keep", "2"]).status, 2);
+});
+
+// The families ci.yml's `cache-prune` job passes, read from the workflow, each
+// with the keys the repository has saved or will save under it, oldest first:
+// the layouts of today and of before (the engine sets, the manifest hash in
+// mbx's generation). Run through the script, every family must keep its newest
+// `keep` entries and delete the others, no key may match two families, and no
+// key may be left unclaimed. A family added to ci.yml without its keys here
+// fails, and so does a key that stops matching.
+const sha = "ec58f954cd12bc72680a8052d009fc144a0201d3";
+const lock = "ba36d31e3f5625414f85eb0bf8ce7c62f0b130a58ab02a6820f8513701ede9fb";
+const real: Record<string, { keep: number; keys: string[] }> = {
+  "^linux-x64-mbx-v1-(m[0-9a-f]+-)?target-rust-": {
+    keep: 1,
+    keys: [
+      `linux-x64-mbx-v1-target-rust-897e5912e8f5-${sha}`,
+      `linux-x64-mbx-v1-m3459b49abe91-target-rust-897e5912e8f5-${sha}`,
+      `linux-x64-mbx-v1-m3459b49abe91-target-rust-897e5912e8f5-${sha.replace("e", "f")}`,
+    ],
+  },
+  "^linux-x64-mbx-v1-wasm-(m[0-9a-f]+-)?target-rust-": {
+    keep: 1,
+    keys: [`linux-x64-mbx-v1-wasm-target-rust-897e5912e8f5-${sha}`, `linux-x64-mbx-v1-wasm-m3459b49abe91-target-rust-897e5912e8f5-${sha}`],
+  },
+  "^darwin-arm64-mbx-v1-(m[0-9a-f]+-)?target-rust-": {
+    keep: 1,
+    keys: [`darwin-arm64-mbx-v1-target-rust-4a6d2236aaf2-${sha}`, `darwin-arm64-mbx-v1-m3459b49abe91-target-rust-4a6d2236aaf2-${sha}`],
+  },
+  "^trunk-tools-Linux-": { keep: 1, keys: [`trunk-tools-Linux-${lock}`, `trunk-tools-Linux-${lock.replace("a", "b")}`] },
+  "^node-cache-Linux-x64-npm-": { keep: 1, keys: [`node-cache-Linux-x64-npm-${lock}`, `node-cache-Linux-x64-npm-${lock.replace("a", "b")}`] },
+  "^playwright-(chromium-)?Linux-": {
+    keep: 1,
+    keys: [`playwright-Linux-${lock}`, `playwright-chromium-Linux-${lock}`, `playwright-chromium-Linux-${lock.replace("a", "b")}`],
+  },
+  "^playwright-chromium-firefox-webkit-Linux-": {
+    keep: 1,
+    keys: [`playwright-chromium-firefox-webkit-Linux-${lock}`, `playwright-chromium-firefox-webkit-Linux-${lock.replace("a", "b")}`],
+  },
+  "^playwright-debs-(chromium-)?ubuntu[0-9]+-": {
+    keep: 2,
+    keys: [
+      `playwright-debs-ubuntu26-20261111.82.6-${lock}-43741`,
+      `playwright-debs-chromium-ubuntu26-20261111.82.6-${lock}-43742`,
+      `playwright-debs-chromium-ubuntu26-20261111.196.1-${lock}-43743-1`,
+    ],
+  },
+  "^playwright-debs-chromium-firefox-webkit-ubuntu[0-9]+-": {
+    keep: 2,
+    keys: [
+      `playwright-debs-chromium-firefox-webkit-ubuntu26-20261111.82.6-${lock}-43741-1`,
+      `playwright-debs-chromium-firefox-webkit-ubuntu26-20261111.196.1-${lock}-43742-1`,
+      `playwright-debs-chromium-firefox-webkit-ubuntu26-20261111.196.1-${lock}-43743-1`,
+    ],
+  },
+};
+
+test("the families ci.yml prunes by keep the newest entries of every key layout and claim every key", () => {
+  const workflow = readFileSync(join(import.meta.dirname, "..", ".github", "workflows", "ci.yml"), "utf8");
+  const call = workflow.slice(workflow.indexOf("scripts/prune-cache.sh \\\n"));
+  const block = call.slice(0, call.indexOf("env:"));
+  const args = [...block.matchAll(/--keep \d+|'([^']+)'/g)].map((m) => m[1] ?? m[0]);
+  const families = args.filter((a) => !a.startsWith("--keep"));
+  assert.deepEqual([...families].sort(), Object.keys(real).sort(), "ci.yml's families and this test's keys differ");
+
+  const entries: Entry[] = [];
+  const doomed: number[] = [];
+  let id = 1;
+  for (const family of families) {
+    const { keep, keys } = real[family]!;
+    keys.forEach((key, i) => {
+      entries.push(entry(id, key, `2026-11-1${i + 1}T10:00:00Z`));
+      if (i < keys.length - keep) doomed.push(id);
+      id++;
+    });
+  }
+  const result = prune([entries], args.flatMap((a) => (a.startsWith("--keep") ? a.split(" ") : [a])));
+  assert.equal(result.status, 0, result.stdout);
+  assert.doesNotMatch(result.stdout, /no family/);
+  assert.deepEqual(result.deleted.sort((a, b) => a - b), doomed);
+});
+
 test("it needs a family", () => {
   const result = prune([[]], []);
   assert.equal(result.status, 2);
