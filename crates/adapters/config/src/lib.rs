@@ -26,6 +26,8 @@ mod parity;
 mod plan;
 mod read;
 mod record;
+#[cfg(test)]
+mod round_trip;
 mod schema;
 mod store;
 mod tables;

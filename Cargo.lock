@@ -901,6 +901,7 @@ dependencies = [
  "async-trait",
  "domain",
  "jiff",
+ "proptest",
  "rustic_core",
  "serde",
  "shell-words",
