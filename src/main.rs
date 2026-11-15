@@ -16,7 +16,7 @@
 
 use std::ffi::OsString;
 use std::future::IntoFuture as _;
-use std::io;
+use std::io::{self, Write as _};
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -180,7 +180,14 @@ fn main() -> ExitCode {
         Command::SetPassword => set_password::set_password(),
         Command::InstallService => service::install_service(),
         Command::RemoveService => service::remove_service(),
-        Command::Worker => engine::worker::main(),
+        Command::Worker => {
+            // Before it reads its job, which carries the secrets (decision
+            // 98). The kernel set the dumpable flag again when it started.
+            for unprotected in platform::dumps::refuse() {
+                let _ = writeln!(io::stderr(), "{}", dumps::worker_line(&unprotected));
+            }
+            engine::worker::main()
+        }
     }
 }
 
@@ -190,9 +197,15 @@ fn serve(
     service_managed: bool,
     plain: bool,
 ) -> ExitCode {
+    // First, before any secret is resolved (decision 98); said once the log
+    // is set up.
+    let unprotected = platform::dumps::refuse();
     logging::install(plain);
     log::info!("ladderback {} starting", *build_info::SHOWN);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    for unprotected in &unprotected {
+        log::warn!("{}", dumps::daemon_line(&localizer, unprotected));
+    }
     finish(
         &localizer,
         run_daemon(&localizer, listen, allowed_hosts, service_managed),

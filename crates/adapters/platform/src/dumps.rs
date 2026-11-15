@@ -26,10 +26,37 @@ pub enum Unprotected {
 /// `/proc/<pid>/mem` by other processes of the same user. Says what it
 /// couldn't do.
 ///
-/// The flag is cleared again by the kernel's `execve` of a program, so a
-/// worker, which is one, calls this itself; the limit is inherited.
+/// The kernel sets the flag again on the `execve` of a program, so a worker,
+/// which is one, calls this itself; the limit is inherited.
 pub fn refuse() -> Vec<Unprotected> {
-    todo!("decision 98")
+    [core_dumps(), debugger_attach()]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+#[cfg(unix)]
+fn core_dumps() -> Option<Unprotected> {
+    use nix::sys::resource::{Resource, setrlimit};
+    let refused = setrlimit(Resource::RLIMIT_CORE, 0, 0).err()?;
+    Some(Unprotected::CoreDumps(refused.into()))
+}
+
+#[cfg(not(unix))]
+fn core_dumps() -> Option<Unprotected> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn debugger_attach() -> Option<Unprotected> {
+    let refused = nix::sys::prctl::set_dumpable(false).err()?;
+    Some(Unprotected::DebuggerAttach(refused.into()))
+}
+
+/// Only Linux has a dumpable flag.
+#[cfg(not(target_os = "linux"))]
+fn debugger_attach() -> Option<Unprotected> {
+    None
 }
 
 #[cfg(all(test, unix))]
@@ -43,7 +70,10 @@ mod tests {
         let unprotected = super::refuse();
 
         assert!(unprotected.is_empty(), "{unprotected:?}");
-        assert_eq!(getrlimit(Resource::RLIMIT_CORE).expect("the core-dump limit"), (0, 0));
+        assert_eq!(
+            getrlimit(Resource::RLIMIT_CORE).expect("the core-dump limit"),
+            (0, 0)
+        );
     }
 
     #[cfg(target_os = "linux")]
