@@ -49,11 +49,14 @@ pub enum RestartAsker {
     SignInOff,
 }
 
-/// A restart asked for: when, and by whom.
+/// A restart asked for: when, by whom, and, for one that waits, whether it
+/// has come (the running operations finished and the daemon is stopping),
+/// after which a cancel is too late.
 #[derive(Clone, Copy, Debug)]
 struct Asked {
     when: RestartWhenDto,
     asker: RestartAsker,
+    come: bool,
 }
 
 /// Whether the daemon offers a restart, and the restart asked for, if any.
@@ -114,7 +117,11 @@ impl Restart {
                 if when == RestartWhenDto::Finished {
                     self.work.hold();
                 }
-                *asked = Some(Asked { when, asker });
+                *asked = Some(Asked {
+                    when,
+                    asker,
+                    come: false,
+                });
                 true
             }
         });
@@ -122,12 +129,13 @@ impl Restart {
 
     /// Cancels a restart that waits, and lets go of its hold, so the queued
     /// operations start again; says whether there was one. A restart asked
-    /// for now is already under way and stays; with none asked for there is
-    /// nothing to cancel.
+    /// for now, or one that waited and has come, is already under way and
+    /// stays, hold and all; with none asked for there is nothing to cancel.
     fn cancel(&self) -> bool {
         self.asked.send_if_modified(|asked| match asked {
             Some(Asked {
                 when: RestartWhenDto::Finished,
+                come: false,
                 ..
             }) => {
                 *asked = None;
@@ -159,27 +167,45 @@ impl Restart {
     }
 
     /// Returns once the daemon is to restart, with who asked: at once for a
-    /// restart now, and for one that waits once no operation is running.
-    /// Never when none is asked for.
+    /// restart now, and for one that waits once no operation is running,
+    /// marking it come under the channel's lock, so no cancel lands between
+    /// the count and the stop. Never when none is asked for.
     pub async fn due(&self) -> RestartAsker {
         let mut asked = self.asked.subscribe();
         loop {
-            let waiting = match *asked.borrow_and_update() {
-                Some(Asked {
-                    when: RestartWhenDto::Now,
-                    asker,
-                }) => return asker,
-                Some(Asked {
-                    when: RestartWhenDto::Finished,
-                    asker,
-                }) => {
-                    if self.work.running() == 0 {
-                        return asker;
+            // Marks what is asked now as seen before reading it, so a change
+            // after the read wakes `changed()` below.
+            drop(asked.borrow_and_update());
+            let mut due = None;
+            let mut waiting = false;
+            // Marking a restart come changes nothing a reader acts on, so it
+            // notifies no one (`false`).
+            self.asked.send_if_modified(|asked| {
+                match asked {
+                    Some(Asked {
+                        when: RestartWhenDto::Now,
+                        asker,
+                        ..
+                    }) => due = Some(*asker),
+                    Some(Asked {
+                        when: RestartWhenDto::Finished,
+                        asker,
+                        come,
+                    }) => {
+                        if *come || self.work.running() == 0 {
+                            *come = true;
+                            due = Some(*asker);
+                        } else {
+                            waiting = true;
+                        }
                     }
-                    true
+                    None => {}
                 }
-                None => false,
-            };
+                false
+            });
+            if let Some(asker) = due {
+                return asker;
+            }
             tokio::select! {
                 // `self` holds the sender, so this never ends in an error.
                 _ = asked.changed() => {}
@@ -225,7 +251,8 @@ pub(crate) async fn ask(
 
 /// `DELETE /api/v1/restart`: cancels a restart that waits for the running
 /// operations, so the queued ones start again, and answers with what the
-/// route then says. A restart asked for now is already under way and stays.
+/// route then says. A restart asked for now, or one that waited and has
+/// come, is already under way and stays.
 /// Refused with `restart-unavailable` where none is offered.
 pub(crate) async fn cancel(
     State(state): State<AppState>,

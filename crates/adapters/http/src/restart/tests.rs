@@ -237,6 +237,21 @@ async fn a_restart_asked_for_now_cannot_be_cancelled() {
     assert_eq!(due_now(&restart), Some(RestartAsker::SignInOff));
 }
 
+// Once due, the daemon is on its way down: a cancel that comes before it
+// stops is too late, so it neither lets go of the hold (a queued backup
+// would start only to be cut off) nor tells Settings the restart is off.
+#[tokio::test]
+async fn a_restart_that_has_come_is_not_cancelled() {
+    let (restart, work) = daemon(true, 0);
+    send(&restart, post(r#"{"when":"finished"}"#)).await;
+    assert_eq!(due_now(&restart), Some(RestartAsker::SignInOff));
+    let (status, body) = send(&restart, delete()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["pending"], true, "Settings says it was cancelled");
+    assert!(work.held.load(Ordering::SeqCst), "the hold was let go");
+    assert_eq!(due_now(&restart), Some(RestartAsker::SignInOff));
+}
+
 #[tokio::test]
 async fn a_daemon_no_service_manager_runs_refuses_a_cancel() {
     let (restart, _) = daemon(false, 0);
