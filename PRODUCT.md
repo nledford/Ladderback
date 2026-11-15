@@ -14,9 +14,14 @@ web
 
 ## Users
 
-People who back up their own machines with [rustic](https://rustic.cli.rs). They might be on a desktop, a laptop or a headless server, and they keep one or more shared repositories. They know backups matter, but they don't want to babysit cron jobs, lock files and per-machine logs. Their job is to know every machine is backed up, notice quickly when one isn't, and get files back without fear.
+People who back up their own machines. They might be on a desktop, a laptop or a headless server, and they keep one or more shared repositories. They know backups matter, but they don't want to babysit cron jobs, lock files and per-machine logs. Their job is to know every machine is backed up, notice quickly when one isn't, and get files back without fear.
 
-Ladderback is built for its author's own fleet first: Bazzite desktops, Linux servers and a MacBook. It is published so other rustic self-hosters can use it, without support promises.
+They come in two kinds, and Ladderback serves both:
+
+- **Casual users,** who want backups that run by themselves and rarely, if ever, open a terminal. They install Ladderback once and do everything else in the web UI.
+- **Advanced users,** often already backing up with the [rustic](https://rustic.cli.rs) CLI, who are at home in a terminal. They expect a command for everything, scriptable, with their existing rustic profiles imported.
+
+Ladderback is built for its author's own fleet first: Bazzite desktops, Linux servers and a MacBook. It is published so other self-hosters can use it, without support promises.
 
 ## Problem
 
@@ -41,6 +46,7 @@ Ladderback turns rustic into a managed service on each machine, with one place t
 4. **No lock-in.** Import existing rustic profiles, and export any plan back to one, so the `rustic` CLI always remains an option.
 5. **One self-contained program.** It runs headless on servers and as a user service on desktops and laptops, with the web UI built in.
 6. **Help from an AI agent, confirmed by a person.** People can ask an AI agent to help them work out what to back up, where and for how long. The AI agent proposes the setup; Ladderback shows in its own words what would change, what it could delete and every command it would add, and with sign-in on, nothing changes until a person has reviewed every change and confirmed it in the web UI. With sign-in off, anyone who can reach Ladderback, an AI agent included, can confirm, and Ladderback says so.
+7. **The web UI and the terminal, both.** Every routine task works from either. Installing takes one command; after that, nothing a casual user needs (setting the admin password, restarting, updating, reading why a backup failed) requires the terminal. The commands stay, for advanced users and for scripts.
 
 Success means: every machine's last good backup is visible at a glance, and a missed or failed backup is reported, not discovered during a restore.
 
