@@ -504,8 +504,10 @@ impl Cause {
     /// The status an orderly stop for this cause ends with: a restart's is
     /// the one the service manager starts the daemon again on.
     fn status(self) -> ExitCode {
-        let _ = self;
-        ExitCode::SUCCESS
+        match self {
+            Self::Restart(_) => ExitCode::from(platform::service::RESTART_STATUS),
+            Self::Signal(_) | Self::ServerEnded => ExitCode::SUCCESS,
+        }
     }
 }
 

@@ -128,18 +128,18 @@ impl BackupQueue {
     /// place waits, for the daemon that starts next to run (decision NN).
     /// The restart ends the hold, or [`Self::release`] when it is cancelled.
     pub fn hold(&mut self) {
-        todo!()
+        self.held = true;
     }
 
     /// Lets go of the hold of a restart that was cancelled: the waiting runs
     /// start again at the next [`Self::start`], under the limit.
     pub fn release(&mut self) {
-        todo!()
+        self.held = false;
     }
 
     /// How many backups hold a slot: running, past their turn.
     pub fn running(&self) -> usize {
-        todo!()
+        self.running.len()
     }
 }
 

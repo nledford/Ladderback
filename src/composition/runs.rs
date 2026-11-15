@@ -77,18 +77,18 @@ impl Runs {
 
     /// How many maintenance runs are running.
     pub(crate) fn maintenance_running(&self) -> usize {
-        todo!()
+        self.lock().running
     }
 
     /// Starts no maintenance run from now on, until [`Self::release`]: a
     /// restart waits for the running ones.
     fn hold(&self) {
-        todo!()
+        self.lock().held = true;
     }
 
     /// Starts maintenance runs again: the restart was cancelled.
     fn release(&self) {
-        todo!()
+        self.lock().held = false;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Maintenance> {

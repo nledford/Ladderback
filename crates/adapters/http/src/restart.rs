@@ -192,8 +192,7 @@ impl Restart {
 /// `GET /api/v1/restart`: whether a restart is offered, whether one waits,
 /// and how many operations are running.
 pub(crate) async fn read(State(state): State<AppState>) -> Response {
-    let _ = state;
-    todo!()
+    axum::Json(state.restart.told()).into_response()
 }
 
 /// `POST /api/v1/restart`: asks the daemon to restart, now or once its
@@ -205,8 +204,23 @@ pub(crate) async fn ask(
     session: Option<axum::Extension<SessionOf>>,
     body: Result<axum::Json<RestartRequestDto>, JsonRejection>,
 ) -> Response {
-    let _ = (state, session, body);
-    todo!()
+    if !state.restart.offered {
+        return refused(StatusCode::CONFLICT, ErrorCode::RestartUnavailable);
+    }
+    let Ok(axum::Json(RestartRequestDto { when })) = body else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let asker = asker_of(session.as_ref());
+    state.restart.ask(when, asker);
+    let told = state.restart.told();
+    if told.pending && told.running > 0 {
+        log::info!(
+            "a restart was asked for ({}); it waits for {} running operations to finish, and starts no new one meanwhile",
+            asked_by(asker),
+            told.running
+        );
+    }
+    (StatusCode::ACCEPTED, axum::Json(told)).into_response()
 }
 
 /// `DELETE /api/v1/restart`: cancels a restart that waits for the running
@@ -217,8 +231,16 @@ pub(crate) async fn cancel(
     State(state): State<AppState>,
     session: Option<axum::Extension<SessionOf>>,
 ) -> Response {
-    let _ = (state, session);
-    todo!()
+    if !state.restart.offered {
+        return refused(StatusCode::CONFLICT, ErrorCode::RestartUnavailable);
+    }
+    if state.restart.cancel() {
+        log::info!(
+            "the restart that waited was cancelled ({}); queued operations start again",
+            cancelled_by(asker_of(session.as_ref()))
+        );
+    }
+    axum::Json(state.restart.told()).into_response()
 }
 
 /// Who asked for a restart, as the log says it.

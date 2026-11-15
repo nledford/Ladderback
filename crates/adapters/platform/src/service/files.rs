@@ -3,7 +3,7 @@
 
 use domain::service::ServicePath;
 
-use super::KILL_AFTER;
+use super::{KILL_AFTER, RESTART_STATUS, SERVICE_MANAGED};
 
 /// The unit's first line. A file at the unit's place without it as a whole
 /// line was not written by `install-service`, and is never touched.
@@ -15,9 +15,11 @@ pub const SYSTEMD_MARK: &str =
 pub const LAUNCHD_MARK: &str =
     "<!-- Written by `ladderback install-service`; `ladderback remove-service` removes it. -->";
 
-/// The systemd user unit that runs `program serve`. Its cache folder is the
-/// one systemd makes for it, private to the user, which the agent is pointed
-/// at (decision 59). systemd waits [`KILL_AFTER`] for it to stop.
+/// The systemd user unit that runs `program serve --service-managed`. Its
+/// cache folder is the one systemd makes for it, private to the user, which
+/// the agent is pointed at (decision 59). systemd waits [`KILL_AFTER`] for it
+/// to stop, and starts it again after a failure or a restart's
+/// [`RESTART_STATUS`], which doesn't mark the unit failed (decision NN).
 pub fn systemd_unit(program: &ServicePath) -> String {
     format!(
         "{SYSTEMD_MARK}\n\
@@ -27,7 +29,7 @@ pub fn systemd_unit(program: &ServicePath) -> String {
          \n\
          [Service]\n\
          Type=exec\n\
-         ExecStart=:{} serve\n\
+         ExecStart=:{} serve {SERVICE_MANAGED}\n\
          CacheDirectory=ladderback\n\
          CacheDirectoryMode=0700\n\
          Environment=LADDERBACK_CACHE_DIR=%C/ladderback\n\
@@ -35,6 +37,8 @@ pub fn systemd_unit(program: &ServicePath) -> String {
          TimeoutStopSec={kill_after}\n\
          Restart=on-failure\n\
          RestartSec=10\n\
+         RestartForceExitStatus={RESTART_STATUS}\n\
+         SuccessExitStatus={RESTART_STATUS}\n\
          \n\
          [Install]\n\
          WantedBy=default.target\n",
@@ -52,9 +56,10 @@ fn systemd_word(text: &str) -> String {
     format!("\"{}\"", text.replace('%', "%%"))
 }
 
-/// The launchd agent labelled `label` that runs `program serve` from login
-/// on, again after a crash, and writes its log to `log`. launchd waits
-/// [`KILL_AFTER`] for it to stop.
+/// The launchd agent labelled `label` that runs `program serve
+/// --service-managed` from login on, again after a crash or a restart's
+/// [`RESTART_STATUS`] (any exit but a successful one), and writes its log to
+/// `log`. launchd waits [`KILL_AFTER`] for it to stop.
 pub fn launchd_plist(label: &str, program: &ServicePath, log: &ServicePath) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -68,6 +73,7 @@ pub fn launchd_plist(label: &str, program: &ServicePath, log: &ServicePath) -> S
          \t<array>\n\
          \t\t<string>{}</string>\n\
          \t\t<string>serve</string>\n\
+         \t\t<string>{SERVICE_MANAGED}</string>\n\
          \t</array>\n\
          \t<key>RunAtLoad</key>\n\
          \t<true/>\n\

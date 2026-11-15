@@ -64,15 +64,23 @@ pub(crate) enum Stage {
 impl Stage {
     /// What a read of the route shows; `None` is no answer.
     pub(crate) fn of(read: Option<&RestartDto>) -> Self {
-        let _ = read;
-        todo!()
+        match read {
+            None => Self::Unreachable,
+            Some(told) if !told.offered => Self::Unavailable,
+            Some(told) if told.pending => Self::Pending,
+            Some(told) => Self::Offered {
+                running: told.running,
+            },
+        }
     }
 
     /// What a read again shows while a restart is pending: no answer is the
     /// daemon going down for it, which the wait has then seen.
     pub(crate) fn while_pending(read: Option<&RestartDto>) -> Self {
-        let _ = read;
-        todo!()
+        match read {
+            None => Self::Restarting { seen_down: true },
+            Some(_) => Self::of(read),
+        }
     }
 
     /// What the section shows once the daemon has taken a request to
@@ -80,37 +88,45 @@ impl Stage {
     /// with nothing running to wait for, and otherwise what the daemon says,
     /// a restart pending.
     pub(crate) fn after_ask(when: RestartWhenDto, told: &RestartDto) -> Self {
-        let _ = (when, told);
-        todo!()
+        match when {
+            RestartWhenDto::Now => Self::Restarting { seen_down: false },
+            RestartWhenDto::Finished if told.running == 0 => Self::Restarting { seen_down: false },
+            RestartWhenDto::Finished => Self::of(Some(told)),
+        }
     }
 }
 
 /// The request that asks for a restart `when`.
 pub(crate) fn request(when: RestartWhenDto) -> RestartRequestDto {
-    let _ = when;
-    todo!()
+    RestartRequestDto { when }
 }
 
 /// What the dialog says about the `running` operations, and the choices it
 /// offers when there are some.
 pub(crate) fn running_said(running: u32) -> Said {
-    let _ = running;
-    todo!()
+    (
+        msg::UI_RESTART_RUNNING,
+        vec![("running", MsgArg::Count(u64::from(running)))],
+    )
 }
 
 /// The dialog's confirm button with `running` operations: a plain restart
 /// with none, which has nothing to wait for, and otherwise one once they
 /// finish. Either asks for a restart once they finish.
 pub(crate) fn confirm_said(running: u32) -> Said {
-    let _ = running;
-    todo!()
+    match running {
+        0 => (msg::UI_RESTART_CONFIRM, Vec::new()),
+        _ => (
+            msg::UI_RESTART_WHEN_FINISHED,
+            vec![("running", MsgArg::Count(u64::from(running)))],
+        ),
+    }
 }
 
 /// Whether the dialog also offers a restart now, which stops the `running`
 /// operations: only when some are.
 pub(crate) fn offers_now(running: u32) -> bool {
-    let _ = running;
-    todo!()
+    running > 0
 }
 
 /// The page's wait for the daemon to come back once it has begun to
@@ -134,16 +150,24 @@ pub(crate) enum Waited {
 impl Wait {
     /// A wait begun at `now_ms`, which has `seen_down` the daemon already.
     pub(crate) fn new(now_ms: i64, seen_down: bool) -> Self {
-        let _ = (now_ms, seen_down);
-        todo!()
+        Self {
+            since_ms: now_ms,
+            seen_down,
+        }
     }
 
     /// What follows a question asked at `now_ms`, which the daemon
     /// `answered` or not. An answer before the daemon was seen down is the
     /// daemon that is stopping, so only one after it reloads the page.
     pub(crate) fn after(&mut self, answered: bool, now_ms: i64) -> Waited {
-        let _ = (answered, now_ms);
-        todo!()
+        if !answered {
+            self.seen_down = true;
+        } else if self.seen_down {
+            return Waited::Reload;
+        }
+        Waited::Again {
+            not_back: now_ms.saturating_sub(self.since_ms) >= NOT_BACK_AFTER_MS,
+        }
     }
 }
 
@@ -151,8 +175,12 @@ impl Wait {
 /// or the wait, and `not_back` once that has lasted too long. `None` says
 /// nothing.
 pub(crate) fn status_of(stage: Stage, not_back: bool) -> Option<MessageId> {
-    let _ = (stage, not_back);
-    todo!()
+    match stage {
+        Stage::Pending => Some(msg::UI_RESTART_PENDING),
+        Stage::Restarting { .. } if not_back => Some(msg::UI_RESTART_NOT_BACK),
+        Stage::Restarting { .. } => Some(msg::UI_RESTARTING),
+        Stage::Loading | Stage::Unreachable | Stage::Unavailable | Stage::Offered { .. } => None,
+    }
 }
 
 #[cfg(test)]
