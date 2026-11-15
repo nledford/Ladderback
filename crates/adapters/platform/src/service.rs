@@ -282,6 +282,15 @@ impl UserService {
         };
         !lingers
     }
+
+    /// Whether the service may run before its user has logged in, and so
+    /// before a `password-keyring` password can be read (#479). A systemd
+    /// user service of a user who lingers starts at boot, and the Secret
+    /// Service starts only with the user's desktop session; a launchd agent
+    /// runs only while its user is logged in.
+    pub fn keyring_waits_for_login(&self) -> bool {
+        todo!()
+    }
 }
 
 #[async_trait]

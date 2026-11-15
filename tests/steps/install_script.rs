@@ -8,7 +8,9 @@
 //! (`install/state/calls`, one line each, the command's name and its
 //! arguments) and the answers a scenario chose: the version each tool
 //! reports, the system `uname` names, the glibc, processors and free memory
-//! `getconf` reports, the toolchains rustup has (`install/state/toolchains`).
+//! `getconf` reports, the names `busctl` lists on the session bus
+//! (`install/state/bus-names`; a Secret Service runs unless a scenario says
+//! otherwise), the toolchains rustup has (`install/state/toolchains`).
 //! Each cargo call also records the Rust it builds with, chosen as rustup and
 //! cargo choose it (`install/state/builds`). Tools a stand-in installs
 //! (`cargo install`, rustup's installer) are copied from
@@ -397,7 +399,31 @@ done
 /// What must never run: recorded, and refused.
 const NEVER: &str = "exit 1\n";
 
-/// The stand-ins for tools the build needs, by name.
+/// `busctl`, listing the session bus's names as `install/state/bus-names`
+/// holds them, or failing as it does where there is no session bus when that
+/// file isn't there.
+const BUSCTL: &str = r#"if [ ! -f "$state/bus-names" ]; then
+  echo 'Failed to connect to bus: No medium found' >&2
+  exit 1
+fi
+/bin/cat "$state/bus-names"
+"#;
+
+/// What `busctl --user --no-legend list` prints: the bus's own name and a
+/// desktop portal, which every session bus here has, then the Secret
+/// Service's line, if any.
+const BUS_NAMES: &str = "\
+:1.12 2214 xdg-desktop-por demo :1.12 user@1000.service - -
+org.freedesktop.DBus 1 systemd demo - init.scope - -
+org.freedesktop.portal.Desktop 2214 xdg-desktop-por demo :1.12 user@1000.service - -
+";
+
+/// The Secret Service's line, running and started when asked for.
+const SECRETS_RUNNING: &str =
+    "org.freedesktop.secrets 1987 oo7-daemon demo :1.9 user@1000.service - -\n";
+const SECRETS_ACTIVATABLE: &str = "org.freedesktop.secrets - - - (activatable) - - -\n";
+
+/// The stand-ins for the tools the script runs, by name.
 const TOOLS: &[(&str, &str)] = &[
     ("cc", "exit 0\n"),
     ("node", NODE),
@@ -412,6 +438,7 @@ const TOOLS: &[(&str, &str)] = &[
     ("curl", CURL),
     ("sha256sum", SHA256SUM),
     ("xcode-select", XCODE_SELECT),
+    ("busctl", BUSCTL),
     ("sudo", NEVER),
 ];
 
@@ -704,6 +731,7 @@ fn every_tool_installed(agent: &mut Agent) {
     set(agent, "uname-m", "x86_64");
     set(agent, "glibc", "2.39");
     set(agent, "long-bit", "64");
+    bus_names(agent, Some(SECRETS_RUNNING));
     fs::create_dir_all(state(agent).join("toolchains")).expect("rustup's toolchains");
     fs::write(pinned_rust(agent), pinned_rust_components(None))
         .expect("rustup has the Rust the release pins");
@@ -1752,5 +1780,61 @@ fn stdout_doesnt_say(agent: &mut Agent, text: String) {
     assert!(
         !stdout.contains(&text),
         "standard output says {text:?}: {stdout}"
+    );
+}
+
+/// What `busctl` lists on the session bus: its usual names and `secrets`,
+/// the Secret Service's line, if any.
+fn bus_names(agent: &Agent, secrets: Option<&str>) {
+    fs::write(
+        state(agent).join("bus-names"),
+        format!("{BUS_NAMES}{}", secrets.unwrap_or_default()),
+    )
+    .expect("the session bus's names");
+}
+
+#[given("nothing answers for a Secret Service on the session bus")]
+fn no_secret_service(agent: &mut Agent) {
+    bus_names(agent, None);
+}
+
+#[given("there is no session bus")]
+fn no_session_bus(agent: &mut Agent) {
+    fs::remove_file(state(agent).join("bus-names")).expect("the session bus was there");
+}
+
+#[given(regex = r"^a Secret Service (runs|is started when asked for) on the session bus$")]
+fn secret_service(agent: &mut Agent, answers: String) {
+    let line = match answers.as_str() {
+        "runs" => SECRETS_RUNNING,
+        _ => SECRETS_ACTIVATABLE,
+    };
+    bus_names(agent, Some(line));
+}
+
+/// The one call that asks the session bus which names answer on it: as the
+/// user who runs the script, never under `sudo`.
+const BUS_CHECK: &str = "busctl --user --no-pager --no-legend list";
+
+#[then("the session bus was asked, as the owner, whether a Secret Service answers")]
+fn bus_asked(agent: &mut Agent) {
+    let calls = calls_since_run(agent);
+    let asked: Vec<&String> = calls
+        .iter()
+        .filter(|call| call.starts_with("busctl"))
+        .collect();
+    assert_eq!(asked, [BUS_CHECK], "{calls:?}");
+    assert!(
+        !calls.iter().any(|call| call.starts_with("sudo")),
+        "{calls:?}"
+    );
+}
+
+#[then("the session bus wasn't asked")]
+fn bus_not_asked(agent: &mut Agent) {
+    let calls = calls_since_run(agent);
+    assert!(
+        !calls.iter().any(|call| call.starts_with("busctl")),
+        "{calls:?}"
     );
 }

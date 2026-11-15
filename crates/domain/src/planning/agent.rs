@@ -261,6 +261,12 @@ impl AgentConfig {
         self.repositories.get(alias)
     }
 
+    /// How many repositories read their password from the OS keyring
+    /// (`password-keyring`).
+    pub fn keyring_passwords(&self) -> usize {
+        todo!()
+    }
+
     /// The plans, in the order they were written.
     pub fn plans(&self) -> &[Plan] {
         &self.plans
@@ -1243,5 +1249,35 @@ mod tests {
                 plan: id("docs"),
             }))
         );
+    }
+
+    /// Only `password-keyring` counts: a lingering Linux service can't read
+    /// the keyring before login (#479), and every other source it can.
+    #[test]
+    fn only_repositories_whose_password_is_in_the_keyring_are_counted() {
+        use crate::secrets::{FileRead, KeyringEntry, SecretValue};
+        let mut entries = repositories(&["cloud", "laptop", "nas", "usb"]);
+        let mut password = |name: &str, password: SecretRef| {
+            entries.get_mut(&alias(name)).unwrap().settings.password = password;
+        };
+        password(
+            "laptop",
+            SecretRef::File {
+                path: "/home/demo/.config/ladderback/laptop.password".to_owned(),
+                read: FileRead::FirstLine,
+            },
+        );
+        password("usb", SecretRef::Inline(SecretValue::new("demo-password")));
+        let only_others = config(entries.clone(), vec![]).unwrap();
+        assert_eq!(only_others.keyring_passwords(), 0);
+
+        let keyring = |entry: &str| SecretRef::Keyring(KeyringEntry::parse(entry).unwrap());
+        entries.get_mut(&alias("nas")).unwrap().settings.password = keyring("ladderback/nas");
+        let one = config(entries.clone(), vec![]).unwrap();
+        assert_eq!(one.keyring_passwords(), 1);
+
+        entries.get_mut(&alias("cloud")).unwrap().settings.password = keyring("ladderback/cloud");
+        let two = config(entries, vec![]).unwrap();
+        assert_eq!(two.keyring_passwords(), 2);
     }
 }

@@ -664,6 +664,22 @@ async fn launchd_has_no_lingering_to_tell_of() {
     assert_eq!(faked.fakes.commands(), Vec::<String>::new());
 }
 
+/// A lingering user unit starts at boot, before a login starts the Secret
+/// Service, so a keyring password can't be read until then (#479); nothing
+/// is asked to say so.
+#[test]
+fn a_systemd_service_may_run_before_the_keyring_can_be_read() {
+    let faked = Faked::new(Which::Systemd);
+    assert!(faked.service.keyring_waits_for_login());
+    assert_eq!(faked.fakes.commands(), Vec::<String>::new());
+}
+
+#[test]
+fn a_launchd_agent_runs_only_once_its_user_has_logged_in() {
+    let faked = Faked::new(Which::Launchd);
+    assert!(!faked.service.keyring_waits_for_login());
+}
+
 /// `systemctl restart` and `disable --now` return only once the unit has
 /// stopped, which systemd gives up to its `TimeoutStopSec`: they are waited
 /// for while it stops, not given up at one call's limit (#543).

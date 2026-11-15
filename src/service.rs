@@ -38,6 +38,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
     let Some(runtime) = runtime(localizer)? else {
         return Ok(ExitCode::FAILURE);
     };
+    let keyring = keyring_passwords(&runtime);
     match runtime.block_on(service.install(&program)) {
         Ok(Installed { file, replaced }) => {
             let id = if replaced {
@@ -51,6 +52,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
             if runtime.block_on(service.should_hint_lingering()) {
                 told.push_str(&line(localizer, msg::CLI_SERVICE_LINGER, &[]));
             }
+            told.push_str(&keyring_said(localizer, &service, keyring));
             to_stdout(&told)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -90,6 +92,17 @@ fn remove(localizer: &Localizer) -> io::Result<ExitCode> {
             Ok(ExitCode::FAILURE)
         }
     }
+}
+
+/// How many repositories of the configuration read their password from the
+/// keyring.
+fn keyring_passwords(_runtime: &tokio::runtime::Runtime) -> usize {
+    todo!()
+}
+
+/// What to say of the repositories whose password is in the keyring.
+fn keyring_said(_localizer: &Localizer, _service: &UserService, _keyring: usize) -> String {
+    todo!()
 }
 
 /// This platform's service manager for this user, or `None` once why there
