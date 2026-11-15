@@ -74,7 +74,9 @@ use store::SqliteStore;
 use uuid::Uuid;
 
 mod maintenance;
+pub(crate) mod mcp_server;
 mod plans;
+mod profiles;
 mod runs;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
@@ -557,8 +559,9 @@ async fn daemon_at(
     let lock = DataDirLock::acquire(&data_dir).map_err(|error| lock_refused(&data_dir, error))?;
     // The configuration next: a file this build cannot read is a refusal,
     // whatever the rest of the machine says.
+    let config_file = config_dir.join("config.toml");
     let config: Arc<dyn ConfigStore> = Arc::new(FileConfigStore::new(
-        config_dir.join("config.toml"),
+        config_file.clone(),
         Arc::new(SystemClock),
     ));
     let loaded = config.load().await.map_err(config_refused)?;
@@ -582,6 +585,7 @@ async fn daemon_at(
     // leaves it as tidy as one that served and stopped.
     match state_over(
         config,
+        config_file,
         &data_dir,
         cache_dir,
         recorded,
@@ -610,6 +614,7 @@ async fn daemon_at(
 /// tidied first, keeping the caches of the repositories `recorded` names.
 async fn state_over(
     config: Arc<dyn ConfigStore>,
+    config_file: std::path::PathBuf,
     data_dir: &std::path::Path,
     cache_dir: Option<std::path::PathBuf>,
     recorded: Recorded,
@@ -723,6 +728,12 @@ async fn state_over(
         Arc::clone(&config),
         app::plans::EditPlans::new(Arc::clone(&config), writes, changed),
     ));
+    let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService::new(
+        Arc::clone(&config),
+        config_file,
+        agent_id,
+        Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
+    ));
     let catalog: Arc<dyn Catalog> = Arc::new(ConfigCatalog {
         config: Arc::clone(&config),
         engine,
@@ -748,6 +759,7 @@ async fn state_over(
             catalog,
             repositories,
             plans,
+            profiles,
             sign_in: SignIn::Off {
                 password: Arc::new(FileAdminPassword::in_data_dir(data_dir)),
                 sessions: Arc::<SqliteStore>::clone(&log.store),
@@ -2321,6 +2333,9 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
         ProfileNotice::UsedProfileMissing { name } => {
             (WarningCode::ProfileUsedMissing, vec![("name", text(name))])
         }
+        ProfileNotice::UsedProfileNotRead { name } => {
+            (WarningCode::ProfileUsedNotRead, vec![("name", text(name))])
+        }
         ProfileNotice::InlineSecret { field } => {
             (WarningCode::InlineSecret, vec![("field", text(field))])
         }
@@ -3481,25 +3496,34 @@ mod captured_log {
 
     struct Captured;
 
-    static LOGGED: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
+    /// Each record's level, target and text.
+    static LOGGED: Mutex<Vec<(log::Level, String, String)>> = Mutex::new(Vec::new());
 
     impl log::Log for Captured {
         fn enabled(&self, _: &log::Metadata<'_>) -> bool {
             true
         }
         fn log(&self, record: &log::Record<'_>) {
-            LOGGED
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push((record.level(), record.args().to_string()));
+            LOGGED.lock().unwrap_or_else(PoisonError::into_inner).push((
+                record.level(),
+                record.target().to_owned(),
+                record.args().to_string(),
+            ));
         }
         fn flush(&self) {}
     }
 
-    /// Starts capturing, before the code that logs runs.
+    /// Starts capturing, before the code that logs runs, at info level or
+    /// more, as another test of the process may have asked.
     pub(super) fn capture() {
+        capture_at(log::LevelFilter::Info);
+    }
+
+    /// Starts capturing at `level` or more: a test that asks for less never
+    /// lowers what another test of the process asked for.
+    pub(super) fn capture_at(level: log::LevelFilter) {
         let _ = log::set_logger(&Captured);
-        log::set_max_level(log::LevelFilter::Info);
+        log::set_max_level(log::max_level().max(level));
     }
 
     /// Every line logged so far at warning level or above, with its level.
@@ -3508,8 +3532,8 @@ mod captured_log {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .filter(|(level, _)| *level <= log::Level::Warn)
-            .cloned()
+            .filter(|(level, _, _)| *level <= log::Level::Warn)
+            .map(|(level, _, line)| (*level, line.clone()))
             .collect()
     }
 
@@ -3519,8 +3543,44 @@ mod captured_log {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .filter(|(level, _)| *level == log::Level::Info)
-            .map(|(_, line)| line.clone())
+            .filter(|(level, _, _)| *level == log::Level::Info)
+            .map(|(_, _, line)| line.clone())
+            .collect()
+    }
+
+    /// The targets of every record logged so far at `level`.
+    pub(super) fn targets_at(level: log::Level) -> Vec<String> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(at, _, _)| *at == level)
+            .map(|(_, target, _)| target.clone())
+            .collect()
+    }
+
+    /// Every line logged so far that the daemon's log, under `RUST_LOG` set
+    /// to `rust_log`, would write.
+    pub(super) fn written_under(rust_log: &str) -> Vec<String> {
+        use log::Log as _;
+        let daemon = crate::logging::logger(
+            Some(rust_log),
+            env_logger::Target::Pipe(Box::new(std::io::sink())),
+            env_logger::WriteStyle::Never,
+        );
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(level, target, _)| {
+                daemon.enabled(
+                    &log::Metadata::builder()
+                        .level(*level)
+                        .target(target)
+                        .build(),
+                )
+            })
+            .map(|(_, _, line)| line.clone())
             .collect()
     }
 }

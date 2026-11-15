@@ -1320,6 +1320,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::ProfileEnvIgnored
                 | WarningCode::ProfileHooksPerPlan
                 | WarningCode::ProfileUsedMissing
+                | WarningCode::ProfileUsedNotRead
                 | WarningCode::InlineSecret
                 | WarningCode::ConfigInlineSecret
                 | WarningCode::LocationSecret
@@ -1495,6 +1496,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::CurrentPasswordWrong
                 | ErrorCode::AdminPasswordUnavailable
                 | ErrorCode::SessionsUnavailable
+                | ErrorCode::DaemonUnreachable
+                | ErrorCode::DaemonAnswerLost
+                | ErrorCode::DaemonAnswerTooLarge
                 | ErrorCode::ConfigUnavailable
                 | ErrorCode::ConfigTooLarge
                 | ErrorCode::ConfigInvalid

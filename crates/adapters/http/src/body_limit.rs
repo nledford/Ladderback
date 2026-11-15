@@ -21,15 +21,26 @@ use crate::refused_with;
 /// The most a request to `/api/v1` may carry: twice the 64 KiB a secret field
 /// may hold (`MAX_SECRET_BYTES`), so that the largest body any route takes
 /// today, one repository's settings with a secret at its cap, fits with room
-/// for the rest of the settings. A configuration import, which may need
-/// more, gets a class of its own when its route exists.
+/// for the rest of the settings. A route that takes more has a class of its
+/// own.
 pub(crate) const API_BODY_LIMIT: u64 = 128 * 1024;
+
+/// The route that previews a profile from its text.
+pub(crate) const PROFILE_PREVIEW_PATH: &str = "/api/v1/profiles/preview";
+
+/// The most a profile preview may carry: twice the 1 MiB a profile may hold,
+/// as JSON may write each of its characters as two (a quote or a backslash
+/// escaped), and the API's own limit for the rest of the body.
+pub(crate) const PROFILE_BODY_LIMIT: u64 = 2 * 1024 * 1024 + API_BODY_LIMIT;
 
 /// The most a request for the web UI may carry: it reads files, so none.
 pub(crate) const UI_BODY_LIMIT: u64 = 0;
 
 /// The limit of the class of route `path` belongs to.
 pub(crate) fn limit_for(path: &str) -> u64 {
+    if path == PROFILE_PREVIEW_PATH {
+        return PROFILE_BODY_LIMIT;
+    }
     match path.strip_prefix("/api/v1") {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => API_BODY_LIMIT,
         _ => UI_BODY_LIMIT,
@@ -98,6 +109,18 @@ mod tests {
             "/plans",
         ] {
             assert_eq!(limit_for(path), UI_BODY_LIMIT, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_profile_preview_takes_a_profile_at_its_cap_written_as_json() {
+        assert_eq!(limit_for(PROFILE_PREVIEW_PATH), PROFILE_BODY_LIMIT);
+        for path in [
+            "/api/v1/profiles",
+            "/api/v1/profiles/preview/",
+            "/api/v1/profiles/preview/x",
+        ] {
+            assert_eq!(limit_for(path), API_BODY_LIMIT, "{path}");
         }
     }
 }

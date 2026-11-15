@@ -26,13 +26,19 @@ struct Created {
 const BEFORE_SECRET: usize = "ladderback_".len() + 12 + 1;
 
 /// A token nobody created: well formed, so that only its check refuses it.
-const NOBODY_S: &str = "ladderback_abcdefghijkl_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+pub(super) const NOBODY_S: &str =
+    "ladderback_abcdefghijkl_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 impl ApiTokensE2e {
     fn created(&self) -> &Created {
         self.created
             .as_ref()
             .expect("the admin created an API token")
+    }
+
+    /// The created token's whole text, as a program presents it.
+    pub(super) fn text(&self) -> &str {
+        &self.created().text
     }
 
     /// The created token's secret, without the ID before it.

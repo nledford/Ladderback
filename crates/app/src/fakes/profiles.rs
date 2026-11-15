@@ -36,7 +36,8 @@ impl FakeProfileReader {
         *lock(&self.script) = script;
     }
 
-    /// The files read and the aliases they were read for, in order.
+    /// The files read, or the names of the texts read, and the aliases they
+    /// were read for, in order.
     pub fn asked(&self) -> Vec<(PathBuf, RepositoryAlias)> {
         lock(&self.asked).clone()
     }
@@ -50,6 +51,16 @@ impl ProfileReader for FakeProfileReader {
         repository: &RepositoryAlias,
     ) -> Result<ImportedProfile, ProfileError> {
         lock(&self.asked).push((file.to_path_buf(), repository.clone()));
+        lock(&self.script).clone()
+    }
+
+    fn read_text(
+        &self,
+        name: &str,
+        _text: &str,
+        repository: &RepositoryAlias,
+    ) -> Result<ImportedProfile, ProfileError> {
+        lock(&self.asked).push((PathBuf::from(name), repository.clone()));
         lock(&self.script).clone()
     }
 }

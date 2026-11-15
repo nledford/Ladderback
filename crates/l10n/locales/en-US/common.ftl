@@ -201,6 +201,20 @@ error-admin-password-unavailable = { -brand-name } could not check or keep the a
 # The database could not keep or forget sessions: a sign-in started none, the session length was not changed, or a sign-out ended its sessions only in the running daemon. Shown wherever that can happen, the sign-in form included, so its last sentence speaks of any session signed out, not of the request that was refused.
 error-sessions-unavailable = { -brand-name } could not keep or forget sessions in its database. Its log says why; check the data folder and try again. Any session you signed out has ended all the same, while { -brand-name } runs.
 
+# `ladderback mcp --connect` got no answer from the daemon's API.
+error-daemon-unreachable = No { -brand-name } answered at the address { "ladderback mcp" } connects to. Check that the daemon is running and that { "--connect" } names its address.
+
+# `ladderback mcp --connect` sent a request that changes something, and its answer was lost on the way back.
+error-daemon-answer-lost = The request was sent to { -brand-name }, but no answer came back, so whether it took effect is unknown. It wasn't sent again: list the operations to see whether it did.
+
+# `ladderback mcp --connect` read an answer from the daemon larger than the most it reads, and left it unread.
+# $limit (bytes): the most it reads, as a size such as 8 MiB.
+# $operation (text): the ID of the operation whose detail was too large. The sender leaves it out for any other answer, a list of snapshots for one, and the program then supplies the text none.
+error-daemon-answer-too-large = { $operation ->
+    [none] { -brand-name } answered with more than { $limit }, the most { "ladderback mcp" } reads, so the answer was left unread.
+   *[other] { -brand-name } answered with more than { $limit }, the most { "ladderback mcp" } reads, so operation { $operation } was left unread. An operation with that many warnings can be read in the web UI.
+  }
+
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.
 # $detail (text): the platform's message. It is shown as it came.
@@ -700,6 +714,10 @@ warning-profile-hooks-per-plan = The hooks the profile set for all its snapshot 
 # A profile named by the profile's use-profiles was not found.
 # $name (text): the name as the profile wrote it.
 warning-profile-used-missing = The profile uses a profile called { $name }, which was not found, so { -brand-name } went on without it. Check the name, or add the file to rustic's profile folder, then import again.
+
+# A profile previewed from its text uses another profile, which a preview never reads.
+# $name (text): the name as the profile wrote it.
+warning-profile-used-not-read = The profile uses a profile called { $name }, which a preview doesn't read, so this preview leaves out what it would add. Import the profile from its file to merge it.
 
 # A secret written in the profile was kept as text in the configuration.
 # $field (text): where the secret is, as its setting.

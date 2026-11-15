@@ -1,0 +1,36 @@
+[package]
+name = "mcp"
+description = "MCP server adapter: `ladderback mcp`, the Model Context Protocol over stdio for AI agents and scripts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The wire types, with their JSON schemas for the tools' output schemas.
+api = { workspace = true, features = ["schemars"] }
+async-trait.workspace = true
+# The tag that names a snapshot's plan, which `list_snapshots` filters by.
+domain.workspace = true
+# Connect mode's client of the daemon's API (§4.6): no defaults, rustls for an
+# `https` daemon.
+reqwest.workspace = true
+rmcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# `wait_operation` reads the operation again after a pause, until the call
+# is cancelled.
+tokio = { workspace = true, features = ["io-std", "macros", "time"] }
+# An operation's ID, and the history cursor just past it that reads its
+# summary alone in connect mode.
+uuid.workspace = true
+
+[dev-dependencies]
+# A stand-in daemon for the connect backend's tests: the API's routes, never
+# `adapters/http` (§3.2).
+axum.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

@@ -191,17 +191,30 @@ fn session_cookie(token: &Token, life: CookieLife, secure: bool) -> Option<Heade
 /// session is live, with its CSRF token when it is, and the cookie renewed
 /// when asking renewed it; a read the page sends on its own only looks, as
 /// at every route. A signed-out answer says whether the sign-in form offers
-/// Keep me signed in on this device.
+/// Keep me signed in on this device. A request with a `read` token is judged
+/// by the token alone, its cookie ignored (decision 93): it has no session,
+/// and is told the build, as a signed-in page is.
 pub(crate) async fn current(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
     State(build): State<BuildDto>,
+    api_token: Option<axum::Extension<crate::api_tokens::TokenOf>>,
     headers: HeaderMap,
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
         SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, build),
     };
+    if api_token.is_some() {
+        return answer_told(
+            SignInStateDto::SignedOut,
+            None,
+            None,
+            None,
+            exposure,
+            Some(build),
+        );
+    }
     let token = session_token(&headers);
     let live = match &token {
         Some(token) if headers.contains_key(&BACKGROUND) => access.peek(token),
@@ -622,6 +635,25 @@ fn answer(
     // A page yet to sign in isn't told the build, as it isn't shown the
     // version (#502).
     let build = matches!(sign_in, SignInStateDto::Off | SignInStateDto::SignedIn).then_some(build);
+    answer_told(
+        sign_in,
+        live,
+        admin_password,
+        keep_signed_in_offered,
+        exposure,
+        build,
+    )
+}
+
+/// [`answer`], telling `build` when there is one.
+fn answer_told(
+    sign_in: SignInStateDto,
+    live: Option<LiveAnswer>,
+    admin_password: Option<AdminPasswordDto>,
+    keep_signed_in_offered: Option<bool>,
+    exposure: Exposure,
+    build: Option<BuildDto>,
+) -> Response {
     let (csrf_token, idle_seconds, ends_in_seconds) = match live {
         Some(live) => (
             Some(live.csrf),

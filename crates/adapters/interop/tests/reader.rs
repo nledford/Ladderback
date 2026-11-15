@@ -566,6 +566,43 @@ async fn a_profile_over_one_mebibyte_is_refused_unread_and_one_at_the_cap_is_rea
     );
 }
 
+#[test]
+fn a_text_over_one_mebibyte_is_refused_unread_and_one_at_the_cap_is_read() {
+    let reader = interop::FileProfileReader::new(Vec::new(), []);
+    let cap = 1024 * 1024;
+    let mut text = profile_text("");
+    text.push_str("# ");
+    text.push_str(&"x".repeat(cap - text.len() - 1));
+    text.push('\n');
+    assert_eq!(text.len(), cap);
+    assert!(
+        reader.read_text("content", &text, &nas()).is_ok(),
+        "a text at the cap is read"
+    );
+
+    text.push('#');
+    assert_eq!(
+        reader.read_text("content", &text, &nas()).unwrap_err(),
+        ProfileError::TooLarge {
+            file: "content".to_owned(),
+            limit: 1024 * 1024,
+        }
+    );
+}
+
+#[test]
+fn a_text_that_is_not_toml_is_refused_where_the_parser_stopped_and_without_its_text() {
+    let reader = interop::FileProfileReader::new(Vec::new(), []);
+    let text = "[repository\npassword = \"CANARY-inline-password\"\n";
+    let error = reader.read_text("content", text, &nas()).unwrap_err();
+    let shown = format!("{error:?}");
+    assert!(!shown.contains("CANARY"), "{shown}");
+    let (key, line, problem) = invalid(error);
+    assert_eq!(key, "");
+    assert_eq!(line, Some(1));
+    assert_eq!(problem, ProfileProblem::Syntax);
+}
+
 #[tokio::test]
 async fn a_profile_that_does_not_exist_or_is_not_a_file_is_unreadable() {
     let scratch = Scratch::new();

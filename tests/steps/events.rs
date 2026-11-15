@@ -94,7 +94,7 @@ impl Events {
     }
 
     /// The scratch folder of the daemon these scenarios start.
-    fn root(agent: &Agent) -> PathBuf {
+    pub(crate) fn root(agent: &Agent) -> PathBuf {
         agent.scratch().join("events")
     }
 
@@ -123,6 +123,11 @@ impl Events {
         let daemon = self.daemon();
         let rest = daemon.log.lock().unwrap_or_else(PoisonError::into_inner);
         format!("{}{rest}", daemon.start_log)
+    }
+
+    /// Everything the daemon has logged so far, if one is serving.
+    pub(crate) fn whole_log_if_serving(&self) -> Option<String> {
+        self.daemon.as_ref().map(|_| self.whole_log())
     }
 
     /// How many pages have connected.

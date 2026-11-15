@@ -11,6 +11,7 @@ members = [
     "crates/adapters/http",
     "crates/adapters/hooks",
     "crates/adapters/interop",
+    "crates/adapters/mcp",
     "crates/adapters/notify",
     "crates/adapters/platform",
     "crates/adapters/secrets",
@@ -30,6 +31,7 @@ default-members = [
     "crates/adapters/http",
     "crates/adapters/hooks",
     "crates/adapters/interop",
+    "crates/adapters/mcp",
     "crates/adapters/notify",
     "crates/adapters/platform",
     "crates/adapters/secrets",
@@ -60,6 +62,7 @@ engine = { path = "crates/adapters/engine" }
 hooks = { path = "crates/adapters/hooks" }
 notify-adapter = { path = "crates/adapters/notify" }
 interop = { path = "crates/adapters/interop" }
+mcp = { path = "crates/adapters/mcp" }
 http-adapter = { path = "crates/adapters/http" }
 platform = { path = "crates/adapters/platform" }
 secrets = { path = "crates/adapters/secrets" }
@@ -150,12 +153,22 @@ proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 # through `rustic_backend`, with these features and more, so it adds no
 # package.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+# The MCP server's protocol layer (`adapters/mcp`, decision 95): the official
+# SDK, which serves clients of the revisions before 2026-07-28 and after it.
+# Pinned exactly: its majors come months apart and break, so an upgrade is a
+# change of its own. No defaults: no macros; `server` and `transport-io`
+# (stdio) only.
+rmcp = { version = "=3.10.0", default-features = false, features = ["server", "transport-io"] }
 rust-embed = "8.13.0"
 # One git revision of rustic's `main`, because `Progress::error` is unreleased
 # (technical design §2.1). The `engine` crate depends on them, and so do the
 # root tests, which initialize scratch repositories and list their snapshots.
 rustic_backend = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284ac43d34bde9334210bcd40f824a0d8c69" }
 rustic_core = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284ac43d34bde9334210bcd40f824a0d8c69" }
+# JSON schemas of the `api` wire types, behind its `schemars` feature, for
+# the MCP server's output schemas (decision 95). Already in the tree through
+# `rmcp`, so it adds no package.
+schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # Hashes the entry page's inline script (see `base64`), and a session's token
@@ -312,6 +325,7 @@ axum.workspace = true
 clap.workspace = true
 config-adapter.workspace = true
 domain.workspace = true
+mcp.workspace = true
 env_logger.workspace = true
 hooks.workspace = true
 log.workspace = true
@@ -346,7 +360,7 @@ tempfile.workspace = true
 toml.workspace = true
 tokio-tungstenite.workspace = true
 testkit.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["io-util", "time"] }
 
 [lints]
 workspace = true

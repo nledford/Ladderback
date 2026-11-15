@@ -271,3 +271,29 @@ cli-service-still-stopping = { $command } had not stopped the service after { $l
 # A file is at the service file's place that `install-service` did not write: a unit written by hand, or a link such as the one `systemctl mask` makes. Neither command replaces nor removes it.
 # $file (text): the service file's path.
 cli-service-not-ours = { $file } is not a service file { -brand-name } wrote, so { -brand-name } leaves it as it is
+
+## The MCP server (components §4.6): `ladderback mcp`.
+
+# `ladderback mcp --connect` was given an address it can't use, and did not start. The address isn't repeated: it may hold a password.
+cli-mcp-connect-invalid = the address after { "--connect" } isn't an http or https address of a host, such as { "http://127.0.0.1:9898" } or { "https://nas.example.com" }, with no user name, password, query or fragment
+
+# The MCP server's client of the daemon's API could not start, so `ladderback mcp` did not start.
+# $detail (text): the HTTP library's own message. It is shown as it came.
+cli-mcp-cannot-start = cannot start the MCP server's client of the daemon: { $detail }
+
+# `ladderback mcp --scratch` could not make or seed its scratch folder, so it did not start. Nothing of the folder is left.
+# $path (text): the temporary folder the scratch folder was to be made in.
+# $detail (text): the operating system's or the configuration's own message. It is shown as it came.
+cli-mcp-scratch-unavailable = cannot make a scratch folder in { $path }: { $detail }
+
+# `ladderback mcp --connect --token-file` named a file that isn't there, so it did not start. Without the flag, a missing default token file means no token is sent.
+# $file (text): the token file's path, as it was given. It is shown as it is.
+cli-mcp-token-file-missing = the token file { $file } that { "--token-file" } names isn't there
+
+# `ladderback mcp --connect` could not use its token file, so it did not start. The token itself is never shown.
+# $file (text): the token file's path. It is shown as it is.
+# $detail (text): what is wrong, in the operating system's or the program's own words, such as that other users can read it. It is shown as it came.
+cli-mcp-token-file-unreadable = cannot use the token file { $file }: { $detail }
+
+# `ladderback mcp --connect` has an API token but its address is plain HTTP to another machine, where anyone on the way could read the token, so it did not start.
+cli-mcp-token-over-plain-http = an { -api-token } is sent only to an { "https" } address or one on this computer, never over plain { "http" } to another machine: connect to the daemon through { "https" }, or without a token

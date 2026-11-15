@@ -16,6 +16,7 @@ mod body_limit;
 mod listener;
 mod maintenance;
 mod plans;
+mod profiles;
 mod repositories;
 mod request_checks;
 mod response_headers;
@@ -48,6 +49,7 @@ use serde::{Deserialize, Serialize};
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use plans::{Plans, PlansError};
+pub use profiles::{Profiles, ProfilesError};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
     Exposure, InvalidHostName, RequestChecks, StartupRefusal, proxied_hosts, startup_rule,
@@ -79,6 +81,8 @@ pub struct AppState {
     pub repositories: Arc<dyn Repositories>,
     /// How a request reads, creates, changes and deletes a plan.
     pub plans: Arc<dyn Plans>,
+    /// How a request previews a profile's import and exports a plan as one.
+    pub profiles: Arc<dyn Profiles>,
     /// Whether sign-in is on, and the sessions it has started (§10.1).
     pub sign_in: SignIn,
     /// Who can reach the daemon at the address it listens on, which the
@@ -425,6 +429,18 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::get(plans::read)
                 .put(plans::change)
                 .delete(plans::delete),
+        )
+        .route(
+            "/api/v1/plans/{id}/profile",
+            axum::routing::get(profiles::export),
+        )
+        // `body_limit` bounds this body by its own class, over the 2 MiB
+        // axum's JSON extractor would otherwise allow.
+        .route(
+            body_limit::PROFILE_PREVIEW_PATH,
+            axum::routing::post(profiles::preview).layer(axum::extract::DefaultBodyLimit::max(
+                usize::try_from(body_limit::PROFILE_BODY_LIMIT).unwrap_or(usize::MAX),
+            )),
         )
         .route(
             "/api/v1/repositories",
@@ -1200,6 +1216,7 @@ mod tests {
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
             plans: Arc::new(crate::request_checks::tests::NoPlans),
+            profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -1240,6 +1257,7 @@ mod tests {
             catalog: Arc::new(DemoCatalog),
             repositories: Arc::new(Repos::default()),
             plans: Arc::new(crate::request_checks::tests::NoPlans),
+            profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -2412,6 +2430,7 @@ mod tests {
             catalog: Arc::new(DemoCatalog),
             repositories: repos.clone(),
             plans: Arc::new(crate::request_checks::tests::NoPlans),
+            profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),

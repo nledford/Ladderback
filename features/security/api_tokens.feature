@@ -139,7 +139,7 @@ Feature: API tokens
 
       Examples:
         | method | path                                  |
-        | GET    | /api/v1/session                       |
+        | POST   | /api/v1/session                       |
         | GET    | /api/v1/tokens                        |
         | POST   | /api/v1/tokens                        |
         | POST   | /api/v1/repositories                  |

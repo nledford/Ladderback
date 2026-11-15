@@ -33,8 +33,8 @@ use domain::{AgentId, PlanId, RepositoryAlias};
 
 use crate::globs::never_matching_globs;
 use crate::ports::{
-    ConfigError, ConfigStore, ExportRefusal, NormalizeSources, PlanExport, Problem, ProfileError,
-    ProfileNotice, ProfileReader, ProfileWriter,
+    ConfigError, ConfigStore, ExportRefusal, ImportedProfile, NormalizeSources, PlanExport,
+    Problem, ProfileError, ProfileNotice, ProfileReader, ProfileWriter,
 };
 
 /// Imports a rustic profile: reads it through the [`ProfileReader`], checks
@@ -131,6 +131,41 @@ impl ImportProfile {
             .read(file, &repository)
             .await
             .map_err(ImportError::Profile)?;
+        let (saved, imported) = self.merged(&loaded, profile, repository).await?;
+        self.config
+            .save(&saved)
+            .await
+            .map_err(ImportError::Config)?;
+        Ok(imported)
+    }
+
+    /// What importing the profile whose TOML is `text` under the alias
+    /// `repository` would add, checked as [`import`](Self::import) checks
+    /// it, without saving anything. A refusal names the profile `name`. No
+    /// file is read: the profiles it uses are notices (§4.6).
+    pub async fn preview(
+        &self,
+        name: &str,
+        text: &str,
+        repository: RepositoryAlias,
+    ) -> Result<Imported, ImportError> {
+        let loaded = self.config.load().await.map_err(ImportError::Config)?;
+        let profile = self
+            .reader
+            .read_text(name, text, &repository)
+            .map_err(ImportError::Profile)?;
+        let (_, imported) = self.merged(&loaded, profile, repository).await?;
+        Ok(imported)
+    }
+
+    /// The configuration `loaded` with `profile` added under `repository`,
+    /// and what that adds.
+    async fn merged(
+        &self,
+        loaded: &AgentConfig,
+        profile: ImportedProfile,
+        repository: RepositoryAlias,
+    ) -> Result<(AgentConfig, Imported), ImportError> {
         // A profile knows no repository ID, so its location alone tells
         // whether the configuration already holds its repository, at any of
         // the entry's locations (decision 80). The entry the alias names is
@@ -213,15 +248,14 @@ impl ImportProfile {
                     detail: String::new(),
                 }),
             })?;
-        self.config
-            .save(&saved)
-            .await
-            .map_err(ImportError::Config)?;
-        Ok(Imported {
-            repository,
-            plans: ids,
-            notices,
-        })
+        Ok((
+            saved,
+            Imported {
+                repository,
+                plans: ids,
+                notices,
+            },
+        ))
     }
 }
 
@@ -1038,6 +1072,36 @@ mod tests {
         assert_eq!(
             reader.asked(),
             vec![(Path::new("nas.toml").to_path_buf(), alias("nas"))]
+        );
+    }
+
+    /// A preview checks the profile as an import does and tells what it
+    /// would add, with the reader's notices, yet saves nothing (§4.6).
+    #[tokio::test]
+    async fn a_preview_tells_what_an_import_would_add_and_saves_nothing() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let mut read = profile(vec![plan("home", None)], Hooks::default());
+        read.notices = vec![ProfileNotice::UsedProfileNotRead {
+            name: "shared".to_owned(),
+        }];
+        let reader = Arc::new(FakeProfileReader::new(Ok(read)));
+        let before = saved(&config).await;
+        let imported = ImportProfile::new(reader.clone(), config.clone(), Arc::new(FakeSources))
+            .preview("content", "[repository]", alias("nas"))
+            .await
+            .expect("previewed");
+        assert_eq!(imported.repository, alias("nas"));
+        assert_eq!(imported.plans, vec![PlanId::parse("home").expect("an ID")]);
+        assert_eq!(
+            imported.notices,
+            vec![ProfileNotice::UsedProfileNotRead {
+                name: "shared".to_owned()
+            }]
+        );
+        assert_eq!(saved(&config).await, before);
+        assert_eq!(
+            reader.asked(),
+            vec![(Path::new("content").to_path_buf(), alias("nas"))]
         );
     }
 }

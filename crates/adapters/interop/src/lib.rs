@@ -102,6 +102,16 @@ impl ProfileReader for FileProfileReader {
         .await;
         read.unwrap_or(Err(ProfileError::Unreadable { file: shown }))
     }
+
+    fn read_text(
+        &self,
+        name: &str,
+        text: &str,
+        repository: &RepositoryAlias,
+    ) -> Result<ImportedProfile, ProfileError> {
+        let resolved = resolve::resolve_text(name, text)?;
+        map::map(resolved, repository, &self.variables, name)
+    }
 }
 
 /// The program a profile runs to read the secret of a keyring entry

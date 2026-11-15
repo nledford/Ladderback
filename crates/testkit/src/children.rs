@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -75,6 +75,12 @@ impl Owned {
     #[must_use]
     pub fn id(&self) -> u32 {
         self.pid
+    }
+
+    /// Its stdin, if it was piped and not taken yet.
+    #[must_use]
+    pub fn take_stdin(&self) -> Option<ChildStdin> {
+        self.with(|child| child.stdin.take())
     }
 
     /// Its stdout, if it was piped and not taken yet.
