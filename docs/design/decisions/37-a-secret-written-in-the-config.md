@@ -28,7 +28,7 @@ A user name alone, an empty password, and a password that is or holds a `${…}`
 - **Nested locations.** A setting's value that is a location of its own (crypt's `remote=':s3,secret_access_key=…:bucket'`) is read the same way, four levels deep, and its credentials count too (§10.2).
 - **The path.** What follows the settings is the path, so `rclone:remote:backups/token=2024` is no credential.
 
-**rclone's own names.** `is_secret_option` takes rclone's own names as whole names only (amended 2026-11-11, #228):
+**rclone's own names.** `is_secret_option` takes rclone's own names as whole names only:
 
 - `pass`, the password option of its SFTP, FTP, SMB and WebDAV backends (so `bypass_cache` and `passive` are not credentials);
 - SFTP's `key_file_pass` and `key_pem`;
@@ -38,7 +38,7 @@ A user name alone, an empty password, and a password that is or holds a `${…}`
 - Filen's `master_keys`;
 - SugarSync's `authorization`;
 - the `headers` of WebDAV and HTTP;
-- and Proton Drive's one-time code `2fa`.
+- and Proton Drive's one-time code `2fa` (amended 2026-11-11, #228).
 
 The redactor and the export's refusal of an rclone credential read the same list.
 
