@@ -4,10 +4,6 @@
 
 Self-hosted backup manager for rustic: plans, schedules and one dashboard for every machine.
 
-## Register
-
-product
-
 ## Platform
 
 web
