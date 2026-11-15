@@ -475,6 +475,22 @@ Then("the dialog {string} opens with focus inside it", async function (this: Bro
   assert.ok(inside, `focus did not come inside the dialog "${name}"`);
 });
 
+// What the page does on its own while the dialog is open, such as hearing a
+// request refused, lands a moment after the step that caused it: the dialog
+// stays open, with focus inside it, the whole second after.
+Then("the dialog {string} stays open with focus inside it", async function (this: BrowserWorld, name: string) {
+  const dialog = dialogOf(this, name);
+  const end = Date.now() + 1_000;
+  while (Date.now() < end) {
+    assert.ok(await dialog.isVisible(), `the dialog "${name}" closed`);
+    assert.ok(
+      await dialog.evaluate((el) => el.contains(document.activeElement)),
+      `focus left the dialog "${name}"`,
+    );
+    await sleep(100);
+  }
+});
+
 Then("the dialog {string} says {string}", async function (this: BrowserWorld, name: string, text: string) {
   const read = await textOfDialog(this, name);
   assert.ok(

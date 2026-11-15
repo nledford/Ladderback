@@ -396,6 +396,10 @@ Then("the page reads the history again", async function (this: BrowserWorld) {
   await scripted(this).untilAReadIsHeld();
 });
 
+Then("the daemon refuses the page's next reading of the history", async function (this: BrowserWorld) {
+  await scripted(this).untilAReadIsRefused();
+});
+
 When("the daemon's events stream drops", async function (this: BrowserWorld) {
   await scripted(this).dropTheStream();
 });

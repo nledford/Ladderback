@@ -106,11 +106,13 @@ Then("the page's heading is described by {string}", async function (this: Browse
 });
 
 // The daemon reads the admin password's hash as it checks each session, so
-// one set anew ends every session at once, with no restart.
+// one set anew ends every session at once, with no restart: the answers a
+// scripted daemon plays for it too.
 When("the admin password is set anew to {string}", async function (this: BrowserWorld, password: string) {
   const own = this.ownServer;
   assert.ok(own, "this scenario's daemon was never started");
   await setPassword(own.scratch, password);
+  this.scriptedDaemon?.endSessions();
 });
 
 // A second tab of the same browser shares the first's cookie, and so its

@@ -16,7 +16,7 @@ use leptos::task::spawn_local;
 use crate::components::{
     Checkbox, ErrorSummary, FormField, SummaryItem, recover_focus, trap_focus,
 };
-use crate::live::{modal_gone, open_modal};
+use crate::live::{close_modal_when_gone, modal_gone, open_modal};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, refusal, text_with};
 use crate::session::{
@@ -226,7 +226,7 @@ pub(crate) fn SessionEnded(localizer: Arc<Localizer>, ended: RwSignal<bool>) -> 
     let dialog = NodeRef::<leptos::html::Dialog>::new();
     // Whether the announcer counts the dialog as an open modal.
     let counted = RwSignal::new(false);
-    on_cleanup(move || modal_gone(counted));
+    close_modal_when_gone(dialog, counted);
     // Whether the dialog closes because the reader signed in, not because
     // the reader dismissed it.
     let signed = StoredValue::new(false);
@@ -282,7 +282,7 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
     let dialog = NodeRef::<leptos::html::Dialog>::new();
     let stay = NodeRef::<leptos::html::Button>::new();
     let counted = RwSignal::new(false);
-    on_cleanup(move || modal_gone(counted));
+    close_modal_when_gone(dialog, counted);
     // Whether a request to stay signed in is on its way, and whether the
     // last one found no daemon to answer it.
     let busy = RwSignal::new(false);

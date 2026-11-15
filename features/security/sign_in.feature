@@ -501,6 +501,27 @@ Feature: Sign-in
       When the page is left unused for "00:02:00"
       Then the dialog "Sign in again" opens with focus inside it
 
+    Scenario: A request refused while Sign in again is open keeps the dialog, and goes again once signed in
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the daemon reports a running backup of "demo-home"
+      And the page's clock can be moved on
+      When I open the address "/operations"
+      And I press Tab until focus is on the textbox "Admin password"
+      And I type "demo-admin-pass"
+      And I press Enter
+      And the table "Operations" has a row "demo-home" that shows "Running"
+      And the page is left unused for "11:58:00"
+      And the page is left unused for "00:02:00"
+      Then the dialog "Sign in again" opens with focus inside it
+      When the admin password is set anew to "another-admin-pass"
+      And the daemon reports that the backup of "demo-home" has succeeded with 3 files
+      Then the daemon refuses the page's next reading of the history
+      And the dialog "Sign in again" stays open with focus inside it
+      When I type "another-admin-pass"
+      And I press Enter
+      Then the dialog "Sign in again" is closed
+      And the row "demo-home" of the table "Operations" lists "3 files" in its "Result" column
+
   @ui
   Rule: While sign-in is on, the navigation offers Sign out
 
