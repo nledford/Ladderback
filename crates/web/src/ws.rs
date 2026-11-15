@@ -511,13 +511,21 @@ pub(crate) async fn sign_out() -> bool {
     if !answer.is_some_and(|(status, _)| succeeded(status)) {
         return false;
     }
+    forget_session();
+    true
+}
+
+/// Forgets the page's session, which the daemon has ended: its CSRF token
+/// and its lease. Signing out ends it, and so does a new admin password set
+/// in Settings, which ends every session. No dialog asks to sign in again:
+/// the caller shows the sign-in page.
+pub(crate) fn forget_session() {
     SESSION.with_borrow_mut(|session| {
         session.csrf = None;
         session.lease = None;
         session.signed_out = true;
     });
     look_again();
-    true
 }
 
 /// Reads the operations history from `base` (the page's own origin) into

@@ -229,6 +229,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let build = RwSignal::new(None::<api::BuildDto>);
     provide_context(standing);
     provide_context(notice);
+    provide_context(sign_in::PasswordChanged(RwSignal::new(false)));
     ws::watch_session(warning, ended, build);
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.

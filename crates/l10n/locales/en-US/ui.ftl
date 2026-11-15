@@ -1347,8 +1347,8 @@ ui-settings-heading = Settings
 # Settings, while sign-in is off: `ladderback set-password` has kept an admin password since Ladderback started. Sign-in is decided only when Ladderback starts, so it stays off until a restart.
 ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn sign-in on.
 
-# Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. `ladderback set-password` is typed as it is: keep it a string literal.
-ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Run { "ladderback set-password" } again to set the password anew.
+# Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. The password can be set again in the Admin password section below this sentence, or at a terminal. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Set the password again below, or with { "ladderback set-password" }.
 
 # The heading of the section of Settings that restarts Ladderback.
 ui-restart-heading = Restart { -brand-name }

@@ -1,6 +1,8 @@
-//! The Settings page, the route `/settings` (§4.4): its API tokens (security
-//! §10.1, decision 93), listed, created and revoked in a session, and the
-//! restart of Ladderback (decision 94). What the form lacks, the request it
+//! The Settings page, the route `/settings` (§4.4): its admin password
+//! (security §10.1, decision 70), set with sign-in off and changed in a
+//! session, whose glue is `settings/password.rs`; its API tokens
+//! (decision 93), listed, created and revoked in a session; and the restart
+//! of Ladderback (decision 94). What the token form lacks, the request it
 //! sends, which field a refusal is about and how a token's row reads are
 //! `api_tokens.rs`'s, and what the restart section offers and waits for is
 //! `restart.rs`'s, all host-tested; this is the DOM glue, which the `@ui`
@@ -10,6 +12,10 @@
 //! A new token's whole text is shown once, in a dialog, and held in one
 //! signal only while that dialog is open: leaving the dialog, however it is
 //! left, clears it from the page (I4).
+
+mod password;
+
+use password::AdminPassword;
 
 use std::sync::Arc;
 
@@ -59,24 +65,30 @@ const SECRET_ID: &str = "api-token-secret";
 
 /// The Settings page. With sign-in off, it asks the daemon on opening whether
 /// an admin password has been set since it started, which waits for a restart
-/// to turn sign-in on (decision 70), and says so above the API tokens.
+/// to turn sign-in on (decision 70), and says so above the sections. The
+/// admin password's section is offered with sign-in off and in a session;
+/// with the daemon unread, the page can't say which form it would be.
 #[component]
 pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_SETTINGS_HEADING);
     let waiting = RwSignal::new(None::<MessageId>);
-    let off = use_context::<RwSignal<Standing>>()
-        .is_some_and(|standing| matches!(standing.get_untracked(), Standing::Off));
+    let standing = use_context::<RwSignal<Standing>>().map(|standing| standing.get_untracked());
+    let off = matches!(standing, Some(Standing::Off));
     if off {
         spawn_local(async move {
             let read = ws::session().await;
             waiting.set(waiting_password(read.as_ref()));
         });
     }
+    let password = matches!(standing, Some(Standing::Off | Standing::SignedIn)).then(|| {
+        view! { <AdminPassword localizer=Arc::clone(&localizer) on=!off waiting=waiting /> }
+    });
     let waiting_localizer = Arc::clone(&localizer);
     let restart_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         {move || waiting.get().map(|id| view! { <p>{text(&waiting_localizer, id)}</p> })}
+        {password}
         <ApiTokens localizer=localizer />
         <RestartSection localizer=restart_localizer />
     }

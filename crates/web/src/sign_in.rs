@@ -143,18 +143,33 @@ fn SignInForm(
     }
 }
 
+/// Whether the admin password has just been changed in Settings, which
+/// ended every session, this page's too (decision 70): the sign-in page then
+/// says so, until the page signs in again. `App` provides it.
+#[derive(Clone, Copy)]
+pub(crate) struct PasswordChanged(pub(crate) RwSignal<bool>);
+
 /// The sign-in page, shown in place of the page asked for while sign-in is
 /// on and the page has no session. Once signed in, the page asked for is
-/// shown, at the address it was asked at.
+/// shown, at the address it was asked at. Shown because the admin password
+/// was changed in Settings, it says so under its heading.
 #[component]
 pub(crate) fn SignInPage(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl IntoView {
+    let changed = use_context::<PasswordChanged>().map(|PasswordChanged(changed)| changed);
     let signed_in = Callback::new(move |signed: Option<Signed>| {
+        if let Some(changed) = changed {
+            changed.set(false);
+        }
         ws::signed_in(signed);
         standing.set(Standing::SignedIn);
     });
     let heading = text(&localizer, msg::UI_SIGN_IN_HEADING);
+    let said = changed
+        .is_some_and(|changed| changed.get_untracked())
+        .then(|| view! { <p>{text(&localizer, msg::UI_ADMIN_PASSWORD_CHANGED)}</p> });
     view! {
         <PageHeading>{heading}</PageHeading>
+        {said}
         <SignInForm localizer=localizer place=Place::Page signed_in=signed_in />
     }
 }

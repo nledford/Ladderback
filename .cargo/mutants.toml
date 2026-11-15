@@ -47,6 +47,17 @@
 # on the host; the `@ui` scenarios of `features/security/api_tokens.feature`
 # run the glue in Chromium.
 #
+# `crates/web/src/settings/password.rs` is the DOM glue of Settings' admin
+# password section (security §10.1, decision 70): it holds the form's
+# signals, reads and clears them, sends the request, shows the error summary
+# and takes the steps an answer calls for (forgetting the session, showing
+# the sign-in page, reading again what waits for a restart). What the form
+# lacks, what it sends, which field a refusal is about, the section's words,
+# which steps an answer calls for (also after the reader has left Settings)
+# and what Settings says once a password is set are `admin_password.rs`'s,
+# mutated on the host; the `@ui` scenarios of
+# `features/security/admin_password.feature` run the glue in Chromium.
+#
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
 # starts and the cancel; doing what `maintenance::Panel` decides (`Page::act`:
@@ -82,6 +93,7 @@ exclude_globs = [
     "crates/web/src/snapshots.rs",
     "crates/web/src/sign_in.rs",
     "crates/web/src/settings.rs",
+    "crates/web/src/settings/password.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [
