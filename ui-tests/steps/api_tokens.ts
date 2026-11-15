@@ -11,7 +11,7 @@ import type { BrowserContext } from "playwright";
 import { expect } from "playwright/test";
 
 import { namePattern } from "../support/keyboard.ts";
-import type { BrowserWorld } from "../support/world.ts";
+import { type BrowserWorld, type Engine, engine } from "../support/world.ts";
 
 // How long a dialog or a value the page sets takes to show, with room.
 const PAGE_PATIENCE_MS = 10_000;
@@ -113,8 +113,18 @@ Given("the daemon can't read its API tokens", function (this: BrowserWorld) {
   });
 });
 
+// Each engine names what the page needs differently, and refuses a name it
+// doesn't know: Chromium both permissions; WebKit only reading, since it lets
+// a click write; Firefox neither, since Playwright's Firefox lets a page use
+// the clipboard without asking.
+const clipboardPermissions: Record<Engine, string[]> = {
+  chromium: ["clipboard-read", "clipboard-write"],
+  webkit: ["clipboard-read"],
+  firefox: [],
+};
+
 Given("the page may use the clipboard", function (this: BrowserWorld) {
-  this.contextOptions = { ...this.contextOptions, permissions: ["clipboard-read", "clipboard-write"] };
+  this.contextOptions = { ...this.contextOptions, permissions: clipboardPermissions[engine] };
 });
 
 Then(

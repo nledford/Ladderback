@@ -6,6 +6,14 @@ import assert from "node:assert/strict";
 
 import type { Locator, Page } from "playwright";
 
+import { engine } from "./world.ts";
+
+// WebKit on macOS moves Tab only between text fields and lists, as Safari does
+// until its reader turns on "Press Tab to highlight each item"; Option+Tab
+// moves to every control there. WebKit on Linux, where CI runs, moves Tab to
+// every control.
+const tabModifier = engine === "webkit" && process.platform === "darwin" ? "Alt+" : "";
+
 // A name the page built from fetched text carries bidi isolation marks
 // around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
 // journey's "Cancel demo-home". The marks are optional wherever they may
@@ -22,7 +30,7 @@ export const namePattern = (name: string): RegExp =>
 export function journey(page: Page) {
   return {
     async press(key: string): Promise<void> {
-      await page.keyboard.press(key);
+      await page.keyboard.press(key === "Tab" || key === "Shift+Tab" ? tabModifier + key : key);
       if (key === "Tab" || key === "Shift+Tab") {
         await assertFocusVisibleAndUnobscured(page, key);
       }
