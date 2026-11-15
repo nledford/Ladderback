@@ -227,6 +227,15 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+# Beyond `all`: complexity and nesting caps, exemptions that must give a
+# reason and go stale loudly, and no unchecked indexing or string slicing
+# outside tests. Thresholds live in clippy.toml. Technical design §13.5.
+cognitive_complexity = "warn"
+excessive_nesting = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+indexing_slicing = "warn"
+string_slice = "warn"
 
 # Development builds carry line tables, not full debug info: a backtrace still
 # names the file and line of every Ladderback frame, while the target folder

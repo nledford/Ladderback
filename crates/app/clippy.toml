@@ -13,6 +13,14 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 
+# The lints Cargo.toml adds beyond `all` (technical design §13.5): no block
+# nested deeper than six, and tests may index (production code uses `get()`;
+# string slices are checked in tests too). `cognitive-complexity-threshold`
+# stays at clippy's default, 25.
+# The root clippy.toml repeats these two lines too.
+excessive-nesting-threshold = 6
+allow-indexing-slicing-in-tests = true
+
 disallowed-methods = [
     { path = "std::time::SystemTime::now", reason = "use the Clock port" },
     { path = "std::time::Instant::now", reason = "use the Clock port" },
