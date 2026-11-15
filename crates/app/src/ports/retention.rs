@@ -31,7 +31,9 @@ pub enum RetentionError {
 pub trait Retention: Send + Sync {
     /// Which of `group`'s snapshots `policy` removes. `group` is one
     /// managed group's snapshots, newest first, exactly as the partition
-    /// built it.
+    /// built it. A policy that sets nothing is refused with
+    /// [`RetentionError::InvalidPolicy`], as rustic refuses it: an empty
+    /// policy keeps everything, and the use case never asks with one.
     async fn removes(
         &self,
         repository: &RepositoryAccess,

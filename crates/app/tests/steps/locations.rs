@@ -27,10 +27,10 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::retry::RetrySchedule;
 use domain::execution::{Operation, OperationStatus, Trigger, WarningKind};
 use domain::planning::{
-    AgentConfig, AgentSettings, Alternative, CurrentNetworkName, Hooks, Interval, Link, Location,
-    LocationRule, LocationWarning, Locations, Maintenance, NameFilter, NetworkKind, NetworkName,
-    Plan, RepositoryConfig, RepositorySettings, RetryPolicy, RuleNote, Schedule, Source,
-    SourceFilter,
+    AgentConfig, AgentSettings, Alternative, CurrentNetworkName, Hooks, Interval, KeepCount, Link,
+    Location, LocationRule, LocationWarning, Locations, Maintenance, NameFilter, NetworkKind,
+    NetworkName, Plan, RepositoryConfig, RepositorySettings, RetryPolicy, RuleNote, Schedule,
+    Source, SourceFilter,
 };
 use domain::secrets::SecretRef;
 use domain::{AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, Uuid};
@@ -936,6 +936,14 @@ async fn backup_runs(agent: &mut Agent, repository: String) {
 #[when(expr = "a forget is previewed for the repository {string}")]
 async fn forget_previewed(agent: &mut Agent, repository: String) {
     let world = &agent.locations;
+    // A policy that sets something, so the preview evaluates it: an empty
+    // policy keeps everything and is never evaluated.
+    let mut plan = Plan::new(
+        plan_id(PLAN),
+        alias(&repository),
+        vec![Source::parse("/home/demo").expect("a source")],
+    );
+    plan.retention.keep_last = Some(KeepCount::new(1).expect("a count"));
     let config = AgentConfig::new(
         AgentSettings::default(),
         Hooks::default(),
@@ -945,11 +953,7 @@ async fn forget_previewed(agent: &mut Agent, repository: String) {
             .into_iter()
             .map(|(name, entry)| (alias(&name), entry))
             .collect(),
-        vec![Plan::new(
-            plan_id(PLAN),
-            alias(&repository),
-            vec![Source::parse("/home/demo").expect("a source")],
-        )],
+        vec![plan],
     )
     .expect("a configuration");
     let store = Arc::new(InMemoryConfigStore::new());

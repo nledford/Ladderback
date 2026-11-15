@@ -120,6 +120,17 @@ Feature: Forget keeps each plan's history within its policy
     Then the operation ends as succeeded
     And the repository still holds the 3 snapshots of the plan "home"
 
+  Scenario: A plan that keeps everything loses nothing beside a plan whose retention removes
+    Given a plan "home" keeping the last 1 snapshot
+    And a plan "photos" with no policy set
+    And the repository holds 3 snapshots of the plan "home"
+    And the repository holds 3 snapshots of the plan "photos"
+    When the owner forgets the repository
+    Then the operation ends as succeeded
+    And the repository keeps the newest snapshot of the plan "home"
+    And the repository still holds the 3 snapshots of the plan "photos"
+    And the log shows the forget removed 2 snapshots
+
   Scenario: A forget holds the repository's maintenance slot
     Given a plan "home" keeping the last 1 snapshot
     And the repository holds 3 snapshots of the plan "home"
