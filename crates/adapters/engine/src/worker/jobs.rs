@@ -247,7 +247,10 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
     if let Some(label) = &job.label {
         snapshot_options = snapshot_options.label(label.clone());
     }
-    let snapshot = SnapshotFile::from_options(&snapshot_options)?;
+    let mut snapshot = SnapshotFile::from_options(&snapshot_options)?;
+    // The snapshot names the program that made it, not rustic's default
+    // `rustic <version>` (decision 90).
+    ctx.program().clone_into(&mut snapshot.program_version);
     let paths = PathList::from_iter(job.sources.iter().map(PathBuf::from))
         .sanitize()
         .map_err(|error| JobError::failed(error.to_string()))?
