@@ -476,6 +476,16 @@ pub enum WarningCode {
     /// `invalid-address`, `unreachable`, `timed-out` or `rejected`. Never the
     /// channel's URL, its token or what it answered (I4).
     NotificationUndelivered,
+    /// The daemon or a worker couldn't set its core-dump limit to 0 as it
+    /// started (decision 98), so a crash may write the secrets it holds to
+    /// disk. It goes on. Logged, never sent; the detail is the operating
+    /// system's own words.
+    CoreDumpsOn,
+    /// On Linux, the daemon or a worker couldn't make itself non-dumpable as
+    /// it started (decision 98), so another process of the same user may
+    /// attach a debugger to it or read its memory. It goes on. Logged, never
+    /// sent; the detail is the operating system's own words.
+    DebuggerAttachAllowed,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -1305,6 +1315,8 @@ impl WarningCode {
             | Self::ProfileEnvIgnored
             | Self::ProfileHooksPerPlan
             | Self::ProfileRetentionEmpty
+            | Self::CoreDumpsOn
+            | Self::DebuggerAttachAllowed
             | Self::Unknown => &[],
         }
     }

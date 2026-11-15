@@ -42,12 +42,16 @@ pub struct Web {
 /// limit.
 #[derive(Debug)]
 pub(crate) struct Server {
-    #[allow(
-        dead_code,
-        reason = "owned so that the daemon is ended with the scenario"
-    )]
+    /// Owned so that the daemon is ended with the scenario.
     child: Owned,
     pub(crate) addr: SocketAddr,
+}
+
+impl Server {
+    /// The daemon's process ID.
+    pub(crate) fn pid(&self) -> u32 {
+        self.child.id()
+    }
 }
 
 #[derive(Debug)]

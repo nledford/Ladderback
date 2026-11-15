@@ -53,6 +53,8 @@ mod build_steps;
 mod cache_steps;
 #[path = "steps/cli_output.rs"]
 mod cli_output_steps;
+#[path = "steps/core_dumps.rs"]
+mod core_dumps_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
 #[path = "steps/install_script.rs"]
@@ -122,6 +124,7 @@ struct Agent {
     notifications: notifications_steps::NotificationsE2e,
     api_tokens: api_tokens_steps::ApiTokensE2e,
     restarting: restart_from_settings_steps::Restarting,
+    core_dumps: core_dumps_steps::CoreDumpsE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -174,6 +177,7 @@ impl Agent {
             notifications: notifications_steps::NotificationsE2e::default(),
             api_tokens: api_tokens_steps::ApiTokensE2e::default(),
             restarting: restart_from_settings_steps::Restarting::default(),
+            core_dumps: core_dumps_steps::CoreDumpsE2e::default(),
         }
     }
 

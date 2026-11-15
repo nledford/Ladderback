@@ -1337,6 +1337,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | WarningCode::LocationRuleMixedLink
                 // The daemon's notifier says it, never a worker.
                 | WarningCode::NotificationUndelivered
+                // Logged as a process starts, never an event.
+                | WarningCode::CoreDumpsOn
+                | WarningCode::DebuggerAttachAllowed
                 | WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact_clipped(&item, TRUNCATED)),
