@@ -38,6 +38,15 @@
 # `@ui` scenarios of `features/security/sign_in.feature` run the glue in
 # Chromium.
 #
+# `crates/web/src/settings.rs` is the DOM glue of the Settings page's API
+# tokens (security §10.1): it sends the list, create and revoke requests,
+# opens and closes the two dialogs, clears a new token's text when its dialog
+# is left, and writes the text to the clipboard. What the form lacks, the
+# request it sends, which field a refusal is about, how a scope and a last use
+# read and the words of each button and dialog are `api_tokens.rs`'s, mutated
+# on the host; the `@ui` scenarios of `features/security/api_tokens.feature`
+# run the glue in Chromium.
+#
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
 # starts and the cancel; doing what `maintenance::Panel` decides (`Page::act`:
@@ -72,6 +81,7 @@ exclude_globs = [
     "crates/web/src/ws.rs",
     "crates/web/src/snapshots.rs",
     "crates/web/src/sign_in.rs",
+    "crates/web/src/settings.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [
@@ -96,6 +106,13 @@ exclude_re = [
     # below it: the two never share a bit, so `|` and `^` give the same byte.
     # A token that parses to other bytes (`&`) is caught.
     'crates/domain/src/access\.rs.*: replace \| with \^ in Token::parse$',
+    # An API token's ID gathers its first eight bytes by shifting what it has
+    # eight bits left and joining the next byte below; its secret is read
+    # back six bits a character the same way, and the last three characters
+    # as `a << 12 | b << 6 | c` with each under 64. The parts joined never
+    # share a bit, so `|` and `^` give the same number. Other bits (`&`) are
+    # caught.
+    'crates/domain/src/access/api_token\.rs.*: replace \| with \^ in (ApiTokenId::from_bytes|PresentedApiToken::parse)$',
     # `Os::get` is the call to the session's own store (the macOS keychain,
     # the Secret Service); what its errors become is `failure`, which is
     # tested. Its test, `the_os_keyring_keeps_and_gives_back_a_secret`,

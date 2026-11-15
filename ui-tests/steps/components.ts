@@ -23,9 +23,11 @@ function demoSection(page: Page, component: string): Locator {
   });
 }
 
+// The button's whole name, read past the isolation marks around a name the
+// reader gave, such as a token's label.
 Then("focus is on the button {string}", async function (this: BrowserWorld, name: string) {
   await journey(this.page).assertFocused(
-    journey(this.page).byRole("button", { name }),
+    journey(this.page).byRole("button", { name: namePattern(name) }),
     `the button ${JSON.stringify(name)}`,
   );
 });
@@ -375,7 +377,9 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - button "Open a demo review"
 - paragraph:
-  - button "Open an empty demo review"`,
+  - button "Open an empty demo review"
+- paragraph:
+  - button "Open a demo secret"`,
   "Pause control": `- heading "Pause control" [level=2]
 - button "Pause the demo updates"
 - paragraph:

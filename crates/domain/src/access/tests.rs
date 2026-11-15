@@ -456,3 +456,26 @@ fn debug_names_a_password_or_a_token_but_never_shows_it() {
     assert!(!shown.contains("abab"), "{shown}");
     assert!(shown.contains("Token"), "the type helps: {shown}");
 }
+
+#[test]
+fn waiting_tells_what_is_left_of_a_wait_and_counts_nothing() {
+    let mut waits = SignInWaits::default();
+    assert_eq!(waits.waiting(v4(1), at(0)), None);
+    assert_eq!(waits.attempt(v4(1), at(0)), Ok(()));
+    assert_eq!(
+        waits.waiting(v4(1), at(0)),
+        Some(SignedDuration::from_secs(1))
+    );
+    assert_eq!(
+        waits.waiting(v4(1), Timestamp::constant(1_800_000_000, 400_000_000)),
+        Some(SignedDuration::from_millis(600))
+    );
+    assert_eq!(waits.waiting(v4(1), at(1)), None);
+    assert_eq!(waits.waiting(v4(2), at(0)), None);
+    // Looking counted nothing: the next failure is the second, 2 s.
+    assert_eq!(waits.attempt(v4(1), at(1)), Ok(()));
+    assert_eq!(
+        waits.waiting(v4(1), at(1)),
+        Some(SignedDuration::from_secs(2))
+    );
+}

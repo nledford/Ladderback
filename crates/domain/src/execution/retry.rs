@@ -99,10 +99,10 @@ impl RetrySchedule {
     /// schedule started, on time or to catch up, or a retry of one. A run a
     /// person or another program asked for is theirs to retry: they see it
     /// fail and decide (decision 76).
-    pub fn retried(trigger: Trigger) -> bool {
+    pub fn retried(trigger: &Trigger) -> bool {
         match trigger {
             Trigger::Schedule | Trigger::CatchUp | Trigger::Retry => true,
-            Trigger::Manual | Trigger::Hub | Trigger::Mcp => false,
+            Trigger::Manual | Trigger::Hub | Trigger::Mcp | Trigger::ApiToken { .. } => false,
         }
     }
 
@@ -142,10 +142,14 @@ mod tests {
     #[test]
     fn only_a_run_the_schedule_started_is_retried() {
         for trigger in [Trigger::Schedule, Trigger::CatchUp, Trigger::Retry] {
-            assert!(RetrySchedule::retried(trigger), "{trigger:?}");
+            assert!(RetrySchedule::retried(&trigger), "{trigger:?}");
         }
-        for trigger in [Trigger::Manual, Trigger::Hub, Trigger::Mcp] {
-            assert!(!RetrySchedule::retried(trigger), "{trigger:?}");
+        let token = Trigger::ApiToken {
+            id: crate::access::api_token::ApiTokenId::from_bytes(&[7; crate::access::TOKEN_BYTES]),
+            label: crate::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
+        };
+        for trigger in [Trigger::Manual, Trigger::Hub, Trigger::Mcp, token] {
+            assert!(!RetrySchedule::retried(&trigger), "{trigger:?}");
         }
     }
 

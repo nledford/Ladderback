@@ -108,7 +108,15 @@ pub(crate) async fn enforce(
         return next.run(request).await;
     };
     let path = request.uri().path();
-    if !is_api(path) || path == SESSION_PATH {
+    if !is_api(path) {
+        return next.run(request).await;
+    }
+    // A request with a Bearer token is judged by its token alone, its
+    // cookie ignored, the session route's included (decision 93).
+    if let Some(presented) = crate::api_tokens::bearer(request.headers()) {
+        return crate::api_tokens::enforce(access, presented, request, next).await;
+    }
+    if path == SESSION_PATH {
         return next.run(request).await;
     }
     let Some(token) = session_token(request.headers()) else {

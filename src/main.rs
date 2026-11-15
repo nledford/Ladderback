@@ -212,17 +212,17 @@ fn run_daemon(
     // Sign-in is decided once, at start, by whether an admin password is
     // kept (§10.1, decisions 70 and 87); beyond loopback the daemon needs a
     // host name, with sign-in on or off.
-    // The one source of randomness, for sign-in's tokens and the scheduler's
-    // jitter alike (§3.2).
+    // The one source of randomness, for sign-in's and API tokens' secrets
+    // and the scheduler's jitter alike (§3.2).
     let random: Arc<dyn Random> = Arc::new(OsRandom);
-    let sign_in = match composition::sign_in(Arc::clone(&random)) {
+    let sign_in = match composition::sign_in() {
         Ok(sign_in) => sign_in,
         Err(refused) => {
             say(localizer, refused.message, &refused.args)?;
             return Ok(ExitCode::FAILURE);
         }
     };
-    let sign_in_on = matches!(sign_in, http_adapter::SignIn::On(_));
+    let sign_in_on = sign_in.is_on();
     let exposure = match http_adapter::startup_rule(listen, &hosts) {
         Ok(exposure) => exposure,
         Err(http_adapter::StartupRefusal::NoAllowedHost(address)) => {
@@ -270,7 +270,7 @@ fn run_daemon(
         lock,
         background,
         workers,
-    } = match runtime.block_on(composition::daemon(sign_in, exposure)) {
+    } = match runtime.block_on(composition::daemon(sign_in, Arc::clone(&random), exposure)) {
         Ok(daemon) => daemon,
         Err(refused) => {
             say(localizer, refused.message, &refused.args)?;

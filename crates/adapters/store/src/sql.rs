@@ -9,7 +9,8 @@ macro_rules! select_operations {
         concat!(
             "SELECT id, kind, plan_id, repo_uuid, \"trigger\", status, queued_at, started_at, ",
             "finished_at, snapshot_id, summary_json, error_code, error_args, error_detail, ",
-            "warning_count, repo_alias, location_no, locations_json FROM operations",
+            "warning_count, repo_alias, location_no, locations_json, token_id, token_label ",
+            "FROM operations",
             $($clause),+
         )
     };
@@ -20,12 +21,13 @@ macro_rules! select_operations {
 /// `kind`, `plan_id`, `repo_uuid`, `trigger`, `status`, `queued_at`,
 /// `started_at`, `finished_at`, `snapshot_id`, `summary_json`, `error_code`,
 /// `error_args`, `error_detail`, `warning_count`, `repo_alias`, `location_no`,
-/// `locations_json`.
+/// `locations_json`, `token_id`, `token_label`.
 pub(crate) const UPSERT_OPERATION: &str = concat!(
     "INSERT INTO operations (id, agent_id, kind, plan_id, repo_uuid, \"trigger\", status, ",
     "queued_at, started_at, finished_at, snapshot_id, summary_json, error_code, error_args, ",
-    "error_detail, warning_count, repo_alias, location_no, locations_json) ",
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+    "error_detail, warning_count, repo_alias, location_no, locations_json, token_id, ",
+    "token_label) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
     "ON CONFLICT(id) DO UPDATE SET ",
     "agent_id = excluded.agent_id, kind = excluded.kind, plan_id = excluded.plan_id, ",
     "repo_uuid = excluded.repo_uuid, \"trigger\" = excluded.\"trigger\", ",
@@ -35,7 +37,8 @@ pub(crate) const UPSERT_OPERATION: &str = concat!(
     "error_code = excluded.error_code, error_args = excluded.error_args, ",
     "error_detail = excluded.error_detail, warning_count = excluded.warning_count, ",
     "repo_alias = excluded.repo_alias, location_no = excluded.location_no, ",
-    "locations_json = excluded.locations_json"
+    "locations_json = excluded.locations_json, token_id = excluded.token_id, ",
+    "token_label = excluded.token_label"
 );
 
 /// Parameter: the operation's ID.
@@ -147,3 +150,41 @@ pub(crate) const EVER_SUCCEEDED: &str = concat!(
     "SELECT EXISTS (SELECT 1 FROM operations ",
     "WHERE plan_id = ? AND status IN ('succeeded', 'succeeded_with_warnings'))"
 );
+
+/// The columns `row::api_token` reads.
+macro_rules! select_api_tokens {
+    ($($clause:literal),+ $(,)?) => {
+        concat!(
+            "SELECT id, label, digest, scopes, password, created_at, last_used_at ",
+            "FROM api_tokens",
+            $($clause),+
+        )
+    };
+}
+
+/// How many API tokens are kept.
+pub(crate) const COUNT_API_TOKENS: &str = "SELECT COUNT(*) FROM api_tokens";
+
+/// Keeps a new API token. Parameters: `id`, `label`, `digest`, `scopes`,
+/// `password`, `created_at`, `last_used_at`.
+pub(crate) const INSERT_API_TOKEN: &str = concat!(
+    "INSERT INTO api_tokens (id, label, digest, scopes, password, created_at, last_used_at) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+);
+
+/// Parameter: the token's ID.
+pub(crate) const GET_API_TOKEN: &str = select_api_tokens!(" WHERE id = ?");
+
+/// Every API token, oldest first; of two created in the same millisecond,
+/// the one kept first.
+pub(crate) const ALL_API_TOKENS: &str = select_api_tokens!(" ORDER BY created_at, rowid");
+
+/// Parameter: the token's ID.
+pub(crate) const DELETE_API_TOKEN: &str = "DELETE FROM api_tokens WHERE id = ?";
+
+/// Forgets the tokens of every other admin password. Parameter: the
+/// fingerprint of the one kept now.
+pub(crate) const DELETE_OTHER_PASSWORDS_TOKENS: &str = "DELETE FROM api_tokens WHERE password <> ?";
+
+/// Parameters: the last use, the token's ID.
+pub(crate) const RECORD_API_TOKEN_USE: &str = "UPDATE api_tokens SET last_used_at = ? WHERE id = ?";

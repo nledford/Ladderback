@@ -159,6 +159,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [90](decisions/90-the-build-a-program-names.md) | The build a program names beside its version |
 | [91](decisions/91-the-operations-a-start-ends-are-announced.md) | The operations a start ends are announced |
 | [92](decisions/92-the-daemons-stop-has-a-limit.md) | The daemon's stop has a limit |
+| [93](decisions/93-api-tokens.md) | API tokens |
 
 ## 17. Open questions
 

@@ -433,20 +433,27 @@ impl OperationLog {
 }
 
 /// Whether sign-in is on (§10.1, decision 70), decided once as the daemon
-/// starts: on when the data folder keeps an admin password's hash, off when
-/// it keeps none. A hash file that can't be read, or isn't a hash this build
-/// checks, is a refusal to start, never sign-in off. Sessions draw their
-/// tokens from `random`.
-pub(crate) fn sign_in(random: Arc<dyn Random>) -> Result<SignIn, Refused> {
+/// starts, before its store opens: on when the data folder keeps an admin
+/// password's hash, off when it keeps none.
+pub(crate) enum SignInDecided {
+    Off,
+    On(Arc<FileAdminPassword>),
+}
+
+impl SignInDecided {
+    pub(crate) fn is_on(&self) -> bool {
+        matches!(self, Self::On(_))
+    }
+}
+
+/// Decides [`SignInDecided`]. A hash file that can't be read, or isn't a
+/// hash this build checks, is a refusal to start, never sign-in off.
+pub(crate) fn sign_in() -> Result<SignInDecided, Refused> {
     let data_dir = dirs::data_dir().ok_or_else(|| plain(msg::CLI_NO_DATA_DIR))?;
     let kept = Arc::new(FileAdminPassword::in_data_dir(&data_dir));
     match kept.is_set() {
-        Ok(false) => Ok(SignIn::Off),
-        Ok(true) => Ok(SignIn::On(Arc::new(app::access::Access::new(
-            kept,
-            random,
-            Arc::new(SystemClock),
-        )))),
+        Ok(false) => Ok(SignInDecided::Off),
+        Ok(true) => Ok(SignInDecided::On(kept)),
         Err(error) => {
             // `is_set` never answers `NotSet`: no file is sign-in off.
             let detail = match error {
@@ -469,13 +476,23 @@ pub(crate) fn sign_in(random: Arc<dyn Random>) -> Result<SignIn, Refused> {
 
 /// What the daemon's router runs against (§4.2), with `sign_in` deciding who
 /// may use it, or why it cannot, and `exposure` who can reach it, which the
-/// session route tells the page.
+/// session route tells the page. With sign-in on, the sessions draw their
+/// tokens from `random`, and the API tokens are kept in the daemon's store.
 pub(crate) async fn daemon(
-    sign_in: SignIn,
+    sign_in: SignInDecided,
+    random: Arc<dyn Random>,
     exposure: http_adapter::Exposure,
 ) -> Result<Daemon, Refused> {
     let mut daemon = daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await?;
-    daemon.state.sign_in = sign_in;
+    daemon.state.sign_in = match sign_in {
+        SignInDecided::Off => SignIn::Off,
+        SignInDecided::On(password) => SignIn::On(Arc::new(app::access::Access::new(
+            password,
+            random,
+            Arc::new(SystemClock),
+            Arc::<SqliteStore>::clone(&daemon.log.store),
+        ))),
+    };
     daemon.state.exposure = exposure;
     Ok(daemon)
 }
@@ -1377,7 +1394,7 @@ impl Unbuilt {
 }
 
 /// Logs that plan `plan`'s run, started by `trigger`, didn't start.
-fn log_not_started(plan: &PlanId, trigger: Trigger, error: &StartError) {
+fn log_not_started(plan: &PlanId, trigger: &Trigger, error: &StartError) {
     log::warn!(
         "{} of plan {} didn't start: {}",
         run_named(trigger),
@@ -1387,15 +1404,22 @@ fn log_not_started(plan: &PlanId, trigger: Trigger, error: &StartError) {
 }
 
 /// A run started by `trigger`, in the log's words: "the scheduled run",
-/// never the trigger's name in the code.
-fn run_named(trigger: Trigger) -> &'static str {
+/// never the trigger's name in the code. A run an API token asked for is
+/// named by the token's label and ID, never its secret (I4).
+fn run_named(trigger: &Trigger) -> std::borrow::Cow<'static, str> {
     match trigger {
-        Trigger::Schedule => "the scheduled run",
-        Trigger::Manual => "the manual run",
-        Trigger::CatchUp => "the catch-up run",
-        Trigger::Retry => "the retry",
-        Trigger::Hub => "the hub's run",
-        Trigger::Mcp => "the MCP client's run",
+        Trigger::Schedule => "the scheduled run".into(),
+        Trigger::Manual => "the manual run".into(),
+        Trigger::CatchUp => "the catch-up run".into(),
+        Trigger::Retry => "the retry".into(),
+        Trigger::Hub => "the hub's run".into(),
+        Trigger::Mcp => "the MCP client's run".into(),
+        Trigger::ApiToken { id, label } => format!(
+            "the run API token \"{}\" ({}) asked for",
+            label.as_str(),
+            id.as_str()
+        )
+        .into(),
     }
 }
 
@@ -1444,7 +1468,7 @@ fn start_refused(error: &StartError) -> String {
 #[async_trait]
 impl PlanRuns for PlanRunner {
     async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
-        match self.start_plan(plan, trigger, Some(place)).await {
+        match self.start_plan(plan, trigger.clone(), Some(place)).await {
             Ok(_) => {}
             // Refused for a secret of its repository, it ends failed with the
             // refusal, so the history and the page say why the schedule's
@@ -1461,7 +1485,7 @@ impl PlanRuns for PlanRunner {
                 // words, which only the history shows, masked (I4).
                 log::warn!(
                     "{} of plan {} didn't start, and ends as failed operation {}: {}",
-                    run_named(trigger),
+                    run_named(&trigger),
                     plan.as_str(),
                     operation.as_uuid().hyphenated(),
                     start_refused(&StartError::SecretRefused(refusal))
@@ -1477,7 +1501,7 @@ impl PlanRuns for PlanRunner {
                 log_recording_errors(&finished);
                 say_how_it_ended(&self.ends, &finished);
             }
-            Err(Unbuilt::Refused(error)) => log_not_started(plan, trigger, &error),
+            Err(Unbuilt::Refused(error)) => log_not_started(plan, &trigger, &error),
         }
     }
 
@@ -1668,15 +1692,15 @@ impl PlanRuns for PlanRunner {
 
 #[async_trait]
 impl Operations for PlanRunner {
-    async fn start_backup(&self, plan: String) -> Result<String, StartError> {
+    async fn start_backup(&self, plan: String, trigger: Trigger) -> Result<String, StartError> {
         let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
         // Refused by hand as on a schedule, the run leaves a line in the log
         // too, not only the answer the page shows for a moment (#483).
         let operation = self
-            .start_plan(&id, Trigger::Manual, None)
+            .start_plan(&id, trigger.clone(), None)
             .await
             .map_err(Unbuilt::into_start_error)
-            .inspect_err(|error| log_not_started(&id, Trigger::Manual, error))?;
+            .inspect_err(|error| log_not_started(&id, &trigger, error))?;
         Ok(operation.as_uuid().hyphenated().to_string())
     }
 
@@ -1782,21 +1806,31 @@ impl Operations for PlanRunner {
         })
     }
 
-    async fn cancel(&self, id: String) -> Result<(), http_adapter::CancelError> {
+    async fn cancel(
+        &self,
+        id: String,
+        by: http_adapter::Canceller,
+    ) -> Result<(), http_adapter::CancelError> {
         let Some(id) = operation_of(&id) else {
             return Err(http_adapter::CancelError::Unknown);
         };
-        // The log says which of the two refusals this is: unknown, or known
-        // but ended. Only a running operation has a handle to fire (§4.2).
-        let running = match GetOperation::new(Arc::clone(&self.store)).get(id).await {
-            Ok(Some(detail)) => !detail.record.status.is_finished(),
+        // The log says which of the refusals this is: unknown, known but not
+        // one a token may stop, or known but ended. Only a running operation
+        // has a handle to fire (§4.2).
+        let record = match GetOperation::new(Arc::clone(&self.store)).get(id).await {
+            Ok(Some(detail)) => detail.record,
             Ok(None) => return Err(http_adapter::CancelError::Unknown),
             Err(error) => {
                 log::error!("the operation log could not be read: {error}");
                 return Err(http_adapter::CancelError::Unknown);
             }
         };
-        if running && self.registry.cancel(&id) {
+        if by == http_adapter::Canceller::ApiToken
+            && !domain::access::api_token::cancels(record.kind)
+        {
+            return Err(http_adapter::CancelError::SessionOnly);
+        }
+        if !record.status.is_finished() && self.registry.cancel(&id) {
             Ok(())
         } else {
             Err(http_adapter::CancelError::NotRunning)
@@ -4167,8 +4201,17 @@ mod tests {
             (Trigger::Retry, "the retry"),
             (Trigger::Hub, "the hub's run"),
             (Trigger::Mcp, "the MCP client's run"),
+            (
+                Trigger::ApiToken {
+                    id: domain::access::api_token::ApiTokenId::parse("abcdefghijkl")
+                        .expect("an ID"),
+                    label: domain::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned())
+                        .expect("a label"),
+                },
+                "the run API token \"nightly-mcp\" (abcdefghijkl) asked for",
+            ),
         ] {
-            assert_eq!(run_named(trigger), words, "{trigger:?}");
+            assert_eq!(run_named(&trigger), words, "{trigger:?}");
         }
     }
 
@@ -5218,7 +5261,7 @@ mod tests {
     async fn a_cancel_in_the_start_window_stops_the_operation() {
         let (runner, mut entered, open_gate, _scratch) = runner_at_a_gate().await;
         let id = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts");
         // The run is in its before-hooks now, parked at the gate and not yet
@@ -5226,7 +5269,7 @@ mod tests {
         entered.changed().await.expect("the run reaches its hooks");
         // The cancel is answered while the gate is still closed: a switch
         // parked any later than the route's answer is a refusal here.
-        let cancel = runner.cancel(id).await;
+        let cancel = runner.cancel(id, http_adapter::Canceller::Session).await;
         open_gate.send(true).expect("the gate opens");
         cancel.expect("a cancel in the start window is accepted");
     }
@@ -5238,7 +5281,7 @@ mod tests {
     async fn a_backup_started_while_another_runs_waits_for_its_turn() {
         let (runner, mut entered, open_gate, _scratch) = runner_at_a_gate().await;
         let first = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts");
         entered
@@ -5246,7 +5289,7 @@ mod tests {
             .await
             .expect("the first run reaches its hooks");
         let second = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts again");
         let second_id = operation_of(&second).expect("an operation ID");
@@ -5260,7 +5303,7 @@ mod tests {
 
         open_gate.send(true).expect("the gate opens");
         runner
-            .cancel(first)
+            .cancel(first, http_adapter::Canceller::Session)
             .await
             .expect("the first run is cancelled");
         tokio::time::timeout(
@@ -5271,7 +5314,7 @@ mod tests {
         .expect("the second run takes its turn once the first one ends")
         .expect("the gate stays open");
         runner
-            .cancel(second)
+            .cancel(second, http_adapter::Canceller::Session)
             .await
             .expect("the second run is cancelled");
     }
@@ -5291,13 +5334,16 @@ mod tests {
         let (sender, ends) = app::retry::run_ends();
         runner.ends = sender;
         let started = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts");
         let operation = operation_of(&started).expect("an operation ID");
         entered.changed().await.expect("the run reaches its hooks");
         open_gate.send(true).expect("the gate opens");
-        runner.cancel(started).await.expect("the run is cancelled");
+        runner
+            .cancel(started, http_adapter::Canceller::Session)
+            .await
+            .expect("the run is cancelled");
         assert_eq!(
             said_end(&ends).await,
             Some(app::retry::RunEnd {
@@ -5335,7 +5381,10 @@ mod tests {
         entered.changed().await.expect("the run reaches its hooks");
         open_gate.send(true).expect("the gate opens");
         runner
-            .cancel(operation.as_uuid().hyphenated().to_string())
+            .cancel(
+                operation.as_uuid().hyphenated().to_string(),
+                http_adapter::Canceller::Session,
+            )
             .await
             .expect("the run is cancelled");
         assert_eq!(
@@ -5753,7 +5802,7 @@ mod tests {
         runner.groups("demo".to_owned()).await.expect("the groups");
         open_gate.send(true).expect("the gate opens");
         runner
-            .start_backup("home".to_owned())
+            .start_backup("home".to_owned(), Trigger::Manual)
             .await
             .expect("the plan starts");
         let mut kinds = Vec::new();
@@ -5833,7 +5882,7 @@ mod tests {
         runner.groups("demo".to_owned()).await.expect("the groups");
         open_gate.send(true).expect("the gate opens");
         runner
-            .start_backup("home".to_owned())
+            .start_backup("home".to_owned(), Trigger::Manual)
             .await
             .expect("the plan starts");
         let mut kinds = Vec::new();
@@ -5983,13 +6032,69 @@ mod tests {
         let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
         open_gate.send(true).expect("the gate opens");
         let id = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts");
         runner
-            .cancel(id.clone())
+            .cancel(id.clone(), http_adapter::Canceller::Session)
             .await
             .expect("a cancel straight after the answer is accepted");
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+
+    fn an_api_token_trigger() -> Trigger {
+        Trigger::ApiToken {
+            id: domain::access::api_token::ApiTokenId::parse("abcdefghijkl").expect("an ID"),
+            label: domain::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned())
+                .expect("a label"),
+        }
+    }
+
+    /// A backup an API token started is logged with the token's trigger, and
+    /// the token may cancel it (decision 93).
+    #[tokio::test]
+    async fn a_backup_an_api_token_started_is_logged_as_its_and_the_token_cancels_it() {
+        let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
+        open_gate.send(true).expect("the gate opens");
+        let id = runner
+            .start_backup("home".into(), an_api_token_trigger())
+            .await
+            .expect("the plan starts");
+        let operation = operation_of(&id).expect("the answer is an operation ID");
+        let logged = GetOperation::new(Arc::clone(&runner.store))
+            .get(operation)
+            .await
+            .expect("the log reads")
+            .expect("the operation is logged");
+        assert_eq!(logged.record.trigger, an_api_token_trigger());
+        runner
+            .cancel(id.clone(), http_adapter::Canceller::ApiToken)
+            .await
+            .expect("a token cancels a backup");
+        assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    }
+
+    /// An API token stops backups only: a running check is refused to it as
+    /// needing a session, and goes on until a session cancels it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_api_token_cancels_no_maintenance_run_and_a_session_still_can() {
+        let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+        runner.engine = Arc::new(IdentifiesThenParks);
+        let id = runner
+            .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
+            .await
+            .expect("the check starts");
+        assert_eq!(
+            runner
+                .cancel(id.clone(), http_adapter::Canceller::ApiToken)
+                .await,
+            Err(http_adapter::CancelError::SessionOnly)
+        );
+        runner
+            .cancel(id.clone(), http_adapter::Canceller::Session)
+            .await
+            .expect("a session cancels the check");
         let operation = operation_of(&id).expect("the answer is an operation ID");
         assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
     }
@@ -6086,7 +6191,7 @@ mod tests {
         });
         let answered = tokio::time::timeout(
             std::time::Duration::from_millis(200),
-            runner.start_backup("home".into()),
+            runner.start_backup("home".into(), Trigger::Manual),
         )
         .await;
         assert!(answered.is_err(), "the start waits for the log");
@@ -6100,7 +6205,10 @@ mod tests {
         let id = operation.as_uuid().hyphenated().to_string();
         let accepted = async {
             loop {
-                match runner.cancel(id.clone()).await {
+                match runner
+                    .cancel(id.clone(), http_adapter::Canceller::Session)
+                    .await
+                {
                     Err(http_adapter::CancelError::Unknown) => {
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     }
@@ -6331,7 +6439,7 @@ mod tests {
         let log = Arc::new(Held::end_over(Arc::clone(&runner.store)));
         let mut heard = listen(&mut runner, Completes, log.clone()).await;
         let id = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts");
 
@@ -6406,7 +6514,7 @@ mod tests {
         let log = Arc::new(Held::start_over(Arc::clone(&runner.store)));
         let mut heard = listen(&mut runner, Completes, log.clone()).await;
         let id = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts");
 
@@ -6788,7 +6896,7 @@ mod tests {
             .await
             .expect("the check starts");
         runner
-            .cancel(id.clone())
+            .cancel(id.clone(), http_adapter::Canceller::Session)
             .await
             .expect("a cancel straight after the answer is accepted");
         let operation = operation_of(&id).expect("the answer is an operation ID");
@@ -6862,7 +6970,7 @@ mod tests {
             refused: Arc::clone(&refused),
         });
         let id = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("a backup starts without a log that takes its writes");
         // The engine parks the run, as a real one is parked while it works,
@@ -7306,7 +7414,7 @@ mod tests {
         let log = Arc::clone(&runner.store);
         let mut heard = listen(&mut runner, Completes, log).await;
         let id = runner
-            .start_backup("home".into())
+            .start_backup("home".into(), Trigger::Manual)
             .await
             .expect("the plan starts");
 
@@ -7333,7 +7441,7 @@ mod tests {
             .await
             .expect("the check starts");
         runner
-            .cancel(id.clone())
+            .cancel(id.clone(), http_adapter::Canceller::Session)
             .await
             .expect("a cancel straight after the answer is accepted");
 
@@ -7374,7 +7482,7 @@ mod tests {
             "the refused start was announced, or the run it was refused for ended"
         );
         runner
-            .cancel(running)
+            .cancel(running, http_adapter::Canceller::Session)
             .await
             .expect("the run that holds the repository is cancelled");
 
@@ -10290,7 +10398,9 @@ mod repository_service_tests {
                 "{error:?}"
             );
             assert_eq!(
-                runner.start_backup("home".to_owned()).await,
+                runner
+                    .start_backup("home".to_owned(), Trigger::Manual)
+                    .await,
                 Err(StartError::Unavailable { code, args, detail }),
                 "{error:?}"
             );
@@ -10419,7 +10529,9 @@ mod repository_service_tests {
             runs: crate::composition::runs::Runs::default(),
         };
 
-        let refused = runner.start_backup("home".to_owned()).await;
+        let refused = runner
+            .start_backup("home".to_owned(), Trigger::Manual)
+            .await;
 
         assert_matches!(
             &refused,
@@ -10583,7 +10695,7 @@ mod repository_service_tests {
         let (runner, _heard, _, plan) =
             refused_runner(settings, store, Arc::new(BroadcastEventBus::new())).await;
 
-        let by_hand = Operations::start_backup(&runner, plan.as_str().to_owned())
+        let by_hand = Operations::start_backup(&runner, plan.as_str().to_owned(), Trigger::Manual)
             .await
             .expect_err("a run by hand is refused");
         let StartError::SecretRefused(alert) = by_hand else {

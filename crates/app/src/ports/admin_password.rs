@@ -11,9 +11,10 @@ pub trait AdminPassword: Send + Sync {
     /// Keeps `password` as the admin password, in place of any before it.
     async fn set(&self, password: &Password) -> Result<(), AdminPasswordError>;
 
-    /// Which admin password is kept now: the same while it is, another once
-    /// it is set anew, even to the same text. Asked on every request that
-    /// carries a session, so it is cheap and never hashes an attempt.
+    /// Which admin password is kept now: the same while it is, in this
+    /// process and the next (API tokens are kept with it), another once it is
+    /// set anew, even to the same text. Asked on every request that carries a
+    /// session or a token, so it is cheap and never hashes an attempt.
     fn fingerprint(&self) -> Result<PasswordFingerprint, AdminPasswordError>;
 }
 

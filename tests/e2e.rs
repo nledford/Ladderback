@@ -45,6 +45,8 @@ mod secrets_steps;
 
 #[path = "steps/adopt.rs"]
 mod adopt_steps;
+#[path = "steps/api_tokens.rs"]
+mod api_tokens_steps;
 #[path = "steps/build.rs"]
 mod build_steps;
 #[path = "steps/cache.rs"]
@@ -114,6 +116,7 @@ struct Agent {
     service: service_steps::ServiceE2e,
     install: install_script_steps::InstallScriptE2e,
     notifications: notifications_steps::NotificationsE2e,
+    api_tokens: api_tokens_steps::ApiTokensE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -164,6 +167,7 @@ impl Agent {
             install: install_script_steps::InstallScriptE2e::default(),
             maintenance: maintenance_steps::MaintenanceE2e::default(),
             notifications: notifications_steps::NotificationsE2e::default(),
+            api_tokens: api_tokens_steps::ApiTokensE2e::default(),
         }
     }
 

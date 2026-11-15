@@ -200,6 +200,18 @@ Feature: The shared components in the gallery
     When I press Enter
     Then focus is on the button "Open an empty demo review"
 
+  Scenario: A review dialog can open on a button of its own, and still closes on Escape and returns focus
+    When I open the component gallery
+    And I press Tab until focus is on the button "Open a demo secret"
+    And I press Enter
+    Then focus is inside the dialog "Demo secret shown once"
+    And focus is on the button "Copy the demo secret"
+    When I press Tab until focus is on the button "Close"
+    And I press Tab
+    Then focus is on the first control of the dialog "Demo secret shown once"
+    When I press Escape
+    Then focus is on the button "Open a demo secret"
+
   Scenario Outline: An open review dialog has no accessibility violations
     When I open the component gallery
     And I press Tab until focus is on the button "<opener>"
@@ -211,6 +223,7 @@ Feature: The shared components in the gallery
       | opener                    | dialog                         |
       | Open a demo review        | Demo review to confirm         |
       | Open an empty demo review | Demo review with nothing to do |
+      | Open a demo secret        | Demo secret shown once         |
 
   Scenario Outline: A button's label grows with the reader's text size
     Given the reader sets the text size to 200 percent

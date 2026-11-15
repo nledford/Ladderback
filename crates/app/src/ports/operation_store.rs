@@ -270,7 +270,7 @@ impl OperationRecord {
         Self {
             id: operation.id(),
             kind: operation.kind(),
-            trigger: operation.trigger(),
+            trigger: operation.trigger().clone(),
             target: operation.target().clone(),
             status: operation.status().clone(),
             queued_at: to_millisecond(operation.queued_at()),
@@ -303,7 +303,7 @@ impl OperationRecord {
         let operation = Operation::queue(
             self.id,
             self.kind,
-            self.trigger,
+            self.trigger.clone(),
             self.target.clone(),
             self.queued_at,
         );

@@ -444,7 +444,9 @@ async fn every_kind_and_trigger_reads_back(store: &dyn OperationStore, fx: &Fixt
         OperationKind::Prune,
         OperationKind::Check,
     ];
-    let triggers = [
+    let label = domain::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned());
+    assert!(label.is_ok(), "the suite's label is valid");
+    let mut triggers = vec![
         Trigger::Schedule,
         Trigger::Manual,
         Trigger::CatchUp,
@@ -452,6 +454,14 @@ async fn every_kind_and_trigger_reads_back(store: &dyn OperationStore, fx: &Fixt
         Trigger::Hub,
         Trigger::Mcp,
     ];
+    if let Ok(label) = label {
+        triggers.push(Trigger::ApiToken {
+            id: domain::access::api_token::ApiTokenId::from_bytes(
+                &[7; domain::access::TOKEN_BYTES],
+            ),
+            label,
+        });
+    }
     let targets = [
         Target::default(),
         Target {
@@ -467,7 +477,7 @@ async fn every_kind_and_trigger_reads_back(store: &dyn OperationStore, fx: &Fixt
     for trigger in triggers {
         for kind in kinds {
             let target = targets[(n % 3) as usize].clone();
-            let op = Operation::queue(id(n), kind, trigger, target, at(0));
+            let op = Operation::queue(id(n), kind, trigger.clone(), target, at(0));
             save(store, &op, None).await;
             let found = read(store, id(n)).await.map(|found| found.record);
             assert_eq!(
@@ -476,7 +486,7 @@ async fn every_kind_and_trigger_reads_back(store: &dyn OperationStore, fx: &Fixt
                 "{kind:?} triggered by {trigger:?} reads back"
             );
             assert_eq!(found.as_ref().map(|record| record.kind), Some(kind));
-            assert_eq!(found.as_ref().map(|record| record.trigger), Some(trigger));
+            assert_eq!(found.as_ref().map(|record| &record.trigger), Some(&trigger));
             assert_eq!(found.map(|record| record.target), Some(op.target().clone()));
             n += 1;
         }

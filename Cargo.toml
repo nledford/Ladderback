@@ -192,7 +192,7 @@ wasm-bindgen-test = "0.3.80"
 # The browser APIs `web` reads the page's language from, declares it with, and
 # writes the live regions, focus and the events WebSocket through (§4.4), and
 # aborts a read of the daemon that hangs with.
-web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Document", "Element", "ErrorEvent", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "UrlSearchParams", "WebSocket", "Window"] }
+web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "BinaryType", "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "UrlSearchParams", "WebSocket", "Window"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

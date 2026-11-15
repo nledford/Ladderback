@@ -181,6 +181,10 @@ pub struct Working {
 /// While the owner is starting the run ([`Working`]), neither button does
 /// anything and Escape does not close the dialog, so a review that is being
 /// confirmed is never dismissed from under the request it sent.
+///
+/// `starts_on` is a button in `children` focus starts on instead of the
+/// dismiss button, for a dialog whose dismissal loses something, such as a
+/// secret shown once, which a stray Enter would then throw away.
 #[component]
 pub fn ReviewDialog(
     open: RwSignal<bool>,
@@ -191,6 +195,7 @@ pub fn ReviewDialog(
     described_by: String,
     #[prop(optional)] working: Option<Working>,
     #[prop(optional)] fallback: Option<String>,
+    #[prop(optional)] starts_on: Option<NodeRef<leptos::html::Button>>,
     children: Children,
 ) -> impl IntoView {
     let dialog = NodeRef::<leptos::html::Dialog>::new();
@@ -213,9 +218,10 @@ pub fn ReviewDialog(
         if wanted {
             open_modal(&dialog, counted);
             // The browser puts focus on the first control it finds; the
-            // dismiss button is the one a review means to start on.
-            if let Some(dismiss) = dismiss.get_untracked() {
-                let _ = dismiss.focus();
+            // dismiss button is the one a review means to start on, unless
+            // the owner named another.
+            if let Some(first) = starts_on.unwrap_or(dismiss).get_untracked() {
+                let _ = first.focus();
             }
         } else if dialog.open() {
             // Closed by its owner, which no `close` handler can be counted on

@@ -114,7 +114,11 @@ struct NoOperations;
 
 #[async_trait]
 impl crate::Operations for NoOperations {
-    async fn start_backup(&self, _plan: String) -> Result<String, crate::StartError> {
+    async fn start_backup(
+        &self,
+        _plan: String,
+        _trigger: domain::execution::Trigger,
+    ) -> Result<String, crate::StartError> {
         Err(crate::StartError::UnknownPlan)
     }
 
@@ -155,7 +159,7 @@ impl crate::Operations for NoOperations {
         Err(crate::LookupError::Unknown)
     }
 
-    async fn cancel(&self, _id: String) -> Result<(), crate::CancelError> {
+    async fn cancel(&self, _id: String, _by: crate::Canceller) -> Result<(), crate::CancelError> {
         Err(crate::CancelError::Unknown)
     }
 }

@@ -249,7 +249,7 @@ impl RecordingRuns {
                 ends.send(RunEnd {
                     operation: OperationId::from_uuid(uuid::Uuid::from_u128(u128::MAX)),
                     plan,
-                    trigger,
+                    trigger: trigger.clone(),
                     outcome: RunOutcome::Cancelled,
                 });
                 return;
@@ -258,7 +258,7 @@ impl RecordingRuns {
                 let mut started = started.lock().unwrap_or_else(PoisonError::into_inner);
                 started.push(Started {
                     plan: plan.clone(),
-                    trigger,
+                    trigger: trigger.clone(),
                     at: clock.now(),
                 });
                 started.len()
@@ -279,7 +279,7 @@ impl RecordingRuns {
             ends.send(RunEnd {
                 operation: OperationId::from_uuid(uuid::Uuid::from_u128(number as u128)),
                 plan,
-                trigger,
+                trigger: trigger.clone(),
                 outcome,
             });
         };

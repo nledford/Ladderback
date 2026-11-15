@@ -32,6 +32,12 @@
 # A rustic repository.
 -repository = repository
 
+# What lets a program other than a browser, such as MCP connect mode, use the API while sign-in is on.
+-api-token = { $form ->
+   *[one] API token
+    [other] API tokens
+}
+
 ## Sizes and durations. The program splits the value and picks the form; the
 ## catalog arranges the parts, so word order stays with the translator.
 
@@ -134,6 +140,37 @@ error-csrf-token-invalid = { -brand-name } refused this request because it did n
 # $detail (text): the platform's message. It is shown as it came.
 error-sign-in-unavailable = { -brand-name } could not check the admin password, so nobody was signed in. Check the admin password file in the data folder, or set the password again with { "ladderback set-password" }.
     .with-detail = { -brand-name } could not check the admin password ({ $detail }), so nobody was signed in. Check the admin password file in the data folder, or set the password again with { "ladderback set-password" }.
+
+# A program's API token is unknown, revoked, of an admin password set since, or has a wrong secret. It counted as a failed sign-in.
+error-api-token-invalid = { -brand-name } doesn't know this { -api-token }: it may have been revoked, or the admin password set again. Create a new token in Settings and give it to the program.
+
+# A good API token was sent to a route its scopes don't open.
+# $scope (text): what the route needs, one of { "read" }, { "run" }, { "preview" }, { "propose" } or { "session" }.
+error-api-token-scope = { $scope ->
+    [session] This { -api-token } can't do that: only a signed-in browser can. Sign in to { -brand-name } to do it.
+   *[other] This { -api-token } can't do that: it needs the { $scope } scope. Create a token with that scope in Settings.
+  }
+
+# The token routes were asked for while no admin password is set.
+error-sign-in-off = Sign-in is off, so there are no { -api-token(form: "other") }. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
+
+# An API token's label is empty, blank, holds a control character, or is too long.
+# $max (count): the most characters a label may have.
+error-api-token-label = Give the token a label of 1 to { $max } characters, so you can tell it from the others.
+
+# An API token was asked for with no scope.
+error-api-token-no-scope = Choose at least one scope for the token: what the program may do.
+
+# As many API tokens as are allowed are kept already.
+# $limit (count): the most tokens kept.
+error-api-token-limit = { -brand-name } keeps at most { $limit } { -api-token(form: "other") }. Revoke one you no longer use, then create the new one.
+
+# The API token to revoke is not kept, as when it was revoked already.
+# $token (text): the token's ID.
+error-api-token-unknown = No { -api-token } { $token } is kept: it may have been revoked already. Reload the page to see the tokens kept now.
+
+# The API tokens could not be read or kept.
+error-api-tokens-unavailable = { -brand-name } could not read or keep its { -api-token(form: "other") }. Its log says why; check the data folder and try again.
 
 # The configuration file could not be read or written.
 # $file (text): the path of the configuration file. It is shown as it is.

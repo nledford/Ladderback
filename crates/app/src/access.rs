@@ -8,12 +8,18 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use domain::access::{Client, Password, Sessions, SignInWaits, Token};
 use domain::{SignedDuration, Timestamp};
 
-use crate::ports::{AdminPassword, Clock, Random};
+use crate::ports::{AdminPassword, ApiTokenStore, Clock, Random};
+
+mod api_tokens;
+
+pub use api_tokens::{ApiTokenGrant, ApiTokenRefused, ApiTokensRefused, CreatedApiToken};
 
 /// The admin's sessions and the waits after failed sign-ins, kept in memory:
-/// a daemon that restarts asks everyone to sign in again.
+/// a daemon that restarts asks everyone to sign in again. The API tokens are
+/// kept in `tokens`, and outlive a restart.
 pub struct Access {
     password: Arc<dyn AdminPassword>,
+    tokens: Arc<dyn ApiTokenStore>,
     random: Arc<dyn Random>,
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
@@ -77,9 +83,11 @@ impl Access {
         password: Arc<dyn AdminPassword>,
         random: Arc<dyn Random>,
         clock: Arc<dyn Clock>,
+        tokens: Arc<dyn ApiTokenStore>,
     ) -> Self {
         Self {
             password,
+            tokens,
             random,
             clock,
             state: Mutex::new(State::default()),
@@ -103,12 +111,12 @@ impl Access {
     ) -> Result<SignedIn, SignInRefused> {
         let client = Client::of(address);
         let now = self.clock.now();
-        self.lock().waits.attempt(client, now).map_err(|left| {
-            let millis = u64::try_from(left.as_millis()).unwrap_or(u64::MAX);
-            SignInRefused::Wait {
-                seconds: millis.div_ceil(1000),
-            }
-        })?;
+        self.lock()
+            .waits
+            .attempt(client, now)
+            .map_err(|left| SignInRefused::Wait {
+                seconds: api_tokens::seconds_left(left),
+            })?;
         let unavailable = |error| SignInRefused::Unavailable(format!("{error:?}"));
         let under = self.password.fingerprint().map_err(unavailable)?;
         match self.password.verify(attempt).await {

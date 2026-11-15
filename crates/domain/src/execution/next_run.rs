@@ -28,7 +28,7 @@ impl RandomDraw {
 
 /// When a plan runs next, and what starts that run: its schedule, or a
 /// catch-up for a run it missed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NextRun {
     pub at: Timestamp,
     pub trigger: Trigger,

@@ -10,6 +10,8 @@ use jiff::{SignedDuration, Timestamp};
 use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq;
 
+pub mod api_token;
+
 /// A session ends once it has gone this long unused.
 pub const SESSION_IDLE: SignedDuration = SignedDuration::from_hours(12);
 
@@ -172,6 +174,11 @@ pub struct PasswordFingerprint(u64);
 impl PasswordFingerprint {
     pub const fn new(value: u64) -> Self {
         Self(value)
+    }
+
+    /// The value, as a store keeps it beside an API token.
+    pub const fn value(self) -> u64 {
+        self.0
     }
 }
 
@@ -372,6 +379,15 @@ impl SignInWaits {
             },
         );
         Ok(())
+    }
+
+    /// What is left of `client`'s wait at `now`, if it is waiting: a
+    /// sign-in or an API token from it now is refused unchecked.
+    pub fn waiting(&self, client: Client, now: Timestamp) -> Option<SignedDuration> {
+        self.by_client
+            .get(&client)
+            .filter(|attempts| now < attempts.next)
+            .map(|attempts| attempts.next.duration_since(now))
     }
 
     /// The sign-in from `client` succeeded: its waits start over.

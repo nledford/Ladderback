@@ -11,6 +11,7 @@
     clippy::unreachable
 )]
 
+mod api_tokens;
 mod body_limit;
 mod listener;
 mod maintenance;
@@ -54,6 +55,7 @@ pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 use api::UiEvent;
 use app::ports::EventBus;
 use async_trait::async_trait;
+use domain::execution::Trigger;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 
@@ -109,9 +111,10 @@ impl axum::extract::FromRef<AppState> for api::BuildDto {
 /// not begin has stored nothing.
 #[async_trait]
 pub trait Operations: Send + Sync {
-    /// Starts a backup of the plan named in the request, returning the
-    /// operation's ID.
-    async fn start_backup(&self, plan: String) -> Result<String, StartError>;
+    /// Starts a backup of the plan named in the request, started by
+    /// `trigger` (by hand, or by an API token), returning the operation's
+    /// ID.
+    async fn start_backup(&self, plan: String, trigger: Trigger) -> Result<String, StartError>;
     /// Starts maintenance (forget, prune, check or adopt) on the repository
     /// named in the request, returning the operation's ID. A forget or an
     /// adoption that carries the `selection` its preview named runs only if
@@ -155,9 +158,18 @@ pub trait Operations: Send + Sync {
     /// One operation's detail.
     async fn operation(&self, id: String) -> Result<api::OperationDetailDto, LookupError>;
 
-    /// Cancels a running operation. Finished operations and unknown IDs are
-    /// typed refusals, not errors.
-    async fn cancel(&self, id: String) -> Result<(), CancelError>;
+    /// Cancels a running operation. Finished operations, unknown IDs and an
+    /// operation `by` may not stop are typed refusals, not errors.
+    async fn cancel(&self, id: String, by: Canceller) -> Result<(), CancelError>;
+}
+
+/// Who asks for a cancel: a request with a session (or any request, with
+/// sign-in off), or an API token, which cancels backups only (§10.1,
+/// decision 93).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Canceller {
+    Session,
+    ApiToken,
 }
 
 /// Why a request couldn't start an operation.
@@ -252,6 +264,9 @@ pub enum CancelError {
     Unknown,
     /// The operation has already ended, so there is nothing to stop.
     NotRunning,
+    /// An API token asked, and the operation is not a backup: only a
+    /// session may stop it.
+    SessionOnly,
 }
 
 /// The body `POST /api/v1/operations` takes.
@@ -360,6 +375,14 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
                 .post(sign_in::sign_in)
                 .delete(sign_in::sign_out),
         )
+        .route(
+            api_tokens::TOKENS_PATH,
+            axum::routing::get(api_tokens::list).post(api_tokens::create),
+        )
+        .route(
+            "/api/v1/tokens/{id}",
+            axum::routing::delete(api_tokens::revoke),
+        )
         .route(sign_in::EVENTS_PATH, axum::routing::get(events))
         .route(
             "/api/v1/operations",
@@ -424,44 +447,69 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
 /// 64 MiB would let a client make the daemon buffer that much.
 const EVENTS_CLIENT_MAX_MESSAGE: usize = 1024;
 
-/// How often an events stream opened with a session asks whether that
-/// session is still live: one that has ended (signed out, unused too long,
-/// or the admin password set anew) stops its stream within this long.
+/// How often an events stream opened with a session or an API token asks
+/// whether it is still live: a session that has ended (signed out, unused
+/// too long, or the admin password set anew) or a token revoked stops its
+/// stream within this long.
 const SESSION_RECHECK: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The live-updates WebSocket (technical design §4.4): one per tab, carrying
 /// [`UiEvent`]s. It sends nothing until an event arrives — the first state
 /// comes over REST — and the client is dropped when a send fails. The
 /// request checks have already allowed this handshake: a foreign `Origin`
-/// never reaches here. With sign-in on, the stream ends when the session
-/// that opened it does.
+/// never reaches here. With sign-in on, the stream ends when the session or
+/// the API token that opened it does.
 async fn events(
     upgrade: WebSocketUpgrade,
     State(state): State<AppState>,
     session: Option<axum::Extension<sign_in::SessionOf>>,
+    token: Option<axum::Extension<api_tokens::TokenOf>>,
 ) -> Response {
     let stream = state.events.subscribe().await;
-    let session = session.map(|axum::Extension(session)| session);
+    let opener = match (session, token) {
+        (Some(axum::Extension(session)), _) => Some(Opener::Session(session)),
+        (None, Some(axum::Extension(token))) => Some(Opener::Token(token)),
+        (None, None) => None,
+    };
     upgrade
         .max_message_size(EVENTS_CLIENT_MAX_MESSAGE)
         .max_frame_size(EVENTS_CLIENT_MAX_MESSAGE)
-        .on_upgrade(move |socket| forward(socket, stream, session))
+        .on_upgrade(move |socket| forward(socket, stream, opener))
+}
+
+/// What opened an events stream with sign-in on: a session, or an API token.
+enum Opener {
+    Session(sign_in::SessionOf),
+    Token(api_tokens::TokenOf),
+}
+
+impl Opener {
+    /// Whether the session is live still, or the token kept still (not
+    /// revoked, and of the admin password kept now).
+    async fn live(&self) -> bool {
+        match self {
+            Self::Session(session) => session.access.peek(&session.token).is_some(),
+            Self::Token(token) => token.access.api_token_live(&token.grant.id).await,
+        }
+    }
 }
 
 /// Reads the bus and writes each event to the client, until the client goes,
-/// the daemon does, or the session that opened the stream ends. A client's
-/// `Ping` is answered with a `Pong`: the events stream never waits on the
-/// client, so the reply races fairly with the next event.
+/// the daemon does, or the session or token that opened the stream ends. A
+/// client's `Ping` is answered with a `Pong`: the events stream never waits
+/// on the client, so the reply races fairly with the next event.
 async fn forward(
     mut socket: WebSocket,
     mut stream: BoxStream<'static, UiEvent>,
-    session: Option<sign_in::SessionOf>,
+    opener: Option<Opener>,
 ) {
     let mut recheck = tokio::time::interval(SESSION_RECHECK);
     loop {
         tokio::select! {
-            _ = recheck.tick(), if session.is_some() => {
-                if session.as_ref().is_some_and(|session| session.access.peek(&session.token).is_none()) {
+            _ = recheck.tick(), if opener.is_some() => {
+                if let Some(opener) = &opener
+                    && !opener.live().await
+                {
                     break;
                 }
             }
@@ -494,17 +542,26 @@ async fn forward(
 
 /// Starts a backup of the plan the body names: the M1b slice of the
 /// operations API. The answer is the operation's ID; what the operation
-/// reports arrives over the events WebSocket. Cancel, polling and history
-/// belong to the operations page's milestone, which grows this route.
+/// reports arrives over the events WebSocket. A run an API token asked for
+/// is recorded with that token's label and ID (decision 93); any other is a
+/// run by hand.
 async fn run_plan(
     State(state): State<AppState>,
+    token: Option<axum::Extension<api_tokens::TokenOf>>,
     body: Result<axum::Json<RunPlanBody>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let plan = match body {
         Ok(axum::Json(RunPlanBody { plan })) => plan,
         Err(_) => return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody),
     };
-    match state.operations.start_backup(plan.clone()).await {
+    let trigger = match token {
+        Some(axum::Extension(token)) => Trigger::ApiToken {
+            id: token.grant.id,
+            label: token.grant.label,
+        },
+        None => Trigger::Manual,
+    };
+    match state.operations.start_backup(plan.clone(), trigger).await {
         Ok(operation) => (
             StatusCode::ACCEPTED,
             axum::Json(StartedOperation { operation }),
@@ -569,16 +626,23 @@ async fn get_operation(
 
 /// Cancels a running operation (§4.2): the empty JSON body the JSON-body
 /// rule asks of every mutating method, and a polite cancel — the worker
-/// stops, the finally-hooks run, the operation ends cancelled.
+/// stops, the finally-hooks run, the operation ends cancelled. An API token
+/// cancels backups only; anything else it is refused as needing a session.
 async fn cancel_operation(
     State(state): State<AppState>,
+    token: Option<axum::Extension<api_tokens::TokenOf>>,
     axum::extract::Path(id): axum::extract::Path<String>,
     body: Result<axum::Json<serde_json::Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     if body.is_err() {
         return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody);
     }
-    match state.operations.cancel(id.clone()).await {
+    let by = match token {
+        Some(_) => Canceller::ApiToken,
+        None => Canceller::Session,
+    };
+    match state.operations.cancel(id.clone(), by).await {
+        Err(CancelError::SessionOnly) => api_tokens::scope_refused(api_tokens::SESSION_SCOPE),
         Ok(()) => (StatusCode::OK, axum::Json(serde_json::json!({}))).into_response(),
         Err(CancelError::Unknown) => refused_with(
             StatusCode::NOT_FOUND,
@@ -867,7 +931,11 @@ mod tests {
 
     #[async_trait]
     impl Operations for Plans {
-        async fn start_backup(&self, plan: String) -> Result<String, StartError> {
+        async fn start_backup(
+            &self,
+            plan: String,
+            _trigger: domain::execution::Trigger,
+        ) -> Result<String, StartError> {
             match plan.as_str() {
                 "missing" => Err(StartError::UnknownPlan),
                 "no-secret" => Err(StartError::SecretRefused(SecretRefusal {
@@ -1000,7 +1068,7 @@ mod tests {
             }
         }
 
-        async fn cancel(&self, id: String) -> Result<(), CancelError> {
+        async fn cancel(&self, id: String, _by: Canceller) -> Result<(), CancelError> {
             if id == "018f0000-0000-7000-8000-000000000001" {
                 // The one logged operation finished long ago.
                 Err(CancelError::NotRunning)

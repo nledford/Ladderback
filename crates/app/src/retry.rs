@@ -50,7 +50,7 @@ impl RunEnd {
         Some(Self {
             operation: operation.id(),
             plan: operation.target().plan.clone()?,
-            trigger: operation.trigger(),
+            trigger: operation.trigger().clone(),
             outcome,
         })
     }
