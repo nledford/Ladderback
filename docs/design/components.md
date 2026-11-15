@@ -774,9 +774,9 @@ Accessibility is designed in from the first screen, not audited in at the end. T
 
 `ladderback mcp` lets AI agents and scripts drive Ladderback through the [Model Context Protocol](https://modelcontextprotocol.io): newline-delimited JSON-RPC 2.0 over stdio. Stdout carries only protocol messages; logs go to stderr.
 
-**Protocol.** MCP revision `2025-06-18` or later, negotiated in `initialize`. Older revisions are refused, because results rely on `structuredContent` and `outputSchema`, which arrived in that revision. Implemented:
+**Protocol.** MCP revisions `2025-06-18`, `2025-11-25` and `2026-07-28`. The first two are negotiated in `initialize`; from `2026-07-28` each request names its revision in `_meta` and `server/discover` lists those served. Older revisions are refused, because results rely on `structuredContent` and `outputSchema`, which arrived in `2025-06-18`. A line from the client over 1 MiB is dropped unread and the session goes on. Implemented:
 
-- **Lifecycle:** `initialize`, then `notifications/initialized`, `ping`, and shutdown on stdin EOF.
+- **Lifecycle:** `initialize`, `notifications/initialized` and `ping` for the revisions that have them, `server/discover` from `2026-07-28`, and shutdown on stdin EOF.
 - **Tools:** `tools/list` and `tools/call`.
 - **Progress and cancellation:** progress notifications, sent only when a request carries `_meta.progressToken`; `notifications/cancelled` for a pending call.
 - **Errors:** an unknown tool or malformed arguments is JSON-RPC error `-32602`. A failure inside a tool is a result with `isError: true` and the same `{code, args}` payload the API returns (§8.4), never a sentence.
@@ -791,26 +791,25 @@ A parity contract suite runs every tool both implementations offer against both,
 
 | Mode | Command | What it drives |
 |---|---|---|
-| **Connect** | `ladderback mcp --connect [URL] [--token-file PATH]` | A running agent, through `/api/v1` and its events WebSocket, like any other API client. The URL defaults to `http://127.0.0.1:9898` and must be `https` or loopback before a token is sent. The server starts even when the daemon isn't up yet, and connects on the first call. A request whose reply was lost is never resent: the tool reports that the outcome is unknown |
-| **Headless** | `ladderback mcp --headless [--config DIR] [--data DIR]` | An in-process agent session wired by the composition root, as `serve` does but without HTTP or the scheduler. It takes the data-dir lock (§9), so a data dir that `serve` has open is refused by that lock and connect mode is the answer. Operations run only while the session lives: on stdin EOF or SIGTERM it cancels its queued operations and stops its workers (SIGTERM, then SIGKILL), so a later `serve` finds no stale queue |
+| **Connect** | `ladderback mcp --connect [URL] [--token-file PATH]` | A running agent, through `/api/v1` and its events WebSocket, like any other API client. The URL defaults to `http://127.0.0.1:9898`. The token from `--token-file` is sent as a Bearer token (decision 93), and only to `https` or loopback: plain HTTP beyond loopback with a token is refused at start, even with sign-in off (decision 87). Without a token it is allowed, and `status` says sign-in is off and the daemon answers on the network. The server starts even when the daemon isn't up yet, and connects on the first call. A request whose reply was lost is never resent: the tool reports that the outcome is unknown |
+| **Headless** | `ladderback mcp --headless [--config DIR] [--data DIR]` | An in-process agent session wired by the composition root, as `serve` does but without HTTP or the scheduler. It takes the data-dir lock (§9), so a data dir that `serve` has open is refused by that lock and connect mode is the answer. It starts with `serve`'s recovery (decision 40). Operations run only while the session lives: on stdin EOF or SIGTERM it cancels its queued operations and stops as `serve` does (decision 92), so a later `serve` finds no stale queue |
 | **Scratch** | `ladderback mcp --scratch` | A headless session in a new mode-0700 temporary directory (`ladderback-scratch-*`) holding config, data and a local repository, seeded with one plan over procedurally generated files. Deleted on exit; stale scratch directories from crashed sessions are swept at the next start. For demos and for agents testing Ladderback itself |
 
 **Tools.** Each maps onto one use case or read-side query. Results are `structuredContent` built from `api` types, declared by each tool's `outputSchema` and mirrored as JSON text. Every `list_*` tool takes `limit` and a cursor, and results have a size cap, so one call can't flood the client's context.
 
 | Tool | Does |
 |---|---|
-| `status` | Plans, last result and next run per plan, running operations |
-| `list_plans`, `list_repositories` | Plans and repositories, with secrets as references only (§10.5) |
-| `list_snapshots` | Snapshots, filtered by host, plan, tag, path or time |
-| `list_operations`, `get_operation` | History, one operation's status, summary and warnings |
-| `operation_log` | One operation's redacted log, paged |
-| `run_plan` | Queues a backup now, under the plan's overlap policy, with `trigger = mcp`; returns the operation ID. The plan's existing hooks and secret sources run as they would for any other trigger |
+| `status` | Plans, last result and next run per plan, and the operations queued or running among the newest 200; this program's build and, in connect mode, the daemon's (`version`, `commit`, `dirty`, `release`, decision 90), its sign-in state and exposure. Headless and scratch plan no runs, so they show no next run |
+| `list_plans`, `list_repositories` | Plans and repositories, with secrets as references only (§10.5), with their configuration warnings (`glob-never-matches`, inline secrets, `location-plain-http-credentials`) |
+| `list_snapshots` | One repository's snapshots, newest first, filtered by host, plan, tag, path or time |
+| `list_operations`, `get_operation` | History, one operation's status, summary, warning codes and `failure {code, args, detail}`, masked (I4) |
+| `run_plan` | Queues a backup now, under the plan's overlap policy; returns the operation ID. The trigger is `mcp` in headless and scratch modes; in connect mode it is `api-token` (decision 93), or `manual` with sign-in off. The plan's existing hooks and secret sources run as they would for any other trigger |
 | `wait_operation` | Waits until an operation finishes or a timeout passes, with progress notifications. Cancelling the call stops the wait, not the operation |
-| `cancel_operation` | Cancels a queued or running backup started by `run_plan` or a schedule. Maintenance operations can't be cancelled from MCP, so a loop can't keep a repository from being pruned |
+| `cancel_operation` | Cancels a queued or running backup, however it started; the daemon refuses a token's cancel of anything else (decision 93). Maintenance operations can't be cancelled from MCP, so a loop can't keep a repository from being pruned |
 | `test_repository` | Tests a configured repository's connection |
 | `preview_forget` | The dry run of forget for a repository this agent owns: what would be deleted, per group (§7.3) |
-| `preview_import` | Takes a rustic profile's TOML as `content`, never a path, and returns the proposed plans and notices without applying them. `use-profiles` is reported as a notice rather than read from disk, and parse errors are redacted |
-| `export_profile` | A plan as a rustic profile (§6.2). Fails with `inline-secret` when the repository's password is stored inline, rather than writing it out |
+| `preview_import` | Takes a rustic profile's TOML as `content`, never a path, and returns the proposed plans and notices without applying them. `use-profiles` is reported as a notice rather than read from disk, and parse errors are redacted. In connect mode, `POST /api/v1/profiles/preview` (scope `preview`) |
+| `export_profile` | A plan as a rustic profile (§6.2). Fails with `inline-secret` when the repository's password is stored inline, rather than writing it out. In connect mode, `GET /api/v1/plans/{id}/profile` (scope `read`) |
 | `propose_setup` | Submits a proposal: typed configuration changes plus the AI agent's rationale (§16, decision 89). Returns its ID and what the submission checks found. Changes nothing until a person approves it in the web UI. Needs the `propose` scope |
 | `check_proposal` | Runs the submission checks on a draft without storing it: parsing and the domain rules only, with no secret resolved, command run or location contacted |
 | `dry_run_plan` | Walks a draft plan's sources, within the allowlist, through its source filter: files and bytes it would back up and what each exclude removed, as counts and sizes, never paths. Runs no hook and opens no repository |
@@ -821,5 +820,7 @@ There is deliberately no tool that restores, downloads, applies forget or prune,
 A proposal is not an edit: the web UI's "Pending changes" page is the confirmation, and with sign-in on, approving there needs a browser session with step-up, never a token; with sign-in off, approval is a convenience, not a safety boundary (decision 89). The proposal tools are offered in connect mode against an agent only, and left out of `tools/list` elsewhere: headless and scratch modes have no web UI to approve in, and plans are view-only from the hub (decision 2).
 
 **Hub.** M3 drives one agent. Connect mode against a hub, with an `agent` argument on the tools that need one (plan IDs are unique per agent only), arrives with remote control in M5.
+
+**Known limits.** There is no `operation_log` tool: no per-operation log exists, and `get_operation` carries the failure and warnings (decision NN). `status` sees queued and running operations only among the newest 200, so an older one still queued behind a long run isn't listed.
 
 **Testing.** `features/automation/mcp.feature` runs as `@e2e` scenarios. The runner speaks JSON-RPC to `ladderback mcp --scratch`, and to `ladderback mcp --connect` against `ladderback serve --listen 127.0.0.1:0`, reading the chosen port from the `listening on` line on its stderr. Each tool's input and output schemas are checked against example calls. The I4 canary test (§10.2) scans every tool result, including `list_repositories`, `export_profile` and `preview_import` with inline secrets.
