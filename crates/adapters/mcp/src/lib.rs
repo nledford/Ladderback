@@ -32,9 +32,10 @@ use api::{
 use async_trait::async_trait;
 use rmcp::handler::server::tool::schema_for_output;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, JsonObject,
-    ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion,
-    ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
+    CallToolRequestMethod, CallToolRequestParams, CallToolResponse, CallToolResult, ConstString,
+    CustomRequest, CustomResult, Implementation, JsonObject, ListToolsResult,
+    PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, ServerCapabilities,
+    ServerConfig, Tool, ToolAnnotations,
 };
 use rmcp::schemars::transform::transform_subschemas;
 use rmcp::schemars::{JsonSchema, Schema};
@@ -42,10 +43,10 @@ use rmcp::service::{RequestContext, ServerInitializeError};
 use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 mod actions;
+mod arguments;
 mod checks;
 mod connect;
 mod pages;
@@ -60,6 +61,7 @@ pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 use actions::{
     CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
 };
+use arguments::{NoArguments, read};
 use checks::{ExportArguments, ForgetPreview, ImportArguments, RepositoryArguments};
 use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
@@ -333,7 +335,8 @@ impl Server {
         }
     }
 
-    async fn list_plans(&self, arguments: ListArguments) -> Result<PlansPage, ErrorDto> {
+    async fn list_plans(&self, given: Option<JsonObject>) -> Result<PlansPage, ErrorDto> {
+        let arguments: ListArguments = read(given)?;
         let listed = self.backend.plans().await?;
         let (plans, next) = page(
             listed.plans,
@@ -346,8 +349,9 @@ impl Server {
 
     async fn list_repositories(
         &self,
-        arguments: ListArguments,
+        given: Option<JsonObject>,
     ) -> Result<RepositoriesPage, ErrorDto> {
+        let arguments: ListArguments = read(given)?;
         let listed = self.backend.repositories().await?;
         let (repositories, next) = page(
             listed.repositories,
@@ -358,10 +362,8 @@ impl Server {
         Ok(RepositoriesPage { repositories, next })
     }
 
-    async fn list_snapshots(
-        &self,
-        arguments: SnapshotsArguments,
-    ) -> Result<SnapshotsPage, ErrorDto> {
+    async fn list_snapshots(&self, given: Option<JsonObject>) -> Result<SnapshotsPage, ErrorDto> {
+        let arguments: SnapshotsArguments = read(given)?;
         let filter = SnapshotFilter {
             plan: arguments.plan,
             host: arguments.host,
@@ -383,8 +385,9 @@ impl Server {
 
     async fn list_operations(
         &self,
-        arguments: OperationsArguments,
+        given: Option<JsonObject>,
     ) -> Result<OperationsPageDto, ErrorDto> {
+        let arguments: OperationsArguments = read(given)?;
         self.backend
             .history(
                 arguments.plan,
@@ -394,7 +397,8 @@ impl Server {
             .await
     }
 
-    async fn get_operation(&self, arguments: OperationArguments) -> Result<Operation, ErrorDto> {
+    async fn get_operation(&self, given: Option<JsonObject>) -> Result<Operation, ErrorDto> {
+        let arguments: OperationArguments = read(given)?;
         let OperationDetailDto {
             operation,
             warnings,
@@ -402,7 +406,8 @@ impl Server {
         Ok(Operation::listing(operation, warnings))
     }
 
-    async fn run_plan(&self, arguments: RunArguments) -> Result<Started, ErrorDto> {
+    async fn run_plan(&self, given: Option<JsonObject>) -> Result<Started, ErrorDto> {
+        let arguments: RunArguments = read(given)?;
         let operation = self.backend.run(arguments.plan).await?;
         Ok(Started { operation })
     }
@@ -416,9 +421,10 @@ impl Server {
     /// dropped then, as the protocol asks, so the detail isn't read for it.
     async fn wait_operation(
         &self,
-        arguments: WaitArguments,
+        given: Option<JsonObject>,
         context: &RequestContext<RoleServer>,
     ) -> Result<Waited, ErrorDto> {
+        let arguments: WaitArguments = read(given)?;
         let length = wait_length(arguments.timeout);
         let began = tokio::time::Instant::now();
         let progress = context.meta.get_progress_token();
@@ -466,42 +472,53 @@ impl Server {
         }
     }
 
-    async fn cancel_operation(&self, arguments: CancelArguments) -> Result<Cancelling, ErrorDto> {
+    async fn cancel_operation(&self, given: Option<JsonObject>) -> Result<Cancelling, ErrorDto> {
+        let arguments: CancelArguments = read(given)?;
         self.backend.cancel(arguments.id.clone()).await?;
         Ok(Cancelling {
             operation: arguments.id,
         })
     }
 
-    async fn preview_forget(
+    async fn test_repository(
         &self,
-        arguments: RepositoryArguments,
-    ) -> Result<ForgetPreview, ErrorDto> {
-        ForgetPreview::of(self.backend.preview_forget(arguments.repository).await?)
+        given: Option<JsonObject>,
+    ) -> Result<LocationsTestDto, ErrorDto> {
+        let RepositoryArguments { repository } = read(given)?;
+        self.backend.test_repository(repository).await
+    }
+
+    async fn preview_forget(&self, given: Option<JsonObject>) -> Result<ForgetPreview, ErrorDto> {
+        let RepositoryArguments { repository } = read(given)?;
+        ForgetPreview::of(self.backend.preview_forget(repository).await?)
+    }
+
+    async fn preview_import(
+        &self,
+        given: Option<JsonObject>,
+    ) -> Result<ProfileImportDto, ErrorDto> {
+        let ImportArguments {
+            content,
+            repository,
+        } = read(given)?;
+        self.backend.preview_import(content, repository).await
+    }
+
+    async fn export_profile(
+        &self,
+        given: Option<JsonObject>,
+    ) -> Result<ProfileExportDto, ErrorDto> {
+        let ExportArguments { plan } = read(given)?;
+        self.backend.export_profile(plan).await
     }
 }
 
-/// A read tool's result: what it read, or the refusal, marked as an error.
-fn answered(result: Result<impl Serialize, ErrorDto>) -> CallToolResponse {
+/// A tool's result: what it read or did, or the refusal, marked as an error.
+fn answered(result: Result<impl Serialize, ErrorDto>) -> CallToolResult {
     match result {
         Ok(value) => structured(&value),
         Err(error) => refused(&error),
     }
-    .into()
-}
-
-/// The arguments `tool` was given, read as `T`.
-///
-/// # Errors
-///
-/// Invalid params: one is missing, unknown or of the wrong type.
-fn arguments<T: DeserializeOwned>(tool: &str, given: Option<JsonObject>) -> Result<T, McpError> {
-    serde_json::from_value(serde_json::Value::Object(given.unwrap_or_default())).map_err(|error| {
-        McpError::invalid_params(
-            format!("the tool {tool} can't take these arguments: {error}"),
-            None,
-        )
-    })
 }
 
 /// A tool's result: `value` as `structuredContent`, mirrored as JSON text.
@@ -743,68 +760,63 @@ impl ServerHandler for Server {
         Ok(ListToolsResult::with_all_items(tools()))
     }
 
+    /// Calls the tool `request` names. An argument it can't take is its
+    /// `invalid-arguments` refusal, which the agent reads (§4.6); only a tool
+    /// that doesn't exist is a protocol error, as are arguments that aren't
+    /// an object, which the SDK refuses before this reads them.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let given = request.arguments;
-        match request.name.as_ref() {
-            STATUS if given.as_ref().is_some_and(|args| !args.is_empty()) => Err(
-                McpError::invalid_params("the tool status takes no arguments", None),
-            ),
-            STATUS => Ok(self.status().await.into()),
-            LIST_PLANS => Ok(answered(
-                self.list_plans(arguments(LIST_PLANS, given)?).await,
-            )),
-            LIST_REPOSITORIES => Ok(answered(
-                self.list_repositories(arguments(LIST_REPOSITORIES, given)?)
-                    .await,
-            )),
-            LIST_SNAPSHOTS => Ok(answered(
-                self.list_snapshots(arguments(LIST_SNAPSHOTS, given)?).await,
-            )),
-            LIST_OPERATIONS => Ok(answered(
-                self.list_operations(arguments(LIST_OPERATIONS, given)?)
-                    .await,
-            )),
-            GET_OPERATION => Ok(answered(
-                self.get_operation(arguments(GET_OPERATION, given)?).await,
-            )),
-            RUN_PLAN => Ok(answered(self.run_plan(arguments(RUN_PLAN, given)?).await)),
-            WAIT_OPERATION => Ok(answered(
-                self.wait_operation(arguments(WAIT_OPERATION, given)?, &context)
-                    .await,
-            )),
-            CANCEL_OPERATION => Ok(answered(
-                self.cancel_operation(arguments(CANCEL_OPERATION, given)?)
-                    .await,
-            )),
-            TEST_REPOSITORY => {
-                let RepositoryArguments { repository } = arguments(TEST_REPOSITORY, given)?;
-                Ok(answered(self.backend.test_repository(repository).await))
+        let result = match request.name.as_ref() {
+            STATUS => match read::<NoArguments>(given) {
+                Ok(NoArguments {}) => self.status().await,
+                Err(error) => refused(&error),
+            },
+            LIST_PLANS => answered(self.list_plans(given).await),
+            LIST_REPOSITORIES => answered(self.list_repositories(given).await),
+            LIST_SNAPSHOTS => answered(self.list_snapshots(given).await),
+            LIST_OPERATIONS => answered(self.list_operations(given).await),
+            GET_OPERATION => answered(self.get_operation(given).await),
+            RUN_PLAN => answered(self.run_plan(given).await),
+            WAIT_OPERATION => answered(self.wait_operation(given, &context).await),
+            CANCEL_OPERATION => answered(self.cancel_operation(given).await),
+            TEST_REPOSITORY => answered(self.test_repository(given).await),
+            PREVIEW_FORGET => answered(self.preview_forget(given).await),
+            PREVIEW_IMPORT => answered(self.preview_import(given).await),
+            EXPORT_PROFILE => answered(self.export_profile(given).await),
+            name => {
+                return Err(McpError::invalid_params(
+                    format!("no tool is named {name:?}"),
+                    None,
+                ));
             }
-            PREVIEW_FORGET => Ok(answered(
-                self.preview_forget(arguments(PREVIEW_FORGET, given)?).await,
-            )),
-            PREVIEW_IMPORT => {
-                let ImportArguments {
-                    content,
-                    repository,
-                } = arguments(PREVIEW_IMPORT, given)?;
-                Ok(answered(
-                    self.backend.preview_import(content, repository).await,
-                ))
-            }
-            EXPORT_PROFILE => {
-                let ExportArguments { plan } = arguments(EXPORT_PROFILE, given)?;
-                Ok(answered(self.backend.export_profile(plan).await))
-            }
-            name => Err(McpError::invalid_params(
-                format!("no tool is named {name:?}"),
+        };
+        Ok(result.into())
+    }
+
+    /// A request the SDK couldn't read as any it knows. A `tools/call` among
+    /// them has params of another shape, such as arguments that aren't an
+    /// object: invalid params, as JSON-RPC names them, not a method this
+    /// server lacks. Any other is a method it lacks, as the SDK answers.
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, McpError> {
+        if request.method == CallToolRequestMethod::VALUE {
+            return Err(McpError::invalid_params(
+                "a tool call names its tool and gives its arguments as an object",
                 None,
-            )),
+            ));
         }
+        Err(McpError::new(
+            rmcp::model::ErrorCode::METHOD_NOT_FOUND,
+            request.method,
+            None,
+        ))
     }
 }
 

@@ -334,14 +334,26 @@ async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_a
     let mut client = connect(told());
     let answer = client.ask_current("tools/list", json!({})).await;
     let mut required = HashMap::new();
-    for tool in answer["result"]["tools"].as_array().expect("a list of tools") {
+    for tool in answer["result"]["tools"]
+        .as_array()
+        .expect("a list of tools")
+    {
         let name = tool["name"].as_str().expect("a name");
         let schema = &tool["inputSchema"];
         let arguments = schema["properties"].as_object().expect("its arguments");
         for (argument, argument_schema) in arguments {
-            assert!(argument_schema["type"].is_string(), "{name}.{argument}: {schema}");
-            assert!(argument_schema.get("format").is_none(), "{name}.{argument}: {schema}");
-            assert!(argument_schema.get("minimum").is_none(), "{name}.{argument}: {schema}");
+            assert!(
+                argument_schema["type"].is_string(),
+                "{name}.{argument}: {schema}"
+            );
+            assert!(
+                argument_schema.get("format").is_none(),
+                "{name}.{argument}: {schema}"
+            );
+            assert!(
+                argument_schema.get("minimum").is_none(),
+                "{name}.{argument}: {schema}"
+            );
         }
         let needed: Vec<&str> = schema["required"]
             .as_array()
@@ -432,6 +444,33 @@ async fn an_unknown_tool_is_invalid_params() {
         .ask_current("tools/call", json!({"name": "restore", "arguments": {}}))
         .await;
     assert_eq!(answer["error"]["code"], -32602, "{answer}");
+}
+
+/// Arguments that aren't an object aren't a call of any tool's shape:
+/// invalid params, a protocol error, before a tool reads them.
+#[tokio::test(start_paused = true)]
+async fn arguments_that_arent_an_object_are_invalid_params() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = connect(lists);
+    for arguments in [json!("home"), json!(["home"]), json!(7)] {
+        let answer = client
+            .ask_current(
+                "tools/call",
+                json!({"name": "run_plan", "arguments": arguments}),
+            )
+            .await;
+        assert_eq!(answer["error"]["code"], -32602, "{answer}");
+    }
+    assert!(asked.lock().unwrap().is_empty(), "{:?}", asked.lock());
+}
+
+/// A method the server lacks stays that, apart from a malformed tool call.
+#[tokio::test(start_paused = true)]
+async fn a_method_the_server_lacks_is_method_not_found() {
+    let mut client = connect(told());
+    let answer = client.ask_current("tools/restore", json!({})).await;
+    assert_eq!(answer["error"]["code"], -32601, "{answer}");
 }
 
 /// The `invalid-arguments` refusal of `field`, for `problem`.
@@ -1008,8 +1047,18 @@ async fn an_argument_a_tool_cant_take_is_refused_naming_it() {
         ("get_operation", json!({}), "operation", "missing"),
         ("get_operation", json!({"id": "x"}), "id", "unknown-key"),
         ("list_plans", json!({"plan": "home"}), "plan", "unknown-key"),
-        ("list_repositories", json!({"limit": "ten"}), "limit", "invalid"),
-        ("list_snapshots", json!({"limit": 2}), "repository", "missing"),
+        (
+            "list_repositories",
+            json!({"limit": "ten"}),
+            "limit",
+            "invalid",
+        ),
+        (
+            "list_snapshots",
+            json!({"limit": 2}),
+            "repository",
+            "missing",
+        ),
         (
             "list_snapshots",
             json!({"repository": "nas", "host": ["canary-host"]}),
@@ -1402,7 +1451,12 @@ async fn the_acting_tools_refuse_an_argument_they_cant_take_naming_it() {
             "now",
             "unknown-key",
         ),
-        ("wait_operation", json!({"timeout": 5}), "operation", "missing"),
+        (
+            "wait_operation",
+            json!({"timeout": 5}),
+            "operation",
+            "missing",
+        ),
         (
             "wait_operation",
             json!({"operation": "x", "timeout": -1}),
