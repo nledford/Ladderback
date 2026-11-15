@@ -6,7 +6,7 @@
 
 use std::net::IpAddr;
 
-use domain::access::Password;
+use domain::access::{Client, Password, PasswordProblem};
 
 use super::{Access, SignInRefused};
 use crate::ports::AdminPassword;
@@ -42,7 +42,16 @@ pub async fn set_admin_password(
     kept: &dyn AdminPassword,
     typed: String,
 ) -> Result<(), SetPasswordRefused> {
-    todo!("{:p}{}", kept, typed.len())
+    let password = match Password::new_admin(typed) {
+        Ok(password) => password,
+        Err(PasswordProblem::Empty | PasswordProblem::TooShort) => {
+            return Err(SetPasswordRefused::TooShort);
+        }
+        Err(PasswordProblem::TooLong) => return Err(SetPasswordRefused::TooLong),
+    };
+    kept.set(&password)
+        .await
+        .map_err(|error| SetPasswordRefused::Unwritable(format!("{error:?}")))
 }
 
 impl Access {
@@ -59,6 +68,13 @@ impl Access {
         current: &Password,
         typed: String,
     ) -> Result<(), PasswordChangeRefused> {
-        todo!("{address}{:?}{}", current, typed.len())
+        let client = Client::of(address);
+        self.check(client, current)
+            .await
+            .map_err(PasswordChangeRefused::Current)?;
+        self.lock().waits.succeeded(client);
+        set_admin_password(self.password.as_ref(), typed)
+            .await
+            .map_err(PasswordChangeRefused::New)
     }
 }
