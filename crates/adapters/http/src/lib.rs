@@ -798,12 +798,13 @@ fn file(path: &str, asset: Asset) -> Response {
         )
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"))
     };
-    // Trunk puts a content hash in every asset name except index.html, so
-    // only the entry page must be revalidated.
-    let cache_control = HeaderValue::from_static(if path == INDEX {
-        "no-cache"
-    } else {
+    // A file whose name carries its content hash gets a new name when it
+    // changes, so it can be cached for good; any other, index.html included,
+    // must be revalidated, or a new release hides behind the cached copy.
+    let cache_control = HeaderValue::from_static(if carries_content_hash(path) {
         "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
     });
     // The entry page starts the application with a script of its own, so its
     // policy names that script by its hash (§10.1).
@@ -822,6 +823,23 @@ fn file(path: &str, asset: Asset) -> Response {
             .insert(header::CONTENT_SECURITY_POLICY, policy);
     }
     response
+}
+
+/// Whether `path` names a file by its content, as `trunk build` names each
+/// file it hashes: `<stem>-<hash>.<extension>`, or `<stem>-<hash>_bg.wasm`
+/// for the module. The hash is 64 bits in lowercase hex: 16 digits, or fewer
+/// for the script and the module, whose hash Trunk doesn't pad. Asking for at
+/// least 8 keeps a name such as `icon-192.png` out; a hash under 8 digits
+/// comes once in 2^36 builds and costs only revalidation.
+fn carries_content_hash(path: &str) -> bool {
+    let Some((_, tail)) = path.rsplit_once('-') else {
+        return false;
+    };
+    let digits = tail
+        .bytes()
+        .take_while(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        .count();
+    (8..=16).contains(&digits) && matches!(tail.as_bytes().get(digits), Some(b'.' | b'_'))
 }
 
 #[cfg(test)]

@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Ladderback</title>
+    <!-- The tab icon (assets/brand/README.md): Trunk copies both files with a
+         content hash in the name, and its links keep only rel and href, so
+         order alone tells the icons apart: the SVG comes last, for browsers
+         that show SVG icons, and one that can't falls back to the PNG. -->
+    <link data-trunk rel="icon" href="assets/brand/favicon-32.png">
+    <link data-trunk rel="icon" href="assets/brand/favicon.svg">
     <link data-trunk rel="css" href="style.css">
     <!-- Tailwind's output (tailwind.css), compiled by the pre-build hook of
          Trunk.toml; its colors are the tokens of style.css. -->
