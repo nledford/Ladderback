@@ -1,0 +1,45 @@
+# Deletes a pull request's Actions caches when it is closed or merged. Nothing
+# in this repository saves a cache from a pull request any more (ci.yml's header
+# comment has the design), so this finds nothing to delete after the first
+# runs; it is the net under whatever does: a workflow, an action or a re-run of
+# an old commit that saves from a pull request would otherwise leave an entry
+# for the seven days before GitHub evicts it, and a pull request's entries are
+# ones no other pull request can read.
+#
+# `pull_request`, never `pull_request_target`: nothing here reads the pull
+# request's code, and `pull_request_target` would give a fork's pull request
+# this write token. A pull request from a fork gets a read-only token under
+# `pull_request`, which couldn't delete, so the job skips it; its entries, if
+# any, wait out GitHub's seven days. A same-repository pull request comes from
+# someone with write access, who can delete caches anyway.
+name: Cache cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  delete:
+    name: Delete the caches of a closed pull request
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      actions: write # to delete cache entries; no checkout, so no contents
+    steps:
+      # The pull request's number from the event, into the ref the caches of its
+      # runs go by (`refs/pull/<number>/merge`). `--all` without `--ref` would
+      # delete every cache of the repository, main's included, so the ref is
+      # asserted before the command runs.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          case "$NUMBER" in
+            '' | *[!0-9]*) echo "not a pull request number: '$NUMBER'" >&2; exit 1 ;;
+          esac
+          ref="refs/pull/$NUMBER/merge"
+          gh cache delete --all --ref "$ref" --repo "$REPO" --succeed-on-no-caches
