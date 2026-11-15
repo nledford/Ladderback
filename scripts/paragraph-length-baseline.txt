@@ -1,4 +1,3 @@
-docs/design/components.md
 docs/design/data-model.md
 docs/design/decisions/25-who-decides-a-forgets-deletions.md
 docs/design/decisions/26-what-an-adoption-writes.md
