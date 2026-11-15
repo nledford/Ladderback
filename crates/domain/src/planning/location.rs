@@ -10,8 +10,8 @@ use std::fmt;
 
 use super::repository::Place;
 use super::{
-    InvalidValue, LocationRule, Plan, RepositoryConfig, RepositorySettings, RuleVerdict, ValueKind,
-    masked_options,
+    InterfaceKind, InvalidValue, Link, LocationRule, Plan, RepositoryConfig, RepositorySettings,
+    RuleVerdict, ValueKind, masked_options,
 };
 use crate::PlanId;
 use crate::secrets::{
@@ -345,6 +345,16 @@ pub enum RuleNote {
     NameUnreadable { position: u8 },
 }
 
+/// What the Repositories page notes of an entry with a rule while the
+/// machine's IPv4 and IPv6 traffic leave by different interfaces, of these
+/// kinds: a rule holds only if it holds for both, so one that holds for one
+/// family alone doesn't hold here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MixedLinkNote {
+    pub ipv4: InterfaceKind,
+    pub ipv6: InterfaceKind,
+}
+
 impl RepositoryConfig {
     /// How many locations the entry has: 1 and the further ones.
     pub fn location_count(&self) -> usize {
@@ -523,6 +533,18 @@ impl RepositoryConfig {
             }));
         }
         notes
+    }
+
+    /// The note about `link`, the machine's link as last read: one, for an
+    /// entry with a rule, while the link is mixed.
+    pub fn link_note(&self, link: Option<Link>) -> Option<MixedLinkNote> {
+        let Some(Link::Mixed { ipv4, ipv6 }) = link else {
+            return None;
+        };
+        self.location_rules()
+            .iter()
+            .any(Option::is_some)
+            .then_some(MixedLinkNote { ipv4, ipv6 })
     }
 }
 
@@ -992,6 +1014,33 @@ mod tests {
             vec![RuleNote::NameUnreadable { position: 2 }]
         );
         assert_eq!(entry.rule_notes(&[], true), Vec::new());
+    }
+
+    #[test]
+    fn a_mixed_link_is_noted_once_for_an_entry_with_a_rule_and_no_other_link_is() {
+        let mixed = Link::Mixed {
+            ipv4: InterfaceKind::WiFi,
+            ipv6: InterfaceKind::Wired,
+        };
+        let mut entry = entry("/srv/lan", &["/srv/public", "/srv/far"], Some("aa"));
+        assert_eq!(entry.link_note(Some(mixed)), None, "no location has a rule");
+        entry.locations.further[0].when = ruled(&[NetworkKind::Wired]);
+        entry.locations.further[1].when = ruled(&[NetworkKind::WiFi]);
+        assert_eq!(
+            entry.link_note(Some(mixed)),
+            Some(MixedLinkNote {
+                ipv4: InterfaceKind::WiFi,
+                ipv6: InterfaceKind::Wired,
+            })
+        );
+        for link in [
+            None,
+            Some(Link::Wired),
+            Some(Link::WiFi),
+            Some(Link::NoRoute),
+        ] {
+            assert_eq!(entry.link_note(link), None, "{link:?}");
+        }
     }
 
     #[test]

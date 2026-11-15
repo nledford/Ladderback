@@ -16,7 +16,7 @@ use app::contract::network_link::NetworkLinkHarness;
 use app::contract::power::PowerHarness;
 use app::ports::{Network, NetworkLink, PlatformError, PowerSupply};
 use domain::execution::conditions::PowerSource;
-use domain::planning::{CurrentNetworkName, Link};
+use domain::planning::{CurrentNetworkName, Family, InterfaceKind, Link};
 use platform::network::{ScutilNetwork, SysfsNetwork};
 use platform::network_link::{KernelLink, RouteLink};
 use platform::power::{PmsetPower, SysfsPower};
@@ -741,10 +741,63 @@ fn default_route(interface: &str, metric: u32) -> String {
 /// IPv6's unreachable default, which every Linux machine lists, out of `lo`.
 const IPV6_UNREACHABLE: &str = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200       lo\n";
 
-const ETH0: Interface<'static> = ("eth0", false, &[("type", "1")], &[]);
-const WLAN0: Interface<'static> = ("wlp2s0", false, &[("type", "1")], &["phy80211"]);
-const TUN0: Interface<'static> = ("tun0", true, &[("type", "65534")], &[]);
-const BRIDGE: Interface<'static> = ("br0", true, &[("type", "1")], &["bridge"]);
+/// What an interface that is up and has a carrier says: Ethernet's type,
+/// `IFF_UP` and `IFF_LOWER_UP` among its flags, and operating.
+const UP: &[(&str, &str)] = &[("type", "1"), ("flags", "0x11003"), ("operstate", "up")];
+
+const ETH0: Interface<'static> = ("eth0", false, UP, &[]);
+const WLAN0: Interface<'static> = ("wlp2s0", false, UP, &["phy80211"]);
+/// A tunnel's driver says no operating state, only its carrier.
+const TUN0: Interface<'static> = (
+    "tun0",
+    true,
+    &[
+        ("type", "65534"),
+        ("flags", "0x110d1"),
+        ("operstate", "unknown"),
+        ("carrier", "1"),
+    ],
+    &[],
+);
+const BRIDGE: Interface<'static> = ("br0", true, UP, &["bridge"]);
+/// `eth0` switched off.
+const ETH0_DOWN: Interface<'static> = (
+    "eth0",
+    false,
+    &[("type", "1"), ("flags", "0x1002"), ("operstate", "down")],
+    &[],
+);
+/// `eth0` switched on, with no cable in it, of a driver that says no
+/// operating state.
+const ETH0_NO_CARRIER: Interface<'static> = (
+    "eth0",
+    false,
+    &[
+        ("type", "1"),
+        ("flags", "0x1003"),
+        ("operstate", "unknown"),
+        ("carrier", "0"),
+    ],
+    &[],
+);
+
+/// An IPv4 default route out of `interface` at `metric`, with `flags`.
+fn ipv4_default(interface: &str, metric: u32, flags: u32) -> String {
+    format!("{interface}\t00000000\t0101A8C0\t{flags:04X}\t0\t0\t{metric}\t00000000\t0\t0\t0\n")
+}
+
+/// An IPv6 default route out of `interface` at `metric`, with `flags`.
+fn ipv6_default(interface: &str, metric: u32, flags: u32) -> String {
+    format!(
+        "00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 {metric:08x} 00000001 00000000 {flags:08x} {interface:>8}\n"
+    )
+}
+
+/// `RTF_UP | RTF_GATEWAY`: a route that carries traffic.
+const CARRIES: u32 = 0x3;
+/// `RTF_UP | RTF_REJECT`: an `unreachable` or `prohibit` route, as both
+/// families list it, and a `blackhole` one as IPv6 lists it.
+const REJECTS: u32 = 0x201;
 
 impl KernelLinkHarness {
     fn new() -> Self {
@@ -767,11 +820,22 @@ impl KernelLinkHarness {
         })
     }
 
-    /// A machine whose default route leaves by a Wi-Fi interface of its
-    /// own, which the stand-in NetworkManager says is `device`; `None` makes
-    /// no device of it.
+    /// A machine whose IPv4 default route leaves by a Wi-Fi interface of
+    /// its own, which the stand-in NetworkManager says is `device`; `None`
+    /// makes no device of it.
     #[cfg(target_os = "linux")]
     fn on_wifi(&self, device: Option<stand_in::Device>) -> Arc<dyn NetworkLink> {
+        self.on_wifi_with_ipv6(device, |_| IPV6_UNREACHABLE.to_owned())
+    }
+
+    /// [`on_wifi`](Self::on_wifi), with the IPv6 routes `ipv6` gives for the
+    /// Wi-Fi interface's name, beside `eth0`.
+    #[cfg(target_os = "linux")]
+    fn on_wifi_with_ipv6(
+        &self,
+        device: Option<stand_in::Device>,
+        ipv6: impl FnOnce(&str) -> String,
+    ) -> Arc<dyn NetworkLink> {
         let interface = format!("wl{}", self.machines.load(Ordering::Relaxed));
         let network_manager = self
             .network_manager
@@ -782,8 +846,21 @@ impl KernelLinkHarness {
         }
         self.machine(
             &default_route(&interface, 600),
-            Some(IPV6_UNREACHABLE),
-            &[(interface.as_str(), false, &[("type", "1")], &["phy80211"])],
+            Some(&ipv6(&interface)),
+            &[(interface.as_str(), false, UP, &["phy80211"]), ETH0],
+        )
+    }
+
+    /// A machine whose IPv4 default route leaves by Wi-Fi at 600 and whose
+    /// IPv6 one leaves by Ethernet at 100 (#492).
+    fn mixed_machine(&self) -> Arc<dyn NetworkLink> {
+        self.machine(
+            &default_route("wlp2s0", 600),
+            Some(&format!(
+                "{}{IPV6_UNREACHABLE}",
+                ipv6_default("eth0", 100, CARRIES)
+            )),
+            &[ETH0, WLAN0],
         )
     }
 
@@ -946,6 +1023,100 @@ impl NetworkLinkHarness for KernelLinkHarness {
     fn name_unrecognized(&self, _name: &str) -> Arc<dyn NetworkLink> {
         unreachable!("the contract runs on Linux only")
     }
+
+    fn ipv4_only(&self) -> Arc<dyn NetworkLink> {
+        self.machine(
+            &default_route("wlp2s0", 600),
+            Some(IPV6_UNREACHABLE),
+            &[ETH0, WLAN0],
+        )
+    }
+
+    fn ipv6_only(&self) -> Arc<dyn NetworkLink> {
+        self.machine(
+            &format!("{ROUTE_HEADER}\n"),
+            Some(&format!(
+                "{}{IPV6_UNREACHABLE}",
+                ipv6_default("eth0", 1024, CARRIES)
+            )),
+            &[ETH0, WLAN0],
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    fn both_on_network(&self, name: &str) -> Arc<dyn NetworkLink> {
+        let device = stand_in::Device::wifi(stand_in::Ssid::Bytes(name.as_bytes().to_vec()));
+        self.on_wifi_with_ipv6(Some(device), |interface| {
+            format!(
+                "{}{IPV6_UNREACHABLE}",
+                ipv6_default(interface, 100, CARRIES)
+            )
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn mixed(&self, name: &str) -> Arc<dyn NetworkLink> {
+        let device = stand_in::Device::wifi(stand_in::Ssid::Bytes(name.as_bytes().to_vec()));
+        self.on_wifi_with_ipv6(Some(device), |_| {
+            format!("{}{IPV6_UNREACHABLE}", ipv6_default("eth0", 100, CARRIES))
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn both_on_network(&self, _name: &str) -> Arc<dyn NetworkLink> {
+        unreachable!("the contract runs on Linux only")
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn mixed(&self, _name: &str) -> Arc<dyn NetworkLink> {
+        unreachable!("the contract runs on Linux only")
+    }
+
+    /// Linux lists an IPv4 `blackhole` route out of no interface (`*`) and
+    /// without `RTF_REJECT`; `unreachable` and `prohibit` alike, with it. A
+    /// route out of `eth9`, which `/sys/class/net` doesn't list, was left
+    /// behind by an interface that is gone.
+    fn carries_nothing(&self, family: Family) -> Vec<Arc<dyn NetworkLink>> {
+        let routes: [(&str, u32, Interface<'static>); 6] = match family {
+            Family::Ipv4 => [
+                ("*", REJECTS, ETH0),
+                ("*", 0x1, ETH0),
+                ("*", REJECTS, ETH0),
+                ("eth0", CARRIES, ETH0_DOWN),
+                ("eth0", CARRIES, ETH0_NO_CARRIER),
+                ("eth9", CARRIES, ETH0),
+            ],
+            Family::Ipv6 => [
+                ("lo", REJECTS, ETH0),
+                ("lo", REJECTS, ETH0),
+                ("lo", REJECTS, ETH0),
+                ("eth0", CARRIES, ETH0_DOWN),
+                ("eth0", CARRIES, ETH0_NO_CARRIER),
+                ("eth9", CARRIES, ETH0),
+            ],
+        };
+        routes
+            .into_iter()
+            .map(|(interface, flags, eth0)| match family {
+                Family::Ipv4 => self.machine(
+                    &format!("{ROUTE_HEADER}\n{}", ipv4_default(interface, 100, flags)),
+                    Some(&format!(
+                        "{}{IPV6_UNREACHABLE}",
+                        ipv6_default("wlp2s0", 600, CARRIES)
+                    )),
+                    &[eth0, WLAN0],
+                ),
+                Family::Ipv6 => self.machine(
+                    &default_route("wlp2s0", 600),
+                    Some(&format!(
+                        "{}{IPV6_UNREACHABLE}",
+                        ipv6_default(interface, 100, flags)
+                    )),
+                    &[eth0, WLAN0],
+                ),
+            })
+            .collect()
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -974,14 +1145,14 @@ async fn the_name_is_the_wi_fi_network_the_default_route_leaves_by() {
     let Some(harness) = KernelLinkHarness::with_network_manager() else {
         testkit::skip!("no dbus-daemon here to run a stand-in NetworkManager on");
     };
-    assert_eq!(harness.wired().network_name().await, Ok(None));
+    assert_eq!(harness.wired().network_name(None).await, Ok(None));
     let mut device = stand_in::Device::wifi(stand_in::Ssid::Bytes(b"Office".to_vec()));
     device.kind = 1;
     for link in [harness.on_wifi(Some(device)), harness.on_wifi(None)] {
-        let answer = link.network_name().await;
+        let answer = link.network_name(None).await;
         assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     }
-    let answer = harness.no_route().network_name().await;
+    let answer = harness.no_route().network_name(None).await;
     assert_matches!(
         answer,
         Err(PlatformError::Unreadable { .. }),
@@ -1002,11 +1173,11 @@ async fn a_machine_off_wi_fi_needs_no_networkmanager_to_have_no_network() {
     let wired = harness
         .kernel_link(&default_route("eth0", 100), None, &[ETH0])
         .with_bus(bus.clone());
-    assert_eq!(wired.network_name().await, Ok(None));
+    assert_eq!(wired.network_name(None).await, Ok(None));
     let wifi = harness
         .kernel_link(&default_route("wlp2s0", 600), None, &[WLAN0])
         .with_bus(bus);
-    let answer = wifi.network_name().await;
+    let answer = wifi.network_name(None).await;
     assert_matches!(answer, Err(PlatformError::Unreadable { .. }));
 }
 
@@ -1025,7 +1196,7 @@ async fn a_name_read_given_up_names_what_stalled() {
         .kernel_link(&default_route("wlp2s0", 600), None, &[WLAN0])
         .with_bus(bus.clone())
         .with_timeout(SHORT)
-        .network_name()
+        .network_name(None)
         .await;
     // Before the asserts: closing the socket ends the call given up, which
     // the runtime waits for when the test ends.
@@ -1049,7 +1220,7 @@ async fn a_name_read_given_up_names_what_stalled() {
         .join("route");
     std::fs::remove_file(&route).expect("the routes written");
     fifo(&route);
-    let answer = link.network_name().await;
+    let answer = link.network_name(None).await;
     release(&route, &answer);
     assert_eq!(
         answer,
@@ -1279,24 +1450,50 @@ async fn the_kernel_with_no_default_route_says_no_route() {
     assert_eq!(link.link().await, Ok(Link::NoRoute));
 }
 
+/// #492: each family's default route of lowest metric is its own, and
+/// metrics are never compared across families. Here, and not only in the
+/// contract, which needs NetworkManager for the names.
 #[tokio::test]
-async fn the_default_route_of_lowest_metric_in_either_family_is_the_link() {
+async fn the_kernel_reads_each_family_s_default_route_apart() {
     let harness = KernelLinkHarness::new();
-    let ipv6_wired = format!(
-        "00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000064 00000001 00000000 00000003     eth0\n{IPV6_UNREACHABLE}"
-    );
-    let link = harness.machine(
-        &default_route("wlp2s0", 600),
-        Some(&ipv6_wired),
-        &[ETH0, WLAN0],
-    );
-    assert_eq!(link.link().await, Ok(Link::Wired));
-    let link = harness.machine(
+    assert_eq!(harness.ipv4_only().link().await, Ok(Link::WiFi));
+    assert_eq!(harness.ipv6_only().link().await, Ok(Link::Wired));
+    let mixed = Ok(Link::Mixed {
+        ipv4: InterfaceKind::WiFi,
+        ipv6: InterfaceKind::Wired,
+    });
+    assert_eq!(harness.mixed_machine().link().await, mixed);
+    let lower_ipv4 = harness.machine(
         &default_route("wlp2s0", 20),
-        Some(&ipv6_wired),
+        Some(&ipv6_default("eth0", 100, CARRIES)),
         &[ETH0, WLAN0],
     );
-    assert_eq!(link.link().await, Ok(Link::WiFi));
+    assert_eq!(lower_ipv4.link().await, mixed);
+}
+
+/// A default route that carries nothing is no family's link, on a machine
+/// without NetworkManager too.
+#[tokio::test]
+async fn the_kernel_passes_over_a_default_route_that_carries_nothing() {
+    let harness = KernelLinkHarness::new();
+    for family in [Family::Ipv4, Family::Ipv6] {
+        for (number, link) in harness.carries_nothing(family).iter().enumerate() {
+            assert_eq!(link.link().await, Ok(Link::WiFi), "{family:?} {number}");
+        }
+    }
+}
+
+/// The name of a mixed link's Wi-Fi family is read; a wired family has
+/// none, and the link has no one interface to name.
+#[tokio::test]
+async fn the_kernel_names_no_network_of_a_mixed_link_s_wired_family() {
+    let harness = KernelLinkHarness::new();
+    let link = harness.mixed_machine();
+    assert_eq!(link.network_name(Some(Family::Ipv6)).await, Ok(None));
+    assert_matches!(
+        link.network_name(None).await,
+        Err(PlatformError::Unreadable { .. })
+    );
 }
 
 #[tokio::test]
@@ -1320,7 +1517,7 @@ async fn a_virtual_ethernet_interface_is_not_wired() {
 #[tokio::test]
 async fn a_wireless_extensions_interface_is_wi_fi() {
     let harness = KernelLinkHarness::new();
-    let old = ("wlan0", false, &[("type", "1")][..], &["wireless"][..]);
+    let old = ("wlan0", false, UP, &["wireless"][..]);
     let link = harness.machine(&default_route("wlan0", 100), None, &[old]);
     assert_eq!(link.link().await, Ok(Link::WiFi));
 }
@@ -1341,21 +1538,61 @@ async fn an_interface_name_that_leaves_the_folder_is_unrecognized() {
     }
 }
 
+/// A default route left behind by an interface that is gone carries
+/// nothing, as one out of a down interface doesn't: it is passed over for
+/// the family's real default route, whatever its metric, and is no route
+/// when it is the only one.
 #[tokio::test]
-async fn a_default_route_out_of_an_interface_not_listed_is_unrecognized() {
+async fn a_default_route_out_of_an_interface_gone_is_passed_over() {
     let harness = KernelLinkHarness::new();
-    let answer = harness
-        .machine(&default_route("eth9", 100), None, &[ETH0])
-        .link()
-        .await;
-    assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
+    let stale_first = format!(
+        "{}{}",
+        default_route("eth9", 50),
+        ipv4_default("wlp2s0", 600, CARRIES)
+    );
+    let link = harness.machine(&stale_first, None, &[ETH0, WLAN0]);
+    assert_eq!(link.link().await, Ok(Link::WiFi));
+    let stale_ipv6 = format!(
+        "{}{}{IPV6_UNREACHABLE}",
+        ipv6_default("eth9", 50, CARRIES),
+        ipv6_default("eth0", 100, CARRIES)
+    );
+    let link = harness.machine(&format!("{ROUTE_HEADER}\n"), Some(&stale_ipv6), &[ETH0]);
+    assert_eq!(link.link().await, Ok(Link::Wired));
+    let only_stale = harness.machine(&default_route("eth9", 100), None, &[ETH0]);
+    assert_eq!(only_stale.link().await, Ok(Link::NoRoute));
 }
 
 /// `route -n get default` on a Mac whose default route leaves by `interface`.
 fn route_output(interface: &str) -> String {
+    route_flagged(interface, "UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL")
+}
+
+/// `route -n get default` on a Mac whose default route leaves by `interface`
+/// with `flags`.
+fn route_flagged(interface: &str, flags: &str) -> String {
     format!(
-        "   route to: default\ndestination: default\n       mask: default\n    gateway: 192.168.1.1\n  interface: {interface}\n      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>\n"
+        "   route to: default\ndestination: default\n       mask: default\n    gateway: 192.168.1.1\n  interface: {interface}\n      flags: <{flags}>\n"
     )
+}
+
+/// A stand-in for `route -n get -inet default` and `-inet6 default`, which
+/// `sh` is given as `$0` and `$1`: what each family's prints, or for `None`
+/// what `route` says of no default route in that family: nothing on stdout,
+/// "not in table" on stderr, and exit 0.
+fn routes(ipv4: Option<&str>, ipv6: Option<&str>) -> [String; 2] {
+    let answer = |output: Option<&str>| match output {
+        Some(text) => format!("cat <<'EOF'\n{text}\nEOF\n"),
+        None => "echo 'route: writing to routing socket: not in table' >&2\n".to_owned(),
+    };
+    [
+        "-c".to_owned(),
+        format!(
+            "case \"$0 $1\" in\n'-inet default')\n{};;\n'-inet6 default')\n{};;\n*) exit 2 ;;\nesac",
+            answer(ipv4),
+            answer(ipv6)
+        ),
+    ]
 }
 
 /// `networksetup -listallhardwareports` as a Mac on Ethernet printed it
@@ -1432,6 +1669,18 @@ impl RouteLinkHarness {
             ("/bin/sh", &printing(profile)[..]),
         ))
     }
+
+    /// A Mac whose IPv4 and IPv6 default routes are `ipv4` and `ipv6`, as
+    /// `route` prints them, `None` for no default in that family, and whose
+    /// Wi-Fi report is `profile`.
+    fn families(ipv4: Option<&str>, ipv6: Option<&str>, profile: &str) -> Arc<dyn NetworkLink> {
+        Arc::new(RouteLink::running(
+            ("/bin/sh", &routes(ipv4, ipv6)[..]),
+            ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &ifconfig()[..]),
+            ("/bin/sh", &printing(profile)[..]),
+        ))
+    }
 }
 
 impl NetworkLinkHarness for RouteLinkHarness {
@@ -1453,7 +1702,7 @@ impl NetworkLinkHarness for RouteLinkHarness {
                 "/bin/sh",
                 &[
                     "-c".to_owned(),
-                    "echo 'route: writing to routing socket: not in table' >&2; exit 1".to_owned(),
+                    "echo 'route: writing to routing socket: not in table' >&2".to_owned(),
                 ][..],
             ),
             ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
@@ -1506,11 +1755,79 @@ impl NetworkLinkHarness for RouteLinkHarness {
     fn name_unrecognized(&self, name: &str) -> Arc<dyn NetworkLink> {
         Self::on_wifi(&profile_on(serde_json::json!([name])))
     }
+
+    fn ipv4_only(&self) -> Arc<dyn NetworkLink> {
+        Self::families(Some(&route_output("en0")), None, &profile(None))
+    }
+
+    fn ipv6_only(&self) -> Arc<dyn NetworkLink> {
+        Self::families(None, Some(&route_output("en10")), &profile(None))
+    }
+
+    fn both_on_network(&self, name: &str) -> Arc<dyn NetworkLink> {
+        let en0 = route_output("en0");
+        Self::families(Some(&en0), Some(&en0), &profile_on(name.into()))
+    }
+
+    fn mixed(&self, name: &str) -> Arc<dyn NetworkLink> {
+        Self::families(
+            Some(&route_output("en0")),
+            Some(&route_output("en10")),
+            &profile_on(name.into()),
+        )
+    }
+
+    /// macOS has no `prohibit` route, and drops the route of a port that
+    /// loses its carrier: a `reject` route, a `blackhole` one, and one whose
+    /// interface is down, without `UP`.
+    fn carries_nothing(&self, family: Family) -> Vec<Arc<dyn NetworkLink>> {
+        let wifi = route_output("en0");
+        [
+            route_flagged("lo0", "UP,DONE,REJECT,STATIC"),
+            route_flagged("lo0", "UP,DONE,BLACKHOLE,STATIC"),
+            route_flagged("en10", "GATEWAY,DONE,STATIC,PRCLONING,GLOBAL"),
+        ]
+        .iter()
+        .map(|nowhere| match family {
+            Family::Ipv4 => Self::families(Some(nowhere), Some(&wifi), &profile(None)),
+            Family::Ipv6 => Self::families(Some(&wifi), Some(nowhere), &profile(None)),
+        })
+        .collect()
+    }
 }
 
 #[tokio::test]
 async fn route_and_networksetup_meet_the_network_link_contract() {
     contract::network_link::run(&RouteLinkHarness).await;
+}
+
+/// `route` prints nothing, says "not in table" and exits 0 for a family
+/// with no default route: that family has none. A `route` that fails, with
+/// any code, 1 too (its code for a destination it can't parse), is no answer.
+#[tokio::test]
+async fn a_family_route_finds_no_default_for_has_none() {
+    let wifi = route_output("en0");
+    let ipv4_only = RouteLinkHarness::families(Some(&wifi), None, &profile(None));
+    assert_eq!(ipv4_only.link().await, Ok(Link::WiFi));
+    let neither = RouteLinkHarness::families(None, None, &profile(None));
+    assert_eq!(neither.link().await, Ok(Link::NoRoute));
+    for code in [1, 2] {
+        let script = format!(
+            "case \"$0\" in -inet6) echo 'route: writing to routing socket: not in table' >&2; \
+             exit {code} ;; esac\ncat <<'EOF'\n{wifi}\nEOF"
+        );
+        let failing = RouteLink::running(
+            ("/bin/sh", &["-c".to_owned(), script][..]),
+            ("/bin/sh", &printing(HARDWARE_PORTS)[..]),
+            ("/bin/sh", &ifconfig()[..]),
+            ("/bin/sh", &printing(&profile(None))[..]),
+        );
+        assert_matches!(
+            failing.link().await,
+            Err(PlatformError::Unreadable { .. }),
+            "exit {code}"
+        );
+    }
 }
 
 /// A port that isn't Wi-Fi is wired only when its medium is Ethernet, whatever
@@ -1545,7 +1862,7 @@ async fn ifconfig_is_asked_only_of_a_port_that_is_not_wi_fi() {
         matches!(answer, Err(PlatformError::Unreadable { .. })),
         "{answer:?}"
     );
-    assert_eq!(without_ifconfig("en10").network_name().await, Ok(None));
+    assert_eq!(without_ifconfig("en10").network_name(None).await, Ok(None));
     assert_eq!(without_ifconfig("en0").link().await, Ok(Link::WiFi));
     assert_eq!(without_ifconfig("utun3").link().await, Ok(Link::Other));
 }
@@ -1570,7 +1887,7 @@ async fn a_name_the_report_leaves_out_or_empties_is_no_answer() {
         profile_on("a name of more than thirty-two bytes".into()),
         no_name,
     ] {
-        let answer = RouteLinkHarness::on_wifi(&report).network_name().await;
+        let answer = RouteLinkHarness::on_wifi(&report).network_name(None).await;
         assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     }
 }
@@ -1586,7 +1903,7 @@ async fn the_name_is_the_wi_fi_port_s_when_the_default_route_leaves_by_it() {
         HARDWARE_PORTS,
         &profile_on("Office".into()),
     );
-    assert_eq!(link.network_name().await, Ok(None));
+    assert_eq!(link.network_name(None).await, Ok(None));
     let two = profile_on("Office".into()).replace("\"awdl0\"", "\"en0\"");
     let none = profile_on("Office".into()).replace("\"en0\"", "\"en1\"");
     for report in [
@@ -1595,7 +1912,7 @@ async fn the_name_is_the_wi_fi_port_s_when_the_default_route_leaves_by_it() {
         "Wi-Fi:\n  Current Network Information:".to_owned(),
         "{\"SPUSBDataType\": []}".to_owned(),
     ] {
-        let answer = RouteLinkHarness::on_wifi(&report).network_name().await;
+        let answer = RouteLinkHarness::on_wifi(&report).network_name(None).await;
         assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
     }
 }
@@ -1620,10 +1937,10 @@ async fn a_wi_fi_report_is_read_up_to_a_mebibyte() {
         )
     };
     assert_eq!(
-        padded(200 * 1024).network_name().await,
+        padded(200 * 1024).network_name(None).await,
         Ok(CurrentNetworkName::new(b"Office"))
     );
-    let answer = padded(1024 * 1024).network_name().await;
+    let answer = padded(1024 * 1024).network_name(None).await;
     assert_matches!(answer, Err(PlatformError::Unrecognized { .. }));
 }
 

@@ -189,11 +189,109 @@ Feature: A repository reached at several locations
       When the plan "home" runs
       Then the operation used the location "public"
 
+  Rule: The link is read for IPv4 and IPv6 apart, and a rule holds on a mixed link only if it holds for both
+
+    # A location may be reached by either IP family, and nothing says which
+    # before it is tried. Each family's default route of lowest metric is read
+    # on its own, and metrics are never compared across families. When the two
+    # leave by different interfaces the link is mixed, and a rule holds only if
+    # it holds for both: doubt means the location isn't tried (decision 80).
+
+    Scenario Outline: A machine with a default route in one family only is on that route's link
+      Given the location "lan" is eligible only on a wired network
+      And the machine's <family> traffic leaves by a wired network
+      And the machine has no <other> default route
+      And the location "lan" answers
+      When the plan "home" runs
+      Then the operation used the location "lan"
+
+      Examples:
+        | family | other |
+        | IPv4   | IPv6  |
+        | IPv6   | IPv4  |
+
+    Scenario: Both families leaving by one interface are one link
+      Given the location "lan" is eligible only on the Wi-Fi network "Office"
+      And the machine's IPv4 and IPv6 traffic leave by one Wi-Fi interface, on the network "Office"
+      And the location "lan" answers
+      When the plan "home" runs
+      Then the operation used the location "lan"
+
+    Scenario Outline: A rule that holds for one family only doesn't hold on a mixed link
+      Given the location "lan" is eligible <rule>
+      And the machine's IPv4 traffic leaves by Wi-Fi
+      And the machine's IPv6 traffic leaves by a wired network
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+      And the operation says the location "lan" was skipped because its rule didn't hold
+      And the location "lan" was never probed
+
+      Examples:
+        | rule                      |
+        | only on a wired network   |
+        | only on any Wi-Fi network |
+
+    Scenario: A rule that each family meets holds on a mixed link
+      Given the location "lan" is eligible on a wired network or on any Wi-Fi network
+      And the machine's IPv4 traffic leaves by Wi-Fi
+      And the machine's IPv6 traffic leaves by a wired network
+      And the location "lan" answers
+      When the plan "home" runs
+      Then the operation used the location "lan"
+
+    Scenario Outline: A rule by Wi-Fi network holds on two Wi-Fi interfaces only if both are on a listed network
+      Given the location "lan" is eligible only on the Wi-Fi network "Office"
+      And the machine's IPv4 traffic leaves by Wi-Fi, on the network "<ipv4>"
+      And the machine's IPv6 traffic leaves by a second Wi-Fi interface, on the network "<ipv6>"
+      And the location "lan" answers
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "<used>"
+
+      Examples:
+        | ipv4   | ipv6   | used   |
+        | Office | Office | lan    |
+        | Office | Guest  | public |
+        | Guest  | Office | public |
+
+    Scenario Outline: A default route that can't carry traffic isn't read as a link
+      Given the location "lan" is eligible only on any Wi-Fi network
+      And the machine's IPv4 traffic leaves by Wi-Fi
+      And the machine's only IPv6 default route <route>
+      And the location "lan" answers
+      When the plan "home" runs
+      Then the operation used the location "lan"
+
+      Examples:
+        | route                                        |
+        | is unreachable                               |
+        | is a blackhole                               |
+        | is prohibited                                |
+        | leaves by a wired interface that is down     |
+        | leaves by a wired interface with no carrier  |
+
+    Scenario: With no default route in either family a rule can't be evaluated
+      Given the location "lan" is eligible only on a wired network
+      And the machine has no default route in either family
+      And the location "public" answers
+      When the plan "home" runs
+      Then the operation used the location "public"
+      And the operation says the location "lan" was skipped because its rule couldn't be evaluated
+
   Rule: A run whose locations' rules all fail to hold is skipped or fails
 
     Scenario: A scheduled run is skipped when every location has a rule and none is known to hold
       Given both locations are eligible only on a wired network
       And the machine is on Wi-Fi
+      When the plan "home" is due
+      Then the run of the plan "home" is skipped because no location's rule holds
+      And no operation is recorded
+
+    Scenario: A scheduled run is skipped on a mixed link where no location's rule holds for both families
+      Given both locations are eligible only on a wired network
+      And the machine's IPv4 traffic leaves by a wired network
+      And the machine's IPv6 traffic leaves by Wi-Fi
       When the plan "home" is due
       Then the run of the plan "home" is skipped because no location's rule holds
       And no operation is recorded
@@ -453,6 +551,19 @@ Feature: A repository reached at several locations
       When the repositories are listed
       Then the repository "nas" carries no note about its locations' rules
 
+    Scenario: A mixed link is noted, naming both links
+      Given the location "lan" is eligible only on a wired network
+      And the machine's IPv4 traffic leaves by Wi-Fi
+      And the machine's IPv6 traffic leaves by a wired network
+      When the repositories are listed
+      Then the repository "nas" notes that this machine's IPv4 traffic leaves by Wi-Fi and its IPv6 traffic by a wired network
+
+    Scenario: A link of one interface is never noted as mixed
+      Given the location "lan" is eligible only on a wired network
+      And the machine's IPv4 and IPv6 traffic leave by one wired interface
+      When the repositories are listed
+      Then the repository "nas" carries no note that the link is mixed
+
     @ui
     Scenario: The Repositories page says when a location may be tried
       Given the location "public" is eligible only on a wired network
@@ -465,6 +576,13 @@ Feature: A repository reached at several locations
       And the machine can't read the Wi-Fi network's name
       When I open the Repositories page
       Then the repository "nas" says this machine can't read the Wi-Fi network's name and the rule doesn't apply
+
+    @ui
+    Scenario: The Repositories page says the link is mixed and how to make one link carry both
+      Given the location "public" is eligible only on a wired network
+      And the machine's IPv4 traffic leaves by Wi-Fi and its IPv6 traffic by a wired network
+      When I open the Repositories page
+      Then the repository "nas" says its rules hold only where they hold for both IPv4 and IPv6, and how to make one link carry both
 
   Rule: What the person sees names a location by its position, never by a secret
 

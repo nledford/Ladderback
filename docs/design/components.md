@@ -323,6 +323,7 @@ This section decides what the daemon does: its HTTP server and API, the schedule
   - `location-every-ruled` when every location has a rule.
   - `location-last-ruled-no-retry` with `plan` for each scheduled plan backing up to it that doesn't retry while its last location has a rule.
   - `location-rule-name-unreadable` with `position` for a rule that names Wi-Fi networks while the last read of the name failed (decision 80, point 10).
+  - `location-rule-mixed-link` with `ipv4` and `ipv6`, the kinds of link (`wired`, `wifi`, `other`) each family's traffic leaves by, while the link the daemon last read is mixed (decision 80): a rule holds only if it holds for both. The first listing with a rule reads the link once in the background, so the note may show from the next listing on.
 
   The page shows each alternative in words under its location ("May be tried on a wired network."), then where the location is skipped, a VPN that carries all traffic included, and the notes as the row's other warnings are shown; a Test that skipped a location for its rule says so.
 

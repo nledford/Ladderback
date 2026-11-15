@@ -5,14 +5,16 @@
 //! scheduler that runs them is #274's; the network wait is bounded here,
 //! whatever the platform does, so it can't hold a run back for good.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::SignedDuration;
 use domain::execution::conditions::{UnmetCondition, location_condition, power_condition};
 use domain::execution::wake::{ClockSample, WAKE_CHECK_EVERY, Wake, WakeDetector};
-use domain::planning::{CurrentNetworkName, Link, LocationRule, RuleVerdict, Schedule};
+use domain::planning::{
+    CurrentNetworkName, Family, InterfaceKind, Link, LocationRule, RuleVerdict, Schedule, WiFiNames,
+};
 use futures::future::{Either, select};
 
 use crate::ports::{Clock, Network, NetworkLink, PlatformError, PowerSupply};
@@ -57,14 +59,34 @@ pub async fn check_power(schedule: &Schedule, power: &dyn PowerSupply) -> PowerC
     }
 }
 
-/// The machine's network link and, when a rule asks for it, its Wi-Fi
-/// network's name, each read at most once: the scheduler makes one for the
-/// plans due together, and a job's choice of location one for its rules, so
-/// the rules see one network.
+/// The machine's network link and, when a rule asks for them, the names of
+/// the Wi-Fi networks its interfaces have joined, each read at most once:
+/// the scheduler makes one for the plans due together, and a job's choice of
+/// location one for its rules, so the rules see one network.
 pub struct LinkReading {
     link: Arc<dyn NetworkLink>,
     read: Option<Option<Link>>,
-    name: Option<Option<CurrentNetworkName>>,
+    names: Option<ReadNames>,
+}
+
+/// The names read: the link's own on a Wi-Fi link of one interface, each
+/// Wi-Fi family's on a mixed one. `None` off Wi-Fi, on no network, or when
+/// the platform couldn't read it.
+#[derive(Clone, Debug, Default)]
+struct ReadNames {
+    link: Option<CurrentNetworkName>,
+    ipv4: Option<CurrentNetworkName>,
+    ipv6: Option<CurrentNetworkName>,
+}
+
+impl ReadNames {
+    fn as_names(&self) -> WiFiNames<'_> {
+        WiFiNames {
+            link: self.link.as_ref(),
+            ipv4: self.ipv4.as_ref(),
+            ipv6: self.ipv6.as_ref(),
+        }
+    }
 }
 
 impl LinkReading {
@@ -73,7 +95,7 @@ impl LinkReading {
         Self {
             link,
             read: None,
-            name: None,
+            names: None,
         }
     }
 
@@ -88,32 +110,51 @@ impl LinkReading {
         read
     }
 
-    /// The Wi-Fi network's name, read the first time it is asked for, and
-    /// only when the link is Wi-Fi: `None` off Wi-Fi, on no network, or when
-    /// the platform couldn't read it.
-    async fn name(&mut self) -> Option<CurrentNetworkName> {
-        if let Some(name) = &self.name {
-            return name.clone();
+    /// The Wi-Fi networks' names, read the first time they are asked for,
+    /// and only of a Wi-Fi interface the link leaves by.
+    async fn names(&mut self) -> ReadNames {
+        if let Some(names) = &self.names {
+            return names.clone();
         }
-        let name = if self.link().await == Some(Link::WiFi) {
-            self.link.network_name().await.ok().flatten()
-        } else {
-            None
+        let names = match self.link().await {
+            Some(Link::WiFi) => ReadNames {
+                link: self.name_of(None).await,
+                ..ReadNames::default()
+            },
+            Some(Link::Mixed { ipv4, ipv6 }) => ReadNames {
+                link: None,
+                ipv4: self.wifi_name(Family::Ipv4, ipv4).await,
+                ipv6: self.wifi_name(Family::Ipv6, ipv6).await,
+            },
+            _ => ReadNames::default(),
         };
-        self.name = Some(name.clone());
-        name
+        self.names = Some(names.clone());
+        names
     }
 
-    /// What `rule` says of the network: the link, and the name only when
+    /// The name of `family`'s interface, of `kind`, when it is Wi-Fi.
+    async fn wifi_name(&self, family: Family, kind: InterfaceKind) -> Option<CurrentNetworkName> {
+        if kind == InterfaceKind::WiFi {
+            self.name_of(Some(family)).await
+        } else {
+            None
+        }
+    }
+
+    async fn name_of(&self, family: Option<Family>) -> Option<CurrentNetworkName> {
+        self.link.network_name(family).await.ok().flatten()
+    }
+
+    /// What `rule` says of the network: the link, and the names only when
     /// the rule lists names.
     pub async fn verdict(&mut self, rule: &LocationRule) -> RuleVerdict {
         let link = self.link().await;
-        let name = if rule.asks_name() {
-            self.name().await
+        let names = if rule.asks_name() {
+            self.names().await
         } else {
-            None
+            ReadNames::default()
         };
-        rule.holds(link, name.as_ref())
+        rule.holds(link, names.as_names())
     }
 }
 
@@ -121,7 +162,7 @@ impl LinkReading {
 /// order (decision 80): the run is skipped only when every location has a
 /// rule and each is known not to hold. The link is read only when every
 /// location has a rule, so a repository with a location that has none never
-/// asks the platform, and the name only when a rule lists names.
+/// asks the platform, and the names only when a rule lists names.
 pub async fn check_location_rules(
     rules: &[Option<LocationRule>],
     reading: &mut LinkReading,
@@ -130,24 +171,27 @@ pub async fn check_location_rules(
         return Ok(());
     }
     let link = reading.link().await;
-    let name = if rules.iter().flatten().any(LocationRule::asks_name) {
-        reading.name().await
+    let names = if rules.iter().flatten().any(LocationRule::asks_name) {
+        reading.names().await
     } else {
-        None
+        ReadNames::default()
     };
-    location_condition(rules, link, name.as_ref())
+    location_condition(rules, link, names.as_names())
 }
 
-/// A network link whose reads of the Wi-Fi network's name are watched
-/// (decision 80, point 10): whether the last read failed, for the
-/// Repositories page's note on a rule with names, and the first failure
-/// since the daemon started, told once to its log. Not being on a network
-/// is no failure: the name is then simply absent.
+/// A network link whose reads are watched (decision 80, point 10): whether
+/// the last read of a name failed, for the Repositories page's note on a
+/// rule with names, and the first failure since the daemon started, told
+/// once to its log; and the link as last read, for the page's note on a
+/// mixed link. Not being on a network is no failure: the name is then
+/// simply absent.
 pub struct NameWatch {
     inner: Arc<dyn NetworkLink>,
     unreadable: AtomicBool,
     told: AtomicBool,
     checked: AtomicBool,
+    link_checked: AtomicBool,
+    last_link: Mutex<Option<Link>>,
     tell: Box<dyn Fn() + Send + Sync>,
 }
 
@@ -159,6 +203,8 @@ impl NameWatch {
             unreadable: AtomicBool::new(false),
             told: AtomicBool::new(false),
             checked: AtomicBool::new(false),
+            link_checked: AtomicBool::new(false),
+            last_link: Mutex::new(None),
             tell: Box::new(tell),
         }
     }
@@ -169,13 +215,40 @@ impl NameWatch {
         !self.unreadable.load(Ordering::Relaxed)
     }
 
-    /// Reads the name once per start, the first time a rule with names is
-    /// seen, so the page can note a rule this machine can't evaluate before
-    /// any run has tried it. Later calls do nothing.
-    pub async fn check_once(&self) {
-        if !self.checked.swap(true, Ordering::Relaxed) {
-            // What the read found is kept by the watch itself.
-            drop(self.network_name().await);
+    /// The link as last read, `None` before any read or when the last one
+    /// failed: for the Repositories page's note on a mixed link.
+    pub fn last_link(&self) -> Option<Link> {
+        *self
+            .last_link
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Reads the link once per start, the first time a rule is seen, and
+    /// the names once, the first time a rule with names is (`names`), so the
+    /// page can note a mixed link, or a rule this machine can't evaluate,
+    /// before any run has tried it. Later calls do nothing. On a mixed link
+    /// the name of each Wi-Fi family's interface is read, as a run reads it.
+    pub async fn check_once(&self, names: bool) {
+        let link_first = !self.link_checked.swap(true, Ordering::Relaxed);
+        let names_first = names && !self.checked.swap(true, Ordering::Relaxed);
+        if !link_first && !names_first {
+            return;
+        }
+        // What the reads found is kept by the watch itself.
+        let link = self.link().await.ok();
+        if !names_first {
+            return;
+        }
+        match link {
+            Some(Link::Mixed { ipv4, ipv6 }) => {
+                for (family, kind) in [(Family::Ipv4, ipv4), (Family::Ipv6, ipv6)] {
+                    if kind == InterfaceKind::WiFi {
+                        drop(self.network_name(Some(family)).await);
+                    }
+                }
+            }
+            _ => drop(self.network_name(None).await),
         }
     }
 }
@@ -183,11 +256,19 @@ impl NameWatch {
 #[async_trait]
 impl NetworkLink for NameWatch {
     async fn link(&self) -> Result<Link, PlatformError> {
-        self.inner.link().await
+        let answer = self.inner.link().await;
+        *self
+            .last_link
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = answer.as_ref().ok().copied();
+        answer
     }
 
-    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
-        let answer = self.inner.network_name().await;
+    async fn network_name(
+        &self,
+        family: Option<Family>,
+    ) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        let answer = self.inner.network_name(family).await;
         let failed = answer.is_err();
         self.unreadable.store(failed, Ordering::Relaxed);
         if failed && !self.told.swap(true, Ordering::Relaxed) {
@@ -283,7 +364,7 @@ mod tests {
     use domain::Timestamp;
     use futures::FutureExt;
 
-    use domain::planning::NetworkKind;
+    use domain::planning::{InterfaceKind, NetworkKind};
 
     use super::*;
     use crate::fakes::{FakeClock, FakeNetworkLink};
@@ -394,17 +475,17 @@ mod tests {
         };
         link.set_name(Err(hidden()));
         for _ in 0..2 {
-            assert_eq!(watch.network_name().now_or_never(), Some(Err(hidden())));
+            assert_eq!(watch.network_name(None).now_or_never(), Some(Err(hidden())));
             assert!(!watch.reads_names());
             // Told at the first failure, and only then.
             assert_eq!(told.load(Ordering::Relaxed), 1);
         }
         link.set_name(Ok(None));
-        assert_eq!(watch.network_name().now_or_never(), Some(Ok(None)));
+        assert_eq!(watch.network_name(None).now_or_never(), Some(Ok(None)));
         assert!(watch.reads_names());
         // Once since the daemon started: a later failure is noted, not told.
         link.set_name(Err(hidden()));
-        assert_eq!(watch.network_name().now_or_never(), Some(Err(hidden())));
+        assert_eq!(watch.network_name(None).now_or_never(), Some(Err(hidden())));
         assert!(!watch.reads_names());
         assert_eq!(told.load(Ordering::Relaxed), 1);
     }
@@ -414,8 +495,113 @@ mod tests {
         let link = on("Office");
         let watch = NameWatch::new(link.clone(), || {});
         for _ in 0..3 {
-            assert_eq!(watch.check_once().now_or_never(), Some(()));
+            assert_eq!(watch.check_once(true).now_or_never(), Some(()));
         }
+        assert_eq!(link.names_asked(), 1);
+    }
+
+    #[test]
+    fn the_watch_keeps_the_last_link_read_and_the_first_check_reads_it() {
+        let link = Arc::new(FakeNetworkLink::new());
+        let watch = NameWatch::new(link.clone(), || {});
+        assert_eq!(watch.last_link(), None, "nothing read yet");
+        let mixed = Link::Mixed {
+            ipv4: InterfaceKind::WiFi,
+            ipv6: InterfaceKind::Wired,
+        };
+        link.set(Ok(mixed));
+        assert_eq!(watch.check_once(false).now_or_never(), Some(()));
+        assert_eq!(watch.last_link(), Some(mixed));
+        assert_eq!(link.names_asked(), 0, "no rule lists names");
+        link.set(Ok(Link::WiFi));
+        assert_eq!(watch.link().now_or_never(), Some(Ok(Link::WiFi)));
+        assert_eq!(watch.last_link(), Some(Link::WiFi));
+        link.set(Err(PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "gone".to_owned(),
+        }));
+        assert!(matches!(watch.link().now_or_never(), Some(Err(_))));
+        assert_eq!(watch.last_link(), None, "a link not read is no link");
+    }
+
+    fn mixed_wifi(ipv6: InterfaceKind) -> Arc<FakeNetworkLink> {
+        let link = Arc::new(FakeNetworkLink::new());
+        link.set(Ok(Link::Mixed {
+            ipv4: InterfaceKind::WiFi,
+            ipv6,
+        }));
+        link.set_name(Err(PlatformError::Unreadable {
+            from: "fake".to_owned(),
+            detail: "not this interface's".to_owned(),
+        }));
+        link
+    }
+
+    fn named(name: &str) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        Ok(CurrentNetworkName::new(name.as_bytes()))
+    }
+
+    #[test]
+    fn on_a_mixed_link_the_name_of_each_wi_fi_family_is_read() {
+        let link = mixed_wifi(InterfaceKind::WiFi);
+        link.set_name_of(Some(Family::Ipv4), named("Office"));
+        link.set_name_of(Some(Family::Ipv6), named("Office"));
+        let mut reading = LinkReading::new(link.clone());
+        let verdict = reading.verdict(&only_office().unwrap()).now_or_never();
+        assert_eq!(verdict, Some(RuleVerdict::Holds));
+        link.set_name_of(Some(Family::Ipv6), named("Guest"));
+        let mut reading = LinkReading::new(link.clone());
+        let checked = check_location_rules(&[only_office()], &mut reading).now_or_never();
+        assert_eq!(checked, Some(Err(UnmetCondition::NoLocationRuleHolds)));
+    }
+
+    #[test]
+    fn on_a_mixed_link_only_a_wi_fi_family_s_name_is_read() {
+        let link = mixed_wifi(InterfaceKind::Wired);
+        link.set_name_of(Some(Family::Ipv4), named("Office"));
+        let mut reading = LinkReading::new(link.clone());
+        let verdict = reading.verdict(&only_office().unwrap()).now_or_never();
+        assert_eq!(verdict, Some(RuleVerdict::NotMet));
+        // Read once for the reading, and only of the Wi-Fi family.
+        let either = LocationRule::new(vec![
+            NetworkKind::Wired.into(),
+            only_office().unwrap().alternatives()[0].clone(),
+        ])
+        .unwrap();
+        assert_eq!(
+            reading.verdict(&either).now_or_never(),
+            Some(RuleVerdict::Holds)
+        );
+        assert_eq!(link.names_asked(), 1);
+    }
+
+    #[test]
+    fn a_rule_with_names_seen_after_one_without_still_has_its_name_read() {
+        let link = on("Office");
+        let watch = NameWatch::new(link.clone(), || {});
+        assert_eq!(watch.check_once(false).now_or_never(), Some(()));
+        assert_eq!((link.asked(), link.names_asked()), (1, 0));
+        assert_eq!(watch.check_once(true).now_or_never(), Some(()));
+        assert_eq!(link.names_asked(), 1);
+        for names in [false, true] {
+            assert_eq!(watch.check_once(names).now_or_never(), Some(()));
+        }
+        assert_eq!(
+            (link.asked(), link.names_asked()),
+            (2, 1),
+            "later checks read nothing"
+        );
+    }
+
+    #[test]
+    fn the_first_check_on_a_mixed_link_reads_only_the_wi_fi_family_s_name() {
+        let link = mixed_wifi(InterfaceKind::Wired);
+        link.set_name_of(Some(Family::Ipv4), named("Office"));
+        let watch = NameWatch::new(link.clone(), || {});
+        assert_eq!(watch.check_once(true).now_or_never(), Some(()));
+        // Every other name fails to read: had one been asked, the watch would
+        // note the name as unreadable.
+        assert!(watch.reads_names());
         assert_eq!(link.names_asked(), 1);
     }
 

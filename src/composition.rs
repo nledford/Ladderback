@@ -48,8 +48,8 @@ use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Target, Trigger, WarningKind};
 use domain::planning::{
-    Location, LocationRule, Maintenance, NameFilter, NotRecorded, Plan, RepositoryConfig,
-    RepositoryField, RepositorySettings, RuleNote,
+    InterfaceKind, Link, Location, LocationRule, Maintenance, MixedLinkNote, NameFilter,
+    NotRecorded, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
@@ -2431,21 +2431,23 @@ impl Catalog for ConfigCatalog {
     async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
         let config = self.config.load().await.map_err(catalog_refusal)?;
         let offered = self.offers(&config).await;
-        // A rule that names networks is noted when the name can't be read:
-        // the first listing that has one reads it once, in the background,
-        // as the read may take seconds.
-        let names_asked = config.repositories().values().any(|repository| {
-            repository
-                .location_rules()
-                .into_iter()
-                .flatten()
-                .any(LocationRule::asks_name)
-        });
-        if names_asked {
+        // A rule is noted on a mixed link, and a rule that names networks
+        // when the name can't be read: the first listing that has a rule
+        // reads the link, and the name when one is named, once, in the
+        // background, as the reads may take seconds.
+        let rules = || {
+            config
+                .repositories()
+                .values()
+                .flat_map(|repository| repository.location_rules().into_iter().flatten())
+        };
+        if rules().next().is_some() {
+            let names_asked = rules().any(LocationRule::asks_name);
             let link = Arc::clone(&self.link);
-            tokio::spawn(async move { link.check_once().await });
+            tokio::spawn(async move { link.check_once(names_asked).await });
         }
         let reads_names = self.link.reads_names();
+        let last_link = self.link.last_link();
         Ok(api::RepositoriesDto {
             repositories: config
                 .repositories()
@@ -2456,13 +2458,15 @@ impl Catalog for ConfigCatalog {
                         .iter()
                         .filter(|plan| &plan.repository == alias)
                         .collect();
-                    listed_repository(
+                    let mut row = listed_repository(
                         alias,
                         repository,
                         &plans,
                         reads_names,
                         offered.contains(alias),
-                    )
+                    );
+                    row.warnings.extend(mixed_link_note(repository, last_link));
+                    row
                 })
                 .collect(),
         })
@@ -3202,6 +3206,30 @@ fn config_unusable<R>(
             unavailable(ErrorCode::ConfigInvalid, args, detail)
         }
     }
+}
+
+/// The Repositories page's note on `repository` while `link`, the link the
+/// daemon last read, is mixed and the entry has a rule (decision 80): the
+/// kind of link each family's traffic leaves by, never an interface's name.
+fn mixed_link_note(repository: &RepositoryConfig, link: Option<Link>) -> Option<api::WarningDto> {
+    let kind = |kind| {
+        text(match kind {
+            InterfaceKind::Wired => "wired",
+            InterfaceKind::WiFi => "wifi",
+            InterfaceKind::Other => "other",
+        })
+    };
+    repository
+        .link_note(link)
+        .map(|MixedLinkNote { ipv4, ipv6 }| api::WarningDto {
+            code: api::WarningCode::LocationRuleMixedLink,
+            args: [
+                ("ipv4".to_owned(), kind(ipv4)),
+                ("ipv6".to_owned(), kind(ipv6)),
+                ("locations".to_owned(), text(repository.locations_code())),
+            ]
+            .into(),
+        })
 }
 
 /// A configured entry as the repositories list shows it: its row, with the
@@ -4180,6 +4208,46 @@ mod tests {
         assert_eq!(row.locations, Vec::new());
         let wire = serde_json::to_value(&row).expect("a row is JSON");
         assert_eq!(wire.get("locations"), None, "{wire}");
+    }
+
+    /// The note names each family's kind of link, by its code, and says of
+    /// a repository of one location that it is one; an entry with no rule,
+    /// a link of one interface and a link not read are not noted.
+    #[test]
+    fn a_mixed_link_is_noted_by_the_kind_of_each_family_s_link() {
+        use domain::planning::NetworkKind;
+        let mixed = Some(Link::Mixed {
+            ipv4: InterfaceKind::WiFi,
+            ipv6: InterfaceKind::Other,
+        });
+        let mut entry = two_locations();
+        assert_eq!(mixed_link_note(&entry, mixed), None, "no rule");
+        entry.locations.further[0].when =
+            Some(LocationRule::new(vec![NetworkKind::Wired.into()]).expect("a rule"));
+        let args = |locations: &str| -> std::collections::BTreeMap<String, MsgArg> {
+            [
+                ("ipv4".to_owned(), MsgArg::Text("wifi".to_owned())),
+                ("ipv6".to_owned(), MsgArg::Text("other".to_owned())),
+                ("locations".to_owned(), MsgArg::Text(locations.to_owned())),
+            ]
+            .into()
+        };
+        assert_eq!(
+            mixed_link_note(&entry, mixed),
+            Some(api::WarningDto {
+                code: WarningCode::LocationRuleMixedLink,
+                args: args("several"),
+            })
+        );
+        for link in [Some(Link::WiFi), Some(Link::NoRoute), None] {
+            assert_eq!(mixed_link_note(&entry, link), None, "{link:?}");
+        }
+        entry.locations.first_when = entry.locations.further[0].when.clone();
+        entry.locations.further.clear();
+        assert_eq!(
+            mixed_link_note(&entry, mixed).map(|note| note.args),
+            Some(args("one"))
+        );
     }
 
     /// The page lists no locations for a repository of one, so neither its

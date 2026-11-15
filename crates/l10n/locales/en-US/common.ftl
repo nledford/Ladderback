@@ -649,6 +649,32 @@ warning-location-rule-name-unreadable = { $locations ->
    *[several] Ladderback can't read the name of the Wi-Fi network this machine is on, so the rule of location { $position }, which names Wi-Fi networks, doesn't apply here and the location is skipped. A rule of { "wired" } or { "wifi" } alone needs no name.
   }
 
+# This machine's IPv4 traffic and its IPv6 traffic leave by different network links, and a location of the repository has a rule about the network: a rule holds only if it holds for both links.
+# $ipv4 (text): the kind of link IPv4 traffic leaves by: wired, wifi, or other for a tunnel, a bridge or a phone's tethering.
+# $ipv6 (text): the kind of link IPv6 traffic leaves by, as $ipv4.
+# $locations (text): one for a repository of one location, which the page lists without locations, so the text speaks of the repository's rule; several otherwise.
+# `ipv6.route-metric` is a setting of NetworkManager, typed as it is: keep it a string literal.
+warning-location-rule-mixed-link = { $locations ->
+    [one] This machine's traffic leaves by two links, IPv4 by { $ipv4 ->
+        [wired] a wired network
+        [wifi] Wi-Fi
+       *[other] another link
+    } and IPv6 by { $ipv6 ->
+        [wired] a wired network
+        [wifi] Wi-Fi
+       *[other] another link
+    }, so the rule of this repository holds here only if it holds for both. To have one link carry both, give it the lower route metric for IPv6 too, as { "ipv6.route-metric" } does in NetworkManager, or put it first in the service order of the Mac's network settings.
+   *[several] This machine's traffic leaves by two links, IPv4 by { $ipv4 ->
+        [wired] a wired network
+        [wifi] Wi-Fi
+       *[other] another link
+    } and IPv6 by { $ipv6 ->
+        [wired] a wired network
+        [wifi] Wi-Fi
+       *[other] another link
+    }, so a location's rule holds here only if it holds for both. To have one link carry both, give it the lower route metric for IPv6 too, as { "ipv6.route-metric" } does in NetworkManager, or put it first in the service order of the Mac's network settings.
+  }
+
 # An export wrote the repository's first location only, because a rustic profile has no fallback.
 # $count (count): how many further locations it left out.
 warning-profile-locations-not-exported = { $count ->

@@ -1,26 +1,33 @@
 //! The machine's network link (technical design §5, decision 80): the kind
-//! of interface its default route leaves by, which a location's rule is
-//! evaluated against. The kernel's routing tables and `/sys/class/net` on
-//! Linux; `route -n get default`, `networksetup -listallhardwareports` and
-//! `ifconfig <interface>` on macOS. The name of the Wi-Fi network that
-//! interface has joined, asked only when a rule lists names: NetworkManager
-//! over D-Bus on Linux, and `system_profiler -json SPAirPortDataType` on
-//! macOS. No error repeats a name: it says where the machine is.
+//! of interface each IP family's default route leaves by, which a
+//! location's rule is evaluated against. The kernel's routing tables and
+//! `/sys/class/net` on Linux; `route -n get -inet default` and `-inet6
+//! default`, `networksetup -listallhardwareports` and `ifconfig
+//! <interface>` on macOS. The name of the Wi-Fi network an interface has
+//! joined, asked only when a rule lists names: NetworkManager over D-Bus on
+//! Linux, and `system_profiler -json SPAirPortDataType` on macOS. No error
+//! repeats a name: it says where the machine is.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use app::ports::{NetworkLink, PlatformError};
 use async_trait::async_trait;
-use domain::planning::{CurrentNetworkName, Link};
+use domain::planning::{
+    CurrentNetworkName, DefaultRoute, DefaultRoutes, Family, InterfaceKind, Link, RouteState,
+};
 
+use crate::network;
 use crate::source::{self, Program, attribute, unrecognized};
 
 /// `RTF_UP` and `RTF_REJECT` of Linux's `route.h` and `ipv6_route.h`.
 const RTF_UP: u32 = 0x1;
 const RTF_REJECT: u32 = 0x200;
+
+/// What `/proc/net/route` names as the interface of a route out of none.
+const NO_INTERFACE: &str = "*";
 
 /// `ARPHRD_ETHER` of Linux's `if_arp.h`.
 const ARPHRD_ETHER: &str = "1";
@@ -107,16 +114,22 @@ impl KernelLink {
 impl NetworkLink for KernelLink {
     async fn link(&self) -> Result<Link, PlatformError> {
         let reader = self.clone();
-        source::blocking(self.route.display(), self.timeout, move || reader.read()).await
+        source::blocking(self.route.display(), self.timeout, move || {
+            reader.routes().map(|routes| routes.link())
+        })
+        .await
     }
 
     /// The kernel's tables, then NetworkManager, under one bound; a read
     /// given up names the one it was waiting on.
-    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
+    async fn network_name(
+        &self,
+        family: Option<Family>,
+    ) -> Result<Option<CurrentNetworkName>, PlatformError> {
         let given_up_at = tokio::time::Instant::now() + self.timeout;
         let reader = self.clone();
         let wifi = source::blocking(self.route.display(), self.timeout, move || {
-            reader.wifi_interface()
+            reader.wifi_interface(family)
         });
         let Some(interface) = wifi.await? else {
             return Ok(None);
@@ -130,75 +143,112 @@ impl NetworkLink for KernelLink {
     }
 }
 
+/// A default route as a routing table lists it, before its interface is
+/// looked at.
+struct Listed {
+    metric: u32,
+    interface: String,
+    /// An `unreachable`, `blackhole` or `prohibit` route.
+    leads_nowhere: bool,
+}
+
 impl KernelLink {
-    /// The kind of the interface the default route of lowest metric leaves
-    /// by, of either family; [`Link::NoRoute`] when there is none.
-    fn read(&self) -> Result<Link, PlatformError> {
-        match self.default_interface()? {
-            Some(interface) => self.kind(&interface),
-            None => Ok(Link::NoRoute),
-        }
-    }
-
-    /// The default route's interface when it is a Wi-Fi one, whose network's
-    /// name NetworkManager is asked for; `None` when it isn't Wi-Fi. The
-    /// kernel says what the interface is, and NetworkManager is asked only
-    /// for a Wi-Fi one, so a wired machine without NetworkManager has no
-    /// network, as on macOS. No default route is an error, not "no network":
-    /// the link was read as Wi-Fi a moment ago, and a rule's `except` must
-    /// not hold on a route that has just gone.
-    fn wifi_interface(&self) -> Result<Option<String>, PlatformError> {
-        let Some(interface) = self.default_interface()? else {
-            return Err(PlatformError::Unreadable {
-                from: self.route.display().to_string(),
-                detail: "no default route".to_owned(),
-            });
-        };
-        if self.kind(&interface)? != Link::WiFi {
-            return Ok(None);
-        }
-        Ok(Some(interface))
-    }
-
-    /// The interface the default route of lowest metric leaves by, of either
-    /// family; `None` when there is none.
-    fn default_interface(&self) -> Result<Option<String>, PlatformError> {
+    /// Each family's default route of lowest metric that carries traffic,
+    /// from both tables.
+    fn routes(&self) -> Result<DefaultRoutes, PlatformError> {
         let Some(ipv4) = source::table(&self.route)? else {
             return Err(PlatformError::Unreadable {
                 from: self.route.display().to_string(),
                 detail: "no such file".to_owned(),
             });
         };
-        let mut best = ipv4_default(&self.route, &ipv4)?;
+        let mut listed: Vec<(Family, Listed)> = ipv4_defaults(&self.route, &ipv4)?
+            .into_iter()
+            .map(|route| (Family::Ipv4, route))
+            .collect();
         // A machine with IPv6 switched off has no table for it.
-        if let Some(ipv6) = source::table(&self.ipv6_route)?
-            && let Some(route) = ipv6_default(&self.ipv6_route, &ipv6)?
-            && best.as_ref().is_none_or(|(metric, _)| route.0 < *metric)
-        {
-            best = Some(route);
+        if let Some(ipv6) = source::table(&self.ipv6_route)? {
+            listed.extend(
+                ipv6_defaults(&self.ipv6_route, &ipv6)?
+                    .into_iter()
+                    .map(|route| (Family::Ipv6, route)),
+            );
         }
-        Ok(best.map(|(_, interface)| interface))
+        let routes = listed
+            .into_iter()
+            .map(|(family, route)| self.default_route(family, route))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(DefaultRoutes::choose(routes))
     }
 
-    /// The kind of the interface named `name`.
-    fn kind(&self, name: &str) -> Result<Link, PlatformError> {
+    /// Whether `route` carries traffic: it leads somewhere, out of an
+    /// interface that is up and has a carrier (decision 63's rule). A route
+    /// left behind by an interface that is gone, which `/sys/class/net`
+    /// no longer lists, carries nothing either, like one out of a down one.
+    fn default_route(&self, family: Family, route: Listed) -> Result<DefaultRoute, PlatformError> {
+        let state = if route.leads_nowhere {
+            RouteState::LeadsNowhere
+        } else {
+            match self.kind(&route.interface)? {
+                Some(kind)
+                    if network::interface_online(&self.interfaces.join(&route.interface))? =>
+                {
+                    RouteState::Carries(kind)
+                }
+                Some(_) | None => RouteState::InterfaceDown,
+            }
+        };
+        Ok(DefaultRoute {
+            family,
+            metric: route.metric,
+            interface: route.interface,
+            state,
+        })
+    }
+
+    /// The interface `family`'s default route leaves by, or for `None` the
+    /// link's one interface, when it is a Wi-Fi one, whose network's name
+    /// NetworkManager is asked for; `None` when it isn't Wi-Fi. The kernel
+    /// says what the interface is, and NetworkManager is asked only for a
+    /// Wi-Fi one, so a wired machine without NetworkManager has no network,
+    /// as on macOS. No such route is an error, not "no network": the link
+    /// was read a moment ago, and a rule's `except` must not hold on a
+    /// route that has just gone.
+    fn wifi_interface(&self, family: Option<Family>) -> Result<Option<String>, PlatformError> {
+        let routes = self.routes()?;
+        let Some(outgoing) = routes.interface(family) else {
+            return Err(PlatformError::Unreadable {
+                from: self.route.display().to_string(),
+                detail: no_interface_to_name(family, routes.link()).to_owned(),
+            });
+        };
+        Ok((outgoing.kind == InterfaceKind::WiFi).then(|| outgoing.interface.clone()))
+    }
+
+    /// The kind of the interface named `name`; `None` when there is no such
+    /// interface.
+    fn kind(&self, name: &str) -> Result<Option<InterfaceKind>, PlatformError> {
         let entry = self.interfaces.join(name);
-        let Ok(found) = std::fs::symlink_metadata(&entry) else {
-            return Err(unrecognized(
-                &self.interfaces,
-                &format!("no interface {name}"),
-            ));
+        let found = match std::fs::symlink_metadata(&entry) {
+            Ok(found) => found,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(PlatformError::Unreadable {
+                    from: entry.display().to_string(),
+                    detail: error.to_string(),
+                });
+            }
         };
         // cfg80211 links `phy80211` for every wireless interface; the older
         // wireless extensions make a `wireless` folder.
         if entry.join("phy80211").exists() || entry.join("wireless").exists() {
-            return Ok(Link::WiFi);
+            return Ok(Some(InterfaceKind::WiFi));
         }
         let Some(kind) = attribute(&entry, "type")? else {
             return Err(unrecognized(&entry, "no type"));
         };
         if kind != ARPHRD_ETHER {
-            return Ok(Link::Other);
+            return Ok(Some(InterfaceKind::Other));
         }
         // A bridge, a veth pair or a bond is linked from under
         // `devices/virtual/`; a port of the machine's from under its bus.
@@ -210,11 +260,11 @@ impl KernelLink {
                 })?
                 .to_string_lossy()
                 .contains("devices/virtual/");
-        Ok(if virtual_interface {
-            Link::Other
+        Ok(Some(if virtual_interface {
+            InterfaceKind::Other
         } else {
-            Link::Wired
-        })
+            InterfaceKind::Wired
+        }))
     }
 }
 
@@ -232,10 +282,11 @@ fn interface_name(from: &Path, name: &str) -> Result<String, PlatformError> {
     Ok(name.to_owned())
 }
 
-/// The IPv4 default route of lowest metric that is up, from
-/// `/proc/net/route`: its metric and interface.
-fn ipv4_default(from: &Path, table: &str) -> Result<Option<(u32, String)>, PlatformError> {
-    let mut best: Option<(u32, String)> = None;
+/// The IPv4 default routes that are up, from `/proc/net/route`. The kernel
+/// lists an `unreachable` or `prohibit` route with `RTF_REJECT`, and a
+/// `blackhole` one without it, all out of no interface (`*`).
+fn ipv4_defaults(from: &Path, table: &str) -> Result<Vec<Listed>, PlatformError> {
+    let mut listed = Vec::new();
     // The first line names the columns.
     for line in table.lines().skip(1).filter(|line| !line.trim().is_empty()) {
         let fields: Vec<&str> = line.split('\t').map(str::trim).collect();
@@ -261,18 +312,20 @@ fn ipv4_default(from: &Path, table: &str) -> Result<Option<(u32, String)>, Platf
         if flags & RTF_UP == 0 {
             continue;
         }
-        let interface = interface_name(from, interface)?;
-        if best.as_ref().is_none_or(|(lowest, _)| metric < *lowest) {
-            best = Some((metric, interface));
-        }
+        listed.push(Listed {
+            metric,
+            leads_nowhere: flags & RTF_REJECT != 0 || *interface == NO_INTERFACE,
+            interface: interface_name(from, interface)?,
+        });
     }
-    Ok(best)
+    Ok(listed)
 }
 
-/// The IPv6 default route of lowest metric that is up and reaches
-/// somewhere, from `/proc/net/ipv6_route`: its metric and interface.
-fn ipv6_default(from: &Path, table: &str) -> Result<Option<(u32, String)>, PlatformError> {
-    let mut best: Option<(u32, String)> = None;
+/// The IPv6 default routes that are up, from `/proc/net/ipv6_route`. The
+/// kernel lists an `unreachable`, `blackhole` or `prohibit` route with
+/// `RTF_REJECT`, out of `lo`.
+fn ipv6_defaults(from: &Path, table: &str) -> Result<Vec<Listed>, PlatformError> {
+    let mut listed = Vec::new();
     for line in table.lines().filter(|line| !line.trim().is_empty()) {
         let fields: Vec<&str> = line.split_whitespace().collect();
         let [
@@ -295,20 +348,21 @@ fn ipv6_default(from: &Path, table: &str) -> Result<Option<(u32, String)>, Platf
         }
         let flags = u32::from_str_radix(flags, 16).map_err(|_| unrecognized(from, line))?;
         let metric = u32::from_str_radix(metric, 16).map_err(|_| unrecognized(from, line))?;
-        if flags & RTF_UP == 0 || flags & RTF_REJECT != 0 {
+        if flags & RTF_UP == 0 {
             continue;
         }
-        let interface = interface_name(from, interface)?;
-        if best.as_ref().is_none_or(|(lowest, _)| metric < *lowest) {
-            best = Some((metric, interface));
-        }
+        listed.push(Listed {
+            metric,
+            leads_nowhere: flags & RTF_REJECT != 0,
+            interface: interface_name(from, interface)?,
+        });
     }
-    Ok(best)
+    Ok(listed)
 }
 
-/// Asks `route -n get default`, `networksetup -listallhardwareports`,
-/// `ifconfig <interface>` and `system_profiler -json SPAirPortDataType` on
-/// macOS, or programs that answer as they do.
+/// Asks `route -n get -inet default` and `-inet6 default`, `networksetup
+/// -listallhardwareports`, `ifconfig <interface>` and `system_profiler -json
+/// SPAirPortDataType` on macOS, or programs that answer as they do.
 #[derive(Clone, Debug)]
 pub struct RouteLink {
     route: Program,
@@ -317,10 +371,16 @@ pub struct RouteLink {
     profile: Program,
 }
 
+/// `route`'s flag for a route of no use: `reject` and `blackhole` routes.
+const ROUTE_REJECT: &str = "REJECT";
+const ROUTE_BLACKHOLE: &str = "BLACKHOLE";
+/// `route`'s flag for a route that is up.
+const ROUTE_UP: &str = "UP";
+
 impl RouteLink {
     pub fn system() -> Self {
         Self::running(
-            ("/sbin/route", ["-n", "get", "default"].as_slice()),
+            ("/sbin/route", ["-n", "get"].as_slice()),
             (
                 "/usr/sbin/networksetup",
                 ["-listallhardwareports"].as_slice(),
@@ -333,12 +393,13 @@ impl RouteLink {
         )
     }
 
-    /// Runs `route`, then `ports` for the link and `media`, with the
-    /// interface after its arguments, for a port that isn't Wi-Fi, or
-    /// `profile` for the network's name, each a program and its arguments,
-    /// with no environment, and reads what they print as `route -n get
-    /// default`, `networksetup -listallhardwareports`, `ifconfig <interface>`
-    /// and `system_profiler -json SPAirPortDataType` print it. `profile` has
+    /// Runs `route` with `-inet default`, then `-inet6 default`, after its
+    /// arguments, then `ports` for the link and `media`, with the interface
+    /// after its arguments, for a port that isn't Wi-Fi, or `profile` for
+    /// the network's name, each a program and its arguments, with no
+    /// environment, and reads what they print as `route -n get`,
+    /// `networksetup -listallhardwareports`, `ifconfig <interface>` and
+    /// `system_profiler -json SPAirPortDataType` print it. `profile` has
     /// 15 s and 1 MiB.
     pub fn running<A: Into<OsString> + Clone>(
         route: (impl Into<PathBuf>, &[A]),
@@ -355,49 +416,149 @@ impl RouteLink {
         }
     }
 
-    /// The interface the default route leaves by.
-    async fn interface(&self) -> Result<String, PlatformError> {
-        let route = self.route.output().await?;
-        route
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("interface:"))
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .ok_or_else(|| unrecognized(self.route.path.as_path(), "no interface"))
+    /// Each family's default route, the one `route` says the family's
+    /// traffic leaves by. `media` is asked whether a port that isn't Wi-Fi
+    /// is wired only when `wired_or_other`; without it such a port is other,
+    /// which is all the network's name needs.
+    async fn routes(&self, wired_or_other: bool) -> Result<DefaultRoutes, PlatformError> {
+        let mut listed = Vec::with_capacity(2);
+        for family in [Family::Ipv4, Family::Ipv6] {
+            if let Some(route) = self.listed(family).await? {
+                listed.push(route);
+            }
+        }
+        let ports = if listed.iter().any(|(_, _, state)| state.is_none()) {
+            self.ports.output().await?
+        } else {
+            String::new()
+        };
+        // Both families often leave by one interface: its kind is read once.
+        let mut kinds: Vec<(String, InterfaceKind)> = Vec::with_capacity(2);
+        let mut routes = Vec::with_capacity(listed.len());
+        for (family, interface, state) in listed {
+            let state = match state {
+                Some(state) => state,
+                None => match kinds.iter().find(|(name, _)| *name == interface) {
+                    Some((_, kind)) => RouteState::Carries(*kind),
+                    None => {
+                        let kind = self.kind(&ports, &interface, wired_or_other).await?;
+                        kinds.push((interface.clone(), kind));
+                        RouteState::Carries(kind)
+                    }
+                },
+            };
+            routes.push(DefaultRoute {
+                family,
+                // `route` gives the one route a family's traffic takes.
+                metric: 0,
+                interface,
+                state,
+            });
+        }
+        Ok(DefaultRoutes::choose(routes))
+    }
+
+    /// `family`'s default route as `route` prints it: its interface, and
+    /// `Some` state when it carries nothing, `None` when it leaves by an
+    /// interface that is up, whose kind is still to be read. `None` when
+    /// the family has no default route, which `route` says by printing
+    /// nothing (and "not in table" on stderr) and exiting 0; a `route` that
+    /// fails gives no answer.
+    async fn listed(
+        &self,
+        family: Family,
+    ) -> Result<Option<(Family, String, Option<RouteState>)>, PlatformError> {
+        let which = match family {
+            Family::Ipv4 => "-inet",
+            Family::Ipv6 => "-inet6",
+        };
+        let extra = [OsStr::new(which), OsStr::new("default")];
+        let route = self.route.output_with(&extra).await?;
+        if route.trim().is_empty() {
+            return Ok(None);
+        }
+        let field = |name: &str| {
+            route
+                .lines()
+                .find_map(|line| line.trim().strip_prefix(name))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        };
+        let from = self.route.path.as_path();
+        let interface = field("interface:").ok_or_else(|| unrecognized(from, "no interface"))?;
+        let flags = field("flags:")
+            .and_then(|flags| flags.strip_prefix('<'))
+            .and_then(|flags| flags.strip_suffix('>'))
+            .ok_or_else(|| unrecognized(from, "no flags"))?;
+        let flagged = |flag: &str| flags.split(',').any(|set| set == flag);
+        let state = if flagged(ROUTE_REJECT) || flagged(ROUTE_BLACKHOLE) {
+            Some(RouteState::LeadsNowhere)
+        } else if flagged(ROUTE_UP) {
+            None
+        } else {
+            Some(RouteState::InterfaceDown)
+        };
+        Ok(Some((family, interface.to_owned(), state)))
+    }
+
+    /// The kind of `interface`, from `ports`, what `networksetup` listed,
+    /// and for a port that isn't Wi-Fi, when `wired_or_other`, its medium.
+    async fn kind(
+        &self,
+        ports: &str,
+        interface: &str,
+        wired_or_other: bool,
+    ) -> Result<InterfaceKind, PlatformError> {
+        Ok(
+            match hardware_port(self.ports.path.as_path(), ports, interface)? {
+                Port::WiFi => InterfaceKind::WiFi,
+                Port::Other if wired_or_other => {
+                    let media = self.media.output_with(&[interface.as_ref()]).await?;
+                    if ethernet_medium(&media) {
+                        InterfaceKind::Wired
+                    } else {
+                        InterfaceKind::Other
+                    }
+                }
+                Port::Other | Port::Absent => InterfaceKind::Other,
+            },
+        )
     }
 }
 
 #[async_trait]
 impl NetworkLink for RouteLink {
     async fn link(&self) -> Result<Link, PlatformError> {
-        let interface = self.interface().await?;
-        let ports = self.ports.output().await?;
-        Ok(
-            match hardware_port(self.ports.path.as_path(), &ports, &interface)? {
-                Port::WiFi => Link::WiFi,
-                Port::Other => {
-                    let media = self.media.output_with(Some(interface.as_ref())).await?;
-                    if ethernet_medium(&media) {
-                        Link::Wired
-                    } else {
-                        Link::Other
-                    }
-                }
-                Port::Absent => Link::Other,
-            },
-        )
+        self.routes(true).await.map(|routes| routes.link())
     }
 
-    /// `None` when the default route's interface isn't the Wi-Fi port.
-    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
-        let interface = self.interface().await?;
-        let ports = self.ports.output().await?;
-        if hardware_port(self.ports.path.as_path(), &ports, &interface)? != Port::WiFi {
+    /// `None` when `family`'s default route, or the link's one interface,
+    /// isn't the Wi-Fi port. No such route is an error, as on Linux.
+    async fn network_name(
+        &self,
+        family: Option<Family>,
+    ) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        let routes = self.routes(false).await?;
+        let Some(outgoing) = routes.interface(family) else {
+            return Err(PlatformError::Unreadable {
+                from: self.route.path.display().to_string(),
+                detail: no_interface_to_name(family, routes.link()).to_owned(),
+            });
+        };
+        if outgoing.kind != InterfaceKind::WiFi {
             return Ok(None);
         }
         let profile = self.profile.output().await?;
-        current_network(self.profile.path.as_path(), &profile, &interface)
+        current_network(self.profile.path.as_path(), &profile, &outgoing.interface)
+    }
+}
+
+/// Why `family`'s interface, or for `None` the link's one, can't be named.
+fn no_interface_to_name(family: Option<Family>, link: Link) -> &'static str {
+    match (family, link) {
+        (_, Link::NoRoute) => "no default route",
+        (None, _) => "the IPv4 and IPv6 default routes leave by different interfaces",
+        (Some(_), _) => "no default route in that family",
     }
 }
 

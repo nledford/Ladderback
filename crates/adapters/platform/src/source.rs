@@ -189,12 +189,12 @@ impl Program {
     /// within its timeout gives no answer; it is killed when this returns.
     /// The timeout covers the whole call, the wait for the gate too.
     pub(crate) async fn output(&self) -> Result<String, PlatformError> {
-        self.output_with(None).await
+        self.output_with(&[]).await
     }
 
-    /// [`output`](Self::output), with `last` after the fixed arguments.
-    pub(crate) async fn output_with(&self, last: Option<&OsStr>) -> Result<String, PlatformError> {
-        tokio::time::timeout(self.timeout, self.run(last))
+    /// [`output`](Self::output), with `extra` after the fixed arguments.
+    pub(crate) async fn output_with(&self, extra: &[&OsStr]) -> Result<String, PlatformError> {
+        tokio::time::timeout(self.timeout, self.run(extra))
             .await
             .unwrap_or_else(|_| {
                 Err(PlatformError::TimedOut {
@@ -204,12 +204,12 @@ impl Program {
     }
 
     /// [`output_with`](Self::output_with), without its timeout.
-    async fn run(&self, last: Option<&OsStr>) -> Result<String, PlatformError> {
+    async fn run(&self, extra: &[&OsStr]) -> Result<String, PlatformError> {
         let from = self.path.as_path();
         let mut command = tokio::process::Command::new(&self.path);
         command
             .args(&self.args)
-            .args(last)
+            .args(extra)
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

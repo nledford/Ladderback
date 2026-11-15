@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use super::link::{InterfaceKind, Link, WiFiNames};
 use super::{InvalidValue, ValueKind};
 
 /// The most alternatives a location's `when` lists.
@@ -132,10 +133,10 @@ impl Alternative {
         self.names.as_ref()
     }
 
-    /// What this alternative says of `link`, with `name` the Wi-Fi
-    /// network's name when it could be read.
-    fn verdict(&self, link: Link, name: Option<&CurrentNetworkName>) -> RuleVerdict {
-        let verdict = self.kind.verdict(link);
+    /// What this alternative says of an interface of `kind`, with `name` the
+    /// Wi-Fi network's name when it could be read.
+    fn verdict(&self, kind: InterfaceKind, name: Option<&CurrentNetworkName>) -> RuleVerdict {
+        let verdict = self.kind.verdict(kind);
         match (&self.names, verdict) {
             // On Wi-Fi: the name decides, and a name not read can't.
             (Some(names), RuleVerdict::Holds) => match name {
@@ -161,21 +162,6 @@ impl From<NetworkKind> for Alternative {
     fn from(kind: NetworkKind) -> Self {
         Self { kind, names: None }
     }
-}
-
-/// The network link the machine reaches others by: the interface its default
-/// route leaves by, as the platform read it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Link {
-    /// An Ethernet interface, not a virtual one.
-    Wired,
-    /// A Wi-Fi interface.
-    WiFi,
-    /// A tunnel, a bridge, a cellular modem, a phone's tethering.
-    Other,
-    /// No default route, as just after a wake: nothing says where the next
-    /// one will leave by.
-    NoRoute,
 }
 
 /// The kind of network one alternative of a rule asks for.
@@ -205,15 +191,14 @@ impl NetworkKind {
         }
     }
 
-    /// What this alternative says of `link`.
-    fn verdict(self, link: Link) -> RuleVerdict {
-        match (self, link) {
-            (Self::Wired, Link::Wired) | (Self::WiFi, Link::WiFi) => RuleVerdict::Holds,
-            // Nothing says where the next route leaves by.
-            (_, Link::NoRoute) => RuleVerdict::Unknown,
-            (Self::Wired, Link::WiFi | Link::Other) | (Self::WiFi, Link::Wired | Link::Other) => {
-                RuleVerdict::NotMet
+    /// What this alternative says of an interface of `kind`.
+    fn verdict(self, kind: InterfaceKind) -> RuleVerdict {
+        match (self, kind) {
+            (Self::Wired, InterfaceKind::Wired) | (Self::WiFi, InterfaceKind::WiFi) => {
+                RuleVerdict::Holds
             }
+            (Self::Wired, InterfaceKind::WiFi | InterfaceKind::Other)
+            | (Self::WiFi, InterfaceKind::Wired | InterfaceKind::Other) => RuleVerdict::NotMet,
         }
     }
 }
@@ -264,16 +249,37 @@ impl LocationRule {
     }
 
     /// Whether the rule holds on `link`, `None` when the link couldn't be
-    /// read, with `name` the Wi-Fi network's name, `None` when it wasn't or
-    /// couldn't be read: it holds when any alternative does, else it is
+    /// read, with `names` the Wi-Fi networks' names that were read. On a
+    /// link of one interface it holds when any alternative does, else it is
     /// unknown when any alternative can't be evaluated, else it isn't met.
-    pub fn holds(&self, link: Option<Link>, name: Option<&CurrentNetworkName>) -> RuleVerdict {
-        let Some(link) = link else {
-            return RuleVerdict::Unknown;
-        };
+    /// With no default route nothing says where the next one will leave by,
+    /// so it is unknown. On a mixed link it holds only if it holds for both
+    /// families' interfaces, each with its own name (decision 80).
+    pub fn holds(&self, link: Option<Link>, names: WiFiNames<'_>) -> RuleVerdict {
+        match link {
+            None | Some(Link::NoRoute) => RuleVerdict::Unknown,
+            Some(Link::Wired) => self.holds_on(InterfaceKind::Wired, names.link),
+            Some(Link::WiFi) => self.holds_on(InterfaceKind::WiFi, names.link),
+            Some(Link::Other) => self.holds_on(InterfaceKind::Other, names.link),
+            Some(Link::Mixed { ipv4, ipv6 }) => {
+                match (
+                    self.holds_on(ipv4, names.ipv4),
+                    self.holds_on(ipv6, names.ipv6),
+                ) {
+                    (RuleVerdict::NotMet, _) | (_, RuleVerdict::NotMet) => RuleVerdict::NotMet,
+                    (RuleVerdict::Unknown, _) | (_, RuleVerdict::Unknown) => RuleVerdict::Unknown,
+                    (RuleVerdict::Holds, RuleVerdict::Holds) => RuleVerdict::Holds,
+                }
+            }
+        }
+    }
+
+    /// Whether the rule holds on an interface of `kind` whose network's name
+    /// is `name`.
+    fn holds_on(&self, kind: InterfaceKind, name: Option<&CurrentNetworkName>) -> RuleVerdict {
         let mut verdict = RuleVerdict::NotMet;
         for alternative in &self.alternatives {
-            match alternative.verdict(link, name) {
+            match alternative.verdict(kind, name) {
                 RuleVerdict::Holds => return RuleVerdict::Holds,
                 RuleVerdict::Unknown => verdict = RuleVerdict::Unknown,
                 RuleVerdict::NotMet => {}
@@ -298,13 +304,30 @@ mod tests {
         .unwrap()
     }
 
+    /// No network's name read.
+    fn unnamed() -> WiFiNames<'static> {
+        WiFiNames::default()
+    }
+
+    /// The name of a link of one interface.
+    fn named(name: &CurrentNetworkName) -> WiFiNames<'_> {
+        WiFiNames::of_link(Some(name))
+    }
+
+    fn mixed(ipv4: InterfaceKind, ipv6: InterfaceKind) -> Option<Link> {
+        Some(Link::Mixed { ipv4, ipv6 })
+    }
+
     #[test]
     fn a_wired_rule_holds_on_a_wired_link_only() {
         let wired = rule(&[NetworkKind::Wired]);
-        assert_eq!(wired.holds(Some(Link::Wired), None), RuleVerdict::Holds);
+        assert_eq!(
+            wired.holds(Some(Link::Wired), unnamed()),
+            RuleVerdict::Holds
+        );
         for link in [Link::WiFi, Link::Other] {
             assert_eq!(
-                wired.holds(Some(link), None),
+                wired.holds(Some(link), unnamed()),
                 RuleVerdict::NotMet,
                 "{link:?}"
             );
@@ -314,10 +337,10 @@ mod tests {
     #[test]
     fn a_wifi_rule_holds_on_wi_fi_only() {
         let wifi = rule(&[NetworkKind::WiFi]);
-        assert_eq!(wifi.holds(Some(Link::WiFi), None), RuleVerdict::Holds);
+        assert_eq!(wifi.holds(Some(Link::WiFi), unnamed()), RuleVerdict::Holds);
         for link in [Link::Wired, Link::Other] {
             assert_eq!(
-                wifi.holds(Some(link), None),
+                wifi.holds(Some(link), unnamed()),
                 RuleVerdict::NotMet,
                 "{link:?}"
             );
@@ -328,7 +351,7 @@ mod tests {
     fn a_link_that_could_not_be_read_evaluates_no_rule() {
         for kind in [NetworkKind::Wired, NetworkKind::WiFi] {
             assert_eq!(
-                rule(&[kind]).holds(None, None),
+                rule(&[kind]).holds(None, unnamed()),
                 RuleVerdict::Unknown,
                 "{kind:?}"
             );
@@ -339,7 +362,7 @@ mod tests {
     fn no_default_route_evaluates_no_rule() {
         for kind in [NetworkKind::Wired, NetworkKind::WiFi] {
             assert_eq!(
-                rule(&[kind]).holds(Some(Link::NoRoute), None),
+                rule(&[kind]).holds(Some(Link::NoRoute), unnamed()),
                 RuleVerdict::Unknown,
                 "{kind:?}"
             );
@@ -349,9 +372,18 @@ mod tests {
     #[test]
     fn a_rule_holds_when_any_alternative_does() {
         let either = rule(&[NetworkKind::Wired, NetworkKind::WiFi]);
-        assert_eq!(either.holds(Some(Link::WiFi), None), RuleVerdict::Holds);
-        assert_eq!(either.holds(Some(Link::Wired), None), RuleVerdict::Holds);
-        assert_eq!(either.holds(Some(Link::Other), None), RuleVerdict::NotMet);
+        assert_eq!(
+            either.holds(Some(Link::WiFi), unnamed()),
+            RuleVerdict::Holds
+        );
+        assert_eq!(
+            either.holds(Some(Link::Wired), unnamed()),
+            RuleVerdict::Holds
+        );
+        assert_eq!(
+            either.holds(Some(Link::Other), unnamed()),
+            RuleVerdict::NotMet
+        );
     }
 
     #[test]
@@ -362,9 +394,15 @@ mod tests {
         let names = only(&["Office"]).alternatives().to_vec();
         let wired = Alternative::from(NetworkKind::Wired);
         let either = LocationRule::new([vec![wired.clone()], names.clone()].concat()).unwrap();
-        assert_eq!(either.holds(Some(Link::WiFi), None), RuleVerdict::Unknown);
+        assert_eq!(
+            either.holds(Some(Link::WiFi), unnamed()),
+            RuleVerdict::Unknown
+        );
         let reversed = LocationRule::new([names, vec![wired]].concat()).unwrap();
-        assert_eq!(reversed.holds(Some(Link::WiFi), None), RuleVerdict::Unknown);
+        assert_eq!(
+            reversed.holds(Some(Link::WiFi), unnamed()),
+            RuleVerdict::Unknown
+        );
     }
 
     #[test]
@@ -420,16 +458,22 @@ mod tests {
     fn an_only_rule_holds_on_a_listed_network_alone() {
         let office = only(&["Office", "Lab"]);
         let wifi = Some(Link::WiFi);
-        assert_eq!(office.holds(wifi, Some(&on(b"Office"))), RuleVerdict::Holds);
-        assert_eq!(office.holds(wifi, Some(&on(b"Lab"))), RuleVerdict::Holds);
-        assert_eq!(office.holds(wifi, Some(&on(b"Guest"))), RuleVerdict::NotMet);
+        assert_eq!(
+            office.holds(wifi, named(&on(b"Office"))),
+            RuleVerdict::Holds
+        );
+        assert_eq!(office.holds(wifi, named(&on(b"Lab"))), RuleVerdict::Holds);
+        assert_eq!(
+            office.holds(wifi, named(&on(b"Guest"))),
+            RuleVerdict::NotMet
+        );
         // Byte for byte, case and all.
         assert_eq!(
-            office.holds(wifi, Some(&on(b"office"))),
+            office.holds(wifi, named(&on(b"office"))),
             RuleVerdict::NotMet
         );
         assert_eq!(
-            office.holds(wifi, Some(&on(b"Office "))),
+            office.holds(wifi, named(&on(b"Office "))),
             RuleVerdict::NotMet
         );
     }
@@ -439,11 +483,11 @@ mod tests {
         let not_guest = except(&["Guest"]);
         let wifi = Some(Link::WiFi);
         assert_eq!(
-            not_guest.holds(wifi, Some(&on(b"Guest"))),
+            not_guest.holds(wifi, named(&on(b"Guest"))),
             RuleVerdict::NotMet
         );
         assert_eq!(
-            not_guest.holds(wifi, Some(&on(b"Office"))),
+            not_guest.holds(wifi, named(&on(b"Office"))),
             RuleVerdict::Holds
         );
     }
@@ -453,11 +497,11 @@ mod tests {
         let latin1 = on(&[0x43, 0x61, 0x66, 0xe9]);
         let wifi = Some(Link::WiFi);
         assert_eq!(
-            only(&["Café"]).holds(wifi, Some(&latin1)),
+            only(&["Café"]).holds(wifi, named(&latin1)),
             RuleVerdict::NotMet
         );
         assert_eq!(
-            except(&["Café"]).holds(wifi, Some(&latin1)),
+            except(&["Café"]).holds(wifi, named(&latin1)),
             RuleVerdict::Holds
         );
     }
@@ -465,7 +509,10 @@ mod tests {
     #[test]
     fn a_name_that_could_not_be_read_evaluates_no_name_rule() {
         for rule in [only(&["Office"]), except(&["Guest"])] {
-            assert_eq!(rule.holds(Some(Link::WiFi), None), RuleVerdict::Unknown);
+            assert_eq!(
+                rule.holds(Some(Link::WiFi), unnamed()),
+                RuleVerdict::Unknown
+            );
         }
     }
 
@@ -474,12 +521,15 @@ mod tests {
         for rule in [only(&["Office"]), except(&["Guest"])] {
             for link in [Link::Wired, Link::Other] {
                 assert_eq!(
-                    rule.holds(Some(link), None),
+                    rule.holds(Some(link), unnamed()),
                     RuleVerdict::NotMet,
                     "{link:?}"
                 );
             }
-            assert_eq!(rule.holds(Some(Link::NoRoute), None), RuleVerdict::Unknown);
+            assert_eq!(
+                rule.holds(Some(Link::NoRoute), unnamed()),
+                RuleVerdict::Unknown
+            );
         }
     }
 
@@ -562,5 +612,64 @@ mod tests {
                 "{kind:?} {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_rule_holds_on_a_mixed_link_only_if_it_holds_for_both_families() {
+        use InterfaceKind::{Other, WiFi, Wired};
+        let wired = rule(&[NetworkKind::Wired]);
+        let wifi = rule(&[NetworkKind::WiFi]);
+        let either = rule(&[NetworkKind::Wired, NetworkKind::WiFi]);
+        for (rule, link, verdict) in [
+            (&wired, mixed(WiFi, Wired), RuleVerdict::NotMet),
+            (&wired, mixed(Wired, WiFi), RuleVerdict::NotMet),
+            (&wired, mixed(Wired, Wired), RuleVerdict::Holds),
+            (&wifi, mixed(WiFi, Wired), RuleVerdict::NotMet),
+            (&wifi, mixed(Other, WiFi), RuleVerdict::NotMet),
+            (&wifi, mixed(WiFi, WiFi), RuleVerdict::Holds),
+            // Each family meets the rule, by a different alternative.
+            (&either, mixed(WiFi, Wired), RuleVerdict::Holds),
+            (&either, mixed(WiFi, Other), RuleVerdict::NotMet),
+        ] {
+            assert_eq!(rule.holds(link, unnamed()), verdict, "{rule:?} {link:?}");
+        }
+    }
+
+    #[test]
+    fn a_name_rule_on_a_mixed_link_needs_each_wi_fi_interface_on_a_listed_network() {
+        let office = only(&["Office"]);
+        let link = mixed(InterfaceKind::WiFi, InterfaceKind::WiFi);
+        let (at_office, at_guest) = (on(b"Office"), on(b"Guest"));
+        let names = |ipv4, ipv6| WiFiNames {
+            link: None,
+            ipv4: Some(ipv4),
+            ipv6: Some(ipv6),
+        };
+        assert_eq!(
+            office.holds(link, names(&at_office, &at_office)),
+            RuleVerdict::Holds
+        );
+        for (ipv4, ipv6) in [(&at_office, &at_guest), (&at_guest, &at_office)] {
+            assert_eq!(office.holds(link, names(ipv4, ipv6)), RuleVerdict::NotMet);
+        }
+        // The name of a link of one interface says nothing of either family.
+        assert_eq!(office.holds(link, named(&at_office)), RuleVerdict::Unknown);
+    }
+
+    #[test]
+    fn on_a_mixed_link_a_family_not_met_wins_over_one_not_evaluated() {
+        let office = only(&["Office"]);
+        let at_office = on(b"Office");
+        // IPv4's Wi-Fi name wasn't read; IPv6 leaves by a wired interface.
+        let link = mixed(InterfaceKind::WiFi, InterfaceKind::Wired);
+        assert_eq!(office.holds(link, unnamed()), RuleVerdict::NotMet);
+        // IPv4's is listed; IPv6's Wi-Fi name wasn't read.
+        let link = mixed(InterfaceKind::WiFi, InterfaceKind::WiFi);
+        let names = WiFiNames {
+            link: None,
+            ipv4: Some(&at_office),
+            ipv6: None,
+        };
+        assert_eq!(office.holds(link, names), RuleVerdict::Unknown);
     }
 }

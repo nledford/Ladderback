@@ -1,7 +1,7 @@
 //! The conditions a plan sets before its scheduled run starts (technical
 //! design §5): only on AC power, when the plan's schedule asks for it.
 
-use crate::planning::{CurrentNetworkName, Link, LocationRule, RuleVerdict, Schedule};
+use crate::planning::{Link, LocationRule, RuleVerdict, Schedule, WiFiNames};
 
 /// What powers the machine, as the platform reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,18 +38,19 @@ pub fn power_condition(
 
 /// Whether a scheduled run of a repository whose locations have `rules`, in
 /// order, starts on `link`, `None` when the link couldn't be read, with
-/// `name` the Wi-Fi network's name when it was read (decision 80): it is skipped only when every location has a rule and each is known
-/// not to hold. A location with no rule is always eligible, and a rule that
-/// can't be evaluated never skips a run: the job's own choice fails it where
-/// it is recorded, notified and retried.
+/// `names` the Wi-Fi networks' names that were read (decision 80): it is
+/// skipped only when every location has a rule and each is known not to
+/// hold. A location with no rule is always eligible, and a rule that can't be
+/// evaluated never skips a run: the job's own choice fails it where it is
+/// recorded, notified and retried.
 pub fn location_condition(
     rules: &[Option<LocationRule>],
     link: Option<Link>,
-    name: Option<&CurrentNetworkName>,
+    names: WiFiNames<'_>,
 ) -> Result<(), UnmetCondition> {
     let known_not_to_hold = |rule: &Option<LocationRule>| {
         rule.as_ref()
-            .is_some_and(|rule| rule.holds(link, name) == RuleVerdict::NotMet)
+            .is_some_and(|rule| rule.holds(link, names) == RuleVerdict::NotMet)
     };
     if !rules.is_empty() && rules.iter().all(known_not_to_hold) {
         Err(UnmetCondition::NoLocationRuleHolds)
@@ -61,7 +62,7 @@ pub fn location_condition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planning::{CronExpression, NetworkKind};
+    use crate::planning::{CronExpression, CurrentNetworkName, InterfaceKind, NetworkKind};
 
     fn wired() -> Option<LocationRule> {
         Some(LocationRule::new(vec![NetworkKind::Wired.into()]).unwrap())
@@ -70,7 +71,7 @@ mod tests {
     #[test]
     fn a_run_is_skipped_when_every_location_has_a_rule_known_not_to_hold() {
         assert_eq!(
-            location_condition(&[wired(), wired()], Some(Link::WiFi), None),
+            location_condition(&[wired(), wired()], Some(Link::WiFi), WiFiNames::default()),
             Err(UnmetCondition::NoLocationRuleHolds)
         );
     }
@@ -79,7 +80,7 @@ mod tests {
     fn a_run_starts_when_any_rule_holds() {
         let wifi = Some(LocationRule::new(vec![NetworkKind::WiFi.into()]).unwrap());
         assert_eq!(
-            location_condition(&[wired(), wifi], Some(Link::WiFi), None),
+            location_condition(&[wired(), wifi], Some(Link::WiFi), WiFiNames::default()),
             Ok(())
         );
     }
@@ -87,17 +88,20 @@ mod tests {
     #[test]
     fn a_location_with_no_rule_never_lets_the_rules_skip_a_run() {
         assert_eq!(
-            location_condition(&[wired(), None], Some(Link::WiFi), None),
+            location_condition(&[wired(), None], Some(Link::WiFi), WiFiNames::default()),
             Ok(())
         );
-        assert_eq!(location_condition(&[None], Some(Link::WiFi), None), Ok(()));
+        assert_eq!(
+            location_condition(&[None], Some(Link::WiFi), WiFiNames::default()),
+            Ok(())
+        );
     }
 
     #[test]
     fn a_rule_that_cannot_be_evaluated_never_skips_a_run() {
         for link in [None, Some(Link::NoRoute)] {
             assert_eq!(
-                location_condition(&[wired(), wired()], link, None),
+                location_condition(&[wired(), wired()], link, WiFiNames::default()),
                 Ok(()),
                 "{link:?}"
             );
@@ -118,11 +122,38 @@ mod tests {
         };
         let guest = CurrentNetworkName::new(b"Guest").unwrap();
         assert_eq!(
-            location_condition(&[only_office(), wired()], Some(Link::WiFi), Some(&guest)),
+            location_condition(
+                &[only_office(), wired()],
+                Some(Link::WiFi),
+                WiFiNames::of_link(Some(&guest))
+            ),
             Err(UnmetCondition::NoLocationRuleHolds)
         );
         assert_eq!(
-            location_condition(&[only_office(), wired()], Some(Link::WiFi), None),
+            location_condition(
+                &[only_office(), wired()],
+                Some(Link::WiFi),
+                WiFiNames::default()
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_run_on_a_mixed_link_is_skipped_unless_a_rule_holds_for_both_families() {
+        let either = Some(
+            LocationRule::new(vec![NetworkKind::Wired.into(), NetworkKind::WiFi.into()]).unwrap(),
+        );
+        let mixed = Some(Link::Mixed {
+            ipv4: InterfaceKind::Wired,
+            ipv6: InterfaceKind::WiFi,
+        });
+        assert_eq!(
+            location_condition(&[wired(), wired()], mixed, WiFiNames::default()),
+            Err(UnmetCondition::NoLocationRuleHolds)
+        );
+        assert_eq!(
+            location_condition(&[wired(), either], mixed, WiFiNames::default()),
             Ok(())
         );
     }

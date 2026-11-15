@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use domain::execution::conditions::PowerSource;
-use domain::planning::{CurrentNetworkName, Link};
+use domain::planning::{CurrentNetworkName, Family, Link};
 
 use crate::ports::{Network, NetworkLink, PlatformError, PowerSupply};
 
@@ -107,6 +107,8 @@ impl Network for FakeNetwork {
 pub struct FakeNetworkLink {
     link: Scripted<Link>,
     name: Scripted<Option<CurrentNetworkName>>,
+    ipv4_name: Scripted<Option<CurrentNetworkName>>,
+    ipv6_name: Scripted<Option<CurrentNetworkName>>,
 }
 
 impl FakeNetworkLink {
@@ -114,6 +116,8 @@ impl FakeNetworkLink {
         Self {
             link: Scripted::new(Link::Wired),
             name: Scripted::new(None),
+            ipv4_name: Scripted::new(None),
+            ipv6_name: Scripted::new(None),
         }
     }
 
@@ -123,9 +127,21 @@ impl FakeNetworkLink {
     }
 
     /// What every later [`network_name`](NetworkLink::network_name) call
-    /// answers.
+    /// answers, of the link's interface and of each family's.
     pub fn set_name(&self, answer: Result<Option<CurrentNetworkName>, PlatformError>) {
-        self.name.set(answer);
+        for family in [None, Some(Family::Ipv4), Some(Family::Ipv6)] {
+            self.set_name_of(family, answer.clone());
+        }
+    }
+
+    /// What every later [`network_name`](NetworkLink::network_name) call
+    /// answers for `family`.
+    pub fn set_name_of(
+        &self,
+        family: Option<Family>,
+        answer: Result<Option<CurrentNetworkName>, PlatformError>,
+    ) {
+        self.names(family).set(answer);
     }
 
     /// How many times the link was read.
@@ -133,9 +149,19 @@ impl FakeNetworkLink {
         self.link.asked()
     }
 
-    /// How many times the network's name was read.
+    /// How many times a network's name was read, of any interface.
     pub fn names_asked(&self) -> usize {
-        self.name.asked()
+        [&self.name, &self.ipv4_name, &self.ipv6_name]
+            .iter()
+            .fold(0, |sum, names| sum.saturating_add(names.asked()))
+    }
+
+    fn names(&self, family: Option<Family>) -> &Scripted<Option<CurrentNetworkName>> {
+        match family {
+            None => &self.name,
+            Some(Family::Ipv4) => &self.ipv4_name,
+            Some(Family::Ipv6) => &self.ipv6_name,
+        }
     }
 }
 
@@ -151,7 +177,10 @@ impl NetworkLink for FakeNetworkLink {
         self.link.ask()
     }
 
-    async fn network_name(&self) -> Result<Option<CurrentNetworkName>, PlatformError> {
-        self.name.ask()
+    async fn network_name(
+        &self,
+        family: Option<Family>,
+    ) -> Result<Option<CurrentNetworkName>, PlatformError> {
+        self.names(family).ask()
     }
 }

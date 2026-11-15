@@ -85,7 +85,7 @@ fn read_interfaces(root: &Path) -> Result<bool, PlatformError> {
 
 /// Whether the interface at `entry` is one this machine is online through.
 /// An interface without `flags` or `operstate` is passed over.
-fn interface_online(entry: &Path) -> Result<bool, PlatformError> {
+pub(crate) fn interface_online(entry: &Path) -> Result<bool, PlatformError> {
     let Some(text) = attribute(entry, "flags")? else {
         return Ok(false);
     };

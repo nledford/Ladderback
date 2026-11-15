@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use domain::planning::{CurrentNetworkName, Link};
+use domain::planning::{CurrentNetworkName, Family, InterfaceKind, Link};
 
 use crate::ports::{NetworkLink, PlatformError};
 
@@ -31,6 +31,25 @@ pub trait NetworkLinkHarness: Send + Sync {
     /// A source of the name this adapter doesn't understand, which holds
     /// `name` somewhere in what it says.
     fn name_unrecognized(&self, name: &str) -> Arc<dyn NetworkLink>;
+    /// A machine whose IPv4 default route leaves by its Wi-Fi interface,
+    /// with no IPv6 default route.
+    fn ipv4_only(&self) -> Arc<dyn NetworkLink>;
+    /// A machine whose IPv6 default route leaves by an Ethernet port, with
+    /// no IPv4 default route.
+    fn ipv6_only(&self) -> Arc<dyn NetworkLink>;
+    /// A machine whose IPv4 and IPv6 default routes both leave by its Wi-Fi
+    /// interface, on the network `name`.
+    fn both_on_network(&self, name: &str) -> Arc<dyn NetworkLink>;
+    /// A machine whose IPv4 default route leaves by its Wi-Fi interface, on
+    /// the network `name`, and whose IPv6 one leaves by an Ethernet port at
+    /// a lower metric (#492).
+    fn mixed(&self, name: &str) -> Arc<dyn NetworkLink>;
+    /// Machines whose `family` has only a default route that carries
+    /// nothing, at a lower metric than the other family's, which leaves by
+    /// the Wi-Fi interface: one that is unreachable, a blackhole, prohibited,
+    /// out of an interface that is down, out of one with no carrier, out of
+    /// one that is gone, each as far as the platform lists it.
+    fn carries_nothing(&self, family: Family) -> Vec<Arc<dyn NetworkLink>>;
 }
 
 pub async fn run(harness: &dyn NetworkLinkHarness) {
@@ -44,6 +63,10 @@ pub async fn run(harness: &dyn NetworkLinkHarness) {
     no_network_joined_is_no_name(harness).await;
     a_name_the_platform_hides_or_cannot_read_is_an_error(harness).await;
     a_name_is_never_in_an_error(harness).await;
+    a_link_of_one_family_is_that_family_s_interface(harness).await;
+    both_families_out_of_one_interface_are_one_link(harness).await;
+    families_out_of_different_interfaces_are_mixed_whatever_their_metrics(harness).await;
+    a_default_route_that_carries_nothing_is_passed_over(harness).await;
 }
 
 async fn a_route_out_of_an_ethernet_port_is_wired(harness: &dyn NetworkLinkHarness) {
@@ -88,7 +111,7 @@ async fn a_source_that_cannot_be_read_is_an_error(harness: &dyn NetworkLinkHarne
 async fn the_name_of_the_network_joined_is_read_as_it_is(harness: &dyn NetworkLinkHarness) {
     for name in ["Office", "Café 5 GHz", "office"] {
         assert_eq!(
-            harness.on_network(name).network_name().await,
+            harness.on_network(name).network_name(None).await,
             Ok(CurrentNetworkName::new(name.as_bytes())),
             "{name:?}"
         );
@@ -96,12 +119,12 @@ async fn the_name_of_the_network_joined_is_read_as_it_is(harness: &dyn NetworkLi
 }
 
 async fn no_network_joined_is_no_name(harness: &dyn NetworkLinkHarness) {
-    assert_eq!(harness.on_no_network().network_name().await, Ok(None));
+    assert_eq!(harness.on_no_network().network_name(None).await, Ok(None));
 }
 
 async fn a_name_the_platform_hides_or_cannot_read_is_an_error(harness: &dyn NetworkLinkHarness) {
     for link in [harness.name_hidden(), harness.no_name_reader()] {
-        let answer = link.network_name().await;
+        let answer = link.network_name(None).await;
         assert!(
             matches!(
                 answer,
@@ -117,8 +140,63 @@ async fn a_name_the_platform_hides_or_cannot_read_is_an_error(harness: &dyn Netw
 async fn a_name_is_never_in_an_error(harness: &dyn NetworkLinkHarness) {
     let answer = harness
         .name_unrecognized("canary-network")
-        .network_name()
+        .network_name(None)
         .await;
     assert!(answer.is_err(), "{answer:?}");
     assert!(!format!("{answer:?}").contains("canary"), "{answer:?}");
+}
+
+/// Many networks have IPv4 only: a link of one family is never mixed.
+async fn a_link_of_one_family_is_that_family_s_interface(harness: &dyn NetworkLinkHarness) {
+    assert_eq!(harness.ipv4_only().link().await, Ok(Link::WiFi));
+    assert_eq!(harness.ipv6_only().link().await, Ok(Link::Wired));
+}
+
+async fn both_families_out_of_one_interface_are_one_link(harness: &dyn NetworkLinkHarness) {
+    let link = harness.both_on_network("Office");
+    assert_eq!(link.link().await, Ok(Link::WiFi));
+    for family in [None, Some(Family::Ipv4), Some(Family::Ipv6)] {
+        assert_eq!(
+            link.network_name(family).await,
+            Ok(CurrentNetworkName::new(b"Office")),
+            "{family:?}"
+        );
+    }
+}
+
+/// #492: metrics are compared within a family, never across, so an IPv6
+/// route of lower metric doesn't outrank the IPv4 one; the link names both.
+async fn families_out_of_different_interfaces_are_mixed_whatever_their_metrics(
+    harness: &dyn NetworkLinkHarness,
+) {
+    let link = harness.mixed("Office");
+    assert_eq!(
+        link.link().await,
+        Ok(Link::Mixed {
+            ipv4: InterfaceKind::WiFi,
+            ipv6: InterfaceKind::Wired,
+        })
+    );
+    assert_eq!(
+        link.network_name(Some(Family::Ipv4)).await,
+        Ok(CurrentNetworkName::new(b"Office"))
+    );
+    assert_eq!(link.network_name(Some(Family::Ipv6)).await, Ok(None));
+    let answer = link.network_name(None).await;
+    assert!(
+        answer.is_err(),
+        "a mixed link has no one interface to name: {answer:?}"
+    );
+}
+
+/// Otherwise a plain IPv4 network with such a route would read as mixed,
+/// and a rule that should hold wouldn't.
+async fn a_default_route_that_carries_nothing_is_passed_over(harness: &dyn NetworkLinkHarness) {
+    for family in [Family::Ipv4, Family::Ipv6] {
+        let machines = harness.carries_nothing(family);
+        assert!(!machines.is_empty(), "{family:?}");
+        for (number, link) in machines.iter().enumerate() {
+            assert_eq!(link.link().await, Ok(Link::WiFi), "{family:?} {number}");
+        }
+    }
 }

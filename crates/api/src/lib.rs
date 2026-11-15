@@ -391,6 +391,12 @@ pub enum WarningCode {
     /// when it last tried (decision 80): that part of the rule doesn't hold
     /// here. `locations` as for `location-every-ruled`.
     LocationRuleNameUnreadable,
+    /// The machine's IPv4 and IPv6 traffic leave by different interfaces,
+    /// of the kinds `ipv4` and `ipv6` (`wired`, `wifi` or `other`), as it
+    /// last read them, and a location of the repository has a rule (decision
+    /// 80): a rule holds there only if it holds for both. `locations` as for
+    /// `location-every-ruled`.
+    LocationRuleMixedLink,
     /// An export wrote the repository's first location only: rustic has no
     /// fallback. The argument `count` is how many locations it left out.
     ProfileLocationsNotExported,
@@ -1105,6 +1111,23 @@ impl WarningCode {
             Self::LocationRuleNameUnreadable => &[
                 ArgSpec {
                     name: "position",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "locations",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::LocationRuleMixedLink => &[
+                ArgSpec {
+                    name: "ipv4",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "ipv6",
                     kind: ArgKind::Text,
                     optional: false,
                 },
@@ -2271,6 +2294,14 @@ mod tests {
         assert_eq!(
             WarningCode::LocationRuleNameUnreadable.args(),
             &[text("position", false), text("locations", false)]
+        );
+        assert_eq!(
+            WarningCode::LocationRuleMixedLink.args(),
+            &[
+                text("ipv4", false),
+                text("ipv6", false),
+                text("locations", false)
+            ]
         );
         assert_eq!(
             WarningCode::GlobNeverMatches.args(),
