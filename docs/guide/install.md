@@ -1,5 +1,3 @@
-<!-- paragraph-length: exempt until restructured (#592) -->
-
 # Install Ladderback
 
 On Linux, from 0.3.1 on, you can [download a release](#download-a-release-linux); on macOS, and on Linux too if you prefer, you build one from source. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. The [README](../../README.md#install) has the one command that installs it: the release's archive on Linux, a build from source on macOS. This guide says how to download a release, what that command does, how to build by hand, how to update, and how to keep Ladderback running in the background.
@@ -23,7 +21,22 @@ mkdir -p ~/.local/bin && install -m 755 "ladderback-$target/ladderback" ~/.local
 
 On 64-bit Linux with glibc 2.35 or newer, the script downloads the newest release's archive and `SHA256SUMS`, as [Download a release](#download-a-release-linux) does, checks the archive against it, and installs the binary into `~/.cargo/bin`, where a build from source goes too, so an update either way replaces the same binary. It needs none of the build's tools and asks nothing. An archive that doesn't match its checksum stops it, naming the file, with nothing installed and nothing built instead; a download that stalls or fails stops it too, and it suggests `--from-source`. Where the release has no archive for the system (macOS, 32-bit or musl systems, a glibc older than 2.35, or a release whose archives aren't attached yet, in the hour after it is published), or with `--from-source`, it builds from source and says why.
 
-To build, it checks the tools the build needs, listed under [By hand](#by-hand), and installs those that need no administrator rights (rustup, just and trunk) after asking you once. trunk comes from its prebuilt release, checked against the SHA-256 the script pins; only on a system trunk publishes no release for is it built from source, with one build job per 2 GB of free memory. A download that stalls, finding no connection within 30 s or averaging under 1 KiB/s for 60 s, stops it, after three retries, with a message that says so; a slow one that still moves is left to finish. Those that need them, a C compiler, git and Node.js 26 or newer, it never installs: it names the missing ones with the command that installs them and stops, and it never runs `sudo`. It keeps Ladderback's source in `~/.local/share/ladderback/source`, checks out the newest release, and installs it with `just install` into `~/.cargo/bin`. The command runs the script on `main`, and the script installs the newest release, not `main` ([decision 79](../design/decisions/79-a-from-source-install-script.md)). Options go after `bash -s --`: `--from-source` builds from source on Linux too, `--yes` installs the missing tools without asking, `--dir <folder>` keeps the source elsewhere, and what follows `--` goes to `just install`, so `bash -s -- -- --root ~/.local` installs into `~/.local/bin`; from the archive only `--root` applies. `--help` lists them.
+To build, it checks the tools the build needs, listed under [By hand](#by-hand), and installs those that need no administrator rights (rustup, just and trunk) after asking you once. trunk comes from its prebuilt release, checked against the SHA-256 the script pins; only on a system trunk publishes no release for is it built from source, with one build job per 2 GB of free memory.
+
+A download that stalls, finding no connection within 30 s or averaging under 1 KiB/s for 60 s, stops it, after three retries, with a message that says so; a slow one that still moves is left to finish.
+
+Those that need them, a C compiler, git and Node.js 26 or newer, it never installs: it names the missing ones with the command that installs them and stops, and it never runs `sudo`.
+
+It keeps Ladderback's source in `~/.local/share/ladderback/source`, checks out the newest release, and installs it with `just install` into `~/.cargo/bin`. The command runs the script on `main`, and the script installs the newest release, not `main` ([decision 79](../design/decisions/79-a-from-source-install-script.md)).
+
+Options go after `bash -s --`:
+
+- `--from-source` builds from source on Linux too,
+- `--yes` installs the missing tools without asking,
+- `--dir <folder>` keeps the source elsewhere,
+- and what follows `--` goes to `just install`, so `bash -s -- -- --root ~/.local` installs into `~/.local/bin`; from the archive only `--root` applies.
+
+`--help` lists them.
 
 ## By hand
 
