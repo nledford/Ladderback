@@ -83,9 +83,10 @@ clippy:
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
 # dev-dependency), the tooling's own tests (`scripts/*.test.ts`, under Node's
 # built-in runner), the journey lint, the check that every path AGENTS.md and
-# CLAUDE.md name exists, then the check that no paragraph in docs/ runs over
-# 150 words (a file that has the exemption marker is exempt for now).
-[doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, and the docs paragraph-length check.')]
+# CLAUDE.md name exists, the check that no paragraph in docs/ runs over
+# 150 words (a file that has the exemption marker is exempt for now), then the
+# check that the §16 decision index matches the decision files.
+[doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, and the decision-index check.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --target wasm32-unknown-unknown -- -D warnings
@@ -94,6 +95,16 @@ lint: _ui-deps clippy
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
     node scripts/check-paragraph-length.ts
+    node scripts/decision-index.ts
+
+# Write the index of decisions in docs/design/roadmap.md §16 from the files in
+# docs/design/decisions/, one row per file, its number and its heading. After
+# adding or renumbering a decision, and to resolve a conflict in the table:
+# take either side, then run this.
+[doc('Write the §16 decision index from docs/design/decisions/.')]
+[group('quality')]
+decision-index:
+    node scripts/decision-index.ts --write
 
 # Lint the GitHub Actions workflows and the repository's own actions:
 # actionlint for the workflows' syntax, expressions and shell steps, zizmor for

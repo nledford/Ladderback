@@ -1,4 +1,4 @@
-# Decision 99: Who is trusted
+# Decision 99: Who is trusted with Ladderback's local data
 
 **Ladderback runs on a person's own computer, as a hub or an agent, so the person and every program running as their operating-system user are trusted with its local data; the security design defends the network, other users of the machine, a repository's storage and outside text** (recorded 2026-11-15; the rule is "Who is trusted" at the top of §10).
 
