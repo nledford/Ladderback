@@ -690,7 +690,7 @@ fn rule(reader: &Reader<'_, '_>, path: &Path, table: RuleTable) -> Read<Rule> {
     reader.value(&events_path, Rule::new(events, channel, plans, template))
 }
 
-fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {
+pub(crate) fn plan(reader: &Reader<'_, '_>, path: &Path, table: PlanTable) -> Read<Plan> {
     let id = reader.required(path, "id", table.id)?;
     let id = reader.id(&path.key("id"), PlanId::parse(&id))?;
     let repository = reader.required(path, "repository", table.repository)?;
