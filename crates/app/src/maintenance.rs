@@ -882,6 +882,12 @@ impl RunMaintenance {
                     plan: plan.plan.clone(),
                 });
             }
+            // An empty policy keeps everything (§6.1), so the plan loses
+            // nothing. It is never evaluated: rustic's retention refuses a
+            // policy that sets no `keep-*` option.
+            if plan.policy.is_empty() {
+                continue;
+            }
             let at = match opened.take() {
                 Some(at) => at,
                 None => self.in_process(op, access).await?,
