@@ -494,13 +494,17 @@ fn placed(new: &Item) -> Item {
 }
 
 /// Drops the place `table` and the tables in it had in the daemon's text,
-/// so each is written after the table before it in the file.
+/// so each is written after the table before it in the file: a place kept
+/// is one among the file's tables, wherever that puts it. The tables in it
+/// include those of an array, a repository's further locations.
 fn unplace(table: &mut Table) {
     table.set_position(None);
     table.decor_mut().set_prefix("\n");
     for (_, item) in table.iter_mut() {
-        if let Some(table) = item.as_table_mut() {
-            unplace(table);
+        match item {
+            Item::Table(table) => unplace(table),
+            Item::ArrayOfTables(tables) => tables.iter_mut().for_each(unplace),
+            Item::None | Item::Value(_) => {}
         }
     }
 }
