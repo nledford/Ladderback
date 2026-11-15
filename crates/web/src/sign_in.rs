@@ -349,26 +349,28 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
     }
 }
 
-/// The navigation's Sign out control, shown while the page has a session.
-/// Once the daemon has ended the session, the sign-in page takes the
-/// place of the page, and focus moves to its heading, as on a route change
-/// (§4.5). A sign-out that reaches no daemon says so beside the control, and
-/// the page stays signed in.
+/// The header's Sign out control, shown while the page has a session. Once
+/// the daemon has ended the session, the sign-in page takes the place of the
+/// page, and focus moves to its heading, as on a route change (§4.5). A
+/// sign-out that reaches no daemon sets `failed`, which [`SignOutFailure`]
+/// says, and the page stays signed in.
 #[component]
-pub(crate) fn SignOut(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl IntoView {
+pub(crate) fn SignOut(
+    localizer: Arc<Localizer>,
+    standing: RwSignal<Standing>,
+    failed: RwSignal<bool>,
+) -> impl IntoView {
     let busy = RwSignal::new(false);
-    let unanswered = RwSignal::new(false);
-    let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
     let sign_out = move |_| {
         if busy.get_untracked() {
             return;
         }
         busy.set(true);
-        unanswered.set(false);
+        failed.set(false);
         spawn_local(async move {
             let answered = ws::sign_out().await;
             busy.try_set(false);
-            unanswered.try_set(!answered);
+            failed.try_set(!answered);
             if answered {
                 standing.set(Standing::SignedOut);
             }
@@ -383,7 +385,21 @@ pub(crate) fn SignOut(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -
         >
             {text(&localizer, msg::UI_SIGN_OUT)}
         </button>
-        <p role="alert">{move || unanswered.get().then(|| unreachable.clone())}</p>
+    }
+}
+
+/// Says, at the top of the page's main content, that a sign-out reached no
+/// daemon. Not beside Sign out: a line in the header would grow it, and one
+/// laid over the page would hide what is under it. The alert is in the page
+/// from the sign-in on, empty, so a screen reader reads out the failure the
+/// moment it is written; empty, it takes no room.
+#[component]
+pub(crate) fn SignOutFailure(localizer: Arc<Localizer>, failed: RwSignal<bool>) -> impl IntoView {
+    let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
+    view! {
+        <p role="alert" class="sign-out-failure">
+            {move || failed.get().then(|| unreachable.clone())}
+        </p>
     }
 }
 

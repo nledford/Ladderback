@@ -103,12 +103,15 @@ a {
   inset-block-start: 0.5rem;
 }
 
-/* The brand on its own line, then the navigation and, at its right, the
-   running version, which wraps under the navigation on a narrow screen. */
+/* The brand on its own line, then the pages' links and, at that line's end,
+   the running version and Sign out (`.site-account`), which wrap under the
+   links on a narrow screen. Every part of the line stands on one baseline,
+   no part is taller than the links and nothing lies under them, so where
+   the line fits, the header is as tall signed in as with sign-in off. */
 .site-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: baseline;
   gap: 0 1rem;
   padding-block: 0.75rem;
   padding-inline: 1rem;
@@ -128,16 +131,25 @@ a {
   color: inherit;
 }
 
+/* The version and Sign out, at the end of the links' line. A flex item is no
+   narrower than its longest unbreakable run unless told otherwise. WebKit
+   measured the version's run (`0.3.1+cedec1f`) unbroken although
+   `overflow-wrap: anywhere` breaks it, so on a narrow screen with larger
+   text, right to left, the line stuck out and the page scrolled sideways
+   (1.4.10): the group and the version may both be narrower than that run. */
+.site-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 1rem;
+  margin-inline-start: auto;
+  min-inline-size: 0;
+}
+
 .site-version {
-  margin-block: 0.25rem 0;
-  margin-inline: auto 0;
+  margin: 0;
   padding-block: 0.25rem;
   color: var(--muted);
-  /* A flex item is no narrower than its longest unbreakable run unless told
-     otherwise. WebKit measured the version's run (`0.3.1+cedec1f`) unbroken
-     although `overflow-wrap: anywhere` breaks it, so on a narrow screen with
-     larger text, right to left, the line stuck out and the page scrolled
-     sideways (1.4.10). */
   min-inline-size: 0;
 }
 
@@ -148,8 +160,7 @@ a {
   flex-wrap: wrap;
   gap: 0.25rem 1rem;
   list-style: none;
-  margin-block: 0.25rem 0;
-  margin-inline: 0;
+  margin: 0;
   padding: 0;
 }
 
@@ -160,6 +171,18 @@ a {
 
 .site-nav a[aria-current="page"] {
   font-weight: 700;
+}
+
+/* A failed sign-out, said at the top of the main content
+   (`sign_in::SignOutFailure`): in the error's color and in words. Empty, it
+   takes no room. */
+.sign-out-failure {
+  margin-block: 0 1rem;
+  color: var(--badge-error-fg);
+}
+
+.sign-out-failure:empty {
+  margin-block: 0;
 }
 
 main {

@@ -129,7 +129,7 @@ use plans_page::Plans;
 use routes::{NotFound, Operations, Repositories, Start};
 use session::{SignInOffNotice, Standing, Title};
 use settings::Settings;
-use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut};
+use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut, SignOutFailure};
 use snapshot_page::Snapshot;
 use snapshots::Snapshots;
 
@@ -211,10 +211,9 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
-/// The site's navigation, shown wherever the pages are; while the page has a
-/// session, it ends with the Sign out control.
+/// The pages' links, shown wherever the pages are.
 #[component]
-fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl IntoView {
+fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
     let (label, operations, plans, snapshots, repositories, settings) = (
         text(&localizer, msg::UI_NAV_LABEL),
         text(&localizer, msg::UI_NAV_OPERATIONS),
@@ -241,18 +240,50 @@ fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl I
                 <li>
                     <A href="/settings">{settings}</A>
                 </li>
-                {move || {
-                    (standing.get() == Standing::SignedIn)
-                        .then(|| {
-                            view! {
-                                <li>
-                                    <SignOut localizer=Arc::clone(&localizer) standing=standing />
-                                </li>
-                            }
-                        })
-                }}
             </ul>
         </nav>
+    }
+}
+
+/// The end of the header's line, after the pages' links: the build the
+/// daemon runs, then, while the page has a session, Sign out, which is not a
+/// page and so stands apart from their list. The web UI is built into the
+/// daemon, so its build is the page's too; until the daemon has said which it
+/// is, no version is shown.
+#[component]
+fn Account(
+    localizer: Arc<Localizer>,
+    standing: RwSignal<Standing>,
+    running: RwSignal<Option<api::BuildDto>>,
+    sign_out_failed: RwSignal<bool>,
+) -> impl IntoView {
+    let versions = Arc::clone(&localizer);
+    let version = move || {
+        running.get().map(|build| {
+            let version = routes::text_with(
+                &versions,
+                msg::UI_VERSION,
+                &[("version", api::MsgArg::Text(build.display()))],
+            );
+            view! { <p class="site-version">{version}</p> }
+        })
+    };
+    view! {
+        <div class="site-account">
+            {version}
+            {move || {
+                (standing.get() == Standing::SignedIn)
+                    .then(|| {
+                        view! {
+                            <SignOut
+                                localizer=Arc::clone(&localizer)
+                                standing=standing
+                                failed=sign_out_failed
+                            />
+                        }
+                    })
+            }}
+        </div>
     }
 }
 
@@ -300,19 +331,18 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         now
     });
     let navigation = Arc::clone(&localizer);
-    // The build the daemon says it runs: the web UI is built into it, so it
-    // is the page's too. Until the daemon has said, nothing is shown.
-    let versions = Arc::clone(&localizer);
-    let version = move || {
-        build.get().map(|build| {
-            let version = routes::text_with(
-                &versions,
-                msg::UI_VERSION,
-                &[("version", api::MsgArg::Text(build.display()))],
-            );
-            view! { <p class="site-version">{version}</p> }
-        })
-    };
+    let account = Arc::clone(&localizer);
+    // Sign out is in the header and says in the page when it fails, so the
+    // header keeps its height (`sign_in::SignOutFailure`). The failure is
+    // the session's: once the page has none, from Sign out everywhere or a
+    // new password, it is not said again on the next sign-in.
+    let sign_out_failed = RwSignal::new(false);
+    Effect::new(move |_| {
+        if shown.get() != Standing::SignedIn {
+            sign_out_failed.set(false);
+        }
+    });
+    let failure = Arc::clone(&localizer);
     let pages = Arc::clone(&localizer);
     let dialog = Arc::clone(&localizer);
     let idle = Arc::clone(&localizer);
@@ -351,8 +381,13 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                         .shows_pages()
                         .then(|| {
                             view! {
-                                <Navigation localizer=Arc::clone(&navigation) standing=standing />
-                                {version.clone()}
+                                <Navigation localizer=Arc::clone(&navigation) />
+                                <Account
+                                    localizer=Arc::clone(&account)
+                                    standing=standing
+                                    running=build
+                                    sign_out_failed=sign_out_failed
+                                />
                             }
                         })
                 }}
@@ -363,6 +398,17 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                         .then(|| {
                             view! {
                                 <p id=routes::SIGN_IN_OFF_NETWORK_ID>{on_the_network.clone()}</p>
+                            }
+                        })
+                }}
+                {move || {
+                    (shown.get() == Standing::SignedIn)
+                        .then(|| {
+                            view! {
+                                <SignOutFailure
+                                    localizer=Arc::clone(&failure)
+                                    failed=sign_out_failed
+                                />
                             }
                         })
                 }}

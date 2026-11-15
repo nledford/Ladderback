@@ -92,6 +92,24 @@ Then("focus is on a control in the main content", async function (this: BrowserW
   assert.ok(inside, "expected focus on a control inside the main content");
 });
 
+// The daemon never hears the next sign-out: the request is lost on its way,
+// as when the daemon has stopped, and every request after it reaches the
+// daemon.
+When("the next sign-out reaches no daemon", async function (this: BrowserWorld) {
+  let lost = false;
+  await this.page.route(
+    (url) => url.pathname === "/api/v1/session",
+    async (route) => {
+      if (!lost && route.request().method() === "DELETE") {
+        lost = true;
+        await route.abort("connectionrefused");
+        return;
+      }
+      await route.fallback();
+    },
+  );
+});
+
 const notedHeights = new WeakMap<BrowserWorld, number>();
 
 When("the height of the header is noted", async function (this: BrowserWorld) {

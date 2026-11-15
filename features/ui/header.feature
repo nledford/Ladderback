@@ -52,6 +52,28 @@ Feature: The header bar
       | 1280  | 720    | 100  | light colors |
       | 320   | 256    | 200  | dark colors  |
 
+  Scenario: A failed sign-out isn't said again once the session has ended another way and the admin signs in again
+    Given a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/settings"
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Settings"
+    When the next sign-out reaches no daemon
+    And I press Shift+Tab until focus is on the button "Sign out"
+    And I press Enter
+    Then the page shows an alert containing "did not answer"
+    When I press Tab until focus is on the button "Sign out everywhere"
+    And I press Enter
+    And I press Tab until focus is on the button "Sign out every browser"
+    And I press Enter
+    Then focus is on the heading "Sign in to Ladderback"
+    When I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Settings"
+    And the page shows no alert containing "did not answer"
+
   Scenario Outline: On a narrow screen the running version and Sign out end the header's line, at <size> percent text
     Given a viewport of 320 by <height> pixels
     And the reader sets the text size to <size> percent
