@@ -12,6 +12,7 @@ use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
+use crate::badge::BadgeState;
 use crate::components::{
     Checkbox, Confirmation, FormField, ModalDialog, PauseUpdates, Progress, RadioGroup,
     ReviewDialog, SortableTable, StatusBadge, Toast, show_toast,
@@ -293,10 +294,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <section>
             <h2>{t(msg::UI_GALLERY_BADGE_HEADING)}</h2>
             <p class="flex flex-wrap gap-2">
-                <StatusBadge state="loading" label=t(msg::UI_GALLERY_BADGE_LOADING) />
-                <StatusBadge state="empty" label=t(msg::UI_GALLERY_BADGE_EMPTY) />
-                <StatusBadge state="error" label=t(msg::UI_GALLERY_BADGE_ERROR) />
-                <StatusBadge state="success" label=t(msg::UI_GALLERY_BADGE_SUCCESS) />
+                <StatusBadge state=BadgeState::Running label=t(msg::UI_GALLERY_BADGE_LOADING) />
+                <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
+                <StatusBadge state=BadgeState::Failed label=t(msg::UI_GALLERY_BADGE_ERROR) />
+                <StatusBadge state=BadgeState::Succeeded label=t(msg::UI_GALLERY_BADGE_SUCCESS) />
             </p>
         </section>
         <section>
