@@ -86,6 +86,14 @@ impl std::fmt::Debug for SecretValue {
     }
 }
 
+impl zeroize::Zeroize for SecretValue {
+    fn zeroize(&mut self) {
+        todo!()
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for SecretValue {}
+
 /// What a secret is replaced with.
 pub const REDACTED: &str = "***";
 
@@ -996,6 +1004,25 @@ mod tests {
             "a masked value still shows: {debug}"
         );
         assert_eq!(secret.expose(), "hunter2");
+    }
+
+    /// A secret wipes its bytes when it is dropped (it is `ZeroizeOnDrop`).
+    /// What its drop does is done here to one still in scope, so what is
+    /// left of it can be looked at; a clone has bytes of its own and is
+    /// wiped on its own.
+    #[test]
+    fn a_secret_wiped_as_its_drop_wipes_it_keeps_none_of_its_bytes() {
+        fn wiped_on_drop(_: &impl zeroize::ZeroizeOnDrop) {}
+        let mut secret = SecretValue::new("canary-7f3a");
+        let mut clone = secret.clone();
+        wiped_on_drop(&secret);
+
+        zeroize::Zeroize::zeroize(&mut secret);
+
+        assert_eq!(secret.expose(), "");
+        assert_eq!(clone.expose(), "canary-7f3a");
+        zeroize::Zeroize::zeroize(&mut clone);
+        assert_eq!(clone.expose(), "");
     }
 
     #[test]

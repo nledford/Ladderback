@@ -185,6 +185,14 @@ impl std::fmt::Debug for ApiTokenSecret {
     }
 }
 
+impl zeroize::Zeroize for ApiTokenSecret {
+    fn zeroize(&mut self) {
+        todo!()
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for ApiTokenSecret {}
+
 /// The SHA-256 of a token's secret: all the daemon keeps of it. Compared only
 /// in constant time.
 #[derive(Clone)]
@@ -242,6 +250,14 @@ impl std::fmt::Debug for ApiTokenText {
         f.write_str("ApiTokenText(***)")
     }
 }
+
+impl zeroize::Zeroize for ApiTokenText {
+    fn zeroize(&mut self) {
+        todo!()
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for ApiTokenText {}
 
 fn base64_char(sextet: u32) -> char {
     let index = usize::try_from(sextet & 63).unwrap_or(0);

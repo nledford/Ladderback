@@ -62,6 +62,35 @@ fn the_secret_is_written_as_base64url() {
     );
 }
 
+fn wiped_on_drop(_: &impl zeroize::ZeroizeOnDrop) {}
+
+/// A token's secret wipes its bytes when it is dropped (it is
+/// `ZeroizeOnDrop`); what its drop does is done here to one still in scope.
+#[test]
+fn a_tokens_secret_wiped_as_its_drop_wipes_it_keeps_none_of_its_bytes() {
+    let mut secret = ApiTokenSecret::from_bytes(bytes(7));
+    let mut clone = secret.clone();
+    wiped_on_drop(&secret);
+
+    zeroize::Zeroize::zeroize(&mut secret);
+
+    assert_eq!(secret.0[..], [0; TOKEN_BYTES]);
+    assert_eq!(clone.0[..], bytes(7));
+    zeroize::Zeroize::zeroize(&mut clone);
+    assert_eq!(clone.0[..], [0; TOKEN_BYTES]);
+}
+
+/// A token's text, the secret written out, wipes itself the same way.
+#[test]
+fn a_tokens_text_wiped_as_its_drop_wipes_it_keeps_none_of_its_bytes() {
+    let (_, mut text) = issued(3);
+    wiped_on_drop(&text);
+
+    zeroize::Zeroize::zeroize(&mut text);
+
+    assert_eq!(text.expose(), "");
+}
+
 #[test]
 fn a_token_accepts_the_text_it_was_shown_as() {
     for seed in [0, 1, 2, 77, 255] {

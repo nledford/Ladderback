@@ -181,6 +181,14 @@ impl std::fmt::Debug for Password {
     }
 }
 
+impl zeroize::Zeroize for Password {
+    fn zeroize(&mut self) {
+        todo!()
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for Password {}
+
 /// A secret the daemon hands out: a session's cookie or its CSRF token,
 /// [`TOKEN_BYTES`] random bytes written as lower-case hex. Its `Debug` hides
 /// it, and it has no `==`: it is compared only by [`Self::matches`], in

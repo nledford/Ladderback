@@ -1620,6 +1620,7 @@ dependencies = [
  "subtle",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
