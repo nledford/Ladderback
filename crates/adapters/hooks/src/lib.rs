@@ -389,7 +389,7 @@ async fn read_capped(
         if read > room {
             *truncated = true;
         }
-        kept.extend_from_slice(&chunk[..read.min(room)]);
+        kept.extend(chunk.iter().take(read.min(room)));
     }
 }
 

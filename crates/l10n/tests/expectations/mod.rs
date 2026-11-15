@@ -64,14 +64,14 @@ impl Outcome {
 
 /// Writes every case of `locale` through a localizer that speaks it.
 pub fn run(locale: &str) -> Vec<Outcome> {
-    let at = LOCALES
+    let (cases, sources) = LOCALES
         .iter()
-        .position(|cases| cases.locale == locale)
+        .zip(SOURCES.iter())
+        .find(|(cases, _)| cases.locale == locale)
         .unwrap_or_else(|| panic!("the table has no cases for {locale}"));
-    let cases = &LOCALES[at];
     let catalog = Catalog {
         tag: &cases.locale,
-        sources: &SOURCES[at],
+        sources,
     };
     let localizer =
         Localizer::from_catalogs(&[locale.parse().expect("a language tag")], &[catalog]);
@@ -112,8 +112,9 @@ struct Locale {
 static LOCALES: LazyLock<Vec<Locale>> = LazyLock::new(|| {
     let table: Value = serde_json::from_str(TABLE).expect("formatting.json is JSON");
     let mut by_locale: BTreeMap<String, Locale> = BTreeMap::new();
-    for case in table["cases"]
-        .as_array()
+    for case in table
+        .get("cases")
+        .and_then(Value::as_array)
         .expect("formatting.json has a list of cases")
     {
         let case = case.as_object().expect("a case is an object");

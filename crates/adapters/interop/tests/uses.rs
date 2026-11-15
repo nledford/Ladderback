@@ -2,6 +2,7 @@
 //! them and merged the way rustic merges them, within bounds a profile
 //! nobody vetted can't push past (technical design §6.2).
 
+#[expect(dead_code, reason = "this file uses a part of the shared helpers")]
 mod common;
 
 use std::fs;

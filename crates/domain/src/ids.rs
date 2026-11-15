@@ -247,7 +247,12 @@ mod tests {
 
     #[test]
     fn anything_else_is_not_a_rustic_id() {
-        for value in ["", &HEX[1..], &format!("{HEX}0"), &HEX.replace('a', "g")] {
+        for value in [
+            "",
+            HEX.get(1..).unwrap(),
+            &format!("{HEX}0"),
+            &HEX.replace('a', "g"),
+        ] {
             assert_eq!(
                 RepositoryId::parse(value),
                 Err(InvalidId {

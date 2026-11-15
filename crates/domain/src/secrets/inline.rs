@@ -652,7 +652,7 @@ mod tests {
             assert_eq!(starts.len(), pieces.len() + 1, "{text:?}");
             assert_eq!(starts.last(), Some(&text.len()), "{text:?}");
             for (at, piece) in pieces.iter().enumerate() {
-                let written = &text[starts[at]..starts[at + 1]];
+                let written = text.get(starts[at]..starts[at + 1]).unwrap();
                 let expected = match piece {
                     Piece::Char('$') if written == "$$" => true,
                     Piece::Char(c) => written == c.to_string(),

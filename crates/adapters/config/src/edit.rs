@@ -329,6 +329,10 @@ fn filled(gap: Vec<Gap>, own: &str, end: bool) -> String {
 
 /// `before`, the text before an entry, up to and with its last blank
 /// line: what is above the comment directly over the entry.
+#[expect(
+    clippy::string_slice,
+    reason = "`end` is 0 or the end of a line `split_inclusive` gave: a char boundary of `before`"
+)]
 fn above(before: &str) -> &str {
     let mut end = 0;
     let mut read = 0;
@@ -344,6 +348,10 @@ fn above(before: &str) -> &str {
 /// `after`, the text after an entry removed, from its first blank line:
 /// the lines directly below the entry's last are its own. With no blank
 /// line, they are those of the entry that follows, or the file's `end`.
+#[expect(
+    clippy::string_slice,
+    reason = "`read` is 0 or the end of a line `split_inclusive` gave: a char boundary of `after`"
+)]
 fn below(after: &str, end: bool) -> &str {
     let mut read = 0;
     for line in after.split_inclusive('\n') {

@@ -190,22 +190,18 @@ mod tests {
         }
     }
 
-    #[allow(clippy::panic)]
     fn repository() -> RepositoryId {
         RepositoryId::parse(&"a".repeat(64)).unwrap_or_else(|e| panic!("a repository ID: {e:?}"))
     }
 
-    #[allow(clippy::panic)]
     fn snapshot() -> SnapshotId {
         SnapshotId::parse(&"3f".repeat(32)).unwrap_or_else(|e| panic!("a snapshot ID: {e:?}"))
     }
 
-    #[allow(clippy::panic)]
     fn alias() -> RepositoryAlias {
         RepositoryAlias::parse("demo").unwrap_or_else(|e| panic!("an alias: {e:?}"))
     }
 
-    #[allow(clippy::panic)]
     fn path(text: &str) -> FolderPath {
         FolderPath::parse(text).unwrap_or_else(|e| panic!("a path: {e:?}"))
     }
@@ -230,7 +226,6 @@ mod tests {
         }
     }
 
-    #[allow(clippy::panic)]
     fn page() -> FolderPage {
         FolderPage {
             entries: vec![Entry {

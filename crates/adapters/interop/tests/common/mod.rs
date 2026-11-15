@@ -1,8 +1,6 @@
 //! What the reader's tests share: a scratch folder with the three places a
 //! used profile is looked for, and profiles written into them.
 
-#![allow(dead_code, reason = "each test file uses a part of this")]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 

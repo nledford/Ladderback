@@ -40,13 +40,11 @@ pub struct Events {
     pages: Vec<Page>,
     /// The page that connected and then never reads again. Held for the
     /// scenario's lifetime so the connection stays open.
-    #[allow(dead_code)]
     stalled: Option<Page>,
     /// The outcome of asking a daemon to serve that was expected to refuse.
     asked_to_serve: Option<Outcome>,
     /// A second daemon that started on the folders the first one holds, kept
     /// so the scenario's end stops it.
-    #[allow(dead_code)]
     second: Option<Daemon>,
     /// How the daemon ended once it was told to stop.
     stopped: Option<ExitStatus>,

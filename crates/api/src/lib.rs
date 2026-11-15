@@ -3450,7 +3450,10 @@ impl OperationSummaryDto {
     /// a time that isn't RFC 3339, like [`SnapshotDto::new`]. The arity is
     /// the wire's: one argument per field of the published shape, except
     /// `failure-code`, which is the code of `failure`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the arity is the wire's: one argument per field of the published shape"
+    )]
     pub fn new(
         id: String,
         plan: String,

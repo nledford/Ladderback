@@ -11,6 +11,15 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 
+# The lints Cargo.toml adds beyond `all` (technical design §13.5): no block
+# nested deeper than six, and tests may index (production code uses `get()`;
+# string slices are checked in tests too). `cognitive-complexity-threshold`
+# stays at clippy's default, 25.
+# Repeated in `domain`'s and `app`'s clippy.toml; the architecture check makes
+# sure they agree.
+excessive-nesting-threshold = 6
+allow-indexing-slicing-in-tests = true
+
 # On macOS, a signal that interrupts `TcpStream::connect` can make it return a
 # stream that is not connected yet (testkit/src/net.rs, #170). `domain` and
 # `app` don't need this line: their clippy.toml bans the whole type.

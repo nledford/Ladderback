@@ -172,18 +172,18 @@ async fn a_lagging_subscriber_never_gives_up_a_state_change_for_progress(
     let seen = take(&mut stalled, operations.len()).await;
     assert_eq!(
         seen.last(),
-        Some(&finishes[EVENT_BUFFER]),
+        finishes.last(),
         "a state change is never dropped, not even for other state changes"
     );
 
     // A progress event arrives while the queue holds nothing but state
     // changes: it is the progress that goes, not the state changes.
     publish_all(&bus, &finishes).await;
-    publish_all(&bus, &[progress(&operations[0], 0)]).await;
+    publish_all(&bus, &[progress(&operation("00"), 0)]).await;
     let seen = take(&mut stalled, operations.len()).await;
     assert_eq!(
-        seen,
-        finishes[1..],
+        Some(seen.as_slice()),
+        finishes.get(1..),
         "progress is dropped before any state change is"
     );
 }

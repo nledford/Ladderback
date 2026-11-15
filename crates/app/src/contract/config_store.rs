@@ -115,86 +115,53 @@ fn strings(items: &[&str]) -> Vec<String> {
 /// Every part set, to values that no default and no neighbouring part
 /// shares, and with the characters a file format has to quote.
 fn rich() -> Option<AgentConfig> {
-    let agent_settings = AgentSettings {
+    let nas = alias("nas")?;
+    let cloud = alias("cloud")?;
+    let repositories = rich_repositories(&nas, &cloud)?;
+    let home = home_plan(nas)?;
+    let mut plans = vec![home];
+    plans.extend(cloud_plans(cloud)?);
+    AgentConfig::new(
+        rich_agent_settings()?,
+        rich_agent_hooks()?,
+        repositories,
+        plans,
+    )
+    .ok()
+}
+
+/// [`rich`]'s agent settings: each one set, none to its default.
+fn rich_agent_settings() -> Option<AgentSettings> {
+    Some(AgentSettings {
         hostname: Some(Hostname::parse("demo-host").ok()?),
         concurrency: Concurrency::new(4).ok()?,
         nice: Some(Nice::new(10).ok()?),
         allow_hub_restore: true,
         locale: Some(Locale::parse("en-US").ok()?),
-    };
-    let agent_hooks = Hooks {
+    })
+}
+
+/// [`rich`]'s agent hooks: one in each list.
+fn rich_agent_hooks() -> Option<Hooks> {
+    Some(Hooks {
         run_before: vec![hook("echo 'agent starting'")?],
         run_after: vec![HookEntry::new("true", Vec::<String>::new(), OnFailure::Ignore).ok()?],
         run_failed: vec![hook("echo failed")?],
         run_finally: vec![hook("echo done")?],
-    };
+    })
+}
 
-    let nas = alias("nas")?;
-    let cloud = alias("cloud")?;
-    let usb = alias("usb")?;
-    let repositories = BTreeMap::from([
+/// [`rich`]'s repositories, `nas` and `cloud` among them: one for each kind
+/// of password reference, each kind of maintenance and each shape of hooks.
+fn rich_repositories(
+    nas: &RepositoryAlias,
+    cloud: &RepositoryAlias,
+) -> Option<BTreeMap<RepositoryAlias, RepositoryConfig>> {
+    Some(BTreeMap::from([
+        (nas.clone(), nas_repository()?),
+        (cloud.clone(), cloud_repository()?),
         (
-            nas.clone(),
-            RepositoryConfig {
-                locations: Default::default(),
-                id: Some(RepositoryId::parse(&"0123456789abcdef".repeat(4)).ok()?),
-                settings: RepositorySettings {
-                    password: SecretRef::Command(
-                        CommandLine::new(
-                            "security",
-                            ["find-generic-password", "-s", "demo nas", "-w"],
-                        )
-                        .ok()?,
-                    ),
-                    options: strings_by_name(&[(
-                        "sftp.command",
-                        "ssh -o 'x y' backup@nas.lan -s sftp",
-                    )]),
-                    ..settings("sftp://backup@nas.lan/backups/demo")
-                },
-                maintenance: Maintenance::Hub,
-                group_by: GroupBy {
-                    host: true,
-                    label: false,
-                    paths: true,
-                    tags: true,
-                },
-                hooks: Hooks {
-                    run_before: vec![hook("echo 'repository ready'")?],
-                    run_after: vec![hook("echo 'repository done'")?],
-                    run_failed: vec![hook("echo 'repository failed'")?],
-                    run_finally: vec![hook("echo 'repository finally'")?],
-                },
-            },
-        ),
-        (
-            cloud.clone(),
-            RepositoryConfig {
-                locations: Default::default(),
-                id: None,
-                settings: RepositorySettings {
-                    repo_hot: Some("/srv/demo-hot".to_owned()),
-                    password: SecretRef::Keyring(
-                        KeyringEntry::parse("ladderback/demo cloud").ok()?,
-                    ),
-                    options: strings_by_name(&[
-                        ("endpoint", "https://${DEMO_HOST}/path"),
-                        ("key", "${file:/home/demo/.s3 key}"),
-                    ]),
-                    options_hot: strings_by_name(&[("region", "us-east-1")]),
-                    options_cold: strings_by_name(&[("storage-class", "GLACIER")]),
-                    ..settings("s3:s3.example.lan/demo-bucket")
-                },
-                maintenance: Maintenance::Local,
-                group_by: GroupBy::default(),
-                hooks: Hooks {
-                    run_failed: vec![hook("echo 'cloud failed'")?],
-                    ..Hooks::default()
-                },
-            },
-        ),
-        (
-            usb,
+            alias("usb")?,
             RepositoryConfig {
                 locations: Default::default(),
                 id: None,
@@ -246,11 +213,73 @@ fn rich() -> Option<AgentConfig> {
                 hooks: Hooks::default(),
             },
         ),
-    ]);
+    ]))
+}
 
-    let home = Plan {
+/// [`rich`]'s `nas`: a recorded ID, a password from a command, an option
+/// with quotes, the hub's maintenance, and a hook in each list.
+fn nas_repository() -> Option<RepositoryConfig> {
+    Some(RepositoryConfig {
+        locations: Default::default(),
+        id: Some(RepositoryId::parse(&"0123456789abcdef".repeat(4)).ok()?),
+        settings: RepositorySettings {
+            password: SecretRef::Command(
+                CommandLine::new(
+                    "security",
+                    ["find-generic-password", "-s", "demo nas", "-w"],
+                )
+                .ok()?,
+            ),
+            options: strings_by_name(&[("sftp.command", "ssh -o 'x y' backup@nas.lan -s sftp")]),
+            ..settings("sftp://backup@nas.lan/backups/demo")
+        },
+        maintenance: Maintenance::Hub,
+        group_by: GroupBy {
+            host: true,
+            label: false,
+            paths: true,
+            tags: true,
+        },
+        hooks: Hooks {
+            run_before: vec![hook("echo 'repository ready'")?],
+            run_after: vec![hook("echo 'repository done'")?],
+            run_failed: vec![hook("echo 'repository failed'")?],
+            run_finally: vec![hook("echo 'repository finally'")?],
+        },
+    })
+}
+
+/// [`rich`]'s `cloud`: a hot repository, a password from the keyring, and
+/// options of every tier, some with references.
+fn cloud_repository() -> Option<RepositoryConfig> {
+    Some(RepositoryConfig {
+        locations: Default::default(),
+        id: None,
+        settings: RepositorySettings {
+            repo_hot: Some("/srv/demo-hot".to_owned()),
+            password: SecretRef::Keyring(KeyringEntry::parse("ladderback/demo cloud").ok()?),
+            options: strings_by_name(&[
+                ("endpoint", "https://${DEMO_HOST}/path"),
+                ("key", "${file:/home/demo/.s3 key}"),
+            ]),
+            options_hot: strings_by_name(&[("region", "us-east-1")]),
+            options_cold: strings_by_name(&[("storage-class", "GLACIER")]),
+            ..settings("s3:s3.example.lan/demo-bucket")
+        },
+        maintenance: Maintenance::Local,
+        group_by: GroupBy::default(),
+        hooks: Hooks {
+            run_failed: vec![hook("echo 'cloud failed'")?],
+            ..Hooks::default()
+        },
+    })
+}
+
+/// [`rich`]'s `home` plan on `nas`: every part set.
+fn home_plan(nas: RepositoryAlias) -> Option<Plan> {
+    Some(Plan {
         id: plan_id("home")?,
-        repository: nas.clone(),
+        repository: nas,
         host: Some(Hostname::parse("demo-laptop").ok()?),
         label: Some("Demo \"home\" backup #1 \u{2013} caf\u{e9}".to_owned()),
         sources: vec![
@@ -269,18 +298,7 @@ fn rich() -> Option<AgentConfig> {
         ),
         overlap: Overlap::Queue,
         retry: Some(RetryPolicy::new(3, SignedDuration::from_millis(600_500)).ok()?),
-        filter: SourceFilter {
-            globs: strings(&["*.tmp", "!keep.tmp", "# not a comment", "say \"hi\""]),
-            iglobs: strings(&["*.LOG"]),
-            glob_files: vec![GlobFile::parse("/home/demo/.excludes").ok()?],
-            iglob_files: vec![GlobFile::parse("/home/demo/.iexcludes").ok()?],
-            git_ignore: true,
-            no_require_git: true,
-            custom_ignorefiles: strings(&[".resticignore", ".backupignore"]),
-            exclude_if_present: strings(&[".nobackup", "CACHEDIR.TAG"]),
-            exclude_if_xattr: strings(&["com.apple.metadata:com_apple_backup_excludeItem"]),
-            one_file_system: true,
-        },
+        filter: home_filter()?,
         retention: RetentionPolicy {
             keep_last: count(1),
             keep_minutely: count(2),
@@ -301,32 +319,56 @@ fn rich() -> Option<AgentConfig> {
             keep_within_half_yearly: within("1 year"),
             keep_within_yearly: within("2 years"),
         },
-        hooks: Hooks {
-            run_before: vec![hook("echo 'plan starting' --now")?],
-            run_after: vec![
-                HookEntry::new(
-                    "/opt/demo tools/notify",
-                    [
-                        "done",
-                        "two words",
-                        "it's",
-                        "say \"hi\"",
-                        "back\\slash",
-                        "tab\there",
-                    ],
-                    OnFailure::Warn,
-                )
-                .ok()?,
-                hook("echo 'second one'")?,
-            ],
-            run_failed: vec![
-                hook("echo failed")?,
-                HookEntry::new("true", Vec::<String>::new(), OnFailure::Ignore).ok()?,
-            ],
-            run_finally: vec![hook("echo finished")?],
-        },
-    };
+        hooks: home_hooks()?,
+    })
+}
 
+/// The `home` plan's filter: every option set.
+fn home_filter() -> Option<SourceFilter> {
+    Some(SourceFilter {
+        globs: strings(&["*.tmp", "!keep.tmp", "# not a comment", "say \"hi\""]),
+        iglobs: strings(&["*.LOG"]),
+        glob_files: vec![GlobFile::parse("/home/demo/.excludes").ok()?],
+        iglob_files: vec![GlobFile::parse("/home/demo/.iexcludes").ok()?],
+        git_ignore: true,
+        no_require_git: true,
+        custom_ignorefiles: strings(&[".resticignore", ".backupignore"]),
+        exclude_if_present: strings(&[".nobackup", "CACHEDIR.TAG"]),
+        exclude_if_xattr: strings(&["com.apple.metadata:com_apple_backup_excludeItem"]),
+        one_file_system: true,
+    })
+}
+
+/// The `home` plan's hooks, with arguments a file format has to quote.
+fn home_hooks() -> Option<Hooks> {
+    Some(Hooks {
+        run_before: vec![hook("echo 'plan starting' --now")?],
+        run_after: vec![
+            HookEntry::new(
+                "/opt/demo tools/notify",
+                [
+                    "done",
+                    "two words",
+                    "it's",
+                    "say \"hi\"",
+                    "back\\slash",
+                    "tab\there",
+                ],
+                OnFailure::Warn,
+            )
+            .ok()?,
+            hook("echo 'second one'")?,
+        ],
+        run_failed: vec![
+            hook("echo failed")?,
+            HookEntry::new("true", Vec::<String>::new(), OnFailure::Ignore).ok()?,
+        ],
+        run_finally: vec![hook("echo finished")?],
+    })
+}
+
+/// [`rich`]'s plans on `cloud`, after `home`: `work`, `photos` and `mail`.
+fn cloud_plans(cloud: RepositoryAlias) -> Option<[Plan; 3]> {
     // Nothing but what a plan needs: its defaults must come back as defaults.
     let work = Plan::new(
         plan_id("work")?,
@@ -355,13 +397,7 @@ fn rich() -> Option<AgentConfig> {
         ..Plan::new(plan_id("mail")?, cloud, vec![source("/home/demo/mail")?])
     };
 
-    AgentConfig::new(
-        agent_settings,
-        agent_hooks,
-        repositories,
-        vec![home, work, photos, mail],
-    )
-    .ok()
+    Some([work, photos, mail])
 }
 
 /// One repository and one plan, with nothing else set: no part of it

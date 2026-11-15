@@ -6,7 +6,8 @@
 #   - `domain` builds for wasm32-unknown-unknown;
 #   - ICU4X's locale data is the daemon's alone: `l10n` and `web` build
 #     without it, and `ladderback` builds with it (technical design §8.4);
-#   - the inner rings share one banned-call list (clippy.toml);
+#   - the inner rings share one banned-call list (clippy.toml), and every
+#     clippy.toml sets the same lint thresholds and test exemptions;
 #   - a release build leaves out the development pseudolocales' `fluent-pseudo`
 #     (technical design §8.4): `ladderback` and `web` have it by default, and not
 #     when built with the release flags (`--no-default-features`, as a release is);
@@ -287,6 +288,39 @@ while IFS= read -r root; do
 done <<<"$roots"
 if ((no_panic_ok)); then
   echo "ok: crate roots deny panicking code; every clippy.toml lets tests use it"
+else
+  status=1
+fi
+
+# The lints Cargo.toml adds beyond `all` (technical design §13.5) take their
+# thresholds and their test exemption from the nearest clippy.toml (or
+# .clippy.toml), so every one must carry the same lines; none sets the
+# cognitive-complexity threshold (or its old name, cyclomatic), so all keep
+# clippy's default.
+lint_settings=('excessive-nesting-threshold = 6' 'allow-indexing-slicing-in-tests = true')
+lint_settings_ok=1
+for file in clippy.toml $(find . -maxdepth 1 -name .clippy.toml) $(find crates \( -name clippy.toml -o -name .clippy.toml \) | sort); do
+  for setting in "${lint_settings[@]}"; do
+    if ! grep -qx "$setting" "$file"; then
+      echo "error: $file lacks '$setting'" >&2
+      lint_settings_ok=0
+    fi
+  done
+  if grep -Eq '^[[:space:]]*(cognitive|cyclomatic)-complexity-threshold' "$file"; then
+    echo "error: $file sets the cognitive-complexity threshold; every clippy.toml keeps clippy's default" >&2
+    lint_settings_ok=0
+  fi
+done
+# `allow_attributes` sees only outer attributes: an inner `#![allow(…)]` or
+# `#![cfg_attr(…, allow(…))]` would pass clippy and go stale unnoticed.
+inner_allows=$(git grep -nE '^[[:space:]]*#!\[[[:space:]]*(allow|cfg_attr\(.*[^_a-z]allow)[[:space:]]*\(' -- '*.rs' || true)
+if [[ -n $inner_allows ]]; then
+  echo "error: an inner allow attribute; write #![expect(…, reason = \"…\")]:" >&2
+  echo "$inner_allows" >&2
+  lint_settings_ok=0
+fi
+if ((lint_settings_ok)); then
+  echo "ok: every clippy.toml sets the same nesting threshold and test exemption; no inner allow"
 else
   status=1
 fi

@@ -14,7 +14,10 @@
 // `ConfigError` is the port's, and its shape is fixed there: a located error
 // carries the file, the key, the place and the detail, which makes it larger
 // than clippy likes for a `Result`. Loading a file is not a hot path.
-#![allow(clippy::result_large_err)]
+#![expect(
+    clippy::result_large_err,
+    reason = "`ConfigError` is the port's, its shape fixed there; loading a file is not a hot path"
+)]
 
 mod edit;
 mod files;

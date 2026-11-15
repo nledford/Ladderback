@@ -54,7 +54,6 @@ pub async fn never_matching_globs(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "test code")]
 mod tests {
     use async_trait::async_trait;
     use domain::planning::Source;

@@ -24,20 +24,20 @@ use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::hooks::use_location;
 use leptos_router::path;
 
-// Nothing but the gallery announces yet: the first page that does is a later
-// slice's, and until then a build without the gallery leaves these unused.
-#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+// What a screen reader is told about the page's own changes, and when.
 mod announcer;
 // What a status badge shows for each state, decided on the host;
 // `components.rs`'s `StatusBadge` is its glue.
 mod badge;
 // The shared component set, exercised by the gallery in a `gallery` build; a
 // build without the gallery has no user for it yet.
-#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+#[cfg_attr(
+    not(feature = "gallery"),
+    expect(dead_code, reason = "only the gallery uses the shared components yet")
+)]
 mod components;
 // The focus-wrap decision is host-testable; components.rs (the DOM glue
 // around it) runs in a browser via the gallery's @ui scenarios.
-#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod focus;
 // The wasm32-only test modules (`just test-wasm` runs them under Node) are
 // declared with `cfg(test)` and `cfg(target_arch)` as two attributes, not as
@@ -49,7 +49,7 @@ mod focus;
 mod formatting;
 #[cfg(feature = "gallery")]
 mod gallery;
-#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+// The live regions' glue around the announcer.
 mod live;
 // What the admin password's and the API tokens' sections of Settings
 // decide, host-tested; `settings.rs` is their glue.
@@ -113,8 +113,13 @@ mod visit;
 mod wording;
 
 // The toast's arrival and lifetime decisions are host-testable; the DOM
-// glue around them runs in a browser via the gallery's @ui scenarios.
-#[cfg_attr(not(feature = "gallery"), allow(dead_code))]
+// glue around them runs in a browser via the gallery's @ui scenarios. Only
+// the gallery shows a toast yet, and the host tests use these decisions, so
+// only a build of neither leaves them unused.
+#[cfg_attr(
+    all(not(feature = "gallery"), not(test)),
+    expect(dead_code, reason = "only the gallery shows a toast yet")
+)]
 mod toast;
 
 use plans_page::Plans;

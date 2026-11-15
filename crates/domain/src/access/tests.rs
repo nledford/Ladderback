@@ -100,11 +100,11 @@ fn a_token_is_written_as_lower_case_hex_and_read_back() {
 #[test]
 fn only_sixty_four_lower_case_hex_digits_are_a_token() {
     let text = token(0xab).to_text();
-    assert!(Token::parse(&text[..63]).is_none());
+    assert!(Token::parse(text.get(..63).unwrap()).is_none());
     assert!(Token::parse(&format!("{text}0")).is_none());
     assert!(Token::parse(&text.to_uppercase()).is_none());
     assert!(Token::parse(&text.replacen('a', "g", 1)).is_none());
-    assert!(Token::parse(&format!("é{}", &text[2..])).is_none());
+    assert!(Token::parse(&format!("é{}", text.get(2..).unwrap())).is_none());
     assert!(Token::parse("").is_none());
     assert!(Token::parse(&"9".repeat(64)).unwrap().matches(&token(0x99)));
     assert!(Token::parse(&"f".repeat(64)).unwrap().matches(&token(0xff)));

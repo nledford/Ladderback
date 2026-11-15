@@ -211,7 +211,7 @@ async fn listing(
             "a page holds at most {size}: {listed:?}"
         );
         assert!(
-            listed.windows(2).all(|pair| pair[0] > pair[1]),
+            listed.is_sorted_by(|a, b| a > b),
             "a page lists the newest first, each operation once: {listed:?}"
         );
         if let Some(cursor) = after {
@@ -474,9 +474,10 @@ async fn every_kind_and_trigger_reads_back(store: &dyn OperationStore, fx: &Fixt
         },
     ];
     let mut n = 0x90;
+    let mut targets = targets.iter().cycle();
     for trigger in triggers {
-        for kind in kinds {
-            let target = targets[(n % 3) as usize].clone();
+        for (kind, target) in kinds.into_iter().zip(&mut targets) {
+            let target = target.clone();
             let op = Operation::queue(id(n), kind, trigger.clone(), target, at(0));
             save(store, &op, None).await;
             let found = read(store, id(n)).await.map(|found| found.record);
@@ -883,7 +884,11 @@ async fn a_page_ends_at_its_limit_and_says_whether_more_remain(
         let this = page(store, &query(docs, None, limit)).await;
         assert_eq!(
             ids(&this.operations),
-            newest_first[..first_page],
+            newest_first
+                .iter()
+                .take(first_page)
+                .cloned()
+                .collect::<Vec<_>>(),
             "limit {limit}"
         );
         assert_eq!(this.next, next.map(id), "limit {limit}");

@@ -952,7 +952,8 @@ mod tests {
 
     /// `text` cut after its first `bytes` bytes, and marked.
     fn cut_after(text: &str, bytes: usize) -> String {
-        format!("{}{WARNING_TEXT_CUT}", &text[..bytes])
+        let kept = text.get(..bytes).expect("a cut at a character's edge");
+        format!("{kept}{WARNING_TEXT_CUT}")
     }
 
     #[test]

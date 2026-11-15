@@ -2,6 +2,7 @@
 //! accepts every key, and reads each as the plan says it. The stock CLI is
 //! not a dependency of the build, so a machine without it skips the check.
 
+#[expect(dead_code, reason = "this file uses a part of the shared helpers")]
 mod common;
 
 use std::collections::BTreeMap;
@@ -105,28 +106,38 @@ fn at<'a>(value: &'a toml::Value, path: &str) -> &'a toml::Value {
         .unwrap_or_else(|| panic!("rustic shows nothing at {path}"))
 }
 
-#[test]
-fn the_stock_rustic_reads_every_key_the_writer_writes() {
+fn text(shown: &toml::Value, path: &str) -> String {
+    at(shown, path).as_str().expect("text").to_owned()
+}
+
+fn list(shown: &toml::Value, path: &str) -> Vec<String> {
+    at(shown, path)
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|item| item.as_str().expect("text").to_owned())
+        .collect()
+}
+
+/// Whether `rustic --version` runs.
+fn rustic_runs() -> bool {
     let mut version = Command::new("rustic");
     version
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if spawn_gate::hold(|| version.spawn())
+    spawn_gate::hold(|| version.spawn())
         .and_then(|mut child| child.wait())
-        .is_err()
-    {
-        testkit::skip!("rustic is not on the PATH");
-    }
-    let export = export();
-    let no_folders = std::ffi::OsStr::new("");
-    let written = RusticProfileWriter::new(KeyringCommand::of_this_platform(), Some(no_folders))
-        .render(&export)
-        .expect("the export is made");
+        .is_ok()
+}
+
+/// What `rustic show-config` shows of the profile `text`, read in a scratch
+/// folder with no environment but `PATH`.
+fn shown_by_rustic(text: &str) -> toml::Value {
     let scratch = tempdir().expect("a scratch folder");
     let profile = scratch.path().join("exported.toml");
-    std::fs::write(&profile, &written.text).expect("the profile");
+    std::fs::write(&profile, text).expect("the profile");
     let mut rustic = Command::new("rustic");
     rustic
         .arg("-P")
@@ -148,20 +159,32 @@ fn the_stock_rustic_reads_every_key_the_writer_writes() {
         output.status.success(),
         "rustic refused the profile: {}\n{}",
         String::from_utf8_lossy(&output.stderr),
-        written.text
+        text
     );
-    let shown: toml::Value = toml::from_str(&stdout)
-        .unwrap_or_else(|error| panic!("show-config is not TOML: {error}\n{stdout}"));
-    let text = |path: &str| at(&shown, path).as_str().expect("text").to_owned();
-    let list = |path: &str| -> Vec<String> {
-        at(&shown, path)
-            .as_array()
-            .expect("a list")
-            .iter()
-            .map(|item| item.as_str().expect("text").to_owned())
-            .collect()
-    };
+    toml::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("show-config is not TOML: {error}\n{stdout}"))
+}
 
+#[test]
+fn the_stock_rustic_reads_every_key_the_writer_writes() {
+    if !rustic_runs() {
+        testkit::skip!("rustic is not on the PATH");
+    }
+    let export = export();
+    let no_folders = std::ffi::OsStr::new("");
+    let written = RusticProfileWriter::new(KeyringCommand::of_this_platform(), Some(no_folders))
+        .render(&export)
+        .expect("the export is made");
+    let shown = shown_by_rustic(&written.text);
+
+    reads_the_repository(&shown);
+    reads_the_backup(&shown);
+    reads_the_hooks(&shown);
+    reads_the_forget(&shown);
+}
+
+fn reads_the_repository(shown: &toml::Value) {
+    let text = |path: &str| text(shown, path);
     assert_eq!(text("repository.repository"), "/srv/demo-repo");
     assert_eq!(text("repository.repo-hot"), "/srv/demo-hot");
     assert_eq!(text("repository.password-file"), "/srv/demo-password");
@@ -169,7 +192,11 @@ fn the_stock_rustic_reads_every_key_the_writer_writes() {
     assert_eq!(text("repository.options.retry"), "3");
     assert_eq!(text("repository.options-hot.region"), "hot-1");
     assert_eq!(text("repository.options-cold.region"), "cold-1");
+}
 
+fn reads_the_backup(shown: &toml::Value) {
+    let text = |path: &str| text(shown, path);
+    let list = |path: &str| list(shown, path);
     assert_eq!(text("backup.snapshots.0.name"), "home");
     assert_eq!(
         list("backup.snapshots.0.sources"),
@@ -202,24 +229,27 @@ fn the_stock_rustic_reads_every_key_the_writer_writes() {
     }
     for key in ["git-ignore", "no-require-git", "one-file-system"] {
         assert_eq!(
-            at(&shown, &format!("backup.snapshots.0.{key}")).as_bool(),
+            at(shown, &format!("backup.snapshots.0.{key}")).as_bool(),
             Some(true),
             "{key}"
         );
     }
-    // The hooks at the three levels: the ones that fail the operation are
-    // strings, the others tables rustic reads as such.
+}
+
+/// The hooks at the three levels: the ones that fail the operation are
+/// strings, the others tables rustic reads as such.
+fn reads_the_hooks(shown: &toml::Value) {
     for level in [
         "global.hooks",
         "repository.hooks",
         "backup.snapshots.0.hooks",
     ] {
         assert_eq!(
-            at(&shown, &format!("{level}.run-before.0")).as_str(),
+            at(shown, &format!("{level}.run-before.0")).as_str(),
             Some("true 'a b'"),
             "{level}"
         );
-        let table = at(&shown, &format!("{level}.run-before.1"));
+        let table = at(shown, &format!("{level}.run-before.1"));
         assert_eq!(
             table.get("command").and_then(toml::Value::as_str),
             Some("true"),
@@ -231,31 +261,34 @@ fn the_stock_rustic_reads_every_key_the_writer_writes() {
             "{level}"
         );
         assert_eq!(
-            at(&shown, &format!("{level}.run-after.0"))
+            at(shown, &format!("{level}.run-after.0"))
                 .get("on-failure")
                 .and_then(toml::Value::as_str),
             Some("ignore"),
             "{level}"
         );
     }
+}
 
-    assert_eq!(text("forget.group-by"), "");
-    assert_eq!(at(&shown, "forget.prune").as_bool(), Some(false));
-    assert_eq!(at(&shown, "forget.keep-last").as_integer(), Some(3));
-    assert_eq!(at(&shown, "forget.keep-daily").as_integer(), Some(7));
-    assert_eq!(at(&shown, "forget.keep-yearly").as_integer(), Some(-1));
+fn reads_the_forget(shown: &toml::Value) {
+    assert_eq!(text(shown, "forget.group-by"), "");
+    assert_eq!(at(shown, "forget.prune").as_bool(), Some(false));
+    assert_eq!(at(shown, "forget.keep-last").as_integer(), Some(3));
+    assert_eq!(at(shown, "forget.keep-daily").as_integer(), Some(7));
+    assert_eq!(at(shown, "forget.keep-yearly").as_integer(), Some(-1));
     // rustic shows the spans in its own words: both must read as the plan's.
     for (key, original) in [("keep-within", "1y 2mo"), ("keep-within-weekly", "4w")] {
         assert_eq!(
-            KeepWithin::parse(&text(&format!("forget.{key}"))).expect("a span"),
+            KeepWithin::parse(&text(shown, &format!("forget.{key}"))).expect("a span"),
             KeepWithin::parse(original).expect("a span"),
             "{key}"
         );
     }
     // One entry, whose two tags rustic ANDs; in whatever order it keeps them.
-    let filter = list("snapshot-filter.filter-tags");
+    let filter = list(shown, "snapshot-filter.filter-tags");
     assert_eq!(filter.len(), 1, "{filter:?}");
-    let mut tags: Vec<_> = filter[0].split(',').collect();
+    let entry = filter.first().expect("one entry");
+    let mut tags: Vec<_> = entry.split(',').collect();
     tags.sort_unstable();
     assert_eq!(
         tags,

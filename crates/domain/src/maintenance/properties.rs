@@ -157,8 +157,7 @@ fn agreed_tag<'a>(snapshot: &'a Snapshot, prefix: &str) -> Option<&'a str> {
     let mut texts: Vec<&str> = snapshot
         .tags
         .iter()
-        .filter(|tag| tag.starts_with(prefix))
-        .map(|tag| &tag[prefix.len()..])
+        .filter_map(|tag| tag.strip_prefix(prefix))
         .collect();
     texts.sort_unstable();
     texts.dedup();

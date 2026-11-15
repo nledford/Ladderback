@@ -74,9 +74,9 @@ Each fact lives in one file. Link to it rather than copying it. The design docum
 
 The daemon runs unattended and owns the operation queue, so a panic silently stops backups. Rules and reasons: §13.5.
 
-- No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!` outside tests. Return typed errors through `Result` and `?`. The one exception is a provably infallible case: `#[allow(clippy::expect_used, reason = "why it can't fail")]` and `.expect("…")`. Every production crate root denies these lints. `todo!()` stubs live only in the red `test:` commit.
+- No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!` outside tests. Return typed errors through `Result` and `?`. The one exception is a provably infallible case: `#[expect(clippy::expect_used, reason = "why it can't fail")]` and `.expect("…")`. Every production crate root denies these lints. `todo!()` stubs live only in the red `test:` commit.
 - Mutex poisoning is `lock().unwrap_or_else(PoisonError::into_inner)` or an error; a thread join is a `Result`.
-- Input-derived numbers are hostile: bytes from outside the process (worker output, `JobSpec`, HTTP requests, `config.toml`, imported profiles, sync messages) never size an allocation unbounded and never index unchecked. Use `get()`, not `[i]` or `[a..b]`; checked or saturating arithmetic; caps on line and message lengths (§4.1); slice strings only at char boundaries.
+- Input-derived numbers are hostile: bytes from outside the process (worker output, `JobSpec`, HTTP requests, `config.toml`, imported profiles, sync messages) never size an allocation unbounded and never index unchecked. Use `get()`, not `[i]` or `[a..b]`; checked or saturating arithmetic; caps on line and message lengths (§4.1); slice strings only at char boundaries. Clippy holds all code but tests to `get()`, and all code to checked string slices (`indexing_slicing`, `string_slice`; §13.5, rule 7).
 
 ## Where code goes
 
@@ -130,7 +130,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 **Never make a check pass by weakening it.** A red check stands for unfinished work. None of these turns it green:
 
 - `#[mutants::skip]` or a `.cargo/mutants.toml` exclusion for a mutant a test could catch. Only an equivalent mutant (one no behaviour can tell apart) or code that never runs on the host is excluded, each with its reason in a comment beside it, and the pull request names it (§13.1);
-- `#[allow(clippy::…)]` without a `reason` that proves the case, or for code that can fail;
+- an `#[expect(…)]` without a `reason` that proves the case, on code that can fail, or on a function too complex or too deeply nested that a split would fix (`#[allow]` isn't used at all: clippy refuses it, and `just architecture` an inner `#![allow]`; §13.5, rule 7);
 - `testkit::skip!` on a test that fails here rather than one that can't run here;
 - raising a test's limit to fit slow code: the e2e runner's 8 s stall check (§13.2), a step's or a scenario's timeout;
 - re-recording a golden file so it matches new output without saying in the pull request why the output changed;

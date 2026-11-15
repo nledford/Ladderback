@@ -631,10 +631,7 @@ fn groups_plan_newest_first(agent: &mut Agent, plan: String, count: usize) {
     let history = history_of(groups(agent), &plan);
     assert_eq!(history.snapshots.len(), count, "{history:?}");
     assert!(
-        history
-            .snapshots
-            .windows(2)
-            .all(|pair| pair[0].time > pair[1].time),
+        history.snapshots.is_sorted_by(|a, b| a.time > b.time),
         "newest first: {history:?}"
     );
 }

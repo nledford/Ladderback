@@ -1626,7 +1626,9 @@ fn profile(current: Option<serde_json::Value>) -> String {
         "spairport_status_information": "spairport_status_connected",
     });
     if let Some(current) = current {
-        en0["spairport_current_network_information"] = current;
+        en0.as_object_mut()
+            .expect("the block is an object")
+            .insert("spairport_current_network_information".to_owned(), current);
     }
     serde_json::json!({ "SPAirPortDataType": [{
         "spairport_airport_interfaces": [en0, {

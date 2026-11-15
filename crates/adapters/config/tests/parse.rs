@@ -22,7 +22,7 @@ use support::*;
 
 fn plan_of(text: &str) -> Plan {
     let parsed = parsed(text).expect("the file is valid");
-    parsed.config.plans()[0].clone()
+    parsed.config.plans().first().expect("a plan").clone()
 }
 
 fn alias(text: &str) -> RepositoryAlias {
