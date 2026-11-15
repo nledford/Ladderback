@@ -133,8 +133,8 @@ jobs:
     timeout-minutes: 45
     steps:
       # Every pull request is checked out: a docs-only one still runs the
-      # agent-guidance path check and the paragraph-length check below, which
-      # `just lint` runs for the rest.
+      # agent-guidance path check, the paragraph-length check and the
+      # decision-index check below, which `just lint` runs for the rest.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -154,9 +154,9 @@ jobs:
       # paragraph-length lints, the architecture checks and the contrast gate
       # give one answer anywhere, so they run on Linux alone; macOS needs no
       # Node then. A docs-only pull request sets Node up as well, for the
-      # paragraph-length check. Every setup-node reads Node's major version
-      # from ui-tests/.nvmrc, which a pull request of its own bumps
-      # (development.md §13.8).
+      # paragraph-length and decision-index checks. Every setup-node reads
+      # Node's major version from ui-tests/.nvmrc, which a pull request of its
+      # own bumps (development.md §13.8).
       - if: runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -165,6 +165,8 @@ jobs:
           cache-dependency-path: ui-tests/package-lock.json
       - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-paragraph-length.ts
+      - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+        run: node scripts/decision-index.ts
       - if: needs.changes.outputs.docs-only != 'true'
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:

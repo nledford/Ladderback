@@ -157,7 +157,7 @@ Several agents may work on the repository at once (§13.5). Whoever starts them 
 - passes `--jobs` to `just mutants` when several agents share the machine (the recipe unsets `CARGO_TARGET_DIR` and `CARGO_BUILD_TARGET_DIR`, so the jobs don't share one build folder), uses its own ports (never `just serve`'s 9898) and its own scratch folder (`just try` gives a daemon both), and never runs `rm -rf` on a shared path;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace;
 - runs the `rustic` CLI itself (a fixture repository, a measurement) with `--no-cache` or a `--cache-dir` inside its scratch folder: otherwise rustic writes to the developer's real cache folder, which `just try` and the tests keep out of (§16, decision 59);
-- adds a new §16 decision as `docs/design/decisions/NN-<slug>.md` plus its index row in §16, and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
+- adds a new §16 decision as `docs/design/decisions/NN-<slug>.md`, then runs `just decision-index`, which writes its row in §16 (never edit the table by hand; on a conflict in it, take either side and run the recipe again), and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
 
 ## Conventions
 
