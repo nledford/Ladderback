@@ -261,6 +261,13 @@ cli-service-not-ours = { $file } is not a service file { -brand-name } wrote, so
 
 ## The MCP server (components §4.6): `ladderback mcp`.
 
+# `ladderback mcp --connect` was given an address it can't use, and did not start. The address isn't repeated: it may hold a password.
+cli-mcp-connect-invalid = the address after { "--connect" } isn't an http or https address of a host, such as { "http://127.0.0.1:9898" } or { "https://nas.example.com" }, with no user name, password, query or fragment
+
+# The MCP server's client of the daemon's API could not start, so `ladderback mcp` did not start.
+# $detail (text): the HTTP library's own message. It is shown as it came.
+cli-mcp-cannot-start = cannot start the MCP server's client of the daemon: { $detail }
+
 # `ladderback mcp --connect --token-file` named a file that isn't there, so it did not start. Without the flag, a missing default token file means no token is sent.
 # $file (text): the token file's path, as it was given. It is shown as it is.
 cli-mcp-token-file-missing = the token file { $file } that { "--token-file" } names isn't there

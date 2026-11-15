@@ -264,7 +264,18 @@ impl Server {
         R: AsyncRead + Send + Unpin + 'static,
         W: AsyncWrite + Send + Unpin + 'static,
     {
-        todo!()
+        let transport =
+            AsyncRwTransport::new_server(input, output).with_max_line_length(MAX_MESSAGE_BYTES);
+        match ServiceExt::serve(self, transport).await {
+            Ok(running) => running
+                .waiting()
+                .await
+                .map(drop)
+                .map_err(|error| SessionFailed(error.to_string())),
+            // Input closed before the first request: nothing to serve.
+            Err(ServerInitializeError::ConnectionClosed(_)) => Ok(()),
+            Err(error) => Err(SessionFailed(error.to_string())),
+        }
     }
 
     async fn status(&self) -> CallToolResult {
@@ -295,9 +306,9 @@ fn structured(value: &impl Serialize, is_error: bool) -> CallToolResult {
         Ok(value) => CallToolResult::structured(value),
         // Only a map with keys that aren't text fails to serialize, and no
         // result holds one: said as a failure all the same, never a panic.
-        Err(error) => CallToolResult::error(vec![rmcp::model::ContentBlock::text(
-            error.to_string(),
-        )]),
+        Err(error) => {
+            CallToolResult::error(vec![rmcp::model::ContentBlock::text(error.to_string())])
+        }
     }
 }
 
@@ -358,7 +369,10 @@ impl ServerHandler for Server {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        let given = request.arguments.as_ref().is_some_and(|args| !args.is_empty());
+        let given = request
+            .arguments
+            .as_ref()
+            .is_some_and(|args| !args.is_empty());
         match request.name.as_ref() {
             STATUS if given => Err(McpError::invalid_params(
                 "the tool status takes no arguments",
