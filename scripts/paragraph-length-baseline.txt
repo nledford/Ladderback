@@ -17,7 +17,6 @@ docs/design/decisions/40-crash-recovery-and-the-data-dir.md
 docs/design/decisions/41-the-end-of-an-operation-is.md
 docs/design/decisions/42-a-maintenance-start-the-client-drops.md
 docs/design/decisions/43-dependency-policy.md
-docs/design/decisions/44-reviewing-maintenance-before-it-runs.md
 docs/design/decisions/46-the-toolings-language.md
 docs/design/decisions/48-who-maintains-a-saved-repository.md
 docs/design/decisions/51-what-a-checks-findings-are.md
