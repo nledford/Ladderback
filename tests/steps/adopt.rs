@@ -40,10 +40,25 @@ pub(crate) fn plan_tags(agent: &Agent, plan: &str) -> [String; 2] {
     ]
 }
 
+/// What the snapshot of the folder that a scenario says was made without
+/// Ladderback with a tag names as its program: restic's, which neither
+/// rustic_core's default nor this build of Ladderback says.
+const OTHER_PROGRAM: &str = "restic 0.17.3";
+
 /// Backs the scenario's folder up with plain rustic, carrying `tags`.
 pub(crate) async fn back_up_with_tags(
     agent: &Agent,
     tags: &[String],
+) -> rustic_core::repofile::SnapshotFile {
+    back_up_by(agent, tags, None).await
+}
+
+/// Backs the scenario's folder up with plain rustic, carrying `tags`, under
+/// `program` as its program version or rustic_core's own when it is `None`.
+async fn back_up_by(
+    agent: &Agent,
+    tags: &[String],
+    program: Option<&'static str>,
 ) -> rustic_core::repofile::SnapshotFile {
     let source = agent.backup.source.clone().expect("a plan source");
     let tags = tags.to_vec();
@@ -55,7 +70,10 @@ pub(crate) async fn back_up_with_tags(
         for tag in &tags {
             options = options.add_tags(tag).expect("a tag");
         }
-        let snapshot = options.to_snapshot().expect("a snapshot");
+        let mut snapshot = options.to_snapshot().expect("a snapshot");
+        if let Some(program) = program {
+            program.clone_into(&mut snapshot.program_version);
+        }
         repository
             .backup(&rustic_core::BackupOptions::default(), &paths, snapshot)
             .expect("a plain rustic backup")
@@ -71,7 +89,7 @@ async fn plan_holds_snapshot(agent: &mut Agent, plan: String) {
 
 #[given(expr = "the folder was backed up without Ladderback with the tag {string}")]
 async fn backed_up_with_tag(agent: &mut Agent, tag: String) {
-    back_up_with_tags(agent, &[tag]).await;
+    back_up_by(agent, &[tag], Some(OTHER_PROGRAM)).await;
 }
 
 #[given(expr = "an earlier adoption into the plan {string} saved its copy but left the original")]
@@ -269,5 +287,39 @@ async fn keeps_user_tag(agent: &mut Agent, tag: String) {
                 );
             }
         }
+    }
+}
+
+#[then("the adopted snapshot still names the program that made it")]
+async fn keeps_program(agent: &mut Agent) {
+    let finished = agent.finished.as_ref().expect("the adoption has run");
+    let Some(app::ports::EngineResult::Rewrite(summary)) = &finished.result else {
+        panic!("a rewrite's result, not {:?}", finished.result)
+    };
+    let created = summary.created.clone();
+    let programs: Vec<(SnapshotId, String)> = with_repository(agent, |repository| {
+        repository
+            .get_all_snapshots()
+            .expect("the snapshots load")
+            .into_iter()
+            .map(|snapshot| {
+                (
+                    SnapshotId::parse(&snapshot.id.to_hex()).expect("a snapshot ID"),
+                    snapshot.program_version,
+                )
+            })
+            .collect()
+    })
+    .await;
+    assert!(!created.is_empty(), "the adoption made a copy");
+    for id in &created {
+        let (_, program) = programs
+            .iter()
+            .find(|(present, _)| present == id)
+            .unwrap_or_else(|| panic!("{id:?} is in the repository: {programs:?}"));
+        assert_eq!(
+            program, OTHER_PROGRAM,
+            "{id:?} names its original's program"
+        );
     }
 }
