@@ -1449,7 +1449,7 @@ pub(crate) async fn run_read(
 
 /// Awaits a read of the repository, giving it up when [`READ_TIMEOUT`] has
 /// passed on `clock` (dropping the read cancels what can be cancelled).
-async fn within_read_timeout<T>(
+pub(crate) async fn within_read_timeout<T>(
     clock: &dyn Clock,
     read: impl Future<Output = Result<T, MaintenanceError>>,
 ) -> Result<T, MaintenanceError> {

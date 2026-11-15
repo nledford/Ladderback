@@ -11,16 +11,40 @@ use domain::browse::{FolderPage, FolderPath};
 use domain::execution::FailureReason;
 use domain::planning::RepositoryConfig;
 use domain::{OperationId, RepositoryAlias, SnapshotId};
+use futures::future::select_all;
+use futures::lock::{Mutex, MutexGuard};
 
-use crate::maintenance::{MaintenanceError, run_read};
+use crate::maintenance::{MaintenanceError, run_read, within_read_timeout};
 use crate::ports::{BrowseJob, Clock, Engine, EngineResult, FolderAnswer, Job};
 use crate::secrets::{ResolveError, ResolveRepository};
+
+/// How many folders are read at once, by all the daemon's browses together.
+pub const FOLDER_READS: usize = 2;
+
+/// The turns to read a folder, shared by every browse of the daemon. Each
+/// read is a worker that may hold a folder's whole tree, hundreds of MiB for
+/// a large one (decision 102), so at most [`FOLDER_READS`] run at once and
+/// the rest wait their turn, within the read timeout.
+#[derive(Default)]
+pub struct FolderReads {
+    turns: [Mutex<()>; FOLDER_READS],
+}
+
+impl FolderReads {
+    /// Waits for a turn, held until the guard is dropped.
+    async fn turn(&self) -> MutexGuard<'_, ()> {
+        // `turns` is never empty, which is all `select_all` asks.
+        let (turn, ..) = select_all(self.turns.iter().map(Mutex::lock)).await;
+        turn
+    }
+}
 
 /// Reads a page of a snapshot's folder.
 pub struct BrowseSnapshot {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
     resolve: ResolveRepository,
+    reads: Arc<FolderReads>,
 }
 
 /// Why a folder couldn't be read. A typed code, never a sentence (§8.4).
@@ -39,11 +63,19 @@ pub enum BrowseError {
 }
 
 impl BrowseSnapshot {
-    pub fn new(engine: Arc<dyn Engine>, clock: Arc<dyn Clock>, resolve: ResolveRepository) -> Self {
+    /// A browse that takes its turns from `reads`, which every browse of
+    /// the daemon shares.
+    pub fn new(
+        engine: Arc<dyn Engine>,
+        clock: Arc<dyn Clock>,
+        resolve: ResolveRepository,
+        reads: Arc<FolderReads>,
+    ) -> Self {
         Self {
             engine,
             clock,
             resolve,
+            reads,
         }
     }
 
@@ -73,7 +105,13 @@ impl BrowseSnapshot {
             folder,
             from,
         });
-        match run_read(self.engine.as_ref(), self.clock.as_ref(), op, job)
+        // The wait for a turn counts against the read timeout, so a read
+        // waits no longer in all than one that started at once.
+        let read = async {
+            let _turn = self.reads.turn().await;
+            run_read(self.engine.as_ref(), self.clock.as_ref(), op, job).await
+        };
+        match within_read_timeout(self.clock.as_ref(), read)
             .await
             .map_err(BrowseError::Read)?
         {
@@ -95,6 +133,7 @@ impl BrowseSnapshot {
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex, PoisonError};
+    use std::time::Duration;
 
     use async_trait::async_trait;
     use domain::browse::{DisplayName, Entry, EntryKind, EntryName, FolderPage, FolderPath};
@@ -103,10 +142,12 @@ mod tests {
     use domain::secrets::{SecretRef, SecretValue};
     use domain::{OperationId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
     use futures::stream;
+    use tokio::sync::watch;
+    use tokio::task::JoinHandle;
 
-    use super::{BrowseError, BrowseSnapshot};
+    use super::{BrowseError, BrowseSnapshot, FolderReads};
     use crate::fakes::{FakeClock, FakeSecrets};
-    use crate::maintenance::MaintenanceError;
+    use crate::maintenance::{MaintenanceError, READ_TIMEOUT};
     use crate::ports::{
         Engine, EngineError, EngineEvent, EngineResult, FolderAnswer, Job, JobControl, RunningJob,
     };
@@ -204,12 +245,68 @@ mod tests {
         }
     }
 
-    fn use_case(engine: Arc<Scripted>) -> BrowseSnapshot {
+    fn use_case(engine: Arc<dyn Engine>, clock: Arc<FakeClock>) -> BrowseSnapshot {
         BrowseSnapshot::new(
             engine,
-            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            clock,
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            Arc::new(FolderReads::default()),
         )
+    }
+
+    fn at_epoch() -> Arc<FakeClock> {
+        Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH))
+    }
+
+    /// Answers every job with a page once `open` holds `true`, recording
+    /// each job as it starts.
+    struct Gated {
+        open: watch::Receiver<bool>,
+        seen: Mutex<Vec<Job>>,
+    }
+
+    #[async_trait]
+    impl Engine for Gated {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            let mut open = self.open.clone();
+            let answer = stream::once(async move {
+                // A gate whose sender went opens too: the test is over.
+                let _ = open.wait_for(|open| *open).await;
+                EngineEvent::Succeeded(EngineResult::Folder(FolderAnswer::Page(page())))
+            });
+            Ok(RunningJob {
+                events: Box::pin(answer),
+                control: Box::new(Stop),
+            })
+        }
+    }
+
+    impl Gated {
+        fn started(&self) -> usize {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .len()
+        }
+    }
+
+    /// Starts a read of the top folder on its own task.
+    fn spawn_read(browse: &Arc<BrowseSnapshot>) -> JoinHandle<Result<FolderPage, BrowseError>> {
+        let browse = Arc::clone(browse);
+        tokio::spawn(async move {
+            browse
+                .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 0)
+                .await
+        })
+    }
+
+    /// Lets the spawned reads run until they wait on something.
+    async fn settle() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     fn scripted(answer: Result<FolderAnswer, FailureReason>) -> Arc<Scripted> {
@@ -226,7 +323,7 @@ mod tests {
     #[tokio::test]
     async fn browsing_reads_the_folder_in_one_job_naming_the_recorded_id() {
         let engine = scripted(Ok(FolderAnswer::Page(page())));
-        let read = use_case(Arc::clone(&engine))
+        let read = use_case(engine.clone(), at_epoch())
             .folder(op(), &alias(), &entry(), snapshot(), path("source/docs"), 0)
             .await;
         assert_eq!(read, Ok(page()));
@@ -248,7 +345,7 @@ mod tests {
     #[tokio::test]
     async fn the_next_page_is_read_from_the_position_asked_for() {
         let engine = scripted(Ok(FolderAnswer::Page(page())));
-        let _ = use_case(Arc::clone(&engine))
+        let _ = use_case(engine.clone(), at_epoch())
             .folder(
                 op(),
                 &alias(),
@@ -268,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_snapshot_that_is_gone_is_said_to_be_unknown() {
-        let read = use_case(scripted(Ok(FolderAnswer::SnapshotUnknown)))
+        let read = use_case(scripted(Ok(FolderAnswer::SnapshotUnknown)), at_epoch())
             .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 0)
             .await;
         assert_eq!(read, Err(BrowseError::SnapshotUnknown));
@@ -276,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_folder_the_snapshot_does_not_hold_is_said_to_be_unknown() {
-        let read = use_case(scripted(Ok(FolderAnswer::FolderUnknown)))
+        let read = use_case(scripted(Ok(FolderAnswer::FolderUnknown)), at_epoch())
             .folder(op(), &alias(), &entry(), snapshot(), path("source/gone"), 0)
             .await;
         assert_eq!(read, Err(BrowseError::FolderUnknown));
@@ -287,12 +384,98 @@ mod tests {
         let reason = FailureReason::EngineFailed {
             detail: "the pack is damaged".to_owned(),
         };
-        let read = use_case(scripted(Err(reason.clone())))
+        let read = use_case(scripted(Err(reason.clone())), at_epoch())
             .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 0)
             .await;
         assert_eq!(
             read,
             Err(BrowseError::Read(MaintenanceError::Failed(reason)))
         );
+    }
+
+    #[tokio::test]
+    async fn at_most_two_folders_are_read_at_once_and_a_third_waits_its_turn() {
+        let (gate, open) = watch::channel(false);
+        let engine = Arc::new(Gated {
+            open,
+            seen: Mutex::new(Vec::new()),
+        });
+        let browse = Arc::new(use_case(engine.clone(), at_epoch()));
+        let reads = [
+            spawn_read(&browse),
+            spawn_read(&browse),
+            spawn_read(&browse),
+        ];
+        settle().await;
+        assert_eq!(
+            engine.started(),
+            2,
+            "two workers read at once; the third waits for one of them to end"
+        );
+        gate.send_replace(true);
+        for read in reads {
+            let read = tokio::time::timeout(Duration::from_secs(5), read)
+                .await
+                .expect("each read ends once the pages are answered")
+                .expect("the read task ran");
+            assert_eq!(read, Ok(page()));
+        }
+        assert_eq!(engine.started(), 3, "the third read took its turn");
+    }
+
+    #[tokio::test]
+    async fn a_read_dropped_while_it_waits_takes_no_turn() {
+        let (gate, open) = watch::channel(false);
+        let engine = Arc::new(Gated {
+            open,
+            seen: Mutex::new(Vec::new()),
+        });
+        let browse = Arc::new(use_case(engine.clone(), at_epoch()));
+        let running = [spawn_read(&browse), spawn_read(&browse)];
+        settle().await;
+        let waiting = spawn_read(&browse);
+        settle().await;
+        waiting.abort();
+        assert!(
+            waiting.await.is_err_and(|ended| ended.is_cancelled()),
+            "the waiting read was dropped before its turn"
+        );
+        gate.send_replace(true);
+        for read in running {
+            let read = tokio::time::timeout(Duration::from_secs(5), read)
+                .await
+                .expect("each read ends once the pages are answered")
+                .expect("the read task ran");
+            assert_eq!(read, Ok(page()));
+        }
+        settle().await;
+        assert_eq!(
+            engine.started(),
+            2,
+            "the dropped read started no worker when the turns came free"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_waiting_its_turn_is_given_up_when_the_read_timeout_ends() {
+        let (_gate, open) = watch::channel(false);
+        let engine = Arc::new(Gated {
+            open,
+            seen: Mutex::new(Vec::new()),
+        });
+        let clock = at_epoch();
+        let browse = Arc::new(use_case(engine.clone(), Arc::clone(&clock)));
+        let _running = [spawn_read(&browse), spawn_read(&browse)];
+        settle().await;
+        let waiting = spawn_read(&browse);
+        settle().await;
+        clock.advance(READ_TIMEOUT);
+        // The two reads it waited on are given up now too, so without its
+        // own timeout it would start one and wait another READ_TIMEOUT.
+        let read = tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the waiting read ends when the read timeout does")
+            .expect("the read task ran");
+        assert_eq!(read, Err(BrowseError::Read(MaintenanceError::TimedOut)));
     }
 }
