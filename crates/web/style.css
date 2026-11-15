@@ -124,11 +124,42 @@ a {
   font-weight: 600;
 }
 
-/* The brand is the start page's link, and looks like the brand still. */
+/* The brand is the start page's link, and looks like the brand still: the
+   product's mark, then its name. */
 .brand a {
   display: inline-block;
   padding-block: 0.25rem;
   color: inherit;
+}
+
+/* The mark (`BrandMark` in main.rs), as tall as the name's letters, the
+   master icon's shapes in the theme's colors. With forced colors, the
+   reader's own two colors, so its slats still stand apart from its tile. */
+.brand-mark {
+  vertical-align: text-bottom;
+  margin-inline-end: 0.5rem;
+}
+
+.brand-mark-tile {
+  fill: var(--accent);
+}
+
+.brand-mark-slats {
+  fill: var(--bg);
+}
+
+@media (forced-colors: active) {
+  .brand-mark {
+    forced-color-adjust: none;
+  }
+
+  .brand-mark-tile {
+    fill: CanvasText;
+  }
+
+  .brand-mark-slats {
+    fill: Canvas;
+  }
 }
 
 /* The version and Sign out, at the end of the links' line. A flex item is no

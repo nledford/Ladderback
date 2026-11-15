@@ -287,6 +287,34 @@ fn Account(
     }
 }
 
+/// The product's mark, beside its name in the header: the master icon's
+/// shapes (`assets/brand/icon.svg`), filled from the theme's tokens by
+/// `style.css`, so it follows the light and dark colors. It is decoration:
+/// the link it sits in is named by the product's name alone.
+#[component]
+fn BrandMark() -> impl IntoView {
+    view! {
+        <svg
+            class="brand-mark"
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 512 512"
+            aria-hidden="true"
+            focusable="false"
+        >
+            <rect class="brand-mark-tile" width="512" height="512" rx="112" />
+            <g class="brand-mark-slats">
+                <rect x="156.8" y="96" width="44" height="320" rx="22" />
+                <rect x="311.2" y="96" width="44" height="320" rx="22" />
+                <rect x="178.8" y="140.8" width="154.4" height="40" rx="20" />
+                <rect x="178.8" y="236.8" width="154.4" height="40" rx="20" />
+                <rect x="178.8" y="332.8" width="154.4" height="40" rx="20" />
+            </g>
+        </svg>
+    }
+}
+
 /// Asks the daemon where the page stands with sign-in (security §10.1), then
 /// shows the pages, or the sign-in page in their place. A request refused
 /// later for want of a session opens the dialog that asks to sign in again,
@@ -368,10 +396,12 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         </a>
         <Router>
             <header class="site-header">
-                // The product name leads back to the start page, marked as the
-                // current page there; `exact`, or every page would match "/".
+                // The product's mark and name lead back to the start page,
+                // marked as the current page there; `exact`, or every page
+                // would match "/".
                 <p class="brand">
                     <A href="/" exact=true>
+                        <BrandMark />
                         {text(&localizer, msg::UI_BRAND)}
                     </A>
                 </p>
