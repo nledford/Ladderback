@@ -100,6 +100,15 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,trunk
+      # dist builds with `cargo auditable build` (dist-workspace.toml), so the
+      # binary embeds its dependency list. A pinned version, checked against
+      # the SHA-256 install-action's manifest records for it; `fallback: none`,
+      # so a release missing from that manifest fails the step rather than
+      # installing an unchecked build with cargo-binstall.
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-auditable@0.7.7
+          fallback: none
       # trunk runs the wasm-bindgen Cargo.lock pins, and downloads it unless
       # that version is on the PATH. Its aarch64 Linux release is a gnu build
       # that needs GLIBC_2.38, which Ubuntu 22.04 hasn't (install-action
@@ -132,6 +141,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           overwrite: true
+      # The section cargo-auditable writes, which `cargo audit bin` reads
+      # (decision 54): without it, dist built with plain `cargo build`.
+      - name: Check the binary embeds its dependency list
+        run: |
+          bin="$RUNNER_TEMP/release/ladderback-$TARGET/ladderback"
+          if [ "$RUNNER_OS" = macOS ]; then sections=$(otool -l "$bin"); else sections=$(readelf -SW "$bin"); fi
+          grep -F .dep-v0 <<<"$sections" || { echo "::error::$bin has no .dep-v0 section, so it was built without cargo-auditable"; exit 1; }
       # A release's binary must say exactly its version, with no commit.
       - if: runner.os == 'Linux'
         run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" --container all ${TAG:+--version "${TAG#v}"}
