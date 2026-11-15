@@ -1,4 +1,4 @@
-//! The release check (technical design §5; decision NN): the loop in
+//! The release check (technical design §5; decision 107): the loop in
 //! `serve` that asks for Ladderback's newest release at most once a day and
 //! keeps the [`UpdateNotice`] the header shows. When it asks is the
 //! domain's `next_check`, and whether a release is an update is

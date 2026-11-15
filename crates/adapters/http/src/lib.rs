@@ -94,7 +94,7 @@ pub struct AppState {
     /// Whether a restart is offered, and the one asked for (decision 94).
     pub restart: Restart,
     /// The available update the release check found, which the session
-    /// route tells with the build (decision NN).
+    /// route tells with the build (decision 107).
     pub updates: Arc<app::updates::UpdateNotice>,
 }
 
@@ -112,7 +112,7 @@ impl axum::extract::FromRef<AppState> for Exposure {
 
 /// What a page that may see the pages is told of the daemon (#502): the
 /// build it runs, and the update its release check found, when there is
-/// one (decision NN). The address of the update's notes is built from its
+/// one (decision 107). The address of the update's notes is built from its
 /// version, never taken from the release feed's answer.
 #[derive(Clone, Debug)]
 pub(crate) struct Running {

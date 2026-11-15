@@ -1,5 +1,5 @@
 //! The port the release check asks for Ladderback's newest release through
-//! (technical design §3.2, §5; decision NN): one request, which ends within
+//! (technical design §3.2, §5; decision 107): one request, which ends within
 //! [`RELEASE_TIMEOUT`] whatever the other end does.
 
 use std::time::Duration;

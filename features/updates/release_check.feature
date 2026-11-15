@@ -1,7 +1,7 @@
 Feature: The release check
   While the agent serves, it asks for Ladderback's newest release at most
   once a day, at a time spread by up to an hour of jitter, so that agents
-  started together don't all ask at once (decision NN). A full release newer
+  started together don't all ask at once (decision 107). A full release newer
   than the version the agent runs is the available update: the header shows
   it, and the log says so once for each new version. A prerelease, an equal
   or older version, or an answer that fails or can't be read shows nothing,

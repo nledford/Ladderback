@@ -1,5 +1,5 @@
 //! Releases of Ladderback and the update notice (technical design §3.1, §5;
-//! decision NN). The agent asks for the newest release at most once a day,
+//! decision 107). The agent asks for the newest release at most once a day,
 //! at a time spread by jitter, and a full release of a higher version than
 //! the one it runs is the **available update**, which the header shows.
 //!

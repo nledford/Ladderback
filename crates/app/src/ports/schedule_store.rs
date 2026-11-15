@@ -24,7 +24,7 @@ pub struct PendingRetry {
 }
 
 /// The agent's last release check, as it keeps it between its starts
-/// (§5, §9 `release_check`; decision NN): when it last asked for the newest
+/// (§5, §9 `release_check`; decision 107): when it last asked for the newest
 /// release, and the available update it knew of then, so that it asks at
 /// most once a day and the header shows the update at once after a restart.
 #[derive(Clone, Debug, PartialEq, Eq)]

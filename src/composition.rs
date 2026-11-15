@@ -330,7 +330,7 @@ pub(crate) struct Background {
     releases: Option<Releases>,
 }
 
-/// What the release check asks (decision NN): its feed, and the version it
+/// What the release check asks (decision 107): its feed, and the version it
 /// compares the feed's newest release with.
 pub(crate) struct Releases {
     feed: Arc<dyn ReleaseFeed>,
@@ -399,7 +399,7 @@ impl Background {
 }
 
 /// The variable that points the release check at another address than
-/// GitHub's (decision NN). The tests, `just try` and the smoke test set it
+/// GitHub's (decision 107). The tests, `just try` and the smoke test set it
 /// to one nothing answers at, so none of them asks the network.
 const RELEASES_URL_VARIABLE: &str = "LADDERBACK_RELEASES_URL";
 
@@ -435,7 +435,7 @@ fn releases(url: Option<std::ffi::OsString>) -> Option<Releases> {
     }
 }
 
-/// Says in the log what the release check did (decision NN): a new
+/// Says in the log what the release check did (decision 107): a new
 /// available update once, with where its notes are; a check that couldn't
 /// read the newest release only for debugging, as nothing is wrong with
 /// the agent, and never with the feed's own words; the last check that

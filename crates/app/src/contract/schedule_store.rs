@@ -32,7 +32,7 @@ pub async fn run(harness: &dyn ScheduleHarness) {
     a_planned_run_outlives_the_daemon(harness).await;
 }
 
-/// The checks of the last release check (decision NN), apart from the
+/// The checks of the last release check (decision 107), apart from the
 /// planned runs.
 pub async fn run_release_check(harness: &dyn ScheduleHarness) {
     let store = harness.empty().await;

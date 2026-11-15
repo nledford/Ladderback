@@ -1,0 +1,18 @@
+# Decision 107: The update notice
+
+**While it serves, the agent asks GitHub Releases for Ladderback's newest release at most once a day, never within 5 minutes of its start, and keeps the last check in its store. A full release with a higher version than the one running is an available update: the header shows it under the version as a link to its notes, and the log says so once per version. The check is on unless `[agent] check-for-updates = false`** (recorded 2026-11-15, §3.1, §4.5, §5, §6.1, §9, §10.7; stage 1 of #513, maintainer to confirm on its pull request).
+
+## Why
+
+- **On by default, with the switch documented.** #513 recommends it: a person who never hears of a release keeps an old build, and the request reveals no more than any visit to GitHub (§10.7). The switch sits in `[agent]` with the agent's other settings, not in a table of its own, and takes effect from the next check without a restart.
+- **The last check in SQLite.** The `release_check` table (migration 0012) holds when the agent last asked and the update it knew of. A restart, which can come several times a day, neither asks again within the day nor forgets the notice. A stored version this build couldn't have written counts as no check at all, and the next check writes the row anew, rather than stop checking.
+- **A day apart, jittered, never at a start.** The next check is a day after the last, put up to an hour later as the `Random` port draws, so agents started together don't ask together; never more than a day ahead should the clock have been set back. It is never sooner than 5 minutes after the agent starts, whatever the last check's time, so a daemon run for a moment, as a test or a try, never asks, and a restart just before the day is over doesn't ask as it comes up.
+- **Only a full release counts.** A release marked a prerelease, a draft, or whose version has a prerelease part (`0.4.0-rc.1`) is never offered: a person who installed a release wants the next one, not a candidate.
+- **The notes link is built, not read.** The address is `https://github.com/nledford/Ladderback/releases/tag/v<version>`, from the parsed version alone. The answer's own URLs are ignored, so a compromised or spoofed feed can't put a link of its choosing in the header.
+- **A hostile answer can only mislead.** No redirect is followed, the request gives up after 10 s, and at most 1 MiB is read, of which only `tag_name`, `prerelease` and `draft`; a tag over 64 bytes or not `v` and a SemVer version is unreadable. Nothing is downloaded or run: at worst a feed shows a version that doesn't exist or hides one that does.
+- **Proxy variables are honored,** as notifications honor them, so a machine that reaches the internet only through a proxy can check.
+- **A bad `LADDERBACK_RELEASES_URL` turns the check off,** said once in the log, rather than fall back to GitHub: whoever set it didn't want GitHub asked. The test suites and `just try` point it at an address nothing answers at.
+- **Plain text, not a live region.** The notice is a paragraph on its own line under the version, not `role="status"`: the announcer is the page's only polite live region (A3), and a notice that appears on a page load needs no announcing, as the version needs none. An update found while a page is open shows at the next read of the session or the next reload.
+- **Failures stay quiet.** A failed check is a debug line, its kind and HTTP status, never the answer's body; the next comes a day later. A check is a convenience, so it never fails an operation or the agent.
+
+Left out (#513's later stages): updating in place, which needs signed releases first; the hub's view of each agent's version; a notice on the sign-in page, which would tell anyone who can reach it the running version.

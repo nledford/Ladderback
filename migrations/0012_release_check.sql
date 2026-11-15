@@ -1,4 +1,4 @@
--- The release check (technical design §5, §9; decision NN). One addition, no
+-- The release check (technical design §5, §9; decision 107). One addition, no
 -- data changes and no table rebuilt:
 --
 -- The agent's last release check: one row at most (id 1), none until it

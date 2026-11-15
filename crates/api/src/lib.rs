@@ -3913,7 +3913,7 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// `signed-out` with the build, without `keep-signed-in-offered` or a CSRF
 /// token, whatever session cookie it also sends (decision 95). With the
 /// build, and only with it, comes the `available-update` the agent's release
-/// check found, when there is one (decision NN).
+/// check found, when there is one (decision 107).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
@@ -3937,7 +3937,7 @@ pub struct SessionDto {
 }
 
 /// A newer release of Ladderback than the one the daemon runs, which the
-/// header shows (decision NN): its version, and the address of its notes,
+/// header shows (decision 107): its version, and the address of its notes,
 /// built from the version, never from what the release feed answered.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

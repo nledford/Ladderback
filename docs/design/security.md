@@ -1,6 +1,6 @@
 ## 10. Security
 
-This section decides how the web UI and the API are protected, how repository secrets are resolved and kept out of every output, and what an agent, a restore, an MCP client and a repository location may do.
+This section decides how the web UI and the API are protected, how repository secrets are resolved and kept out of every output, what an agent, a restore, an MCP client and a repository location may do, and what the release check sends.
 
 **Who is trusted** (§16, decision 99). Ladderback runs on a person's own computer, as a hub or an agent. The person, and every program running as their operating-system user, AI tools and development tools included, can already read and write the data folder: `config.toml`, the SQLite store, the admin password's hash, the logs. Ladderback doesn't rely on keeping its data from them, and a weakness that needs such a program first is not a security finding unless it reaches further than that user already could. Root and the machine's administrators are outside every boundary here.
 
@@ -379,3 +379,14 @@ A repository may be reached at several locations, tried in order, each with an o
 | A hung backend taking a job with it | A silent address that never answers | A probe is its own worker, killed 8 s after its start; locations that check the server first are probed at once (decision 86), others in their turn, so at most 32 s before the job | Up to 32 s waiting away from home when no rule keeps the run off a silent address |
 
 Reading the network's name takes no privilege Ladderback asks for: NetworkManager's D-Bus API on Linux, whose policy lets an unprivileged process read the properties, and `system_profiler` on macOS, which returned the name to a launchd-started program in the test (decision 80, point 10) and which Apple may redact. The workspace keeps `unsafe_code = "forbid"` (§13.5, item 6).
+
+### 10.7 The release check
+
+The release check (§5; §16, decision 107) is the one request Ladderback makes on its own to a service it doesn't run. This is what it sends, what it reads and how to turn it off.
+
+- **What leaves the machine.** At most once a day, an HTTPS `GET` of `https://api.github.com/repos/nledford/Ladderback/releases/latest`, with `User-Agent: ladderback/<version>` (GitHub asks every client for one) and `Accept: application/vnd.github+json`. No cookie, no token, no referrer and nothing about the machine, its plans or its repositories. GitHub, and anyone who sees the connection's metadata, learns the machine's IP address, that it runs Ladderback, which version, and roughly when it started.
+- **Turning it off.** `check-for-updates = false` in `[agent]` (§6.1): the agent then asks nothing and shows nothing, from the next check on, without a restart. The `LADDERBACK_RELEASES_URL` variable points the check elsewhere (the test suites and `just try` use an address nothing answers at); a value that isn't an `http` or `https` address turns the check off, said once in the log, rather than ask GitHub instead.
+- **A hostile or broken answer.** The client follows no redirect and gives up after 10 s, connecting included. It reads at most 1 MiB, and of the answer only `tag_name`, `prerelease` and `draft`; a tag that isn't `v` and a SemVer version of at most 64 bytes is unreadable. A version is digits, letters, dots and hyphens only, and the address of its notes is built from it under `https://github.com/nledford/Ladderback/releases/tag/`, never taken from the answer, so nothing of the answer but the parsed version reaches a page, the log or the store. A feed that lies can at worst show a version that doesn't exist or hide one that does; the notice is never acted on.
+- **What the log keeps.** A found update at info level, once per version; a failure at debug level, as a kind and the HTTP status, never the answer's body.
+- **The page.** The notice's link opens GitHub with `rel="noreferrer"`, so GitHub isn't told the daemon's address. It is shown only where the running version is (with sign-in off or a live session), never on the sign-in page.
+- **Proxies.** The standard variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, in either case) are honored, as for notifications, so a machine that reaches the internet only through a proxy can check, and the proxy sees the request as any proxy does.

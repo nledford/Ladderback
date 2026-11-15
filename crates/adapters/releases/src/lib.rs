@@ -1,4 +1,4 @@
-//! The release feed adapter (technical design §3.2, §10; decision NN): the
+//! The release feed adapter (technical design §3.2, §10; decision 107): the
 //! [`ReleaseFeed`] port over GitHub's REST API. One `GET` of the newest
 //! release, `/repos/nledford/Ladderback/releases/latest`, which carries no
 //! cookie, no token and no referrer, only a `User-Agent` naming Ladderback

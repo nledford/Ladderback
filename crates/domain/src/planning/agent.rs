@@ -79,7 +79,7 @@ pub struct AgentSettings {
 }
 
 /// Whether the agent asks for Ladderback's newest release once a day, to
-/// show an available update in the header (decision NN): on unless
+/// show an available update in the header (decision 107): on unless
 /// `[agent] check-for-updates = false` turns it off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UpdateCheck {

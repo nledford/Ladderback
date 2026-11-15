@@ -1,4 +1,4 @@
-//! The [`ReleaseFeed`](crate::ports::ReleaseFeed) contract (decision NN):
+//! The [`ReleaseFeed`](crate::ports::ReleaseFeed) contract (decision 107):
 //! the same checks run against the scripted fake and the real GitHub
 //! adapter, whose harness serves the answers on loopback, never the
 //! network. A check fails on the first violation, as the other suites do.

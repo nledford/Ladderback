@@ -34,6 +34,9 @@
 
   A waiting run's job is built when it is queued, from the configuration of that moment, so a change to its plan while it waits doesn't reach it. A cancel ends a waiting run at once, without its hooks (decision 75).
 - **Maintenance jobs** (forget/prune/check) are scheduled only on the repo's **granted maintenance owner** and run one at a time per repo (§7.3).
+- **The release check.** A second loop in `app` (`app::updates::CheckForUpdates`), which `serve` runs beside the scheduler, asks the `ReleaseFeed` port for Ladderback's newest release (§10.7; §16, decision 107). Its next check is `next_check` in `domain::updates`: a day after the last one, but never sooner than 5 minutes from now, so a start always waits that long, whether there was no check, that day is over or it is about to be; never more than a day ahead should the clock have been set back before the check is planned (one set back while the loop waits for it delays it as much); then put up to an hour later as the `Random` port draws, so agents started together don't ask together. A daemon run for a moment, as a test or a try, never asks.
+
+  On start it shows the available update the last check kept in `release_check` (§9), when the check is on and that update is still newer than the running version. Before each check it reads `[agent] check-for-updates`: off, or a configuration that can't be read, it asks nothing, shows nothing and reads the setting again a day later. On, it asks once, shows the update the answer is, keeps the check, and says in the daemon's log once for each new version that it is available. An answer that fails or can't be read keeps the update found before, waits a day like any check, and is noted only at debug level, with the HTTP status at most, never the answer's text. A last check that can't be read counts as none, and the next check overwrites it.
 
 ---
 
@@ -52,6 +55,7 @@ concurrency = 1
 nice = 10
 allow-hub-restore = false        # §10.4
 locale = "en-US"                 # notification text (§8.4); defaults to the POSIX locale, then en-US
+check-for-updates = true         # the daily release check (§5, §10.7); false never asks
 
 [hub]                            # optional
 url = "https://hub.example.lan:9899"

@@ -332,7 +332,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // again: a request refused while it is open leaves it as it is.
     let asking = Memo::new(move |_| ended.get());
     // What the daemon runs, and the update it found, once it has told the
-    // page (decision 90, decision NN).
+    // page (decision 90, decision 107).
     let told = RwSignal::new(None::<session::Told>);
     provide_context(standing);
     provide_context(notice);

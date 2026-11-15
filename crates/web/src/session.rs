@@ -253,7 +253,7 @@ impl Signed {
 
 /// What the daemon tells a page that may see the pages of itself, which the
 /// header shows: the build it runs (decision 90) and the update its release
-/// check found, when there is one (decision NN).
+/// check found, when there is one (decision 107).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Told {
     pub(crate) build: BuildDto,
