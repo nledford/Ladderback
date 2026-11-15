@@ -66,24 +66,38 @@ impl SessionLength {
     /// How long a session lasts after its sign-in, or `None` when nothing
     /// but its idle limit, a sign-out or a new admin password ends it.
     pub fn after_sign_in(self) -> Option<SignedDuration> {
-        todo!()
+        let days = match self {
+            Self::UntilBrowserCloses | Self::UntilSignOut => return None,
+            Self::SevenDays => 7,
+            Self::ThirtyDays => 30,
+            Self::NinetyDays => 90,
+            Self::OneYear => 365,
+        };
+        Some(SignedDuration::from_hours(days * 24))
     }
 
     /// Its name on the wire and in the store.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Self::UntilBrowserCloses => "until-browser-closes",
+            Self::SevenDays => "7-days",
+            Self::ThirtyDays => "30-days",
+            Self::NinetyDays => "90-days",
+            Self::OneYear => "1-year",
+            Self::UntilSignOut => "until-sign-out",
+        }
     }
 
+    /// The session length named `text`, as [`Self::as_str`] writes it.
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = text;
-        todo!()
+        Self::ALL.into_iter().find(|length| length.as_str() == text)
     }
 
     /// Whether the sign-in form offers **Keep me signed in on this device**:
     /// not under Until I close the browser, which gives every session an
     /// idle limit.
     pub fn offers_keep_signed_in(self) -> bool {
-        todo!()
+        self != Self::UntilBrowserCloses
     }
 }
 
@@ -233,14 +247,13 @@ impl SessionDigest {
     }
 
     pub fn as_bytes(&self) -> &[u8; 32] {
-        todo!()
+        &self.0
     }
 }
 
 impl std::fmt::Debug for SessionDigest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = f;
-        todo!()
+        f.write_str("SessionDigest(..)")
     }
 }
 
@@ -277,8 +290,8 @@ impl PasswordFingerprint {
 
 /// One signed-in browser: when it started, when it was last used, the CSRF
 /// token its changed requests carry, the admin password it started under,
-/// whether it was signed in with Keep me signed in on this device, and the
-/// cookie last set for it.
+/// whether it was signed in with Keep me signed in on this device, whether
+/// its cookie is marked `Secure`, and the cookie last set for it.
 #[derive(Clone, Debug)]
 pub struct Session {
     csrf: Token,
@@ -288,23 +301,39 @@ pub struct Session {
     /// The last use the store holds.
     kept_use: Timestamp,
     keep_signed_in: bool,
+    /// Decided at sign-in, as the request that signed in showed it, and
+    /// kept for every renewal: the requests that renew a cookie may not
+    /// show it.
     secure: bool,
     /// `None` until one is set after a restart.
     cookie: Option<CookieSet>,
 }
 
-/// A cookie set for a session: when, and when it ends; `None` when the
-/// browser drops it as it closes.
+/// A cookie set for a session: when, under which session length, and when
+/// it ends; `None` when the browser drops it as it closes.
 #[derive(Clone, Copy, Debug)]
 struct CookieSet {
     at: Timestamp,
+    length: SessionLength,
     ends: Option<Timestamp>,
+}
+
+impl CookieSet {
+    /// The cookie set at `at` under `length` that lasts `life`.
+    fn of(at: Timestamp, length: SessionLength, life: CookieLife) -> Self {
+        let ends = match life {
+            CookieLife::UntilBrowserCloses => None,
+            CookieLife::Lasts(lasts) => Some(after(at, lasts)),
+        };
+        Self { at, length, ends }
+    }
 }
 
 /// A session as the store keeps it, so it outlives a restart: its token's
 /// digest, never the token, and no CSRF token, which a restored session draws
 /// anew; when it started and was last used, the admin password it started
-/// under, and whether it was signed in with Keep me signed in on this device.
+/// under, whether it was signed in with Keep me signed in on this device, and
+/// whether its cookie is marked `Secure`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeptSession {
     pub digest: SessionDigest,
@@ -336,8 +365,9 @@ impl Session {
     /// length `length`; `None` when nothing but its idle limit, a sign-out
     /// or a new admin password ends it.
     pub fn ends_at(&self, length: SessionLength) -> Option<Timestamp> {
-        let _ = length;
-        Some(after(self.started, SignedDuration::from_hours(30 * 24)))
+        length
+            .after_sign_in()
+            .map(|lasts| after(self.started, lasts))
     }
 
     /// How long the session may go unused under the session length
@@ -345,8 +375,7 @@ impl Session {
     /// me signed in on this device, unless `length` is Until I close the
     /// browser.
     pub fn idle_limit(&self, length: SessionLength) -> Option<SignedDuration> {
-        let _ = length;
-        Some(SESSION_IDLE)
+        (!self.keep_signed_in || !length.offers_keep_signed_in()).then_some(SESSION_IDLE)
     }
 
     /// Whether the session is live at `now` under the session length
@@ -363,14 +392,26 @@ impl Session {
     /// drops as it closes; otherwise one that lasts until the session ends,
     /// and at most [`COOKIE_MOST`].
     pub fn cookie_at(&self, now: Timestamp, length: SessionLength) -> CookieLife {
-        let _ = (now, length);
-        CookieLife::Lasts(SignedDuration::from_hours(30 * 24))
+        if length == SessionLength::UntilBrowserCloses {
+            return CookieLife::UntilBrowserCloses;
+        }
+        let left = self.ends_at(length).map_or(COOKIE_MOST, |end| {
+            end.duration_since(now)
+                .clamp(SignedDuration::ZERO, COOKIE_MOST)
+        });
+        CookieLife::Lasts(left)
     }
 
     /// The session as the store keeps it, under its token's `digest`.
     pub fn kept(&self, digest: SessionDigest) -> KeptSession {
-        let _ = digest;
-        todo!()
+        KeptSession {
+            digest,
+            password: self.password,
+            started: self.started,
+            last_used: self.last_used,
+            keep_signed_in: self.keep_signed_in,
+            secure: self.secure,
+        }
     }
 }
 
@@ -395,8 +436,8 @@ pub struct Sessions {
 impl Sessions {
     /// Starts a session for `token` at `now`, under the admin password
     /// `password`, with no idle limit when `keep_signed_in` and the session
-    /// length offers it. When [`MAX_SESSIONS`] are live, the one used
-    /// longest ago ends.
+    /// length offers it, and its cookie marked `Secure` when `secure`. When
+    /// [`MAX_SESSIONS`] are live, the one used longest ago ends.
     pub fn start(
         &mut self,
         token: Token,
@@ -418,16 +459,21 @@ impl Sessions {
         if let Some(oldest) = self.oldest_when_full() {
             self.forget(oldest);
         }
-        let session = Session {
+        let mut session = Session {
             csrf,
             password,
             started: now,
             last_used: now,
             kept_use: now,
-            keep_signed_in,
+            keep_signed_in: keep_signed_in && self.length.offers_keep_signed_in(),
             secure,
             cookie: None,
         };
+        session.cookie = Some(CookieSet::of(
+            now,
+            self.length,
+            session.cookie_at(now, self.length),
+        ));
         self.by_digest.insert(token.digest(), session.clone());
         session
     }
@@ -481,7 +527,10 @@ impl Sessions {
     /// Ends every session: Sign out everywhere. Each is forgotten, for the
     /// store to forget too.
     pub fn end_all(&mut self) {
-        todo!()
+        let all: Vec<SessionDigest> = self.by_digest.keys().copied().collect();
+        for digest in all {
+            self.forget(digest);
+        }
     }
 
     /// Forgets the session of `digest`, for the store to forget too.
@@ -520,16 +569,26 @@ impl Sessions {
     /// included, from each one's sign-in: a session it ends by `now` is
     /// forgotten at once, for the store to forget too.
     pub fn set_length(&mut self, length: SessionLength, now: Timestamp) {
-        let _ = (length, now);
-        todo!()
+        self.length = length;
+        let ended: Vec<SessionDigest> = self
+            .by_digest
+            .iter()
+            .filter(|(_, session)| !session.live_at(now, length))
+            .map(|(digest, _)| *digest)
+            .collect();
+        for digest in ended {
+            self.forget(digest);
+        }
     }
 
     /// Brings back a session the store kept, with `csrf` as its new CSRF
     /// token, when it is still live at `now` under the session length and
     /// the admin password `password`; one that has ended, or started under
-    /// another password, is forgotten instead. Past [`MAX_SESSIONS`], the
-    /// one used longest ago ends, which may be this one. Whether it was
-    /// brought back.
+    /// another password, is forgotten instead. So is one started or last
+    /// used after `now`, as a clock set back leaves: counted from `now`, it
+    /// would start again, or be used again, at every restart and outlive
+    /// its length or its idle limit. Past [`MAX_SESSIONS`], the one used
+    /// longest ago ends, which may be this one. Whether it was brought back.
     pub fn restore(
         &mut self,
         kept: KeptSession,
@@ -537,32 +596,72 @@ impl Sessions {
         password: PasswordFingerprint,
         now: Timestamp,
     ) -> bool {
-        let _ = (kept, csrf, password, now);
-        todo!()
+        let session = Session {
+            csrf,
+            password: kept.password,
+            started: kept.started,
+            last_used: kept.last_used,
+            kept_use: kept.last_used,
+            keep_signed_in: kept.keep_signed_in,
+            secure: kept.secure,
+            cookie: None,
+        };
+        let dated_ahead = kept.started > now || kept.last_used > now;
+        if dated_ahead || !self.lives(&session, password, now) {
+            self.forgotten.push(kept.digest);
+            return false;
+        }
+        if let Some(oldest) = self.oldest_when_full() {
+            let older = self
+                .by_digest
+                .get(&oldest)
+                .is_some_and(|other| session.last_used < other.last_used);
+            if older {
+                self.forgotten.push(kept.digest);
+                return false;
+            }
+            self.forget(oldest);
+        }
+        self.by_digest.insert(kept.digest, session);
+        true
     }
 
     /// The digests of the sessions forgotten since this was last asked, for
     /// the store to forget too.
     pub fn take_forgotten(&mut self) -> Vec<SessionDigest> {
-        todo!()
+        std::mem::take(&mut self.forgotten)
     }
 
     /// The last use of the session of `token` for the store to keep, once it
     /// is [`SESSION_USE_KEPT_EVERY`] past the one the store holds; `None`
     /// before then, or for no session.
     pub fn use_to_keep(&mut self, token: &Token) -> Option<(SessionDigest, Timestamp)> {
-        let _ = token;
-        todo!()
+        let digest = token.digest();
+        let session = self.by_digest.get_mut(&digest)?;
+        if session.last_used < after(session.kept_use, SESSION_USE_KEPT_EVERY) {
+            return None;
+        }
+        session.kept_use = session.last_used;
+        Some((digest, session.last_used))
     }
 
     /// The cookie a person's use of the session of `token` at `now` renews,
     /// if it is due: a day after the one set last, or at once when the
-    /// session now ends before that one would, or the session length has
-    /// changed between a cookie the browser drops as it closes and one that
-    /// lasts. `None` when no renewal is due, or for no session.
+    /// session length has changed since that one was set, or no cookie has
+    /// been set since a restart. `None` when no renewal is due, or for no
+    /// session.
     pub fn renew_cookie(&mut self, token: &Token, now: Timestamp) -> Option<CookieLife> {
-        let _ = (token, now);
-        None
+        let length = self.length;
+        let session = self.by_digest.get_mut(&token.digest())?;
+        let due = session.cookie.is_none_or(|set| {
+            set.length != length || set.ends.is_some() && now >= after(set.at, COOKIE_RENEWED_EVERY)
+        });
+        if !due {
+            return None;
+        }
+        let fresh = session.cookie_at(now, length);
+        session.cookie = Some(CookieSet::of(now, length, fresh));
+        Some(fresh)
     }
 }
 
