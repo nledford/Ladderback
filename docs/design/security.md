@@ -60,8 +60,8 @@ This section decides who may use the web UI and the API, what every request is c
     - When the admin password or the tokens can't be read, the request is refused `503 api-tokens-unavailable` and the log says why.
     - The check runs where the session check does: after the request checks and before the body limit, so a refused token request's body is never read.
   - **Scopes,** `read`, `run`, `preview` and `propose` (proposing configuration changes for a person to approve, §16 decision 89), checked by the daemon per route from one table (`http_adapter::api_tokens::required_scope`):
-    - `read` opens `GET` and `HEAD` of the events stream, the operations, one operation, the plans, a plan's export as a profile, the repositories, a repository's snapshots and groups, a page of a snapshot's folder, and the session route, which answers a token `signed-out` with the build and no CSRF token: a token has no session, and signing in and out stay a session's (decision 95).
-    - `run` opens starting a plan, cancelling an operation and testing a saved repository.
+    - `read` opens `GET` and `HEAD` of the events stream, the operations, one operation, the plans, a plan's export as a profile, the repositories, a repository's snapshots, groups and stats as last read, a page of a snapshot's folder, and the session route, which answers a token `signed-out` with the build and no CSRF token: a token has no session, and signing in and out stay a session's (decision 95).
+    - `run` opens starting a plan, cancelling an operation, testing a saved repository and reading a repository's stats now, which opens the repository as a test does and keeps the reading (decision 104).
     - `preview` opens the maintenance preview and a profile's preview from its text (decision 95).
     - `propose` opens nothing yet.
 

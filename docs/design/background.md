@@ -15,7 +15,7 @@ Ladderback pins `rustic_core` and `rustic_backend` to **one git revision of `rus
 | Prune | `prune_plan(&PruneOptions)` then `prune(&opts, plan)` |
 | Check | `check(CheckOptions) -> CheckResults` |
 | Browse / restore | `node_from_snapshot_path("SNAP[:PATH]", filter)`, `ls(&Node, &LsOptions)`, `prepare_restore` and `restore`, `dump(&Node, &mut impl Write)` |
-| Stats | `infos_files()`, `infos_index()` |
+| Stats | `get_all_snapshots()` (count, `total_bytes_processed`), `infos_index()` (stored and raw size); `infos_files()` is the probe's (§16, decision 104) |
 | Progress | `trait ProgressBars { fn progress(ProgressType, prefix) -> Progress }`. A progress object has `set_length`/`inc`/`set_title`/`finish`/`error(item, during, message)` (`error` is on `main` only) |
 
 Facts that shape the design:
