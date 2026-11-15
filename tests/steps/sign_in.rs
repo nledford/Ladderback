@@ -200,7 +200,12 @@ fn no_file_holds_the_session_token(agent: &mut Agent) {
     no_file_under_holds(&home, token);
     let bytes: Vec<u8> = (0..token.len())
         .step_by(2)
-        .map(|at| u8::from_str_radix(&token[at..at + 2], 16).expect("a hex digit pair"))
+        .map(|at| {
+            token
+                .get(at..at + 2)
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                .expect("a hex digit pair")
+        })
         .collect();
     for path in files_under(&home) {
         let kept = std::fs::read(&path).expect("a file Ladderback keeps");

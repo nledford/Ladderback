@@ -287,7 +287,8 @@ fn reads_the_forget(shown: &toml::Value) {
     // One entry, whose two tags rustic ANDs; in whatever order it keeps them.
     let filter = list(shown, "snapshot-filter.filter-tags");
     assert_eq!(filter.len(), 1, "{filter:?}");
-    let mut tags: Vec<_> = filter[0].split(',').collect();
+    let entry = filter.first().expect("one entry");
+    let mut tags: Vec<_> = entry.split(',').collect();
     tags.sort_unstable();
     assert_eq!(
         tags,

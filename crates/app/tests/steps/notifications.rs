@@ -315,7 +315,7 @@ fn a_webhook_with_a_canary(agent: &mut Agent, name: String, canary: String) {
 fn a_webhook_nobody_answers(agent: &mut Agent, name: String) {
     let world = &mut agent.notifications;
     world.channel(&name, ChannelKind::Webhook, None);
-    let url = world.urls[&name].clone();
+    let url = world.urls.get(&name).expect("the channel's URL").clone();
     world.notifier.fail_at(&url, NotifyError::Unreachable);
 }
 

@@ -151,6 +151,12 @@ fn settings(repository: &str) -> RepositorySettings {
     }
 }
 
+/// What the scenario keeps under `name`.
+fn named<'a, V>(map: &'a BTreeMap<String, V>, name: &str) -> &'a V {
+    map.get(name)
+        .unwrap_or_else(|| panic!("the scenario has nothing named {name:?}"))
+}
+
 impl LocationsWorld {
     fn nas(&mut self) -> &mut RepositoryConfig {
         self.entries.get_mut(NAS).expect("the repository nas")
@@ -158,8 +164,8 @@ impl LocationsWorld {
 
     /// The position, from 1, of the location named `name` in "nas".
     fn position(&self, name: &str) -> u8 {
-        let address = &self.addresses[name];
-        let entry = &self.entries[NAS];
+        let address = named(&self.addresses, name);
+        let entry = named(&self.entries, NAS);
         if entry.settings.repository == *address {
             return 1;
         }
@@ -174,7 +180,7 @@ impl LocationsWorld {
 
     /// Sets what location `name` of "nas" answers.
     fn answers(&self, name: &str, answer: Answer) {
-        let address = self.addresses[name].clone();
+        let address = named(&self.addresses, name).clone();
         self.answers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -184,7 +190,7 @@ impl LocationsWorld {
     /// Changes the location `name` of "nas" as `change` says, wherever the
     /// entry keeps it.
     fn change_location(&mut self, name: &str, change: impl FnOnce(&mut Location)) {
-        let address = self.addresses[name].clone();
+        let address = named(&self.addresses, name).clone();
         let entry = self.nas();
         if entry.settings.repository == address {
             let mut first = Location {
@@ -576,7 +582,7 @@ impl NormalizeSources for AsWritten {
 /// Runs a backup of the plan "home" on `repository`, started by `trigger`.
 async fn run_backup(agent: &mut Agent, repository: &str, trigger: Trigger) {
     let world = &agent.locations;
-    let entry = world.entries[repository].clone();
+    let entry = named(&world.entries, repository).clone();
     let resolved = ResolveRepository::new(world.secrets.clone())
         .resolve_saved(&alias(repository), &entry)
         .await
@@ -726,7 +732,7 @@ fn location_answers_after(agent: &mut Agent, name: String, seconds: i64) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .insert(
-            world.addresses[&name].clone(),
+            named(&world.addresses, &name).clone(),
             SignedDuration::from_secs(seconds),
         );
 }
@@ -1000,7 +1006,7 @@ fn repositories_listed(agent: &mut Agent) {
 fn used_location(agent: &mut Agent, name: String) {
     let world = &agent.locations;
     assert_eq!(world.record().used(), Some(world.position(&name)));
-    let address = &world.addresses[&name];
+    let address = named(&world.addresses, &name);
     let opens = world.opens();
     assert!(!opens.is_empty(), "the job opened the repository");
     for access in opens {
@@ -1075,7 +1081,7 @@ fn warns_other_repository(agent: &mut Agent, name: String) {
 
 #[then("nothing was written to the other repository")]
 fn nothing_written(agent: &mut Agent) {
-    let lan = &agent.locations.addresses["lan"];
+    let lan = named(&agent.locations.addresses, "lan");
     for access in agent.locations.opens() {
         assert_ne!(&access.repository, lan);
     }
@@ -1164,7 +1170,7 @@ fn no_retry(agent: &mut Agent, _plan: String) {
 #[then(expr = "the repository was opened at the location {string} only")]
 fn opened_only_at(agent: &mut Agent, name: String) {
     let world = &agent.locations;
-    let address = &world.addresses[&name];
+    let address = named(&world.addresses, &name);
     let opens = world.opens();
     assert!(!opens.is_empty(), "the repository was opened");
     for access in opens {
@@ -1182,12 +1188,12 @@ fn retention_applied_at(agent: &mut Agent, name: String) {
         .iter()
         .map(|access| access.repository.clone())
         .collect();
-    assert_eq!(applied, vec![world.addresses[&name].clone()]);
+    assert_eq!(applied, vec![named(&world.addresses, &name).clone()]);
 }
 
 #[then(expr = "the location {string} was never opened")]
 fn never_opened(agent: &mut Agent, name: String) {
-    let address = &agent.locations.addresses[&name];
+    let address = named(&agent.locations.addresses, &name);
     for access in agent.locations.opens() {
         assert_ne!(&access.repository, address);
     }
@@ -1197,7 +1203,7 @@ impl LocationsWorld {
     /// When, on the run's monotonic clock, each probe of the location
     /// `name` was started, in order.
     fn probed_at(&self, name: &str) -> Vec<SignedDuration> {
-        let address = &self.addresses[name];
+        let address = named(&self.addresses, name);
         self.contacts
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1263,7 +1269,7 @@ fn first_tried_after(agent: &mut Agent, name: String, seconds: i64, earlier: Str
 fn no_secret_of(agent: &mut Agent, name: String) {
     let world = &agent.locations;
     assert!(world.opens().iter().all(|access| {
-        access.repository != world.addresses[&name]
+        access.repository != *named(&world.addresses, &name)
             && !access
                 .options
                 .values()
@@ -1283,8 +1289,8 @@ fn canary_nowhere(agent: &mut Agent) {
         format!("{:?}", world.reports()),
         format!("{:?}", world.operation()),
         format!("{:?}", world.results),
-        format!("{:?}", world.entries[NAS].location_warnings()),
-        format!("{:?}", world.entries[NAS]),
+        format!("{:?}", named(&world.entries, NAS).location_warnings()),
+        format!("{:?}", named(&world.entries, NAS)),
     ];
     for text in shown {
         assert!(!text.contains("canary-value"), "{text}");
@@ -1313,8 +1319,10 @@ fn both_same_slot(agent: &mut Agent) {
             _ => None,
         })
         .collect();
-    assert_eq!(backups.len(), 2);
-    assert_ne!(backups[0].repository, backups[1].repository);
+    let [first, second] = backups.as_slice() else {
+        panic!("two backups: {backups:?}");
+    };
+    assert_ne!(first.repository, second.repository);
     for access in backups {
         assert_eq!(access.id, Some(repository_id(REPOSITORY_ID)));
     }
@@ -1376,8 +1384,8 @@ fn warning_speaks_of_repository(agent: &mut Agent) {
     let world = &agent.locations;
     let warned = world.warned.expect("a step found the warning");
     let name = world.warned_in.as_ref().expect("a step found the warning");
-    assert_eq!(world.listed[name], vec![warned], "{name}");
-    let entry = &world.entries[name];
+    assert_eq!(*named(&world.listed, name), vec![warned], "{name}");
+    let entry = named(&world.entries, name);
     assert_eq!(
         usize::from(warned.position),
         entry.location_count(),
@@ -1423,7 +1431,7 @@ fn rule_notes(agent: &Agent) -> Vec<RuleNote> {
         plan.retry = retries
             .then(|| RetryPolicy::new(3, SignedDuration::from_mins(10)).expect("a retry policy"));
     }
-    world.entries[NAS].rule_notes(&[&plan], true)
+    named(&world.entries, NAS).rule_notes(&[&plan], true)
 }
 
 #[then(expr = "the repository {string} notes that every location has a rule")]
@@ -1823,7 +1831,7 @@ fn eligible_any_wifi(agent: &mut Agent, name: String) {
     expr = "the repository {string} notes that this machine's IPv4 traffic leaves by Wi-Fi and its IPv6 traffic by a wired network"
 )]
 fn notes_mixed_link(agent: &mut Agent, name: String) {
-    let note = agent.locations.entries[&name].link_note(Some(routes_link(agent)));
+    let note = named(&agent.locations.entries, &name).link_note(Some(routes_link(agent)));
     assert_eq!(
         note,
         Some(MixedLinkNote {
@@ -1837,7 +1845,10 @@ fn notes_mixed_link(agent: &mut Agent, name: String) {
 fn notes_no_mixed_link(agent: &mut Agent, name: String) {
     let link = routes_link(agent);
     assert_eq!(link, Link::Wired, "the scenario's link is one interface");
-    assert_eq!(agent.locations.entries[&name].link_note(Some(link)), None);
+    assert_eq!(
+        named(&agent.locations.entries, &name).link_note(Some(link)),
+        None
+    );
 }
 
 #[given(expr = "a run of the plan {string} is queued while the machine is on a wired network")]
@@ -1865,7 +1876,7 @@ async fn person_tests(agent: &mut Agent, repository: String) {
     let world = &agent.locations;
     let saved = SavedEntry {
         alias: alias(&repository),
-        entry: world.entries[&repository].clone(),
+        entry: named(&world.entries, &repository).clone(),
     };
     let tested = world
         .engine(agent.clock.clone())
@@ -1898,7 +1909,7 @@ fn test_says_answered(agent: &mut Agent, name: String) {
 
 #[then(expr = "the location {string} was never probed")]
 fn never_probed(agent: &mut Agent, name: String) {
-    let address = &agent.locations.addresses[&name];
+    let address = named(&agent.locations.addresses, &name);
     let probes = agent.locations.probes();
     assert!(
         probes.iter().all(|probe| &probe.repository != address),
@@ -1908,7 +1919,7 @@ fn never_probed(agent: &mut Agent, name: String) {
 
 #[then(expr = "the location {string} is probed")]
 fn is_probed(agent: &mut Agent, name: String) {
-    let address = &agent.locations.addresses[&name];
+    let address = named(&agent.locations.addresses, &name);
     assert!(
         agent
             .locations

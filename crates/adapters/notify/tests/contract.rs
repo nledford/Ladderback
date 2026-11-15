@@ -210,7 +210,12 @@ async fn answer(mut stream: TcpStream, served: Arc<Served>) {
                 ChannelKind::Webhook => {
                     let body: serde_json::Value =
                         serde_json::from_str(&request.body).unwrap_or_default();
-                    let text = |key: &str| body[key].as_str().unwrap_or_default().to_owned();
+                    let text = |key: &str| {
+                        body.get(key)
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned()
+                    };
                     Received {
                         kind,
                         ping: None,

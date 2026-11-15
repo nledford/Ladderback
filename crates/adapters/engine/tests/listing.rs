@@ -54,7 +54,10 @@ async fn a_listing_longer_than_one_message_is_listed_whole_and_newest_first() {
     repository.save_snapshots(snapshots).unwrap();
     let listed = listed(&location).await;
     assert_eq!(listed.len(), 1_500);
-    let labels: Vec<&str> = listed.iter().map(|s| &s.label[..4]).collect();
+    let labels: Vec<&str> = listed
+        .iter()
+        .map(|s| s.label.get(..4).expect("a label of four digits first"))
+        .collect();
     let newest_first: Vec<String> = (0..1_500).rev().map(|n| format!("{n:04}")).collect();
     assert_eq!(labels, newest_first);
 }

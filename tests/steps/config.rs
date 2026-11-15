@@ -46,10 +46,9 @@ pub(super) fn in_scratch(agent: &Agent, text: &str) -> String {
 pub(super) fn long_texts(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some(open) = rest.find('{') {
-        let (before, after) = rest.split_at(open);
+    while let Some((before, after)) = rest.split_once('{') {
         out.push_str(before);
-        let inside = after.get(1..).and_then(|after| after.split_once('}'));
+        let inside = after.split_once('}');
         match inside.and_then(|(name, after)| Some((placeholder(name)?, after))) {
             Some((text, after)) => {
                 out.push_str(&text);
@@ -57,7 +56,7 @@ pub(super) fn long_texts(text: &str) -> String {
             }
             None => {
                 out.push('{');
-                rest = &after[1..];
+                rest = after;
             }
         }
     }

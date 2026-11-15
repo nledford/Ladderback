@@ -325,7 +325,7 @@ fn absurd_digit_options_are_capped_before_anything_is_written() {
     assert_eq!(fraction.len(), 100, "{fraction}");
     assert!(fraction.starts_with('5'), "{fraction}");
     assert!(
-        fraction[1..].bytes().all(|digit| digit == b'0'),
+        fraction.bytes().skip(1).all(|digit| digit == b'0'),
         "{fraction}"
     );
 }

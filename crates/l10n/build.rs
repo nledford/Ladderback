@@ -104,8 +104,9 @@ fn check_syntax(tag: &str, name: &str, text: &str) -> Result<()> {
     };
     let mut report = format!("locales/{tag}/{name} has syntax errors:");
     for error in errors {
-        let line = text[..error.pos.start.min(text.len())]
+        let line = text
             .bytes()
+            .take(error.pos.start)
             .filter(|byte| *byte == b'\n')
             .count()
             + 1;

@@ -178,9 +178,9 @@ mod tests {
     fn a_page_stops_before_it_outgrows_one_message() {
         // Names of the longest kept, each escaped to six bytes a character:
         // far fewer than the cap's worth fit in a page.
-        let long = "\u{1}".repeat(MAX_ENTRY_NAME_BYTES);
+        let tail = "\u{1}".repeat(MAX_ENTRY_NAME_BYTES - 4);
         let nodes: Vec<Node> = (0..PAGE_ENTRIES)
-            .map(|at| file(&format!("{at:04}{}", &long[4..]), 1))
+            .map(|at| file(&format!("{at:04}{tail}"), 1))
             .collect();
         let first = page(&nodes, 0);
         let kept = names(&first).len();

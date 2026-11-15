@@ -264,7 +264,9 @@ async fn killed_backup_left_a_pack(agent: &mut Agent) {
         let mut names = BTreeSet::new();
         walk(&root.join("data"), "data", &mut names);
         let pack = names.first().expect("the repository holds a pack to copy");
-        let folder = root.join("data").join(&STRAY_PACK[..2]);
+        let folder = root
+            .join("data")
+            .join(STRAY_PACK.get(..2).expect("a pack name"));
         std::fs::create_dir_all(&folder).expect("the pack's folder");
         std::fs::copy(root.join(pack), folder.join(STRAY_PACK)).expect("the pack is copied");
     })

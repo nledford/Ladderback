@@ -68,10 +68,9 @@ pub fn invalid<T: std::fmt::Debug>(result: Result<T, ConfigError>) -> Invalid {
 /// Where the first `needle` in `text` starts, counted from 1 in lines and in
 /// characters. The fixtures are ASCII up to the place they are searched for.
 pub fn position_of(text: &str, needle: &str) -> Position {
-    let offset = text
-        .find(needle)
+    let (before, _) = text
+        .split_once(needle)
         .unwrap_or_else(|| panic!("{needle:?} is not in the text"));
-    let before = &text[..offset];
     let line = before.matches('\n').count() + 1;
     let column = before
         .rsplit('\n')

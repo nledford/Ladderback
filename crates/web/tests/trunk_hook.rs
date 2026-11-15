@@ -45,7 +45,7 @@ echo "npx $*" >> "$FAKE_LOG"
 fn hook() -> (String, Vec<String>) {
     let text = fs::read_to_string(Path::new(PACKAGE).join("Trunk.toml")).unwrap();
     let config: toml::Table = toml::from_str(&text).unwrap();
-    let hooks = config["hooks"].as_array().unwrap();
+    let hooks = config.get("hooks").and_then(toml::Value::as_array).unwrap();
     let [hook] = hooks.as_slice() else {
         panic!("Trunk.toml has {} hooks; this test runs one", hooks.len());
     };

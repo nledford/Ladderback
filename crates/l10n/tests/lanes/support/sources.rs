@@ -33,12 +33,12 @@ fn walk(stream: TokenStream, usage: &mut Usage) {
         return;
     }
     let mut at = 0;
-    while at < tokens.len() {
+    while let Some(token) = tokens.get(at) {
         if marks_test_code(&tokens, at) {
             at = skip_item(&tokens, at + 2);
             continue;
         }
-        match &tokens[at] {
+        match token {
             TokenTree::Ident(ident) if ident == "msg" && is_path_separator(&tokens, at + 1) => {
                 match tokens.get(at + 3) {
                     Some(TokenTree::Ident(name)) => {
