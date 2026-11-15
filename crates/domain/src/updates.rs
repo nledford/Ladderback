@@ -59,33 +59,116 @@ impl Version {
     /// The version `text` is: `MAJOR.MINOR.PATCH`, each a number without a
     /// leading zero, then an optional `-` prerelease and `+` build metadata.
     pub fn parse(text: &str) -> Result<Self, InvalidVersion> {
-        todo!("parse {text}")
+        if text.len() > MAX_VERSION_BYTES {
+            return Err(InvalidVersion);
+        }
+        let (rest, build) = match text.split_once('+') {
+            Some((rest, build)) => (rest, Some(build)),
+            None => (text, None),
+        };
+        if let Some(build) = build
+            && !build.split('.').all(is_identifier)
+        {
+            return Err(InvalidVersion);
+        }
+        let (core, pre) = match rest.split_once('-') {
+            Some((core, pre)) => (
+                core,
+                pre.split('.')
+                    .map(Identifier::parse)
+                    .collect::<Result<_, _>>()?,
+            ),
+            None => (rest, Vec::new()),
+        };
+        let mut numbers = core.split('.').map(number);
+        let (Some(major), Some(minor), Some(patch), None) = (
+            numbers.next(),
+            numbers.next(),
+            numbers.next(),
+            numbers.next(),
+        ) else {
+            return Err(InvalidVersion);
+        };
+        Ok(Self {
+            major: major?,
+            minor: minor?,
+            patch: patch?,
+            pre,
+        })
     }
 
     /// The version a release's tag names: `v` and the version (`v0.3.0`).
     pub fn of_tag(tag: &str) -> Result<Self, InvalidVersion> {
-        todo!("parse the tag {tag}")
+        tag.strip_prefix('v')
+            .map_or(Err(InvalidVersion), Self::parse)
     }
 
     /// Whether it is a prerelease (`0.4.0-rc.1`).
     pub fn is_prerelease(&self) -> bool {
-        todo!()
+        !self.pre.is_empty()
     }
 
     /// The tag its release has: `v0.3.0`.
     pub fn tag(&self) -> String {
-        todo!()
+        format!("v{self}")
     }
 
     /// The address of its release's notes.
     pub fn release_notes(&self) -> String {
-        todo!()
+        format!("{RELEASES_PAGE}{}", self.tag())
     }
+}
+
+impl Identifier {
+    /// A prerelease part: digits without a leading zero are a number; other
+    /// letters, digits and hyphens are text.
+    fn parse(text: &str) -> Result<Self, InvalidVersion> {
+        if text.bytes().all(|byte| byte.is_ascii_digit()) {
+            number(text).map(Self::Numeric)
+        } else if is_identifier(text) {
+            Ok(Self::Text(text.to_owned()))
+        } else {
+            Err(InvalidVersion)
+        }
+    }
+}
+
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Numeric(number) => write!(f, "{number}"),
+            Self::Text(text) => f.write_str(text),
+        }
+    }
+}
+
+/// Whether `text` is a SemVer identifier: one or more ASCII letters, digits
+/// and hyphens.
+fn is_identifier(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+/// A SemVer number: digits that fit a `u64`, without a leading zero.
+fn number(text: &str) -> Result<u64, InvalidVersion> {
+    let digits = text.bytes().all(|byte| byte.is_ascii_digit());
+    if !digits || (text.len() > 1 && text.starts_with('0')) {
+        return Err(InvalidVersion);
+    }
+    text.parse().map_err(|_| InvalidVersion)
 }
 
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!("{}", f.alternate())
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)?;
+        let mut separator = '-';
+        for identifier in &self.pre {
+            write!(f, "{separator}{identifier}")?;
+            separator = '.';
+        }
+        Ok(())
     }
 }
 
@@ -94,7 +177,14 @@ impl Ord for Version {
     /// before the release of its numbers, two prereleases by their parts in
     /// turn, a number before text, and fewer parts before more.
     fn cmp(&self, other: &Self) -> Ordering {
-        todo!("{other}")
+        (self.major, self.minor, self.patch)
+            .cmp(&(other.major, other.minor, other.patch))
+            .then_with(|| match (self.pre.is_empty(), other.pre.is_empty()) {
+                (true, true) => Ordering::Equal,
+                (true, false) => Ordering::Greater,
+                (false, true) => Ordering::Less,
+                (false, false) => self.pre.cmp(&other.pre),
+            })
     }
 }
 
@@ -116,16 +206,29 @@ pub struct Release {
 /// when it is a full release (neither marked a prerelease nor with a
 /// prerelease part) newer than `running`; `None` otherwise.
 pub fn available_update(running: &Version, release: &Release) -> Option<Version> {
-    todo!("{running} {release:?}")
+    let full = !release.prerelease && !release.version.is_prerelease();
+    (full && release.version > *running).then(|| release.version.clone())
 }
 
 /// When the agent asks for the newest release next, at `now`, having last
-/// asked at `last`: a day after `last`, or [`FIRST_CHECK_DELAY`] from now
-/// when it never asked or that day is already over; never more than a day
-/// from now, should the clock have been set back. Then spread by up to
-/// [`CHECK_JITTER`], as the draw falls.
+/// asked at `last`: a day after `last`, but never sooner than
+/// [`FIRST_CHECK_DELAY`] from now, so an agent that has just started waits
+/// that long whenever it last asked; never more than a day from now, should
+/// the clock have been set back. Then spread by up to [`CHECK_JITTER`], as
+/// the draw falls.
 pub fn next_check(last: Option<Timestamp>, now: Timestamp, draw: RandomDraw) -> Timestamp {
-    todo!("{last:?} {now} {draw:?}")
+    let soon = later(now, FIRST_CHECK_DELAY);
+    let moment = last.map_or(soon, |last| {
+        later(last, CHECK_INTERVAL)
+            .max(soon)
+            .min(later(now, CHECK_INTERVAL))
+    });
+    later(moment, share(CHECK_JITTER, draw))
+}
+
+/// `duration` after `moment`, or the last moment there is.
+fn later(moment: Timestamp, duration: SignedDuration) -> Timestamp {
+    moment.checked_add(duration).unwrap_or(Timestamp::MAX)
 }
 
 #[cfg(test)]
