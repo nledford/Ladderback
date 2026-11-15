@@ -75,7 +75,11 @@ impl Exit {
 
 /// What `ladderback worker` does. Never returns normally: the process exits
 /// with the job's [`Exit`] code, or 74 when the events can't be written.
-pub fn main() -> ExitCode {
+///
+/// `program` is the program and its build as its `--version` prints them,
+/// `ladderback 0.3.0+3f937cf`: every snapshot a backup writes names it
+/// (decision 90).
+pub fn main(program: &'static str) -> ExitCode {
     // Who started the worker, and the signals it stops on, taken before the
     // kernel is asked for the parent-death signal: one that comes early waits
     // for its handler instead of ending the worker.
@@ -110,7 +114,7 @@ pub fn main() -> ExitCode {
     if let Err(error) = logging::install(events.clone()) {
         say(&format!("cannot route logs into events: {error}"));
     }
-    let process = Process::real();
+    let process = Process::real(program);
     #[cfg(unix)]
     if let Err(error) = signals
         .and_then(|signals| exit_on_signal(signals, daemon, events.clone(), process.cancel.clone()))
@@ -158,18 +162,27 @@ fn die_with_the_daemon() {
     }
 }
 
-/// Runs the job read from `input`, writing events to `output`. Fails only if
-/// `output` can't be written, for example because the daemon went away.
+/// Runs the job read from `input`, writing events to `output`, as the
+/// `program` that [`main`] names. Fails only if `output` can't be written,
+/// for example because the daemon went away.
 ///
 /// Unlike [`main`], this leaves the process alone: no logger, no signal
 /// handler. A job with a deadline still exits the process when it passes.
-pub fn run(input: impl Read, output: impl Write + Send + 'static, pid: u32) -> io::Result<Exit> {
-    run_events(input, Events::new(output), pid, Process::real())
+pub fn run(
+    input: impl Read,
+    output: impl Write + Send + 'static,
+    pid: u32,
+    program: &'static str,
+) -> io::Result<Exit> {
+    run_events(input, Events::new(output), pid, Process::real(program))
 }
 
-/// The process-level effects a deadline needs, injectable for tests.
+/// What a job takes from the process it runs in: the program it is, and the
+/// effects a deadline needs, injectable for tests.
 #[derive(Clone)]
 pub(crate) struct Process {
+    /// The program and its build, as [`main`] was given them.
+    program: &'static str,
     clock: WallClock,
     terminate: Terminate,
     cancel: Cancel,
@@ -179,8 +192,9 @@ pub(crate) struct Process {
 }
 
 impl Process {
-    fn real() -> Self {
+    fn real(program: &'static str) -> Self {
         Self {
+            program,
             clock: Arc::new(Timestamp::now),
             terminate: Arc::new(|code| {
                 std::process::exit(code);
@@ -289,6 +303,11 @@ impl Context {
     /// The worker's cancel: what a SIGTERM asks for.
     pub(crate) fn cancel(&self) -> &Cancel {
         &self.process.cancel
+    }
+
+    /// The program and its build, which a backup's snapshot names.
+    pub(crate) fn program(&self) -> &'static str {
+        self.process.program
     }
 }
 
@@ -451,6 +470,9 @@ mod tests {
     use super::*;
     use crate::job::{FakeEndSpec, FakeJobSpec};
 
+    /// The program the tests' workers say they are.
+    const PROGRAM: &str = "ladderback 0.0.0-test";
+
     fn fake_spec(budget: Option<SignedDuration>, steps: u32) -> JobSpec {
         JobSpec {
             op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
@@ -469,7 +491,7 @@ mod tests {
     #[test]
     fn an_unreadable_job_spec_is_reported_as_a_failure() {
         let (events, capture) = capture();
-        let exit = run_events(&b"{not json"[..], events, 42, Process::real()).unwrap();
+        let exit = run_events(&b"{not json"[..], events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         let events = capture.parsed();
         let [WorkerEvent::Failed { code, detail, .. }] = events.as_slice() else {
@@ -487,7 +509,7 @@ mod tests {
     fn a_worker_says_it_took_its_job_before_it_starts_the_work() {
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(None, 1)).unwrap();
-        run_events(input.as_slice(), events, 42, Process::real()).unwrap();
+        run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
         let events = capture.parsed();
         let [
             WorkerEvent::Log { level, .. },
@@ -522,7 +544,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, Process::real()).unwrap();
+        let exit = run_events(input.as_slice(), events, 1, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         let events = capture.parsed();
         assert_matches!(
@@ -545,7 +567,7 @@ mod tests {
         let spec = fake_spec(None, 2);
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 42, Process::real()).unwrap();
+        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit, Exit::Reported { failed: false });
         let events = capture.parsed();
         let Some(WorkerEvent::Started { op_id, pid, .. }) = events
@@ -561,17 +583,18 @@ mod tests {
         );
     }
 
-    /// A backup the cancel ended reports nothing more, neither a result nor
-    /// a failure, and the worker exits as a SIGTERM's, so that the daemon
-    /// tells it from a crash when the SIGTERM wasn't its own.
-    #[test]
-    fn a_cancelled_backup_ends_the_worker_with_sigterms_code_and_reports_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("source");
+    /// A folder of one demo file in `dir`.
+    fn demo_source(dir: &Path) -> PathBuf {
+        let source = dir.join("source");
         std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("notes.txt"), b"demo").unwrap();
-        let repo = RepositorySpec {
-            repository: dir.path().join("repo").to_string_lossy().into_owned(),
+        source
+    }
+
+    /// A local repository at `repo` in `dir`, not yet created.
+    fn demo_repository(dir: &Path) -> RepositorySpec {
+        RepositorySpec {
+            repository: dir.join("repo").to_string_lossy().into_owned(),
             repo_hot: None,
             password: SecretValue::new("demo-password"),
             options: Default::default(),
@@ -579,25 +602,12 @@ mod tests {
             options_cold: Default::default(),
             secrets: Vec::new(),
             id: None,
-        };
-        let run = |job, process| {
-            let spec = JobSpec {
-                op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
-                cache_dir: None,
-                watchdog_interval_ms: 10,
-                job,
-            };
-            let (events, capture) = capture();
-            let input = serde_json::to_vec(&spec).unwrap();
-            let exit = run_events(input.as_slice(), events, 1, process).unwrap();
-            (exit, capture.parsed())
-        };
-        let (exit, _) = run(JobKind::Init(repo.clone()), Process::real());
-        assert_eq!(exit, Exit::Reported { failed: false });
+        }
+    }
 
-        let process = Process::real();
-        process.cancel.request();
-        let backup = crate::job::BackupJobSpec {
+    /// A backup of `source` to `repo` for the plan `home`.
+    fn home_backup(repo: RepositorySpec, source: &Path) -> crate::job::BackupJobSpec {
+        crate::job::BackupJobSpec {
             repo,
             sources: vec![source.to_string_lossy().into_owned()],
             plan: domain::PlanId::parse("home").unwrap(),
@@ -607,8 +617,37 @@ mod tests {
             host: None,
             filter: Default::default(),
             deadline_budget: SignedDuration::from_hours(1),
+        }
+    }
+
+    /// Runs `job` in `process`: how it ended and the events it wrote.
+    fn run_job(job: JobKind, process: Process) -> (Exit, Vec<WorkerEvent>) {
+        let spec = JobSpec {
+            op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
+            cache_dir: None,
+            watchdog_interval_ms: 10,
+            job,
         };
-        let (exit, events) = run(JobKind::Backup(backup), process);
+        let (events, capture) = capture();
+        let input = serde_json::to_vec(&spec).unwrap();
+        let exit = run_events(input.as_slice(), events, 1, process).unwrap();
+        (exit, capture.parsed())
+    }
+
+    /// A backup the cancel ended reports nothing more, neither a result nor
+    /// a failure, and the worker exits as a SIGTERM's, so that the daemon
+    /// tells it from a crash when the SIGTERM wasn't its own.
+    #[test]
+    fn a_cancelled_backup_ends_the_worker_with_sigterms_code_and_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = demo_source(dir.path());
+        let repo = demo_repository(dir.path());
+        let (exit, _) = run_job(JobKind::Init(repo.clone()), Process::real(PROGRAM));
+        assert_eq!(exit, Exit::Reported { failed: false });
+
+        let process = Process::real(PROGRAM);
+        process.cancel.request();
+        let (exit, events) = run_job(JobKind::Backup(home_backup(repo, &source)), process);
         assert_eq!(exit.code(), crate::job::exit_code::TERMINATED);
         assert!(
             !events
@@ -620,12 +659,47 @@ mod tests {
         assert_eq!(snapshots.count(), 0, "a cancelled backup wrote a snapshot");
     }
 
+    /// A backup's snapshot names the program and the build the worker was
+    /// given, not rustic's own `rustic <version>` (decision 90).
+    #[test]
+    fn a_backups_snapshot_names_the_program_and_build_the_worker_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = demo_source(dir.path());
+        let repo = demo_repository(dir.path());
+        let (exit, _) = run_job(JobKind::Init(repo.clone()), Process::real(PROGRAM));
+        assert_eq!(exit, Exit::Reported { failed: false });
+
+        let program = "ladderback 9.8.7+abcdef1.dirty";
+        let backup = JobKind::Backup(home_backup(repo, &source));
+        let (exit, events) = run_job(backup, Process::real(program));
+        assert_eq!(exit, Exit::Reported { failed: false }, "{events:?}");
+        let backends = rustic_backend::BackendOptions::default()
+            .repository(dir.path().join("repo").to_string_lossy())
+            .to_backends()
+            .unwrap();
+        let snapshots = rustic_core::Repository::new(
+            &rustic_core::RepositoryOptions::default().no_cache(true),
+            &backends,
+        )
+        .unwrap()
+        .open(&rustic_core::Credentials::password("demo-password"))
+        .unwrap()
+        .get_all_snapshots()
+        .unwrap();
+        let programs: Vec<&str> = snapshots
+            .iter()
+            .map(|snapshot| snapshot.program_version.as_str())
+            .collect();
+        assert_eq!(programs, [program]);
+    }
+
     #[test]
     fn a_job_with_a_budget_counts_it_from_the_started_event_and_is_stopped_when_it_ends() {
         let at = Timestamp::from_second(1_800_000_000).unwrap();
         let (tx, terminated) = mpsc::channel();
         let tx = Mutex::new(tx);
         let process = Process {
+            program: PROGRAM,
             clock: Arc::new(move || at),
             terminate: Arc::new(move |code| {
                 let _ = tx.lock().unwrap().send(code);
@@ -663,6 +737,7 @@ mod tests {
         let (tx, terminated) = mpsc::channel();
         let tx = Mutex::new(tx);
         let process = Process {
+            program: PROGRAM,
             clock: {
                 let seconds = Arc::clone(&seconds);
                 Arc::new(move || {
@@ -703,6 +778,7 @@ mod tests {
         let (tx, terminated) = mpsc::channel();
         let tx = Mutex::new(tx);
         let process = Process {
+            program: PROGRAM,
             clock: {
                 let seconds = Arc::clone(seconds);
                 Arc::new(move || {
@@ -888,6 +964,7 @@ mod tests {
         let (tx, terminated) = mpsc::channel();
         let tx = Mutex::new(tx);
         let process = Process {
+            program: PROGRAM,
             clock: {
                 let seconds = Arc::clone(&seconds);
                 Arc::new(move || Timestamp::from_second(seconds.load(Ordering::SeqCst)).unwrap())
@@ -986,7 +1063,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, Process::real()).unwrap();
+        let exit = run_events(input.as_slice(), events, 1, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         capture.text()
     }
@@ -1100,7 +1177,7 @@ mod tests {
         // Trailing whitespace is still valid JSON.
         input.resize(crate::job::MAX_MESSAGE_BYTES + 1, b' ');
         let (events, capture) = capture();
-        let exit = run_events(input.as_slice(), events, 42, Process::real()).unwrap();
+        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         invalid_spec_failure(&capture.parsed());
     }
@@ -1110,7 +1187,7 @@ mod tests {
         let mut input = serde_json::to_vec(&fake_spec(None, 0)).unwrap();
         input.resize(crate::job::MAX_MESSAGE_BYTES, b' ');
         let (events, _capture) = capture();
-        let exit = run_events(input.as_slice(), events, 42, Process::real()).unwrap();
+        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit, Exit::Reported { failed: false });
     }
 
@@ -1138,7 +1215,7 @@ mod tests {
             left: 64 << 20,
         };
         let (events, capture) = capture();
-        let exit = run_events(input, events, 42, Process::real()).unwrap();
+        let exit = run_events(input, events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         invalid_spec_failure(&capture.parsed());
         assert!(

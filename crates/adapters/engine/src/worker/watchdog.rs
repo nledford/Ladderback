@@ -232,6 +232,7 @@ mod tests {
                 terminated,
                 refusing_at_exit,
                 process: Process {
+                    program: "ladderback 0.0.0-test",
                     clock,
                     terminate,
                     cancel,

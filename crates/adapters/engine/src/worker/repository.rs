@@ -431,7 +431,7 @@ mod tests {
             watchdog_interval_ms: 10,
             job: JobKind::Identify(spec_at("/unused")),
         };
-        Context::new(events, &spec, 1, Process::real())
+        Context::new(events, &spec, 1, Process::real("ladderback 0.0.0-test"))
     }
 
     fn context(cache_dir: Option<PathBuf>) -> (Context, Capture) {

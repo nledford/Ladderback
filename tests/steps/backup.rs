@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use app::history::GetOperation;
@@ -527,6 +528,30 @@ async fn tagged(agent: &mut Agent) {
     for tag in agent.plan_tags().tags() {
         assert!(tags.contains(&&tag), "{tag} missing from {tags:?}");
     }
+}
+
+/// What `ladderback --version` prints, without its line end: the program and
+/// the build it names (decision 90).
+fn version_text() -> String {
+    let mut command = Command::new(super::LADDERBACK);
+    command
+        .arg("--version")
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let child = spawn_gate::hold(|| command.spawn()).expect("ladderback starts");
+    let output = child.wait_with_output().expect("ladderback --version ends");
+    assert!(output.status.success(), "--version failed: {output:?}");
+    let text = String::from_utf8(output.stdout).expect("--version prints UTF-8");
+    text.strip_suffix('\n').unwrap_or(&text).to_owned()
+}
+
+#[then("the snapshot names the build that made it as the program's version does")]
+async fn names_the_build(agent: &mut Agent) {
+    let snapshot = newest_snapshot(agent).await;
+    let version = blocking(version_text).await;
+    assert_eq!(snapshot.program_version, version);
 }
 
 /// The backup's snapshot has a file in `half`, one of the folders of the

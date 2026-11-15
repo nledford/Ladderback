@@ -1,7 +1,8 @@
 @e2e
 Feature: Backups
-  A backup records which plan and agent made it, builds on that plan's last
-  snapshot, and reports files it couldn't read without failing.
+  A backup records which plan and agent made it and the build of Ladderback
+  that wrote it, builds on that plan's last snapshot, and reports files it
+  couldn't read without failing.
 
   Background:
     Given a new repository
@@ -14,6 +15,11 @@ Feature: Backups
     And the history shows the backup's snapshot
     And the repository has 1 snapshot
     And the snapshot is tagged with the plan and the agent
+
+  Scenario: A backup's snapshot names the build of Ladderback that made it
+    When the agent backs up the plan
+    Then the operation ends as succeeded
+    And the snapshot names the build that made it as the program's version does
 
   @needs-file-permissions
   Scenario: Unreadable files are warnings, not failures

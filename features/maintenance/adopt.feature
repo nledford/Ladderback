@@ -101,6 +101,7 @@ Feature: Adopt gives history this agent doesn't own to a plan of its own
     Then the operation ends as succeeded
     And the adoption reports 1 snapshot rewritten
     And the adopted snapshot still carries the tag "weekly"
+    And the adopted snapshot still names the program that made it
 
   @e2e
   Scenario: An adoption cut short after its copy is finished without a second copy
