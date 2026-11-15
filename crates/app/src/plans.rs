@@ -69,8 +69,19 @@ impl EditPlans {
         &self,
         change: impl FnOnce(&AgentConfig) -> Result<AgentConfig, ChangeRefused>,
     ) -> Result<(), EditError> {
-        let _ = (&self.config, &self.writes, &self.changed, change);
-        todo!()
+        let _writing = self.writes.lock().await;
+        let loaded = self
+            .config
+            .load()
+            .await
+            .map_err(|error| EditError::Config(Box::new(error)))?;
+        let changed = change(&loaded).map_err(EditError::Refused)?;
+        self.config
+            .save(&changed)
+            .await
+            .map_err(|error| EditError::Config(Box::new(error)))?;
+        self.changed.tell();
+        Ok(())
     }
 }
 

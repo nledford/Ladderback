@@ -270,8 +270,9 @@ impl Scheduler {
         }
     }
 
-    /// Sleeps for `duration`, or until a backup ends, and returns that end.
-    /// Once every run's sender is gone, only the sleep ends it.
+    /// Sleeps for `duration`, until a backup ends, which it returns, or
+    /// until a configuration change is told. Once every run's sender is
+    /// gone, and the teller of changes, only the sleep ends it.
     async fn sleep(&self, duration: SignedDuration) -> Option<RunEnd> {
         let ended = async {
             match self.ends.next().await {
@@ -279,8 +280,15 @@ impl Scheduler {
                 None => std::future::pending().await,
             }
         };
-        match select(pin!(self.clock.sleep(duration)), pin!(ended)).await {
-            Either::Left(((), _)) => None,
+        let changed = async {
+            if self.changes.next().await.is_none() {
+                std::future::pending::<()>().await;
+            }
+        };
+        let (clock, changed) = (pin!(self.clock.sleep(duration)), pin!(changed));
+        let slept = select(clock, changed);
+        match select(pin!(slept), pin!(ended)).await {
+            Either::Left(_) => None,
             Either::Right((end, _)) => Some(end),
         }
     }
