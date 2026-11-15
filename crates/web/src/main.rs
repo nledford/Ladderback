@@ -28,6 +28,9 @@ use leptos_router::path;
 // slice's, and until then a build without the gallery leaves these unused.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod announcer;
+// What a status badge shows for each state, decided on the host;
+// `components.rs`'s `StatusBadge` is its glue.
+mod badge;
 // The shared component set, exercised by the gallery in a `gallery` build; a
 // build without the gallery has no user for it yet.
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
@@ -87,6 +90,10 @@ mod sign_in_settings;
 // The Snapshots page's DOM glue; the decisions it sends and shows are
 // `maintenance.rs` and `wording.rs`.
 mod snapshots;
+// Declared as `formatting` is, for the same reason.
+#[cfg(test)]
+#[cfg(target_arch = "wasm32")]
+mod status_badge;
 // Declared as `formatting` is, for the same reason.
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]

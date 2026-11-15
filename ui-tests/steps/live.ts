@@ -541,6 +541,42 @@ Then("the columns of the table {string} keep the widths noted", async function (
   assert.deepEqual(moved, [], `the columns of the table ${name} changed width`);
 });
 
+// The shapes a row's status badge draws (technical design §4.5), noted by one
+// step for a later one to compare with. Its icon is decoration a screen
+// reader skips, so the badge is found by its class inside the row's cell.
+const notedIcons = new WeakMap<BrowserWorld, string>();
+
+async function badgeIcon(world: BrowserWorld, name: string, row: string): Promise<string> {
+  const cell = await cellOf(world, name, row, "Status");
+  return cell.evaluate((element) => element.querySelector(".badge svg")?.innerHTML ?? "");
+}
+
+When(
+  "the icon of the status badge of the row {string} of the table {string} is noted",
+  async function (this: BrowserWorld, row: string, name: string) {
+    const icon = await badgeIcon(this, name, row);
+    assert.notEqual(icon, "", `the status badge of the row ${row} of the table ${name} has no icon`);
+    notedIcons.set(this, icon);
+  },
+);
+
+// A badge's icon follows its state in place, as its label does: once the run
+// has ended, the row's badge draws its new state's icon, not the one noted
+// while it ran.
+Then(
+  "the status badge of the row {string} of the table {string} draws another icon than the one noted",
+  async function (this: BrowserWorld, row: string, name: string) {
+    const noted = notedIcons.get(this);
+    assert.ok(noted, `the icon of the status badge of the row ${row} was never noted`);
+    await expect
+      .poll(async () => {
+        const icon = await badgeIcon(this, name, row);
+        return icon !== "" && icon !== noted;
+      }, { message: `the status badge of the row ${row} of the table ${name} kept its icon`, timeout: UPDATE_PATIENCE_MS })
+      .toBe(true);
+  },
+);
+
 // The gap a reader needs to see a header's text and its button as two things:
 // a quarter of the root's text size, 4 px at the browser's default.
 const APART_REM = 0.25;

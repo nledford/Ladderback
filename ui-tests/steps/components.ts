@@ -1,7 +1,7 @@
 // Journey steps for the shared component set in the gallery (technical design
 // §4.5): the dialog, the data table, the form field, the checkbox, the
-// progress bar, the toast and the pause control. Keyboard only,
-// role-and-name locators, as everywhere in steps/.
+// progress bar, the toast, the pause control and the status badge. Keyboard
+// only, role-and-name locators, as everywhere in steps/.
 
 import assert from "node:assert/strict";
 
@@ -308,6 +308,93 @@ When("the reader asks for less motion", async function (this: BrowserWorld) {
   await this.page.emulateMedia({ reducedMotion: "reduce" });
 });
 
+// A status badge's icon (technical design §4.5) is decoration beside its
+// text, so a screen reader reads the label once and Tab never stops on it; it
+// is drawn in the text's color, so the contrast gate's badge pairs cover it;
+// and its shape is its state's own, so the state reads without the color.
+Then(
+  "each of the {int} badges of the {string} demo has an icon of its own, in its text's color, which a screen reader skips",
+  async function (this: BrowserWorld, count: number, component: string) {
+    const section = demoSection(this.page, component);
+    await section.waitFor({ timeout: 5_000 });
+    const badges = await section.evaluate((element) =>
+      Array.from(element.querySelectorAll(".badge"), (badge) => {
+        const icon = badge.querySelector("svg");
+        return {
+          text: badge.textContent?.trim() ?? "",
+          hidden: icon?.getAttribute("aria-hidden") ?? null,
+          focusable: icon?.getAttribute("focusable") ?? null,
+          stroke: icon === null ? "" : getComputedStyle(icon).stroke,
+          color: getComputedStyle(badge).color,
+          shape: icon?.innerHTML ?? "",
+        };
+      }),
+    );
+    assert.equal(badges.length, count);
+    for (const badge of badges) {
+      assert.equal(badge.hidden, "true", badge.text);
+      assert.equal(badge.focusable, "false", badge.text);
+      assert.equal(badge.stroke, badge.color, badge.text);
+      assert.notEqual(badge.shape, "", badge.text);
+    }
+    assert.equal(new Set(badges.map((badge) => badge.shape)).size, count, "every state its own shape");
+  },
+);
+
+// No badge moves (technical design §4.5): a running operation can run for
+// hours while the page stays in use, and nothing on the page could stop a
+// turning icon or a pulsing pill (WCAG 2.2.2), so the visible text tells the
+// state. A badge's count is every animation the browser runs on its pill or
+// inside it (CSS animations and transitions, the Web Animations API) and
+// every SVG animation element it holds. A badge without an icon fails first,
+// so the check can't pass on a badge with nothing in it to move.
+Then(
+  "none of the {int} badges of the {string} demo moves",
+  async function (this: BrowserWorld, count: number, component: string) {
+    const section = demoSection(this.page, component);
+    await section.waitFor({ timeout: 5_000 });
+    const badges = await section.evaluate((element) =>
+      Array.from(element.querySelectorAll(".badge"), (badge) => ({
+        text: badge.textContent?.trim() ?? "",
+        icon: badge.querySelector("svg") !== null,
+        motions:
+          badge.getAnimations({ subtree: true }).length +
+          badge.querySelectorAll("animate, animateMotion, animateTransform, set").length,
+      })),
+    );
+    assert.equal(badges.length, count);
+    for (const badge of badges) {
+      assert.ok(badge.icon, `the badge "${badge.text}" has no icon`);
+      assert.equal(badge.motions, 0, badge.text);
+    }
+  },
+);
+
+// A badge's icon is as tall as its text, `1em` (technical design §4.5), so it
+// grows with the reader's text size (WCAG 1.4.4) rather than staying a small
+// mark beside large words. Half a pixel of rounding is allowed.
+Then(
+  "the icon of each badge of the {string} demo is as tall as its text",
+  async function (this: BrowserWorld, component: string) {
+    const section = demoSection(this.page, component);
+    await section.waitFor({ timeout: 5_000 });
+    const badges = await section.evaluate((element) =>
+      Array.from(element.querySelectorAll(".badge"), (badge) => ({
+        text: badge.textContent?.trim() ?? "",
+        font: Number.parseFloat(getComputedStyle(badge).fontSize),
+        icon: badge.querySelector("svg")?.getBoundingClientRect().height ?? 0,
+      })),
+    );
+    assert.ok(badges.length > 0, `the ${component} demo has no badge`);
+    for (const badge of badges) {
+      assert.ok(
+        Math.abs(badge.icon - badge.font) < 0.5,
+        `the badge "${badge.text}": its icon is ${badge.icon}px tall, its text ${badge.font}px`,
+      );
+    }
+  },
+);
+
 // A bar whose size isn't known is indeterminate (WAI-ARIA `progressbar`): it
 // has no value to give, so it gives no `aria-valuenow`, rather than a value
 // of nothing, and its value text says what the operation is doing, never a
@@ -407,7 +494,7 @@ const SNAPSHOTS: Record<string, string> = {
   - radio "Every month"
   - text: Every month`,
   "Status badge": `- heading "Status badge" [level=2]
-- paragraph: Loading Empty Error Success`,
+- paragraph: Queued Running Succeeded Succeeded with warnings Failed Cancelled Empty`,
   Progress: `- heading "Progress" [level=2]
 - progressbar "Demo backup progress": Backing up… 40%
 - paragraph:

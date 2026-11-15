@@ -6,8 +6,9 @@ Feature: The shared components in the gallery
   error, a multi-line form field that takes an entry a line, a checkbox, a
   radio group, a progress bar a keyboard user can reach, whose changes
   are never announced and are told at most every 30 seconds, and which shows
-  no percentage while its size isn't known, a toast and the
-  control that pauses live updates. Every demo state a
+  no percentage while its size isn't known, a toast, the
+  control that pauses live updates, and a status badge for every state an
+  operation can be in, whose icon tells the state by its shape. Every demo state a
   component can show (loading, empty, error, success, on and off) stays clear
   of accessibility violations, and each component's structure is pinned by an
   ARIA snapshot. The text of a control, such as a button's label, grows with
@@ -292,3 +293,16 @@ Feature: The shared components in the gallery
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
+
+  Scenario: Each state of a status badge has an icon of its own beside its text, which a screen reader skips
+    When I open the component gallery
+    Then each of the 7 badges of the "Status badge" demo has an icon of its own, in its text's color, which a screen reader skips
+
+  Scenario: No status badge moves, the running one's icon either, however long the operation runs
+    When I open the component gallery
+    Then none of the 7 badges of the "Status badge" demo moves
+
+  Scenario: A status badge's icon grows with the reader's text size
+    Given the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then the icon of each badge of the "Status badge" demo is as tall as its text
