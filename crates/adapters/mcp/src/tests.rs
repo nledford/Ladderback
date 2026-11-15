@@ -1515,7 +1515,7 @@ async fn a_wait_whose_detail_is_too_large_to_read_returns_the_summary_it_read() 
         assert_eq!(content["finished"], finished, "{answer}");
         assert_eq!(content["operation"]["status"], status, "{answer}");
         assert_eq!(content["warnings"], json!([]), "{answer}");
-        assert_eq!(content["unlisted-warnings"], 0, "{answer}");
+        assert_eq!(content.get("unlisted-warnings"), None, "{answer}");
     }
 }
 
