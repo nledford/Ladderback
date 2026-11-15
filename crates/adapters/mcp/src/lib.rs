@@ -317,17 +317,14 @@ impl Server {
                 daemon,
                 plans,
                 running,
-            }) => structured(
-                &Status {
-                    build: self.build.clone(),
-                    access,
-                    daemon,
-                    plans,
-                    running,
-                },
-                false,
-            ),
-            Err(error) => structured(&error, true),
+            }) => structured(&Status {
+                build: self.build.clone(),
+                access,
+                daemon,
+                plans,
+                running,
+            }),
+            Err(error) => refused(&error),
         }
     }
 
@@ -466,8 +463,8 @@ impl Server {
 /// A read tool's result: what it read, or the refusal, marked as an error.
 fn answered(result: Result<impl Serialize, ErrorDto>) -> CallToolResponse {
     match result {
-        Ok(value) => structured(&value, false),
-        Err(error) => structured(&error, true),
+        Ok(value) => structured(&value),
+        Err(error) => refused(&error),
     }
     .into()
 }
@@ -487,9 +484,8 @@ fn arguments<T: DeserializeOwned>(tool: &str, given: Option<JsonObject>) -> Resu
 }
 
 /// A tool's result: `value` as `structuredContent`, mirrored as JSON text.
-fn structured(value: &impl Serialize, is_error: bool) -> CallToolResult {
+fn structured(value: &impl Serialize) -> CallToolResult {
     match serde_json::to_value(value) {
-        Ok(value) if is_error => CallToolResult::structured_error(value),
         Ok(value) => CallToolResult::structured(value),
         // Only a map with keys that aren't text fails to serialize, and no
         // result holds one: said as a failure all the same, never a panic.
@@ -497,6 +493,15 @@ fn structured(value: &impl Serialize, is_error: bool) -> CallToolResult {
             CallToolResult::error(vec![rmcp::model::ContentBlock::text(error.to_string())])
         }
     }
+}
+
+/// A refusal: the `{code, args}` as JSON text, marked as an error, with no
+/// `structuredContent`. Clients check `structuredContent` against the tool's
+/// output schema, error or not, and a refusal isn't the shape it declares
+/// (§4.6).
+fn refused(error: &ErrorDto) -> CallToolResult {
+    let text = serde_json::to_string(error).unwrap_or_else(|error| error.to_string());
+    CallToolResult::error(vec![rmcp::model::ContentBlock::text(text)])
 }
 
 /// The input schema of a tool that takes no arguments.

@@ -1,6 +1,7 @@
 //! The protocol as a client sees it: one session over an in-memory pipe, a
 //! stand-in [`Backend`] behind it.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -357,11 +358,19 @@ async fn a_refusal_from_the_backend_is_a_result_marked_as_an_error() {
         None,
     ))));
     let answer = client.call_status(json!({})).await;
-    assert_eq!(answer["result"]["isError"], true, "{answer}");
-    assert_eq!(
-        answer["result"]["structuredContent"],
-        json!({"code": "sign-in-required"})
-    );
+    assert_eq!(refusal(&answer), json!({"code": "sign-in-required"}));
+}
+
+/// The `{code, args}` of a refusal: a result marked as an error, with no
+/// `structuredContent`, whose one text content holds it as JSON.
+fn refusal(answer: &Value) -> Value {
+    let result = &answer["result"];
+    assert_eq!(result["isError"], true, "{answer}");
+    assert!(result.get("structuredContent").is_none(), "{answer}");
+    let text = result["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no text: {answer}"));
+    serde_json::from_str(text).unwrap_or_else(|error| panic!("{error}: {text}"))
 }
 
 #[tokio::test]
@@ -693,9 +702,8 @@ async fn list_repositories_pages_by_alias_and_refuses_a_cursor_that_names_none()
     let answer = client
         .call("list_repositories", json!({"cursor": "gone"}))
         .await;
-    assert_eq!(answer["result"]["isError"], true, "{answer}");
     assert_eq!(
-        answer["result"]["structuredContent"],
+        refusal(&answer),
         json!({"code": "invalid-cursor", "args": {"cursor": {"type": "text", "value": "gone"}}})
     );
 }
@@ -813,11 +821,7 @@ async fn list_snapshots_lists_only_those_of_the_plan_and_host_named_and_pages_wh
             listing(json!({"plan": "home", "cursor": id(2)})),
         )
         .await;
-    assert_eq!(answer["result"]["isError"], true, "{answer}");
-    assert_eq!(
-        answer["result"]["structuredContent"]["code"],
-        "invalid-cursor"
-    );
+    assert_eq!(refusal(&answer)["code"], "invalid-cursor");
 }
 
 #[test]
@@ -941,13 +945,13 @@ async fn a_missing_or_unknown_argument_is_invalid_params() {
 
 #[tokio::test]
 async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error() {
-    let refusal = ErrorDto::new(
+    let told = ErrorDto::new(
         ErrorCode::RepositoryUnknown,
         [("alias", api::MsgArg::Text("nas".to_owned()))],
         None,
     );
     let mut client = connect(Lists {
-        refusal: Some(refusal.clone()),
+        refusal: Some(told.clone()),
         detail: Some(OperationDetailDto {
             operation: summary(1),
             warnings: Vec::new(),
@@ -973,13 +977,122 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
         ("export_profile", json!({"plan": "home"})),
     ] {
         let answer = client.call(tool, arguments).await;
-        assert_eq!(answer["result"]["isError"], true, "{tool}: {answer}");
         assert_eq!(
-            answer["result"]["structuredContent"],
-            serde_json::to_value(&refusal).unwrap(),
+            refusal(&answer),
+            serde_json::to_value(&told).unwrap(),
             "{tool}"
         );
     }
+}
+
+/// The golden file's output schema of each tool, by name.
+fn golden_output_schemas() -> HashMap<String, Value> {
+    let golden =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/tools-list.json");
+    let tools: Value =
+        serde_json::from_str(&std::fs::read_to_string(golden).expect("the golden file")).unwrap();
+    tools
+        .as_array()
+        .expect("a list of tools")
+        .iter()
+        .map(|tool| {
+            (
+                tool["name"].as_str().expect("a name").to_owned(),
+                tool["outputSchema"].clone(),
+            )
+        })
+        .collect()
+}
+
+/// Whether `content` has every key `schema` requires and, where it takes no
+/// others, only those it names: what a client checks first of
+/// `structuredContent` against a tool's output schema.
+fn keys_conform(content: &Value, schema: &Value) -> Result<(), String> {
+    let keys = content
+        .as_object()
+        .ok_or_else(|| format!("not an object: {content}"))?;
+    for required in schema["required"].as_array().into_iter().flatten() {
+        let required = required.as_str().unwrap_or_default();
+        if !keys.contains_key(required) {
+            return Err(format!("no {required:?} in {content}"));
+        }
+    }
+    if schema["additionalProperties"] == false {
+        let named = schema["properties"].as_object();
+        if let Some(other) = keys
+            .keys()
+            .find(|key| !named.is_some_and(|named| named.contains_key(*key)))
+        {
+            return Err(format!("{other:?} isn't in the schema: {content}"));
+        }
+    }
+    Ok(())
+}
+
+/// A client such as the official TypeScript SDK checks `structuredContent`
+/// against the tool's output schema whether the result is an error or not,
+/// and throws when it doesn't conform, so a refusal must never carry a
+/// `structuredContent` its tool's schema doesn't take.
+#[tokio::test]
+async fn no_refusal_of_any_tool_carries_structured_content_its_output_schema_doesnt_take() {
+    let schemas = golden_output_schemas();
+    let told = ErrorDto::new(
+        ErrorCode::PlanUnknown,
+        [("plan", api::MsgArg::Text("home".to_owned()))],
+        None,
+    );
+    let mut status = connect(Told(Err(told.clone())));
+    let mut client = connect(Lists {
+        refusal: Some(told.clone()),
+        detail: Some(OperationDetailDto {
+            operation: summary(1),
+            warnings: Vec::new(),
+        }),
+        preview: Some(forget_preview()),
+        ..Lists::default()
+    });
+    let mut checked = Vec::new();
+    for (tool, arguments) in [
+        ("status", json!({})),
+        ("list_plans", json!({})),
+        ("list_repositories", json!({})),
+        ("list_snapshots", json!({"repository": "nas"})),
+        ("list_operations", json!({})),
+        ("get_operation", json!({"id": summary(1).id})),
+        ("run_plan", json!({"plan": "home"})),
+        ("wait_operation", json!({"id": summary(1).id})),
+        ("cancel_operation", json!({"id": summary(1).id})),
+        ("test_repository", json!({"repository": "nas"})),
+        ("preview_forget", json!({"repository": "nas"})),
+        (
+            "preview_import",
+            json!({"content": "[repository]\n", "repository": "nas"}),
+        ),
+        ("export_profile", json!({"plan": "home"})),
+    ] {
+        let answer = if tool == "status" {
+            status.call(tool, arguments).await
+        } else {
+            client.call(tool, arguments).await
+        };
+        let result = &answer["result"];
+        assert_eq!(result["isError"], true, "{tool}: {answer}");
+        if let Some(content) = result.get("structuredContent") {
+            let schema = schemas
+                .get(tool)
+                .unwrap_or_else(|| panic!("no schema for {tool}"));
+            if let Err(why) = keys_conform(content, schema) {
+                panic!("{tool}: {why}");
+            }
+        }
+        assert_eq!(
+            refusal(&answer),
+            serde_json::to_value(&told).unwrap(),
+            "{tool}"
+        );
+        checked.push(tool);
+    }
+    assert_eq!(checked.len(), schemas.len(), "every tool listed is checked");
 }
 
 #[tokio::test]
@@ -1012,9 +1125,8 @@ async fn a_cancel_the_backend_refuses_is_its_refusal_marked_as_an_error() {
     let answer = client
         .call("cancel_operation", json!({"id": summary(1).id}))
         .await;
-    assert_eq!(answer["result"]["isError"], true, "{answer}");
     assert_eq!(
-        answer["result"]["structuredContent"],
+        refusal(&answer),
         json!({"code": "api-token-scope", "args": {"scope": {"type": "text", "value": "session"}}}),
     );
 }
@@ -1112,11 +1224,7 @@ async fn a_forget_preview_answered_with_another_kind_is_daemon_unreachable() {
     let answer = client
         .call("preview_forget", json!({"repository": "nas"}))
         .await;
-    assert_eq!(answer["result"]["isError"], true, "{answer}");
-    assert_eq!(
-        answer["result"]["structuredContent"],
-        json!({"code": "daemon-unreachable"}),
-    );
+    assert_eq!(refusal(&answer), json!({"code": "daemon-unreachable"}));
 }
 
 #[tokio::test]

@@ -305,6 +305,18 @@ fn content(agent: &Agent) -> &Value {
     &result["structuredContent"]
 }
 
+/// A tool's refusal: a result marked as an error, with no
+/// `structuredContent` (its tool's output schema doesn't take one), whose
+/// text content holds the `{code, args}` as JSON.
+fn refusal_of(result: &Value) -> Value {
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(result.get("structuredContent").is_none(), "{result}");
+    let text = result["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no text: {result}"));
+    serde_json::from_str(text).unwrap_or_else(|error| panic!("{error}: {text}"))
+}
+
 /// The address of the daemon the scenario started: the one `Ladderback is
 /// serving on loopback` started, or the one started with a plan, which the
 /// operation steps drive.
@@ -623,22 +635,17 @@ fn sign_in_off_on_loopback(agent: &mut Agent) {
 
 #[then(expr = "the result is the error {string}")]
 fn result_is_the_error(agent: &mut Agent, code: String) {
-    let result = result(agent);
-    assert_eq!(result["isError"], true, "{result}");
-    assert_eq!(
-        result["structuredContent"]["code"],
-        code.as_str(),
-        "{result}"
-    );
+    let refusal = refusal_of(result(agent));
+    assert_eq!(refusal["code"], code.as_str(), "{refusal}");
 }
 
 #[then(expr = "the error names the scope {string}")]
 fn error_names_the_scope(agent: &mut Agent, scope: String) {
-    let result = result(agent);
+    let refusal = refusal_of(result(agent));
     assert_eq!(
-        result["structuredContent"]["args"]["scope"],
+        refusal["args"]["scope"],
         json!({"type": "text", "value": scope}),
-        "{result}"
+        "{refusal}"
     );
 }
 
@@ -932,10 +939,8 @@ async fn until_running(agent: &mut Agent) {
         call(agent, "get_operation".to_owned(), json!({"id": id})).await;
         let result = result(agent);
         let status = if result["isError"] == true {
-            assert_eq!(
-                result["structuredContent"]["code"], "operation-unknown",
-                "{result}"
-            );
+            let refusal = refusal_of(result);
+            assert_eq!(refusal["code"], "operation-unknown", "{refusal}");
             "unknown".to_owned()
         } else {
             result["structuredContent"]["operation"]["status"]
