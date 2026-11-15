@@ -378,6 +378,18 @@ Feature: How long signing in lasts
       When I reload the page
       Then the main heading reads "Sign in to Ladderback"
 
+    Scenario: Sign out everywhere chosen with Space moves focus to the sign-in page's heading
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the admin is signed in with "demo-admin-pass"
+      When I open the address "/settings"
+      And I press Tab until focus is on the button "Sign out everywhere"
+      And I press Space
+      Then the dialog "Sign out everywhere?" opens with focus on the button "Cancel"
+      When I press Tab until focus is on the button "Sign out every browser"
+      And I press Space
+      Then focus is on the heading "Sign in to Ladderback"
+      And the page has no accessibility violations
+
     Scenario: With sign-in off, Settings says Stay signed in for applies once sign-in is on
       When I open the address "/settings"
       Then the page shows a message containing "applies once sign-in is on"
