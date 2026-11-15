@@ -245,7 +245,7 @@ impl Engine for Unavailable {
 /// cancels the job.
 const SCENARIO_LIMIT: Duration = Duration::from_secs(60);
 
-#[allow(
+#[expect(
     clippy::disallowed_methods,
     reason = "a test runner reads its own argv"
 )]

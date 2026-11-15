@@ -60,7 +60,6 @@ pub trait NormalizeSources: Send + Sync {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
 

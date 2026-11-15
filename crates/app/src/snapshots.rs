@@ -30,7 +30,6 @@ pub enum SnapshotError {
     Failed(FailureReason),
 }
 
-#[allow(clippy::result_large_err)]
 impl ListSnapshots {
     pub fn new(engine: Arc<dyn Engine>, resolve: ResolveRepository) -> Self {
         Self { engine, resolve }
@@ -61,7 +60,6 @@ impl ListSnapshots {
 }
 
 /// Runs the listing job to its end and returns its list.
-#[allow(clippy::result_large_err)]
 async fn run(
     engine: &dyn Engine,
     op: OperationId,
@@ -145,7 +143,6 @@ mod tests {
 
     use crate::ports::EngineEvent;
 
-    #[allow(clippy::panic)]
     fn snapshot(n: u8, at: i64, label: &str) -> SnapshotSummary {
         SnapshotSummary {
             id: SnapshotId::parse(&format!("{n:0>64}"))
@@ -176,7 +173,6 @@ mod tests {
         OperationId::from_uuid(Uuid::from_u128(0x5eed))
     }
 
-    #[allow(clippy::panic)]
     fn alias() -> RepositoryAlias {
         RepositoryAlias::parse("demo").unwrap_or_else(|e| panic!("an alias: {e:?}"))
     }
@@ -193,9 +189,6 @@ mod tests {
         }
     }
 
-    // Fixed demo values; the `panic` they guard never happens, and a helper
-    // outside a test body is production code to clippy.
-    #[allow(clippy::panic)]
     fn repository() -> RepositoryId {
         RepositoryId::parse(&"a".repeat(64)).unwrap_or_else(|e| panic!("a repository ID: {e:?}"))
     }

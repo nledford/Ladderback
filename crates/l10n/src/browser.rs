@@ -255,14 +255,11 @@ impl InstantFormatter for Instants {
 
     fn format(&self, utc_ms: i64, zone: Option<&IanaZone>) -> Option<String> {
         // The years a calendar can show, ±9999: the bound of the other
-        // hosts, and well inside the ±8.64e15 ms a `Date` takes.
+        // hosts, and well inside the ±8.64e15 ms a `Date` takes, and so far
+        // below the 2^53 milliseconds an `f64` holds exactly.
         let milliseconds = jiff::Timestamp::from_millisecond(utc_ms)
             .ok()?
             .as_millisecond();
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "within the years ±9999, far below 2^53 milliseconds"
-        )]
         let date = Date::new(&JsValue::from_f64(milliseconds as f64));
         let formatter = self.formatter(zone);
         match self.style {

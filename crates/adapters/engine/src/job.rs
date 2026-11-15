@@ -82,7 +82,7 @@ pub struct JobSpec {
     pub job: JobKind,
 }
 
-#[allow(
+#[expect(
     clippy::large_enum_variant,
     reason = "one spec per worker, read once: boxing the backup would only add an allocation"
 )]

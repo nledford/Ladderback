@@ -2,6 +2,7 @@
 //! stock rustic accepts, scoped to the plan, that holds a way to read each
 //! secret and never the secret.
 
+#[expect(dead_code, reason = "this file uses a part of the shared helpers")]
 mod common;
 
 use std::collections::BTreeMap;

@@ -105,7 +105,10 @@ pub enum ExportError {
     Config(ConfigError),
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(
+    clippy::result_large_err,
+    reason = "a typed code for the caller to match; none of its variants is large on its own"
+)]
 impl ImportProfile {
     pub fn new(
         reader: Arc<dyn ProfileReader>,
@@ -297,7 +300,10 @@ fn apply_hostname_rule(agent: &mut Option<Hostname>, plans: &mut [Plan], first_i
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(
+    clippy::result_large_err,
+    reason = "a typed code for the caller to match; none of its variants is large on its own"
+)]
 impl ExportProfile {
     pub fn new(
         writer: Arc<dyn ProfileWriter>,
@@ -350,7 +356,6 @@ impl ExportProfile {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic, reason = "test code")]
 mod tests {
     use std::assert_matches;
     use std::collections::BTreeMap;
@@ -415,7 +420,7 @@ mod tests {
         }
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(clippy::result_large_err, reason = "the use case's own error")]
     async fn import(
         config: &Arc<InMemoryConfigStore>,
         profile: ImportedProfile,
@@ -728,7 +733,7 @@ mod tests {
         config
     }
 
-    #[allow(clippy::result_large_err)]
+    #[expect(clippy::result_large_err, reason = "the use case's own error")]
     async fn import_as(
         config: &Arc<InMemoryConfigStore>,
         repository: RepositoryConfig,
@@ -813,7 +818,6 @@ mod tests {
         }
     }
 
-    #[allow(clippy::result_large_err)]
     async fn import_over(
         entry: &RepositoryConfig,
         theirs: RepositoryConfig,

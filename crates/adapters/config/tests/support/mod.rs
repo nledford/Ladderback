@@ -1,6 +1,10 @@
 //! Shared by the config adapter's integration tests.
 
-#![allow(dead_code, clippy::result_large_err)]
+#![expect(
+    dead_code,
+    clippy::result_large_err,
+    reason = "each test file uses a part of this; `ConfigError` is the port's, its shape fixed there"
+)]
 
 pub mod model;
 

@@ -117,7 +117,6 @@ pub(crate) async fn export(State(state): State<AppState>, Path(plan): Path<Strin
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use std::sync::{Arc, Mutex, PoisonError};
 

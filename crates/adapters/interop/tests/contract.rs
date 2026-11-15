@@ -1,6 +1,7 @@
 //! The real reader and writer against the profiles contract suite, the one
 //! the fakes pass too, so the fakes can't drift from the real thing.
 
+#[expect(dead_code, reason = "this file uses a part of the shared helpers")]
 mod common;
 
 use std::path::PathBuf;

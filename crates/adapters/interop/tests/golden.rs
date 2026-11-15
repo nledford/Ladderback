@@ -2,6 +2,7 @@
 //! accepts every key, and reads each as the plan says it. The stock CLI is
 //! not a dependency of the build, so a machine without it skips the check.
 
+#[expect(dead_code, reason = "this file uses a part of the shared helpers")]
 mod common;
 
 use std::collections::BTreeMap;

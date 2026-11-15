@@ -15,9 +15,9 @@ fn table(text: &str) -> toml::Table {
     text.parse().expect("the plan's keys are TOML")
 }
 
-#[allow(
+#[expect(
     clippy::result_large_err,
-    reason = "`ConfigError` is the port's, its shape fixed there, as the crate's own allow says"
+    reason = "`ConfigError` is the port's, its shape fixed there, as the crate's own expectation says"
 )]
 fn read(text: &str) -> Result<Plan, ConfigError> {
     read_plan(&table(text))

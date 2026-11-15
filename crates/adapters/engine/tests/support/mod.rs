@@ -1,7 +1,7 @@
 //! Shared helpers of the engine's integration tests: scratch repositories
 //! made with `rustic_core` itself, and a `WorkerEngine` on the real worker.
 
-#![allow(dead_code)]
+#![expect(dead_code, reason = "each test file uses a part of this")]
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

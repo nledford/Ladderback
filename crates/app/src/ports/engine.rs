@@ -111,7 +111,7 @@ impl TryFrom<FailureReason> for EngineError {
 }
 
 /// What an operation should do.
-#[allow(
+#[expect(
     clippy::large_enum_variant,
     reason = "one job per operation, built once and moved to the engine: boxing the backup would only add an allocation"
 )]

@@ -52,7 +52,7 @@ use domain::secrets::SecretWarning;
 
 /// The `keep-delete` a manual prune uses when nothing else says: six days,
 /// just under the weekly interval a prune is expected to run on (§7.3).
-#[allow(
+#[expect(
     clippy::expect_used,
     reason = "six days is always at least rustic's own 23-hour minimum"
 )]
@@ -347,7 +347,10 @@ pub struct RunMaintenance {
 }
 
 impl RunMaintenance {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the composition root hands in each port and setting once, at start-up"
+    )]
     pub fn new(
         engine: Arc<dyn Engine>,
         clock: Arc<dyn Clock>,
@@ -569,7 +572,7 @@ impl RunMaintenance {
             self.clock.now(),
         )
         .with_repository_alias(alias);
-        #[allow(
+        #[expect(
             clippy::expect_used,
             reason = "the operation was queued a moment above and nothing else runs"
         )]
@@ -1724,8 +1727,6 @@ mod tests {
 #[cfg(test)]
 #[cfg(feature = "fakes")]
 mod read_timeout_tests {
-    #![allow(clippy::expect_used, reason = "test code")]
-
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
@@ -1888,8 +1889,6 @@ mod read_timeout_tests {
 #[cfg(test)]
 #[cfg(feature = "fakes")]
 mod record_tests {
-    #![allow(clippy::expect_used, reason = "test code")]
-
     use std::assert_matches;
     use std::sync::Arc;
 
@@ -2012,8 +2011,6 @@ mod record_tests {
 #[cfg(test)]
 #[cfg(feature = "fakes")]
 mod config_tests {
-    #![allow(clippy::expect_used, reason = "test code")]
-
     use std::sync::Arc;
 
     use async_trait::async_trait;
@@ -2101,8 +2098,6 @@ mod config_tests {
 #[cfg(test)]
 #[cfg(feature = "fakes")]
 mod cancel_tests {
-    #![allow(clippy::expect_used, reason = "test code")]
-
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2295,8 +2290,6 @@ mod cancel_tests {
 #[cfg(test)]
 #[cfg(feature = "fakes")]
 mod secret_tests {
-    #![allow(clippy::expect_used, reason = "test code")]
-
     use std::collections::BTreeMap;
     use std::sync::Arc;
 

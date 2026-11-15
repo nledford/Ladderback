@@ -130,7 +130,10 @@ pub enum RepositoryError {
 // The error of these use cases is a typed code for the caller to match; it
 // is not boxed to satisfy a size rule, for none of its variants is large on
 // its own.
-#[allow(clippy::result_large_err)]
+#[expect(
+    clippy::result_large_err,
+    reason = "`RepositoryError` is a typed code for the caller to match; none of its variants is large on its own"
+)]
 impl InitRepository {
     pub fn new(
         clock: Arc<dyn Clock>,
@@ -240,7 +243,7 @@ impl InitRepository {
 /// that opens is refused as one already there, and any other failure to find
 /// one as not offered; a refusal of the look itself (a timeout, an engine
 /// that didn't start) is its own.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 async fn found_empty(
     clock: &dyn Clock,
     engine: &dyn Engine,
@@ -255,7 +258,7 @@ async fn found_empty(
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 impl TestRepository {
     pub fn new(clock: Arc<dyn Clock>, engine: Arc<dyn Engine>, resolve: ResolveRepository) -> Self {
         Self {
@@ -277,7 +280,7 @@ impl TestRepository {
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 impl ConnectRepository {
     pub fn new(
         clock: Arc<dyn Clock>,
@@ -314,7 +317,7 @@ impl ConnectRepository {
 /// The settings with every reference resolved, ready for a job. The resolver's
 /// warnings about how each secret was read are dropped: like progress, they
 /// belong to the operation log, which these requests don't write (see `run`).
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 async fn access(
     resolve: &ResolveRepository,
     settings: &RepositorySettings,
@@ -336,7 +339,7 @@ async fn access(
 /// once (no grace: there is nothing in it to finish). Its caller holds the
 /// configuration lock across this call, so the bound is also how long a
 /// repository that never answers can hold up every other save.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 async fn run(
     clock: &dyn Clock,
     engine: &dyn Engine,
@@ -365,7 +368,7 @@ const READY_EVENTS: usize = 64;
 /// here, on the event itself, so a worker that never stops talking can't keep
 /// the timer from its turn; only the events already waiting behind it, up to
 /// [`READY_EVENTS`], are read first, for the result may be one of them.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 async fn drive(
     clock: &dyn Clock,
     deadline: Deadline,
@@ -406,7 +409,6 @@ async fn drive(
 
 /// What an event ends a job with, if it ends it: the repository's ID or the
 /// job's failure. Progress and warnings end nothing.
-#[allow(clippy::result_large_err)]
 fn result_of(event: EngineEvent) -> Option<Result<RepositoryId, RepositoryError>> {
     match event {
         EngineEvent::Succeeded(EngineResult::Repository { id }) => Some(Ok(id)),
@@ -429,7 +431,7 @@ fn failed(reason: FailureReason) -> RepositoryError {
 /// known, under no alias ([`AgentConfig::alias_of`]): a taken alias is
 /// refused first, then a repository already configured, which has one alias
 /// (§7.3).
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 async fn unused(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
@@ -450,7 +452,7 @@ async fn unused(
 /// `maintenance` as its request of who maintains it, refusing what [`unused`]
 /// refuses. What is saved is the settings as written: a secret stays a
 /// reference.
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 async fn save(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
@@ -492,7 +494,7 @@ async fn save(
 /// removed or moved meanwhile, by a hand edit or the CLI's import, which
 /// don't take the daemon's lock, records nothing: the ID is not its
 /// repository's (decision 53).
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
 async fn record(
     config: &dyn ConfigStore,
     alias: &RepositoryAlias,
@@ -698,10 +700,6 @@ mod tests {
     /// Runs `work` against a manual clock, moving time by `steps` once the
     /// work waits on it. Gives, after each step, whether the work had ended
     /// and what `watch` said, and then what the work ended with.
-    #[allow(
-        clippy::panic,
-        reason = "a helper outside a test body is production code to clippy"
-    )]
     async fn timed<T>(
         clock: &FakeClock,
         watch: &AtomicBool,
@@ -740,11 +738,7 @@ mod tests {
         (seen, done)
     }
 
-    #[allow(
-        clippy::panic,
-        clippy::result_large_err,
-        reason = "a helper outside a test body is production code to clippy; the error is the use cases' own"
-    )]
+    #[expect(clippy::result_large_err, reason = "the use cases' own error")]
     async fn within(
         work: impl std::future::Future<Output = Result<RepositoryId, RepositoryError>>,
     ) -> Result<RepositoryId, RepositoryError> {
@@ -924,15 +918,11 @@ mod tests {
         OperationId::from_uuid(Uuid::from_u128(0x5eed))
     }
 
-    // Fixed demo values; the `panic` they guard never happens, and a helper
-    // outside a test body is production code to clippy.
-    #[allow(clippy::panic)]
     fn alias() -> RepositoryAlias {
         RepositoryAlias::try_from("demo".to_owned())
             .unwrap_or_else(|e| panic!("a valid alias: {e:?}"))
     }
 
-    #[allow(clippy::panic)]
     fn id() -> RepositoryId {
         RepositoryId::parse(&"a".repeat(64)).unwrap_or_else(|e| panic!("a repository ID: {e:?}"))
     }
@@ -998,7 +988,6 @@ mod tests {
 
     /// The rules and channels of a configuration: one channel, and one rule
     /// that sends it every failed backup.
-    #[allow(clippy::panic)]
     fn notifications() -> domain::notifications::Notifications {
         use domain::notifications::{
             Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
@@ -1027,7 +1016,6 @@ mod tests {
 
     /// Gives the configuration in `config` the rules and channels of
     /// [`notifications`].
-    #[allow(clippy::panic)]
     async fn with_notifications(config: &InMemoryConfigStore) {
         let loaded = config
             .load()
@@ -1285,7 +1273,6 @@ mod tests {
 
     /// The plan that backs up to `alias()` in [`saved_entry`]'s
     /// configuration.
-    #[allow(clippy::panic)]
     fn home() -> domain::PlanId {
         domain::PlanId::parse("home").unwrap_or_else(|e| panic!("a plan ID: {e:?}"))
     }
@@ -1313,7 +1300,6 @@ mod tests {
     }
 
     /// [`saved_entry`], with an engine that finds `found` at the location.
-    #[allow(clippy::panic)]
     async fn saved_entry_finding(
         settings: &domain::planning::RepositorySettings,
         recorded: Option<RepositoryId>,
@@ -1357,7 +1343,6 @@ mod tests {
 
     /// The offers over an operation log holding a backup of [`home`] for
     /// each of `ends`, oldest first, each succeeded (`Ok`) or failed.
-    #[allow(clippy::panic)]
     async fn log_of(ends: &[Result<(), FailureReason>]) -> CreateOffers {
         let store = Arc::new(InMemoryOperationStore::new());
         for (n, end) in (1u128..).zip(ends) {
@@ -1574,7 +1559,6 @@ mod tests {
 
     #[async_trait]
     impl Engine for MovedMeanwhile {
-        #[allow(clippy::panic)]
         async fn run(&self, op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
             let loaded = self
                 .config

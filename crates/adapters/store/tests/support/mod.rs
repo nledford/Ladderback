@@ -1,7 +1,7 @@
 //! Shared helpers of the store's integration tests: scratch databases, raw
 //! connections to the same file, and the operations the tests save.
 
-#![allow(dead_code)]
+#![expect(dead_code, reason = "each test file uses a part of this")]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
