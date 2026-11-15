@@ -149,6 +149,31 @@ test("when every entry is claimed nothing is reported", () => {
   assert.doesNotMatch(result.stdout, /no family/);
 });
 
+test("--keep N keeps the newest N entries of the families after it, until the next --keep", () => {
+  const result = prune(
+    [
+      [
+        entry(1, "a-1", "2026-11-11T10:00:00Z"),
+        entry(2, "a-2", "2026-11-12T10:00:00Z"),
+        entry(3, "a-3", "2026-11-13T10:00:00Z"),
+        entry(4, "b-1", "2026-11-11T10:00:00Z"),
+        entry(5, "b-2", "2026-11-12T10:00:00Z"),
+        entry(6, "c-1", "2026-11-11T10:00:00Z"),
+        entry(7, "c-2", "2026-11-12T10:00:00Z"),
+      ],
+    ],
+    ["^a-", "--keep", "2", "^b-", "--keep", "1", "^c-"],
+  );
+  assert.deepEqual(result.deleted.sort(), [1, 2, 6]);
+});
+
+test("--keep takes a positive number", () => {
+  for (const bad of [[], ["x"], ["0"]]) {
+    const result = prune([[]], ["--keep", ...bad, "^a-"]);
+    assert.equal(result.status, 2);
+  }
+});
+
 test("it needs a family", () => {
   const result = prune([[]], []);
   assert.equal(result.status, 2);

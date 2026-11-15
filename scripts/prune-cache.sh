@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Keeps one Actions cache entry per family on the default branch: for each
-# family (an extended regular expression over cache keys) named on the command
-# line, it deletes every entry of main but the newest. ci.yml's `cache-prune`
-# job runs it after the jobs that save those entries, so an entry is deleted
-# only after its successor exists: a family never drops below one entry, and a
-# run whose save failed deletes nothing of what the pull requests restore.
+# Keeps the newest Actions cache entry of each family on the default branch and
+# deletes the rest: `prune-cache.sh [--keep N] FAMILY...`, a family being an
+# extended regular expression over cache keys. ci.yml's `cache-prune` job runs
+# it after the jobs that save those entries, so an entry is deleted only after
+# its successor exists: a family never drops below its newest entry, and a run
+# whose save failed deletes nothing that pull requests restore.
+#
+# `--keep N` sets how many entries the families after it keep (1 by default,
+# until the next `--keep`). Two entries are right where two versions of
+# something are in use at once, as the two runner images GitHub rolls out side
+# by side, each restoring the package set of its own.
 #
 # Needs `gh` and `jq`, both on GitHub's hosted runners, and a token that holds
 # `actions: write` in GH_TOKEN. GITHUB_REPOSITORY names the repository.
@@ -15,12 +20,13 @@
 # the key's start, and end its stem with the separator that follows it.
 set -euo pipefail
 
+repo="${GITHUB_REPOSITORY:?prune-cache: GITHUB_REPOSITORY is not set}"
+ref="${PRUNE_REF:-refs/heads/main}"
+
 if [ $# -eq 0 ]; then
     echo "prune-cache: name at least one family, an extended regular expression over cache keys" >&2
     exit 2
 fi
-repo="${GITHUB_REPOSITORY:?prune-cache: GITHUB_REPOSITORY is not set}"
-ref="${PRUNE_REF:-refs/heads/main}"
 
 # One JSON document per page; -s gathers them. The `ref` filter makes the
 # server list only the entries main's own runs saved, so a pull request's
@@ -28,16 +34,31 @@ ref="${PRUNE_REF:-refs/heads/main}"
 caches=$(gh api --paginate "repos/$repo/actions/caches?ref=$ref&per_page=100" | jq -s '[.[].actions_caches[]]')
 
 failed=0
+keep=1
 unclaimed="$caches"
-for family in "$@"; do
+while [ $# -gt 0 ]; do
+    if [ "$1" = "--keep" ]; then
+        case "${2:-}" in
+            '' | *[!0-9]* | 0)
+                echo "prune-cache: --keep takes a number of entries, 1 or more" >&2
+                exit 2
+                ;;
+        esac
+        keep=$2
+        shift 2
+        continue
+    fi
+    family=$1
+    shift
+
     matching=$(jq -c --arg re "$family" '[.[] | select(.key | test($re))] | sort_by(.created_at, .id) | reverse' <<< "$caches")
     unclaimed=$(jq -c --arg re "$family" '[.[] | select(.key | test($re) | not)]' <<< "$unclaimed")
     count=$(jq 'length' <<< "$matching")
-    if [ "$count" -le 1 ]; then
-        echo "prune-cache: $family: $count on $ref, nothing to delete"
+    if [ "$count" -le "$keep" ]; then
+        echo "prune-cache: $family: $count on $ref, keeping $keep, nothing to delete"
         continue
     fi
-    echo "prune-cache: $family: $count on $ref, keeping $(jq -r '.[0].key' <<< "$matching")"
+    echo "prune-cache: $family: $count on $ref, keeping the newest $keep, $(jq -r '.[0].key' <<< "$matching") first"
     while read -r id key; do
         if gh api --method DELETE "repos/$repo/actions/caches/$id" > /dev/null; then
             echo "prune-cache:   deleted $key"
@@ -45,7 +66,7 @@ for family in "$@"; do
             echo "::warning title=Cache prune::could not delete the cache entry $key (ID $id)"
             failed=1
         fi
-    done < <(jq -r '.[1:][] | "\(.id) \(.key)"' <<< "$matching")
+    done < <(jq -r --argjson keep "$keep" '.[$keep:][] | "\(.id) \(.key)"' <<< "$matching")
 done
 
 # An entry no family claims is one nothing prunes: a cache a later change added

@@ -6,9 +6,13 @@ updates:
   # The workflows' actions: one grouped pull request a week. A release must
   # be a week old before it is proposed, so a compromised release that is
   # pulled within days never reaches a pull request. These pull requests edit
-  # `.github/workflows/`, so the maintainer merges them.
+  # `.github/`, so the maintainer merges them. The local composite
+  # actions pin actions too (the mbx build cache is in rust-cache), and a
+  # `directory` of `/` reaches only the workflows and a root action.yml.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     cooldown:

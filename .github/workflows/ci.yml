@@ -1,21 +1,94 @@
 # Every job runs the same `just` recipes developers and agents run locally.
 # The red-first check is in red-first.yml.
 #
-# mr boxington (mbx) caches Cargo builds: pushes to main save the cache, pull
-# requests only restore it. It keeps one build per OS and commit, under one
-# key, and the first job to finish saves it; before, that was `Wasm tests`, a
-# few hundred megabytes, and every other Linux job restored it and rebuilt
-# nearly every crate. So on Linux only `Check (ubuntu-latest)` saves under that
-# key: it builds the most, and `Release-build tests`, the host part of `UI
-# journeys` and red-first.yml start from its build. `UI journeys`,
-# `Release-build tests` and both `Service managers` jobs empty their target
-# dir after their last step on a push (on macOS too, leaving that OS's save
-# to `Check (macos-latest)`), and mbx skips the save of a job with no build
-# to keep. `Wasm tests` builds wasm32 tests, which Check doesn't, so it keeps
-# a cache of its own (`cache-generation`), a few hundred megabytes. A cache
-# per job doesn't fit: the repository's Actions cache holds 10 GB, and the
-# macOS build alone takes 4.7. If Check fails on a push, that commit saves no
-# Linux build, and pull requests restore the one before.
+# The Actions cache (#727). GitHub keeps 10 GB of it per repository and, past
+# that, evicts the least recently used entries, whatever they are; a cold
+# `Check (macos-latest)` is the costliest result. A pull request can read its
+# own caches and the base branch's, and no other pull request's, so the rules
+# below keep exactly the entries every pull request reads, one per family, and
+# a footprint that fits with room for a save in flight.
+#
+# 1. Only a push to main saves a cache. Pull requests restore and never save:
+#    mbx saves on a push to the default branch alone, and every other cache
+#    (browsers, trunk's tools, npm's) is restored by one step and saved by a
+#    second one that runs on a push to main, when the restore missed. Each
+#    pull request used to save its own copy of what it restored (a copy of
+#    the browsers is 0.3 to 0.5 GB), which no other pull request could read.
+# 2. Main saves every set a pull request restores. red-first.yml runs on pull
+#    requests alone, so `browser-cache` below installs its engines on main.
+# 3. The Rust build doesn't grow. Cargo names each artifact by a hash of what
+#    went into it and never deletes one it stops using, and mbx saves what a
+#    build leaves and restores it for the next, so a change to a manifest,
+#    the lockfile or the toolchain left the old copy of every artifact it
+#    touched in the entry for good. Measured on main (2026-11-15): the Linux
+#    entry held 2.0 GB for twelve commits, then took 2.8 GB with the commit
+#    that changed `web-sys`'s features and two manifests (b856eeb), and 3.8 GB
+#    with the next save, which followed ten commits that added the `mcp`
+#    crate and dependencies of `domain` (ec58f95). Nearly every crate and test
+#    binary is rebuilt under a new hash then: 263 test executables sat in the
+#    entry, 86 in a build from nothing, 11.9 of the 15.9 GB it unpacks to. The
+#    macOS entry jumped at the same commits, 1.6 to 2.2 to 2.9 GB, and the
+#    wasm one held 90 MB over a build from nothing. So `rust-cache`
+#    (.github/actions/rust-cache) puts a hash of the manifests, the lockfile
+#    and the toolchain file into the cache's key. A push to main restores only
+#    an entry with its own hash and otherwise builds from nothing, once per
+#    change to those files; a Check run from nothing took about 3 minutes
+#    longer than a warm one on Linux (10 to 12 minutes against 7 to 10, on
+#    2026-11-14 and 15) and about 4 on macOS. Pull requests prefer their own
+#    hash, fall back to the newest entry of any, and never save. Between such
+#    changes an entry stays the size of its sources.
+# 4. One entry per family, and it goes after its successor is saved. mbx saves
+#    in its post step, after a job's last step, so no step of that job can
+#    delete what the save replaced. The `cache-prune` job at the end of a
+#    push runs after the jobs that save and keeps each family's newest entry
+#    (scripts/prune-cache.sh): a failed save leaves the old entry, and a
+#    family never has fewer than one. Its `actions: write` is the only one
+#    in this file. A save that is still running isn't listed, and a
+#    restore that a delete cuts short falls back to a cold build, as a miss
+#    does (the mbx steps may fail without failing the job).
+# 5. A closed pull request's caches are deleted (cache-cleanup.yml), with
+#    `pull_request`, not `pull_request_target`, and not for forks.
+#
+# Footprint on main, in GB. "Entry" is what one push saves, measured on
+# 2026-11-15 (the Rust builds are a build from nothing at this commit, 1.5 GB
+# for Linux, rounded up for what a few commits add); "kept" is how many entries
+# `cache-prune` leaves; "peak" is one entry more of each, the worst moment:
+# every family has saved its successor and `cache-prune` hasn't run. A usual
+# push rotates the three Rust builds, and only a change to a lockfile the rest.
+#
+#   family                           saved by         entry  kept  steady  peak
+#   Rust build, Linux                Check (ubuntu)    1.60     1    1.60  3.20
+#   Rust build, Linux, wasm32        Wasm tests        0.42     1    0.42  0.84
+#   Rust build, macOS                Check (macos)     1.30     1    1.30  2.60
+#   browsers, chromium               UI journeys       0.31     1    0.31  0.62
+#   browsers, three engines          browser-cache     0.51     1    0.51  1.02
+#   system packages, chromium        UI journeys       0.02     2    0.04  0.06
+#   system packages, three engines   browser-cache     0.14     2    0.28  0.42
+#   trunk's tools                    UI journeys       0.01     1    0.01  0.02
+#   npm's packages                   Check (ubuntu)    0.02     1    0.02  0.04
+#   total                                                           4.49  8.82
+#
+# The peak leaves 1.2 GB under the limit: the room for the three Rust builds to
+# grow by 0.4 GB each between changes to the manifests. Before this change the
+# repository held 10.8 GB (2026-11-15): the Linux build twice (3.8 and 2.8 GB),
+# the macOS one twice (2.9 and 2.2), and a copy of the browsers per pull
+# request. A change that adds a cache, or makes one larger, keeps the peak
+# under the limit and adds its row; `cache-prune` warns of an entry on main
+# that no family claims.
+#
+# Which jobs build what, and who saves: on Linux only `Check (ubuntu-latest)`
+# saves the Rust build: it builds the most, and `Release-build tests`, the
+# host part of `UI journeys` and red-first.yml start from its build. (The
+# first job to finish used to save it, `Wasm tests`, a few hundred
+# megabytes, and every other Linux job restored that and rebuilt nearly every
+# crate.) `UI journeys`, `Release-build tests` and both `Service managers`
+# jobs empty their target dir after their last step on a push (on macOS too,
+# leaving that OS's save to `Check (macos-latest)`), and mbx skips the save of
+# a job with no build to keep. `Wasm tests` builds wasm32 tests, which Check
+# doesn't, so it keeps a family of its own (the `generation` input of
+# `rust-cache`). A cache per job doesn't fit the limit. If Check fails on a
+# push, that commit saves no Linux build, and pull requests restore the one
+# before.
 name: CI
 
 on:
@@ -147,7 +220,7 @@ jobs:
       # allowed to fail, the build runs uncached (slower, still correct). The
       # same applies to the other mr-boxington steps below.
       - if: needs.changes.outputs.docs-only != 'true'
-        uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+        uses: $/.github/actions/rust-cache
         continue-on-error: true
       # Only the host clippy and the tests can differ by OS (`cfg(target_os)`
       # code). Formatting, the wasm32 clippy, the journey, doc-path and
@@ -161,8 +234,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
-          cache: npm
-          cache-dependency-path: ui-tests/package-lock.json
+          package-manager-cache: false
       - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-paragraph-length.ts
       - if: needs.changes.outputs.docs-only != 'true'
@@ -184,9 +256,10 @@ jobs:
       # official release, checked against the SHA-256 the script pins.
       - if: needs.changes.outputs.docs-only != 'true'
         run: scripts/install-rustic.sh
+      # The one job that saves npm's cache on a push to main (the cache-prune
+      # job's comment).
       - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
-        run: npm ci
-        working-directory: ui-tests
+        uses: $/.github/actions/npm-ci
       - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just fmt-check
       - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
@@ -239,18 +312,18 @@ jobs:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
       - run: rustup toolchain install
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - uses: $/.github/actions/rust-cache
         continue-on-error: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
-          cache: npm
-          cache-dependency-path: ui-tests/package-lock.json
+          package-manager-cache: false
       # trunk downloads wasm-bindgen and wasm-opt (binaryen) from GitHub
       # releases on a cold build; during a releases outage those 504 and fail
       # the job. Cache its tools so only the first build after a lockfile
       # change fetches them.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - id: trunk
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trunk
           key: trunk-tools-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
@@ -258,12 +331,21 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just,trunk
-      - run: npm ci
-        working-directory: ui-tests
+      - uses: $/.github/actions/npm-ci
+        with:
+          save: "false"
       - uses: $/.github/actions/browser
         with:
           engines: chromium
       - run: just test-ui
+      # Saved here, not as the job starts, so that a build that failed leaves
+      # nothing behind, and only from main: a pull request's entry would be
+      # one no other pull request reads.
+      - if: github.event_name == 'push' && steps.trunk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trunk
+          key: trunk-tools-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
       - if: github.event_name == 'push'
         run: rm -rf target
@@ -286,10 +368,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
-          cache: npm
-          cache-dependency-path: ui-tests/package-lock.json
-      - run: npm ci
-        working-directory: ui-tests
+          package-manager-cache: false
+      - uses: $/.github/actions/npm-ci
+        with:
+          save: "false"
       - uses: $/.github/actions/browser
         with:
           engines: chromium firefox webkit
@@ -314,10 +396,10 @@ jobs:
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
       - run: rustup toolchain install
       # Its own cache key, not Check's (top of this file).
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - uses: $/.github/actions/rust-cache
         continue-on-error: true
         with:
-          cache-generation: v1-wasm
+          generation: v1-wasm
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
@@ -385,7 +467,7 @@ jobs:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
       - run: rustup toolchain install
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - uses: $/.github/actions/rust-cache
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
@@ -441,7 +523,7 @@ jobs:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
       - run: rustup toolchain install
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - uses: $/.github/actions/rust-cache
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
@@ -531,7 +613,7 @@ jobs:
           fetch-depth: 0
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
       - run: rustup toolchain install
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - uses: $/.github/actions/rust-cache
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
@@ -585,7 +667,7 @@ jobs:
           persist-credentials: false
       # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
       - run: rustup toolchain install
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+      - uses: $/.github/actions/rust-cache
         continue-on-error: true
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
@@ -604,3 +686,55 @@ jobs:
         with:
           title: Nightly mutation run failed
           body: "The full mutation run (`just mutants-all`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. The run's `mutants.out` artifact lists the missed mutants and timeouts."
+
+  # Deletes the Actions cache entries a push to main superseded, once the jobs
+  # that save them are done: mbx saves in its post step, after a job's last
+  # step, so no step of that job could run after its own save. The script keeps
+  # the newest entry of each family below and deletes the others, so a family
+  # never drops below one entry, and a run whose save failed deletes nothing
+  # that pull requests restore (header comment: the design, and the footprint
+  # this keeps the repository to). Runs after a failed job too: a family that
+  # grew past one entry is pruned whatever happened to this run. The only job
+  # that holds `actions: write`; the code it runs is main's own, checked out
+  # without credentials. It is not a required check. A family is the regular
+  # expression over the cache keys; each cache a job saves needs one here,
+  # and the script warns of an entry on main that none claims. Where one
+  # family's key begins another's (`chromium-` and `chromium-firefox-webkit-`),
+  # the expression ends with what tells them apart.
+  cache-prune:
+    name: Prune superseded caches
+    needs: [check, ui, wasm, browser-cache]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      actions: write # to delete cache entries
+      contents: read # to check out the script
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/prune-cache.sh
+          sparse-checkout-cone-mode: false
+      # An entry saved before the manifest hash joined the key
+      # (`...-v1-target-rust-...`) is in its family too, until the first
+      # entry of the new layout supersedes it. The browsers' and package sets'
+      # keys before the engine sets (`playwright-Linux-`, `playwright-debs-ubuntu`)
+      # are the chromium set's. The package sets keep two entries: GitHub rolls
+      # a runner image out beside the one before it, each run restores the set
+      # of its own image, and the older of two is the one a run on the other
+      # image is about to need.
+      - run: |
+          scripts/prune-cache.sh \
+            '^linux-x64-mbx-v1-(m[0-9a-f]+-)?target-rust-' \
+            '^linux-x64-mbx-v1-wasm-(m[0-9a-f]+-)?target-rust-' \
+            '^darwin-arm64-mbx-v1-(m[0-9a-f]+-)?target-rust-' \
+            '^trunk-tools-Linux-' \
+            '^node-cache-Linux-x64-npm-' \
+            '^playwright-(chromium-)?Linux-' \
+            '^playwright-chromium-firefox-webkit-Linux-' \
+            --keep 2 \
+            '^playwright-debs-(chromium-)?ubuntu[0-9]+-' \
+            '^playwright-debs-chromium-firefox-webkit-ubuntu[0-9]+-'
+        env:
+          GH_TOKEN: ${{ github.token }}
