@@ -402,7 +402,7 @@ impl Server {
         let OperationDetailDto {
             operation,
             warnings,
-        } = self.backend.operation(arguments.id).await?;
+        } = self.backend.operation(arguments.operation).await?;
         Ok(Operation::listing(operation, warnings))
     }
 
@@ -429,7 +429,7 @@ impl Server {
         let began = tokio::time::Instant::now();
         let progress = context.meta.get_progress_token();
         loop {
-            let operation = self.backend.summary(arguments.id.clone()).await?;
+            let operation = self.backend.summary(arguments.operation.clone()).await?;
             if context.ct.is_cancelled() {
                 return Ok(Waited {
                     finished: !is_unfinished(&operation),
@@ -438,7 +438,7 @@ impl Server {
             }
             let left = length.saturating_sub(began.elapsed());
             if !is_unfinished(&operation) || left.is_zero() {
-                let operation = match self.backend.operation(arguments.id).await {
+                let operation = match self.backend.operation(arguments.operation).await {
                     Ok(OperationDetailDto {
                         operation,
                         warnings,
@@ -474,9 +474,9 @@ impl Server {
 
     async fn cancel_operation(&self, given: Option<JsonObject>) -> Result<Cancelling, ErrorDto> {
         let arguments: CancelArguments = read(given)?;
-        self.backend.cancel(arguments.id.clone()).await?;
+        self.backend.cancel(arguments.operation.clone()).await?;
         Ok(Cancelling {
-            operation: arguments.id,
+            operation: arguments.operation,
         })
     }
 

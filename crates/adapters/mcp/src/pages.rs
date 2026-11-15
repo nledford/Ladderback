@@ -146,8 +146,8 @@ pub struct OperationsArguments {
 #[schemars(crate = "rmcp::schemars")]
 #[serde(deny_unknown_fields)]
 pub struct OperationArguments {
-    /// The operation's ID, as `list_operations` names it.
-    pub id: String,
+    /// The operation's ID, as `run_plan` or `list_operations` names it.
+    pub operation: String,
 }
 
 /// One page of the configured plans, in the order they were written.

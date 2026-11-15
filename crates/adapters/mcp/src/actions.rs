@@ -68,7 +68,7 @@ pub struct Started {
 #[serde(deny_unknown_fields)]
 pub struct WaitArguments {
     /// The operation's ID, as `run_plan` or `list_operations` names it.
-    pub id: String,
+    pub operation: String,
     /// How many seconds to wait at most, up to 600; 60 when not given. A
     /// larger number waits 600; 0 reads the operation once.
     pub timeout: Option<u64>,
@@ -91,7 +91,7 @@ pub struct Waited {
 #[serde(deny_unknown_fields)]
 pub struct CancelArguments {
     /// The backup's ID, as `run_plan` or `list_operations` names it.
-    pub id: String,
+    pub operation: String,
 }
 
 /// What `cancel_operation` returns: the operation asked to stop. It ends as
