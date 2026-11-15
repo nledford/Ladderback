@@ -223,6 +223,17 @@ impl ImportProfile {
             notices,
         })
     }
+
+    /// What importing the profile whose TOML is `text` under the alias
+    /// `repository` would add, without saving anything.
+    pub async fn preview(
+        &self,
+        _name: &str,
+        _text: &str,
+        _repository: RepositoryAlias,
+    ) -> Result<Imported, ImportError> {
+        todo!()
+    }
 }
 
 /// The settings of `entry` that `theirs`, a profile's repository at the same
@@ -1038,6 +1049,36 @@ mod tests {
         assert_eq!(
             reader.asked(),
             vec![(Path::new("nas.toml").to_path_buf(), alias("nas"))]
+        );
+    }
+
+    /// A preview checks the profile as an import does and tells what it
+    /// would add, with the reader's notices, yet saves nothing (§4.6).
+    #[tokio::test]
+    async fn a_preview_tells_what_an_import_would_add_and_saves_nothing() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let mut read = profile(vec![plan("home", None)], Hooks::default());
+        read.notices = vec![ProfileNotice::UsedProfileNotRead {
+            name: "shared".to_owned(),
+        }];
+        let reader = Arc::new(FakeProfileReader::new(Ok(read)));
+        let before = saved(&config).await;
+        let imported = ImportProfile::new(reader.clone(), config.clone(), Arc::new(FakeSources))
+            .preview("content", "[repository]", alias("nas"))
+            .await
+            .expect("previewed");
+        assert_eq!(imported.repository, alias("nas"));
+        assert_eq!(imported.plans, vec![PlanId::parse("home").expect("an ID")]);
+        assert_eq!(
+            imported.notices,
+            vec![ProfileNotice::UsedProfileNotRead {
+                name: "shared".to_owned()
+            }]
+        );
+        assert_eq!(saved(&config).await, before);
+        assert_eq!(
+            reader.asked(),
+            vec![(Path::new("content").to_path_buf(), alias("nas"))]
         );
     }
 }

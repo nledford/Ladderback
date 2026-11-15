@@ -46,6 +46,15 @@ impl ProfilesHarness for RealProfiles {
     fn missing_profile(&self) -> PathBuf {
         self.0.work.join("missing.toml")
     }
+
+    fn text_using(&self, _repository: &RepositoryAlias, used: &str) -> String {
+        // Where a read from a file would find it: in the working folder.
+        self.0.profile(
+            &format!("{used}.toml"),
+            "[[backup.snapshots]]\nname = \"work\"\nsources = [\"/home/demo/work\"]\n",
+        );
+        format!("[global]\nuse-profiles = [\"{used}\"]\n\n{REPOSITORY}\n{ENTRY}")
+    }
 }
 
 #[tokio::test]

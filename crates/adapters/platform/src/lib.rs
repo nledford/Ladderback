@@ -20,9 +20,11 @@ pub mod network;
 pub mod network_link;
 pub mod power;
 pub mod random;
+pub mod scratch;
 pub mod service;
 mod source;
 pub mod terminal;
+pub mod token_file;
 
 use app::ports::Clock;
 use async_trait::async_trait;

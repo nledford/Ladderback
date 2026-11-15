@@ -443,8 +443,14 @@ impl FakeProfilesHarness {
         }
     }
 
-    /// Scripts a profile of the plan `home` into `repository`, at `location`.
-    fn script_profile(&self, repository: &domain::RepositoryAlias, location: &str) -> PathBuf {
+    /// Scripts a profile of the plan `home` into `repository`, at `location`,
+    /// with `notices`.
+    fn script_profile(
+        &self,
+        repository: &domain::RepositoryAlias,
+        location: &str,
+        notices: Vec<app::ports::ProfileNotice>,
+    ) -> PathBuf {
         use domain::planning::{
             GroupBy, Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings, Source,
         };
@@ -476,7 +482,7 @@ impl FakeProfilesHarness {
             },
             plans: vec![plan],
             hooks: Hooks::default(),
-            notices: Vec::new(),
+            notices,
         }));
         PathBuf::from("/demo/nas.toml")
     }
@@ -492,12 +498,12 @@ impl contract::profiles::ProfilesHarness for FakeProfilesHarness {
     }
 
     fn good_profile(&self, repository: &domain::RepositoryAlias) -> PathBuf {
-        self.script_profile(repository, "/srv/demo-repo")
+        self.script_profile(repository, "/srv/demo-repo", Vec::new())
     }
 
     fn reference_profile(&self, repository: &domain::RepositoryAlias) -> PathBuf {
         // What the real reader hands back for the text `${file:…}`: escaped.
-        self.script_profile(repository, "s3:$${file:/srv/demo-endpoint}")
+        self.script_profile(repository, "s3:$${file:/srv/demo-endpoint}", Vec::new())
     }
 
     fn broken_profile(&self) -> PathBuf {
@@ -519,6 +525,18 @@ impl contract::profiles::ProfilesHarness for FakeProfilesHarness {
                 file: file.display().to_string(),
             }));
         file
+    }
+
+    fn text_using(&self, repository: &domain::RepositoryAlias, used: &str) -> String {
+        // What the real reader gives for a text naming `used`: a notice.
+        self.script_profile(
+            repository,
+            "/srv/demo-repo",
+            vec![app::ports::ProfileNotice::UsedProfileNotRead {
+                name: used.to_owned(),
+            }],
+        );
+        "the text of a profile".to_owned()
     }
 }
 

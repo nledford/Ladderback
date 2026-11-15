@@ -41,6 +41,11 @@ pub trait ProfilesHarness: Send + Sync {
 
     /// A path with nothing at it, in a folder that exists.
     fn missing_profile(&self) -> PathBuf;
+
+    /// The text of `good_profile`'s profile, which also uses the profile
+    /// `used`. A profile by that name, of another plan, is where a read
+    /// from a file would find it.
+    fn text_using(&self, repository: &RepositoryAlias, used: &str) -> String;
 }
 
 /// What the suite checks of the reader: every plan is for the repository it
@@ -56,6 +61,7 @@ pub async fn run(harness: &dyn ProfilesHarness) {
     the_same_plan_is_written_the_same_way_twice(harness);
     a_password_in_the_config_is_refused_and_never_written(harness);
     a_location_that_is_a_reference_is_refused(harness);
+    a_text_is_read_without_the_profiles_it_uses(harness);
     an_option_that_is_a_reference_or_a_secret_is_left_out_with_a_variable(harness);
     a_plan_that_keeps_everything_is_written_with_a_notice(harness);
     a_repository_of_several_locations_is_written_at_its_first_with_a_notice(harness);
@@ -164,6 +170,43 @@ async fn a_file_that_is_not_there_is_unreadable(harness: &dyn ProfilesHarness) {
     if let Err(ProfileError::Unreadable { file: named }) = read {
         assert_eq!(named, file.display().to_string(), "the file is named");
     }
+}
+
+fn a_text_is_read_without_the_profiles_it_uses(harness: &dyn ProfilesHarness) {
+    let Some(demo) = alias("demo") else {
+        return;
+    };
+    let text = harness.text_using(&demo, "shared");
+    let read = harness.reader().read_text("content", &text, &demo);
+    assert!(read.is_ok(), "the text is read: {read:?}");
+    let Ok(profile) = read else { return };
+    let plans: Vec<(&str, &RepositoryAlias)> = profile
+        .plans
+        .iter()
+        .map(|plan| (plan.id.as_str(), &plan.repository))
+        .collect();
+    assert_eq!(
+        plans,
+        [("home", &demo)],
+        "only the text's own plan, for the repository asked"
+    );
+    assert!(
+        profile
+            .notices
+            .contains(&ProfileNotice::UsedProfileNotRead {
+                name: "shared".to_owned()
+            }),
+        "the profile it uses is a notice: {:?}",
+        profile.notices
+    );
+    assert!(
+        !profile
+            .notices
+            .iter()
+            .any(|notice| matches!(notice, ProfileNotice::UsedProfileMissing { .. })),
+        "it was never looked for: {:?}",
+        profile.notices
+    );
 }
 
 // --- The writer ---------------------------------------------------------------

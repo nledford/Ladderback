@@ -67,7 +67,7 @@ fn git(folder: &Path, args: &[&str]) -> Option<String> {
         .flatten()
 }
 
-async fn expected() -> Option<BuildDto> {
+pub(super) async fn expected() -> Option<BuildDto> {
     blocking(this_checkout).await
 }
 

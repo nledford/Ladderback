@@ -14,13 +14,15 @@ use super::Position;
 /// A profile is input nobody vetted: the port reads a bounded file, and
 /// refuses what Ladderback could only guess at. It reads nothing but files
 /// (the profile, the profiles it uses) and never opens a repository or runs a
-/// hook.
+/// hook. A profile given as text it reads without touching a file at all.
 ///
 /// Contract (checked by `contract::profiles`):
 /// - a profile it cannot read is a [`ProfileError`] and nothing else;
 /// - every plan it returns backs up into `repository`;
 /// - no value it returns holds a `${` that was not made by the port itself:
-///   what the profile wrote is escaped, so it stays text (§10.2).
+///   what the profile wrote is escaped, so it stays text (§10.2);
+/// - a profile read from text reads no profile it uses: each is a
+///   [`ProfileNotice::UsedProfileNotRead`].
 #[async_trait]
 pub trait ProfileReader: Send + Sync {
     /// The repository, plans and hooks of the profile in `file`. Every plan
@@ -29,6 +31,17 @@ pub trait ProfileReader: Send + Sync {
     async fn read(
         &self,
         file: &Path,
+        repository: &RepositoryAlias,
+    ) -> Result<ImportedProfile, ProfileError>;
+
+    /// As [`read`](Self::read), of the profile whose TOML is `text`, which
+    /// a refusal names `name` as it would a file. Every profile it uses is
+    /// a [`ProfileNotice::UsedProfileNotRead`], never looked for: no file is
+    /// read (§4.6).
+    fn read_text(
+        &self,
+        name: &str,
+        text: &str,
         repository: &RepositoryAlias,
     ) -> Result<ImportedProfile, ProfileError>;
 }
@@ -69,6 +82,9 @@ pub enum ProfileNotice {
     HooksPerPlan,
     /// A profile named by `use-profiles` was not found.
     UsedProfileMissing { name: String },
+    /// A profile read from text names a profile in `use-profiles`, which
+    /// was not read: reading from text reads no file.
+    UsedProfileNotRead { name: String },
     /// A secret written in the profile was kept as text in the config.
     InlineSecret { field: String },
     /// A location written in the profile holds a password, which was kept

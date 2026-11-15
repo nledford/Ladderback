@@ -43,6 +43,7 @@ pub(crate) fn test_state() -> AppState {
         catalog: Arc::new(EmptyCatalog),
         repositories: Arc::new(NoRepositories),
         plans: Arc::new(NoPlans),
+        profiles: Arc::new(NoProfiles),
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
@@ -124,6 +125,23 @@ impl crate::Plans for NoPlans {
 
     async fn delete(&self, _id: String) -> Result<(), crate::PlansError> {
         Err(crate::PlansError::InvalidBody)
+    }
+}
+
+/// Does nothing: the checks never reach a route.
+pub(crate) struct NoProfiles;
+
+#[async_trait]
+impl crate::Profiles for NoProfiles {
+    async fn preview(
+        &self,
+        _request: api::ProfilePreviewDto,
+    ) -> Result<api::ProfileImportDto, crate::ProfilesError> {
+        Err(crate::ProfilesError::InvalidBody)
+    }
+
+    async fn export(&self, _plan: String) -> Result<api::ProfileExportDto, crate::ProfilesError> {
+        Err(crate::ProfilesError::InvalidBody)
     }
 }
 

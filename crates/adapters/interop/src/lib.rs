@@ -102,6 +102,15 @@ impl ProfileReader for FileProfileReader {
         .await;
         read.unwrap_or(Err(ProfileError::Unreadable { file: shown }))
     }
+
+    fn read_text(
+        &self,
+        _name: &str,
+        _text: &str,
+        _repository: &RepositoryAlias,
+    ) -> Result<ImportedProfile, ProfileError> {
+        todo!()
+    }
 }
 
 /// The program a profile runs to read the secret of a keyring entry

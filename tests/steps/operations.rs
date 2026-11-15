@@ -309,6 +309,35 @@ async fn a_wrong_password(agent: &mut Agent, password: String) {
     super::events_steps::save_daemon_config(agent, None).await;
 }
 
+/// The password file of the plan's repository, in the scenario's scratch
+/// folder.
+fn password_file(agent: &Agent) -> PathBuf {
+    agent.scratch().join("repository-password")
+}
+
+#[given("the plan's repository reads its password from a file")]
+async fn password_from_a_file(agent: &mut Agent) {
+    let file = password_file(agent);
+    std::fs::write(&file, format!("{}\n", super::backup_steps::PASSWORD))
+        .expect("the password file");
+    // A password file only its owner can read, as a person keeps one.
+    std::fs::set_permissions(
+        &file,
+        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
+    )
+    .expect("the password file's mode");
+    agent.backup.password = Some(domain::secrets::SecretRef::File {
+        path: file.to_str().expect("a UTF-8 path").to_owned(),
+        read: domain::secrets::FileRead::FirstLine,
+    });
+    super::events_steps::save_daemon_config(agent, None).await;
+}
+
+#[when(expr = "the repository's password file holds {string}, which isn't the repository's")]
+fn password_file_holds(agent: &mut Agent, password: String) {
+    std::fs::write(password_file(agent), format!("{password}\n")).expect("the password file");
+}
+
 #[given("the plan's repository folder is gone")]
 fn the_repository_folder_is_gone(agent: &mut Agent) {
     let repository = agent.backup.repository.clone().expect("a repository");
@@ -633,6 +662,7 @@ fn starts_two_backups(agent: &mut Agent, plan: String) {
 
 #[when(expr = "the daemon has finished {int} backups of the plan {string}")]
 #[when(expr = "the daemon has finished {int} backup of the plan {string}")]
+#[given(expr = "the daemon has finished {int} backup of the plan {string}")]
 pub(crate) async fn finished_backups(agent: &mut Agent, count: usize, plan: String) {
     for _ in 0..count {
         let id = start_backup(agent, &plan);
