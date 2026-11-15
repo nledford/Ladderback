@@ -11,7 +11,7 @@ import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
 import { journey, namePattern } from "../support/keyboard.ts";
-import type { BrowserWorld } from "../support/world.ts";
+import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -81,10 +81,11 @@ Then("the button {string} has no description", async function (this: BrowserWorl
 });
 
 Then("the table {string} is sorted by repository ascending", async function (this: BrowserWorld, name: string) {
-  const cells = await this.page
-    .getByRole("table", { name })
-    .getByRole("cell")
-    .allTextContents();
+  const cells = await evaluateAll(
+    this.page.getByRole("table", { name }).getByRole("cell"),
+    (found) => found.map((cell) => cell.textContent ?? ""),
+    undefined,
+  );
   assert.deepEqual(
     cells,
     [...cells].sort((a, b) => a.localeCompare(b)),

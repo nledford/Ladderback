@@ -17,7 +17,7 @@ import { expect } from "playwright/test";
 import { ISOLATION, namePattern } from "../support/keyboard.ts";
 import { partsBrokenInside } from "../support/parts.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
-import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
+import { type BrowserWorld, evaluateAll, fixtureRepo, startServer } from "../support/world.ts";
 
 // The scratch repositories' password: the one the `demo-repo` fixture was
 // initialized with. Not a real secret.
@@ -515,9 +515,11 @@ async function hasRows(grid: Locator, count: number, what: string): Promise<void
 const notedWidths = new WeakMap<BrowserWorld, number[]>();
 
 function columnWidths(world: BrowserWorld, name: string): Promise<number[]> {
-  return table(world, name)
-    .getByRole("columnheader")
-    .evaluateAll((cells) => cells.map((cell) => cell.getBoundingClientRect().width));
+  return evaluateAll(
+    table(world, name).getByRole("columnheader"),
+    (cells) => cells.map((cell) => cell.getBoundingClientRect().width),
+    undefined,
+  );
 }
 
 When("the widths of the columns of the table {string} are noted", async function (this: BrowserWorld, name: string) {
@@ -801,7 +803,7 @@ Then(
     const cell = await cellOf(this, name, row, column);
     const items = cell.getByRole("list").getByRole("listitem");
     await expect(items.first(), `the ${column} of the row ${row} lists nothing`).toBeVisible({ timeout: ROW_PATIENCE_MS });
-    const split = await items.evaluateAll((elements) =>
+    const split = await evaluateAll(items, (elements) =>
       elements.flatMap((item) => {
         const tops = new Set<number>();
         const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
@@ -816,6 +818,7 @@ Then(
         }
         return tops.size > 1 ? [`"${item.textContent}" takes ${tops.size} lines`] : [];
       }),
+      undefined,
     );
     assert.deepEqual(split, [], `the ${column} of the row ${row} breaks inside an item`);
   },
@@ -922,17 +925,16 @@ Then(
 async function instants(world: BrowserWorld, name: string, column: string): Promise<string[]> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
-  return table(world, name)
-    .locator("tbody tr")
-    .evaluateAll(
-      (rows: HTMLTableRowElement[], at) =>
-        rows.map((row) => {
-          const cell = row.cells[at];
-          if (cell === undefined) throw new Error(`a row has no cell ${at}`);
-          return cell.title;
-        }),
-      index,
-    );
+  return evaluateAll(
+    table(world, name).locator("tbody tr"),
+    (rows: HTMLTableRowElement[], at) =>
+      rows.map((row) => {
+        const cell = row.cells[at];
+        if (cell === undefined) throw new Error(`a row has no cell ${at}`);
+        return cell.title;
+      }),
+    index,
+  );
 }
 
 Then("the table {string} shows its {string} column newest first", async function (this: BrowserWorld, name: string, column: string) {
@@ -952,17 +954,16 @@ Given("the browser is in the time zone {string}", function (this: BrowserWorld, 
 async function timeCells(world: BrowserWorld, name: string, column: string): Promise<Array<readonly [string, string]>> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
-  const cells = await table(world, name)
-    .locator("tbody tr")
-    .evaluateAll(
-      (rows: HTMLTableRowElement[], at) =>
-        rows.map((row) => {
-          const cell = row.cells[at];
-          if (cell === undefined) throw new Error(`a row has no cell ${at}`);
-          return [cell.title, cell.textContent ?? ""] as const;
-        }),
-      index,
-    );
+  const cells = await evaluateAll(
+    table(world, name).locator("tbody tr"),
+    (rows: HTMLTableRowElement[], at) =>
+      rows.map((row) => {
+        const cell = row.cells[at];
+        if (cell === undefined) throw new Error(`a row has no cell ${at}`);
+        return [cell.title, cell.textContent ?? ""] as const;
+      }),
+    index,
+  );
   return cells.map(([raw, shown]) => [raw, fold(shown)] as const);
 }
 
