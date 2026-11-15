@@ -779,7 +779,7 @@ Accessibility is designed in from the first screen, not audited in at the end. T
 - **Lifecycle:** `initialize`, `notifications/initialized` and `ping` for the revisions that have them, `server/discover` from `2026-07-28`, and shutdown on stdin EOF.
 - **Tools:** `tools/list` and `tools/call`.
 - **Progress and cancellation:** progress notifications, sent only when a request carries `_meta.progressToken`; `notifications/cancelled` for a pending call.
-- **Errors:** an unknown tool or malformed arguments is JSON-RPC error `-32602`. A failure inside a tool is a result with `isError: true` and the same `{code, args}` payload the API returns (§8.4), never a sentence.
+- **Errors:** an unknown tool or malformed arguments is JSON-RPC error `-32602`. A failure inside a tool is a result with `isError: true` whose one text content is the same `{code, args}` payload the API returns, as JSON (§8.4), never a sentence. A refusal has no `structuredContent`: clients check it against the tool's `outputSchema` whether the result is an error or not (the official TypeScript SDK throws when it doesn't conform), and a refusal isn't the shape the schema declares.
 - **Not localized:** tool `title`s and `description`s are fixed English, like API field names (§8.4).
 
 **Placement.** `adapters/mcp` is an inbound adapter beside `http`, with no rule of its own. Its tools call one `Backend` trait defined inside the adapter, with two implementations:
