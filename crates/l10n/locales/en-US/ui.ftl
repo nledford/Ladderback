@@ -254,6 +254,11 @@ ui-gallery-demo-review-body = Nothing changes until you confirm this demo review
 # The button inside that review demo that confirms it.
 ui-gallery-confirm-demo-review = Confirm the demo review
 
+# The second confirm button inside that review demo, after the first: a
+# review with two ways to go ahead, as Settings' restart has (once they
+# finish, or now).
+ui-gallery-also-demo-review = Confirm the demo review now
+
 # Announced politely when the demo review is confirmed.
 ui-gallery-demo-review-confirmed = Demo review confirmed.
 

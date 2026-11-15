@@ -172,13 +172,16 @@ pub struct Working {
 ///
 /// A review with something to confirm has a [`Confirmation`]: the dismiss
 /// button and then the confirm one, whose action leaves the dialog open until
-/// the owner closes it. A review with nothing to do has none, and offers only
+/// the owner closes it. A review with two ways to go ahead, such as a restart
+/// once the running operations finish or now, passes the second as `also`,
+/// which comes after the confirm button, so the dismiss button still comes
+/// first. A review with nothing to do has none, and offers only
 /// the dismiss button. `described_by` is the id of the element in `children`
 /// that says what the review is about, which a screen reader reads as the
 /// dialog's description. While the dialog is open, polite messages wait
 /// ([`crate::live::modal_opened`]).
 ///
-/// While the owner is starting the run ([`Working`]), neither button does
+/// While the owner is starting the run ([`Working`]), no button does
 /// anything and Escape does not close the dialog, so a review that is being
 /// confirmed is never dismissed from under the request it sent.
 ///
@@ -191,6 +194,7 @@ pub fn ReviewDialog(
     title: String,
     dismiss_label: String,
     confirm: Option<Confirmation>,
+    #[prop(optional_no_strip)] also: Option<Confirmation>,
     returns_to: String,
     described_by: String,
     #[prop(optional)] working: Option<Working>,
@@ -231,7 +235,7 @@ pub fn ReviewDialog(
         }
     });
     let body = children();
-    let confirm = confirm.map(|Confirmation { label, action }| {
+    let choice = move |Confirmation { label, action }| {
         view! {
             <button
                 type="button"
@@ -245,7 +249,9 @@ pub fn ReviewDialog(
                 {label}
             </button>
         }
-    });
+    };
+    let confirm = confirm.map(choice);
+    let also = also.map(choice);
     view! {
         <dialog
             node_ref=dialog
@@ -282,6 +288,7 @@ pub fn ReviewDialog(
                     {dismiss_label}
                 </button>
                 {confirm}
+                {also}
             </p>
         </dialog>
     }

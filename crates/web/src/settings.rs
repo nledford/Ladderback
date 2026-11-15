@@ -978,7 +978,7 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
 /// The dialog that asks before Ladderback restarts: what becomes of the
 /// running and the queued operations, Cancel first, so a stray Enter backs
 /// out, then a restart once they finish (a plain restart with none
-/// running), and a restart now beside it while some run. While the daemon
+/// running), and a restart now after it while some run. While the daemon
 /// takes the request, the dialog holds still and says so; a refusal is an
 /// alert inside it.
 #[component]
@@ -998,22 +998,9 @@ fn RestartDialog(
         active: busy.into(),
         status: text(&localizer, msg::UI_RESTART_ASKING),
     };
-    let now = offers_now(running).then(|| {
-        view! {
-            <p class="actions">
-                <button
-                    type="button"
-                    aria-disabled=move || busy.get().then_some("true")
-                    on:click=move |_| {
-                        if !busy.get_untracked() {
-                            ask.run(RestartWhenDto::Now);
-                        }
-                    }
-                >
-                    {text(&localizer, msg::UI_RESTART_NOW)}
-                </button>
-            </p>
-        }
+    let now = offers_now(running).then(|| Confirmation {
+        label: text(&localizer, msg::UI_RESTART_NOW),
+        action: Callback::new(move |()| ask.run(RestartWhenDto::Now)),
     });
     view! {
         <ReviewDialog
@@ -1021,6 +1008,7 @@ fn RestartDialog(
             title=text(&localizer, msg::UI_RESTART_TITLE)
             dismiss_label=text(&localizer, msg::UI_REVIEW_CANCEL)
             confirm=Some(confirm)
+            also=now
             returns_to=restart::BUTTON_ID.to_owned()
             described_by=restart::BODY_ID.to_owned()
             working=working
@@ -1030,7 +1018,6 @@ fn RestartDialog(
                 <p>{say(&localizer, running_said(running))}</p>
                 <p>{text(&localizer, msg::UI_RESTART_QUEUED)}</p>
             </div>
-            {now}
             {move || {
                 error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
             }}
