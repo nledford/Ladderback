@@ -1404,6 +1404,65 @@ ui-restarting = { -brand-name } is restarting. This page reloads once it answers
 # Shown when Ladderback hasn't answered a minute after the restart began.
 ui-restart-not-back = { -brand-name } hasn't answered for a minute since it began to restart. Check its service: { "systemctl --user status ladderback" } on Linux, or its log, { "~/Library/Logs/ladderback.log" }, on macOS.
 
+# The heading of the section of Settings that sets the admin password, or changes it while sign-in is on.
+ui-admin-password-heading = Admin password
+
+# What that section says while sign-in is off: no admin password is in use yet. Sign-in is decided only when Ladderback starts.
+ui-admin-password-off-body = There is no admin password yet. Once it is set, sign-in protects { -brand-name }: the web UI asks for the password, and only a signed-in browser or an { -api-token } can use { -brand-name }. Sign-in turns on when { -brand-name } next starts.
+
+# What that section says while sign-in is on.
+ui-admin-password-on-body = Changing the admin password signs out every browser, this one included, and revokes every { -api-token }.
+
+# The label of the field for the admin password as it is now, asked for while sign-in is on.
+ui-admin-password-current-label = Current password
+
+# The hint under that field.
+ui-admin-password-current-hint = The admin password you signed in with.
+
+# The label of the field for the new admin password.
+ui-admin-password-new-label = New password
+
+# The hint under that field.
+# $min (number): the fewest characters an admin password may have.
+ui-admin-password-new-hint = { $min ->
+    [one] At least 1 character.
+   *[other] At least { $min } characters.
+  }
+
+# The label of the field where the new admin password is typed a second time.
+ui-admin-password-again-label = New password again
+
+# The hint under that field.
+ui-admin-password-again-hint = Type the new password once more, so a typing mistake can't lock you out.
+
+# The button that sets the admin password while sign-in is off.
+ui-admin-password-set = Set the admin password
+
+# The button that changes the admin password while sign-in is on.
+ui-admin-password-change = Change the admin password
+
+# Said while the daemon sets the admin password.
+ui-admin-password-saving = Setting the admin password…
+
+# The heading of the list of what is wrong with the form, which takes focus when the form is refused.
+# $count (number): how many problems the list names.
+ui-admin-password-problems = { $count ->
+    [one] There is { $count } problem with the form
+   *[other] There are { $count } problems with the form
+  }
+
+# Shown when the form is sent without the current password, in the error summary and under the field.
+ui-admin-password-current-required = Enter the current admin password.
+
+# Shown when the form is sent without a new password.
+ui-admin-password-new-required = Enter a new password.
+
+# Shown when the two new passwords typed differ.
+ui-admin-password-mismatch = The two new passwords differ. Type the same password in both fields.
+
+# Shown on the sign-in page once the admin password has been changed in Settings, which signed every browser out.
+ui-admin-password-changed = Admin password changed. Sign in with the new password.
+
 # The heading of the section of Settings that lists the API tokens and creates them. It names the table of tokens too.
 ui-api-tokens-heading = { -api-token(form: "other") }
 

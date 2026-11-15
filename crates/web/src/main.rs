@@ -48,8 +48,9 @@ mod formatting;
 mod gallery;
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod live;
-// What the API tokens of Settings decide, host-tested; `settings.rs` is
-// their glue.
+// What the admin password's and the API tokens' sections of Settings
+// decide, host-tested; `settings.rs` is their glue.
+mod admin_password;
 mod api_tokens;
 // The live pages' decisions (host-tested) and their DOM glue; see
 // `backend.rs` for why the fetch-and-socket glue is only covered by the

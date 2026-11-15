@@ -1489,6 +1489,10 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ApiTokenLimit
                 | ErrorCode::ApiTokenUnknown
                 | ErrorCode::ApiTokensUnavailable
+                | ErrorCode::AdminPasswordTooShort
+                | ErrorCode::AdminPasswordTooLong
+                | ErrorCode::CurrentPasswordWrong
+                | ErrorCode::AdminPasswordUnavailable
                 | ErrorCode::ConfigUnavailable
                 | ErrorCode::ConfigTooLarge
                 | ErrorCode::ConfigInvalid

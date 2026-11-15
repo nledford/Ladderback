@@ -2,7 +2,7 @@
 //! tokens the admin creates and revokes in a session over HTTP, presented to
 //! the real daemon as `Authorization: Bearer <token>` (§10.1, decision 93).
 
-use cucumber::{given, then};
+use cucumber::{given, then, when};
 
 use super::request_checks_steps::{self as web, Request, Response};
 use super::sign_in_steps;
@@ -114,6 +114,25 @@ fn with_the_token(agent: &mut Agent, method: String, path: String) {
 #[given(expr = "a {string} request for {string} with a token nobody created")]
 fn with_nobody_s_token(agent: &mut Agent, method: String, path: String) {
     with_bearer(agent, method, path, NOBODY_S);
+}
+
+#[when(
+    expr = "the admin changes the admin password over HTTP from {string} to {string} with the API token"
+)]
+fn changes_with_the_token(agent: &mut Agent, current: String, new: String) {
+    let text = agent.api_tokens.created().text.clone();
+    with_bearer(
+        agent,
+        "POST".to_owned(),
+        sign_in_steps::ADMIN_PASSWORD_PATH.to_owned(),
+        &text,
+    );
+    let request = agent.web.request();
+    request
+        .headers
+        .push("Content-Type: application/json".to_owned());
+    request.body = sign_in_steps::admin_password_body(Some(&current), &new);
+    web::send(agent);
 }
 
 #[then(expr = "the refusal names the scope {string}")]

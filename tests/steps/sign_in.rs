@@ -292,6 +292,65 @@ fn sign_in(agent: &mut Agent, password: &str, origin: Option<&str>) {
     agent.sign_in.csrf = body["csrf-token"].as_str().map(str::to_owned);
 }
 
+/// The route Settings sets and changes the admin password through.
+pub(crate) const ADMIN_PASSWORD_PATH: &str = "/api/v1/admin-password";
+
+/// The body Settings sends to set the admin password `new`, with the
+/// `current` one when sign-in is on.
+pub(crate) fn admin_password_body(current: Option<&str>, new: &str) -> String {
+    match current {
+        Some(current) => {
+            serde_json::json!({ "current-password": current, "new-password": new }).to_string()
+        }
+        None => serde_json::json!({ "new-password": new }).to_string(),
+    }
+}
+
+#[when(expr = "the admin password {string} is set over HTTP")]
+fn set_over_http(agent: &mut Agent, password: String) {
+    agent.web.request = Some(Request {
+        method: "POST".to_owned(),
+        path: ADMIN_PASSWORD_PATH.to_owned(),
+        headers: vec!["Content-Type: application/json".to_owned()],
+        default_host: true,
+        body: admin_password_body(None, &password),
+    });
+    web::send(agent);
+}
+
+#[when(expr = "the admin changes the admin password over HTTP from {string} to {string}")]
+fn changes_over_http(agent: &mut Agent, current: String, new: String) {
+    agent.web.request = Some(Request {
+        method: "POST".to_owned(),
+        path: ADMIN_PASSWORD_PATH.to_owned(),
+        headers: vec![
+            session_cookie(agent),
+            csrf_header(agent),
+            "Content-Type: application/json".to_owned(),
+        ],
+        default_host: true,
+        body: admin_password_body(Some(&current), &new),
+    });
+    web::send(agent);
+}
+
+#[then(expr = "the answer doesn't hold {string}")]
+fn answer_doesnt_hold(agent: &mut Agent, text: String) {
+    let response = agent.web.response();
+    assert!(
+        !response.body.contains(&text),
+        "the answer holds {text:?}: {:?}",
+        response.body
+    );
+}
+
+#[then(expr = "the daemon's log doesn't hold {string}")]
+fn log_doesnt_hold(agent: &mut Agent, text: String) {
+    let log = std::fs::read_to_string(agent.web.log()).expect("the daemon's log");
+    assert!(!log.is_empty(), "the daemon logged nothing");
+    assert!(!log.contains(&text), "the log holds {text:?}: {log}");
+}
+
 #[when(expr = "the admin signs in over HTTP with {string}")]
 fn signs_in(agent: &mut Agent, password: String) {
     sign_in(agent, &password, None);

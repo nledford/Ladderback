@@ -10,8 +10,10 @@ use domain::{SignedDuration, Timestamp};
 
 use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore, Clock, Random};
 
+mod admin_password;
 mod api_tokens;
 
+pub use admin_password::{PasswordChangeRefused, SetPasswordRefused, set_admin_password};
 pub use api_tokens::{ApiTokenGrant, ApiTokenRefused, ApiTokensRefused, CreatedApiToken};
 
 /// The admin's sessions and the waits after failed sign-ins, kept in memory:

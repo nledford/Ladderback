@@ -1,14 +1,17 @@
-//! Steps for the untagged scenarios of `features/security/sign_in.feature`:
-//! the sign-in use case over an in-memory admin password, seeded randomness
-//! and the world's fake clock.
+//! Steps for the untagged scenarios of `features/security/sign_in.feature`
+//! and `features/security/admin_password.feature`: the sign-in use case and
+//! the one that sets the admin password, over an in-memory admin password,
+//! seeded randomness and the world's fake clock.
 
 use std::assert_matches;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use app::access::{Access, SignInRefused, SignedIn};
+use app::access::{
+    Access, PasswordChangeRefused, SetPasswordRefused, SignInRefused, SignedIn, set_admin_password,
+};
 use app::fakes::{InMemoryAdminPassword, InMemoryApiTokenStore, SeededRandom};
-use app::ports::AdminPassword;
+use app::ports::{AdminPassword, AdminPasswordError};
 use cucumber::{given, then, when};
 use domain::SignedDuration;
 use domain::access::{Password, Token};
@@ -25,6 +28,10 @@ pub struct SignInWorld {
     last: Option<Result<SignedIn, SignInRefused>>,
     /// The sessions started so far, first first.
     sessions: Vec<SignedIn>,
+    /// What setting the admin password in Settings with sign-in off came to.
+    set: Option<Result<(), SetPasswordRefused>>,
+    /// What the last change of the admin password came to.
+    changed: Option<Result<(), PasswordChangeRefused>>,
 }
 
 impl std::fmt::Debug for SignInWorld {
@@ -82,15 +89,85 @@ fn admin_password(agent: &mut Agent, password: String) {
     agent.sign_in.kept = Some(kept);
 }
 
+/// `ladderback set-password`, which calls the use case Settings calls.
 #[when(expr = "the admin password is set to {string}")]
 async fn set_password(agent: &mut Agent, password: String) {
-    let password = Password::parse(password).expect("a password");
     let kept = agent
         .sign_in
         .kept
         .as_ref()
         .expect("an admin password is set");
-    kept.set(&password).await.expect("the password is kept");
+    set_admin_password(kept.as_ref(), password)
+        .await
+        .expect("the password is kept");
+}
+
+#[given("no admin password is set")]
+fn no_admin_password(agent: &mut Agent) {
+    agent.sign_in.kept = Some(Arc::new(InMemoryAdminPassword::default()));
+}
+
+#[when(expr = "the admin password {string} is set in Settings")]
+async fn set_in_settings(agent: &mut Agent, password: String) {
+    let kept = agent.sign_in.kept.clone().expect("where it is kept");
+    agent.sign_in.set = Some(set_admin_password(kept.as_ref(), password).await);
+}
+
+#[when(expr = "the admin changes the admin password from {string} to {string} from {word}")]
+async fn changes(agent: &mut Agent, current: String, new: String, from: String) {
+    let current = Password::parse(current).expect("a password");
+    let changed = agent
+        .sign_in
+        .access()
+        .change_password(address(&from), &current, new)
+        .await;
+    agent.sign_in.changed = Some(changed);
+}
+
+#[then(expr = "the admin password is {string}")]
+async fn kept_is(agent: &mut Agent, password: String) {
+    let kept = agent.sign_in.kept.clone().expect("where it is kept");
+    let password = Password::parse(password).expect("a password");
+    assert_eq!(kept.verify(&password).await, Ok(true));
+}
+
+#[then("no admin password is kept")]
+fn none_kept(agent: &mut Agent) {
+    let kept = agent.sign_in.kept.clone().expect("where it is kept");
+    assert_eq!(kept.fingerprint().err(), Some(AdminPasswordError::NotSet));
+}
+
+#[then("the password is refused as shorter than 8 characters")]
+fn refused_too_short(agent: &mut Agent) {
+    let refused = match (&agent.sign_in.set, &agent.sign_in.changed) {
+        (Some(set), None) => set.clone().err(),
+        (None, Some(changed)) => match changed {
+            Err(PasswordChangeRefused::New(refused)) => Some(refused.clone()),
+            other => panic!("not refused for the new password: {other:?}"),
+        },
+        _ => panic!("no admin password was set or changed"),
+    };
+    assert_eq!(refused, Some(SetPasswordRefused::TooShort));
+}
+
+#[then("the change is refused as a wrong current password")]
+fn change_refused_wrong(agent: &mut Agent) {
+    assert_eq!(
+        agent.sign_in.changed,
+        Some(Err(PasswordChangeRefused::Current(
+            SignInRefused::WrongPassword
+        )))
+    );
+}
+
+#[then(expr = "the change is refused, to be tried again in {int} second(s)")]
+fn change_refused_wait(agent: &mut Agent, seconds: u64) {
+    assert_eq!(
+        agent.sign_in.changed,
+        Some(Err(PasswordChangeRefused::Current(SignInRefused::Wait {
+            seconds
+        })))
+    );
 }
 
 #[given(regex = r"^the admin has signed in(?: again)? from (\S+)$")]
