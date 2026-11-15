@@ -2269,7 +2269,10 @@
         "unlisted-warnings": {
           "format": "uint64",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "warnings": {
           "items": {
@@ -2280,8 +2283,7 @@
       },
       "required": [
         "operation",
-        "warnings",
-        "unlisted-warnings"
+        "warnings"
       ],
       "type": "object"
     },
@@ -2331,7 +2333,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "Waits until an operation finishes or the timeout passes, then returns whether it finished and the operation as get_operation does; when its warnings are too many to read, none are listed and its warning-codes still name them. Sends progress notifications when the call asks for them. Cancelling the call stops the wait, not the operation.",
+    "description": "Waits until an operation finishes or the timeout passes, then returns whether it finished and the operation as get_operation does; when its warnings are too many to read, none are listed, unlisted-warnings is absent and its warning-codes still name them. Sends progress notifications when the call asks for them. Cancelling the call stops the wait, not the operation.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -2797,7 +2799,10 @@
         "unlisted-warnings": {
           "format": "uint64",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "warnings": {
           "items": {
@@ -2809,8 +2814,7 @@
       "required": [
         "finished",
         "operation",
-        "warnings",
-        "unlisted-warnings"
+        "warnings"
       ],
       "type": "object"
     },

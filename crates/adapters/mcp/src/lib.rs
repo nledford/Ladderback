@@ -411,7 +411,7 @@ impl Server {
     /// finished or the wait's length has passed, then its detail once,
     /// sending a progress notification after each read that finds it
     /// unfinished when the call carried a progress token. A detail too large
-    /// to read is the summary just read, with no warnings listed. A
+    /// to read is the summary just read, with no warnings listed or counted. A
     /// cancelled call stops the wait, never the operation: the answer is
     /// dropped then, as the protocol asks, so the detail isn't read for it.
     async fn wait_operation(
@@ -427,26 +427,26 @@ impl Server {
             if context.ct.is_cancelled() {
                 return Ok(Waited {
                     finished: !is_unfinished(&operation),
-                    operation: Operation::listing(operation, Vec::new()),
+                    operation: Operation::unread(operation),
                 });
             }
             let left = length.saturating_sub(began.elapsed());
             if !is_unfinished(&operation) || left.is_zero() {
-                let (operation, warnings) = match self.backend.operation(arguments.id).await {
+                let operation = match self.backend.operation(arguments.id).await {
                     Ok(OperationDetailDto {
                         operation,
                         warnings,
-                    }) => (operation, warnings),
+                    }) => Operation::listing(operation, warnings),
                     // How it ended still reaches the agent, its warnings'
                     // codes in the summary.
                     Err(error) if error.code == ErrorCode::DaemonAnswerTooLarge => {
-                        (operation, Vec::new())
+                        Operation::unread(operation)
                     }
                     Err(error) => return Err(error),
                 };
                 return Ok(Waited {
-                    finished: !is_unfinished(&operation),
-                    operation: Operation::listing(operation, warnings),
+                    finished: !is_unfinished(&operation.operation),
+                    operation,
                 });
             }
             if let Some(token) = &progress {
@@ -660,7 +660,8 @@ fn tools() -> Vec<Tool> {
             WAIT_OPERATION,
             "Waits until an operation finishes or the timeout passes, then returns whether it \
              finished and the operation as get_operation does; when its warnings are too many \
-             to read, none are listed and its warning-codes still name them. Sends progress \
+             to read, none are listed, unlisted-warnings is absent and its warning-codes still \
+             name them. Sends progress \
              notifications when the call asks for them. Cancelling the call stops the wait, not \
              the operation.",
             no_arguments(),

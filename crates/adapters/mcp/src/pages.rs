@@ -189,8 +189,10 @@ pub struct Operation {
     pub operation: OperationSummaryDto,
     /// The first 100 warnings, in the order they were recorded.
     pub warnings: Vec<OperationWarningDto>,
-    /// How many more warnings it recorded than `warnings` lists.
-    pub unlisted_warnings: u64,
+    /// How many more warnings it recorded than `warnings` lists; absent
+    /// when its warnings weren't read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unlisted_warnings: Option<u64>,
 }
 
 impl Operation {
@@ -201,7 +203,16 @@ impl Operation {
         Self {
             operation,
             warnings,
-            unlisted_warnings: u64::try_from(unlisted).unwrap_or(u64::MAX),
+            unlisted_warnings: Some(u64::try_from(unlisted).unwrap_or(u64::MAX)),
+        }
+    }
+
+    /// `operation` alone, its warnings unread: none listed, none counted.
+    pub fn unread(operation: OperationSummaryDto) -> Self {
+        Self {
+            operation,
+            warnings: Vec::new(),
+            unlisted_warnings: None,
         }
     }
 }
