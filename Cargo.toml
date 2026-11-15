@@ -68,8 +68,9 @@ spawn-gate = { path = "crates/spawn-gate" }
 testkit = { path = "crates/testkit" }
 
 # The admin password's hash, argon2id (security §10.1, decision 70). `std`
-# brings the operating system's randomness, for its salt and session tokens.
-argon2 = { version = "0.5.3", features = ["std"] }
+# brings the operating system's randomness, for its salt and session tokens;
+# `zeroize` wipes the memory a hash is worked out in (security §10.2).
+argon2 = { version = "0.5.3", features = ["std", "zeroize"] }
 async-trait = "0.1.92"
 # `ws` carries the live-updates WebSocket at `/api/v1/events` (§4.2).
 axum = { version = "0.8.9", features = ["ws"] }
