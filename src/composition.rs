@@ -48,8 +48,8 @@ use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Target, Trigger, WarningKind};
 use domain::planning::{
-    InterfaceKind, Link, Location, LocationRule, Maintenance, NameFilter, NotRecorded, Plan,
-    RepositoryConfig, RepositoryField, RepositorySettings, RuleNote,
+    InterfaceKind, Link, Location, LocationRule, Maintenance, MixedLinkNote, NameFilter,
+    NotRecorded, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
@@ -2431,21 +2431,23 @@ impl Catalog for ConfigCatalog {
     async fn repositories(&self) -> Result<api::RepositoriesDto, CatalogError> {
         let config = self.config.load().await.map_err(catalog_refusal)?;
         let offered = self.offers(&config).await;
-        // A rule that names networks is noted when the name can't be read:
-        // the first listing that has one reads it once, in the background,
-        // as the read may take seconds.
-        let names_asked = config.repositories().values().any(|repository| {
-            repository
-                .location_rules()
-                .into_iter()
-                .flatten()
-                .any(LocationRule::asks_name)
-        });
-        if names_asked {
+        // A rule is noted on a mixed link, and a rule that names networks
+        // when the name can't be read: the first listing that has a rule
+        // reads the link, and the name when one is named, once, in the
+        // background, as the reads may take seconds.
+        let rules = || {
+            config
+                .repositories()
+                .values()
+                .flat_map(|repository| repository.location_rules().into_iter().flatten())
+        };
+        if rules().next().is_some() {
+            let names_asked = rules().any(LocationRule::asks_name);
             let link = Arc::clone(&self.link);
-            tokio::spawn(async move { link.check_once(true).await });
+            tokio::spawn(async move { link.check_once(names_asked).await });
         }
         let reads_names = self.link.reads_names();
+        let last_link = self.link.last_link();
         Ok(api::RepositoriesDto {
             repositories: config
                 .repositories()
@@ -2456,13 +2458,15 @@ impl Catalog for ConfigCatalog {
                         .iter()
                         .filter(|plan| &plan.repository == alias)
                         .collect();
-                    listed_repository(
+                    let mut row = listed_repository(
                         alias,
                         repository,
                         &plans,
                         reads_names,
                         offered.contains(alias),
-                    )
+                    );
+                    row.warnings.extend(mixed_link_note(repository, last_link));
+                    row
                 })
                 .collect(),
         })
@@ -3207,11 +3211,25 @@ fn config_unusable<R>(
 /// The Repositories page's note on `repository` while `link`, the link the
 /// daemon last read, is mixed and the entry has a rule (decision 80): the
 /// kind of link each family's traffic leaves by, never an interface's name.
-fn mixed_link_note(
-    _repository: &RepositoryConfig,
-    _link: Option<Link>,
-) -> Option<api::WarningDto> {
-    todo!()
+fn mixed_link_note(repository: &RepositoryConfig, link: Option<Link>) -> Option<api::WarningDto> {
+    let kind = |kind| {
+        text(match kind {
+            InterfaceKind::Wired => "wired",
+            InterfaceKind::WiFi => "wifi",
+            InterfaceKind::Other => "other",
+        })
+    };
+    repository
+        .link_note(link)
+        .map(|MixedLinkNote { ipv4, ipv6 }| api::WarningDto {
+            code: api::WarningCode::LocationRuleMixedLink,
+            args: [
+                ("ipv4".to_owned(), kind(ipv4)),
+                ("ipv6".to_owned(), kind(ipv6)),
+                ("locations".to_owned(), text(repository.locations_code())),
+            ]
+            .into(),
+        })
 }
 
 /// A configured entry as the repositories list shows it: its row, with the
