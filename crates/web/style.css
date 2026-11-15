@@ -153,6 +153,15 @@ a {
   min-inline-size: 0;
 }
 
+/* Sign out (`sign_in::SignOut`): the browser's own button, sized as the
+   action rows' buttons are: at least 2rem tall (2.5.8), so it grows with the
+   reader's text. While it waits for the daemon it looks unavailable
+   (`button[aria-disabled="true"]`). */
+.sign-out {
+  min-block-size: 2rem;
+  padding-inline: 0.75rem;
+}
+
 /* The pages' links, in the header of every page; the current page is bold,
    which is more than its color (§4.5, A2). */
 .site-nav ul {
