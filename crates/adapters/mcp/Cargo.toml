@@ -22,6 +22,9 @@ serde_json.workspace = true
 # `wait_operation` reads the operation again after a pause, until the call
 # is cancelled.
 tokio = { workspace = true, features = ["io-std", "macros", "time"] }
+# An operation's ID, and the history cursor just past it that reads its
+# summary alone in connect mode.
+uuid.workspace = true
 
 [dev-dependencies]
 # A stand-in daemon for the connect backend's tests: the API's routes, never

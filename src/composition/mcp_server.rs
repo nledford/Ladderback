@@ -465,6 +465,12 @@ impl ::mcp::Backend for InProcess {
             })
     }
 
+    /// Read from the detail: this process reads its own store, with no cap
+    /// on what it reads.
+    async fn summary(&self, id: String) -> Result<api::OperationSummaryDto, api::ErrorDto> {
+        Ok(self.operation(id).await?.operation)
+    }
+
     async fn run(&self, plan: String) -> Result<String, api::ErrorDto> {
         use http_adapter::StartError;
         self.operations

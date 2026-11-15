@@ -1496,6 +1496,7 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::AdminPasswordUnavailable
                 | ErrorCode::DaemonUnreachable
                 | ErrorCode::DaemonAnswerLost
+                | ErrorCode::DaemonAnswerTooLarge
                 | ErrorCode::ConfigUnavailable
                 | ErrorCode::ConfigTooLarge
                 | ErrorCode::ConfigInvalid

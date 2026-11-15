@@ -7,14 +7,15 @@ use std::time::Duration;
 
 use api::{
     ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, OperationDetailDto,
-    OperationsPageDto, PlansDto, ProfileExportDto, ProfileImportDto, RepositoriesDto, SessionDto,
-    SignInStateDto, SnapshotsDto,
+    OperationSummaryDto, OperationsPageDto, PlansDto, ProfileExportDto, ProfileImportDto,
+    RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use reqwest::{Client, Url, redirect};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use uuid::Uuid;
 
 use crate::{
     Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, PlanStatus, RECENT_OPERATIONS,
@@ -217,8 +218,9 @@ impl Connect {
 
     /// The daemon's answer to `GET route/segments?query`, read as `T`, the
     /// segments as [`DaemonUrl::route_to`] joins them. A refusal is the
-    /// daemon's own `{code, args}`; no answer, or one that isn't the API's,
-    /// is `daemon-unreachable`.
+    /// daemon's own `{code, args}`; an answer over [`MAX_ANSWER_BYTES`] is
+    /// [`too_large`]; no answer, or one that isn't the API's, is
+    /// `daemon-unreachable`.
     async fn get<T: DeserializeOwned>(
         &self,
         route: &str,
@@ -238,7 +240,10 @@ impl Connect {
         }
         let response = request.send().await.map_err(|_| no_answer())?;
         let succeeded = response.status().is_success();
-        let body = read_capped(response).await.ok_or_else(no_answer)?;
+        let body = read_capped(response).await.map_err(|unread| match unread {
+            Unread::TooLarge => too_large(),
+            Unread::Broken => no_answer(),
+        })?;
         if succeeded {
             serde_json::from_slice(&body).map_err(|_| no_answer())
         } else {
@@ -279,7 +284,7 @@ impl Connect {
             }
         })?;
         let succeeded = response.status().is_success();
-        let body = read_capped(response).await.ok_or_else(lost)?;
+        let body = read_capped(response).await.map_err(|_| lost())?;
         if succeeded {
             serde_json::from_slice(&body).map_err(|_| lost())
         } else {
@@ -303,10 +308,32 @@ fn unknown_repository(alias: String) -> ErrorDto {
     )
 }
 
+/// `operation-unknown` for `id`: the daemon holds no operation it names.
+fn unknown_operation(id: String) -> ErrorDto {
+    ErrorDto::new(
+        ErrorCode::OperationUnknown,
+        [("operation", MsgArg::Text(id))],
+        None,
+    )
+}
+
 /// `daemon-answer-lost`: a request that changes something may have reached
 /// the daemon, and no answer of the API's came back.
 fn answer_lost() -> ErrorDto {
     ErrorDto::new(ErrorCode::DaemonAnswerLost, [], None)
+}
+
+/// `daemon-answer-too-large`: the daemon answered with more than
+/// [`MAX_ANSWER_BYTES`], which was left unread.
+fn too_large() -> ErrorDto {
+    ErrorDto::new(
+        ErrorCode::DaemonAnswerTooLarge,
+        [(
+            "limit",
+            MsgArg::Bytes(u64::try_from(MAX_ANSWER_BYTES).unwrap_or(u64::MAX)),
+        )],
+        None,
+    )
 }
 
 /// What `POST /api/v1/operations` answers: the started operation's ID.
@@ -319,17 +346,25 @@ struct StartedOperation {
 #[derive(Deserialize)]
 struct Nothing {}
 
+/// Why an answer's body was left unread.
+enum Unread {
+    /// It is larger than [`MAX_ANSWER_BYTES`].
+    TooLarge,
+    /// The connection failed before its end.
+    Broken,
+}
+
 /// The body of `response`, unless it is larger than [`MAX_ANSWER_BYTES`] or
 /// can't be read.
-async fn read_capped(mut response: reqwest::Response) -> Option<Vec<u8>> {
+async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>, Unread> {
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.ok()? {
+    while let Some(chunk) = response.chunk().await.map_err(|_| Unread::Broken)? {
         if body.len().saturating_add(chunk.len()) > MAX_ANSWER_BYTES {
-            return None;
+            return Err(Unread::TooLarge);
         }
         body.extend_from_slice(&chunk);
     }
-    Some(body)
+    Ok(body)
 }
 
 #[async_trait]
@@ -398,13 +433,32 @@ impl Backend for Connect {
 
     async fn operation(&self, id: String) -> Result<OperationDetailDto, ErrorDto> {
         let Some(segment) = segment(&id) else {
-            return Err(ErrorDto::new(
-                ErrorCode::OperationUnknown,
-                [("operation", MsgArg::Text(id))],
-                None,
-            ));
+            return Err(unknown_operation(id));
         };
         self.get("api/v1/operations", &[segment], &[]).await
+    }
+
+    /// The first of the history page of one just past `id`: the history is
+    /// newest first by ID, and its cursor need not name an operation that
+    /// exists, so that page starts with the operation `id` names, when the
+    /// daemon holds it (§4.6). Unlike the detail it is one summary long.
+    async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto> {
+        let Ok(wanted) = id.parse::<Uuid>() else {
+            return Err(unknown_operation(id));
+        };
+        // No ID is past the last one: the first page then starts with it.
+        let past = wanted
+            .as_u128()
+            .checked_add(1)
+            .map(|past| Uuid::from_u128(past).hyphenated().to_string());
+        let mut query = vec![("limit", "1")];
+        query.extend(past.as_deref().map(|past| ("after", past)));
+        let page: OperationsPageDto = self.get("api/v1/operations", &[], &query).await?;
+        page.operations
+            .into_iter()
+            .next()
+            .filter(|first| first.id.parse::<Uuid>().ok() == Some(wanted))
+            .ok_or_else(|| unknown_operation(id))
     }
 
     async fn run(&self, plan: String) -> Result<String, ErrorDto> {
@@ -420,18 +474,14 @@ impl Backend for Connect {
     }
 
     async fn cancel(&self, id: String) -> Result<(), ErrorDto> {
-        let detail = self.operation(id.clone()).await?;
+        let operation = self.summary(id.clone()).await?;
         // A daemon refuses a token's cancel of anything but a backup; with
         // sign-in off there is no token, so the rule is kept here too.
-        if detail.operation.kind != CANCELLABLE_KIND {
+        if operation.kind != CANCELLABLE_KIND {
             return Err(not_cancellable());
         }
         let Some(segment) = segment(&id) else {
-            return Err(ErrorDto::new(
-                ErrorCode::OperationUnknown,
-                [("operation", MsgArg::Text(id))],
-                None,
-            ));
+            return Err(unknown_operation(id));
         };
         let Nothing {} = self
             .post(

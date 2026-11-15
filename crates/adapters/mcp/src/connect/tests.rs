@@ -216,17 +216,29 @@ async fn an_answer_that_isnt_the_apis_is_daemon_unreachable() {
     assert_eq!(refusal.code, ErrorCode::DaemonUnreachable);
 }
 
+/// An operation that recorded many long warnings can have a detail larger
+/// than is read: told as such, never as no answer.
 #[tokio::test]
-async fn an_answer_over_the_limit_is_daemon_unreachable() {
+async fn an_answer_over_the_limit_is_daemon_answer_too_large() {
     let routes = Router::new().route(
-        "/api/v1/session",
+        "/api/v1/operations/{id}",
         get(|| async {
             let padding = " ".repeat(MAX_ANSWER_BYTES);
-            format!(r#"{{"sign-in": "off"{padding}}}"#)
+            format!(r#"{{"operation": {{}}{padding}}}"#)
         }),
     );
-    let refusal = status_of(daemon(routes).await).await.unwrap_err();
-    assert_eq!(refusal.code, ErrorCode::DaemonUnreachable);
+    let connect = Connect::new(daemon(routes).await).unwrap();
+    let refusal = connect
+        .operation("00000000-0000-7000-8000-000000000001".to_owned())
+        .await;
+    assert_eq!(
+        refusal,
+        Err(ErrorDto::new(
+            ErrorCode::DaemonAnswerTooLarge,
+            [("limit", api::MsgArg::Bytes(8 * 1024 * 1024))],
+            None
+        ))
+    );
 }
 
 #[tokio::test]
@@ -555,7 +567,7 @@ fn a_token_is_its_text_without_the_spaces_around_it_and_is_never_shown() {
 type Sent = Arc<std::sync::Mutex<Vec<[String; 5]>>>;
 
 /// A daemon that records each request it is sent and answers it as
-/// `answer` does for its path.
+/// `answer` does for its path and query.
 fn recording(sent: Sent, answer: fn(&str) -> axum::response::Response) -> Router {
     let record = move |method: axum::http::Method,
                        uri: axum::http::Uri,
@@ -570,22 +582,26 @@ fn recording(sent: Sent, answer: fn(&str) -> axum::response::Response) -> Router
                     .unwrap_or_default()
                     .to_owned()
             };
+            let path = uri
+                .path_and_query()
+                .map_or_else(|| uri.path().to_owned(), ToString::to_string);
             sent.lock().unwrap().push([
                 method.to_string(),
-                uri.path().to_owned(),
+                path.clone(),
                 header("content-type"),
                 header("authorization"),
                 body,
             ]);
-            answer(uri.path())
+            answer(&path)
         }
     };
     Router::new().fallback(record)
 }
 
 /// A daemon that queues every run as the operation `…01`, whose operation
-/// `…01` is a backup and `…02` a check, and whose cancel route answers `{}`.
-/// It records each request it is sent.
+/// `…01` is a backup and `…02` a check, as the history page just past each
+/// tells, and whose cancel route answers `{}`. It records each request it is
+/// sent.
 fn a_daemon_that_runs_and_cancels(sent: Sent) -> Router {
     recording(sent, |path| {
         let id = |n: u8| format!("00000000-0000-7000-8000-0000000000{n:02}");
@@ -593,13 +609,14 @@ fn a_daemon_that_runs_and_cancels(sent: Sent) -> Router {
             axum::Json(json!({"operation": id(1)})).into_response()
         } else if path.ends_with("/cancel") {
             axum::Json(json!({})).into_response()
-        } else if path.ends_with(&id(1)) {
-            axum::Json(json!({"operation": operation(1, "home", "running"), "warnings": []}))
-                .into_response()
-        } else {
+        } else if path == format!("/api/v1/operations?limit=1&after={}", id(2)) {
+            axum::Json(page(vec![operation(1, "home", "running")])).into_response()
+        } else if path == format!("/api/v1/operations?limit=1&after={}", id(3)) {
             let mut check = operation(2, "home", "running");
             check["kind"] = json!("check");
-            axum::Json(json!({"operation": check, "warnings": []})).into_response()
+            axum::Json(page(vec![check])).into_response()
+        } else {
+            StatusCode::NOT_FOUND.into_response()
         }
     })
 }
@@ -727,8 +744,10 @@ async fn a_run_is_posted_as_json_with_the_token_and_returns_the_operation_queued
     );
 }
 
+/// A cancel reads the operation's summary, never its detail, which can be
+/// too large to read when it recorded many warnings.
 #[tokio::test]
-async fn a_backup_is_read_then_its_cancel_posted() {
+async fn a_backups_summary_is_read_then_its_cancel_posted() {
     let sent = Sent::default();
     let connect =
         Connect::new(daemon(a_daemon_that_runs_and_cancels(Arc::clone(&sent))).await).unwrap();
@@ -745,7 +764,7 @@ async fn a_backup_is_read_then_its_cancel_posted() {
         [
             (
                 "GET".to_owned(),
-                format!("/api/v1/operations/{id}"),
+                "/api/v1/operations?limit=1&after=00000000-0000-7000-8000-000000000002".to_owned(),
                 String::new()
             ),
             (
@@ -753,6 +772,71 @@ async fn a_backup_is_read_then_its_cancel_posted() {
                 format!("/api/v1/operations/{id}/cancel"),
                 "{}".to_owned()
             ),
+        ]
+    );
+}
+
+/// A daemon whose history page holds the operation `…01`, whatever is
+/// asked, and which records the `after` and `limit` of each request.
+fn a_daemon_holding_one_operation(asked: Arc<std::sync::Mutex<Vec<String>>>) -> Router {
+    Router::new().route(
+        "/api/v1/operations",
+        get(move |Query(query): Query<HashMap<String, String>>| {
+            let asked = Arc::clone(&asked);
+            async move {
+                asked.lock().unwrap().push(format!(
+                    "{:?} {:?}",
+                    query.get("after"),
+                    query.get("limit")
+                ));
+                axum::Json(page(vec![operation(1, "home", "running")]))
+            }
+        }),
+    )
+}
+
+/// The history is newest first by ID, and its cursor need not name an
+/// operation that exists, so the page of one just past an ID starts with
+/// the operation it names, when the daemon holds it.
+#[tokio::test]
+async fn an_operations_summary_is_the_history_page_of_one_just_past_its_id() {
+    let asked = Arc::default();
+    let connect =
+        Connect::new(daemon(a_daemon_holding_one_operation(Arc::clone(&asked))).await).unwrap();
+    let unknown = |id: &str| {
+        Err(ErrorDto::new(
+            ErrorCode::OperationUnknown,
+            [("operation", api::MsgArg::Text(id.to_owned()))],
+            None,
+        ))
+    };
+    let held = Ok(summary(operation(1, "home", "running")));
+    for (id, told) in [
+        ("00000000-0000-7000-8000-000000000001", held.clone()),
+        // The same ID, written without its hyphens.
+        ("00000000000070008000000000000001", held),
+        // The page starts with an older operation: the ID names none.
+        (
+            "00000000-0000-7000-8000-00000000000f",
+            unknown("00000000-0000-7000-8000-00000000000f"),
+        ),
+        // No ID is past the last one, so the first page is asked.
+        (
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            unknown("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        ),
+        // Not an ID: the daemon isn't asked.
+        ("not-an-operation", unknown("not-an-operation")),
+    ] {
+        assert_eq!(connect.summary(id.to_owned()).await, told, "{id}");
+    }
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [
+            r#"Some("00000000-0000-7000-8000-000000000002") Some("1")"#,
+            r#"Some("00000000-0000-7000-8000-000000000002") Some("1")"#,
+            r#"Some("00000000-0000-7000-8000-000000000010") Some("1")"#,
+            r#"None Some("1")"#,
         ]
     );
 }
