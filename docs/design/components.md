@@ -772,7 +772,7 @@ Accessibility is designed in from the first screen, not audited in at the end. T
 
 ### 4.6 MCP server
 
-`ladderback mcp` lets AI agents and scripts drive Ladderback through the [Model Context Protocol](https://modelcontextprotocol.io): newline-delimited JSON-RPC 2.0 over stdio. Stdout carries only protocol messages; logs go to stderr.
+`ladderback mcp` lets AI agents and scripts drive Ladderback through the [Model Context Protocol](https://modelcontextprotocol.io): newline-delimited JSON-RPC 2.0 over stdio. Stdout carries only protocol messages; logs go to stderr. The MCP SDK (target `rmcp`) logs at `warn` at most, whatever `RUST_LOG` says: at `debug` it would log every request and result whole, a profile's password with them (I4), and MCP clients keep a server's stderr in their own logs.
 
 **Protocol.** MCP revisions `2025-06-18`, `2025-11-25` and `2026-07-28`. The first two are negotiated in `initialize`; from `2026-07-28` each request names its revision in `_meta` and `server/discover` lists those served. Older revisions are refused, because results rely on `structuredContent` and `outputSchema`, which arrived in `2025-06-18`. A line from the client over 1 MiB is dropped unread and the session goes on. Implemented:
 

@@ -10,7 +10,7 @@
 //! record is masked with that repository's secrets (`engine::Masked`, I4).
 
 use env_logger::{Builder, Logger, Target, WriteStyle};
-use log::LevelFilter;
+use log::{Level, LevelFilter, Log, Metadata};
 
 /// What the daemon logs when `RUST_LOG` names no level. env_logger's own
 /// default is `error`, which would hide the warnings of a worker.
@@ -38,24 +38,41 @@ fn set(logger: Logger) {
     }
 }
 
+/// The MCP SDK's target. At debug level it logs every request and result
+/// whole, a `preview_import`'s profile text and its password included (I4).
+const MCP_SDK: &str = "rmcp";
+
 /// The daemon's logger, writing to `target` in `style`, for the value of
 /// `RUST_LOG`, if that is set.
 ///
 /// It logs at [`DEFAULT_LEVEL`] unless `rust_log` names another level, and
 /// env_logger's directives (`debug`, `ladderback::worker=off`) go on top of
 /// that, so one for a target leaves the others at the default. An empty or
-/// blank `rust_log` says nothing, as none does.
+/// blank `rust_log` says nothing, as none does. Whatever it says, the MCP
+/// SDK ([`MCP_SDK`]) logs at `warn` at most.
 pub(crate) fn logger(rust_log: Option<&str>, target: Target, style: WriteStyle) -> Logger {
+    // The SDK's level as `rust_log` sets it, capped: `warn`, `error` or none.
+    let probe = filtered(rust_log).build();
+    let sdk = [Level::Warn, Level::Error]
+        .into_iter()
+        .find(|level| probe.enabled(&Metadata::builder().level(*level).target(MCP_SDK).build()))
+        .map_or(LevelFilter::Off, |level| level.to_level_filter());
+    filtered(rust_log)
+        .filter_module(MCP_SDK, sdk)
+        .target(target)
+        .write_style(style)
+        .format_timestamp_millis()
+        .build()
+}
+
+/// A builder at [`DEFAULT_LEVEL`] with `rust_log`'s directives on top.
+fn filtered(rust_log: Option<&str>) -> Builder {
     let mut builder = Builder::new();
     builder.filter_level(DEFAULT_LEVEL);
     if let Some(rust_log) = rust_log {
         builder.parse_filters(rust_log);
     }
     builder
-        .target(target)
-        .write_style(style)
-        .format_timestamp_millis()
-        .build()
 }
 
 /// How the daemon's log is styled: with no colour at all when plain output
@@ -198,6 +215,30 @@ mod tests {
         assert_eq!(
             written(Some("ladderback::worker=debug"), "ladderback"),
             NORMAL
+        );
+    }
+
+    /// The MCP SDK logs each request and result whole at debug level, a
+    /// profile's password included (I4), so no `RUST_LOG` lets it under
+    /// `warn`; one that silences it more is kept.
+    #[test]
+    fn the_mcp_sdk_never_logs_under_warn_whatever_rust_log_says() {
+        let warnings = [Level::Error, Level::Warn];
+        for rust_log in [None, Some("debug"), Some("trace"), Some("rmcp=trace")] {
+            for target in ["rmcp", "rmcp::service"] {
+                assert_eq!(
+                    written(rust_log, target),
+                    warnings,
+                    "{rust_log:?}, {target}"
+                );
+            }
+        }
+        assert_eq!(written(Some("error"), "rmcp::service"), [Level::Error]);
+        assert!(written(Some("rmcp=off"), "rmcp::service").is_empty());
+        assert_eq!(
+            written(Some("trace"), "ladderback"),
+            LEVELS,
+            "other targets keep their level"
         );
     }
 

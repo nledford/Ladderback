@@ -3430,25 +3430,34 @@ mod captured_log {
 
     struct Captured;
 
-    static LOGGED: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
+    /// Each record's level, target and text.
+    static LOGGED: Mutex<Vec<(log::Level, String, String)>> = Mutex::new(Vec::new());
 
     impl log::Log for Captured {
         fn enabled(&self, _: &log::Metadata<'_>) -> bool {
             true
         }
         fn log(&self, record: &log::Record<'_>) {
-            LOGGED
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push((record.level(), record.args().to_string()));
+            LOGGED.lock().unwrap_or_else(PoisonError::into_inner).push((
+                record.level(),
+                record.target().to_owned(),
+                record.args().to_string(),
+            ));
         }
         fn flush(&self) {}
     }
 
-    /// Starts capturing, before the code that logs runs.
+    /// Starts capturing, before the code that logs runs, at info level or
+    /// more, as another test of the process may have asked.
     pub(super) fn capture() {
+        capture_at(log::LevelFilter::Info);
+    }
+
+    /// Starts capturing at `level` or more: a test that asks for less never
+    /// lowers what another test of the process asked for.
+    pub(super) fn capture_at(level: log::LevelFilter) {
         let _ = log::set_logger(&Captured);
-        log::set_max_level(log::LevelFilter::Info);
+        log::set_max_level(log::max_level().max(level));
     }
 
     /// Every line logged so far at warning level or above, with its level.
@@ -3457,8 +3466,8 @@ mod captured_log {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .filter(|(level, _)| *level <= log::Level::Warn)
-            .cloned()
+            .filter(|(level, _, _)| *level <= log::Level::Warn)
+            .map(|(level, _, line)| (*level, line.clone()))
             .collect()
     }
 
@@ -3468,8 +3477,44 @@ mod captured_log {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .filter(|(level, _)| *level == log::Level::Info)
-            .map(|(_, line)| line.clone())
+            .filter(|(level, _, _)| *level == log::Level::Info)
+            .map(|(_, _, line)| line.clone())
+            .collect()
+    }
+
+    /// The targets of every record logged so far at `level`.
+    pub(super) fn targets_at(level: log::Level) -> Vec<String> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(at, _, _)| *at == level)
+            .map(|(_, target, _)| target.clone())
+            .collect()
+    }
+
+    /// Every line logged so far that the daemon's log, under `RUST_LOG` set
+    /// to `rust_log`, would write.
+    pub(super) fn written_under(rust_log: &str) -> Vec<String> {
+        use log::Log as _;
+        let daemon = crate::logging::logger(
+            Some(rust_log),
+            env_logger::Target::Pipe(Box::new(std::io::sink())),
+            env_logger::WriteStyle::Never,
+        );
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(level, target, _)| {
+                daemon.enabled(
+                    &log::Metadata::builder()
+                        .level(*level)
+                        .target(target)
+                        .build(),
+                )
+            })
+            .map(|(_, _, line)| line.clone())
             .collect()
     }
 }

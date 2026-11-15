@@ -966,11 +966,12 @@ async fn every_tool(session: &mut Session) -> serde_json::Value {
 /// API token, no result, refusal, progress notification or log line of
 /// either backend holds a secret, whatever tool is called and however it
 /// ends: a profile's own password and one it fails to parse around
-/// included.
+/// included. The log is read as the daemon writes it by default and with
+/// `RUST_LOG=debug`, at which the MCP SDK would log every request whole.
 #[tokio::test]
 async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
     use domain::access::api_token::{ApiTokenLabel, Scope, Scopes};
-    crate::composition::captured_log::capture();
+    crate::composition::captured_log::capture_at(log::LevelFilter::Debug);
     let scratch = tempfile::tempdir().expect("a scratch dir");
     let daemon = a_daemon_over(scratch.path(), &canary_config(scratch.path()), &[]).await;
     // A run asked for stays queued: its password is read when it is asked
@@ -1041,12 +1042,20 @@ async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
     let logged = crate::composition::captured_log::lines()
         .into_iter()
         .map(|(_, line)| line)
-        .chain(crate::composition::captured_log::infos());
+        .chain(crate::composition::captured_log::infos())
+        .chain(crate::composition::captured_log::written_under("debug"));
     for line in logged {
         for secret in &secrets {
             assert!(!line.contains(secret.as_str()), "the log: {line}");
         }
     }
+    // Debug records were logged, the SDK's among them: what the daemon's log
+    // would write under `RUST_LOG=debug` was read, not nothing.
+    let debug = crate::composition::captured_log::targets_at(log::Level::Debug);
+    assert!(
+        debug.iter().any(|target| target.starts_with("rmcp")),
+        "{debug:?}"
+    );
     // What was asked reached the daemon: the run read its password and
     // queued, the wait told its progress, and the unknown token got nothing.
     let [in_process, connect, unknown_token] = &sessions;
