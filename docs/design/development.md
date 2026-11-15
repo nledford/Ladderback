@@ -204,7 +204,8 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 1. Its path in `members` and `default-members` in the root `Cargo.toml` (`default-members` leaves out `crates/web`, which builds for wasm32).
 2. A `[[package]]` entry in `release-plz.toml` whose `git_tag_name` no tag matches, in the change that creates the crate. release-plz reads each package from the tree of its last `vX.Y.Z` tag, so a crate missing there stops the release PR with `cannot find package "<name>" in workspace` (§12.1).
 3. Once a release's tag holds the crate, a pull request after it removes that entry: with it, the crate would look unreleased, and its own `feat` commits would bump only the patch version.
-4. If its code is gated, §13.7.3.
+4. Its row in the crate graph in `scripts/check-crate-graph.ts` (an adapter takes the adapters' row) and its edges in §3.2, which change together; `just architecture` fails for a workspace crate with no row. If it owns a foreign model, its entry in that file's `OWNERS` too.
+5. If its code is gated, §13.7.3.
 
 ### 13.8 Pull requests and merging
 

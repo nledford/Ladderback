@@ -171,6 +171,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [103](decisions/103-status-badge-icons.md) | Status badge icons |
 | [104](decisions/104-repository-stats.md) | A repository's stats |
 | [105](decisions/105-clippy-lints.md) | Clippy lints for complexity, nesting and indexing |
+| [106](decisions/106-the-crate-graph-checked.md) | Which workspace crates and foreign models each crate may depend on |
 
 ## 17. Open questions
 
