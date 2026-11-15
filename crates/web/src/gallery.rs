@@ -63,6 +63,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let form_error = RwSignal::<Option<String>>::new(None);
     let form_value = RwSignal::new(String::new());
     let required_error = t(msg::UI_GALLERY_REPOSITORY_REQUIRED);
+    // The multi-line field's demo: its entries and its error, which its own
+    // button shows and clears as the one-line field's does.
+    let lines_error = RwSignal::<Option<String>>::new(None);
+    let lines_value = RwSignal::new(String::new());
+    let folders_error = t(msg::UI_GALLERY_FOLDERS_REQUIRED);
     const GIB: u64 = 1 << 30;
     let progress = RwSignal::new(Reading {
         step: Some(api::OperationStep::BackingUp),
@@ -226,6 +231,32 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     }
                 >
                     {t(msg::UI_GALLERY_CHECK_REPOSITORY)}
+                </button>
+            </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_LINES_HEADING)}</h2>
+            <FormField
+                id="form-field-lines"
+                value=lines_value
+                label=t(msg::UI_GALLERY_DEMO_FOLDERS)
+                description=t(msg::UI_GALLERY_DEMO_FOLDERS_HINT)
+                error=lines_error
+                lines=3
+            />
+            <p>
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        if lines_error.get_untracked().is_some() {
+                            lines_error.set(None);
+                        } else {
+                            lines_error.set(Some(folders_error.clone()));
+                            reply(Politeness::Polite, &folders_error);
+                        }
+                    }
+                >
+                    {t(msg::UI_GALLERY_CHECK_FOLDERS)}
                 </button>
             </p>
         </section>

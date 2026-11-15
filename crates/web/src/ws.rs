@@ -408,6 +408,20 @@ pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
     sorted(status, &text)
 }
 
+/// Puts `body` as JSON to `url`, as [`post`] posts it.
+pub(crate) async fn put<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
+    let (status, text) = send(None, Asked::ByPerson, |csrf, _| {
+        let builder = Request::put(url);
+        let builder = match csrf {
+            Some(csrf) => builder.header(CSRF_HEADER, csrf),
+            None => builder,
+        };
+        builder.json(body).ok()
+    })
+    .await?;
+    sorted(status, &text)
+}
+
 /// Sends `DELETE url`, a JSON request with no body, with the session's CSRF
 /// token when sign-in is on, and sorts the answer as [`post`] does.
 pub(crate) async fn delete(url: &str) -> Option<Posted> {

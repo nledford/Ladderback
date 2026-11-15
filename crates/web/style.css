@@ -269,7 +269,8 @@ main:focus {
   font-weight: 600;
 }
 
-.field input {
+.field input,
+.field textarea {
   display: block;
   inline-size: 100%;
   max-inline-size: 32rem;

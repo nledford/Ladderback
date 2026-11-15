@@ -63,8 +63,11 @@ mod page;
 mod repositories;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
-// What the Plans page shows, sends and says, decided on the host.
+// What the Plans page shows, sends and says, decided on the host;
+// `plans_page.rs` is its glue.
 mod plans;
+// The Plans page's DOM glue; `plans.rs` decides for it.
+mod plans_page;
 // What a progress bar tells a screen reader, and when, decided on the host;
 // `components.rs`'s `Progress` is its glue.
 mod progress;
@@ -99,6 +102,7 @@ mod wording;
 #[cfg_attr(not(feature = "gallery"), allow(dead_code))]
 mod toast;
 
+use plans_page::Plans;
 use routes::{NotFound, Operations, Repositories, Start};
 use session::{SignInOffNotice, Standing, Title};
 use settings::Settings;
@@ -145,6 +149,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let start = Arc::clone(&localizer);
     let gallery = Arc::clone(&localizer);
     let operations = Arc::clone(&localizer);
+    let plans = Arc::clone(&localizer);
     let snapshots = Arc::clone(&localizer);
     let repositories = Arc::clone(&localizer);
     let settings = Arc::clone(&localizer);
@@ -156,6 +161,10 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
             <Route
                 path=path!("/operations")
                 view=move || view! { <Operations localizer=Arc::clone(&operations) /> }
+            />
+            <Route
+                path=path!("/plans")
+                view=move || view! { <Plans localizer=Arc::clone(&plans) /> }
             />
             <Route
                 path=path!("/snapshots")
@@ -177,9 +186,10 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
 /// session, it ends with the Sign out control.
 #[component]
 fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl IntoView {
-    let (label, operations, snapshots, repositories, settings) = (
+    let (label, operations, plans, snapshots, repositories, settings) = (
         text(&localizer, msg::UI_NAV_LABEL),
         text(&localizer, msg::UI_NAV_OPERATIONS),
+        text(&localizer, msg::UI_NAV_PLANS),
         text(&localizer, msg::UI_NAV_SNAPSHOTS),
         text(&localizer, msg::UI_NAV_REPOSITORIES),
         text(&localizer, msg::UI_NAV_SETTINGS),
@@ -189,6 +199,9 @@ fn Navigation(localizer: Arc<Localizer>, standing: RwSignal<Standing>) -> impl I
             <ul>
                 <li>
                     <A href="/operations">{operations}</A>
+                </li>
+                <li>
+                    <A href="/plans">{plans}</A>
                 </li>
                 <li>
                     <A href="/snapshots">{snapshots}</A>
