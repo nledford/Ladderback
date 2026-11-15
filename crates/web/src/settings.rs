@@ -1,9 +1,11 @@
 //! The Settings page, the route `/settings` (§4.4): its API tokens (security
-//! §10.1, decision 93), listed, created and revoked in a session. What the
-//! form lacks, the request it sends, which field a refusal is about and how a
-//! token's row reads are `api_tokens.rs`'s, host-tested; this is the DOM glue,
-//! which the `@ui` scenarios of `features/security/api_tokens.feature` run in
-//! Chromium.
+//! §10.1, decision 93), listed, created and revoked in a session, and the
+//! restart of Ladderback (decision NN). What the form lacks, the request it
+//! sends, which field a refusal is about and how a token's row reads are
+//! `api_tokens.rs`'s, and what the restart section offers and waits for is
+//! `restart.rs`'s, all host-tested; this is the DOM glue, which the `@ui`
+//! scenarios of `features/security/api_tokens.feature` and
+//! `features/execution/restart_from_settings.feature` run in Chromium.
 //!
 //! A new token's whole text is shown once, in a dialog, and held in one
 //! signal only while that dialog is open: leaving the dialog, however it is
@@ -11,7 +13,9 @@
 
 use std::sync::Arc;
 
-use api::{ApiTokenDto, ApiTokenScopeDto, ApiTokensDto, IanaZone, MsgArg};
+use api::{
+    ApiTokenDto, ApiTokenScopeDto, ApiTokensDto, IanaZone, MsgArg, RestartDto, RestartWhenDto,
+};
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -30,6 +34,10 @@ use crate::components::{
 };
 use crate::live::reply;
 use crate::repositories::Sentence;
+use crate::restart::{
+    self, ANSWER_PATIENCE, PENDING_EVERY, RESTART_PATH, Stage, WAIT_EVERY, Wait, Waited,
+    confirm_said, offers_now, request, running_said, status_of,
+};
 use crate::routes::{PageHeading, instant, refused_sentence, text_with};
 use crate::session::{Standing, waiting_password};
 use crate::text;
@@ -65,10 +73,12 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
         });
     }
     let waiting_localizer = Arc::clone(&localizer);
+    let restart_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         {move || waiting.get().map(|id| view! { <p>{text(&waiting_localizer, id)}</p> })}
         <ApiTokens localizer=localizer />
+        <RestartSection localizer=restart_localizer />
     }
 }
 
@@ -670,6 +680,353 @@ fn RevokeDialog(
             fallback=HEADING_ID.to_owned()
         >
             <p id=REVOKE_BODY_ID>{text(&localizer, msg::UI_API_TOKEN_REVOKE_BODY)}</p>
+            {move || {
+                error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            }}
+        </ReviewDialog>
+    }
+}
+
+/// What the restart section holds: what it shows, whether the wait has
+/// lasted too long, and which turn of the section a poll belongs to, so a
+/// poll of a stage that has since changed stops.
+#[derive(Clone, Copy)]
+struct RestartState {
+    base: StoredValue<String>,
+    stage: RwSignal<Stage>,
+    not_back: RwSignal<bool>,
+    turn: StoredValue<u32>,
+}
+
+impl RestartState {
+    fn url(self) -> String {
+        format!("{}{RESTART_PATH}", self.base.get_value())
+    }
+
+    /// Shows `next`, and starts what it waits for: a read again each
+    /// [`PENDING_EVERY`] while a restart is pending, and the wait for the
+    /// daemon to come back once it restarts.
+    fn enter(self, next: Stage) {
+        let turn = self.turn.get_value().wrapping_add(1);
+        self.turn.set_value(turn);
+        self.stage.set(next);
+        match next {
+            Stage::Pending => spawn_local(self.watch_pending(turn)),
+            Stage::Restarting { seen_down } => spawn_local(self.await_daemon(turn, seen_down)),
+            Stage::Loading | Stage::Unreachable | Stage::Unavailable | Stage::Offered { .. } => {}
+        }
+    }
+
+    /// Whether `turn` is still the section's, on a page still open.
+    fn current(self, turn: u32) -> bool {
+        self.turn.try_get_value() == Some(turn)
+    }
+
+    async fn watch_pending(self, turn: u32) {
+        let url = self.url();
+        loop {
+            gloo_timers::future::sleep(PENDING_EVERY).await;
+            if !self.current(turn) {
+                return;
+            }
+            let read = ws::poll::<RestartDto>(&url, ANSWER_PATIENCE).await;
+            if !self.current(turn) {
+                return;
+            }
+            let next = Stage::while_pending(read.as_ref());
+            if next != Stage::Pending {
+                self.enter(next);
+                return;
+            }
+        }
+    }
+
+    async fn await_daemon(self, turn: u32, seen_down: bool) {
+        let mut wait = Wait::new(ws::now_ms(), seen_down);
+        loop {
+            let answered = ws::answers(ANSWER_PATIENCE).await;
+            if !self.current(turn) {
+                return;
+            }
+            match wait.after(answered, ws::now_ms()) {
+                Waited::Reload => {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.location().reload();
+                    }
+                    return;
+                }
+                Waited::Again { not_back } => {
+                    self.not_back.set(not_back);
+                    gloo_timers::future::sleep(WAIT_EVERY).await;
+                }
+            }
+        }
+    }
+}
+
+/// The restart section (decision NN): offered only when a service manager
+/// runs the daemon, and otherwise says why not. Its button reads how many
+/// operations run and opens the dialog that asks. While a restart waits for
+/// them it says so and offers to cancel it; once the daemon restarts it says
+/// so in its status, and the page reloads once the daemon has gone down and
+/// answers again (`restart.rs` decides each step).
+#[component]
+fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
+    let section = RestartState {
+        base: StoredValue::new(ws::origin()),
+        stage: RwSignal::new(Stage::Loading),
+        not_back: RwSignal::new(false),
+        turn: StoredValue::new(0),
+    };
+    let read = move || async move {
+        match ws::get::<RestartDto>(&section.url()).await {
+            Some(Got::Read(told)) => Stage::of(Some(&told)),
+            Some(Got::Refused(..)) | None => Stage::of(None),
+        }
+    };
+    spawn_local(async move {
+        let next = read().await;
+        if section.stage.try_get_untracked().is_some() {
+            section.enter(next);
+        }
+    });
+
+    // The dialog: the running count it is about, and what asking came to.
+    let asking = RwSignal::<Option<u32>>::new(None);
+    let open = RwSignal::new(false);
+    let busy = RwSignal::new(false);
+    let error = RwSignal::<Option<Sentence>>::new(None);
+    let offer = Callback::new(move |()| {
+        spawn_local(async move {
+            match read().await {
+                Stage::Offered { running } => {
+                    error.try_set(None);
+                    asking.try_set(Some(running));
+                    open.try_set(true);
+                }
+                next if section.stage.try_get_untracked().is_some() => section.enter(next),
+                _ => {}
+            }
+        });
+    });
+    let ask_localizer = Arc::clone(&localizer);
+    let ask = Callback::new(move |when: RestartWhenDto| {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        let localizer = Arc::clone(&ask_localizer);
+        let url = section.url();
+        spawn_local(async move {
+            let posted = ws::post(&url, &request(when)).await;
+            if busy.try_get_untracked().is_none() {
+                return;
+            }
+            busy.set(false);
+            let told = match posted {
+                Some(Posted::Done(answer)) => serde_json::from_str::<RestartDto>(&answer).ok(),
+                Some(Posted::Refused(code, args, detail)) => {
+                    error.set(Some(refused_sentence(
+                        &localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                    return;
+                }
+                None => None,
+            };
+            match told {
+                Some(told) => {
+                    open.set(false);
+                    section.enter(Stage::after_ask(when, &told));
+                }
+                None => error.set(Some(Sentence::new(
+                    &text(&localizer, msg::UI_SESSION_UNREACHABLE),
+                    None,
+                ))),
+            }
+        });
+    });
+    let cancel_localizer = Arc::clone(&localizer);
+    let cancel = Callback::new(move |()| {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        let localizer = Arc::clone(&cancel_localizer);
+        let url = section.url();
+        spawn_local(async move {
+            let answer = ws::delete(&url).await;
+            if busy.try_get_untracked().is_none() {
+                return;
+            }
+            busy.set(false);
+            match answer {
+                Some(Posted::Done(answer)) => {
+                    let told = serde_json::from_str::<RestartDto>(&answer).ok();
+                    section.enter(Stage::of(told.as_ref()));
+                }
+                Some(Posted::Refused(code, args, detail)) => error.set(Some(refused_sentence(
+                    &localizer,
+                    code,
+                    &args,
+                    detail.as_deref(),
+                ))),
+                // No answer while a restart waits is the daemon going down
+                // for it.
+                None => section.enter(Stage::while_pending(None)),
+            }
+        });
+    });
+
+    let heading = text(&localizer, msg::UI_RESTART_HEADING);
+    let stage_localizer = Arc::clone(&localizer);
+    let status_localizer = Arc::clone(&localizer);
+    let dialog_localizer = Arc::clone(&localizer);
+    view! {
+        <section aria-labelledby=restart::HEADING_ID>
+            <h2 id=restart::HEADING_ID tabindex="-1">
+                {heading}
+            </h2>
+            {move || {
+                let localizer = &stage_localizer;
+                match section.stage.get() {
+                    Stage::Loading => view! { <p>{text(localizer, msg::UI_LOADING)}</p> }.into_any(),
+                    Stage::Unreachable => {
+                        view! { <p>{text(localizer, msg::UI_UNREACHABLE_BODY)}</p> }.into_any()
+                    }
+                    Stage::Unavailable => {
+                        view! { <p>{text(localizer, msg::UI_RESTART_UNAVAILABLE)}</p> }.into_any()
+                    }
+                    Stage::Offered { .. } => {
+                        let button = NodeRef::<leptos::html::Button>::new();
+                        hand_focus_when_gone(button, restart::HEADING_ID.to_owned());
+                        view! {
+                            <p>{text(localizer, msg::UI_RESTART_BODY)}</p>
+                            <p>
+                                <button
+                                    type="button"
+                                    id=restart::BUTTON_ID
+                                    node_ref=button
+                                    on:click=move |_| offer.run(())
+                                >
+                                    {text(localizer, msg::UI_RESTART_BUTTON)}
+                                </button>
+                            </p>
+                        }
+                            .into_any()
+                    }
+                    Stage::Pending => {
+                        let button = NodeRef::<leptos::html::Button>::new();
+                        hand_focus_when_gone(button, restart::HEADING_ID.to_owned());
+                        view! {
+                            <p>
+                                <button
+                                    type="button"
+                                    node_ref=button
+                                    aria-disabled=move || busy.get().then_some("true")
+                                    on:click=move |_| cancel.run(())
+                                >
+                                    {text(localizer, msg::UI_RESTART_CANCEL)}
+                                </button>
+                            </p>
+                        }
+                            .into_any()
+                    }
+                    Stage::Restarting { .. } => ().into_any(),
+                }
+            }}
+            <p role="status" aria-atomic="true">
+                {move || {
+                    status_of(section.stage.get(), section.not_back.get())
+                        .map(|id| text(&status_localizer, id))
+                }}
+            </p>
+            {move || {
+                (section.stage.get() == Stage::Pending)
+                    .then(|| error.get())
+                    .flatten()
+                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            }}
+            {move || {
+                asking
+                    .get()
+                    .map(|running| {
+                        view! {
+                            <RestartDialog
+                                localizer=Arc::clone(&dialog_localizer)
+                                running=running
+                                open=open
+                                busy=busy
+                                error=error
+                                ask=ask
+                            />
+                        }
+                    })
+            }}
+        </section>
+    }
+}
+
+/// The dialog that asks before Ladderback restarts: what becomes of the
+/// running and the queued operations, Cancel first, so a stray Enter backs
+/// out, then a restart once they finish (a plain restart with none
+/// running), and a restart now beside it while some run. While the daemon
+/// takes the request, the dialog holds still and says so; a refusal is an
+/// alert inside it.
+#[component]
+fn RestartDialog(
+    localizer: Arc<Localizer>,
+    running: u32,
+    open: RwSignal<bool>,
+    busy: RwSignal<bool>,
+    error: RwSignal<Option<Sentence>>,
+    ask: Callback<RestartWhenDto>,
+) -> impl IntoView {
+    let confirm = Confirmation {
+        label: say(&localizer, confirm_said(running)),
+        action: Callback::new(move |()| ask.run(RestartWhenDto::Finished)),
+    };
+    let working = Working {
+        active: busy.into(),
+        status: text(&localizer, msg::UI_RESTART_ASKING),
+    };
+    let now = offers_now(running).then(|| {
+        view! {
+            <p class="actions">
+                <button
+                    type="button"
+                    aria-disabled=move || busy.get().then_some("true")
+                    on:click=move |_| {
+                        if !busy.get_untracked() {
+                            ask.run(RestartWhenDto::Now);
+                        }
+                    }
+                >
+                    {text(&localizer, msg::UI_RESTART_NOW)}
+                </button>
+            </p>
+        }
+    });
+    view! {
+        <ReviewDialog
+            open=open
+            title=text(&localizer, msg::UI_RESTART_TITLE)
+            dismiss_label=text(&localizer, msg::UI_REVIEW_CANCEL)
+            confirm=Some(confirm)
+            returns_to=restart::BUTTON_ID.to_owned()
+            described_by=restart::BODY_ID.to_owned()
+            working=working
+            fallback=restart::HEADING_ID.to_owned()
+        >
+            <div id=restart::BODY_ID>
+                <p>{say(&localizer, running_said(running))}</p>
+                <p>{text(&localizer, msg::UI_RESTART_QUEUED)}</p>
+            </div>
+            {now}
             {move || {
                 error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
             }}

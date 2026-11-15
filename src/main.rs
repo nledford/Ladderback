@@ -71,6 +71,11 @@ enum Command {
         /// forwards with the browser's Host (repeatable).
         #[arg(long = "allowed-host", value_name = "NAME")]
         allowed_hosts: Vec<String>,
+        /// Set by the service files `install-service` writes: a service
+        /// manager runs the agent and starts it again when it exits with
+        /// the restart status, so Settings offers a restart.
+        #[arg(long)]
+        service_managed: bool,
     },
     /// Add the repository and the plans of a rustic profile to the
     /// configuration.
@@ -163,7 +168,8 @@ fn main() -> ExitCode {
         Command::Serve {
             listen,
             allowed_hosts,
-        } => serve(listen, allowed_hosts, plain),
+            service_managed,
+        } => serve(listen, allowed_hosts, service_managed, plain),
         Command::ImportProfile {
             file,
             repo_name,
@@ -177,21 +183,32 @@ fn main() -> ExitCode {
     }
 }
 
-fn serve(listen: SocketAddr, allowed_hosts: Vec<String>, plain: bool) -> ExitCode {
+fn serve(
+    listen: SocketAddr,
+    allowed_hosts: Vec<String>,
+    service_managed: bool,
+    plain: bool,
+) -> ExitCode {
     logging::install(plain);
     log::info!("ladderback {} starting", *build_info::SHOWN);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
-    finish(&localizer, run_daemon(&localizer, listen, allowed_hosts))
+    finish(
+        &localizer,
+        run_daemon(&localizer, listen, allowed_hosts, service_managed),
+    )
 }
 
 /// Starts the daemon and runs it until it is told to stop, and says how it
 /// ended. What it says on stderr before it serves is written through `say`:
 /// a startup line that nobody reads stops it, as anything that prints does.
 /// Once it serves it only logs, and the logger drops what it cannot write.
+/// A stop asked for as a restart ends with the status the service manager
+/// starts it again on (decision NN).
 fn run_daemon(
     localizer: &Localizer,
     listen: SocketAddr,
     allowed_hosts: Vec<String>,
+    service_managed: bool,
 ) -> io::Result<ExitCode> {
     // Checked here, not by the argument parser, so that the refusal is said
     // in the catalog's words and the person's language (§8.4). Exit status 2
@@ -271,7 +288,12 @@ fn run_daemon(
         lock,
         background,
         workers,
-    } = match runtime.block_on(composition::daemon(sign_in, Arc::clone(&random), exposure)) {
+    } = match runtime.block_on(composition::daemon(
+        sign_in,
+        Arc::clone(&random),
+        exposure,
+        service_managed,
+    )) {
         Ok(daemon) => daemon,
         Err(refused) => {
             say(localizer, refused.message, &refused.args)?;
@@ -335,6 +357,7 @@ fn run_daemon(
         // listens, and stop with it: they run on what the log still holds
         // open (§5, decision 73).
         let runs = background.runs();
+        let restart = state.restart.clone();
         let scheduled = tokio::spawn(background.run(random));
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
@@ -347,7 +370,7 @@ fn run_daemon(
             app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
         )
         .with_graceful_shutdown(async move {
-            let _ = cause_tx.send(shutdown_signal(interrupt, terminate).await);
+            let _ = cause_tx.send(shutdown_signal(interrupt, terminate, restart).await);
         })
         .into_future();
         tokio::pin!(serving);
@@ -356,7 +379,7 @@ fn run_daemon(
         // With no request open, the server ends in the same poll that sees
         // the signal, so its cause is looked for then too.
         let (cause, served) = tokio::select! {
-            served = &mut serving => (cause.try_recv().unwrap_or("the server ended"), Some(served)),
+            served = &mut serving => (cause.try_recv().unwrap_or(Cause::ServerEnded), Some(served)),
             Ok(cause) = &mut cause => (cause, None),
         };
         // At the signal, before anything else: no scheduled run starts, the
@@ -370,7 +393,7 @@ fn run_daemon(
         scheduled.abort();
         let workers_stopped = workers.stop();
         runs.freeze();
-        log::info!("stopping ({cause})");
+        log::info!("stopping ({})", cause.said());
         let mut stop = Stopping::new(shutdown::LIMIT);
         let served = match served {
             Some(served) => {
@@ -396,7 +419,7 @@ fn run_daemon(
         let code = match served {
             Some(Err(error)) => say(localizer, msg::CLI_SERVER_ERROR, &[("detail", text(error))])
                 .map(|()| ExitCode::FAILURE),
-            Some(Ok(())) | None => Ok(ExitCode::SUCCESS),
+            Some(Ok(())) | None => Ok(cause.status()),
         };
         Ok((code, Some(stop)))
     });
@@ -457,12 +480,46 @@ fn text(value: impl std::fmt::Display) -> MsgArg {
     MsgArg::Text(value.to_string())
 }
 
-/// Resolves on Ctrl-C (`interrupt`) or SIGTERM (`terminate`, what systemd
-/// and launchd send), with the signal's name.
-async fn shutdown_signal(interrupt: Option<Signal>, terminate: Option<Signal>) -> &'static str {
+/// Why the daemon stops: a signal, a restart asked for, or the server's end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cause {
+    /// Ctrl-C (`SIGINT`) or `SIGTERM`, what systemd and launchd send.
+    Signal(&'static str),
+    /// A restart asked for in Settings, by whom (decision NN).
+    Restart(http_adapter::RestartAsker),
+    /// The server ended of itself.
+    ServerEnded,
+}
+
+impl Cause {
+    /// The cause as the log's `stopping (…)` line says it.
+    fn said(self) -> &'static str {
+        match self {
+            Self::Signal(name) => name,
+            Self::Restart(asker) => http_adapter::asked_by(asker),
+            Self::ServerEnded => "the server ended",
+        }
+    }
+
+    /// The status an orderly stop for this cause ends with: a restart's is
+    /// the one the service manager starts the daemon again on.
+    fn status(self) -> ExitCode {
+        let _ = self;
+        ExitCode::SUCCESS
+    }
+}
+
+/// Resolves on Ctrl-C (`interrupt`), SIGTERM (`terminate`), or once a
+/// restart asked for is due, with its cause.
+async fn shutdown_signal(
+    interrupt: Option<Signal>,
+    terminate: Option<Signal>,
+    restart: http_adapter::Restart,
+) -> Cause {
     tokio::select! {
-        () = received(interrupt) => "SIGINT",
-        () = received(terminate) => "SIGTERM",
+        () = received(interrupt) => Cause::Signal("SIGINT"),
+        () = received(terminate) => Cause::Signal("SIGTERM"),
+        asker = restart.due() => Cause::Restart(asker),
     }
 }
 
@@ -491,5 +548,13 @@ mod tests {
             line,
             "ladderback: cannot write the result: No space left on device\n"
         );
+    }
+
+    #[test]
+    fn only_a_restart_ends_with_the_status_the_service_manager_restarts_on() {
+        let restart = Cause::Restart(http_adapter::RestartAsker::SignInOff);
+        assert_eq!(restart.status(), ExitCode::from(75));
+        assert_eq!(Cause::Signal("SIGTERM").status(), ExitCode::SUCCESS);
+        assert_eq!(Cause::ServerEnded.status(), ExitCode::SUCCESS);
     }
 }

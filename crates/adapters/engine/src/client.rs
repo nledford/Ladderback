@@ -1482,6 +1482,8 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
                 | ErrorCode::ApiTokenInvalid
                 | ErrorCode::ApiTokenScope
                 | ErrorCode::SignInOff
+                | ErrorCode::RestartUnavailable
+                | ErrorCode::RestartPending
                 | ErrorCode::ApiTokenLabel
                 | ErrorCode::ApiTokenNoScope
                 | ErrorCode::ApiTokenLimit

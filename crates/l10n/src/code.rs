@@ -52,6 +52,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ApiTokenInvalid => msg::ERROR_API_TOKEN_INVALID,
     ApiTokenScope => msg::ERROR_API_TOKEN_SCOPE,
     SignInOff => msg::ERROR_SIGN_IN_OFF,
+    RestartUnavailable => msg::ERROR_RESTART_UNAVAILABLE,
+    RestartPending => msg::ERROR_RESTART_PENDING,
     ApiTokenLabel => msg::ERROR_API_TOKEN_LABEL,
     ApiTokenNoScope => msg::ERROR_API_TOKEN_NO_SCOPE,
     ApiTokenLimit => msg::ERROR_API_TOKEN_LIMIT,

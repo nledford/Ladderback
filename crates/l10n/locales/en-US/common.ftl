@@ -154,6 +154,12 @@ error-api-token-scope = { $scope ->
 # The token routes were asked for while no admin password is set.
 error-sign-in-off = Sign-in is off, so there are no { -api-token(form: "other") }. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
 
+# A restart was asked for in Settings, but no service manager runs Ladderback, so nothing would start it again once it stopped.
+error-restart-unavailable = { -brand-name } can't restart from here: no service manager runs it, so nothing would start it again. Install it as a service with { "ladderback install-service" }, or stop it and start it again yourself.
+
+# Maintenance was asked for while a restart waits for the running operations to finish; the daemon starts no new operation until it restarts.
+error-restart-pending = { -brand-name } is waiting to restart once the running operations finish, so it starts no maintenance now. Run it again once { -brand-name } is back, or cancel the restart in Settings.
+
 # An API token's label is empty, blank, holds a control character, or is too long.
 # $max (count): the most characters a label may have.
 error-api-token-label = Give the token a label of 1 to { $max } characters, so you can tell it from the others.

@@ -18,6 +18,7 @@ mod maintenance;
 mod repositories;
 mod request_checks;
 mod response_headers;
+mod restart;
 mod sign_in;
 
 use std::borrow::Cow;
@@ -50,6 +51,7 @@ pub use request_checks::{
     Exposure, InvalidHostName, RequestChecks, StartupRefusal, proxied_hosts, startup_rule,
     validate_host_name,
 };
+pub use restart::{Restart, RestartAsker, Work, asked_by};
 pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 
 use api::UiEvent;
@@ -81,6 +83,8 @@ pub struct AppState {
     /// The build the daemon runs, which the session route tells a page that
     /// may see the pages (decision 90).
     pub build: api::BuildDto,
+    /// Whether a restart is offered, and the one asked for (decision NN).
+    pub restart: Restart,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {
@@ -430,6 +434,12 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/repositories/{alias}/maintenance/preview",
             axum::routing::post(maintenance::preview),
+        )
+        .route(
+            restart::RESTART_PATH,
+            axum::routing::get(restart::read)
+                .post(restart::ask)
+                .delete(restart::cancel),
         )
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
@@ -1164,6 +1174,7 @@ mod tests {
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
+            restart: Restart::default(),
         }
     }
 
@@ -1202,6 +1213,7 @@ mod tests {
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
+            restart: Restart::default(),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -2372,6 +2384,7 @@ mod tests {
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
+            restart: Restart::default(),
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(

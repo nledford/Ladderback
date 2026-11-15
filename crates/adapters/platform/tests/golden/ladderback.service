@@ -5,7 +5,7 @@ Documentation=https://github.com/nledford/Ladderback
 
 [Service]
 Type=exec
-ExecStart=:"/home/demo/.local/bin/ladderback" serve
+ExecStart=:"/home/demo/.local/bin/ladderback" serve --service-managed
 CacheDirectory=ladderback
 CacheDirectoryMode=0700
 Environment=LADDERBACK_CACHE_DIR=%C/ladderback
@@ -13,6 +13,8 @@ KillMode=mixed
 TimeoutStopSec=75
 Restart=on-failure
 RestartSec=10
+RestartForceExitStatus=75
+SuccessExitStatus=75
 
 [Install]
 WantedBy=default.target

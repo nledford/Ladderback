@@ -1,7 +1,7 @@
 //! The daemon's runs of operations and the orderly stop that freezes them
 //! (§4.2, decision 92).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::watch;
 
@@ -12,16 +12,29 @@ use tokio::sync::watch;
 /// daemon that is going, and the stop's operation log step records its end
 /// (`daemon-shut-down`). A frozen run is dropped where it stands, so a hook
 /// it was running is killed at once, as the runtime's end once killed it.
-/// Clones share one switch.
+/// Clones share one switch, and one count of the maintenance runs going,
+/// which a restart that waits for the running operations counts with the
+/// queue's running backups and holds, so none starts meanwhile (decision NN).
 #[derive(Clone)]
 pub(crate) struct Runs {
     frozen: Arc<watch::Sender<bool>>,
+    maintenance: Arc<Mutex<Maintenance>>,
+}
+
+/// The maintenance runs going, and whether a restart holds new ones back.
+/// One lock for both, so a run either counts before the hold or is refused
+/// after it.
+#[derive(Default)]
+struct Maintenance {
+    running: usize,
+    held: bool,
 }
 
 impl Default for Runs {
     fn default() -> Self {
         Self {
             frozen: Arc::new(watch::channel(false).0),
+            maintenance: Arc::new(Mutex::new(Maintenance::default())),
         }
     }
 }
@@ -48,6 +61,76 @@ impl Runs {
     /// Freezes every run, those begun from now on too.
     pub(crate) fn freeze(&self) {
         self.frozen.send_replace(true);
+    }
+
+    /// Counts a maintenance run as running until what this returns is
+    /// dropped, however the run ends; `None`, and nothing counted, while a
+    /// restart holds new runs back.
+    pub(crate) fn maintaining(&self) -> Option<Maintaining> {
+        let mut maintenance = self.lock();
+        if maintenance.held {
+            return None;
+        }
+        maintenance.running = maintenance.running.saturating_add(1);
+        Some(Maintaining(Arc::clone(&self.maintenance)))
+    }
+
+    /// How many maintenance runs are running.
+    pub(crate) fn maintenance_running(&self) -> usize {
+        todo!()
+    }
+
+    /// Starts no maintenance run from now on, until [`Self::release`]: a
+    /// restart waits for the running ones.
+    fn hold(&self) {
+        todo!()
+    }
+
+    /// Starts maintenance runs again: the restart was cancelled.
+    fn release(&self) {
+        todo!()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Maintenance> {
+        self.maintenance
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// A maintenance run counted as running ([`Runs::maintaining`]).
+pub(crate) struct Maintaining(Arc<Mutex<Maintenance>>);
+
+impl Drop for Maintaining {
+    fn drop(&mut self) {
+        let mut maintenance = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        maintenance.running = maintenance.running.saturating_sub(1);
+    }
+}
+
+/// What a restart that waits for the running operations counts and holds
+/// (decision NN): the queue's running backups, whose waiting ones it starts
+/// no more, and the maintenance runs going, of which it starts no new one.
+pub(crate) struct Work {
+    pub(crate) queue: Arc<app::queue::RunQueue>,
+    pub(crate) runs: Runs,
+}
+
+impl http_adapter::Work for Work {
+    fn hold(&self) {
+        self.queue.hold();
+        self.runs.hold();
+    }
+
+    fn release(&self) {
+        self.runs.release();
+        self.queue.release();
+    }
+
+    fn running(&self) -> usize {
+        self.queue
+            .running()
+            .saturating_add(self.runs.maintenance_running())
     }
 }
 
@@ -134,5 +217,56 @@ mod tests {
         let _ = go.send(());
         run.await.unwrap();
         assert!(went_on.load(Ordering::SeqCst), "the run was cut short");
+    }
+
+    #[test]
+    fn a_maintenance_run_counts_as_running_until_it_ends() {
+        let runs = Runs::default();
+        let prune = runs.maintaining();
+        let check = runs.clone().maintaining();
+        assert!(prune.is_some() && check.is_some());
+        assert_eq!(runs.maintenance_running(), 2);
+        drop(prune);
+        assert_eq!(runs.maintenance_running(), 1);
+        drop(check);
+        assert_eq!(runs.maintenance_running(), 0);
+    }
+
+    /// A restart that waits holds the work: it counts the maintenance run
+    /// and the backup already running, starts no new maintenance run and no
+    /// queued backup, and its cancel lets both go.
+    #[test]
+    fn a_held_restart_starts_no_new_operation_until_it_is_released() {
+        use futures::FutureExt;
+        use http_adapter::Work as _;
+
+        let runs = Runs::default();
+        let work = super::Work {
+            queue: Arc::new(app::queue::RunQueue::new()),
+            runs: runs.clone(),
+        };
+        let limit = domain::planning::Concurrency::default();
+        let home = domain::PlanId::parse("home").unwrap();
+        let docs = domain::PlanId::parse("docs").unwrap();
+        let running_backup = work.queue.push(&home, limit);
+        let prune = runs.maintaining();
+        work.hold();
+        assert_eq!(work.running(), 2, "the running operations aren't counted");
+        assert!(runs.maintaining().is_none(), "a maintenance run started");
+        assert_eq!(work.running(), 2, "a refused run was counted");
+        let mut queued = work.queue.push(&docs, limit);
+        drop(running_backup);
+        drop(prune);
+        assert_eq!(work.running(), 0);
+        assert!(
+            queued.turn().now_or_never().is_none(),
+            "a queued backup started"
+        );
+        work.release();
+        assert!(runs.maintaining().is_some(), "maintenance stays held");
+        assert!(
+            queued.turn().now_or_never().is_some(),
+            "the queued backup didn't start"
+        );
     }
 }

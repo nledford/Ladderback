@@ -1345,6 +1345,60 @@ ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn 
 # Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. `ladderback set-password` is typed as it is: keep it a string literal.
 ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Run { "ladderback set-password" } again to set the password anew.
 
+# The heading of the section of Settings that restarts Ladderback.
+ui-restart-heading = Restart { -brand-name }
+
+# What that section says when a restart is offered: what a restart is for.
+ui-restart-body = A restart applies what { -brand-name } reads only when it starts, such as an admin password set with { "ladderback set-password" }. { -brand-name } stops in order, and its service manager starts it again.
+
+# What that section says in place of the button when no service manager runs Ladderback.
+ui-restart-unavailable = No service manager runs { -brand-name }, so nothing would start it again after a restart. To restart it from here, install it as a service with { "ladderback install-service" }.
+
+# The button that asks before Ladderback restarts.
+ui-restart-button = Restart { -brand-name }
+
+# The title of the dialog that asks before Ladderback restarts.
+ui-restart-title = Restart { -brand-name }?
+
+# What that dialog says about the operations running now, and the two choices it offers when some are: a restart once they finish, which starts no new operation meanwhile, or a restart now, which stops them as any stop of Ladderback does.
+# $running (count): how many operations are running.
+ui-restart-running = { $running ->
+        [0] No operation is running.
+        [one] One operation is running. Restart once it finishes, and { -brand-name } starts no new operation meanwhile. Or restart now: that stops it, as any stop of { -brand-name } does, and its history says the shutdown interrupted it.
+       *[other] { $running } operations are running. Restart once they finish, and { -brand-name } starts no new operation meanwhile. Or restart now: that stops them, as any stop of { -brand-name } does, and their history says the shutdown interrupted them.
+    }
+
+# What that dialog says after the running operations: what becomes of queued ones.
+ui-restart-queued = Queued operations wait, and run once { -brand-name } is back.
+
+# The button of that dialog that restarts Ladderback.
+ui-restart-confirm = Restart
+
+# The button of that dialog, while operations are running, that restarts Ladderback once they finish.
+# $running (count): how many operations are running.
+ui-restart-when-finished = { $running ->
+        [one] Restart once it finishes
+       *[other] Restart once they finish
+    }
+
+# The button of that dialog, while operations are running, that restarts Ladderback at once, stopping them.
+ui-restart-now = Restart now
+
+# What the restart section of Settings says while a restart waits for the running operations to finish.
+ui-restart-pending = { -brand-name } restarts once the running operations finish, and starts no new operation meanwhile.
+
+# The button of that section that cancels a restart that waits, so the queued operations start again.
+ui-restart-cancel = Cancel restart
+
+# Said in that dialog while the request to restart is on its way.
+ui-restart-asking = Asking { -brand-name } to restart…
+
+# Shown and announced once Ladderback has begun to restart, while the page waits for it to answer again.
+ui-restarting = { -brand-name } is restarting. This page reloads once it answers again.
+
+# Shown when Ladderback hasn't answered a minute after the restart began.
+ui-restart-not-back = { -brand-name } hasn't answered for a minute since it began to restart. Check its service: { "systemctl --user status ladderback" } on Linux, or its log, { "~/Library/Logs/ladderback.log" }, on macOS.
+
 # The heading of the section of Settings that lists the API tokens and creates them. It names the table of tokens too.
 ui-api-tokens-heading = { -api-token(form: "other") }
 

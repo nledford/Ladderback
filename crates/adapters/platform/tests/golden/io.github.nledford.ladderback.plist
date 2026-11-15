@@ -9,6 +9,7 @@
 	<array>
 		<string>/Users/demo/.local/bin/ladderback</string>
 		<string>serve</string>
+		<string>--service-managed</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

@@ -86,6 +86,18 @@ Feature: Install the agent as a service
       Then the command exits with status 0
       And the service manager waits 75 seconds for the service to stop before it kills it
 
+    Scenario: The service manager starts the agent again when it exits to restart
+      A restart asked for in Settings is an orderly stop and an exit with
+      status 75, which the service manager answers by starting the agent
+      again. The service file tells the agent a manager runs it, so Settings
+      offers the restart only then
+      (`features/execution/restart_from_settings.feature`).
+
+      When the owner runs "install-service"
+      Then the command exits with status 0
+      And the service file runs this program's "serve --service-managed"
+      And the service manager starts the service again when it exits with status 75
+
     Scenario: A service manager that refuses is named, with its words
       Given the service manager refuses with "Failed to connect to bus: No medium found"
       When the owner runs "install-service"

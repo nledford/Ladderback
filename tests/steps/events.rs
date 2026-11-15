@@ -60,6 +60,9 @@ pub struct Events {
     /// Variables added to the environment of the daemons the scenario
     /// starts, as a reference such as `${LAN_KEY}` reads them.
     pub(crate) env: Vec<(String, String)>,
+    /// Arguments added after `serve` for the daemons the scenario starts,
+    /// as `--service-managed`, which a service file passes.
+    pub(crate) args: Vec<String>,
 }
 
 /// A running daemon, ended when the scenario ends or the run stops at its
@@ -213,7 +216,8 @@ impl Events {
     pub(crate) async fn start_and_stop_at_once(agent: &mut Agent) {
         let root = Self::root(agent);
         let env = agent.events.env.clone();
-        let (status, took, log) = blocking(move || match spawn_daemon(&root, &env, true) {
+        let args = agent.events.args.clone();
+        let (status, took, log) = blocking(move || match spawn_daemon(&root, &env, &args, true) {
             (Some(daemon), _) => exited(daemon, None),
             (None, Outcome::Exited(status, log)) => {
                 panic!("ladderback exited with {status}: {log}")
@@ -221,6 +225,29 @@ impl Events {
             (None, Outcome::Listening(addr)) => panic!("ladderback listened on {addr} unkept"),
         })
         .await;
+        agent.events.stopped = Some(status);
+        agent.events.stop_took = Some(took);
+        agent.events.stopped_log = Some(log);
+    }
+
+    /// Sends `method` to the restart route, as the Settings page does with
+    /// sign-in off (`body` the request's JSON), and returns the answer's
+    /// status and body.
+    pub(crate) async fn restart_route(agent: &Agent, method: &str, body: &str) -> (u16, String) {
+        let addr = agent.events.daemon().addr;
+        let (method, body) = (method.to_owned(), body.to_owned());
+        blocking(move || {
+            super::operations_steps::exchange_at(addr, &method, "/api/v1/restart", &body)
+        })
+        .await
+    }
+
+    /// Waits for the daemon to exit of itself, as one asked to restart does,
+    /// within the time [`Self::stop`] allows, and keeps how it ended for the
+    /// steps that read it.
+    pub(crate) async fn await_exit(agent: &mut Agent) {
+        let daemon = agent.events.daemon.take().expect("Ladderback is serving");
+        let (status, took, log) = blocking(move || exited(daemon, None)).await;
         agent.events.stopped = Some(status);
         agent.events.stop_took = Some(took);
         agent.events.stopped_log = Some(log);
@@ -291,7 +318,8 @@ impl Events {
 async fn start(agent: &mut Agent) -> Outcome {
     let root = Events::root(agent);
     let env = agent.events.env.clone();
-    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env, false)).await;
+    let args = agent.events.args.clone();
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env, &args, false)).await;
     if daemon.is_some() {
         agent.events.daemon = daemon;
     }
@@ -333,7 +361,8 @@ pub(crate) async fn serve(agent: &mut Agent) {
 pub(crate) async fn start_second(agent: &mut Agent) {
     let root = Events::root(agent);
     let env = agent.events.env.clone();
-    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env, false)).await;
+    let args = agent.events.args.clone();
+    let (daemon, outcome) = blocking(move || spawn_daemon(&root, &env, &args, false)).await;
     agent.events.second = daemon;
     agent.events.asked_to_serve = Some(outcome);
 }
@@ -350,12 +379,14 @@ pub(crate) fn refusal(agent: &mut Agent) -> (ExitStatus, String) {
     }
 }
 
-/// Starts the daemon and reads its log until it says where it listens or
-/// exits; the daemon is there when it listens. With `stop_when_listening`,
-/// it is sent SIGTERM as soon as that line is read.
+/// Starts the daemon, with `args` after `serve`'s own, and reads its log
+/// until it says where it listens or exits; the daemon is there when it
+/// listens. With `stop_when_listening`, it is sent SIGTERM as soon as that
+/// line is read.
 fn spawn_daemon(
     root: &std::path::Path,
     env: &[(String, String)],
+    args: &[String],
     stop_when_listening: bool,
 ) -> (Option<Daemon>, Outcome) {
     let mut command = Command::new(super::LADDERBACK);
@@ -363,6 +394,7 @@ fn spawn_daemon(
     command.envs(env.iter().map(|(name, value)| (name, value)));
     command
         .args(["serve", "--listen", "127.0.0.1:0"])
+        .args(args)
         .stderr(Stdio::piped());
     let child = Owned::spawn(&mut command).expect("ladderback serve starts");
     let stderr = child.take_stderr().expect("the daemon's stderr");
@@ -522,10 +554,14 @@ async fn connect(agent: &Agent) -> Page {
 
 #[given(expr = "Ladderback is serving on loopback with the plan {string}")]
 async fn serving_with_plan(agent: &mut Agent, plan: String) {
-    // A real plan the daemon can run: a real scratch repository, a folder of
-    // demo files, and a config.toml naming both.
+    serve_with_plan(agent, &plan).await;
+}
+
+/// Starts the daemon on loopback with a real plan it can run: a real scratch
+/// repository, a folder of demo files, and a config.toml naming both.
+pub(crate) async fn serve_with_plan(agent: &mut Agent, plan: &str) {
     super::backup_steps::new_repository(agent).await;
-    super::backup_steps::source_with_files(agent, &plan, 3);
+    super::backup_steps::source_with_files(agent, plan, 3);
     save_daemon_config(agent, None).await;
     match start(agent).await {
         Outcome::Listening(_) => {}
