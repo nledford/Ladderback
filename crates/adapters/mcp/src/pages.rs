@@ -69,8 +69,8 @@ pub fn page<T>(
 #[schemars(crate = "rmcp::schemars")]
 #[serde(deny_unknown_fields)]
 pub struct ListArguments {
-    /// How many to list, from 1 to 200; 50 when not given. A larger number
-    /// lists 200.
+    /// How many to list, a whole number from 1 to 200; 50 when not given. A
+    /// larger number lists 200, and 0 lists 1.
     pub limit: Option<u64>,
     /// The `next` of the page before, to list the page after it.
     pub cursor: Option<String>,
@@ -89,8 +89,8 @@ pub struct SnapshotsArguments {
     /// Only the snapshots taken on this host, by its name exactly as the
     /// snapshots give it.
     pub host: Option<String>,
-    /// How many to list, from 1 to 200; 50 when not given. A larger number
-    /// lists 200.
+    /// How many to list, a whole number from 1 to 200; 50 when not given. A
+    /// larger number lists 200, and 0 lists 1.
     pub limit: Option<u64>,
     /// The `next` of the page before, asked with the same filters, to list
     /// the page after it.
@@ -134,8 +134,8 @@ impl SnapshotFilter {
 pub struct OperationsArguments {
     /// Only this plan's operations, by its ID.
     pub plan: Option<String>,
-    /// How many to list, from 1 to 200; 50 when not given. A larger number
-    /// lists 200.
+    /// How many to list, a whole number from 1 to 200; 50 when not given. A
+    /// larger number lists 200, and 0 lists 1.
     pub limit: Option<u64>,
     /// The `next` of the page before, to list the page after it.
     pub cursor: Option<String>,

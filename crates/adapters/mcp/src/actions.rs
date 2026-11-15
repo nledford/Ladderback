@@ -69,8 +69,8 @@ pub struct Started {
 pub struct WaitArguments {
     /// The operation's ID, as `run_plan` or `list_operations` names it.
     pub operation: String,
-    /// How many seconds to wait at most, up to 600; 60 when not given. A
-    /// larger number waits 600; 0 reads the operation once.
+    /// How many seconds to wait at most, a whole number from 0 to 600; 60
+    /// when not given. A larger number waits 600; 0 reads the operation once.
     pub timeout: Option<u64>,
 }
 
