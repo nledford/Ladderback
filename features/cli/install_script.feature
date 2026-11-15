@@ -603,9 +603,50 @@ Feature: Install Ladderback with one command
 
     Scenario: On macOS it says to grant Full Disk Access
       Given the system is macOS
+      And nothing answers for a Secret Service on the session bus
       When the owner runs the install script
       Then the command exits with status 0
       And standard output says "Full Disk Access"
+      And standard output doesn't say "Secret Service"
+      And the session bus wasn't asked
+
+    Scenario Outline: On Linux, when <bus>, it names the Secret Services to choose from, or a password file
+      A `password-keyring` password is read from the Secret Service on the
+      session bus (operations §12). Where nothing answers for one there,
+      the closing notes name the ones to choose from: oo7-daemon, Fedora
+      45's, GNOME Keyring and KDE's KWallet, or a password file instead.
+      The script installs none of them, as that needs administrator rights
+      (decision 79), and it asks the bus as the user who runs it.
+
+      Given <bus>
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the session bus was asked, as the owner, whether a Secret Service answers
+      And standard output says "oo7-daemon"
+      And standard output says "GNOME Keyring"
+      And standard output says "KWallet"
+      And standard output says "password-file"
+      And nothing ran sudo or a package manager
+
+      Examples:
+        | bus                                                     |
+        | nothing answers for a Secret Service on the session bus |
+        | there is no session bus                                 |
+
+    Scenario Outline: On Linux, when a Secret Service <answers> on the session bus, it says nothing of one
+      A Secret Service that D-Bus starts the first time it is asked for
+      answers as well as one that already runs.
+
+      Given a Secret Service <answers> on the session bus
+      When the owner runs the install script
+      Then the command exits with status 0
+      And the session bus was asked, as the owner, whether a Secret Service answers
+      And standard output doesn't say "Secret Service"
+
+      Examples:
+        | answers                   |
+        | runs                      |
+        | is started when asked for |
 
     Scenario: After installing Rust, it says to open a new terminal
       Given Rust isn't installed

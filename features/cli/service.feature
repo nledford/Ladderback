@@ -112,6 +112,29 @@ Feature: Install the agent as a service
       And standard error says "home folder"
       And the service manager was asked nothing
 
+  Rule: On Linux it says when a repository's password can't be read before login
+    A `password-keyring` password is read from the Secret Service, which
+    starts with the user's desktop session. A service that lingers starts at
+    boot, before anyone logs in, so a backup that runs before the first login
+    can't read the password (operations §12, #479). On Linux `install-service`
+    says so whenever a repository's password is in the keyring, and suggests
+    a password file that only the user can read. A launchd agent on macOS
+    runs only while its user is logged in, so nothing about it is said there.
+
+    Scenario: A repository whose password is in the keyring is told of a password file
+      Given a repository reads its password from the keyring
+      When the owner runs "install-service"
+      Then the command exits with status 0
+      And the service runs
+      And standard output says, on Linux alone, that a password in the keyring can't be read before login
+
+    Scenario: A repository whose password is in a file is told nothing of the keyring
+      Given a repository reads its password from a file
+      When the owner runs "install-service"
+      Then the command exits with status 0
+      And the service runs
+      And standard output never says that a password in the keyring can't be read before login
+
   Rule: Removing has the manager stop the service and removes its file
 
     Scenario: Removing the service

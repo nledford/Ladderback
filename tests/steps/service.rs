@@ -309,3 +309,59 @@ fn stdout_never_says_how_to_linger(agent: &mut Agent) {
         "standard output {stdout:?} says {LINGER_HINT:?}"
     );
 }
+
+/// Writes the configuration the scenario's `ladderback` reads: one
+/// repository, whose password is where `password` says.
+fn one_repository(agent: &Agent, password: &str) {
+    let folder = agent.scratch().join("config");
+    std::fs::create_dir_all(&folder).expect("the configuration folder");
+    std::fs::write(
+        folder.join("config.toml"),
+        format!("schema = 1\n\n[repositories.nas]\nrepository = \"/srv/demo-repo\"\n{password}\n"),
+    )
+    .expect("the configuration is written");
+}
+
+#[given("a repository reads its password from the keyring")]
+fn password_in_the_keyring(agent: &mut Agent) {
+    one_repository(agent, "password-keyring = \"ladderback/nas\"");
+}
+
+#[given("a repository reads its password from a file")]
+fn password_in_a_file(agent: &mut Agent) {
+    one_repository(
+        agent,
+        "password-file = \"/home/demo/.config/ladderback/nas.password\"",
+    );
+}
+
+/// What the note on a keyring password names, in every language: the
+/// source it suggests instead.
+const KEYRING_NOTE: &str = "password-file";
+
+#[then(
+    "standard output says, on Linux alone, that a password in the keyring can't be read before login"
+)]
+fn stdout_says_keyring_waits_for_login(agent: &mut Agent) {
+    let stdout = &ran(agent).stdout;
+    if cfg!(target_os = "macos") {
+        assert!(
+            !stdout.contains(KEYRING_NOTE),
+            "a launchd agent runs only after login, yet standard output {stdout:?} says {KEYRING_NOTE:?}"
+        );
+    } else {
+        assert!(
+            stdout.contains(KEYRING_NOTE),
+            "standard output {stdout:?} doesn't say {KEYRING_NOTE:?}"
+        );
+    }
+}
+
+#[then("standard output never says that a password in the keyring can't be read before login")]
+fn stdout_never_says_keyring_waits_for_login(agent: &mut Agent) {
+    let stdout = &ran(agent).stdout;
+    assert!(
+        !stdout.contains(KEYRING_NOTE),
+        "standard output {stdout:?} says {KEYRING_NOTE:?}"
+    );
+}
