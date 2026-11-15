@@ -26,13 +26,23 @@ pub struct TokenFileError {
 ///
 /// # Errors
 ///
-/// The file is there but can't be read, other users than its owner can read
-/// it, it is larger than a token, or it isn't UTF-8.
+/// The file is there but isn't a regular file or can't be read, other users
+/// than its owner can read it, it is larger than a token, or it isn't UTF-8.
 pub fn read(path: &Path) -> Result<Option<String>, TokenFileError> {
     let refused = |detail: String| TokenFileError {
         path: path.to_owned(),
         detail,
     };
+    // Checked before opening: opening a FIFO waits for a writer, which may
+    // never come.
+    match std::fs::metadata(path) {
+        Ok(found) if !found.is_file() => {
+            return Err(refused("it isn't a regular file".to_owned()));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(refused(error.to_string())),
+    }
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -117,6 +127,35 @@ mod tests {
         assert_eq!(
             read(&path).map(|text| text.map(|text| text.len())),
             Ok(Some(4096))
+        );
+    }
+
+    /// Opening a FIFO waits for a writer, which may never come: the server
+    /// would hang at start rather than refuse the file.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_isnt_a_regular_file_is_refused_without_opening_it() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join(DEFAULT_NAME);
+        let made = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .unwrap();
+        let (told, answer) = std::sync::mpsc::channel();
+        let asked = path.clone();
+        std::thread::spawn(move || told.send(read(&asked)));
+        let refused = answer
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("a FIFO is refused, not waited on")
+            .expect_err("a FIFO");
+        assert_eq!(refused.path, path);
+        assert!(
+            refused.detail.contains("regular file"),
+            "{}",
+            refused.detail
         );
     }
 }
