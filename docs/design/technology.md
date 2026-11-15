@@ -84,6 +84,8 @@ ladderback/
 
 **Scope.** v1 ships **American English (`en-US`) only**, but it is localization-ready from the first user-facing string. Adding a language touches only the `l10n` crate: drop `.ftl` files into `locales/<tag>/`. Its `build.rs` regenerates the locale table and the embedded catalogs. ICU4X's data is compiled in for every locale, so a new language needs nothing there (its size is under *Host formatters*). Retrofitting this after the UI exists would mean touching every view, so it starts in M1b with the first real screen.
 
+**Japanese** (`ja`) is the first language after it, in M4 (§16, decision 101): an AI drafts the messages, the maintainer reviews them, and a release offers a language only when every message is translated and none is stale since the `en-US` text it came from. Decision 101 also brings the stored language choice and the layout rules Japanese needs.
+
 | Text | Localized? |
 |---|---|
 | Web UI: labels, messages, errors, `aria-*` text, page titles | Yes, in the browser's negotiated locale |
