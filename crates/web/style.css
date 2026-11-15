@@ -190,13 +190,24 @@ main:focus {
 
 /*
  * Status badges (§4.5): a short labeled state on a colored pill, its text
- * token on its background token — the pairs scripts/check-contrast.ts checks.
+ * token on its background token — the pairs scripts/check-contrast.ts checks
+ * — with the state's icon before the text, stroked in the text's color.
  */
 .badge {
   display: inline-block;
   border-radius: 9999px;
   padding-block: 0.125rem;
   padding-inline: 0.5rem;
+}
+
+/* The icon is as tall as the text and grows with it (1.4.4), sits on the
+   text's line, and keeps a small gap before the label. */
+.badge-icon {
+  display: inline-block;
+  inline-size: 1em;
+  block-size: 1em;
+  vertical-align: -0.125em;
+  margin-inline-end: 0.25em;
 }
 
 .badge-loading {
