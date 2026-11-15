@@ -37,7 +37,6 @@ docs/design/decisions/73-the-persistent-queue-and-the-scheduler-loop.md
 docs/design/decisions/76-retries-of-a-failed-backup.md
 docs/design/decisions/79-a-from-source-install-script.md
 docs/design/decisions/80-repository-locations.md
-docs/design/decisions/81-identify-a-repository-before-its-first-job.md
 docs/design/decisions/82-the-step-a-running-operation-is-in.md
 docs/design/decisions/83-a-progress-bar-a-screen-reader-can-reach.md
 docs/design/decisions/89-agent-proposed-setup.md
