@@ -535,6 +535,28 @@ fn each_plan_problem_has_its_own_words_naming_the_field() {
     assert_eq!(texts.len(), problems.len(), "{texts:#?}");
 }
 
+#[test]
+fn each_argument_problem_has_its_own_words_naming_the_argument() {
+    use api::ArgumentProblem::{Invalid, Missing, UnknownKey};
+    let localizer = english();
+    let problems = [Missing, UnknownKey, Invalid];
+    let texts: BTreeSet<String> = problems
+        .iter()
+        .map(|problem| {
+            let args = [
+                ("field", MsgArg::Text("timeout".to_owned())),
+                ("problem", MsgArg::Text(problem.as_str().to_owned())),
+            ];
+            let shown = localizer.error(ErrorCode::InvalidArguments, &args, None);
+            assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+            assert!(shown.text().contains("timeout"), "{shown}");
+            shown.text().to_owned()
+        })
+        .collect();
+    // A name the message has no arm for would read as `invalid` does.
+    assert_eq!(texts.len(), problems.len(), "{texts:#?}");
+}
+
 /// Only an operation's detail grows with its warnings, which the web UI
 /// shows; a list or a profile too large to read isn't pointed there.
 #[test]

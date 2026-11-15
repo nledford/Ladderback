@@ -337,6 +337,15 @@ error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kin
 # $cursor (text): the cursor as it was sent.
 error-invalid-cursor = { -brand-name } could not continue the history from { $cursor }. Use the cursor the previous page gave.
 
+# A call of an MCP tool gave an argument the tool does not take, left out one it needs, or gave one a value it does not take, so the tool did not run.
+# $field (text): the argument's name, as the tool's input schema or the call names it, such as plan or timeout.
+# $problem (text): what is wrong with it, one of { "missing" }, { "unknown-key" } or { "invalid" }.
+error-invalid-arguments = { $problem ->
+    [missing] The tool needs the argument { $field }, so it did not run. Add it, then call the tool again.
+    [unknown-key] The tool takes no argument { $field }, so it did not run. Leave it out, then call the tool again.
+   *[invalid] The tool does not take the value given for its argument { $field }, so it did not run. Give a value that its description and input schema allow, then call the tool again.
+  }
+
 ## Warning codes
 
 # A file or folder the backup could not read.
