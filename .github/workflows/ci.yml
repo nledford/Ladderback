@@ -227,6 +227,9 @@ jobs:
           path: target/nextest/ci/junit.xml
           retention-days: 14
 
+  # The same journeys in Firefox and WebKit run as `ui-engines` below; this
+  # job stays Chromium alone, under the name the ruleset requires (a matrix
+  # job that its own `if` skips never creates that check; see `check` above).
   ui:
     name: UI journeys (Chromium, axe-core, keyboard)
     needs: changes
@@ -266,6 +269,58 @@ jobs:
       - run: just test-ui
       # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
       - if: github.event_name == 'push'
+        run: rm -rf target
+
+  # The `ui` job's journeys in Gecko (Firefox, Zen, LibreWolf) and WebKit
+  # (Safari's engine, the closest stand-in for Safari that runs on Linux).
+  # Not required checks: the maintainer adds them to the ruleset once they have
+  # a clean record. Its steps are the `ui` job's; change both together.
+  ui-engines:
+    name: UI journeys (${{ matrix.name }}, axe-core, keyboard)
+    needs: changes
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Firefox
+            engine: firefox
+          - name: WebKit
+            engine: webkit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      LADDERBACK_UI_BROWSER: ${{ matrix.engine }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
+        continue-on-error: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui-tests/.nvmrc
+          cache: npm
+          cache-dependency-path: ui-tests/package-lock.json
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trunk
+          key: trunk-tools-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: trunk-tools-${{ runner.os }}-
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just,trunk
+      - run: npm ci
+        working-directory: ui-tests
+      - uses: $/.github/actions/browser
+        with:
+          engines: ${{ matrix.engine }}
+      # `LADDERBACK_UI_BROWSER` (above) picks the engine.
+      - run: just test-ui
+      # Also after a failed run: these jobs are expected to fail more often, and
+      # a target left behind could be saved under the shared Linux build key.
+      - if: ${{ !cancelled() && github.event_name == 'push' }}
         run: rm -rf target
 
   # The red-first check (red-first.yml) installs all three engines in one job,
