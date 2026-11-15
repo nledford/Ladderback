@@ -8,6 +8,16 @@
 
 **Amended** (2026-11-15, #617): the admin password is set and changed in Settings too, not only at the terminal, by the rules `set-password` keeps and with its effects. With sign-in off, Settings sets it, and it waits for a restart as one the command sets does: whoever can reach the page can already run and change everything, so this opens nothing new. With sign-in on, changing it takes a session, never an API token, and the current password, checked as a sign-in is: a wrong one counts in the waits, and one sent during a wait is refused unchecked, so the form is no way around them. The new password ends every session and token, the changing page's too. Turning sign-in off and recovering a forgotten password stay at the terminal: a web path to either would let whoever reaches the page downgrade it.
 
+**Amended** (2026-11-15, #610): sessions outlive a restart, and Settings chooses how long one lasts (§10.1). **Stay signed in for** sets the session length, measured from each session's sign-in, the open ones included: until the browser closes, 7, 30 (the default) or 90 days, a year, or until sign-out. **Keep me signed in on this device** lifts a session's 12-hour idle limit, except until the browser closes, which always keeps it. The cookie lasts as long as the session has left, at most the 400 days a browser keeps one, and a person's use renews it at most once a day. **Sign out everywhere** ends every session, the asking one included; API tokens go on.
+
+The store keeps each session's token digest, never the token, so a copy of the database signs nobody in; the CSRF token isn't kept, and each session gets a new one at start. At start the daemon forgets the rows it can't read and logs how many, rather than refusing to start over one damaged row. A new password set in Settings, or by `set-password` with no daemon holding the data folder, has the store forget every session; with a daemon running, `set-password` leaves the store alone, the fingerprint ends them, and the next start forgets them. When the database can't keep or forget sessions, the request is answered `sessions-unavailable`, a code of its own: the admin password is not at fault.
+
+Known limits:
+
+- A sign-out or Sign out everywhere whose store delete fails has still ended the session, but a restart before a later write succeeds brings it back.
+- A `PUT /api/v1/settings/sign-in` dropped after the store keeps the length leaves the running daemon on the old length until it restarts.
+- A cookie renewal lost when the client hangs up isn't sent again for up to a day, so after the length grows the browser may drop the cookie before the session ends.
+
 Why:
 
 - **On or off, decided at start.** Sign-in is on while `admin-password` exists in the data folder, and the daemon decides once, when it starts. A daemon that could turn sign-in on by itself would leave a page open without one; one that turned it off when the file went away would open the API to anyone. A hash file the daemon can't read refuses the start, so a damaged file never means sign-in off.
@@ -24,4 +34,4 @@ Why:
 - **Failed sign-ins make the next one wait; none locks out.** A lockout would let anyone who can reach the daemon lock the admin out. The wait doubles from 1 second to at most 5 minutes per client (an IPv4 address, or an IPv6 /64), and a sign-in during the wait is refused unchecked, so guessing costs 5 minutes a guess while the admin, once the wait passes, gets in. Behind a reverse proxy every client shares the proxy's wait: trusting forwarded addresses would let an attacker name a fresh address for every guess. The cost: whoever shares the admin's client (another user on loopback, anyone behind the proxy) can keep the admin waiting by failing the moment each wait passes; that denies sign-in without making a guess count, and a cookie giving a browser once signed in a wait of its own is left for later (§10.1).
 - **Beyond loopback only with sign-in on and an `--allowed-host`.** The request checks admit only configured names, so without one every request from the network would be refused anyway; requiring it makes that a refusal at start, not a page that never loads. The log warns that plain HTTP sends the password unencrypted.
 
-Left out: the trusted-proxy SSO header mode (decision 11, tracked separately), API tokens (§10.1, M3), sessions that survive a restart, and more than one user.
+Left out: the trusted-proxy SSO header mode (decision 11, tracked separately), API tokens (§10.1, M3), and more than one user.
