@@ -380,9 +380,11 @@ fn is_blank(line: &str) -> bool {
 }
 
 /// Makes the change from `base` to `new` in `mine`, the plans as the file
-/// writes them, each found by its ID, in the order of `new`: a plan kept is
-/// changed where it is written, one added follows the last, and one
-/// removed goes with what is written in it.
+/// writes them, each found by its ID: a plan kept is changed where it is
+/// written, one added follows the plan before it in `new`, and one removed
+/// goes with what is written in it. A plan kept keeps its place, so plans
+/// put in another order are left in the file's: that edit reads back
+/// wrong, and `saved` doesn't keep it.
 fn plans(
     mine: &mut ArrayOfTables,
     base: Option<&ArrayOfTables>,
