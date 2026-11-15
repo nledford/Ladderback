@@ -5,7 +5,7 @@
 ## Why
 
 - **A bug one engine shows can be proven red.** #631's Firefox forced-colors focus ring and WebKit's sideways scroll at 320 px fail in no other engine, so a Chromium-only check would call their scenarios `GREEN` and no `behaviour` change could fix them.
-- **Chromium stays primary.** CI's required `UI journeys` job runs Chromium alone, so a Chromium red keeps its meaning: the required job proves the scenario passes at the head. Firefox and WebKit are not run on every push; a step adapts to them by branching on `engine`, never by skipping (§13.2).
+- **Chromium stays primary.** CI's required `UI journeys` job runs Chromium alone, so a Chromium red keeps its meaning: the required job proves the scenario passes at the head. No required job runs Firefox or WebKit; a step adapts to them by branching on `engine`, never by skipping (§13.2).
 - **The head check keeps the check strict.** No required job runs Firefox or WebKit at the head. Without the head run, a scenario Chromium passes, failing in Firefox for a reason the branch never fixes, would pass for red, and the required check would loosen.
 - **The head's step code.** The head run takes `features/` and `ui-tests/` from the head. Freezing them at the `test:` commit would fail heads that legitimately change a step; a step changed later still has to pass the required Chromium job.
 - **Tooling has unit tests.** The verdict lives in `scripts/red-first-ui.ts`, tested by `node --test` in `just lint`. Decision 79 rejected `node:test` only for behaviour tests, which red-first and `just test` can't see; tooling logic is not behaviour, and lint is where its tests run.
