@@ -4,6 +4,8 @@
 
 **Amended by decision 87** (2026-11-13, #503): beyond loopback needs an `--allowed-host`, but no longer sign-in (the "Beyond loopback" point below). With sign-in off there, the daemon warns on stderr, in a line no log setting hides, and every page says that anyone who can reach it can use it.
 
+**Amended** (2026-11-14, #612): sign-in is still decided at start, but with it off the daemon now says when an admin password has been set since: the session route's answer carries `admin-password` (`set`, or `unreadable` for a file it can't read or check), and Settings says that a restart turns sign-in on, or that the file is damaged. The daemon still never turns sign-in on by itself, for the reason in "On or off, decided at start" below.
+
 Why:
 
 - **On or off, decided at start.** Sign-in is on while `admin-password` exists in the data folder, and the daemon decides once, when it starts. A daemon that could turn sign-in on by itself would leave a page open without one; one that turned it off when the file went away would open the API to anyone. A hash file the daemon can't read refuses the start, so a damaged file never means sign-in off.
