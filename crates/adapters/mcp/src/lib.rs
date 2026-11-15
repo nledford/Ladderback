@@ -46,6 +46,7 @@ use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 mod actions;
+mod checks;
 mod connect;
 mod pages;
 
@@ -59,6 +60,7 @@ pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 use actions::{
     CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
 };
+use checks::{ExportArguments, ForgetPreview, ImportArguments, RepositoryArguments};
 use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
     SnapshotsArguments, SnapshotsPage, page, page_length,
@@ -75,7 +77,9 @@ const REVISIONS: &[ProtocolVersion] = &[
 
 /// The longest message read from the client, in bytes. A longer line is
 /// dropped unread and the session goes on. Every request a tool takes is a
-/// few hundred bytes; the SDK's own default is 16 MiB.
+/// few hundred bytes but `preview_import`'s, which carries a profile's text:
+/// one near the import's own 1 MiB cap doesn't fit (§4.6). The SDK's own
+/// default is 16 MiB.
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 
 /// The tools' names.
@@ -88,6 +92,10 @@ const GET_OPERATION: &str = "get_operation";
 const RUN_PLAN: &str = "run_plan";
 const WAIT_OPERATION: &str = "wait_operation";
 const CANCEL_OPERATION: &str = "cancel_operation";
+const TEST_REPOSITORY: &str = "test_repository";
+const PREVIEW_FORGET: &str = "preview_forget";
+const PREVIEW_IMPORT: &str = "preview_import";
+const EXPORT_PROFILE: &str = "export_profile";
 
 /// How many of the newest operations `status` looks through for those
 /// queued or running: the history's largest page.
@@ -152,32 +160,30 @@ pub trait Backend: Send + Sync + 'static {
     /// (decision 93).
     async fn cancel(&self, id: String) -> Result<(), ErrorDto>;
 
-    /// Tries every location of a repository and tells each one's outcome.
-    async fn test_repository(&self, _repository: String) -> Result<LocationsTestDto, ErrorDto> {
-        todo!()
-    }
+    /// Tries every location of the repository whose alias is `repository`,
+    /// as a job would choose among them, and tells each one's outcome.
+    /// Records nothing.
+    async fn test_repository(&self, repository: String) -> Result<LocationsTestDto, ErrorDto>;
 
-    /// What a forget of a repository maintained here would let go.
-    async fn preview_forget(
-        &self,
-        _repository: String,
-    ) -> Result<MaintenancePreviewDto, ErrorDto> {
-        todo!()
-    }
+    /// What a forget of the repository whose alias is `repository` would
+    /// let go, read from the repository: refused as `maintenance-not-owner`
+    /// unless this agent maintains it (I1). Takes no maintenance slot and
+    /// writes nothing.
+    async fn preview_forget(&self, repository: String) -> Result<MaintenancePreviewDto, ErrorDto>;
 
-    /// What importing a profile given as its TOML would add.
+    /// What importing the rustic profile whose TOML is `content` under the
+    /// alias `repository` would add, checked as an import checks it. Saves
+    /// nothing and reads no file: the profiles it uses are a notice.
     async fn preview_import(
         &self,
-        _content: String,
-        _repository: String,
-    ) -> Result<ProfileImportDto, ErrorDto> {
-        todo!()
-    }
+        content: String,
+        repository: String,
+    ) -> Result<ProfileImportDto, ErrorDto>;
 
-    /// A plan as a profile the stock `rustic` reads.
-    async fn export_profile(&self, _plan: String) -> Result<ProfileExportDto, ErrorDto> {
-        todo!()
-    }
+    /// The plan whose ID is `plan` as a profile the stock `rustic` reads,
+    /// and what was left out of it. A password stored inline is refused as
+    /// `inline-secret`, never written out (I4).
+    async fn export_profile(&self, plan: String) -> Result<ProfileExportDto, ErrorDto>;
 }
 
 /// What a [`Backend`] tells `status`.
@@ -448,6 +454,13 @@ impl Server {
             operation: arguments.id,
         })
     }
+
+    async fn preview_forget(
+        &self,
+        arguments: RepositoryArguments,
+    ) -> Result<ForgetPreview, ErrorDto> {
+        ForgetPreview::of(self.backend.preview_forget(arguments.repository).await?)
+    }
 }
 
 /// A read tool's result: what it read, or the refusal, marked as an error.
@@ -514,6 +527,17 @@ fn acting() -> ToolAnnotations {
         .read_only(false)
         .destructive(false)
         .idempotent(false)
+        .open_world(false)
+}
+
+/// A tool that keeps nothing, yet opens a repository at each of its
+/// locations as a backup would: testing a repository, which the daemon
+/// grants only to the `run` scope, so it isn't offered as a read.
+fn trying() -> ToolAnnotations {
+    ToolAnnotations::new()
+        .read_only(false)
+        .destructive(false)
+        .idempotent(true)
         .open_world(false)
 }
 
@@ -627,6 +651,47 @@ fn tools() -> Vec<Tool> {
         .with_input_schema::<CancelArguments>()
         .with_raw_output_schema(output_schema::<Cancelling>())
         .with_annotations(acting()),
+        Tool::new(
+            TEST_REPOSITORY,
+            "Tries each location of a configured repository, as a backup would choose among \
+             them, and tells each one's outcome. Records nothing.",
+            no_arguments(),
+        )
+        .with_title("Test repository")
+        .with_input_schema::<RepositoryArguments>()
+        .with_raw_output_schema(output_schema::<LocationsTestDto>())
+        .with_annotations(trying()),
+        Tool::new(
+            PREVIEW_FORGET,
+            "What a forget of a repository maintained here would let go, by each plan's \
+             retention, and what it leaves alone. Reads the repository; deletes nothing.",
+            no_arguments(),
+        )
+        .with_title("Preview forget")
+        .with_input_schema::<RepositoryArguments>()
+        .with_raw_output_schema(output_schema::<ForgetPreview>())
+        .with_annotations(read_only()),
+        Tool::new(
+            PREVIEW_IMPORT,
+            "What importing a rustic profile, given as its TOML text, would add: the \
+             repository's name, the plans and what the import couldn't carry over. Saves \
+             nothing and reads no file; profiles it uses are named in a notice.",
+            no_arguments(),
+        )
+        .with_title("Preview import")
+        .with_input_schema::<ImportArguments>()
+        .with_raw_output_schema(output_schema::<ProfileImportDto>())
+        .with_annotations(read_only()),
+        Tool::new(
+            EXPORT_PROFILE,
+            "A plan as a profile the stock rustic reads, and what the export left out. A \
+             password stored in the configuration is refused, never written out.",
+            no_arguments(),
+        )
+        .with_title("Export profile")
+        .with_input_schema::<ExportArguments>()
+        .with_raw_output_schema(output_schema::<ProfileExportDto>())
+        .with_annotations(read_only()),
     ]
 }
 
@@ -686,6 +751,26 @@ impl ServerHandler for Server {
                 self.cancel_operation(arguments(CANCEL_OPERATION, given)?)
                     .await,
             )),
+            TEST_REPOSITORY => {
+                let RepositoryArguments { repository } = arguments(TEST_REPOSITORY, given)?;
+                Ok(answered(self.backend.test_repository(repository).await))
+            }
+            PREVIEW_FORGET => Ok(answered(
+                self.preview_forget(arguments(PREVIEW_FORGET, given)?).await,
+            )),
+            PREVIEW_IMPORT => {
+                let ImportArguments {
+                    content,
+                    repository,
+                } = arguments(PREVIEW_IMPORT, given)?;
+                Ok(answered(
+                    self.backend.preview_import(content, repository).await,
+                ))
+            }
+            EXPORT_PROFILE => {
+                let ExportArguments { plan } = arguments(EXPORT_PROFILE, given)?;
+                Ok(answered(self.backend.export_profile(plan).await))
+            }
             name => Err(McpError::invalid_params(
                 format!("no tool is named {name:?}"),
                 None,

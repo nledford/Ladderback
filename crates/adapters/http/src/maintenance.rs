@@ -194,13 +194,28 @@ pub(crate) async fn start(
     }
 }
 
-/// The typed refusal of `error` on the repository `alias`, with the status of
-/// its kind: a body that can't be taken is 400; something unknown, or a
-/// location that holds no repository, 404; a run refused because of what the
-/// repository holds, or a read the engine ran and failed, 422; a repository
-/// that is busy or has changed since its preview 409; a read the repository
-/// didn't answer in time 504; and the daemon not being able to do it now, 503.
+impl MaintenanceRefusal {
+    /// The refusal on the repository `alias` as the API answers it.
+    pub fn error(self, alias: &str) -> api::ErrorDto {
+        answer(alias, self).1
+    }
+}
+
+/// The typed refusal of `error` on the repository `alias`, with the status
+/// of its kind.
 fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
+    let (status, error) = answer(alias, error);
+    (status, Json(error)).into_response()
+}
+
+/// The refusal of `error` on the repository `alias` as the API answers it,
+/// and its status: a body that can't be taken is 400; something unknown, or
+/// a location that holds no repository, 404; a run refused because of what
+/// the repository holds, or a read the engine ran and failed, 422; a
+/// repository that is busy or has changed since its preview 409; a read the
+/// repository didn't answer in time 504; and the daemon not being able to do
+/// it now, 503.
+fn answer(alias: &str, error: MaintenanceRefusal) -> (StatusCode, api::ErrorDto) {
     use api::{ErrorCode, MsgArg};
     let text = |name, value: String| vec![(name, MsgArg::Text(value))];
     let (status, code, args, detail) = match error {
@@ -286,5 +301,5 @@ fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
             (StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
         }
     };
-    refused_detailed(status, code, args, detail)
+    (status, api::ErrorDto::new(code, args, detail))
 }

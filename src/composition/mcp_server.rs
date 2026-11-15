@@ -369,6 +369,8 @@ fn in_process(daemon: Daemon, scratch: Option<Scratch>) -> (::mcp::Server, Held)
 pub(crate) struct InProcess {
     catalog: Arc<dyn http_adapter::Catalog>,
     operations: Arc<dyn http_adapter::Operations>,
+    repositories: Arc<dyn http_adapter::Repositories>,
+    profiles: Arc<dyn http_adapter::Profiles>,
 }
 
 impl InProcess {
@@ -377,6 +379,8 @@ impl InProcess {
         Self {
             catalog: Arc::clone(&state.catalog),
             operations: Arc::clone(&state.operations),
+            repositories: Arc::clone(&state.repositories),
+            profiles: Arc::clone(&state.profiles),
         }
     }
 }
@@ -501,6 +505,47 @@ impl ::mcp::Backend for InProcess {
                     None,
                 ),
             })
+    }
+
+    async fn test_repository(
+        &self,
+        repository: String,
+    ) -> Result<api::LocationsTestDto, api::ErrorDto> {
+        self.repositories
+            .test_saved(repository)
+            .await
+            .map_err(|error| error.error())
+    }
+
+    async fn preview_forget(
+        &self,
+        repository: String,
+    ) -> Result<api::MaintenancePreviewDto, api::ErrorDto> {
+        self.operations
+            .preview(repository.clone(), http_adapter::MaintenanceRequest::Forget)
+            .await
+            .map_err(|refusal| refusal.error(&repository))
+    }
+
+    async fn preview_import(
+        &self,
+        content: String,
+        repository: String,
+    ) -> Result<api::ProfileImportDto, api::ErrorDto> {
+        self.profiles
+            .preview(api::ProfilePreviewDto {
+                content,
+                repository,
+            })
+            .await
+            .map_err(http_adapter::ProfilesError::error)
+    }
+
+    async fn export_profile(&self, plan: String) -> Result<api::ProfileExportDto, api::ErrorDto> {
+        self.profiles
+            .export(plan)
+            .await
+            .map_err(http_adapter::ProfilesError::error)
     }
 }
 

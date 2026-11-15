@@ -89,6 +89,7 @@ pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
         ["events" | "operations" | "plans" | "repositories" | "session"]
         | ["operations", _]
         | ["repositories", _, "snapshots" | "groups"]
+        | ["plans", _, "profile"]
             if reads =>
         {
             Some(Scope::Read)
@@ -98,7 +99,9 @@ pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
         {
             Some(Scope::Run)
         }
-        ["repositories", _, "maintenance", "preview"] if method == Method::POST => {
+        ["repositories", _, "maintenance", "preview"] | ["profiles", "preview"]
+            if method == Method::POST =>
+        {
             Some(Scope::Preview)
         }
         _ => None,

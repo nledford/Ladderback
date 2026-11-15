@@ -24,6 +24,9 @@ pub(crate) struct Resolved {
     pub part: Part,
     /// The names in `use-profiles` that no folder had a profile for.
     pub missing: Vec<String>,
+    /// The names in `use-profiles` of a profile read from text, none of
+    /// which was looked for.
+    pub unread: Vec<String>,
 }
 
 /// The profile in `file`, and the profiles it uses, found in `search`, first
@@ -38,6 +41,40 @@ pub(crate) fn resolve(file: &Path, search: &[PathBuf]) -> Loaded<Resolved> {
     Ok(Resolved {
         part,
         missing: resolver.missing,
+        unread: Vec::new(),
+    })
+}
+
+/// The profile whose text is `text`, which a refusal names `shown`, with
+/// none of the profiles it uses read: their names, each once, are its
+/// `unread`. A name that isn't a file's is refused as it is from a file.
+pub(crate) fn resolve_text(shown: &str, text: &str) -> Loaded<Resolved> {
+    if u64::try_from(text.len()).is_ok_and(|len| len > MAX_PROFILE_BYTES) {
+        return Err(ProfileError::TooLarge {
+            file: shown.to_owned(),
+            limit: MAX_PROFILE_BYTES,
+        });
+    }
+    let mut part = parse(shown, text)?;
+    let mut unread: Vec<String> = Vec::new();
+    for used in std::mem::take(&mut part.uses) {
+        if !is_file_name(&used.name) {
+            return Err(ProfileError::Invalid {
+                file: shown.to_owned(),
+                key: Some(used.key),
+                at: used.at,
+                problem: ProfileProblem::UsedName,
+                detail: String::new(),
+            });
+        }
+        if !unread.contains(&used.name) {
+            unread.push(used.name);
+        }
+    }
+    Ok(Resolved {
+        part,
+        missing: Vec::new(),
+        unread,
     })
 }
 

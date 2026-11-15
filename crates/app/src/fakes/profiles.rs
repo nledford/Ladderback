@@ -56,11 +56,12 @@ impl ProfileReader for FakeProfileReader {
 
     fn read_text(
         &self,
-        _name: &str,
+        name: &str,
         _text: &str,
-        _repository: &RepositoryAlias,
+        repository: &RepositoryAlias,
     ) -> Result<ImportedProfile, ProfileError> {
-        todo!()
+        lock(&self.asked).push((PathBuf::from(name), repository.clone()));
+        lock(&self.script).clone()
     }
 }
 

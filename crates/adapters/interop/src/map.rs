@@ -46,10 +46,19 @@ pub(crate) fn map(
     variables: &BTreeMap<String, String>,
     file: &str,
 ) -> Result<ImportedProfile, ProfileError> {
-    let Resolved { part, missing } = resolved;
+    let Resolved {
+        part,
+        missing,
+        unread,
+    } = resolved;
     let mut notices: Vec<ProfileNotice> = missing
         .into_iter()
         .map(|name| ProfileNotice::UsedProfileMissing { name })
+        .chain(
+            unread
+                .into_iter()
+                .map(|name| ProfileNotice::UsedProfileNotRead { name }),
+        )
         .collect();
     notices.extend(
         part.left_out

@@ -1490,6 +1490,7 @@ fn named(args: impl IntoIterator<Item = (&'static str, MsgArg)>) -> BTreeMap<Str
 /// profile: the name the repository was saved under, the IDs of the plans
 /// added, and what the profile could not carry over or changed on the way.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct ProfileImportDto {
     pub repository: String,
@@ -1510,6 +1511,7 @@ pub struct ProfilePreviewDto {
 /// `GET /api/v1/plans/{id}/profile`: the plan as a profile the stock
 /// `rustic` reads, and what the export left out of it or warns of (§6.2).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct ProfileExportDto {
     pub text: String,
@@ -3595,6 +3597,7 @@ pub struct LocationTriedDto {
 /// (`POST /api/v1/repositories/{alias}/test`): each location's outcome, in
 /// order, none `not-tried`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct LocationsTestDto {
     pub locations: Vec<LocationTriedDto>,
@@ -4190,6 +4193,7 @@ impl UnmanagedGroupDto {
 
 /// What a forget run would do to one plan's history.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct ForgetPlanDto {
     pub plan: String,
@@ -4224,6 +4228,7 @@ impl ForgetPlanDto {
 
 /// How many groups and snapshots a forget leaves alone of one kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct TallyDto {
     pub groups: u64,
@@ -4233,6 +4238,7 @@ pub struct TallyDto {
 /// The history a forget leaves alone (I6): groups no plan of this agent
 /// owns, which only an adoption or an explicit deletion touches.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct LeftAloneDto {
     pub orphaned: TallyDto,
