@@ -10,13 +10,14 @@ use api::{
     SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
-use reqwest::header::{AUTHORIZATION, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use reqwest::{Client, Url, redirect};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    Access, Backend, BackendStatus, DaemonStatus, PlanStatus, RECENT_OPERATIONS, not_cancellable,
-    unfinished,
+    Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, PlanStatus, RECENT_OPERATIONS,
+    not_cancellable, unfinished,
 };
 
 /// The daemon `--connect` reaches when it names none: `serve`'s default
@@ -233,12 +234,67 @@ impl Connect {
             Err(serde_json::from_slice(&body).unwrap_or_else(|_| no_answer()))
         }
     }
+
+    /// The daemon's answer to `POST route/segments` with the JSON `body`,
+    /// read as `T`. A refusal is the daemon's own `{code, args}`; no
+    /// connection is `daemon-unreachable`. Anything else, once the request
+    /// may have reached the daemon, is `daemon-answer-lost`: whether it took
+    /// effect is unknown, so it is never sent again (§4.6).
+    async fn post<T: DeserializeOwned>(
+        &self,
+        route: &str,
+        segments: &[&str],
+        body: &serde_json::Value,
+    ) -> Result<T, ErrorDto> {
+        let url = self
+            .daemon
+            .route_to(route, segments)
+            .ok_or_else(no_answer)?;
+        let mut request = self
+            .client
+            .post(url)
+            .header(CONTENT_TYPE, "application/json")
+            .body(body.to_string());
+        if let Some(token) = &self.token {
+            request = request.header(AUTHORIZATION, token.0.clone());
+        }
+        let response = request.send().await.map_err(|error| {
+            if error.is_connect() {
+                no_answer()
+            } else {
+                answer_lost()
+            }
+        })?;
+        let succeeded = response.status().is_success();
+        let body = read_capped(response).await.ok_or_else(answer_lost)?;
+        if succeeded {
+            serde_json::from_slice(&body).map_err(|_| answer_lost())
+        } else {
+            Err(serde_json::from_slice(&body).unwrap_or_else(|_| answer_lost()))
+        }
+    }
 }
 
 /// `daemon-unreachable`: no answer from a Ladderback API at the address.
 fn no_answer() -> ErrorDto {
     ErrorDto::new(ErrorCode::DaemonUnreachable, [], None)
 }
+
+/// `daemon-answer-lost`: a request that changes something may have reached
+/// the daemon, and no answer of the API's came back.
+fn answer_lost() -> ErrorDto {
+    ErrorDto::new(ErrorCode::DaemonAnswerLost, [], None)
+}
+
+/// What `POST /api/v1/operations` answers: the started operation's ID.
+#[derive(Deserialize)]
+struct StartedOperation {
+    operation: String,
+}
+
+/// What `POST /api/v1/operations/{id}/cancel` answers: an empty object.
+#[derive(Deserialize)]
+struct Nothing {}
 
 /// The body of `response`, unless it is larger than [`MAX_ANSWER_BYTES`] or
 /// can't be read.
@@ -330,6 +386,41 @@ impl Backend for Connect {
             ));
         };
         self.get("api/v1/operations", &[segment], &[]).await
+    }
+
+    async fn run(&self, plan: String) -> Result<String, ErrorDto> {
+        let started: StartedOperation = self
+            .post(
+                "api/v1/operations",
+                &[],
+                &serde_json::json!({ "plan": plan }),
+            )
+            .await?;
+        Ok(started.operation)
+    }
+
+    async fn cancel(&self, id: String) -> Result<(), ErrorDto> {
+        let detail = self.operation(id.clone()).await?;
+        // A daemon refuses a token's cancel of anything but a backup; with
+        // sign-in off there is no token, so the rule is kept here too.
+        if detail.operation.kind != CANCELLABLE_KIND {
+            return Err(not_cancellable());
+        }
+        let Some(segment) = segment(&id) else {
+            return Err(ErrorDto::new(
+                ErrorCode::OperationUnknown,
+                [("operation", MsgArg::Text(id))],
+                None,
+            ));
+        };
+        let Nothing {} = self
+            .post(
+                "api/v1/operations",
+                &[segment, "cancel"],
+                &serde_json::json!({}),
+            )
+            .await?;
+        Ok(())
     }
 }
 

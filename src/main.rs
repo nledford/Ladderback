@@ -290,10 +290,11 @@ fn run_mcp(localizer: &Localizer, mode: McpMode) -> io::Result<ExitCode> {
         }
     };
     let ended = runtime.block_on(server.serve(tokio::io::stdin(), tokio::io::stdout()));
-    // The log closes inside the runtime, so a write in flight ends as it
-    // would have.
+    // A session of its own stops as `serve` does, inside the runtime: its
+    // workers stopped, its runs frozen, what still runs ended as
+    // `daemon-shut-down` and the log closed (decision 92).
     if let Some(held) = &held {
-        runtime.block_on(held.log.close());
+        runtime.block_on(held.stop());
     }
     // A read of stdin can't be cancelled: the runtime isn't waited for.
     runtime.shutdown_background();

@@ -33,8 +33,8 @@ use async_trait::async_trait;
 use rmcp::handler::server::tool::schema_for_output;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, JsonObject,
-    ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
-    Tool, ToolAnnotations,
+    ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion,
+    ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
 };
 use rmcp::schemars::transform::transform_subschemas;
 use rmcp::schemars::{JsonSchema, Schema};
@@ -49,13 +49,16 @@ mod actions;
 mod connect;
 mod pages;
 
+pub use actions::{CANCELLABLE_KIND, DEFAULT_WAIT, MAX_WAIT, WAIT_STEP, not_cancellable};
 pub use connect::{
     ApiToken, ClientUnavailable, Connect, DEFAULT_DAEMON_URL, DaemonUrl, InvalidDaemonUrl,
     TokenOverPlainHttp,
 };
-pub use actions::not_cancellable;
 pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 
+use actions::{
+    CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
+};
 use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
     SnapshotsArguments, SnapshotsPage, page, page_length,
@@ -82,6 +85,9 @@ const LIST_REPOSITORIES: &str = "list_repositories";
 const LIST_SNAPSHOTS: &str = "list_snapshots";
 const LIST_OPERATIONS: &str = "list_operations";
 const GET_OPERATION: &str = "get_operation";
+const RUN_PLAN: &str = "run_plan";
+const WAIT_OPERATION: &str = "wait_operation";
+const CANCEL_OPERATION: &str = "cancel_operation";
 
 /// How many of the newest operations `status` looks through for those
 /// queued or running: the history's largest page.
@@ -90,10 +96,12 @@ pub const RECENT_OPERATIONS: u64 = 200;
 /// Those of `operations` that are queued or running, in their order: what
 /// `status` lists of the newest [`RECENT_OPERATIONS`], in either mode.
 pub fn unfinished(operations: Vec<OperationSummaryDto>) -> Vec<OperationSummaryDto> {
-    operations
-        .into_iter()
-        .filter(|operation| matches!(operation.status.as_str(), "queued" | "running"))
-        .collect()
+    operations.into_iter().filter(is_unfinished).collect()
+}
+
+/// Whether `operation` is queued or running: not finished yet.
+fn is_unfinished(operation: &OperationSummaryDto) -> bool {
+    matches!(operation.status.as_str(), "queued" | "running")
 }
 
 /// What the tools reach Ladderback through: a running daemon in connect
@@ -132,15 +140,17 @@ pub trait Backend: Send + Sync + 'static {
     /// recorded.
     async fn operation(&self, id: String) -> Result<OperationDetailDto, ErrorDto>;
 
-    /// Queues a backup of a plan now and returns its operation's ID.
-    async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
-        todo!()
-    }
+    /// Queues a backup of the plan whose ID is `plan` now, under the plan's
+    /// overlap policy, and returns its operation's ID. The trigger recorded
+    /// is the backend's: `mcp` in this process, and through a daemon an API
+    /// token's, or `manual` with sign-in off (decision 93).
+    async fn run(&self, plan: String) -> Result<String, ErrorDto>;
 
-    /// Asks a queued or running backup to stop.
-    async fn cancel(&self, _id: String) -> Result<(), ErrorDto> {
-        todo!()
-    }
+    /// Asks the queued or running operation whose ID is `id` to stop, as an
+    /// API token may: a backup only, whoever started it. Anything else is
+    /// [`not_cancellable`], since maintenance must be able to finish
+    /// (decision 93).
+    async fn cancel(&self, id: String) -> Result<(), ErrorDto>;
 
     /// Tries every location of a repository and tells each one's outcome.
     async fn test_repository(&self, _repository: String) -> Result<LocationsTestDto, ErrorDto> {
@@ -383,6 +393,61 @@ impl Server {
         } = self.backend.operation(arguments.id).await?;
         Ok(Operation::listing(operation, warnings))
     }
+
+    async fn run_plan(&self, arguments: RunArguments) -> Result<Started, ErrorDto> {
+        let operation = self.backend.run(arguments.plan).await?;
+        Ok(Started { operation })
+    }
+
+    /// Reads the operation every [`WAIT_STEP`] until it has finished or the
+    /// wait's length has passed, sending a progress notification after each
+    /// read that finds it unfinished when the call carried a progress token.
+    /// A cancelled call stops the wait, never the operation: the answer is
+    /// dropped then, as the protocol asks.
+    async fn wait_operation(
+        &self,
+        arguments: WaitArguments,
+        context: &RequestContext<RoleServer>,
+    ) -> Result<Waited, ErrorDto> {
+        let length = wait_length(arguments.timeout);
+        let began = tokio::time::Instant::now();
+        let progress = context.meta.get_progress_token();
+        loop {
+            let OperationDetailDto {
+                operation,
+                warnings,
+            } = self.backend.operation(arguments.id.clone()).await?;
+            let finished = !is_unfinished(&operation);
+            let left = length.saturating_sub(began.elapsed());
+            if finished || left.is_zero() || context.ct.is_cancelled() {
+                return Ok(Waited {
+                    finished,
+                    operation: Operation::listing(operation, warnings),
+                });
+            }
+            if let Some(token) = &progress {
+                // The seconds waited, of the wait's length: they grow with
+                // each, as the protocol asks. A client gone is the
+                // session's end, which the wait sees through its token.
+                let notification =
+                    ProgressNotificationParam::new(token.clone(), began.elapsed().as_secs_f64())
+                        .with_total(length.as_secs_f64())
+                        .with_message(operation.status);
+                let _ = context.peer.notify_progress(notification).await;
+            }
+            tokio::select! {
+                () = context.ct.cancelled() => {}
+                () = tokio::time::sleep(WAIT_STEP.min(left)) => {}
+            }
+        }
+    }
+
+    async fn cancel_operation(&self, arguments: CancelArguments) -> Result<Cancelling, ErrorDto> {
+        self.backend.cancel(arguments.id.clone()).await?;
+        Ok(Cancelling {
+            operation: arguments.id,
+        })
+    }
 }
 
 /// A read tool's result: what it read, or the refusal, marked as an error.
@@ -433,12 +498,22 @@ fn no_arguments() -> Arc<JsonObject> {
     Arc::new(schema)
 }
 
-/// What every tool so far is: a reading that changes nothing.
+/// A tool that reads and changes nothing.
 fn read_only() -> ToolAnnotations {
     ToolAnnotations::new()
         .read_only(true)
         .destructive(false)
         .idempotent(true)
+        .open_world(false)
+}
+
+/// A tool that changes what Ladderback does, never what it keeps: starting
+/// or stopping a backup.
+fn acting() -> ToolAnnotations {
+    ToolAnnotations::new()
+        .read_only(false)
+        .destructive(false)
+        .idempotent(false)
         .open_world(false)
 }
 
@@ -521,6 +596,37 @@ fn tools() -> Vec<Tool> {
         .with_input_schema::<OperationArguments>()
         .with_raw_output_schema(output_schema::<Operation>())
         .with_annotations(read_only()),
+        Tool::new(
+            RUN_PLAN,
+            "Queues a backup of a plan now, under the plan's overlap policy, and returns its \
+             operation's ID. Its hooks and secret sources run as for any other run.",
+            no_arguments(),
+        )
+        .with_title("Run plan")
+        .with_input_schema::<RunArguments>()
+        .with_raw_output_schema(output_schema::<Started>())
+        .with_annotations(acting()),
+        Tool::new(
+            WAIT_OPERATION,
+            "Waits until an operation finishes or the timeout passes, then returns whether it \
+             finished and the operation as get_operation does. Sends progress notifications \
+             when the call asks for them. Cancelling the call stops the wait, not the operation.",
+            no_arguments(),
+        )
+        .with_title("Wait for operation")
+        .with_input_schema::<WaitArguments>()
+        .with_raw_output_schema(output_schema::<Waited>())
+        .with_annotations(read_only()),
+        Tool::new(
+            CANCEL_OPERATION,
+            "Asks a queued or running backup to stop, however it started; it then ends as \
+             cancelled. Maintenance can't be cancelled from here.",
+            no_arguments(),
+        )
+        .with_title("Cancel operation")
+        .with_input_schema::<CancelArguments>()
+        .with_raw_output_schema(output_schema::<Cancelling>())
+        .with_annotations(acting()),
     ]
 }
 
@@ -546,7 +652,7 @@ impl ServerHandler for Server {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let given = request.arguments;
         match request.name.as_ref() {
@@ -570,6 +676,15 @@ impl ServerHandler for Server {
             )),
             GET_OPERATION => Ok(answered(
                 self.get_operation(arguments(GET_OPERATION, given)?).await,
+            )),
+            RUN_PLAN => Ok(answered(self.run_plan(arguments(RUN_PLAN, given)?).await)),
+            WAIT_OPERATION => Ok(answered(
+                self.wait_operation(arguments(WAIT_OPERATION, given)?, &context)
+                    .await,
+            )),
+            CANCEL_OPERATION => Ok(answered(
+                self.cancel_operation(arguments(CANCEL_OPERATION, given)?)
+                    .await,
             )),
             name => Err(McpError::invalid_params(
                 format!("no tool is named {name:?}"),

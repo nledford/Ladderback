@@ -24,22 +24,54 @@ use platform::SystemClock;
 use platform::data_dir_lock::DataDirLock;
 use platform::scratch::{self, Scratch};
 
-use super::{Daemon, OperationLog, Refused, daemon_at, text};
+use super::runs::Runs;
+use super::{Daemon, LOG_CLOSE_BOUND, OperationLog, Refused, close_within, daemon_at, text};
+use crate::shutdown::WORKERS_BOUND;
 
-/// What a headless or scratch session holds until it ends: the operation
-/// log it closes, the data folder's lock it lets go of once the runtime is
-/// gone (§9), and its scratch folder, deleted last.
+/// What a headless or scratch session holds until it ends: its workers and
+/// runs, which it stops as `serve` stops; the operation log it closes; the
+/// data folder's lock it lets go of once the runtime is gone (§9); and its
+/// scratch folder, deleted last.
 pub(crate) struct Held {
     pub(crate) log: OperationLog,
     pub(crate) lock: DataDirLock,
     pub(crate) scratch: Option<Scratch>,
+    workers: engine::Workers,
+    runs: Runs,
 }
 
 impl Held {
+    /// Stops the session as `serve` stops at its signal (decision 92): no
+    /// run starts a worker, runs a hook or records an end from here on; the
+    /// workers are asked to stop and waited for; then the operation log ends
+    /// what is still running as `daemon-shut-down` and closes. Operations
+    /// still queued stay queued for the next `serve`, as `serve` leaves
+    /// them (decision 73). Call it once the session has ended, inside the
+    /// runtime.
+    pub(crate) async fn stop(&self) {
+        let workers_stopped = self.workers.stop();
+        self.runs.freeze();
+        if tokio::time::timeout(WORKERS_BOUND, workers_stopped)
+            .await
+            .is_err()
+        {
+            log::warn!(
+                "stopping: the workers did not stop within {} s; the next start ends what they ran",
+                WORKERS_BOUND.as_secs()
+            );
+        }
+        close_within(
+            self.log.close_at_orderly_stop(),
+            &self.log.database,
+            LOG_CLOSE_BOUND,
+        )
+        .await;
+    }
+
     /// Lets go of the data folder, then deletes the scratch folder, if the
-    /// session has one. Call it once the log is closed and the runtime is
-    /// gone. A folder that can't be deleted is said in the log; the next
-    /// scratch session sweeps it.
+    /// session has one. Call it once [`Held::stop`] has returned and the
+    /// runtime is gone. A folder that can't be deleted is said in the log;
+    /// the next scratch session sweeps it.
     pub(crate) fn release(self) {
         drop(self.lock);
         if let Some(scratch) = self.scratch {
@@ -308,17 +340,28 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// The server over `daemon`'s state through the in-process backend, and
-/// what the session holds. The queue the daemon would run and its scheduler
-/// are left unstarted: a session plans no runs.
+/// what the session holds. The queue's leftovers and the scheduler are left
+/// unstarted: a session plans no runs, and runs only those it is asked for.
 fn in_process(daemon: Daemon, scratch: Option<Scratch>) -> (::mcp::Server, Held) {
     let Daemon {
-        state, log, lock, ..
+        state,
+        log,
+        lock,
+        background,
+        workers,
     } = daemon;
     let server = ::mcp::Server::new(
         Arc::new(InProcess::over(&state)),
         crate::build_info::running(),
     );
-    (server, Held { log, lock, scratch })
+    let held = Held {
+        log,
+        lock,
+        scratch,
+        workers,
+        runs: background.runs(),
+    };
+    (server, held)
 }
 
 /// The in-process [`mcp::Backend`] of headless and scratch modes: the
@@ -415,6 +458,48 @@ impl ::mcp::Backend for InProcess {
                     [("operation", MsgArg::Text(id))],
                     None,
                 )
+            })
+    }
+
+    async fn run(&self, plan: String) -> Result<String, api::ErrorDto> {
+        use http_adapter::StartError;
+        self.operations
+            .start_backup(plan.clone(), domain::execution::Trigger::Mcp)
+            .await
+            .map_err(|error| match error {
+                StartError::UnknownPlan => api::ErrorDto::new(
+                    api::ErrorCode::PlanUnknown,
+                    [("plan", MsgArg::Text(plan))],
+                    None,
+                ),
+                StartError::SecretRefused(secret) => {
+                    api::ErrorDto::new(secret.code, secret.args, secret.detail)
+                }
+                StartError::Unavailable { code, args, detail } => {
+                    api::ErrorDto::new(code, args, detail)
+                }
+            })
+    }
+
+    /// Cancels as an API token may, a backup only (decision 93), whose
+    /// refusal the domain's rule gives.
+    async fn cancel(&self, id: String) -> Result<(), api::ErrorDto> {
+        use http_adapter::CancelError;
+        self.operations
+            .cancel(id.clone(), http_adapter::Canceller::ApiToken)
+            .await
+            .map_err(|error| match error {
+                CancelError::SessionOnly => ::mcp::not_cancellable(),
+                CancelError::Unknown => api::ErrorDto::new(
+                    api::ErrorCode::OperationUnknown,
+                    [("operation", MsgArg::Text(id))],
+                    None,
+                ),
+                CancelError::NotRunning => api::ErrorDto::new(
+                    api::ErrorCode::OperationNotRunning,
+                    [("operation", MsgArg::Text(id))],
+                    None,
+                ),
             })
     }
 }
