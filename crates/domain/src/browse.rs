@@ -55,8 +55,15 @@ impl std::fmt::Display for InvalidName {
 impl EntryName {
     /// `name`, when it can name an entry.
     pub fn parse(name: &str) -> Result<Self, InvalidName> {
-        let _ = name;
-        todo!("EntryName::parse")
+        if name.is_empty() {
+            Err(InvalidName::Empty)
+        } else if name.contains('/') {
+            Err(InvalidName::Slash)
+        } else if name.len() > MAX_ENTRY_NAME_BYTES {
+            Err(InvalidName::TooLong)
+        } else {
+            Ok(Self(name.to_owned()))
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -94,13 +101,37 @@ pub struct DisplayName(String);
 impl DisplayName {
     /// `name`, as the file system wrote it, with what can't be shown as it
     /// is made visible.
-    pub fn new(_name: &str) -> Self {
-        todo!()
+    pub fn new(name: &str) -> Self {
+        use std::fmt::Write as _;
+
+        let mut shown = String::with_capacity(name.len());
+        for c in name.chars() {
+            match c {
+                '\u{0}'..='\u{1f}' => shown.push(control_picture(c)),
+                '\u{7f}' => shown.push('\u{2421}'),
+                '\u{80}'..='\u{9f}'
+                | '\u{61c}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}' => {
+                    // Writing to a String can't fail.
+                    let _ = write!(shown, "[U+{:04X}]", u32::from(c));
+                }
+                _ => shown.push(c),
+            }
+        }
+        Self(shown)
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// The Control Picture of a C0 control: U+2400 plus the control's code.
+fn control_picture(control: char) -> char {
+    char::from_u32(0x2400 + u32::from(control)).unwrap_or(char::REPLACEMENT_CHARACTER)
 }
 
 /// Any text becomes a name to show, so a worker's answer is made visible
@@ -130,8 +161,18 @@ impl FolderPath {
 
     /// The folder `path` names, its names joined by `/`: `""` is the top.
     pub fn parse(path: &str) -> Result<Self, InvalidName> {
-        let _ = path;
-        todo!("FolderPath::parse")
+        if path.is_empty() {
+            return Ok(Self::top());
+        }
+        // Counted before a name is copied, so a hostile path costs no more
+        // than the deepest one.
+        if path.split('/').nth(MAX_FOLDER_DEPTH).is_some() {
+            return Err(InvalidName::TooDeep);
+        }
+        path.split('/')
+            .map(EntryName::parse)
+            .collect::<Result<_, _>>()
+            .map(Self)
     }
 
     /// The folder's names, from the top down.
@@ -142,8 +183,12 @@ impl FolderPath {
     /// The folder `name` within this one, unless that is past the deepest
     /// a path names.
     pub fn join(&self, name: EntryName) -> Result<Self, InvalidName> {
-        let _ = name;
-        todo!("FolderPath::join")
+        if self.0.len() >= MAX_FOLDER_DEPTH {
+            return Err(InvalidName::TooDeep);
+        }
+        let mut names = self.0.clone();
+        names.push(name);
+        Ok(Self(names))
     }
 }
 
@@ -202,8 +247,12 @@ impl FolderPage {
     /// position reached is short of the total. An entry left out of a page
     /// (a name too long to carry) still takes its position.
     pub fn continuing(entries: Vec<Entry>, from: u64, consumed: u64, total: u64) -> Self {
-        let _ = (from, consumed, total);
-        todo!("FolderPage::continuing {entries:?}")
+        let reached = from.saturating_add(consumed);
+        Self {
+            entries,
+            total,
+            next: (reached < total).then_some(reached),
+        }
     }
 }
 
@@ -298,14 +347,23 @@ mod tests {
 
     #[test]
     fn the_page_that_reaches_the_folders_end_is_its_last() {
-        assert_eq!(FolderPage::continuing(Vec::new(), 2_000, 345, 2_345).next, None);
+        assert_eq!(
+            FolderPage::continuing(Vec::new(), 2_000, 345, 2_345).next,
+            None
+        );
         assert_eq!(FolderPage::continuing(Vec::new(), 0, 0, 0).next, None);
     }
 
     #[test]
     fn a_page_asked_past_the_folders_end_is_its_last() {
-        assert_eq!(FolderPage::continuing(Vec::new(), 5_000, 0, 2_345).next, None);
-        assert_eq!(FolderPage::continuing(Vec::new(), u64::MAX, u64::MAX, 3).next, None);
+        assert_eq!(
+            FolderPage::continuing(Vec::new(), 5_000, 0, 2_345).next,
+            None
+        );
+        assert_eq!(
+            FolderPage::continuing(Vec::new(), u64::MAX, u64::MAX, 3).next,
+            None
+        );
     }
 
     fn shown(text: &str) -> String {

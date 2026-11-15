@@ -4,7 +4,7 @@
 //! [`LISTING_BATCH_BYTES`] serialized, so the page is one message under the
 //! protocol's cap whatever the folder holds (§4.1).
 
-use domain::browse::{DisplayName, EntryKind, MAX_ENTRY_NAME_BYTES, PAGE_ENTRIES};
+use domain::browse::{DisplayName, EntryKind, FolderPage, MAX_ENTRY_NAME_BYTES, PAGE_ENTRIES};
 use rustic_core::repofile::{Node, NodeType};
 
 use crate::job::{EntryResult, FolderResult, LISTING_BATCH_BYTES};
@@ -14,8 +14,37 @@ use crate::job::{EntryResult, FolderResult, LISTING_BATCH_BYTES};
 /// system writes one) is left out of the page but keeps its position, so the
 /// total still counts it and the next page starts after it.
 pub(crate) fn page(nodes: &[Node], from: u64) -> FolderResult {
-    let _ = (nodes, from, PAGE_ENTRIES, LISTING_BATCH_BYTES, MAX_ENTRY_NAME_BYTES);
-    todo!("browse::page")
+    let total = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
+    let start = usize::try_from(from).unwrap_or(usize::MAX);
+    let mut entries = Vec::new();
+    let mut bytes = 0_usize;
+    let mut consumed = 0_u64;
+    for node in nodes.iter().skip(start) {
+        if entries.len() == PAGE_ENTRIES {
+            break;
+        }
+        if node.name.len() <= MAX_ENTRY_NAME_BYTES {
+            let entry = entry(node);
+            // The entry as the page's JSON carries it, and the comma after
+            // it: an entry that would take the page past the budget starts
+            // the next one instead.
+            let size = serde_json::to_vec(&entry)
+                .map_or(usize::MAX, |json| json.len())
+                .saturating_add(1);
+            bytes = bytes.saturating_add(size);
+            if bytes > LISTING_BATCH_BYTES {
+                break;
+            }
+            entries.push(entry);
+        }
+        consumed = consumed.saturating_add(1);
+    }
+    let FolderPage { total, next, .. } = FolderPage::continuing(Vec::new(), from, consumed, total);
+    FolderResult::Page {
+        entries,
+        total,
+        next,
+    }
 }
 
 /// What `node` is, as a page says it.
@@ -24,10 +53,9 @@ fn kind(node: &Node) -> EntryKind {
         NodeType::Dir => EntryKind::Folder,
         NodeType::File => EntryKind::File,
         NodeType::Symlink { .. } => EntryKind::Link,
-        NodeType::Dev { .. }
-        | NodeType::Chardev { .. }
-        | NodeType::Fifo
-        | NodeType::Socket => EntryKind::Other,
+        NodeType::Dev { .. } | NodeType::Chardev { .. } | NodeType::Fifo | NodeType::Socket => {
+            EntryKind::Other
+        }
     }
 }
 
@@ -68,7 +96,9 @@ mod tests {
     }
 
     fn files(n: usize) -> Vec<Node> {
-        (0..n).map(|at| file(&format!("file-{at:04}.txt"), 1)).collect()
+        (0..n)
+            .map(|at| file(&format!("file-{at:04}.txt"), 1))
+            .collect()
     }
 
     fn names(result: &FolderResult) -> Vec<&str> {
@@ -90,7 +120,12 @@ mod tests {
     #[test]
     fn a_page_holds_each_entry_with_its_kind_size_and_time() {
         let nodes = vec![folder("docs"), file("readme.txt", 5)];
-        let FolderResult::Page { entries, total, next } = page(&nodes, 0) else {
+        let FolderResult::Page {
+            entries,
+            total,
+            next,
+        } = page(&nodes, 0)
+        else {
             panic!("a page");
         };
         assert_eq!(total, 2);
@@ -120,9 +155,15 @@ mod tests {
         let nodes = files(PAGE_ENTRIES + 1);
         let first = page(&nodes, 0);
         assert_eq!(names(&first).len(), PAGE_ENTRIES);
-        assert_eq!(paging(&first), (PAGE_ENTRIES as u64 + 1, Some(PAGE_ENTRIES as u64)));
+        assert_eq!(
+            paging(&first),
+            (PAGE_ENTRIES as u64 + 1, Some(PAGE_ENTRIES as u64))
+        );
         let second = page(&nodes, PAGE_ENTRIES as u64);
-        assert_eq!(names(&second), [format!("file-{PAGE_ENTRIES:04}.txt").as_str()]);
+        assert_eq!(
+            names(&second),
+            [format!("file-{PAGE_ENTRIES:04}.txt").as_str()]
+        );
         assert_eq!(paging(&second), (PAGE_ENTRIES as u64 + 1, None));
     }
 
@@ -146,7 +187,11 @@ mod tests {
         assert!(kept > 0 && kept < PAGE_ENTRIES, "{kept}");
         let bytes = serde_json::to_vec(&first).expect("a page serializes").len();
         assert!(bytes <= LISTING_BATCH_BYTES + 1024, "{bytes}");
-        assert_eq!(paging(&first).1, Some(kept as u64), "the next page starts after it");
+        assert_eq!(
+            paging(&first).1,
+            Some(kept as u64),
+            "the next page starts after it"
+        );
     }
 
     #[test]

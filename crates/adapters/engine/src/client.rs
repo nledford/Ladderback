@@ -14,11 +14,11 @@ use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob,
     FolderAnswer, ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, ProbeAnswer,
-    ProgressEvent,
-    ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary, RepositoryAccess, RewriteJob,
-    RewriteSummary, RunningJob, SnapshotSummary,
+    ProgressEvent, ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary,
+    RepositoryAccess, RewriteJob, RewriteSummary, RunningJob, SnapshotSummary,
 };
 use async_trait::async_trait;
+use domain::browse::{Entry, EntryName, FolderPage, PAGE_ENTRIES};
 use domain::execution::{FailureReason, Warning, WarningKind};
 use domain::secrets::{MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue};
 use domain::{OperationId, RepositoryId};
@@ -31,10 +31,9 @@ use crate::cache_lock::CacheLock;
 use crate::environment;
 use crate::job::{
     BackupJobSpec, BrowseJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning,
-    FolderResult, ForgetJobSpec, JobKind,
-    JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, MAX_MESSAGE_BYTES, OpResult,
-    ProbeResult, ProgressKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec,
-    TRUNCATED, WorkerEvent, exit_code,
+    FolderResult, ForgetJobSpec, JobKind, JobSpec, Level, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS,
+    MAX_MESSAGE_BYTES, OpResult, ProbeResult, ProgressKind, PruneJobSpec, RepositorySpec,
+    RewriteJobSpec, SourceFilterSpec, TRUNCATED, WorkerEvent, exit_code,
 };
 use crate::step::step_of;
 use domain::planning::{GlobFile, SourceFilter};
@@ -1380,7 +1379,9 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
             // it can't read does.
             OpResult::Folder(found) => match folder_answer(found) {
                 Ok(answer) => EngineResult::Folder(answer),
-                Err(detail) => return Some(EngineEvent::Failed(FailureReason::EngineFailed { detail })),
+                Err(detail) => {
+                    return Some(EngineEvent::Failed(FailureReason::EngineFailed { detail }));
+                }
             },
             OpResult::Backup(r) => EngineResult::Backup(BackupSummary {
                 repository: r.repository,
@@ -1555,8 +1556,39 @@ fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<EngineEvent> {
 /// name, and a page of no more than a page's entries (an input-derived
 /// size, §13.5). Anything else is the worker's fault, said in the detail.
 fn folder_answer(found: FolderResult) -> Result<FolderAnswer, String> {
-    let _ = found;
-    todo!("folder_answer")
+    let (entries, total, next) = match found {
+        FolderResult::SnapshotUnknown => return Ok(FolderAnswer::SnapshotUnknown),
+        FolderResult::FolderUnknown => return Ok(FolderAnswer::FolderUnknown),
+        FolderResult::Page {
+            entries,
+            total,
+            next,
+        } => (entries, total, next),
+    };
+    if entries.len() > PAGE_ENTRIES {
+        return Err(format!(
+            "the worker sent a page of {} entries, more than {PAGE_ENTRIES}",
+            entries.len()
+        ));
+    }
+    let entries = entries
+        .into_iter()
+        .map(|entry| {
+            Ok(Entry {
+                name: EntryName::parse(&entry.name)
+                    .map_err(|error| format!("the worker sent a page in which {error}"))?,
+                display: entry.display,
+                kind: entry.kind,
+                size: entry.size,
+                modified: entry.modified,
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(FolderAnswer::Page(FolderPage {
+        entries,
+        total,
+        next,
+    }))
 }
 
 fn repository_id(job: &Job) -> Option<&RepositoryId> {
