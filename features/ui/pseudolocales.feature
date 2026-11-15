@@ -53,20 +53,29 @@ Feature: Pseudolocales
       | en-XA  |
       | ar-XB  |
 
-  Scenario Outline: The transformed text copes with larger text and wider spacing together
+  Scenario: The transformed text copes with larger text and wider spacing together
     Given a viewport of 320 by 256 pixels
     And the reader sets the text size to 200 percent
     And the reader increases the text spacing
-    When I open the web UI asking for the locale "<locale>"
+    When I open the web UI asking for the locale "en-XA"
     Then every visible text is transformed
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
 
-    Examples:
-      | locale |
-      | en-XA  |
-      | ar-XB  |
+  # A scenario of its own, not a row of the one above: WebKit alone showed it,
+  # the version in the header kept its unbroken run's width and stuck out of
+  # the page right to left (1.4.10), and red-first needs every row of a
+  # scenario to fail in the engine.
+  Scenario: The transformed text of a page that runs right to left copes with larger text and wider spacing together
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    And the reader increases the text spacing
+    When I open the web UI asking for the locale "ar-XB"
+    Then every visible text is transformed
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
 
   Scenario Outline: A pseudolocale page has no accessibility violations
     When I open the web UI asking for the locale "<locale>"
