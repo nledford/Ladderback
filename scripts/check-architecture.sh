@@ -17,8 +17,12 @@
 #     release flags these checks use (technical design §12.1).
 #   - the build has one version of `dbus-secret-service`, the error type
 #     `secrets` downcasts `keyring`'s Secret Service failures to.
-# Dev-dependencies are excluded, so tests may use a runtime. `testkit` (test
-# support) may be a dev-dependency only.
+#   - the workspace crates depend on each other only as the crate graph
+#     allows, only its owners depend on each foreign model, and `domain` has
+#     no `async` (scripts/check-crate-graph.ts, from `cargo metadata`).
+# Dev-dependencies are excluded, so tests may use a runtime (the crate graph
+# alone checks them too). `testkit` (test support) may be a dev-dependency
+# only.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -109,6 +113,13 @@ done
 if ((daemon_has_icu)); then
   echo "ok: ladderback builds with ICU4X"
 fi
+
+# The crate graph, the owners of foreign models and no `async` in `domain`
+# (technical design §3.2): scripts/check-crate-graph.ts reads them from
+# `cargo metadata`, which needs no build. Separate from the script: a failing
+# `cargo metadata` must stop this one.
+metadata=$(cargo metadata --no-deps --format-version 1)
+node scripts/check-crate-graph.ts <<<"$metadata" || status=1
 
 # testkit is test support: a dev-dependency only. `cargo tree --invert` lists
 # the crates that depend on it through normal or build edges, which includes
