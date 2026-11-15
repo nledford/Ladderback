@@ -557,6 +557,7 @@ pub enum ProgressUnit {
 /// A typed message argument. Identifiers, ports, years and hostnames are
 /// `Text`, so they are never formatted as numbers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "value", rename_all = "kebab-case")]
 pub enum MsgArg {
     Count(u64),
@@ -579,6 +580,7 @@ pub enum MsgArg {
 /// whether the zone exists is for whoever resolves it. The syntax rules out
 /// anything that could walk a file path (`..`, a leading `/`, a backslash).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "String")]
 pub struct IanaZone(String);
 
@@ -658,6 +660,45 @@ pub struct ArgSpec {
     /// the text `none`, so the message can choose its wording (§8.4). An
     /// optional argument is always text.
     pub optional: bool,
+}
+
+/// A code's schema: text, never the list of every code. Each tool's output
+/// schema would repeat the hundreds of codes, which a client reads into its
+/// context with every `tools/list`, and a code a newer Ladderback sends is
+/// still one.
+#[cfg(feature = "schemars")]
+fn code_schema(description: &str) -> schemars::Schema {
+    schemars::json_schema!({"type": "string", "description": description})
+}
+
+#[cfg(feature = "schemars")]
+impl schemars::JsonSchema for ErrorCode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ErrorCode".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        code_schema("Why it failed, in kebab-case, such as `repository-unknown`.")
+    }
+}
+
+#[cfg(feature = "schemars")]
+impl schemars::JsonSchema for WarningCode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "WarningCode".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        code_schema("What to know, in kebab-case, such as `glob-never-matches`.")
+    }
 }
 
 impl ErrorCode {
@@ -1334,6 +1375,7 @@ impl WarningCode {
 /// takes, by name, for the reader to render; and, when the sender has words
 /// of its own to show, the `detail`, such as the engine's message as it came.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct ErrorDto {
     pub code: ErrorCode,
@@ -1401,6 +1443,7 @@ impl ErrorDto {
 /// its notices as these, and the row of a configured repository carries its
 /// own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct WarningDto {
     pub code: WarningCode,
@@ -2406,6 +2449,7 @@ pub const MAX_SNAPSHOT_TAGS: usize = 64;
 /// what a list view needs — id, when it was taken (RFC 3339) and by a clock
 /// at which offset, which host, its label, tags and paths.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct SnapshotDto {
     /// 64 hex digits, as rustic writes a snapshot's ID.
     pub id: String,
@@ -2437,6 +2481,7 @@ pub struct SnapshotDto {
 /// written as RFC 3339 writes an offset, `-06:00` or `+00:00`, with seconds
 /// (`+00:19:32`) only when it has some, and read back only in that form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(try_from = "String", into = "String")]
 pub struct ClockOffset(jiff::tz::Offset);
 
@@ -3196,6 +3241,7 @@ mod ui_event_tests {
 /// a list view needs — ids, the kind and status, the lifecycle times, and
 /// the typed outcome. Times are RFC 3339, UTC.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct OperationSummaryDto {
     /// A UUID, hyphenated.
@@ -3330,6 +3376,7 @@ fn is_uuid(id: &str) -> bool {
 /// One page of the operation history: newest first, and `next` set when
 /// older operations remain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct OperationsPageDto {
     pub operations: Vec<OperationSummaryDto>,
@@ -3340,6 +3387,7 @@ pub struct OperationsPageDto {
 /// start request names, the repository its backups go to, and when it runs
 /// on its own (§5).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct PlanSummaryDto {
     pub id: String,
@@ -3423,6 +3471,7 @@ pub struct RepositoriesDto {
 /// password in the location masked, and where its password comes from.
 /// Never the password itself (I4).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct RepositoryDto {
     pub alias: String,
@@ -3461,6 +3510,7 @@ pub struct RepositoryDto {
 /// page lists it: its address with the credentials written in it masked,
 /// and its options by name. Never a secret (I4).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct LocationDto {
     /// Its place in the order, from 1.
@@ -3482,6 +3532,7 @@ pub struct LocationDto {
 
 /// One alternative of a location's rule (decision 80).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct LocationAlternativeDto {
     /// The kind of network, as the configuration writes it: `wired` or
@@ -3502,6 +3553,7 @@ pub struct LocationAlternativeDto {
 /// never hold it. A value written in the configuration is never shown: it
 /// may be the secret.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct LocationOptionDto {
     /// `options`, `options-hot` or `options-cold`, as the configuration
@@ -3516,6 +3568,7 @@ pub struct LocationOptionDto {
 /// operation, as the run's choice saw it; in a Test, as its probe found it
 /// (decision 80). Named by its position, never a network's name.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct LocationTriedDto {
     /// Its place in the order, from 1.
@@ -3551,6 +3604,7 @@ pub struct LocationsTestDto {
 /// all five sources the configuration takes, the command by its program
 /// only, since its arguments may hold the secret itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "source", rename_all = "kebab-case")]
 pub enum PasswordSourceDto {
     /// The configuration file holds the password.
@@ -3752,6 +3806,7 @@ pub enum RestartWhenDto {
 /// version's release tag names. Separate fields, so no reader parses the
 /// shown form ([`BuildDto::display`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct BuildDto {
     /// The workspace version, `0.3.0`.
@@ -3787,6 +3842,7 @@ impl BuildDto {
 
 /// Where a request stands with sign-in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SignInStateDto {
     /// No admin password is set: there is nothing to sign in to.
@@ -3811,6 +3867,7 @@ pub enum AdminPasswordDto {
 
 /// Who can reach the daemon at the address it listens on (§10.1).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ExposureDto {
     /// This machine only: a loopback address.
@@ -4340,6 +4397,7 @@ pub struct MaintenanceRequestDto {
 /// One recorded warning of an operation's detail: its typed code and the
 /// free-form fields the engine reported.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct OperationWarningDto {
     pub code: WarningCode,
@@ -4353,6 +4411,7 @@ pub struct OperationWarningDto {
 
 /// One operation's detail: its summary and the warnings it recorded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct OperationDetailDto {
     pub operation: OperationSummaryDto,
@@ -4362,6 +4421,7 @@ pub struct OperationDetailDto {
 /// What a successful operation produced, as the history page shows it: a
 /// small typed summary per kind, mapped from the app's engine result.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(
     tag = "type",
     rename_all = "kebab-case",

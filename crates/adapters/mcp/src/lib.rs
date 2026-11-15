@@ -30,25 +30,36 @@ use api::{
     ProfileImportDto, RepositoriesDto, SnapshotDto, SnapshotsDto,
 };
 use async_trait::async_trait;
+use rmcp::handler::server::tool::schema_for_output;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, JsonObject,
     ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
     Tool, ToolAnnotations,
 };
+use rmcp::schemars::transform::transform_subschemas;
+use rmcp::schemars::{JsonSchema, Schema};
 use rmcp::service::{RequestContext, ServerInitializeError};
 use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 mod actions;
 mod connect;
+mod pages;
 
 pub use connect::{
     ApiToken, ClientUnavailable, Connect, DEFAULT_DAEMON_URL, DaemonUrl, InvalidDaemonUrl,
     TokenOverPlainHttp,
 };
 pub use actions::not_cancellable;
+pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE};
+
+use pages::{
+    ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
+    SnapshotsArguments, SnapshotsPage, page, page_length,
+};
 
 /// The revisions served, oldest first: the first with `structuredContent`
 /// and `outputSchema`, the one after it, and the current one, which has no
@@ -64,8 +75,13 @@ const REVISIONS: &[ProtocolVersion] = &[
 /// few hundred bytes; the SDK's own default is 16 MiB.
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 
-/// The `status` tool's name.
+/// The tools' names.
 const STATUS: &str = "status";
+const LIST_PLANS: &str = "list_plans";
+const LIST_REPOSITORIES: &str = "list_repositories";
+const LIST_SNAPSHOTS: &str = "list_snapshots";
+const LIST_OPERATIONS: &str = "list_operations";
+const GET_OPERATION: &str = "get_operation";
 
 /// How many of the newest operations `status` looks through for those
 /// queued or running: the history's largest page.
@@ -90,35 +106,31 @@ pub trait Backend: Send + Sync + 'static {
     /// Ladderback's state as `status` shows it, without this program's build.
     async fn status(&self) -> Result<BackendStatus, ErrorDto>;
 
-    /// The configured plans.
-    async fn plans(&self) -> Result<PlansDto, ErrorDto> {
-        todo!()
-    }
+    /// The configured plans, in the order they were written, each with its
+    /// configuration warnings.
+    async fn plans(&self) -> Result<PlansDto, ErrorDto>;
 
-    /// The configured repositories.
-    async fn repositories(&self) -> Result<RepositoriesDto, ErrorDto> {
-        todo!()
-    }
+    /// The configured repositories, in the order of their aliases, each
+    /// with its configuration warnings and never a secret (I4).
+    async fn repositories(&self) -> Result<RepositoriesDto, ErrorDto>;
 
-    /// One repository's snapshots.
-    async fn snapshots(&self, _repository: String) -> Result<SnapshotsDto, ErrorDto> {
-        todo!()
-    }
+    /// The snapshots of the repository whose alias is `repository`, newest
+    /// first, read live.
+    async fn snapshots(&self, repository: String) -> Result<SnapshotsDto, ErrorDto>;
 
-    /// One page of the history.
+    /// One page of the history, newest first, as the API pages it: of
+    /// `plan` alone when it names one, after the operation `after`, at most
+    /// `limit` long.
     async fn history(
         &self,
-        _plan: Option<String>,
-        _after: Option<String>,
-        _limit: u64,
-    ) -> Result<OperationsPageDto, ErrorDto> {
-        todo!()
-    }
+        plan: Option<String>,
+        after: Option<String>,
+        limit: u64,
+    ) -> Result<OperationsPageDto, ErrorDto>;
 
-    /// One operation with its warnings.
-    async fn operation(&self, _id: String) -> Result<OperationDetailDto, ErrorDto> {
-        todo!()
-    }
+    /// The operation whose ID is `id`: its summary and every warning it
+    /// recorded.
+    async fn operation(&self, id: String) -> Result<OperationDetailDto, ErrorDto>;
 
     /// Queues a backup of a plan now and returns its operation's ID.
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
@@ -188,7 +200,8 @@ pub enum Access {
 /// The daemon connect mode drives: its build, when it tells it (with
 /// sign-in off or to a `read` token, decisions 90 and 93), and who can
 /// reach it (decision 87).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "kebab-case")]
 pub struct DaemonStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -218,7 +231,8 @@ impl SnapshotFilter {
 
 /// One plan as `status` shows it: the plans list's entry, with its next run,
 /// and its last operation, left out when it has none.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "kebab-case")]
 pub struct PlanStatus {
     #[serde(flatten)]
@@ -230,13 +244,17 @@ pub struct PlanStatus {
 /// The `status` tool's result: this program's build (`version`, `commit`,
 /// `dirty`, `release` as fields of their own, decision 90), then what the
 /// backend told.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "kebab-case")]
 struct Status {
+    /// This program's build.
     build: BuildDto,
+    /// The daemon the tools drive, in connect mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     daemon: Option<DaemonStatus>,
     plans: Vec<PlanStatus>,
+    /// The operations queued or running, newest first.
     running: Vec<OperationSummaryDto>,
 }
 
@@ -311,6 +329,89 @@ impl Server {
             Err(error) => structured(&error, true),
         }
     }
+
+    async fn list_plans(&self, arguments: ListArguments) -> Result<PlansPage, ErrorDto> {
+        let listed = self.backend.plans().await?;
+        let (plans, next) = page(
+            listed.plans,
+            |plan| &plan.id,
+            arguments.cursor,
+            arguments.limit,
+        )?;
+        Ok(PlansPage { plans, next })
+    }
+
+    async fn list_repositories(
+        &self,
+        arguments: ListArguments,
+    ) -> Result<RepositoriesPage, ErrorDto> {
+        let listed = self.backend.repositories().await?;
+        let (repositories, next) = page(
+            listed.repositories,
+            |repository| &repository.alias,
+            arguments.cursor,
+            arguments.limit,
+        )?;
+        Ok(RepositoriesPage { repositories, next })
+    }
+
+    async fn list_snapshots(
+        &self,
+        arguments: SnapshotsArguments,
+    ) -> Result<SnapshotsPage, ErrorDto> {
+        let listed = self.backend.snapshots(arguments.repository).await?;
+        let (snapshots, next) = page(
+            listed.snapshots,
+            |snapshot| &snapshot.id,
+            arguments.cursor,
+            arguments.limit,
+        )?;
+        Ok(SnapshotsPage { snapshots, next })
+    }
+
+    async fn list_operations(
+        &self,
+        arguments: OperationsArguments,
+    ) -> Result<OperationsPageDto, ErrorDto> {
+        self.backend
+            .history(
+                arguments.plan,
+                arguments.cursor,
+                page_length(arguments.limit),
+            )
+            .await
+    }
+
+    async fn get_operation(&self, arguments: OperationArguments) -> Result<Operation, ErrorDto> {
+        let OperationDetailDto {
+            operation,
+            warnings,
+        } = self.backend.operation(arguments.id).await?;
+        Ok(Operation::listing(operation, warnings))
+    }
+}
+
+/// A read tool's result: what it read, or the refusal, marked as an error.
+fn answered(result: Result<impl Serialize, ErrorDto>) -> CallToolResponse {
+    match result {
+        Ok(value) => structured(&value, false),
+        Err(error) => structured(&error, true),
+    }
+    .into()
+}
+
+/// The arguments `tool` was given, read as `T`.
+///
+/// # Errors
+///
+/// Invalid params: one is missing, unknown or of the wrong type.
+fn arguments<T: DeserializeOwned>(tool: &str, given: Option<JsonObject>) -> Result<T, McpError> {
+    serde_json::from_value(serde_json::Value::Object(given.unwrap_or_default())).map_err(|error| {
+        McpError::invalid_params(
+            format!("the tool {tool} can't take these arguments: {error}"),
+            None,
+        )
+    })
 }
 
 /// A tool's result: `value` as `structuredContent`, mirrored as JSON text.
@@ -338,7 +439,31 @@ fn no_arguments() -> Arc<JsonObject> {
     Arc::new(schema)
 }
 
-/// Every tool, in the order `tools/list` gives them.
+/// What every tool so far is: a reading that changes nothing.
+fn read_only() -> ToolAnnotations {
+    ToolAnnotations::new()
+        .read_only(true)
+        .destructive(false)
+        .idempotent(true)
+        .open_world(false)
+}
+
+/// A tool's output schema without its fields' descriptions: the field names
+/// say enough, and `tools/list` stays small (§4.6). Input schemas keep theirs.
+fn output_schema<T: JsonSchema + 'static>() -> Arc<JsonObject> {
+    let mut schema = Schema::from(schema_for_output::<T>().as_ref().clone());
+    drop_descriptions(&mut schema);
+    // A schema made from a map stays one.
+    Arc::new(schema.as_object().cloned().unwrap_or_default())
+}
+
+fn drop_descriptions(schema: &mut Schema) {
+    schema.remove("description");
+    transform_subschemas(&mut drop_descriptions, schema);
+}
+
+/// Every tool, in the order `tools/list` gives them. Each argument type is
+/// a struct, whose schema is an object, the one input schema the SDK takes.
 fn tools() -> Vec<Tool> {
     vec![
         Tool::new(
@@ -349,13 +474,59 @@ fn tools() -> Vec<Tool> {
             no_arguments(),
         )
         .with_title("Status")
-        .with_annotations(
-            ToolAnnotations::new()
-                .read_only(true)
-                .destructive(false)
-                .idempotent(true)
-                .open_world(false),
-        ),
+        .with_raw_output_schema(output_schema::<Status>())
+        .with_annotations(read_only()),
+        Tool::new(
+            LIST_PLANS,
+            "The configured plans, a page at a time: each with its repository, whether it \
+             has a schedule, its next run and its configuration warnings.",
+            no_arguments(),
+        )
+        .with_title("List plans")
+        .with_input_schema::<ListArguments>()
+        .with_raw_output_schema(output_schema::<PlansPage>())
+        .with_annotations(read_only()),
+        Tool::new(
+            LIST_REPOSITORIES,
+            "The configured repositories, a page at a time: each with its location, \
+             credentials masked, where its password comes from, whether it is maintained \
+             here and its configuration warnings. Never a secret.",
+            no_arguments(),
+        )
+        .with_title("List repositories")
+        .with_input_schema::<ListArguments>()
+        .with_raw_output_schema(output_schema::<RepositoriesPage>())
+        .with_annotations(read_only()),
+        Tool::new(
+            LIST_SNAPSHOTS,
+            "One repository's snapshots, newest first, a page at a time, read from the \
+             repository.",
+            no_arguments(),
+        )
+        .with_title("List snapshots")
+        .with_input_schema::<SnapshotsArguments>()
+        .with_raw_output_schema(output_schema::<SnapshotsPage>())
+        .with_annotations(read_only()),
+        Tool::new(
+            LIST_OPERATIONS,
+            "The history of operations, newest first, a page at a time, running ones \
+             included: each with its status, times, warning codes and, when it failed, why.",
+            no_arguments(),
+        )
+        .with_title("List operations")
+        .with_input_schema::<OperationsArguments>()
+        .with_raw_output_schema(output_schema::<OperationsPageDto>())
+        .with_annotations(read_only()),
+        Tool::new(
+            GET_OPERATION,
+            "One operation: its summary, why it failed when it did, and the first 100 \
+             warnings it recorded.",
+            no_arguments(),
+        )
+        .with_title("Get operation")
+        .with_input_schema::<OperationArguments>()
+        .with_raw_output_schema(output_schema::<Operation>())
+        .with_annotations(read_only()),
     ]
 }
 
@@ -383,16 +554,29 @@ impl ServerHandler for Server {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        let given = request
-            .arguments
-            .as_ref()
-            .is_some_and(|args| !args.is_empty());
+        let given = request.arguments;
         match request.name.as_ref() {
-            STATUS if given => Err(McpError::invalid_params(
-                "the tool status takes no arguments",
-                None,
-            )),
+            STATUS if given.as_ref().is_some_and(|args| !args.is_empty()) => Err(
+                McpError::invalid_params("the tool status takes no arguments", None),
+            ),
             STATUS => Ok(self.status().await.into()),
+            LIST_PLANS => Ok(answered(
+                self.list_plans(arguments(LIST_PLANS, given)?).await,
+            )),
+            LIST_REPOSITORIES => Ok(answered(
+                self.list_repositories(arguments(LIST_REPOSITORIES, given)?)
+                    .await,
+            )),
+            LIST_SNAPSHOTS => Ok(answered(
+                self.list_snapshots(arguments(LIST_SNAPSHOTS, given)?).await,
+            )),
+            LIST_OPERATIONS => Ok(answered(
+                self.list_operations(arguments(LIST_OPERATIONS, given)?)
+                    .await,
+            )),
+            GET_OPERATION => Ok(answered(
+                self.get_operation(arguments(GET_OPERATION, given)?).await,
+            )),
             name => Err(McpError::invalid_params(
                 format!("no tool is named {name:?}"),
                 None,

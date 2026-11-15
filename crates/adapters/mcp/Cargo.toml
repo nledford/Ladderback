@@ -8,7 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-api.workspace = true
+# The wire types, with their JSON schemas for the tools' output schemas.
+api = { workspace = true, features = ["schemars"] }
 async-trait.workspace = true
 # Connect mode's client of the daemon's API (§4.6): no defaults, rustls for an
 # `https` daemon.

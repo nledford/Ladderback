@@ -4,7 +4,10 @@
 
 use std::time::Duration;
 
-use api::{ErrorCode, ErrorDto, OperationsPageDto, PlansDto, SessionDto};
+use api::{
+    ErrorCode, ErrorDto, MsgArg, OperationDetailDto, OperationsPageDto, PlansDto, RepositoriesDto,
+    SessionDto, SnapshotsDto,
+};
 use async_trait::async_trait;
 use reqwest::header::HeaderValue;
 use reqwest::{Client, Url, redirect};
@@ -71,6 +74,22 @@ impl DaemonUrl {
     fn route(&self, route: &str) -> Option<Url> {
         self.0.join(route).ok()
     }
+
+    /// The URL of `route`, then `segments`, each percent-encoded as one
+    /// segment of the path, so no text a tool is given reaches another
+    /// route. A segment `.` or `..` would be left out: callers send none
+    /// ([`segment`]).
+    fn route_to(&self, route: &str, segments: &[&str]) -> Option<Url> {
+        let mut url = self.route(route)?;
+        url.path_segments_mut().ok()?.extend(segments);
+        Some(url)
+    }
+}
+
+/// `text` as one segment of a route's path, unless it is one no route takes
+/// (empty, `.` or `..`), which names nothing the daemon holds.
+fn segment(text: &str) -> Option<&str> {
+    (!matches!(text, "" | "." | "..")).then_some(text)
 }
 
 /// The HTTP client could not be built: its TLS could not start.
@@ -148,15 +167,20 @@ impl Connect {
         todo!()
     }
 
-    /// The daemon's answer to `GET route?query`, read as `T`. A refusal is
-    /// the daemon's own `{code, args}`; no answer, or one that isn't the
-    /// API's, is `daemon-unreachable`.
+    /// The daemon's answer to `GET route/segments?query`, read as `T`, the
+    /// segments as [`DaemonUrl::route_to`] joins them. A refusal is the
+    /// daemon's own `{code, args}`; no answer, or one that isn't the API's,
+    /// is `daemon-unreachable`.
     async fn get<T: DeserializeOwned>(
         &self,
         route: &str,
+        segments: &[&str],
         query: &[(&str, &str)],
     ) -> Result<T, ErrorDto> {
-        let mut url = self.daemon.route(route).ok_or_else(no_answer)?;
+        let mut url = self
+            .daemon
+            .route_to(route, segments)
+            .ok_or_else(no_answer)?;
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(query);
         }
@@ -192,21 +216,17 @@ async fn read_capped(mut response: reqwest::Response) -> Option<Vec<u8>> {
 #[async_trait]
 impl Backend for Connect {
     async fn status(&self) -> Result<BackendStatus, ErrorDto> {
-        let session: SessionDto = self.get("api/v1/session", &[]).await?;
-        let listed: PlansDto = self.get("api/v1/plans", &[]).await?;
+        let session: SessionDto = self.get("api/v1/session", &[], &[]).await?;
+        let listed = self.plans().await?;
         let mut plans = Vec::with_capacity(listed.plans.len());
         for plan in listed.plans {
-            let page: OperationsPageDto = self
-                .get("api/v1/operations", &[("plan", &plan.id), ("limit", "1")])
-                .await?;
+            let page = self.history(Some(plan.id.clone()), None, 1).await?;
             plans.push(PlanStatus {
                 last: page.operations.into_iter().next(),
                 plan,
             });
         }
-        let recent = RECENT_OPERATIONS.to_string();
-        let recent: OperationsPageDto =
-            self.get("api/v1/operations", &[("limit", &recent)]).await?;
+        let recent = self.history(None, None, RECENT_OPERATIONS).await?;
         let running = unfinished(recent.operations);
         Ok(BackendStatus {
             access: Access::SignInOff,
@@ -217,6 +237,50 @@ impl Backend for Connect {
             plans,
             running,
         })
+    }
+
+    async fn plans(&self) -> Result<PlansDto, ErrorDto> {
+        self.get("api/v1/plans", &[], &[]).await
+    }
+
+    async fn repositories(&self) -> Result<RepositoriesDto, ErrorDto> {
+        self.get("api/v1/repositories", &[], &[]).await
+    }
+
+    async fn snapshots(&self, repository: String) -> Result<SnapshotsDto, ErrorDto> {
+        let Some(alias) = segment(&repository) else {
+            return Err(ErrorDto::new(
+                ErrorCode::RepositoryUnknown,
+                [("alias", MsgArg::Text(repository))],
+                None,
+            ));
+        };
+        self.get("api/v1/repositories", &[alias, "snapshots"], &[])
+            .await
+    }
+
+    async fn history(
+        &self,
+        plan: Option<String>,
+        after: Option<String>,
+        limit: u64,
+    ) -> Result<OperationsPageDto, ErrorDto> {
+        let limit = limit.to_string();
+        let mut query = vec![("limit", limit.as_str())];
+        query.extend(plan.as_deref().map(|plan| ("plan", plan)));
+        query.extend(after.as_deref().map(|after| ("after", after)));
+        self.get("api/v1/operations", &[], &query).await
+    }
+
+    async fn operation(&self, id: String) -> Result<OperationDetailDto, ErrorDto> {
+        let Some(segment) = segment(&id) else {
+            return Err(ErrorDto::new(
+                ErrorCode::OperationUnknown,
+                [("operation", MsgArg::Text(id))],
+                None,
+            ));
+        };
+        self.get("api/v1/operations", &[segment], &[]).await
     }
 }
 
