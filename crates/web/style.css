@@ -162,26 +162,34 @@ a {
   }
 }
 
-/* The version and Sign out, at the end of the links' line. A flex item is no
-   narrower than its longest unbreakable run unless told otherwise. WebKit
-   measured the version's run (`0.3.1+cedec1f`) unbroken although
-   `overflow-wrap: anywhere` breaks it, so on a narrow screen with larger
-   text, right to left, the line stuck out and the page scrolled sideways
-   (1.4.10): the group and the version may both be narrower than that run. */
+/* The version and Sign out, at the end of the links' line. On a narrow
+   screen they wrap under the links, together where they fit; where they
+   don't, the version ends one line and Sign out the next, both at the line's
+   end, so Sign out never stands alone at the line's start.
+
+   A flex item is no narrower than its longest unbreakable run unless told
+   otherwise. WebKit measured the version's run (`0.3.1+cedec1f`) unbroken
+   although `overflow-wrap: anywhere` breaks it, so on a narrow screen with
+   larger text, right to left, the line stuck out and the page scrolled
+   sideways (1.4.10): the group and the version may both be narrower than
+   that run. */
 .site-account {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: baseline;
-  gap: 0 1rem;
+  gap: 0.25rem 1rem;
   margin-inline-start: auto;
   min-inline-size: 0;
 }
 
+/* A version too long for its line wraps, its lines at the line's end. */
 .site-version {
   margin: 0;
   padding-block: 0.25rem;
   color: var(--muted);
   min-inline-size: 0;
+  text-align: end;
 }
 
 /* Sign out (`sign_in::SignOut`): the browser's own button, sized as the
