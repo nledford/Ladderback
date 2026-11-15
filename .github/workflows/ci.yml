@@ -51,6 +51,20 @@ env:
   # The mbx action doesn't set it. Debug info is Cargo.toml's dev profile, the
   # same as a local build's.
   CARGO_INCREMENTAL: 0
+  # Keeps Cargo 1.100's build dir in the layout mbx's cache can use. Since 1.100
+  # (rust-toolchain.toml, #411) Cargo puts intermediate files under
+  # target/<profile>/build/<package>/<hash>/ and no longer writes
+  # target/<profile>/.fingerprint/ or deps/. The mbx action (v1.7.3) decides
+  # whether a build is worth saving by looking for a non-empty `.fingerprint`
+  # directory, and it prunes the saved tree by the old directory names, so on
+  # the new layout every job logged "No reusable Cargo target state was
+  # produced" and saved nothing (#598). Cargo 1.100 still honours this
+  # variable, which it calls temporary, and means to delete the legacy layout
+  # once a few weeks have passed (rust-lang/cargo#17182). When it does, the
+  # "Build cache" step below warns on every push to main, and the fix is an
+  # mbx action that knows the new layout. red-first.yml sets it too: it copies
+  # a restored target dir.
+  __CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT: 1
 
 jobs:
   # Tells a docs-only pull request from one that touches code, with plain git,
@@ -184,6 +198,16 @@ jobs:
         run: just test
         env:
           NEXTEST_PROFILE: ci
+      # Nothing fails when the build cache saves nothing: every later run just
+      # starts cold (#598 went unseen for that reason). mbx saves only a target
+      # dir with a non-empty `target/<profile>/.fingerprint`, so a main push
+      # that built none warns here, where the maintainers read the run.
+      - name: Build cache
+        if: github.event_name == 'push' && needs.changes.outputs.docs-only != 'true'
+        run: |
+          if [ -z "$(ls -A target/debug/.fingerprint 2>/dev/null)" ]; then
+            echo "::warning title=Build cache::target/debug/.fingerprint is empty, so mbx will not save this build and pull requests start cold. See the __CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT comment in ci.yml (#598)."
+          fi
       # Kept 14 days, not the repository's default of 90: a report is read
       # while its failure is fresh, and two weeks still covers a run looked at
       # after a week away. The same holds for both `mutants.out` uploads below.

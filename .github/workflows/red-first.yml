@@ -34,6 +34,9 @@ env:
   CARGO_TERM_COLOR: always
   # Same as ci.yml, see the comment there.
   CARGO_INCREMENTAL: 0
+  # Same as ci.yml, see the comment there: the build copied from main's cache
+  # has the layout mbx can save, and this build must use the same one.
+  __CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT: 1
   # This job builds the pull request's first commit and its merge base, whose
   # Cargo.toml can predate the dev profile's line tables (technical design
   # §13.11); without this they would build everything with full debug info.
