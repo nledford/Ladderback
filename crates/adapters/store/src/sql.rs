@@ -188,3 +188,38 @@ pub(crate) const DELETE_OTHER_PASSWORDS_TOKENS: &str = "DELETE FROM api_tokens W
 
 /// Parameters: the last use, the token's ID.
 pub(crate) const RECORD_API_TOKEN_USE: &str = "UPDATE api_tokens SET last_used_at = ? WHERE id = ?";
+
+/// Keeps a session, in place of one of the same digest. Parameters: `digest`,
+/// `password`, `started_at`, `last_used_at`, `keep_signed_in`, `secure`.
+pub(crate) const INSERT_SESSION: &str = concat!(
+    "INSERT OR REPLACE INTO sessions ",
+    "(digest, password, started_at, last_used_at, keep_signed_in, secure) ",
+    "VALUES (?, ?, ?, ?, ?, ?)"
+);
+
+/// Every session, with the `rowid` that names a row whose digest can't be
+/// read; the columns `row::kept_session` reads.
+pub(crate) const ALL_SESSIONS: &str = concat!(
+    "SELECT rowid, digest, password, started_at, last_used_at, keep_signed_in, secure ",
+    "FROM sessions"
+);
+
+/// Parameter: the session's digest.
+pub(crate) const DELETE_SESSION: &str = "DELETE FROM sessions WHERE digest = ?";
+
+/// Parameter: the row's `rowid`.
+pub(crate) const DELETE_SESSION_ROW: &str = "DELETE FROM sessions WHERE rowid = ?";
+
+pub(crate) const DELETE_ALL_SESSIONS: &str = "DELETE FROM sessions";
+
+/// Parameters: the last use, the session's digest.
+pub(crate) const RECORD_SESSION_USE: &str = "UPDATE sessions SET last_used_at = ? WHERE digest = ?";
+
+/// The session length the admin set; no row while none has been set.
+pub(crate) const SESSION_LENGTH: &str = "SELECT session_length FROM sign_in_settings WHERE id = 1";
+
+/// Keeps the session length, in place of the one kept. Parameter: its name.
+pub(crate) const SET_SESSION_LENGTH: &str = concat!(
+    "INSERT INTO sign_in_settings (id, session_length) VALUES (1, ?) ",
+    "ON CONFLICT(id) DO UPDATE SET session_length = excluded.session_length"
+);

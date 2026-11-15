@@ -9,11 +9,10 @@
 use std::fmt::Display;
 
 use app::ports::{EngineResult, OperationRecord, PendingRetry, PlannedRun, StoreError};
-
 use domain::access::api_token::{
     ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, Scope, Scopes,
 };
-use domain::access::PasswordFingerprint;
+use domain::access::{KeptSession, PasswordFingerprint, SessionDigest, SessionLength};
 use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
@@ -280,6 +279,57 @@ pub(crate) fn api_token(row: &SqliteRow) -> Result<ApiToken, StoreError> {
         created_at: reader.required_time("created_at")?,
         last_used_at: reader.time("last_used_at")?,
     })
+}
+
+/// The session length as `sql::SESSION_LENGTH` reads it. A name this version
+/// didn't write is [`StoreError::Corrupt`], never the default length.
+pub(crate) fn session_length(row: &SqliteRow) -> Result<SessionLength, StoreError> {
+    let reader = Reader {
+        row,
+        scope: "the sign-in settings".to_owned(),
+    };
+    let name = reader.required_text("session_length")?;
+    SessionLength::parse(&name).ok_or_else(|| {
+        reader.corrupt(
+            "session_length",
+            format!("{} is no session length", shown(&name)),
+        )
+    })
+}
+
+/// A session as `sql::ALL_SESSIONS` reads it. A report names it by its row,
+/// never by its digest.
+pub(crate) fn kept_session(row: &SqliteRow) -> Result<KeptSession, StoreError> {
+    let reader = Reader {
+        row,
+        scope: "a session".to_owned(),
+    };
+    let digest = reader
+        .blob("digest")?
+        .ok_or_else(|| reader.corrupt("digest", "is NULL"))?;
+    let digest = <[u8; 32]>::try_from(digest.as_slice())
+        .map_err(|_| reader.corrupt("digest", format!("is {} bytes, not 32", digest.len())))?;
+    let password = reader
+        .integer("password")?
+        .ok_or_else(|| reader.corrupt("password", "is NULL"))?;
+    Ok(KeptSession {
+        digest: SessionDigest::from_bytes(digest),
+        password: PasswordFingerprint::new(password.cast_unsigned()),
+        started: reader.required_time("started_at")?,
+        last_used: reader.required_time("last_used_at")?,
+        keep_signed_in: flag(&reader, "keep_signed_in")?,
+        secure: flag(&reader, "secure")?,
+    })
+}
+
+/// A column that holds 1 for yes and 0 for no; anything else is corrupt.
+fn flag(reader: &Reader<'_>, column: &str) -> Result<bool, StoreError> {
+    match reader.integer(column)? {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        Some(other) => Err(reader.corrupt(column, format!("is {other}, not 0 or 1"))),
+        None => Err(reader.corrupt(column, "is NULL")),
+    }
 }
 
 /// What a column that couldn't be read says: for a value of the wrong type,
