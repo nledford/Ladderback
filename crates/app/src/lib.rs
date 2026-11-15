@@ -33,6 +33,7 @@ pub mod progress;
 pub mod queue;
 pub mod recovery;
 pub mod repositories;
+pub mod restore;
 pub mod retry;
 pub mod schedule;
 pub mod secrets;

@@ -209,6 +209,7 @@ fn read(kind: &str, text: &str) -> Result<Option<HookEntry>, Refusal> {
         "source" => value(Source::parse(text)),
         "glob-file" => value(GlobFile::parse(text)),
         "locale" => value(Locale::parse(text)),
+        "restore-folder" => todo!("read [agent] restore-folder {text}"),
         "repository-alias" => RepositoryAlias::parse(text)
             .map(|_| None)
             .map_err(Refusal::from),

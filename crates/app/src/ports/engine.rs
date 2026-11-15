@@ -154,6 +154,15 @@ pub enum Job {
     /// (§16, decision 104). A read, not an operation: it takes no I7 slot and
     /// is never written to the operation log.
     Stats(RepositoryAccess),
+    /// Restores one entry of a snapshot into a new folder or in place
+    /// (§10.4): an operation, with the deadline a backup of its repository
+    /// has, that only reads the repository, so it takes no I7 slot.
+    Restore(RestoreJob),
+    /// What a [`Restore`](Self::Restore) in place would do, worked out and
+    /// not done: rustic's dry run, which writes nothing. A read, never
+    /// written to the operation log; what a person reviews before an
+    /// in-place restore starts.
+    RestorePlan(RestoreJob),
 }
 
 impl Job {
@@ -163,6 +172,7 @@ impl Job {
         match self {
             Self::Fake(job) => job.deadline_budget,
             Self::Backup(job) => Some(job.deadline_budget),
+            Self::Restore(job) => Some(job.deadline_budget),
             Self::Forget(_)
             | Self::Rewrite(_)
             | Self::Identify(_)
@@ -173,7 +183,8 @@ impl Job {
             | Self::Check(_)
             | Self::Ls(_)
             | Self::Browse(_)
-            | Self::Stats(_) => None,
+            | Self::Stats(_)
+            | Self::RestorePlan(_) => None,
         }
     }
 
@@ -193,6 +204,8 @@ impl Job {
             // A browse is an `ls` of one folder (§4.1); a stats read is never
             // recorded either: it reads as a listing.
             Self::Ls(_) | Self::Browse(_) | Self::Stats(_) => OperationKind::Ls,
+            // A dry run is never recorded; it names the kind it plans.
+            Self::Restore(_) | Self::RestorePlan(_) => OperationKind::Restore,
         }
     }
 
@@ -211,6 +224,7 @@ impl Job {
             Self::Prune(job) | Self::PrunePlan(job) => Some(&job.repository),
             Self::Check(job) => Some(&job.repository),
             Self::Browse(job) => Some(&job.repository),
+            Self::Restore(job) | Self::RestorePlan(job) => Some(&job.repository),
         }
     }
 
@@ -229,6 +243,7 @@ impl Job {
             Self::Prune(job) | Self::PrunePlan(job) => Some(&mut job.repository),
             Self::Check(job) => Some(&mut job.repository),
             Self::Browse(job) => Some(&mut job.repository),
+            Self::Restore(job) | Self::RestorePlan(job) => Some(&mut job.repository),
         }
     }
 
@@ -415,6 +430,33 @@ pub struct BrowseJob {
     pub from: u64,
 }
 
+/// One entry of a snapshot to restore, and where.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RestoreJob {
+    pub repository: RepositoryAccess,
+    pub snapshot: SnapshotId,
+    /// The entry, by its keys from the snapshot's top; the top itself names
+    /// none and restores the whole snapshot.
+    pub entry: FolderPath,
+    pub target: RestoreTarget,
+    /// How long the restore may run after it starts reading the index: a
+    /// backup's budget in the same repository (I3's reason: a prune may
+    /// delete the packs it reads once `keep-delete` has passed).
+    pub deadline_budget: SignedDuration,
+}
+
+/// Where a restore writes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RestoreTarget {
+    /// The folder at this absolute path, which the engine makes, with the
+    /// folders above it it needs, and refuses when it is already there: so
+    /// no file that was there is touched.
+    NewFolder(String),
+    /// The entry's original path. It adds and overwrites, and never
+    /// deletes a file the snapshot doesn't hold.
+    InPlace,
+}
+
 /// A scripted job: count `steps`, waiting `step_delay` before each, report
 /// `warnings` right after starting, then end as `end` says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -561,6 +603,38 @@ pub enum EngineResult {
     Folder(FolderAnswer),
     /// What a [`Job::Stats`] read.
     Stats(domain::maintenance::RepositoryStats),
+    /// What a [`Job::Restore`] wrote.
+    Restore(RestoreSummary),
+    /// What a [`Job::RestorePlan`] found.
+    RestorePlan(RestorePlanSummary),
+}
+
+/// What a restore did, counted as rustic counts it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RestoreSummary {
+    /// Files it wrote, new or overwritten.
+    pub files_restored: u64,
+    /// Files already as the snapshot holds them, left as they were.
+    pub files_unchanged: u64,
+    /// Folders it made.
+    pub folders_restored: u64,
+    /// Bytes it wrote.
+    pub bytes_restored: u64,
+}
+
+/// What a restore in place would do, from rustic's dry run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RestorePlanSummary {
+    /// Files it would add, where nothing is.
+    pub files_added: u64,
+    /// Files it would overwrite, which differ from the snapshot's.
+    pub files_overwritten: u64,
+    /// Files already as the snapshot holds them.
+    pub files_unchanged: u64,
+    /// Files the destination holds and the snapshot doesn't: they stay.
+    pub files_kept: u64,
+    /// Bytes it would write.
+    pub bytes_to_write: u64,
 }
 
 /// What a browse of a snapshot's folder found: the page, or that what it

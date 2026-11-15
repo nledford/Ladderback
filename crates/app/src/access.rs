@@ -212,6 +212,24 @@ pub enum RestoreFailed {
     Password(AdminPasswordError),
 }
 
+/// A step-up password that was right (§10.4): the address's waits started
+/// over, and the person may go on with what it confirms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StepUpConfirmed;
+
+/// Why a step-up password confirmed nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StepUpRefused {
+    /// The password is not the admin password: it counted as a failed
+    /// sign-in.
+    WrongPassword,
+    /// The address's wait after failed sign-ins has `seconds` left, rounded
+    /// up; the password was not checked.
+    Wait { seconds: u64 },
+    /// The admin password could not be checked: the platform's own text.
+    Unavailable(String),
+}
+
 impl Access {
     pub fn new(
         password: Arc<dyn AdminPassword>,
@@ -392,6 +410,19 @@ impl Access {
             idle_limit,
             cookie,
         })
+    }
+
+    /// Checks `attempt`, the admin password entered again before a restore
+    /// or a download (§10.4), from `address`, in the same waits a sign-in
+    /// counts against: a wrong one makes the address's next sign-in wait, as
+    /// a wrong sign-in does, and a right one starts its waits over. No
+    /// session is started or used.
+    pub async fn step_up(
+        &self,
+        _address: IpAddr,
+        _attempt: &Password,
+    ) -> Result<StepUpConfirmed, StepUpRefused> {
+        todo!("Access::step_up")
     }
 
     /// The session of `token`, if it is live, used once more by asking,

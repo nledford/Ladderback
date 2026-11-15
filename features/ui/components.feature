@@ -10,7 +10,9 @@ Feature: The shared components in the gallery
   control that pauses live updates, a status badge for every state an
   operation can be in, whose icon tells the state by its shape, a
   snapshot's tree, one stop for Tab, whose folders are read as they are
-  opened, the shared vocabulary every component takes: its tones, each
+  opened, the step-up field, which takes the admin password from a
+  password manager or a paste, or shows a short ID to copy and paste back,
+  and the shared vocabulary every component takes: its tones, each
   named in words and drawn in a color of its own, its sizes and its
   placements, which follow the page's direction, and a spinner, which a
   label names, which never speaks for itself, which takes its tone, size
@@ -32,6 +34,33 @@ Feature: The shared components in the gallery
     Then focus is on the first control of the dialog "Demo dialog"
     When I press Escape
     Then focus is on the button "Open the demo dialog"
+
+  Scenario: The step-up field takes a password from a password manager or paste
+    When I open the component gallery
+    And I press Tab until focus is on the button "Open the demo step-up"
+    And I press Enter
+    Then focus is inside the dialog "Demo step-up"
+    And the textbox "Admin password" has the autocomplete token "current-password"
+    When I press Tab until focus is on the textbox "Admin password"
+    And I paste "canary-demo-password"
+    Then the field "Admin password" holds what was pasted
+    And the page has no accessibility violations
+
+  Scenario: The step-up field shows a short ID to copy and takes it back by paste
+    Given the page may use the clipboard
+    When I open the component gallery
+    And I press Tab until focus is on the button "Open the demo short-ID step-up"
+    And I press Enter
+    Then focus is inside the dialog "Demo short-ID step-up"
+    And the dialog "Demo short-ID step-up" shows "1a2b3c4d" as text that can be copied
+    When I press Tab until focus is on the button "Copy the ID"
+    And I press Enter
+    Then the clipboard holds "1a2b3c4d"
+    And the dialog "Demo short-ID step-up" says "Copied."
+    When I press Tab until focus is on the textbox "Demo ID"
+    And I paste "1a2b3c4d"
+    Then the field "Demo ID" holds what was pasted
+    And the page has no accessibility violations
 
   Scenario: The table can be sorted by keyboard and the sort state is announced
     When I open the component gallery
@@ -294,6 +323,7 @@ Feature: The shared components in the gallery
       | Tree        |
       | Shared vocabulary |
       | Spinner     |
+      | Step-up field |
 
   Scenario Outline: Each component's structure is pinned by an ARIA snapshot
     When I open the component gallery
@@ -315,6 +345,7 @@ Feature: The shared components in the gallery
       | Tree        |
       | Shared vocabulary |
       | Spinner     |
+      | Step-up field |
 
   Scenario: A review dialog opens on its dismiss button, keeps Tab inside and returns focus on Escape
     When I open the component gallery

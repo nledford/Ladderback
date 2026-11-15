@@ -129,6 +129,7 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             None,
         ),
         F::DeadlinePassed => ErrorDto::new(ErrorCode::DeadlinePassed, [], None),
+        F::RestoreTargetUnwritable => todo!("ErrorCode::RestoreTargetUnwritable, §13.7"),
         F::EngineStartTimedOut => ErrorDto::new(ErrorCode::EngineStartTimedOut, [], None),
         F::EngineExitTimedOut => ErrorDto::new(ErrorCode::EngineExitTimedOut, [], None),
         F::RepositoryExists => ErrorDto::new(ErrorCode::RepositoryExists, [], None),

@@ -22,6 +22,7 @@ pub mod notifications;
 pub mod planning;
 #[cfg(test)]
 mod properties;
+pub mod restore;
 pub mod secrets;
 pub mod service;
 pub mod snapshot;

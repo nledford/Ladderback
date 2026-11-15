@@ -494,6 +494,8 @@ impl ForgetWorld {
                 Job::Fake(_) => "fake",
                 Job::Init(_) => "init",
                 Job::Backup(_) => "backup",
+                Job::Restore(_) => "restore",
+                Job::RestorePlan(_) => "restore-plan",
             })
             .collect()
     }

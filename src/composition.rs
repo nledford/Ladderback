@@ -1314,13 +1314,15 @@ fn is_operation(job: &Job) -> bool {
         | Job::Ls(_)
         | Job::Browse(_)
         | Job::Stats(_)
-        | Job::PrunePlan(_) => false,
+        | Job::PrunePlan(_)
+        | Job::RestorePlan(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
         | Job::Rewrite(_)
         | Job::Prune(_)
-        | Job::Check(_) => true,
+        | Job::Check(_)
+        | Job::Restore(_) => true,
     }
 }
 
@@ -2173,10 +2175,12 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             rewritten: u64::try_from(rewrite.created.len()).unwrap_or(0),
             duration_ms,
         }),
+        EngineResult::Restore(_) => todo!("the restore's result on the wire"),
         // Reads: a result no operation row holds, so the page shows none.
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
         | EngineResult::PrunePlan(_)
+        | EngineResult::RestorePlan(_)
         | EngineResult::Probed(_)
         | EngineResult::Snapshots(_)
         | EngineResult::Folder(_)
@@ -2196,6 +2200,7 @@ fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",
+        OperationKind::Restore => "restore",
     }
 }
 
@@ -3392,6 +3397,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             None,
         ),
         F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
+        F::RestoreTargetUnwritable => todo!("ErrorCode::RestoreTargetUnwritable, §13.7"),
         F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
         F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
         // Only a backup's before-hook stops a job this way: a repository job

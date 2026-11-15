@@ -117,7 +117,7 @@ Given("the daemon can't read its API tokens", function (this: BrowserWorld) {
 // doesn't know: Chromium both permissions; WebKit only reading, since it lets
 // a click write; Firefox neither, since Playwright's Firefox lets a page use
 // the clipboard without asking.
-const clipboardPermissions: Record<Engine, string[]> = {
+export const clipboardPermissions: Record<Engine, string[]> = {
   chromium: ["clipboard-read", "clipboard-write"],
   webkit: ["clipboard-read"],
   firefox: [],

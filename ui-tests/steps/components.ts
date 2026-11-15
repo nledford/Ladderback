@@ -1198,4 +1198,9 @@ const SNAPSHOTS: Record<string, string> = {
 - text: Loading at the start of the line… Loading in the middle of the line… Loading at the end of the line…
 - paragraph:
   - button "Saving the demo settings…" [disabled]`,
+  "Step-up field": `- heading "Step-up field" [level=2]
+- paragraph:
+  - button "Open the demo step-up"
+- paragraph:
+  - button "Open the demo short-ID step-up"`,
 };

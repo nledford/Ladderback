@@ -85,6 +85,8 @@ mod rest_server_steps;
 mod restart_from_settings_steps;
 #[path = "steps/restart.rs"]
 mod restart_steps;
+#[path = "steps/restore.rs"]
+mod restore_steps;
 #[path = "steps/service.rs"]
 mod service_steps;
 #[path = "steps/shutdown.rs"]
@@ -134,6 +136,7 @@ struct Agent {
     mcp: mcp_steps::McpE2e,
     mcp_call: mcp_call_steps::McpCallE2e,
     core_dumps: core_dumps_steps::CoreDumpsE2e,
+    restore: restore_steps::RestoreE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -190,6 +193,7 @@ impl Agent {
             mcp: mcp_steps::McpE2e::default(),
             mcp_call: mcp_call_steps::McpCallE2e::default(),
             core_dumps: core_dumps_steps::CoreDumpsE2e::default(),
+            restore: restore_steps::RestoreE2e::default(),
         }
     }
 
