@@ -527,6 +527,36 @@ async fn a_token_is_sent_as_bearer_with_each_request_and_none_without_one() {
     }
 }
 
+/// A redirect is never followed, so the token never reaches the address in
+/// its `Location`, and the answer, not the API's, is `daemon-unreachable`.
+#[tokio::test]
+async fn a_redirect_is_never_followed_and_the_token_never_reaches_its_location() {
+    let elsewhere = Sent::default();
+    let target = daemon(recording(Arc::clone(&elsewhere), |_| {
+        axum::Json(json!({"plans": []})).into_response()
+    }))
+    .await;
+    let location = format!("{}api/v1/plans", target.0);
+    let routes = Router::new().route(
+        "/api/v1/plans",
+        get(move || {
+            let location = location.clone();
+            async move { axum::response::Redirect::temporary(&location) }
+        }),
+    );
+    let token = ApiToken::parse(TOKEN).expect("a token");
+    let connect = Connect::new(daemon(routes).await)
+        .unwrap()
+        .with_token(token)
+        .unwrap();
+    let refused = connect
+        .plans()
+        .await
+        .expect_err("a redirect isn't the API's answer");
+    assert_eq!(refused.code, ErrorCode::DaemonUnreachable);
+    assert!(elsewhere.lock().unwrap().is_empty(), "{elsewhere:?}");
+}
+
 #[test]
 fn a_token_is_sent_only_over_https_or_to_this_computer() {
     let token = || ApiToken::parse(TOKEN).expect("a token");
