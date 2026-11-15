@@ -3318,8 +3318,15 @@ impl PlanProblem {
     /// The name the `problem` argument carries, which the message selects
     /// on.
     pub const fn as_str(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::Missing => "missing",
+            Self::UnknownKey => "unknown-key",
+            Self::WrongType => "wrong-type",
+            Self::Invalid => "invalid",
+            Self::Taken => "taken",
+            Self::UnknownRepository => "unknown-repository",
+            Self::NoSources => "no-sources",
+        }
     }
 }
 

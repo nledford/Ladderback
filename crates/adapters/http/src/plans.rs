@@ -10,9 +10,9 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 
-use crate::AppState;
+use crate::{AppState, refused_detailed as refused};
 
 /// What the plan routes ask of the daemon, each from a request as it came,
 /// before anything in it was read as a domain value.
@@ -63,8 +63,10 @@ pub enum PlansError {
 
 /// The plan the path names, as the Plans page's form shows it.
 pub(crate) async fn read(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let _ = (state, id);
-    todo!()
+    match state.plans.plan(id).await {
+        Ok(plan) => (StatusCode::OK, Json(plan)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// Creates the plan the body holds.
@@ -72,8 +74,13 @@ pub(crate) async fn create(
     State(state): State<AppState>,
     body: Result<Json<api::PlanDto>, JsonRejection>,
 ) -> Response {
-    let _ = (state, body);
-    todo!()
+    let Ok(Json(plan)) = body else {
+        return refusal(&PlansError::InvalidBody);
+    };
+    match state.plans.create(plan).await {
+        Ok(saved) => (StatusCode::CREATED, Json(saved)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// Changes the plan the path names to the one the body holds.
@@ -82,14 +89,62 @@ pub(crate) async fn change(
     Path(id): Path<String>,
     body: Result<Json<api::PlanDto>, JsonRejection>,
 ) -> Response {
-    let _ = (state, id, body);
-    todo!()
+    let Ok(Json(plan)) = body else {
+        return refusal(&PlansError::InvalidBody);
+    };
+    match state.plans.change(id, plan).await {
+        Ok(saved) => (StatusCode::OK, Json(saved)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// Deletes the plan the path names.
 pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let _ = (state, id);
-    todo!()
+    match state.plans.delete(id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => refusal(&error),
+    }
+}
+
+/// The typed refusal of `error`, with the status of its kind: a body that
+/// isn't a plan's table is 400; a plan the configuration doesn't hold, 404;
+/// a plan the file wouldn't load, 422; a plan a rule names, 409; and the
+/// configuration not being usable now, 503.
+fn refusal(error: &PlansError) -> Response {
+    use api::{ErrorCode, MsgArg};
+    let text = |value: &str| MsgArg::Text(value.to_owned());
+    match error {
+        PlansError::InvalidBody => refused(
+            StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidBody,
+            Vec::new(),
+            None,
+        ),
+        PlansError::Invalid { field, problem } => refused(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::PlanInvalid,
+            vec![("field", text(field)), ("problem", text(problem.as_str()))],
+            None,
+        ),
+        PlansError::Unknown { plan } => refused(
+            StatusCode::NOT_FOUND,
+            ErrorCode::PlanUnknown,
+            vec![("plan", text(plan))],
+            None,
+        ),
+        PlansError::InUse { plan, rule } => refused(
+            StatusCode::CONFLICT,
+            ErrorCode::PlanInUse,
+            vec![("plan", text(plan)), ("rule", text(rule))],
+            None,
+        ),
+        PlansError::Unavailable { code, args, detail } => refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            *code,
+            args.clone(),
+            detail.clone(),
+        ),
+    }
 }
 
 #[cfg(test)]

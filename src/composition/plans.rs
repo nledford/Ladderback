@@ -6,11 +6,15 @@
 
 use std::sync::Arc;
 
-use api::PlanProblem;
-use app::plans::EditPlans;
-use app::ports::ConfigStore;
+use api::{ErrorCode, PlanProblem};
+use app::plans::{EditError, EditPlans};
+use app::ports::{ConfigError, ConfigStore, Problem};
 use async_trait::async_trait;
+use domain::PlanId;
+use domain::planning::{ChangeRefused, Plan, Violation};
 use http_adapter::{Plans, PlansError};
+
+use super::config_unusable;
 
 /// The plans of the configuration `config`, edited by `edits`.
 pub(super) struct PlanService {
@@ -27,24 +31,138 @@ impl PlanService {
 #[async_trait]
 impl Plans for PlanService {
     async fn plan(&self, id: String) -> Result<api::PlanDto, PlansError> {
-        let _ = (&self.config, &self.edits, id, PlanProblem::Invalid);
-        todo!()
+        let wanted = named(&id)?;
+        let config = self.config.load().await.map_err(unusable)?;
+        let plan = config
+            .plans()
+            .iter()
+            .find(|plan| plan.id == wanted)
+            .ok_or(PlansError::Unknown { plan: id })?;
+        shown(plan)
     }
 
     async fn create(&self, plan: api::PlanDto) -> Result<api::PlanDto, PlansError> {
-        let _ = plan;
-        todo!()
+        let plan = read(&plan)?;
+        self.edits.create(plan.clone()).await.map_err(refused)?;
+        shown(&plan)
     }
 
     async fn change(&self, id: String, plan: api::PlanDto) -> Result<api::PlanDto, PlansError> {
-        let _ = (id, plan);
-        todo!()
+        named(&id)?;
+        let mut table = plan.0;
+        match table.get("id") {
+            None => {
+                table.insert("id".to_owned(), serde_json::Value::String(id));
+            }
+            Some(serde_json::Value::String(given)) if *given != id => {
+                return Err(PlansError::Invalid {
+                    field: "id".to_owned(),
+                    problem: PlanProblem::Invalid,
+                });
+            }
+            // The path's ID, or a value that isn't text, which the reader
+            // refuses at `id`.
+            Some(_) => {}
+        }
+        let plan = read(&api::PlanDto(table))?;
+        self.edits.change(plan.clone()).await.map_err(refused)?;
+        shown(&plan)
     }
 
     async fn delete(&self, id: String) -> Result<(), PlansError> {
-        let _ = id;
-        todo!()
+        let plan = named(&id)?;
+        self.edits.delete(&plan).await.map_err(refused)
     }
+}
+
+/// The plan the path names: a name that is no plan ID names no plan.
+fn named(id: &str) -> Result<PlanId, PlansError> {
+    PlanId::parse(id).map_err(|_| PlansError::Unknown {
+        plan: id.to_owned(),
+    })
+}
+
+/// The plan `table` holds, read as the loader reads one of the file's.
+fn read(table: &api::PlanDto) -> Result<Plan, PlansError> {
+    config_adapter::read_plan(&table.0).map_err(|error| match error {
+        ConfigError::Invalid {
+            key: Some(field),
+            problem,
+            ..
+        } => match problem {
+            Problem::Violation(violation) => violated(violation),
+            problem => PlansError::Invalid {
+                field,
+                problem: problem_of(&problem),
+            },
+        },
+        // A table the file's format can't hold, as one with a null in it.
+        ConfigError::Invalid { key: None, .. } => PlansError::InvalidBody,
+        error => unusable(error),
+    })
+}
+
+/// `plan` as the Plans page shows it: its table as the file writes it.
+fn shown(plan: &Plan) -> Result<api::PlanDto, PlansError> {
+    config_adapter::plan_as(plan).map_err(unusable)
+}
+
+/// What is wrong with a plan's setting, as the refusal names it.
+fn problem_of(problem: &Problem) -> PlanProblem {
+    match problem {
+        Problem::MissingKey => PlanProblem::Missing,
+        Problem::UnknownKey => PlanProblem::UnknownKey,
+        Problem::WrongType => PlanProblem::WrongType,
+        _ => PlanProblem::Invalid,
+    }
+}
+
+/// A change the configuration refused.
+fn refused(error: EditError) -> PlansError {
+    match error {
+        EditError::Refused(ChangeRefused::UnknownPlan(plan)) => PlansError::Unknown {
+            plan: plan.as_str().to_owned(),
+        },
+        EditError::Refused(ChangeRefused::Violation(violation)) => violated(violation),
+        EditError::Config(error) => unusable(*error),
+    }
+}
+
+/// A rule of the whole configuration the change would break, at the plan's
+/// setting that breaks it.
+fn violated(violation: Violation) -> PlansError {
+    let at = |field: &str, problem| PlansError::Invalid {
+        field: field.to_owned(),
+        problem,
+    };
+    match violation {
+        Violation::DuplicatePlan { .. } => at("id", PlanProblem::Taken),
+        Violation::UnknownRepository { .. } => at("repository", PlanProblem::UnknownRepository),
+        Violation::NoSources { .. } => at("sources", PlanProblem::NoSources),
+        Violation::UnknownRulePlan { rule, plan } => PlansError::InUse {
+            plan: plan.as_str().to_owned(),
+            rule: rule.as_str().to_owned(),
+        },
+        // No change of a plan reaches the repositories or the channels: the
+        // configuration as it is breaks these, and wouldn't load.
+        violation @ (Violation::SameRepository { .. } | Violation::UnknownChannel { .. }) => {
+            unusable(ConfigError::Invalid {
+                file: "config.toml".to_owned(),
+                key: None,
+                at: None,
+                detail: violation.to_string(),
+                problem: Problem::Violation(violation),
+            })
+        }
+    }
+}
+
+/// A configuration that couldn't be read or written, as every route that
+/// reads the file says it (#347).
+fn unusable(error: ConfigError) -> PlansError {
+    config_unusable(error, |code: ErrorCode, args, detail| {
+        PlansError::Unavailable { code, args, detail }
+    })
 }
 
 #[cfg(test)]
