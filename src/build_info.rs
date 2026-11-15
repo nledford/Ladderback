@@ -19,3 +19,7 @@ pub(crate) fn running() -> api::BuildDto {
 /// The build as people read it (`0.3.0+3f937cf`), which `--version` and the
 /// startup log line say.
 pub(crate) static SHOWN: LazyLock<String> = LazyLock::new(|| running().display());
+
+/// The program and its build as `--version` prints them
+/// (`ladderback 0.3.0+3f937cf`), which every snapshot a backup writes names.
+pub(crate) static NAMED: LazyLock<String> = LazyLock::new(|| todo!("the program and its build"));

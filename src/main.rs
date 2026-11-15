@@ -207,7 +207,7 @@ fn main() -> ExitCode {
             scratch,
             ..
         } => serve_mcp(McpMode::of(connect, token_file, scratch), plain),
-        Command::Worker => engine::worker::main(),
+        Command::Worker => engine::worker::main(build_info::NAMED.as_str()),
     }
 }
 
