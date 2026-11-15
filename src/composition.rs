@@ -29,7 +29,8 @@ use app::ports::{
     AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
     EngineEvent, EngineResult, EventBus, ExportRefusal, HookRunner, HookSetup, Job, Network,
     NetworkLink, NormalizeSources, OperationRecord, OperationStore, PowerSupply, ProfileError,
-    ProfileNotice, Random, RunningJob, ScheduleStore, SnapshotSummary,
+    ProfileNotice, RELEASE_TIMEOUT, Random, ReleaseFeed, ReleaseFeedError, RunningJob,
+    ScheduleStore, SnapshotSummary,
 };
 use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
@@ -41,6 +42,7 @@ use app::repositories::{
 use app::schedule::{PlanRuns, ScheduleReport, Scheduler};
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use app::snapshots::{ListSnapshots, SnapshotError};
+use app::updates::{CheckForUpdates, ReleaseCheckReport, UpdateNotice};
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::RepositoryAlias;
@@ -57,6 +59,7 @@ use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
     SecretValue, SecretWarning, Template,
 };
+use domain::updates::Version;
 use domain::{AgentId, OperationId, PlanId, RepositoryId, SnapshotId};
 use engine::{Recorded, RemovedKind, WorkerEngine};
 use futures::stream::StreamExt;
@@ -71,6 +74,7 @@ use platform::SystemClock;
 use platform::admin_password::FileAdminPassword;
 use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
 use platform::{agent_id, dirs};
+use releases_adapter::GitHubReleases;
 use secrets::SystemSecrets;
 use store::SqliteStore;
 use uuid::Uuid;
@@ -304,7 +308,8 @@ impl RunConditions {
 }
 
 /// The daemon's work that no request starts (§5): the backups the operation
-/// log still holds as queued from before the start, then the scheduler.
+/// log still holds as queued from before the start, then the scheduler; and
+/// beside them the release check, when there is a feed to ask.
 pub(crate) struct Background {
     runner: Arc<PlanRunner>,
     /// The queued operations recovery found, oldest first.
@@ -319,6 +324,17 @@ pub(crate) struct Background {
     /// The changes of the configuration a request saved, which wake the
     /// scheduler to read it again at once (decision 96).
     changes: app::schedule::ConfigChanges,
+    /// What the header shows of the release check's findings.
+    notice: Arc<UpdateNotice>,
+    /// Where the release check asks, `None` for a daemon that never checks.
+    releases: Option<Releases>,
+}
+
+/// What the release check asks (decision NN): its feed, and the version it
+/// compares the feed's newest release with.
+pub(crate) struct Releases {
+    feed: Arc<dyn ReleaseFeed>,
+    running: Version,
 }
 
 impl Background {
@@ -329,37 +345,122 @@ impl Background {
     }
 
     /// Runs the queue's leftovers, oldest first, then the scheduler, with
-    /// `random` spreading its runs over their jitter, until the future is
-    /// dropped.
+    /// `random` spreading its runs over their jitter, and beside them the
+    /// release check, with `random` spreading its checks too, until the
+    /// future is dropped.
     pub(crate) async fn run(self, random: Arc<dyn Random>) {
+        let check = self.releases.map(|releases| CheckForUpdates {
+            clock: Arc::new(SystemClock),
+            random: Arc::clone(&random),
+            feed: releases.feed,
+            schedules: Arc::clone(&self.schedules),
+            config: Arc::clone(&self.config),
+            running: releases.running,
+            notice: self.notice,
+            reports: Arc::new(log_release_check),
+        });
+        let checking = async {
+            if let Some(check) = &check {
+                check.run().await;
+            }
+        };
         let queue = Arc::clone(&self.runner.queue);
         let events = Arc::clone(&self.runner.events);
         let runs: Arc<dyn PlanRuns> = self.runner;
-        resume_queued(
-            self.queued,
-            self.config.as_ref(),
-            self.store,
-            Arc::clone(&events),
-            runs.as_ref(),
-        )
-        .await;
-        Scheduler {
-            clock: Arc::new(SystemClock),
-            random,
-            schedules: self.schedules,
-            config: self.config,
-            power: self.conditions.power,
-            network: self.conditions.network,
-            link: self.conditions.link,
-            runs,
-            queue,
-            zone: domain::TimeZone::system(),
-            ends: self.ends,
-            events,
-            changes: self.changes,
+        let scheduling = async {
+            resume_queued(
+                self.queued,
+                self.config.as_ref(),
+                self.store,
+                Arc::clone(&events),
+                runs.as_ref(),
+            )
+            .await;
+            Scheduler {
+                clock: Arc::new(SystemClock),
+                random,
+                schedules: self.schedules,
+                config: self.config,
+                power: self.conditions.power,
+                network: self.conditions.network,
+                link: self.conditions.link,
+                runs,
+                queue,
+                zone: domain::TimeZone::system(),
+                ends: self.ends,
+                events,
+                changes: self.changes,
+            }
+            .run()
+            .await;
+        };
+        tokio::join!(scheduling, checking);
+    }
+}
+
+/// The variable that points the release check at another address than
+/// GitHub's (decision NN). The tests, `just try` and the smoke test set it
+/// to one nothing answers at, so none of them asks the network.
+const RELEASES_URL_VARIABLE: &str = "LADDERBACK_RELEASES_URL";
+
+/// Where the release check asks: GitHub Releases, or the address `url`
+/// (the value of [`RELEASES_URL_VARIABLE`]) names. `None`, said once in the
+/// log, when that address isn't one or the client can't be built: the
+/// daemon then never checks, rather than ask an address it wasn't given.
+fn releases(url: Option<std::ffi::OsString>) -> Option<Releases> {
+    let running = match Version::parse(env!("CARGO_PKG_VERSION")) {
+        Ok(running) => running,
+        Err(_) => {
+            log::warn!("the release check is off: this build's version isn't one it can compare");
+            return None;
         }
-        .run()
-        .await;
+    };
+    let url = match url.map(std::ffi::OsString::into_string) {
+        None => releases_adapter::LATEST_RELEASE.to_owned(),
+        Some(Ok(url)) => url,
+        Some(Err(_)) => {
+            log::warn!("the release check is off: {RELEASES_URL_VARIABLE} isn't an address");
+            return None;
+        }
+    };
+    match GitHubReleases::new(&url, &running, RELEASE_TIMEOUT) {
+        Ok(feed) => Some(Releases {
+            feed: Arc::new(feed),
+            running,
+        }),
+        Err(error) => {
+            log::warn!("the release check is off: {error}");
+            None
+        }
+    }
+}
+
+/// Says in the log what the release check did (decision NN): a new
+/// available update once, with where its notes are; a check that couldn't
+/// read the newest release only for debugging, as nothing is wrong with
+/// the agent, and never with the feed's own words; the last check that
+/// couldn't be read or kept by the store's code alone (I4).
+fn log_release_check(report: ReleaseCheckReport) {
+    match report {
+        ReleaseCheckReport::UpdateAvailable(version) => log::info!(
+            "Ladderback {version} is available; its release notes are at {}",
+            version.release_notes()
+        ),
+        ReleaseCheckReport::Failed(ReleaseFeedError::Rejected { status }) => log::debug!(
+            "the release check couldn't read the newest release: it was answered with status {status}"
+        ),
+        ReleaseCheckReport::Failed(error) => log::debug!(
+            "the release check couldn't read the newest release ({})",
+            error.reason()
+        ),
+        ReleaseCheckReport::Store(error) => log::warn!(
+            "the release check couldn't read or keep its last check in the operation log ({}); it checks again on its schedule",
+            error.code()
+        ),
+        // The scheduler says the configuration can't be read already.
+        ReleaseCheckReport::Config(error) => {
+            log::debug!("the release check didn't ask: the configuration can't be read: {error}")
+        }
     }
 }
 
@@ -522,6 +623,7 @@ pub(crate) async fn daemon(
         }
     };
     daemon.state.exposure = exposure;
+    daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
     Ok(daemon)
 }
 
@@ -748,6 +850,7 @@ async fn state_over(
         sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
         reads: Arc::default(),
     });
+    let notice = Arc::new(UpdateNotice::new());
     let background = Background {
         runner,
         queued: recovered.queued,
@@ -757,6 +860,8 @@ async fn state_over(
         conditions,
         ends,
         changes,
+        notice: Arc::clone(&notice),
+        releases: None,
     };
     Ok((
         AppState {
@@ -773,7 +878,7 @@ async fn state_over(
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
             restart: http_adapter::Restart::default(),
-            updates: Arc::default(),
+            updates: notice,
         },
         background,
         stopping,

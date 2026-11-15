@@ -273,7 +273,8 @@ serve: build
 # Runs the ladderback binary on folders of its own under the target directory:
 # the configuration, the data and HOME (where rustic keeps its profiles and
 # cache) are all scratch, so nothing reaches your real Ladderback or rustic
-# setup, and the daemon listens on a free port, never `serve`'s 9898. Arguments
+# setup, and the daemon listens on a free port, never `serve`'s 9898. Its
+# release check asks an address nothing answers at, never GitHub. Arguments
 # replace `serve`, and paths are relative to where you run it: `just try
 # import-profile demo.toml` imports into the same scratch configuration. A
 # keyring password source still uses your real OS keyring (the Keychain on
@@ -290,7 +291,7 @@ try *args: build
     mkdir -p "$scratch/config" "$scratch/data" "$scratch/home"
     if [ $# -eq 0 ]; then set -- serve --listen 127.0.0.1:0; fi
     echo "try: scratch folders in $scratch" >&2
-    HOME="$scratch/home" LADDERBACK_CONFIG_DIR="$scratch/config" LADDERBACK_DATA_DIR="$scratch/data" LADDERBACK_CACHE_DIR="$scratch/cache" \
+    HOME="$scratch/home" LADDERBACK_CONFIG_DIR="$scratch/config" LADDERBACK_DATA_DIR="$scratch/data" LADDERBACK_CACHE_DIR="$scratch/cache" LADDERBACK_RELEASES_URL="http://127.0.0.1:9/" \
         exec "$target/debug/ladderback" "$@"
 
 # Calls the cucumber-js that `_ui-deps` installs by its path: `npx` (even

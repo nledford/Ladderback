@@ -19,6 +19,14 @@ pub const DATA_DIR_ENV: &str = "LADDERBACK_DATA_DIR";
 /// The variable that names the daemon's cache folder.
 pub const CACHE_DIR_ENV: &str = "LADDERBACK_CACHE_DIR";
 
+/// The variable that names where the daemon asks for Ladderback's newest
+/// release.
+pub const RELEASES_URL_ENV: &str = "LADDERBACK_RELEASES_URL";
+
+/// Where [`isolate`] has the daemon ask for its newest release: an address
+/// nothing answers at, so no test asks GitHub.
+pub const NO_RELEASE_FEED: &str = "http://127.0.0.1:9/";
+
 /// The config folder [`isolate`] gives a daemon whose scratch folder is `root`.
 pub fn config_dir(root: &Path) -> PathBuf {
     root.join("config")
@@ -36,10 +44,12 @@ pub fn cache_dir(root: &Path) -> PathBuf {
 
 /// Points the daemon that `command` starts at the config, data and cache
 /// folders under `root`, a scratch folder of that daemon's own (the daemon
-/// creates the data and cache folders; the config folder may stay absent).
+/// creates the data and cache folders; the config folder may stay absent),
+/// and its release check at [`NO_RELEASE_FEED`].
 pub fn isolate<'a>(command: &'a mut Command, root: &Path) -> &'a mut Command {
     command
         .env(CONFIG_DIR_ENV, config_dir(root))
         .env(DATA_DIR_ENV, data_dir(root))
         .env(CACHE_DIR_ENV, cache_dir(root))
+        .env(RELEASES_URL_ENV, NO_RELEASE_FEED)
 }

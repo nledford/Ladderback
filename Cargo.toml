@@ -351,6 +351,7 @@ hooks.workspace = true
 log.workspace = true
 notify-adapter.workspace = true
 platform.workspace = true
+releases-adapter.workspace = true
 secrets.workspace = true
 serde.workspace = true
 serde_json.workspace = true

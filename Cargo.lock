@@ -3261,6 +3261,7 @@ dependencies = [
  "nix 0.31.3",
  "notify-adapter",
  "platform",
+ "releases-adapter",
  "rustic_backend",
  "rustic_core",
  "secrets",
