@@ -494,13 +494,17 @@ fn placed(new: &Item) -> Item {
 }
 
 /// Drops the place `table` and the tables in it had in the daemon's text,
-/// so each is written after the table before it in the file.
+/// so each is written after the table before it in the file: a place kept
+/// is one among the file's tables, wherever that puts it. The tables in it
+/// include those of an array, a repository's further locations.
 fn unplace(table: &mut Table) {
     table.set_position(None);
     table.decor_mut().set_prefix("\n");
     for (_, item) in table.iter_mut() {
-        if let Some(table) = item.as_table_mut() {
-            unplace(table);
+        match item {
+            Item::Table(table) => unplace(table),
+            Item::ArrayOfTables(tables) => tables.iter_mut().for_each(unplace),
+            Item::None | Item::Value(_) => {}
         }
     }
 }
@@ -523,11 +527,11 @@ mod tests {
 
     use domain::planning::{
         AgentConfig, AgentSettings, Concurrency, CronExpression, GroupBy, HookEntry, Hooks,
-        Hostname, KeepCount, Maintenance, Overlap, Plan, RepositoryConfig, RepositorySettings,
-        RetentionPolicy, Schedule, Source,
+        Hostname, KeepCount, Location, Maintenance, Overlap, Plan, RepositoryConfig,
+        RepositorySettings, RetentionPolicy, Schedule, Source,
     };
     use domain::secrets::SecretRef;
-    use domain::{PlanId, RepositoryAlias, TimeZoneDatabase};
+    use domain::{PlanId, RepositoryAlias, RepositoryId, TimeZoneDatabase};
 
     use super::saved;
     use crate::schema::{CURRENT_SCHEMA, MAX_CONFIG_BYTES, Schemas, parse, render_as};
@@ -784,6 +788,50 @@ keep-daily = 7
             Some(WRITTEN.replace(
                 "  options = { timeout = \"60s\" }\n",
                 "  options = { timeout = \"60s\" }\n\n[repositories.cloud]\nrepository = \"/srv/demo-cloud\"\npassword-env = \"DEMO_PASSWORD\"\n"
+            ))
+        );
+    }
+
+    /// `usb`, reached at a second location too, which makes it record its
+    /// ID.
+    fn usb_in_two_places() -> RepositoryConfig {
+        let mut usb = entry_at("/Volumes/demo-usb/repo");
+        usb.id = Some(RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"));
+        usb.locations.further = vec![Location::of(&entry_at("/srv/demo-usb-copy").settings)];
+        usb
+    }
+
+    /// `usb_in_two_places` in the daemon's layout, after the blank line
+    /// before it.
+    const USB: &str = "\n[repositories.usb]\nrepository = \"/Volumes/demo-usb/repo\"\nrepository-id = \"0707070707070707070707070707070707070707070707070707070707070707\"\npassword-env = \"DEMO_PASSWORD\"\n\n[[repositories.usb.locations]]\nrepository = \"/srv/demo-usb-copy\"\n";
+
+    #[test]
+    fn a_repository_a_save_adds_comes_with_its_further_locations_before_the_plans() {
+        let saved = changed(WRITTEN, |parts| {
+            parts.repositories.insert(alias("usb"), usb_in_two_places());
+        });
+        assert_eq!(
+            saved,
+            Some(WRITTEN.replace(
+                "  options = { timeout = \"60s\" }\n",
+                &format!("  options = {{ timeout = \"60s\" }}\n{USB}"),
+            ))
+        );
+    }
+
+    /// A plan added first follows the last table before the plans: the
+    /// further locations of a repository added with it are among those.
+    #[test]
+    fn a_plan_a_save_adds_first_follows_the_further_locations_of_a_repository_it_adds() {
+        let saved = changed(WRITTEN, |parts| {
+            parts.repositories.insert(alias("usb"), usb_in_two_places());
+            parts.plans.insert(0, docs());
+        });
+        assert_eq!(
+            saved,
+            Some(WRITTEN.replace(
+                "  options = { timeout = \"60s\" }\n",
+                &format!("  options = {{ timeout = \"60s\" }}\n{USB}{DOCS}"),
             ))
         );
     }
@@ -1088,6 +1136,39 @@ keep-daily = 7
             parts.agent.hostname = Some(Hostname::parse("demo-host").expect("a hostname"));
         });
         assert_eq!(saved, None);
+    }
+
+    /// Text holding what TOML writes only escaped: a carriage return alone
+    /// and before a line feed, a form feed, NUL, the last C0 control and
+    /// DEL, with a line feed, which makes the string one of several lines.
+    const CONTROLS: &str = "a\rb\r\nc\u{c}d\0e\u{1f}f\u{7f}g\n";
+
+    /// A save that sets, adds and adds a table with text holding control
+    /// characters edits the file in place, which reads back as the
+    /// configuration saved (`saved` keeps only an edit that does), and
+    /// what it didn't change stays as written.
+    #[test]
+    fn text_with_control_characters_is_edited_in_and_the_rest_stays_as_written() {
+        let config = rebuilt(&read(WRITTEN), |parts| {
+            let nas = parts.repositories.get_mut(&alias("nas")).expect("nas");
+            nas.settings.repository = format!("/srv/{CONTROLS}");
+            nas.settings
+                .options
+                .insert(CONTROLS.to_owned(), CONTROLS.to_owned());
+            plan_mut(parts, "home").label = Some(CONTROLS.to_owned());
+            parts
+                .repositories
+                .insert(alias("usb"), entry_at(&format!("local:/{CONTROLS}")));
+        });
+        let saved = saved_as(WRITTEN, &config).expect("edited in place");
+        for unchanged in [
+            "# The demo laptop's agent, written by hand.\nschema = 1\n\n[agent]\nconcurrency = 1        # how many operations run at once\nnice    =   10\n\n# The NAS in the hall cupboard.\n[repositories.nas]\n",
+            "  password-env = \"DEMO_PASSWORD\"\n  maintenance = \"none\"   # the hub may own it later\n",
+            "sources = [\n  \"/home/demo\",        # everything\n  \"/srv/demo-shared\",  # and the shared folder\n]\nschedule = { cron = \"0 * * * *\", jitter = \"5 minutes\" }\n",
+            "\n# How long the history goes back.\n[plans.retention]\nkeep-daily = 7\n",
+        ] {
+            assert!(saved.contains(unchanged), "lost {unchanged:?} in:\n{saved}");
+        }
     }
 }
 
