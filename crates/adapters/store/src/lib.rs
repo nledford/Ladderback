@@ -681,10 +681,22 @@ impl ScheduleStore for SqliteStore {
     }
 
     async fn release_check(&self) -> Result<Option<ReleaseCheck>, StoreError> {
-        todo!("{}", self.pool.size())
+        let _call = self.call().await;
+        let found = sqlx::query(sql::RELEASE_CHECK)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        found.as_ref().map(row::release_check).transpose()
     }
 
     async fn keep_release_check(&self, check: &ReleaseCheck) -> Result<(), StoreError> {
-        todo!("{check:?}")
+        let _call = self.call().await;
+        sqlx::query(sql::KEEP_RELEASE_CHECK)
+            .bind(check.at.as_millisecond())
+            .bind(check.update.as_ref().map(ToString::to_string))
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
     }
 }

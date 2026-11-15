@@ -8,7 +8,9 @@
 
 use std::fmt::Display;
 
-use app::ports::{EngineResult, OperationRecord, PendingRetry, PlannedRun, StoreError};
+use app::ports::{
+    EngineResult, OperationRecord, PendingRetry, PlannedRun, ReleaseCheck, StoreError,
+};
 use domain::access::api_token::{
     ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, Scope, Scopes,
 };
@@ -17,6 +19,7 @@ use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
 use domain::maintenance::{RepositoryStats, StatsReading};
+use domain::updates::Version;
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -236,6 +239,27 @@ pub(crate) fn pending_retry(row: &SqliteRow) -> Result<PendingRetry, StoreError>
             at: reader.required_time("retry_at")?,
             until: reader.time("until")?,
         },
+    })
+}
+
+/// The row of `release_check`. A version this version couldn't have written
+/// is [`StoreError::Corrupt`]; the next check writes the row anew.
+pub(crate) fn release_check(row: &SqliteRow) -> Result<ReleaseCheck, StoreError> {
+    let reader = Reader {
+        row,
+        scope: "the release check".to_owned(),
+    };
+    let update = reader
+        .text("update_version")?
+        .map(|text| {
+            Version::parse(&text).map_err(|_| {
+                reader.corrupt("update_version", format!("{} is no version", shown(&text)))
+            })
+        })
+        .transpose()?;
+    Ok(ReleaseCheck {
+        at: reader.required_time("checked_at")?,
+        update,
     })
 }
 

@@ -256,3 +256,15 @@ pub(crate) const LATEST_STATS: &str = select_stats!(" ORDER BY taken_at DESC, id
 /// Every reading of an alias, oldest first, in the order kept among equals.
 /// Parameter: the alias.
 pub(crate) const STATS_HISTORY: &str = select_stats!(" ORDER BY taken_at, id");
+
+/// The last release check; no row before the first.
+pub(crate) const RELEASE_CHECK: &str =
+    "SELECT checked_at, update_version FROM release_check WHERE id = 1";
+
+/// Keeps the release check, in place of the one kept. Parameters:
+/// `checked_at`, `update_version`.
+pub(crate) const KEEP_RELEASE_CHECK: &str = concat!(
+    "INSERT INTO release_check (id, checked_at, update_version) VALUES (1, ?, ?) ",
+    "ON CONFLICT(id) DO UPDATE SET checked_at = excluded.checked_at, ",
+    "update_version = excluded.update_version"
+);
