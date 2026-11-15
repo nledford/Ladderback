@@ -9,6 +9,7 @@ use domain::secrets::{
     FileRead, MAX_SECRET_BYTES, Problem, SecretError, SourceName, decode, file_warning,
 };
 use nix::fcntl::OFlag;
+use zeroize::Zeroizing;
 
 /// Reads the secret in the file at `path`. `credentials_directory` is the
 /// value of `$CREDENTIALS_DIRECTORY`, if it is set.
@@ -46,9 +47,11 @@ pub(crate) fn read(
         return Err(unreachable("not a regular file".to_owned()));
     }
 
-    // One byte more than the limit: that is already too much.
-    let mut bytes = Vec::new();
-    file.take(MAX_SECRET_BYTES as u64 + 1)
+    // One byte more than the limit: that is already too much. Room for all
+    // of it up front, so the buffer never grows and leaves an unwiped copy.
+    let kept = MAX_SECRET_BYTES + 1;
+    let mut bytes = Zeroizing::new(Vec::with_capacity(kept));
+    file.take(kept as u64)
         .read_to_end(&mut bytes)
         .map_err(|error| unreachable(error.to_string()))?;
     let value = decode(&source, &bytes, |text| read.extract(text))?;

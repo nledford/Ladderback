@@ -6028,6 +6028,7 @@ dependencies = [
  "tempfile",
  "testkit",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]

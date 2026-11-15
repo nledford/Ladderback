@@ -125,8 +125,11 @@ pub(crate) fn failure(
             OsStore::SecretService => locked().map_or(Failure::NoEntry, Failure::NoService),
             OsStore::Keychain => Failure::NoEntry,
         },
-        // The error holds the bytes: a secret. Drop them.
-        keyring::Error::BadEncoding(_) => Failure::NotUnicode,
+        // The error holds the bytes: a secret. Wipe them.
+        keyring::Error::BadEncoding(mut bytes) => {
+            zeroize::Zeroize::zeroize(&mut bytes);
+            Failure::NotUnicode
+        }
         error if no_service => Failure::NoService(error.to_string()),
         other => Failure::Unreachable(other.to_string()),
     }
