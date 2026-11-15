@@ -323,6 +323,54 @@ async fn the_tools_listed_are_the_golden_files() {
     );
 }
 
+/// Some clients turn a tool's input schema into a function declaration of a
+/// narrower schema language (§4.6): each argument has one type, never a list
+/// with null, no `format` and no `minimum`, a bound being said in its
+/// description; an optional one is left out of `required`. The tools that
+/// take an operation name it `operation`, as `run_plan` and
+/// `cancel_operation` return it.
+#[tokio::test(start_paused = true)]
+async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_are_required() {
+    let mut client = connect(told());
+    let answer = client.ask_current("tools/list", json!({})).await;
+    let mut required = HashMap::new();
+    for tool in answer["result"]["tools"].as_array().expect("a list of tools") {
+        let name = tool["name"].as_str().expect("a name");
+        let schema = &tool["inputSchema"];
+        let arguments = schema["properties"].as_object().expect("its arguments");
+        for (argument, argument_schema) in arguments {
+            assert!(argument_schema["type"].is_string(), "{name}.{argument}: {schema}");
+            assert!(argument_schema.get("format").is_none(), "{name}.{argument}: {schema}");
+            assert!(argument_schema.get("minimum").is_none(), "{name}.{argument}: {schema}");
+        }
+        let needed: Vec<&str> = schema["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|argument| argument.as_str().expect("an argument's name"))
+            .collect();
+        required.insert(name, needed);
+    }
+    let expected: HashMap<&str, Vec<&str>> = [
+        ("status", vec![]),
+        ("list_plans", vec![]),
+        ("list_repositories", vec![]),
+        ("list_snapshots", vec!["repository"]),
+        ("list_operations", vec![]),
+        ("get_operation", vec!["operation"]),
+        ("run_plan", vec!["plan"]),
+        ("wait_operation", vec!["operation"]),
+        ("cancel_operation", vec!["operation"]),
+        ("test_repository", vec!["repository"]),
+        ("preview_forget", vec!["repository"]),
+        ("preview_import", vec!["content", "repository"]),
+        ("export_profile", vec!["plan"]),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(required, expected);
+}
+
 #[tokio::test(start_paused = true)]
 async fn status_names_this_programs_build_field_by_field_and_what_the_backend_told() {
     let mut client = connect(told());
@@ -386,11 +434,22 @@ async fn an_unknown_tool_is_invalid_params() {
     assert_eq!(answer["error"]["code"], -32602, "{answer}");
 }
 
+/// The `invalid-arguments` refusal of `field`, for `problem`.
+fn invalid(field: &str, problem: &str) -> Value {
+    json!({
+        "code": "invalid-arguments",
+        "args": {
+            "field": {"type": "text", "value": field},
+            "problem": {"type": "text", "value": problem},
+        },
+    })
+}
+
 #[tokio::test(start_paused = true)]
-async fn arguments_to_status_are_invalid_params() {
+async fn an_argument_to_status_is_refused_as_one_it_doesnt_take() {
     let mut client = connect(told());
     let answer = client.call_status(json!({"plan": "home"})).await;
-    assert_eq!(answer["error"]["code"], -32602, "{answer}");
+    assert_eq!(refusal(&answer), invalid("plan", "unknown-key"));
 }
 
 /// A `tools/list` request with the ID `id`, padded so that its line, the
@@ -760,13 +819,6 @@ async fn list_snapshots_reads_the_repository_named_and_pages_by_snapshot_id() {
     );
 }
 
-#[tokio::test(start_paused = true)]
-async fn list_snapshots_without_a_repository_is_invalid_params() {
-    let mut client = connect(Lists::default());
-    let answer = client.call("list_snapshots", json!({"limit": 2})).await;
-    assert_eq!(answer["error"]["code"], -32602, "{answer}");
-}
-
 /// Snapshot `n` of `plan`, taken on `host`, tagged as a plan's backup is,
 /// after a tag of the user's.
 fn snapshot_of(n: u8, plan: &str, host: &str) -> api::SnapshotDto {
@@ -914,7 +966,9 @@ async fn get_operation_lists_the_first_hundred_warnings_and_counts_the_rest() {
     let asked = Arc::clone(&lists.asked);
     let mut client = connect(lists);
     let id = summary(1).id;
-    let content = client.listed("get_operation", json!({"id": id})).await;
+    let content = client
+        .listed("get_operation", json!({"operation": id}))
+        .await;
     assert_eq!(
         content["operation"],
         serde_json::to_value(summary(1)).unwrap()
@@ -936,35 +990,80 @@ async fn get_operation_with_every_warning_listed_counts_none_unlisted() {
         ..Lists::default()
     });
     let content = client
-        .listed("get_operation", json!({"id": summary(1).id}))
+        .listed("get_operation", json!({"operation": summary(1).id}))
         .await;
     assert_eq!(content["warnings"].as_array().map(Vec::len), Some(100));
     assert_eq!(content["unlisted-warnings"], 0);
 }
 
+/// An argument a tool can't take is the tool's refusal, which the agent
+/// reads, naming the argument and what is wrong with it but never the value
+/// given; and the backend is asked nothing.
 #[tokio::test(start_paused = true)]
-async fn a_missing_or_unknown_argument_is_invalid_params() {
-    let mut client = connect(Lists::default());
-    for (tool, arguments) in [
-        ("get_operation", json!({})),
-        ("list_plans", json!({"plan": "home"})),
-        ("list_repositories", json!({"limit": "ten"})),
-        ("list_operations", json!({"repository": "nas"})),
-        ("test_repository", json!({})),
+async fn an_argument_a_tool_cant_take_is_refused_naming_it() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = connect(lists);
+    for (tool, arguments, field, problem) in [
+        ("get_operation", json!({}), "operation", "missing"),
+        ("get_operation", json!({"id": "x"}), "id", "unknown-key"),
+        ("list_plans", json!({"plan": "home"}), "plan", "unknown-key"),
+        ("list_repositories", json!({"limit": "ten"}), "limit", "invalid"),
+        ("list_snapshots", json!({"limit": 2}), "repository", "missing"),
+        (
+            "list_snapshots",
+            json!({"repository": "nas", "host": ["canary-host"]}),
+            "host",
+            "invalid",
+        ),
+        (
+            "list_operations",
+            json!({"repository": "nas"}),
+            "repository",
+            "unknown-key",
+        ),
+        ("list_operations", json!({"limit": -1}), "limit", "invalid"),
+        ("list_operations", json!({"limit": 2.5}), "limit", "invalid"),
+        // Null for an argument it needs is no value for it; for an optional
+        // one it is the argument left out, so the one it needs is missing.
+        (
+            "get_operation",
+            json!({"operation": null}),
+            "operation",
+            "invalid",
+        ),
+        (
+            "list_snapshots",
+            json!({"limit": null}),
+            "repository",
+            "missing",
+        ),
+        ("test_repository", json!({}), "repository", "missing"),
         (
             "preview_forget",
             json!({"repository": "nas", "selection": "x"}),
+            "selection",
+            "unknown-key",
         ),
-        ("preview_import", json!({"content": "[repository]\n"})),
+        (
+            "preview_import",
+            json!({"content": "[repository]\n"}),
+            "repository",
+            "missing",
+        ),
         (
             "preview_import",
             json!({"path": "/etc/rustic/nas.toml", "repository": "nas"}),
+            "path",
+            "unknown-key",
         ),
-        ("export_profile", json!({"plan": 7})),
+        ("export_profile", json!({"plan": 7}), "plan", "invalid"),
     ] {
         let answer = client.call(tool, arguments).await;
-        assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");
+        assert_eq!(refusal(&answer), invalid(field, problem), "{tool}");
+        assert!(!answer.to_string().contains("canary"), "{answer}");
     }
+    assert!(asked.lock().unwrap().is_empty(), "{:?}", asked.lock());
 }
 
 #[tokio::test(start_paused = true)]
@@ -988,10 +1087,10 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
         ("list_repositories", json!({})),
         ("list_snapshots", json!({"repository": "nas"})),
         ("list_operations", json!({})),
-        ("get_operation", json!({"id": summary(1).id})),
+        ("get_operation", json!({"operation": summary(1).id})),
         ("run_plan", json!({"plan": "home"})),
-        ("wait_operation", json!({"id": summary(1).id})),
-        ("cancel_operation", json!({"id": summary(1).id})),
+        ("wait_operation", json!({"operation": summary(1).id})),
+        ("cancel_operation", json!({"operation": summary(1).id})),
         ("test_repository", json!({"repository": "nas"})),
         ("preview_forget", json!({"repository": "nas"})),
         (
@@ -1103,10 +1202,10 @@ fn every_tool_called() -> [(&'static str, Value); 13] {
         ("list_repositories", json!({})),
         ("list_snapshots", json!({"repository": "nas"})),
         ("list_operations", json!({})),
-        ("get_operation", json!({"id": summary(1).id})),
+        ("get_operation", json!({"operation": summary(1).id})),
         ("run_plan", json!({"plan": "home"})),
-        ("wait_operation", json!({"id": summary(1).id})),
-        ("cancel_operation", json!({"id": summary(1).id})),
+        ("wait_operation", json!({"operation": summary(1).id})),
+        ("cancel_operation", json!({"operation": summary(1).id})),
         ("test_repository", json!({"repository": "nas"})),
         ("preview_forget", json!({"repository": "nas"})),
         (
@@ -1172,7 +1271,9 @@ async fn cancel_operation_asks_the_backend_to_cancel_and_names_the_operation() {
     let asked = Arc::clone(&lists.asked);
     let mut client = connect(lists);
     let id = summary(1).id;
-    let content = client.listed("cancel_operation", json!({"id": id})).await;
+    let content = client
+        .listed("cancel_operation", json!({"operation": id}))
+        .await;
     assert_eq!(content, json!({"operation": id}));
     assert_eq!(*asked.lock().unwrap(), [format!("cancel {id}")]);
 }
@@ -1184,7 +1285,7 @@ async fn a_cancel_the_backend_refuses_is_its_refusal_marked_as_an_error() {
         ..Lists::default()
     });
     let answer = client
-        .call("cancel_operation", json!({"id": summary(1).id}))
+        .call("cancel_operation", json!({"operation": summary(1).id}))
         .await;
     assert_eq!(
         refusal(&answer),
@@ -1289,18 +1390,33 @@ async fn a_forget_preview_answered_with_another_kind_is_daemon_unreachable() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_acting_tools_refuse_a_missing_or_unknown_argument_as_invalid_params() {
-    let mut client = connect(Lists::default());
-    for (tool, arguments) in [
-        ("run_plan", json!({})),
-        ("run_plan", json!({"plan": "home", "now": true})),
-        ("wait_operation", json!({"timeout": 5})),
-        ("wait_operation", json!({"id": "x", "timeout": -1})),
-        ("cancel_operation", json!({})),
+async fn the_acting_tools_refuse_an_argument_they_cant_take_naming_it() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = connect(lists);
+    for (tool, arguments, field, problem) in [
+        ("run_plan", json!({}), "plan", "missing"),
+        (
+            "run_plan",
+            json!({"plan": "home", "now": true}),
+            "now",
+            "unknown-key",
+        ),
+        ("wait_operation", json!({"timeout": 5}), "operation", "missing"),
+        (
+            "wait_operation",
+            json!({"operation": "x", "timeout": -1}),
+            "timeout",
+            "invalid",
+        ),
+        ("wait_operation", json!({"id": "x"}), "id", "unknown-key"),
+        ("cancel_operation", json!({}), "operation", "missing"),
+        ("cancel_operation", json!({"id": "x"}), "id", "unknown-key"),
     ] {
         let answer = client.call(tool, arguments).await;
-        assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");
+        assert_eq!(refusal(&answer), invalid(field, problem), "{tool}");
     }
+    assert!(asked.lock().unwrap().is_empty(), "{:?}", asked.lock());
 }
 
 /// More summary reads than any wait makes: 121 in sixty seconds. A wait
@@ -1431,7 +1547,7 @@ impl Client {
         if let Some(token) = progress {
             meta["progressToken"] = json!(token);
         }
-        let mut arguments = json!({"id": summary(1).id});
+        let mut arguments = json!({"operation": summary(1).id});
         if let Some(timeout) = timeout {
             arguments["timeout"] = json!(timeout);
         }
@@ -1602,7 +1718,7 @@ async fn cancelling_a_wait_stops_the_wait_and_never_the_operation() {
             "method": "tools/call",
             "params": {
                 "name": "wait_operation",
-                "arguments": {"id": summary(1).id, "timeout": 60},
+                "arguments": {"operation": summary(1).id, "timeout": 60},
                 "_meta": meta,
             },
         }))
