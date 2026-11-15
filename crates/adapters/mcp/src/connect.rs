@@ -103,9 +103,10 @@ impl DaemonUrl {
     }
 
     /// The URL of `route`, then `segments`, each percent-encoded as one
-    /// segment of the path, so no text a tool is given reaches another
-    /// route. A segment `.` or `..` would be left out: callers send none
-    /// ([`segment`]).
+    /// segment of the path. A segment `.` or `..` would be left out, and a
+    /// tab, line feed or carriage return stripped before that is checked, so
+    /// callers send only what [`segment`] passes: then no text a tool is
+    /// given reaches another route or names another item.
     fn route_to(&self, route: &str, segments: &[&str]) -> Option<Url> {
         let mut url = self.route(route)?;
         url.path_segments_mut().ok()?.extend(segments);
@@ -114,9 +115,12 @@ impl DaemonUrl {
 }
 
 /// `text` as one segment of a route's path, unless it is one no route takes
-/// (empty, `.` or `..`), which names nothing the daemon holds.
+/// (empty, `.` or `..`) or holds an ASCII control character, which names
+/// nothing the daemon holds: the path would lose a tab, line feed or
+/// carriage return, so `na\tme` would name `name`.
 fn segment(text: &str) -> Option<&str> {
-    (!matches!(text, "" | "." | "..")).then_some(text)
+    (!matches!(text, "" | "." | "..") && !text.chars().any(|c| c.is_ascii_control()))
+        .then_some(text)
 }
 
 /// The HTTP client could not be built: its TLS could not start.

@@ -348,7 +348,11 @@ async fn the_repository_is_sent_as_one_segment_of_the_path_whatever_it_holds() {
 #[tokio::test]
 async fn a_name_no_path_segment_can_hold_is_refused_without_asking_the_daemon() {
     let connect = Connect::new(daemon(a_daemon_that_echoes_the_path()).await).unwrap();
-    for name in ["", ".", ".."] {
+    // A tab, line feed or carriage return would be stripped from the path
+    // as it is written: `na\ts` would name `nas`, and `.\t.` would be `..`.
+    for name in [
+        "", ".", "..", "na\ts", ".\t.", "\n", "a\rb", "nas\0", "x\u{7f}y",
+    ] {
         let text = api::MsgArg::Text(name.to_owned());
         assert_eq!(
             connect.snapshots(name.to_owned()).await,
