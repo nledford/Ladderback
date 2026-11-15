@@ -142,6 +142,16 @@ exclude_re = [
     # slower, so no test can tell it from the cache. A guard of `true` (an old
     # locale's localizer for a new one) is not excluded and is caught.
     'crates/adapters/notify/src/lib\.rs.*: replace match guard held\.0 == \*locale with false in HttpNotifier::in_locale$',
+    # `wait_operation` answers a call cancelled mid-wait with what it last
+    # read, but `rmcp` drops every answer to a request the client cancelled
+    # (it forgets the request when `notifications/cancelled` arrives, and
+    # its sink drops an answer to a request it no longer holds), and the
+    # session's end cancels it with no client left to answer. So whether
+    # that answer says `finished` reaches no one;
+    # `cancelling_a_wait_stops_the_wait_and_never_the_operation` checks that
+    # it is never sent. The other `!`s of the wait are not excluded and are
+    # caught. Named by line, so a moved line brings the mutant back to judge.
+    'crates/adapters/mcp/src/lib\.rs:428:31: delete ! in Server::wait_operation$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
