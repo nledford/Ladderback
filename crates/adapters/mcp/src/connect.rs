@@ -187,6 +187,10 @@ impl Connect {
             .timeout(REQUEST_TIMEOUT)
             .redirect(redirect::Policy::none())
             .referer(false)
+            // A proxy the environment names (`HTTP_PROXY`, `ALL_PROXY`) would
+            // be sent a plain `http` request to loopback, its token included
+            // (decision 87): the daemon is reached directly or not at all.
+            .no_proxy()
             .build()
             .map_err(|error| ClientUnavailable(error.to_string()))?;
         Ok(Self {
