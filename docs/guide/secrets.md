@@ -7,11 +7,13 @@ The Repositories page saves the password you type into `config.toml`, and the pa
   ```sh
   # macOS: the login keychain
   security add-generic-password -s ladderback -a nas -w
-  # Linux: the Secret Service, such as GNOME Keyring
+  # Linux: the Secret Service, such as oo7, GNOME Keyring or KWallet
   secret-tool store --label="Ladderback: nas" service ladderback username nas
   ```
 
   Then write `password-keyring = "ladderback/nas"`, the service and the name.
+
+  On Linux the Secret Service starts with your desktop session: oo7 (`oo7-daemon`) on Fedora 45, GNOME Keyring, or KDE's KWallet, which hasn't been tested with Ladderback. Where there is none, the install script's closing notes say so. A service that keeps running while you are logged out (`loginctl enable-linger`) starts at boot, before you log in, and can't read the keyring until you do, which `ladderback install-service` points out. On a machine that backs up while you are logged out, use a password file instead.
 - **A password file** that only you can read. Ladderback reads its first line, and warns when others can read it:
 
   ```sh
