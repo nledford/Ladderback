@@ -73,13 +73,15 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let toast = RwSignal::<Option<String>>::new(None);
     let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
     // The review demos: whether each is open, and what confirming the first
-    // announces. The third starts on a button of its own (`starts_on`).
+    // announces, either way it goes ahead. The third starts on a button of
+    // its own (`starts_on`).
     let review_open = RwSignal::new(false);
     let empty_review_open = RwSignal::new(false);
     let secret_review_open = RwSignal::new(false);
     let secret_copy = NodeRef::<leptos::html::Button>::new();
     let review_confirmed = t(msg::UI_GALLERY_DEMO_REVIEW_CONFIRMED);
     let review_body = t(msg::UI_GALLERY_DEMO_REVIEW_BODY);
+    let also_confirmed = review_confirmed.clone();
     let empty_review_body = t(msg::UI_GALLERY_DEMO_EMPTY_REVIEW_BODY);
     let secret_review_body = t(msg::UI_GALLERY_DEMO_SECRET_REVIEW_BODY);
     let copy_demo_secret = t(msg::UI_GALLERY_COPY_DEMO_SECRET);
@@ -326,6 +328,13 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     action: Callback::new(move |()| {
                         review_open.set(false);
                         reply(Politeness::Polite, &review_confirmed);
+                    }),
+                })
+                also=Some(Confirmation {
+                    label: t(msg::UI_GALLERY_ALSO_DEMO_REVIEW),
+                    action: Callback::new(move |()| {
+                        review_open.set(false);
+                        reply(Politeness::Polite, &also_confirmed);
                     }),
                 })
                 returns_to="gallery-review".to_owned()

@@ -288,6 +288,9 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
         (Method::DELETE, "/api/v1/session", None),
         (Method::GET, "/api/v1/tokens", None),
         (Method::POST, "/api/v1/tokens", None),
+        (Method::GET, "/api/v1/restart", None),
+        (Method::POST, "/api/v1/restart", None),
+        (Method::DELETE, "/api/v1/restart", None),
         (Method::DELETE, "/api/v1/tokens/abcdefghijkl", None),
         (Method::POST, "/api/v1/repositories", None),
         (Method::POST, "/api/v1/repositories/_test", None),
@@ -411,9 +414,59 @@ async fn a_good_token_beside_a_live_session_still_cannot_use_a_session_only_rout
         ),
         delete("/api/v1/tokens/abcdefghijkl", &both),
         post("/api/v1/repositories/home/maintenance", &both, "{}"),
+        get("/api/v1/restart", &both),
+        post("/api/v1/restart", &both, r#"{"when":"now"}"#),
+        delete("/api/v1/restart", &both),
     ] {
         assert_needs(&daemon, request, "session").await;
     }
+}
+
+/// No operations, for a daemon that offers a restart.
+struct Idle;
+
+impl crate::Work for Idle {
+    fn hold(&self) {}
+
+    fn release(&self) {}
+
+    fn running(&self) -> usize {
+        0
+    }
+}
+
+#[tokio::test]
+async fn the_signed_in_admin_restarts_with_the_csrf_token_and_is_named_as_who_asked() {
+    use futures::FutureExt;
+    let daemon = Daemon::new();
+    let (cookie, csrf) = daemon.signed_in().await;
+    let restart = crate::Restart::new(true, Arc::new(Idle));
+    let send = |request: Request| {
+        let mut state = daemon.state();
+        state.restart = restart.clone();
+        router(Arc::new(NoUi), RequestChecks::default(), state).oneshot(request)
+    };
+    let without_csrf = send(post(
+        "/api/v1/restart",
+        &[("cookie", &cookie)],
+        r#"{"when":"now"}"#,
+    ))
+    .await
+    .unwrap();
+    assert_eq!(without_csrf.status(), StatusCode::FORBIDDEN);
+    assert_eq!(restart.due().now_or_never(), None, "restarted without CSRF");
+    let asked = send(post(
+        "/api/v1/restart",
+        &[("cookie", &cookie), ("x-csrf-token", &csrf)],
+        r#"{"when":"now"}"#,
+    ))
+    .await
+    .unwrap();
+    assert_eq!(asked.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        restart.due().now_or_never(),
+        Some(crate::RestartAsker::SignedInAdmin)
+    );
 }
 
 #[tokio::test]

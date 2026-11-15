@@ -37,6 +37,8 @@ pub struct BackupQueue {
     running: BTreeMap<Ticket, PlanId>,
     /// By ticket, so oldest first.
     waiting: BTreeMap<Ticket, PlanId>,
+    /// Held for a restart: no waiting run starts again (decision 94).
+    held: bool,
 }
 
 impl BackupQueue {
@@ -47,6 +49,7 @@ impl BackupQueue {
             issued: 0,
             running: BTreeMap::new(),
             waiting: BTreeMap::new(),
+            held: false,
         }
     }
 
@@ -84,10 +87,10 @@ impl BackupQueue {
 
     /// Starts the waiting runs that may start now, and returns their
     /// tickets: while fewer than the limit run, the oldest waiting run whose
-    /// plan has none running.
+    /// plan has none running. A held queue starts none.
     pub fn start(&mut self) -> Vec<Ticket> {
         let mut started = Vec::new();
-        while self.running.len() < usize::from(self.limit.get()) {
+        while !self.held && self.running.len() < usize::from(self.limit.get()) {
             let running = &self.running;
             let Some(ticket) = self
                 .waiting
@@ -119,6 +122,25 @@ impl BackupQueue {
             .chain(self.waiting.values())
             .any(|going| going == plan)
     }
+
+    /// Holds the queue for a restart that waits for the running backups to
+    /// end: from now on no waiting run starts, and a run that asks for a
+    /// place waits, for the daemon that starts next to run (decision 94).
+    /// The restart ends the hold, or [`Self::release`] when it is cancelled.
+    pub fn hold(&mut self) {
+        self.held = true;
+    }
+
+    /// Lets go of the hold of a restart that was cancelled: the waiting runs
+    /// start again at the next [`Self::start`], under the limit.
+    pub fn release(&mut self) {
+        self.held = false;
+    }
+
+    /// How many backups hold a slot: running, past their turn.
+    pub fn running(&self) -> usize {
+        self.running.len()
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +155,48 @@ mod tests {
 
     fn limit(value: i64) -> Concurrency {
         Concurrency::new(value).unwrap()
+    }
+
+    #[test]
+    fn a_held_queue_starts_no_waiting_run_while_its_running_ones_end() {
+        let mut queue = BackupQueue::new(limit(1));
+        let home = queue.push(&plan("home"));
+        let docs = queue.push(&plan("docs"));
+        assert_eq!(queue.start(), vec![home]);
+        queue.hold();
+        let photos = queue.push(&plan("photos"));
+        assert_eq!(queue.running(), 1);
+        queue.leave(home);
+        assert_eq!(queue.start(), Vec::<Ticket>::new());
+        assert_eq!(queue.running(), 0);
+        assert!(queue.is_going(&plan("docs")) && queue.is_going(&plan("photos")));
+        // Left before their turn, as a cancel takes them out.
+        queue.leave(docs);
+        queue.leave(photos);
+        assert!(!queue.is_going(&plan("docs")));
+    }
+
+    #[test]
+    fn a_released_queue_starts_its_waiting_runs_oldest_first_under_the_limit() {
+        let mut queue = BackupQueue::new(limit(1));
+        queue.hold();
+        let home = queue.push(&plan("home"));
+        queue.push(&plan("docs"));
+        assert_eq!(queue.start(), Vec::<Ticket>::new());
+        queue.release();
+        assert_eq!(queue.start(), vec![home]);
+    }
+
+    #[test]
+    fn the_running_count_is_the_runs_past_their_turn() {
+        let mut queue = BackupQueue::new(limit(2));
+        assert_eq!(queue.running(), 0);
+        queue.push(&plan("home"));
+        queue.push(&plan("docs"));
+        queue.push(&plan("photos"));
+        assert_eq!(queue.running(), 0, "waiting runs aren't running");
+        queue.start();
+        assert_eq!(queue.running(), 2);
     }
 
     #[test]

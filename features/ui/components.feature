@@ -175,11 +175,24 @@ Feature: The shared components in the gallery
     And I press Enter
     Then focus is inside the dialog "Demo review to confirm"
     And focus is on the button "Cancel"
-    When I press Tab until focus is on the button "Confirm the demo review"
+    When I press Tab until focus is on the button "Confirm the demo review now"
     And I press Tab
     Then focus is on the first control of the dialog "Demo review to confirm"
     When I press Escape
     Then focus is on the button "Open a demo review"
+
+  Scenario: A review dialog's second way to go ahead comes after its confirm button
+    When I open the component gallery
+    And I press Tab until focus is on the button "Open a demo review"
+    And I press Enter
+    Then focus is on the button "Cancel"
+    When I press Tab
+    Then focus is on the button "Confirm the demo review"
+    When I press Tab
+    Then focus is on the button "Confirm the demo review now"
+    When I press Tab
+    Then focus is on the first control of the dialog "Demo review to confirm"
+    And focus is on the button "Cancel"
 
   Scenario: A confirmed review dialog closes, returns focus and announces after it closed
     When I open the component gallery

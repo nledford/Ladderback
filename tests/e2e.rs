@@ -71,6 +71,8 @@ mod plan_settings_steps;
 mod repositories_steps;
 #[path = "steps/rest_server.rs"]
 mod rest_server_steps;
+#[path = "steps/restart_from_settings.rs"]
+mod restart_from_settings_steps;
 #[path = "steps/restart.rs"]
 mod restart_steps;
 #[path = "steps/service.rs"]
@@ -117,6 +119,7 @@ struct Agent {
     install: install_script_steps::InstallScriptE2e,
     notifications: notifications_steps::NotificationsE2e,
     api_tokens: api_tokens_steps::ApiTokensE2e,
+    restarting: restart_from_settings_steps::Restarting,
 }
 
 impl std::fmt::Debug for Agent {
@@ -168,6 +171,7 @@ impl Agent {
             maintenance: maintenance_steps::MaintenanceE2e::default(),
             notifications: notifications_steps::NotificationsE2e::default(),
             api_tokens: api_tokens_steps::ApiTokensE2e::default(),
+            restarting: restart_from_settings_steps::Restarting::default(),
         }
     }
 

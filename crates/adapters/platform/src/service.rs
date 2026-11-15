@@ -51,6 +51,17 @@ const MANAGER_LIMIT: Duration = Duration::from_secs(30);
 /// stop short (decision 92, #543).
 pub const KILL_AFTER: Duration = Duration::from_secs(75);
 
+/// The status the agent exits with after an orderly stop asked for as a
+/// restart (EX_TEMPFAIL), which the service files have the manager start it
+/// again on: launchd on any exit but a successful one, systemd through
+/// `RestartForceExitStatus=` (decision 94).
+pub const RESTART_STATUS: u8 = 75;
+
+/// The argument the service files pass after `serve`: it tells the agent a
+/// service manager runs it and starts it again after a restart, so Settings
+/// offers one (decision 94).
+pub const SERVICE_MANAGED: &str = "--service-managed";
+
 /// The exit codes of `launchctl print` for an agent that isn't loaded: 113
 /// ("Could not find service"), and 3 (`ESRCH`, "No such process") from
 /// older releases.

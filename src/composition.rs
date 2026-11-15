@@ -479,12 +479,22 @@ pub(crate) fn sign_in() -> Result<SignInDecided, Refused> {
 /// may use it, or why it cannot, and `exposure` who can reach it, which the
 /// session route tells the page. With sign-in on, the sessions draw their
 /// tokens from `random`, and the API tokens are kept in the daemon's store.
+/// A restart is offered when `service_managed`: a service manager runs the
+/// daemon, and starts it again once it exits (decision 94).
 pub(crate) async fn daemon(
     sign_in: SignInDecided,
     random: Arc<dyn Random>,
     exposure: http_adapter::Exposure,
+    service_managed: bool,
 ) -> Result<Daemon, Refused> {
     let mut daemon = daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await?;
+    daemon.state.restart = http_adapter::Restart::new(
+        service_managed,
+        Arc::new(runs::Work {
+            queue: Arc::clone(&daemon.background.runner.queue),
+            runs: daemon.background.runs(),
+        }),
+    );
     daemon.state.sign_in = match sign_in {
         SignInDecided::Off(kept) => SignIn::Off(kept),
         SignInDecided::On(password) => SignIn::On(Arc::new(app::access::Access::new(
@@ -706,6 +716,7 @@ async fn state_over(
             sign_in: SignIn::Off(Arc::new(FileAdminPassword::in_data_dir(data_dir))),
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
+            restart: http_adapter::Restart::default(),
         },
         background,
         stopping,

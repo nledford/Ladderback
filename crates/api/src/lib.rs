@@ -299,6 +299,13 @@ pub enum ErrorCode {
     ApiTokenScope,
     /// Sign-in is off, so there are no API tokens to create, list or revoke.
     SignInOff,
+    /// A restart was asked for, but no service manager runs the daemon to
+    /// start it again: its service file didn't pass `--service-managed`, as
+    /// with `ladderback serve` started by hand (decision 94).
+    RestartUnavailable,
+    /// A maintenance run was asked for while a restart waits for the running
+    /// operations to finish: it starts no new one meanwhile (decision 94).
+    RestartPending,
     /// An API token's label is empty, blank, holds a control character, or is
     /// longer than `max` characters.
     ApiTokenLabel,
@@ -951,6 +958,8 @@ impl ErrorCode {
             | Self::SignInUnavailable
             | Self::ApiTokenInvalid
             | Self::SignInOff
+            | Self::RestartUnavailable
+            | Self::RestartPending
             | Self::ApiTokenNoScope
             | Self::ApiTokensUnavailable
             | Self::InlineSecret
@@ -1890,6 +1899,8 @@ mod tests {
             ErrorCode::SignInUnavailable,
             ErrorCode::ApiTokenInvalid,
             ErrorCode::SignInOff,
+            ErrorCode::RestartUnavailable,
+            ErrorCode::RestartPending,
             ErrorCode::ApiTokenNoScope,
             ErrorCode::ApiTokensUnavailable,
             ErrorCode::ConfigFolderUnknown,
@@ -3483,6 +3494,37 @@ pub struct SessionDto {
     pub admin_password: Option<AdminPasswordDto>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildDto>,
+}
+
+/// What `GET /api/v1/restart` answers, and `POST` once it has taken a
+/// request (decision 94): whether Settings offers a restart, which it does
+/// only when a service manager runs the daemon and starts it again once it
+/// exits; whether a restart asked for once the running operations finish is
+/// pending, neither come nor cancelled, whatever runs (it stays pending
+/// until the daemon stops); and how many operations are running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RestartDto {
+    pub offered: bool,
+    pub pending: bool,
+    pub running: u32,
+}
+
+/// The body of `POST /api/v1/restart`: when the daemon restarts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RestartRequestDto {
+    pub when: RestartWhenDto,
+}
+
+/// When a restart happens: once no operation is running, starting no queued
+/// one meanwhile (`finished`); or at once, stopping the running operations
+/// in order, as any stop does (`now`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestartWhenDto {
+    Finished,
+    Now,
 }
 
 /// The build a program came from (§3.1, decision 90): its version, the

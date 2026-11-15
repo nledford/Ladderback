@@ -368,6 +368,30 @@ pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
     ))
 }
 
+/// Reads `url` as typed JSON, as the page's own read (a poll), which keeps
+/// no session alive; `None` is anything but the answer, as for `read_as`,
+/// an answer that takes longer than `patience` included.
+pub(crate) async fn poll<T: DeserializeOwned>(url: &str, patience: Duration) -> Option<T> {
+    read_as(url, Asked::OnItsOwn, Some(patience)).await
+}
+
+/// Whether the daemon answers, within `patience`: the page's own read of the
+/// session route, whose answer counts signed in or not, as from a daemon
+/// just started with sign-in newly on, but only as Ladderback's own
+/// (`restart::is_ladderback`), never a proxy's for a daemon that is down.
+pub(crate) async fn answers(patience: Duration) -> bool {
+    let url = format!("{}{SESSION_PATH}", origin());
+    send(Some(patience), Asked::OnItsOwn, |_, signal| {
+        Request::get(&url)
+            .header(api::BACKGROUND_HEADER, "1")
+            .abort_signal(signal)
+            .build()
+            .ok()
+    })
+    .await
+    .is_some_and(|(status, text)| crate::restart::is_ladderback(status, &text))
+}
+
 /// Posts `body` as JSON to `url` (the JSON-body rule applies to every
 /// mutating method, §4.2), with the session's CSRF token when sign-in is on,
 /// and sorts the answer.

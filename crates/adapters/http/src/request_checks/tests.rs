@@ -42,6 +42,7 @@ pub(crate) fn test_state() -> AppState {
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
+        restart: crate::Restart::default(),
     }
 }
 

@@ -2,7 +2,7 @@
 
 ## Sign-in
 
-Sign-in is off until you set an admin password with `ladderback set-password`, which turns it on the next time Ladderback starts (for the service, run `ladderback install-service` again). With sign-in off, anyone with an account on the machine can use Ladderback, so set a password on a machine others use.
+Sign-in is off until you set an admin password with `ladderback set-password`, which turns it on the next time Ladderback starts (for the service, use **Restart Ladderback** in Settings, or run `ladderback install-service` again). With sign-in off, anyone with an account on the machine can use Ladderback, so set a password on a machine others use.
 
 ## Listening beyond loopback
 

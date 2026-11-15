@@ -98,6 +98,11 @@ pub(super) async fn start(
     request: MaintenanceRequest,
     selection: Option<String>,
 ) -> Result<String, MaintenanceRefusal> {
+    // Counted from the request on, so a restart asked for from now on waits
+    // for it; a restart that already waits starts no new run (decision 94).
+    let Some(maintaining) = runner.runs.maintaining() else {
+        return Err(unavailable(ErrorCode::RestartPending, Vec::new(), None));
+    };
     let alias = alias_of(&repository)?;
     let kind = kind_of(request)?;
     let held = selection.as_deref().map(held_of).transpose()?;
@@ -120,6 +125,7 @@ pub(super) async fn start(
     // the operation failed; a run it freezes is ended by the stop (decision
     // 92).
     tokio::spawn(runner.runs.until_frozen(async move {
+        let _maintaining = maintaining;
         let prepared = match use_case.start(assessment).await {
             Ok(prepared) => prepared,
             Err(refused) => {

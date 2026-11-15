@@ -137,10 +137,15 @@ fn file_runs_program(agent: &mut Agent, command: String) {
         text.contains(LADDERBACK) || text.contains(&*canonical.to_string_lossy()),
         "the service file doesn't run {LADDERBACK}:\n{text}"
     );
+    // Its words, after the program's path: each its own string in the plist,
+    // and one line of the unit, which may go on with further words.
     let runs = if cfg!(target_os = "macos") {
-        format!("<string>{command}</string>")
+        command
+            .split(' ')
+            .map(|word| format!("\t\t<string>{word}</string>\n"))
+            .collect::<String>()
     } else {
-        format!("\" {command}\n")
+        format!("\" {command}")
     };
     assert!(
         text.contains(&runs),
@@ -232,6 +237,31 @@ fn manager_waits_to_kill(agent: &mut Agent, seconds: u64) {
         text.contains(&wanted),
         "the service file lacks {wanted:?}:\n{text}"
     );
+}
+
+// launchd starts an agent again on any exit but a successful one; systemd on
+// the statuses `RestartForceExitStatus=` names, whatever `Restart=` says, and
+// `SuccessExitStatus=` keeps that exit from marking the unit failed.
+#[then(expr = "the service manager starts the service again when it exits with status {int}")]
+fn manager_restarts_on(agent: &mut Agent, status: u8) {
+    let text = service_text(agent);
+    let wanted: Vec<String> = if cfg!(target_os = "macos") {
+        vec![
+            "<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n"
+                .to_owned(),
+        ]
+    } else {
+        vec![
+            format!("\nRestartForceExitStatus={status}\n"),
+            format!("\nSuccessExitStatus={status}\n"),
+        ]
+    };
+    for wanted in wanted {
+        assert!(
+            text.contains(&wanted),
+            "the service file lacks {wanted:?}:\n{text}"
+        );
+    }
 }
 
 #[then("the service manager was asked nothing")]

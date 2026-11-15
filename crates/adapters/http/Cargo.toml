@@ -27,7 +27,7 @@ serde.workspace = true
 sha2.workspace = true
 # Every accept holds the spawn gate (decision 66).
 spawn-gate.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "sync", "time"] }
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }

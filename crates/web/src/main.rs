@@ -65,6 +65,9 @@ mod pause;
 // What a progress bar tells a screen reader, and when, decided on the host;
 // `components.rs`'s `Progress` is its glue.
 mod progress;
+// What the restart section of Settings offers, says and waits for, decided
+// on the host; `settings.rs` is its glue.
+mod restart;
 mod routes;
 // The Settings page's DOM glue; `api_tokens.rs` decides for it.
 mod settings;

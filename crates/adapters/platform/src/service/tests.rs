@@ -60,7 +60,7 @@ fn the_unit_keeps_what_systemd_would_read_in_the_program_path_as_text() {
     // it expanding one in the program's argv[0].
     assert_eq!(
         exec_start("/home/demo/My Apps/50% $HOME/ladderback"),
-        r#"ExecStart=:"/home/demo/My Apps/50%% $HOME/ladderback" serve"#
+        r#"ExecStart=:"/home/demo/My Apps/50%% $HOME/ladderback" serve --service-managed"#
     );
 }
 

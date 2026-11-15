@@ -88,6 +88,27 @@ impl RunQueue {
         state.queue.is_going(plan)
     }
 
+    /// Holds the queue for a restart that waits for the running backups to
+    /// end: no waiting run gets its turn from now on (`BackupQueue::hold`).
+    pub fn hold(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.hold();
+    }
+
+    /// Lets go of the hold of a restart that was cancelled, and starts the
+    /// waiting runs that may start now (`BackupQueue::release`).
+    pub fn release(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.release();
+        state.start();
+    }
+
+    /// How many backups are running: past their turn, their place kept.
+    pub fn running(&self) -> usize {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.running()
+    }
+
     /// Asks `take` for a ticket, and starts whatever may start now: the new
     /// run, or, under a limit `take` raised, runs that waited, whether or
     /// not `take` gave a ticket.
@@ -197,6 +218,33 @@ mod tests {
         assert!(!has_turn(&mut photos));
         drop(docs);
         assert!(has_turn(&mut photos));
+    }
+
+    #[test]
+    fn a_held_queue_gives_no_turn_once_its_running_backups_end() {
+        let queue = RunQueue::new();
+        let docs = queue.push(&plan("docs"), limit(1));
+        let mut home = queue.push(&plan("home"), limit(1));
+        assert_eq!(queue.running(), 1);
+        queue.hold();
+        // Neither a raised limit nor the end of the running one starts it.
+        let mut photos = queue.push(&plan("photos"), limit(3));
+        drop(docs);
+        assert_eq!(queue.running(), 0);
+        assert!(!has_turn(&mut home));
+        assert!(!has_turn(&mut photos));
+    }
+
+    #[test]
+    fn a_released_queue_gives_the_waiting_runs_their_turn_at_once() {
+        let queue = RunQueue::new();
+        queue.hold();
+        let mut home = queue.push(&plan("home"), limit(1));
+        let mut docs = queue.push(&plan("docs"), limit(1));
+        assert!(!has_turn(&mut home));
+        queue.release();
+        assert!(has_turn(&mut home), "the oldest waiting run didn't start");
+        assert!(!has_turn(&mut docs), "the limit wasn't kept");
     }
 
     #[test]
