@@ -900,6 +900,7 @@ async fn state_over(
         link: Arc::clone(&conditions.link),
         sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
         reads: Arc::default(),
+        listings: Arc::default(),
     });
     let notice = Arc::new(UpdateNotice::new());
     let background = Background {
@@ -2689,6 +2690,9 @@ struct ConfigCatalog {
     /// The turns to read a folder of a snapshot, which every browse shares
     /// (decision 102).
     reads: Arc<ReadTurns>,
+    /// The turns to list a repository's snapshots, which every listing
+    /// shares (#710).
+    listings: Arc<ReadTurns>,
 }
 
 #[async_trait]
@@ -2789,8 +2793,10 @@ impl Catalog for ConfigCatalog {
         let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
         let listing = ListSnapshots::new(
             Arc::clone(&self.engine),
+            Arc::new(SystemClock),
             ResolveRepository::new(Arc::new(SystemSecrets::default()))
                 .telling(Arc::new(log_secret_warning)),
+            Arc::clone(&self.listings),
         )
         .list(OperationId::from_uuid(Uuid::now_v7()), &alias, repository)
         .await;
@@ -6710,6 +6716,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6791,6 +6798,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6890,6 +6898,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -7619,6 +7628,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11232,6 +11242,7 @@ mod repository_service_tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11272,6 +11283,7 @@ mod repository_service_tests {
             schedules,
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11969,6 +11981,7 @@ mod repository_service_tests {
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
                 reads: Arc::default(),
+                listings: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -12006,6 +12019,7 @@ mod repository_service_tests {
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
                 reads: Arc::default(),
+                listings: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -12889,6 +12903,7 @@ mod repository_service_tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -13035,6 +13050,7 @@ mod repository_service_tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},

@@ -3,13 +3,16 @@
 //! an operation (§9): it takes no I7 slot, writes nothing to the operation
 //! log, and the UI fetches the list live — nothing stores it.
 
+use std::pin::pin;
 use std::sync::Arc;
 
 use domain::execution::FailureReason;
 use domain::planning::RepositoryConfig;
 use domain::{OperationId, RepositoryAlias};
-use futures::StreamExt;
+use futures::future::FutureExt;
+use futures::{StreamExt, select_biased};
 
+use crate::maintenance::READ_TIMEOUT;
 use crate::ports::{
     Clock, Engine, EngineError, EngineEvent, EngineResult, Job, RunningJob, SnapshotSummary,
 };
@@ -17,10 +20,14 @@ use crate::reads::ReadTurns;
 use crate::secrets::{ResolveError, ResolveRepository};
 
 /// Lists a repository's snapshots. Saves nothing: the list is fetched live
-/// every time, for a read is safe to run alongside anything (§9).
+/// every time, for a read is safe to run alongside anything (§9). Each
+/// listing is a worker that reads the repository's whole index, so the
+/// daemon's listings take turns (#710).
 pub struct ListSnapshots {
     engine: Arc<dyn Engine>,
+    clock: Arc<dyn Clock>,
     resolve: ResolveRepository,
+    turns: Arc<ReadTurns>,
 }
 
 /// Why a listing failed. A typed code, never a sentence (§8.4).
@@ -35,16 +42,21 @@ pub enum SnapshotError {
 }
 
 impl ListSnapshots {
-    pub fn new(engine: Arc<dyn Engine>, resolve: ResolveRepository) -> Self {
-        Self { engine, resolve }
-    }
-
     /// A listing that takes its turn from `turns`, which every listing of
-    /// the daemon shares, waiting no longer than the read timeout by
-    /// `clock`.
-    pub fn with_turns(self, clock: Arc<dyn Clock>, turns: Arc<ReadTurns>) -> Self {
-        let _ = (clock, turns);
-        todo!()
+    /// the daemon shares, and waits for it and its list no longer than
+    /// [`READ_TIMEOUT`] by `clock`.
+    pub fn new(
+        engine: Arc<dyn Engine>,
+        clock: Arc<dyn Clock>,
+        resolve: ResolveRepository,
+        turns: Arc<ReadTurns>,
+    ) -> Self {
+        Self {
+            engine,
+            clock,
+            resolve,
+            turns,
+        }
     }
 
     /// Lists the snapshots of the repository the configuration's entry
@@ -65,7 +77,23 @@ impl ListSnapshots {
             .map_err(SnapshotError::Resolve)?
             .access;
         let job = Job::Ls(access);
-        let mut snapshots = run(self.engine.as_ref(), op, job).await?;
+        // The wait for a turn counts against the read timeout, so a listing
+        // waits no longer in all than one that started at once, and one
+        // whose turn comes only once its time is up starts no worker.
+        let deadline = self.clock.now() + READ_TIMEOUT;
+        let listing = async {
+            let _turn = self.turns.turn().await;
+            if self.clock.now() >= deadline {
+                return Err(SnapshotError::TimedOut);
+            }
+            run(self.engine.as_ref(), op, job).await
+        };
+        let give_up = self.clock.sleep_until(deadline);
+        // The listing first: one that is ready is never lost to a timer.
+        let mut snapshots = select_biased! {
+            listed = pin!(listing.fuse()) => listed?,
+            () = pin!(give_up.fuse()) => return Err(SnapshotError::TimedOut),
+        };
         snapshots.sort_by_key(|s| std::cmp::Reverse(s.time));
         Ok(snapshots)
     }
@@ -128,6 +156,16 @@ mod tests {
     #[async_trait]
     impl JobControl for Stop {
         async fn stop(&mut self) {}
+    }
+
+    /// A listing with turns of its own and a clock that doesn't move.
+    fn listing(engine: Arc<dyn Engine>) -> ListSnapshots {
+        ListSnapshots::new(
+            engine,
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            Arc::default(),
+        )
     }
 
     #[async_trait]
@@ -215,10 +253,7 @@ mod tests {
             outcome: Mutex::new(Ok(vec![oldest, middle.clone(), newest.clone()])),
             seen: Mutex::new(Vec::new()),
         });
-        let use_case = ListSnapshots::new(
-            engine.clone(),
-            ResolveRepository::new(Arc::new(FakeSecrets::new())),
-        );
+        let use_case = listing(engine.clone());
         let listed = use_case
             .list(op(), &alias(), &entry(Some(repository())))
             .await
@@ -250,10 +285,7 @@ mod tests {
             outcome: Mutex::new(Ok(Vec::new())),
             seen: Mutex::new(Vec::new()),
         });
-        let use_case = ListSnapshots::new(
-            engine.clone(),
-            ResolveRepository::new(Arc::new(FakeSecrets::new())),
-        );
+        let use_case = listing(engine.clone());
         use_case
             .list(op(), &alias(), &entry(None))
             .await
@@ -281,8 +313,7 @@ mod tests {
             outcome: Mutex::new(Err(reason.clone())),
             seen: Mutex::new(Vec::new()),
         });
-        let use_case =
-            ListSnapshots::new(engine, ResolveRepository::new(Arc::new(FakeSecrets::new())));
+        let use_case = listing(engine);
         assert_eq!(
             use_case.list(op(), &alias(), &entry(None)).await,
             Err(SnapshotError::Failed(reason))
@@ -325,10 +356,7 @@ mod tests {
             Arc::new(ConfigWrites::new(())),
             Arc::new(|_| {}),
         );
-        let use_case = ListSnapshots::new(
-            Arc::new(engine),
-            ResolveRepository::new(Arc::new(FakeSecrets::new())),
-        );
+        let use_case = listing(Arc::new(engine));
         assert_eq!(
             use_case.list(op(), &alias(), &entry(None)).await,
             Err(SnapshotError::Engine(EngineError::Unavailable {
@@ -383,10 +411,12 @@ mod tests {
     }
 
     fn in_turns(engine: Arc<Gated>, clock: Arc<FakeClock>) -> Arc<ListSnapshots> {
-        Arc::new(
-            ListSnapshots::new(engine, ResolveRepository::new(Arc::new(FakeSecrets::new())))
-                .with_turns(clock, Arc::default()),
-        )
+        Arc::new(ListSnapshots::new(
+            engine,
+            clock,
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            Arc::default(),
+        ))
     }
 
     fn spawn_listing(
@@ -396,9 +426,16 @@ mod tests {
         tokio::spawn(async move { listing.list(op(), &alias(), &entry(None)).await })
     }
 
-    /// Lets the spawned listings run until they wait on something.
-    async fn settle() {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    /// Waits until `listings` listings have set their read timeouts on
+    /// `clock`: each sets it before it waits for its turn.
+    async fn until_timed(clock: &FakeClock, listings: usize) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while clock.sleepers() < listings {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{listings} listings set their read timeouts"));
     }
 
     /// #710: each listing is a worker that reads the repository's whole
@@ -406,16 +443,14 @@ mod tests {
     #[tokio::test]
     async fn at_most_two_listings_run_at_once_and_a_third_waits_its_turn() {
         let (gate, engine) = gated();
-        let listing = in_turns(
-            engine.clone(),
-            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
-        );
+        let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+        let listing = in_turns(engine.clone(), Arc::clone(&clock));
         let listings = [
             spawn_listing(&listing),
             spawn_listing(&listing),
             spawn_listing(&listing),
         ];
-        settle().await;
+        until_timed(&clock, 3).await;
         assert_eq!(
             engine.started(),
             2,
@@ -438,9 +473,9 @@ mod tests {
         let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
         let listing = in_turns(engine.clone(), Arc::clone(&clock));
         let _running = [spawn_listing(&listing), spawn_listing(&listing)];
-        settle().await;
+        until_timed(&clock, 2).await;
         let waiting = spawn_listing(&listing);
-        settle().await;
+        until_timed(&clock, 3).await;
         clock.advance(crate::maintenance::READ_TIMEOUT);
         let listed = tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
             .await

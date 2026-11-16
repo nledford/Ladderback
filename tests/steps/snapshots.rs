@@ -265,7 +265,9 @@ fn a_wrong_password(agent: &mut Agent) {
 async fn lists(agent: &mut Agent) {
     let use_case = ListSnapshots::new(
         agent.engine.clone(),
+        Arc::new(SystemClock),
         ResolveRepository::new(Arc::new(SystemSecrets::new())),
+        Arc::default(),
     );
     let entry = agent.snapshot_entry();
     let alias = domain::RepositoryAlias::parse("demo").expect("an alias");
