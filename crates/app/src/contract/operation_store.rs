@@ -4,7 +4,7 @@ mod serialization;
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
     FailureReason, LifecycleError, MAX_STORED_WARNINGS, Operation, OperationKind, OperationStatus,
-    Target, Transition, Trigger, Warning, WarningKind,
+    RepositoryHalf, Target, Transition, Trigger, Warning, WarningKind,
 };
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 
@@ -381,6 +381,15 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
             limit: 262_144,
         },
         FailureReason::DaemonStopped,
+        // No repository config at the location, in rustic's words as awkward
+        // as they get, and a refused login with and without the half named.
+        FailureReason::RepositoryConfigNotFound {
+            detail: awkward.to_owned(),
+        },
+        FailureReason::CredentialsRefused {
+            half: Some(RepositoryHalf::Hot),
+        },
+        FailureReason::CredentialsRefused { half: None },
         // A run the schedule started that was refused for a setting: its
         // source and what was said, as awkward as either gets.
         FailureReason::SecretRefused {

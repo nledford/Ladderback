@@ -1467,6 +1467,9 @@ mod tests {
             OperationStatus::Cancelled,
             failed(FailureReason::RepositoryExists),
             failed(FailureReason::DaemonStopped),
+            failed(FailureReason::RepositoryConfigNotFound {
+                detail: "no config file".to_owned(),
+            }),
         ] {
             assert!(!status.found_no_repository(), "{status:?}");
         }
