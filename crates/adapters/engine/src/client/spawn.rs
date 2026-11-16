@@ -10,7 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use app::ports::{Engine, EngineError, Job, RepositoryAccess, RunningJob};
 use async_trait::async_trait;
-use domain::secrets::{MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue};
+use domain::secrets::{
+    MAX_MASKED_BYTES, MaskedSecrets, Redactor, RepositorySecrets, SecretValue, proxy_credentials,
+    proxy_credentials_by_variable,
+};
 use domain::{OperationId, RepositoryId};
 use futures::stream::{self, StreamExt};
 use tokio::io::{AsyncWriteExt, BufReader};
@@ -63,7 +66,7 @@ impl Engine for WorkerEngine {
         // and a job past what is masked is not started (§10.2).
         let environment = environment::scrubbed(self.base_environment());
         refuse_too_much_to_mask(&job, &environment)?;
-        let redactor = job_redactor(&job, environment::proxy_credentials(&environment));
+        let redactor = job_redactor(&job, proxy_credentials(&environment));
         let spec = serde_json::to_vec(&JobSpec {
             op_id: op,
             cache_dir: slot.as_ref().map(|slot| slot.dir.clone()),
@@ -293,7 +296,7 @@ fn refuse_too_much_to_mask(
             .repository(access.known_secrets())
             .map_err(|_| too_much(None))?;
     }
-    for (variable, credentials) in environment::proxy_credentials_by_variable(environment) {
+    for (variable, credentials) in proxy_credentials_by_variable(environment) {
         credentials
             .iter()
             .try_for_each(|credential| masked.secret(credential))
@@ -343,7 +346,7 @@ mod tests {
         capture_the_worker_log();
         let redactor = job_redactor(
             &fake_job(),
-            environment::proxy_credentials(&[(
+            proxy_credentials(&[(
                 OsString::from("HTTPS_PROXY"),
                 OsString::from("http://demo:CANARY-proxy@proxy.demo:3128"),
             )]),
