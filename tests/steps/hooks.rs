@@ -31,6 +31,7 @@ impl HooksE2e {
                 plan: Default::default(),
                 plan_id: PlanId::parse("demo-plan").unwrap(),
                 repository_alias: RepositoryAlias::parse("nas").unwrap(),
+                redactor: Default::default(),
             },
         }
     }

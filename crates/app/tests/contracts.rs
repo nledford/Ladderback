@@ -401,7 +401,9 @@ struct FakeHooksHarness {
 impl Default for FakeHooksHarness {
     fn default() -> Self {
         Self {
-            runner: Arc::new(FakeHookRunner::new().with_secret(Self::secret())),
+            runner: Arc::new(
+                FakeHookRunner::new().with_environment([("HTTPS_PROXY", Self::proxy())]),
+            ),
             written: Arc::new(Mutex::new(Vec::new())),
             counter: AtomicUsize::new(0),
         }
@@ -416,6 +418,11 @@ impl FakeHooksHarness {
 
     fn secret() -> &'static str {
         "hunter2-demo"
+    }
+
+    /// The proxy URL of the environment the fake claims to give a hook.
+    fn proxy() -> &'static str {
+        "http://demo:hunter3-proxy@proxy.demo:3128"
     }
 }
 
@@ -448,6 +455,7 @@ impl HooksHarness for FakeHooksHarness {
                 }
                 lines.push("env: PATH=/usr/bin".to_owned());
                 lines.push("env: HOME=/home/demo".to_owned());
+                lines.push(format!("env: HTTPS_PROXY={}", Self::proxy()));
                 lines.push(format!("env: LADDERBACK_HOOK={}", context.phase.as_env()));
                 lines.push(format!("env: LADDERBACK_PLAN={}", context.plan.as_str()));
                 lines.push(format!(
@@ -506,6 +514,10 @@ impl HooksHarness for FakeHooksHarness {
 
     fn secret(&self) -> String {
         Self::secret().to_owned()
+    }
+
+    fn proxy_password(&self) -> String {
+        "hunter3-proxy".to_owned()
     }
 
     fn leaked_env_var(&self) -> String {

@@ -223,7 +223,7 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 | `Notifier` | Deliver a rendered notification | reqwest, lettre | Recording fake |
 | `ReleaseFeed` | Ladderback's newest release: its version and whether it is a prerelease (§10.7; §16, decision 107) | reqwest `GET` of GitHub's latest-release API | Scripted fake that records when it was asked |
 | `HubLink` / `AgentLink` | Send `AgentReport`s to the hub / `HubCommand`s to an agent | WebSocket sync | In-memory pair |
-| `HookRunner` | Run hook commands with a scrubbed environment | Process spawner | Recording fake |
+| `HookRunner` | Run hook commands with a scrubbed environment, their output masked with the run's redactor, and name the credentials that environment holds | Process spawner | Recording fake |
 
 **Port style.** Ports are object-safe traits used as `Arc<dyn Port>`, written with `#[async_trait]` so their futures are `Send` and use cases can be spawned. One boxed future per port call costs nothing next to the I/O behind it, and the composition root stays readable with a dozen ports. Streams are `futures::stream::BoxStream`. No port signature mentions a tokio, sqlx, axum or rustic type.
 

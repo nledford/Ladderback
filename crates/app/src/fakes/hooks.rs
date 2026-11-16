@@ -2,11 +2,12 @@
 //! scripted by its command, and every call is remembered with the context it
 //! ran in, so a scenario can tell what ran, when, and what it was told.
 
+use std::ffi::OsString;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use domain::planning::HookEntry;
-use domain::secrets::{Redactor, SecretValue};
+use domain::secrets::{Redactor, SecretValue, proxy_credentials};
 
 use crate::ports::{
     HookContext, HookOutcome, HookOutput, HookRunner, HookStatus, MAX_HOOK_OUTPUT_BYTES,
@@ -61,24 +62,16 @@ pub struct HookCall {
 
 /// The fake runner. Outcomes are scripted by the hook's program name, so
 /// different hooks in one scenario can be told apart; a program with no
-/// script never started. Scripted text is returned as the capped, redacted
-/// capture, so the fake passes the same contract checks as the real runner.
+/// script never started. Scripted text is returned as the capped capture,
+/// redacted with the call's redactor, so the fake passes the same contract
+/// checks as the real runner.
+#[derive(Default)]
 pub struct FakeHookRunner {
     scripts: Mutex<Vec<(String, Scripted)>>,
     simulated: Mutex<Vec<Simulated>>,
     calls: Mutex<Vec<HookCall>>,
-    redactor: Redactor,
-}
-
-impl Default for FakeHookRunner {
-    fn default() -> Self {
-        Self {
-            scripts: Mutex::new(Vec::new()),
-            simulated: Mutex::new(Vec::new()),
-            calls: Mutex::new(Vec::new()),
-            redactor: Redactor::new([]),
-        }
-    }
+    /// The environment it claims to give every hook.
+    environment: Vec<(OsString, OsString)>,
 }
 
 /// A hook whose outcome is computed from the call itself, by program name.
@@ -92,11 +85,18 @@ impl FakeHookRunner {
         Self::default()
     }
 
-    /// Adds a secret the scripted text is redacted against, as a real run's
-    /// secrets would be.
-    pub fn with_secret(mut self, secret: &str) -> Self {
-        let value = SecretValue::new(secret);
-        self.redactor = Redactor::new([&value]);
+    /// Claims to give every hook `vars` as its environment, so its
+    /// [`environment_secrets`](HookRunner::environment_secrets) are those
+    /// of the proxy URLs among them, as a real runner's are.
+    #[must_use]
+    pub fn with_environment(
+        mut self,
+        vars: impl IntoIterator<Item = (impl Into<OsString>, impl Into<OsString>)>,
+    ) -> Self {
+        self.environment = vars
+            .into_iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
         self
     }
 
@@ -127,7 +127,12 @@ impl FakeHookRunner {
 
 #[async_trait]
 impl HookRunner for FakeHookRunner {
-    async fn run(&self, entry: &HookEntry, context: &HookContext) -> HookOutcome {
+    async fn run(
+        &self,
+        entry: &HookEntry,
+        context: &HookContext,
+        redactor: &Redactor,
+    ) -> HookOutcome {
         let program = entry.command.program();
         if let Ok(mut calls) = self.calls.lock() {
             calls.push(HookCall {
@@ -147,8 +152,8 @@ impl HookRunner for FakeHookRunner {
         {
             return HookOutcome {
                 status: scripted.status.clone(),
-                stdout: self.capture(&scripted.stdout),
-                stderr: self.capture(&scripted.stderr),
+                stdout: capture(&scripted.stdout, redactor),
+                stderr: capture(&scripted.stderr, redactor),
             };
         }
         HookOutcome {
@@ -159,40 +164,43 @@ impl HookRunner for FakeHookRunner {
             stderr: HookOutput::default(),
         }
     }
+
+    fn environment_secrets(&self) -> Vec<SecretValue> {
+        proxy_credentials(&self.environment)
+    }
 }
 
-impl FakeHookRunner {
-    /// The scripted text of one stream, redacted and capped as a real
-    /// capture is.
-    fn capture(&self, text: &str) -> HookOutput {
-        let redacted = self.redactor.redact(text);
-        if redacted.len() <= MAX_HOOK_OUTPUT_BYTES {
-            return HookOutput {
-                text: redacted,
-                truncated: false,
-            };
+/// The scripted text of one stream, redacted and capped as a real capture
+/// is.
+fn capture(text: &str, redactor: &Redactor) -> HookOutput {
+    let redacted = redactor.redact(text);
+    if redacted.len() <= MAX_HOOK_OUTPUT_BYTES {
+        return HookOutput {
+            text: redacted,
+            truncated: false,
+        };
+    }
+    // The cut can land inside a multi-byte character; step back the three
+    // bytes that take at most, bounded so a walk that does not shrink the
+    // cut stops instead of spinning, and a cut that is not on a boundary
+    // yields nothing rather than panicking.
+    let mut cut = MAX_HOOK_OUTPUT_BYTES;
+    for _ in 0..3 {
+        if redacted.is_char_boundary(cut) {
+            break;
         }
-        // The cut can land inside a multi-byte character; step back the
-        // three bytes that take at most, bounded so a walk that does not
-        // shrink the cut stops instead of spinning, and a cut that is not
-        // on a boundary yields nothing rather than panicking.
-        let mut cut = MAX_HOOK_OUTPUT_BYTES;
-        for _ in 0..3 {
-            if redacted.is_char_boundary(cut) {
-                break;
-            }
-            cut -= 1;
-        }
-        HookOutput {
-            text: redacted.get(..cut).unwrap_or_default().to_owned(),
-            truncated: true,
-        }
+        cut -= 1;
+    }
+    HookOutput {
+        text: redacted.get(..cut).unwrap_or_default().to_owned(),
+        truncated: true,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use domain::planning::{HookEntry, OnFailure};
+    use domain::secrets::{Redactor, SecretValue};
     use domain::{OperationId, PlanId, RepositoryAlias};
 
     use super::{FakeHookRunner, Scripted};
@@ -226,7 +234,7 @@ mod tests {
                 stderr: String::new(),
             },
         );
-        let outcome = runner.run(&entry(), &context()).await;
+        let outcome = runner.run(&entry(), &context(), &Redactor::default()).await;
         assert!(outcome.stdout.truncated);
         assert_eq!(outcome.stdout.text.len(), MAX_HOOK_OUTPUT_BYTES - 1);
         assert!(outcome.stdout.text.len() <= MAX_HOOK_OUTPUT_BYTES);
@@ -243,8 +251,43 @@ mod tests {
                 stderr: String::new(),
             },
         );
-        let outcome = runner.run(&entry(), &context()).await;
+        let outcome = runner.run(&entry(), &context(), &Redactor::default()).await;
         assert_eq!(outcome.stdout.text, "demo output");
         assert!(!outcome.stdout.truncated);
+    }
+
+    /// What a scripted hook writes is masked with the redactor of the call,
+    /// the run's, in both streams.
+    #[tokio::test]
+    async fn a_capture_is_masked_with_the_calls_redactor() {
+        let runner = FakeHookRunner::new();
+        runner.script(
+            "demo-hook",
+            Scripted {
+                status: HookStatus::Succeeded,
+                stdout: "out canary-run".to_owned(),
+                stderr: "err canary-run".to_owned(),
+            },
+        );
+        let redactor = Redactor::new([&SecretValue::new("canary-run")]);
+        let outcome = runner.run(&entry(), &context(), &redactor).await;
+        assert_eq!(outcome.stdout.text, "out ***");
+        assert_eq!(outcome.stderr.text, "err ***");
+    }
+
+    /// The credentials of the proxy URLs of the environment it claims to
+    /// give a hook are its environment's secrets; nothing else is.
+    #[test]
+    fn the_proxy_credentials_of_its_environment_are_its_environment_secrets() {
+        assert!(FakeHookRunner::new().environment_secrets().is_empty());
+        let runner = FakeHookRunner::new().with_environment([
+            ("HTTPS_PROXY", "http://demo:canary-proxy@proxy.demo:3128"),
+            ("DEMO_URL", "http://demo:not-a-proxy@demo.example"),
+        ]);
+        let redactor = Redactor::new(&runner.environment_secrets());
+        assert_eq!(
+            redactor.redact("canary-proxy not-a-proxy"),
+            "*** not-a-proxy"
+        );
     }
 }

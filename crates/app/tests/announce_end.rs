@@ -570,7 +570,12 @@ struct NotesHooks {
 
 #[async_trait]
 impl HookRunner for NotesHooks {
-    async fn run(&self, _entry: &HookEntry, context: &HookContext) -> HookOutcome {
+    async fn run(
+        &self,
+        _entry: &HookEntry,
+        context: &HookContext,
+        _redactor: &domain::secrets::Redactor,
+    ) -> HookOutcome {
         self.journal
             .note(format!("hook {}", context.phase.as_env()));
         HookOutcome {
@@ -582,6 +587,10 @@ impl HookRunner for NotesHooks {
             stdout: Default::default(),
             stderr: Default::default(),
         }
+    }
+
+    fn environment_secrets(&self) -> Vec<domain::secrets::SecretValue> {
+        Vec::new()
     }
 }
 
@@ -620,6 +629,7 @@ fn hooks_in_every_list() -> HookSetup {
         plan: Hooks::default(),
         plan_id: PlanId::parse("demo-plan").unwrap(),
         repository_alias: RepositoryAlias::parse("nas").unwrap(),
+        redactor: Default::default(),
     }
 }
 

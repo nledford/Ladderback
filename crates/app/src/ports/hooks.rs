@@ -1,11 +1,14 @@
 //! The hook runner port (architecture.md §5, `HookRunner`): runs one hook
 //! command around an operation, with a scrubbed environment and captured,
-//! capped, redacted output (security.md §10.2).
+//! capped output, redacted with the run's redactor (security.md §10.2).
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::planning::{HookEntry, Hooks};
+use domain::secrets::{Redactor, SecretValue};
 use domain::{OperationId, PlanId, RepositoryAlias, SnapshotId};
-use std::time::Duration;
 
 /// How long one hook may run before it is stopped: SIGTERM to its process
 /// group, then SIGKILL after 5 s, as the password-command runner does. A
@@ -38,15 +41,22 @@ impl HookPhase {
 }
 
 /// The hooks of the three levels around one operation (§6.1, decision 10),
-/// and the names its context variables carry. The order the lists run in
-/// belongs to the use case, not the runner.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// the names its context variables carry, and what every one of them has
+/// its output masked with. The order the lists run in belongs to the use
+/// case, not the runner.
+#[derive(Clone, Debug)]
 pub struct HookSetup {
     pub agent: Hooks,
     pub repository: Hooks,
     pub plan: Hooks,
     pub plan_id: PlanId,
     pub repository_alias: RepositoryAlias,
+    /// The run's redactor, built once when its secrets have been read: the
+    /// secrets the run resolved, every secret the configuration holds as
+    /// written, and the credentials in the environment the runner gives a
+    /// hook ([`HookRunner::environment_secrets`]). A hook can print any of
+    /// them (security.md §10.2).
+    pub redactor: Arc<Redactor>,
 }
 
 impl HookSetup {
@@ -125,16 +135,30 @@ impl HookOutcome {
 ///   (scheduling-and-config.md §6.1).
 /// - Its environment is the worker's allow-list (components.md §4.1) plus
 ///   the `LADDERBACK_*` variables of the context, and nothing else: no
-///   secret, no repository URL with credentials.
+///   secret of the run, no repository URL with credentials. What the
+///   allow-list passes that is a credential, a proxy URL's userinfo, is in
+///   [`environment_secrets`](HookRunner::environment_secrets).
 /// - Its stdout and stderr are captured, cut at
 ///   [`MAX_HOOK_OUTPUT_BYTES`] each with `truncated` set, and redacted
-///   against the run's secrets, before they are stored or logged.
+///   with the `redactor` the call is given, the run's, before they are
+///   returned; a secret the cap cut through leaves nothing of itself.
 /// - A non-zero exit is `Failed` with the exit code; a command past the
 ///   timeout is `TimedOut`; one that can't start is `NotStarted` with a
 ///   short platform detail.
 #[async_trait]
 pub trait HookRunner: Send + Sync {
-    async fn run(&self, entry: &HookEntry, context: &HookContext) -> HookOutcome;
+    async fn run(
+        &self,
+        entry: &HookEntry,
+        context: &HookContext,
+        redactor: &Redactor,
+    ) -> HookOutcome;
+
+    /// The credentials in the environment this runner gives every hook:
+    /// those of the proxy URLs it passes (security.md §10.2). They stay in
+    /// the environment, where a program the hook starts uses them, so the
+    /// run's redactor masks them in what the hook writes.
+    fn environment_secrets(&self) -> Vec<SecretValue>;
 }
 
 #[cfg(test)]
@@ -153,6 +177,7 @@ mod tests {
             plan,
             plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
             repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+            redactor: Default::default(),
         }
     }
 

@@ -6,7 +6,7 @@ use domain::browse::{DisplayName, FolderPage, FolderPath};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
-use domain::planning::{Hostname, RepositoryConfig, SourceFilter, masked_options};
+use domain::planning::{AgentConfig, Hostname, RepositoryConfig, SourceFilter, masked_options};
 use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
 use domain::{
     Offset, OperationId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId, Timestamp,
@@ -334,6 +334,19 @@ impl RepositoryAccess {
     /// What hides this repository's secrets wherever text about it is shown.
     pub fn redactor(&self) -> Redactor {
         Redactor::for_repository(self.known_secrets())
+    }
+
+    /// What hides, in the output of the hooks of a run that opens this
+    /// repository, every secret one of them can print (I4, security.md
+    /// §10.2): this repository's secrets as the run resolved them, every
+    /// secret `config` holds as written, which a hook can read from the
+    /// configuration file, and the `environment` secrets the hook runner
+    /// gives every hook.
+    pub fn hooks_redactor(&self, config: &AgentConfig, environment: &[SecretValue]) -> Redactor {
+        let mut secrets = self.known_secrets().values();
+        secrets.extend(config.written_secrets());
+        secrets.extend_from_slice(environment);
+        Redactor::new(&secrets)
     }
 }
 
@@ -1091,6 +1104,49 @@ mod tests {
         assert!(
             debug.contains("rest:https://hot.example:8000/***/hot"),
             "{debug}"
+        );
+    }
+
+    #[test]
+    fn the_redactor_of_a_runs_hooks_masks_its_resolved_written_and_environment_secrets() {
+        use domain::planning::{AgentSettings, GroupBy, Hooks, Maintenance, RepositorySettings};
+        use domain::secrets::SecretRef;
+
+        let written = RepositoryConfig {
+            locations: Default::default(),
+            id: None,
+            settings: RepositorySettings {
+                repository: "/srv/other/repo".to_owned(),
+                repo_hot: None,
+                password: SecretRef::Inline(SecretValue::new("canary-written")),
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+            },
+            maintenance: Maintenance::None,
+            group_by: GroupBy::default(),
+            hooks: Hooks::default(),
+        };
+        let config = AgentConfig::new(
+            AgentSettings::default(),
+            Hooks::default(),
+            BTreeMap::from([(RepositoryAlias::parse("other").expect("an alias"), written)]),
+            Vec::new(),
+        )
+        .expect("a valid configuration");
+        let access = RepositoryAccess {
+            password: SecretValue::new("canary-password"),
+            options: BTreeMap::from([("secret_access_key".to_owned(), "canary-option".to_owned())]),
+            secrets: vec![SecretValue::new("canary-reference")],
+            ..access_at("/srv/demo/repo")
+        };
+        let redactor = access.hooks_redactor(&config, &[SecretValue::new("canary-proxy-password")]);
+        assert_eq!(
+            redactor.redact(
+                "canary-password canary-option canary-reference canary-written \
+                 canary-proxy-password /srv/demo/repo"
+            ),
+            "*** *** *** *** *** /srv/demo/repo"
         );
     }
 }

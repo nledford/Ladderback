@@ -5,9 +5,13 @@
 
 use std::collections::BTreeMap;
 
-use domain::planning::RepositorySettings;
+use domain::RepositoryAlias;
+use domain::planning::{
+    AgentConfig, AgentSettings, GroupBy, Hooks, Location, Locations, Maintenance, RepositoryConfig,
+    RepositorySettings,
+};
 use domain::secrets::{
-    FileRead, InlineSecret, KeyringEntry, SecretRef, SecretValue, rclone_location,
+    FileRead, InlineSecret, KeyringEntry, Redactor, SecretRef, SecretValue, rclone_location,
 };
 
 fn settings(password: SecretRef) -> RepositorySettings {
@@ -451,5 +455,94 @@ fn hostile_locations_end_without_a_panic() {
     assert_eq!(
         located("https://:\u{0}@h").inline_secrets(),
         [InlineSecret::Location]
+    );
+}
+
+// --- What a configuration holds as written, as values (#853) ----------------
+
+/// What a redactor of `secrets` leaves of `text`.
+fn masked_by(secrets: &[SecretValue], text: &str) -> String {
+    Redactor::new(secrets).redact(text)
+}
+
+#[test]
+fn the_secrets_settings_hold_as_written_are_masked_and_nothing_else() {
+    let mut demo = located("rest:https://demo:canary-url@backup.example.com/nas");
+    demo.password = inline("canary-password");
+    demo.repo_hot = Some("rest:https://demo:canary-hot-url@hot.example.com/".to_owned());
+    demo.options = options(&[("secret_access_key", "canary-key"), ("region", "eu-demo")]);
+    demo.options_hot = options(&[("session-token", "canary-token")]);
+    demo.options_cold = options(&[("account_key", "canary-cold-key")]);
+    assert_eq!(
+        masked_by(
+            &demo.written_secrets(),
+            "canary-password canary-url canary-hot-url canary-key canary-token canary-cold-key eu-demo"
+        ),
+        "*** *** *** *** *** *** eu-demo"
+    );
+}
+
+#[test]
+fn a_password_read_from_a_source_is_masked_only_as_written() {
+    let demo = settings(env());
+    assert_eq!(
+        masked_by(&demo.written_secrets(), "DEMO_PASSWORD"),
+        "DEMO_PASSWORD"
+    );
+    assert!(
+        demo.written_secrets()
+            .iter()
+            .all(|secret| secret.expose().is_empty()),
+        "a reference adds no secret of its own"
+    );
+}
+
+fn repository(settings: RepositorySettings, further: Vec<Location>) -> RepositoryConfig {
+    RepositoryConfig {
+        settings,
+        locations: Locations {
+            first_when: None,
+            further,
+        },
+        id: None,
+        maintenance: Maintenance::None,
+        group_by: GroupBy::default(),
+        hooks: Hooks::default(),
+    }
+}
+
+#[test]
+fn the_configuration_holds_the_written_secrets_of_every_repository_at_every_location() {
+    let mut first = settings(inline("canary-first"));
+    first.options = options(&[("secret_access_key", "canary-first-key")]);
+    let further = Location {
+        repository: "rest:https://demo:canary-further-url@far.example.com/nas".to_owned(),
+        options: options(&[("secret_access_key", "canary-further-key")]),
+        ..Location::default()
+    };
+    let mut second = located("/srv/second");
+    second.password = inline("canary-second");
+    let config = AgentConfig::new(
+        AgentSettings::default(),
+        Hooks::default(),
+        BTreeMap::from([
+            (
+                RepositoryAlias::parse("first").expect("an alias"),
+                repository(first, vec![further]),
+            ),
+            (
+                RepositoryAlias::parse("second").expect("an alias"),
+                repository(second, Vec::new()),
+            ),
+        ]),
+        Vec::new(),
+    )
+    .expect("a valid configuration");
+    assert_eq!(
+        masked_by(
+            &config.written_secrets(),
+            "canary-first canary-first-key canary-further-url canary-further-key canary-second"
+        ),
+        "*** *** *** *** ***"
     );
 }

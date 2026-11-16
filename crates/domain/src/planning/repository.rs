@@ -131,6 +131,24 @@ impl RepositorySettings {
         found
     }
 
+    /// What of these settings, as written, a redactor masks
+    /// ([`Redactor::for_repository`]): the password when it is inline, and
+    /// what the locations and the options hold, nothing resolved. A
+    /// reference is masked only as it is written.
+    pub fn written_secrets(&self) -> Vec<SecretValue> {
+        let none = SecretValue::new("");
+        RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: self.password.inline().unwrap_or(&none),
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &[],
+        }
+        .values()
+    }
+
     /// The location `secret` is written in: `repository` for
     /// [`InlineSecret::Location`], `repo-hot` for
     /// [`InlineSecret::LocationHot`], and none for a secret in a setting of
@@ -239,20 +257,7 @@ fn places(
 /// options hold is masked, and so are the passwords in the repository URLs.
 impl fmt::Debug for RepositorySettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let inline = self
-            .password
-            .inline()
-            .cloned()
-            .unwrap_or_else(|| SecretValue::new(""));
-        let redactor = Redactor::for_repository(RepositorySecrets {
-            repository: &self.repository,
-            repo_hot: self.repo_hot.as_deref(),
-            password: &inline,
-            options: &self.options,
-            options_hot: &self.options_hot,
-            options_cold: &self.options_cold,
-            resolved: &[],
-        });
+        let redactor = Redactor::new(&self.written_secrets());
         f.debug_struct("RepositorySettings")
             .field("repository", &redactor.redact(&self.repository))
             .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))

@@ -5,6 +5,7 @@
 use std::assert_matches;
 
 use domain::planning::HookEntry;
+use domain::secrets::{REDACTED, Redactor, SecretValue};
 use domain::{OperationId, PlanId, RepositoryAlias, SnapshotId, Uuid};
 
 use crate::ports::{HookContext, HookPhase, HookRunner, HookStatus, MAX_HOOK_OUTPUT_BYTES};
@@ -33,8 +34,12 @@ pub trait HooksHarness: Send + Sync {
     fn hook_missing(&self) -> HookEntry;
     /// A hook that exits zero, first writing `text` to stdout.
     fn hook_prints(&self, text: &str) -> HookEntry;
-    /// The secret the captured output is redacted against.
+    /// The secret of the run: the captured output is redacted with a
+    /// redactor of it.
     fn secret(&self) -> String;
+    /// The password in the userinfo of the proxy URL `HTTPS_PROXY` holds
+    /// in the environment the runner under test gives every hook.
+    fn proxy_password(&self) -> String;
     /// The name of a variable of the daemon's environment that is not on
     /// the worker's allow-list, and so must not reach a hook: the runner of
     /// a test process names one cargo always sets, such as
@@ -58,6 +63,7 @@ pub async fn run(harness: &dyn HooksHarness) {
     a_failing_hook_reports_its_exit_code(harness, &demo).await;
     a_hook_runs_as_parsed_without_a_shell(harness, &demo).await;
     a_hook_is_told_the_context_and_nothing_else(harness, &demo).await;
+    a_hook_is_given_the_proxy_whose_credentials_are_its_environment_secrets(harness, &demo).await;
     a_hook_past_its_timeout_is_stopped(harness, &demo).await;
     a_hook_that_cannot_be_started_is_not_started(harness, &demo).await;
     output_past_the_cap_is_cut(harness, &demo).await;
@@ -94,15 +100,44 @@ fn context(demo: &Demo, phase: HookPhase) -> HookContext {
     }
 }
 
+/// Runs `entry` as a hook of a run whose secret is the harness's.
 async fn run_hook(
     harness: &dyn HooksHarness,
     demo: &Demo,
     entry: &HookEntry,
 ) -> crate::ports::HookOutcome {
+    let redactor = Redactor::new([&SecretValue::new(harness.secret())]);
     harness
         .runner()
-        .run(entry, &context(demo, HookPhase::Before))
+        .run(entry, &context(demo, HookPhase::Before), &redactor)
         .await
+}
+
+/// A hook is given the proxy variables as they are, credentials and all,
+/// for a program it starts to use; those credentials are what the runner
+/// names as its environment's secrets, so the run's redactor masks them
+/// (security.md §10.2).
+async fn a_hook_is_given_the_proxy_whose_credentials_are_its_environment_secrets(
+    harness: &dyn HooksHarness,
+    demo: &Demo,
+) {
+    let password = harness.proxy_password();
+    let hook = harness.hook_env("demo");
+    let outcome = run_hook(harness, demo, &hook).await;
+    assert!(outcome.succeeded(), "the env hook runs: {outcome:?}");
+    let written = harness.written().await;
+    assert!(
+        written
+            .iter()
+            .any(|line| line.starts_with("env: HTTPS_PROXY=") && line.contains(&password)),
+        "the hook is given the proxy as it is: {written:?}"
+    );
+    let redactor = Redactor::new(&harness.runner().environment_secrets());
+    assert_eq!(
+        redactor.redact(&format!("proxy said {password}")),
+        format!("proxy said {REDACTED}"),
+        "the proxy's password is an environment secret"
+    );
 }
 
 async fn a_hook_that_succeeds_captures_its_output(harness: &dyn HooksHarness, demo: &Demo) {

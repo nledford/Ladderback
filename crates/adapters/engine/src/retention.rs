@@ -171,7 +171,7 @@ fn redactor_of(
         .secrets
         .iter()
         .cloned()
-        .chain(crate::environment::proxy_credentials(&environment))
+        .chain(domain::secrets::proxy_credentials(&environment))
         .chain(server.secrets().into_iter().cloned())
         .collect();
     domain::secrets::Redactor::for_repository(domain::secrets::RepositorySecrets {

@@ -42,7 +42,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::planning::HookEntry;
-use domain::secrets::{Redactor, SecretValue};
+use domain::secrets::{Redactor, SecretValue, proxy_credentials};
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -95,48 +95,24 @@ const KEPT: [&str; 24] = [
     "no_proxy",
 ];
 
-/// The environment one hook starts with: the allow-list, plus the context
-/// variables of the operation it runs for, and nothing else: no secret, no
-/// repository URL (security.md §10.2).
-fn environment(context: &HookContext) -> Vec<(OsString, OsString)> {
-    let pair = |name: &str, value: &str| (OsString::from(name), OsString::from(value));
-    let mut vars = KEPT
-        .iter()
-        .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(*name), value)))
-        .collect::<Vec<_>>();
-    vars.push(pair("LADDERBACK_HOOK", context.phase.as_env()));
-    vars.push(pair("LADDERBACK_PLAN", context.plan.as_str()));
-    vars.push(pair("LADDERBACK_REPOSITORY", context.repository.as_str()));
-    vars.push(pair(
-        "LADDERBACK_OPERATION_ID",
-        &context.operation.as_uuid().to_string(),
-    ));
-    if let Some(snapshot) = &context.snapshot {
-        vars.push(pair("LADDERBACK_SNAPSHOT_ID", snapshot.as_str()));
-    }
-    if let Some(error) = &context.error {
-        vars.push(pair("LADDERBACK_ERROR", error));
-    }
-    vars
-}
-
 /// Runs hook commands as processes.
 #[derive(Clone, Debug, Default)]
 pub struct ProcessHookRunner {
     /// How long one hook may run before it is stopped: SIGTERM to its
     /// process group, then SIGKILL after [`KILL_GRACE`].
     timeout: Duration,
-    /// Masks the secrets of the run in everything a hook wrote, before it is
-    /// stored or logged.
-    redactor: Redactor,
+    /// The environment hooks are scrubbed from, when one was given; else
+    /// this process's own.
+    environment: Option<Vec<(OsString, OsString)>>,
 }
 
 impl ProcessHookRunner {
-    /// A runner with the default timeout, redacting against nothing.
+    /// A runner with the default timeout, giving hooks the allow-list of
+    /// this process's environment.
     pub fn new() -> Self {
         Self {
             timeout: HOOK_TIMEOUT,
-            redactor: Redactor::new([]),
+            environment: None,
         }
     }
 
@@ -148,11 +124,59 @@ impl ProcessHookRunner {
         }
     }
 
-    /// Adds a secret the captured output is redacted against.
-    pub fn with_secret(mut self, secret: &str) -> Self {
-        let value = SecretValue::new(secret);
-        self.redactor = Redactor::new([&value]);
+    /// Starts hooks with `vars` as the environment they are scrubbed from,
+    /// instead of this process's own.
+    #[must_use]
+    pub fn with_environment(
+        mut self,
+        vars: impl IntoIterator<Item = (impl Into<OsString>, impl Into<OsString>)>,
+    ) -> Self {
+        self.environment = Some(
+            vars.into_iter()
+                .map(|(name, value)| (name.into(), value.into()))
+                .collect(),
+        );
         self
+    }
+
+    /// What every hook keeps of the environment it is scrubbed from: the
+    /// variables of [`KEPT`], and nothing else.
+    fn kept(&self) -> Vec<(OsString, OsString)> {
+        match &self.environment {
+            Some(vars) => vars
+                .iter()
+                .filter(|(name, _)| KEPT.iter().any(|kept| name == kept))
+                .cloned()
+                .collect(),
+            None => KEPT
+                .iter()
+                .filter_map(|name| {
+                    std::env::var_os(name).map(|value| (OsString::from(*name), value))
+                })
+                .collect(),
+        }
+    }
+
+    /// The environment one hook starts with: the allow-list, plus the
+    /// context variables of the operation it runs for, and nothing else: no
+    /// secret of the run, no repository URL (security.md §10.2).
+    fn environment(&self, context: &HookContext) -> Vec<(OsString, OsString)> {
+        let pair = |name: &str, value: &str| (OsString::from(name), OsString::from(value));
+        let mut vars = self.kept();
+        vars.push(pair("LADDERBACK_HOOK", context.phase.as_env()));
+        vars.push(pair("LADDERBACK_PLAN", context.plan.as_str()));
+        vars.push(pair("LADDERBACK_REPOSITORY", context.repository.as_str()));
+        vars.push(pair(
+            "LADDERBACK_OPERATION_ID",
+            &context.operation.as_uuid().to_string(),
+        ));
+        if let Some(snapshot) = &context.snapshot {
+            vars.push(pair("LADDERBACK_SNAPSHOT_ID", snapshot.as_str()));
+        }
+        if let Some(error) = &context.error {
+            vars.push(pair("LADDERBACK_ERROR", error));
+        }
+        vars
     }
 
     /// Runs one hook to its end, or stops it at `self.timeout`. What was
@@ -175,7 +199,7 @@ impl ProcessHookRunner {
         command
             .args(entry.command.args())
             .env_clear()
-            .envs(environment(context))
+            .envs(self.environment(context))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -248,13 +272,22 @@ impl ProcessHookRunner {
 
 #[async_trait]
 impl HookRunner for ProcessHookRunner {
-    async fn run(&self, entry: &HookEntry, context: &HookContext) -> HookOutcome {
+    async fn run(
+        &self,
+        entry: &HookEntry,
+        context: &HookContext,
+        redactor: &Redactor,
+    ) -> HookOutcome {
         let (status, captured) = self.spawn_and_wait(entry, context).await;
         HookOutcome {
-            stdout: captured.stream(&captured.stdout, captured.stdout_truncated, &self.redactor),
-            stderr: captured.stream(&captured.stderr, captured.stderr_truncated, &self.redactor),
+            stdout: captured.stream(&captured.stdout, captured.stdout_truncated, redactor),
+            stderr: captured.stream(&captured.stderr, captured.stderr_truncated, redactor),
             status,
         }
+    }
+
+    fn environment_secrets(&self) -> Vec<SecretValue> {
+        proxy_credentials(&self.kept())
     }
 }
 
