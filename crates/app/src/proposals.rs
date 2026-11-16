@@ -17,16 +17,17 @@ use std::sync::Arc;
 use api::{ProposalStatusDto, UiEvent};
 use domain::access::Password;
 use domain::planning::{
-    AgentConfig, ConfigChange, ConfigRevision, DiffHash, MAX_ENDED, MAX_PENDING, Proposal,
-    ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale, Rejection,
-    RejectionRefused, Shown, SummaryLine, TooSoon, confirms_proposal,
+    AgentConfig, ConfigChange, ConfigRevision, DiffHash, Location, MAX_ENDED, MAX_PENDING,
+    Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale,
+    Rejection, RejectionRefused, Shown, SummaryLine, TooSoon, confirms_proposal,
 };
 use domain::secrets::Redactor;
 
 use crate::access::{Access, PasswordRefused};
 use crate::ports::{
-    Admission, ChangeCodec, Clock, CodecError, ConfigDrafts, ConfigError, ConfigStore, EventBus,
-    ProposalStore, Random, RandomUnavailable, SavedOver, StoreError, StoredProposal,
+    Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError,
+    ConfigStore, EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError,
+    StoredProposal,
 };
 use crate::repositories::ConfigWrites;
 use crate::schedule::ConfigChanged;
@@ -96,7 +97,8 @@ pub struct Review {
     /// changes make, every secret the configuration holds masked; empty
     /// for one that isn't pending.
     pub diff: String,
-    /// What an approval of it is bound to: the file and the unmasked diff.
+    /// What an approval of it is bound to: the file and the diff as shown,
+    /// masked; the file's revision binds what the mask hides.
     pub shown: Shown,
     /// Whether the file has changed since the proposal was drafted.
     pub changed_since_drafted: bool,
@@ -199,8 +201,9 @@ impl Proposals {
             Admission::Refused(TooSoon::Pending) => return Err(ProposalError::Full),
             Admission::Refused(too_soon) => return Err(ProposalError::TooSoon(too_soon)),
         }
-        let _ = Proposal::warnings(&config, &proposal.changes);
-        todo!()
+        let warnings = Proposal::warnings(&config, &proposal.changes);
+        self.announce(&proposal.id, ProposalStatus::Pending).await;
+        Ok(Made { proposal, warnings })
     }
 
     /// The proposals `asker` may see, newest first, each brought up to
@@ -269,25 +272,119 @@ impl Proposals {
             return Err(ProposalError::NotPending(now));
         }
         proposal.status = ProposalStatus::Withdrawn;
+        self.announce(id, proposal.status).await;
         Ok(proposal)
     }
 
     /// The proposal `id` as the "Pending changes" page shows it, brought up
     /// to date: a page opening is a read like any other.
     pub async fn review(&self, id: &ProposalId) -> Result<Review, ProposalError> {
-        let _ = id;
-        todo!()
+        let proposal = self.get(&Proposer::NoToken, id).await?;
+        let rejected = self
+            .ports
+            .store
+            .all()
+            .await
+            .map_err(ProposalError::Store)?
+            .iter()
+            .filter(|one| {
+                one.status == ProposalStatus::Rejected
+                    && same_proposer(&one.proposer, &proposal.proposer)
+            })
+            .count();
+        let config = self.load().await?;
+        let summary = proposal.summary(&config);
+        // Only a pending one is approved, so only its diff is shown; an
+        // ended one shows the file as it is.
+        let after = if proposal.status == ProposalStatus::Pending {
+            Proposal::check(&config, &proposal.changes).ok()
+        } else {
+            None
+        };
+        let draft = self.draft(after.as_ref().unwrap_or(&config)).await?;
+        let diff = if after.is_some() {
+            masked_diff(&config, &draft.before, &draft.after)
+        } else {
+            String::new()
+        };
+        Ok(Review {
+            changed_since_drafted: draft.revision != proposal.base,
+            // Nothing is held back for the forget preview yet.
+            needs_forget_preview: false,
+            shown: Shown {
+                revision: draft.revision,
+                diff: DiffHash::of(&diff),
+            },
+            proposal,
+            summary,
+            diff,
+            rejected,
+        })
     }
 
     /// Approves the pending proposal `id` as `ask` says the page showed it,
-    /// once step-up confirms it, and applies it.
+    /// once step-up confirms it, and applies it: under the configuration's
+    /// write lock, rebuilt against the file as it is, and saved only over
+    /// that file. A rebuild that isn't what the page showed, or a file
+    /// edited by hand meanwhile, leaves the proposal pending.
     pub async fn approve(
         &self,
         id: &ProposalId,
         ask: ApprovalAsk,
     ) -> Result<Proposal, ProposalError> {
-        let _ = (id, ask);
-        todo!()
+        self.step_up(id, &ask).await?;
+        let _writes = self.ports.writes.lock().await;
+        let mut proposal = self.get(&Proposer::NoToken, id).await?;
+        if proposal.status != ProposalStatus::Pending {
+            return Err(ProposalError::NotPending(proposal.status));
+        }
+        let config = self.load().await?;
+        // `get` found it applies; a hand edit since then is a change of
+        // the file the page showed.
+        let after =
+            Proposal::check(&config, &proposal.changes).map_err(|_| ProposalError::Changed)?;
+        let draft = self.draft(&after).await?;
+        let rebuilt = Shown {
+            revision: draft.revision.clone(),
+            diff: DiffHash::of(&masked_diff(&config, &draft.before, &draft.after)),
+        };
+        if rebuilt != ask.shown {
+            return Err(ProposalError::Changed);
+        }
+        let now = to_the_millisecond(self.ports.clock.now());
+        let approved = self
+            .ports
+            .store
+            .approve(id, now, Some(ask.address))
+            .await
+            .map_err(ProposalError::Store)?;
+        if !approved {
+            return Err(ProposalError::NotPending(self.kept_status(id).await?));
+        }
+        proposal.decided_at = Some(now);
+        self.announce(id, ProposalStatus::Applying).await;
+        match self.ports.drafts.save_over(&draft.revision, &after, id).await {
+            Ok(SavedOver::Saved { kept }) => {
+                self.ports.changed.tell();
+                self.ports
+                    .store
+                    .applied(id, kept.as_deref())
+                    .await
+                    .map_err(ProposalError::Store)?;
+                proposal.status = ProposalStatus::Applied;
+                proposal.applied_as = kept;
+                self.announce(id, proposal.status).await;
+                Ok(proposal)
+            }
+            Ok(SavedOver::ChangedMeanwhile) => {
+                self.end_apply(id, ProposalStatus::Pending).await?;
+                Err(ProposalError::Changed)
+            }
+            Err(error) => {
+                self.end_apply(id, ProposalStatus::Failed).await?;
+                Err(ProposalError::Config(Box::new(error)))
+            }
+        }
     }
 
     /// Rejects the pending proposal `id` for `reasons`, one per change.
@@ -296,8 +393,82 @@ impl Proposals {
         id: &ProposalId,
         reasons: Vec<String>,
     ) -> Result<Proposal, ProposalError> {
-        let _ = (id, reasons, Rejection::default());
-        todo!()
+        let mut proposal = self.get(&Proposer::NoToken, id).await?;
+        if proposal.status != ProposalStatus::Pending {
+            return Err(ProposalError::NotPending(proposal.status));
+        }
+        let rejection =
+            Rejection::new(proposal.changes.len(), reasons).map_err(ProposalError::Rejection)?;
+        let now = to_the_millisecond(self.ports.clock.now());
+        let rejected = self
+            .ports
+            .store
+            .reject(id, now, rejection.reasons())
+            .await
+            .map_err(ProposalError::Store)?;
+        if !rejected {
+            return Err(ProposalError::NotPending(self.kept_status(id).await?));
+        }
+        proposal.status = ProposalStatus::Rejected;
+        proposal.decided_at = Some(now);
+        proposal.rejection = rejection;
+        self.announce(id, proposal.status).await;
+        Ok(proposal)
+    }
+
+    /// The step-up confirmation of `ask`: the admin password, in the
+    /// address's sign-in waits, with sign-in on; the proposal's short ID
+    /// otherwise.
+    async fn step_up(&self, id: &ProposalId, ask: &ApprovalAsk) -> Result<(), ProposalError> {
+        let Some(access) = &self.access else {
+            return if confirms_proposal(&ask.confirmation, id) {
+                Ok(())
+            } else {
+                Err(ProposalError::StepUpFailed)
+            };
+        };
+        // Nothing typed, or more than any password, is no attempt at it.
+        let attempt =
+            Password::parse(ask.confirmation.clone()).map_err(|_| ProposalError::StepUpFailed)?;
+        access
+            .step_up(ask.address, &attempt)
+            .await
+            .map(|_| ())
+            .map_err(|refused| match refused {
+                PasswordRefused::WrongPassword => ProposalError::StepUpFailed,
+                PasswordRefused::Wait { seconds } => ProposalError::StepUpWait { seconds },
+                PasswordRefused::Unavailable(text) => ProposalError::StepUpUnavailable(text),
+            })
+    }
+
+    /// Ends the apply of `id` with `status`, and announces it.
+    async fn end_apply(&self, id: &ProposalId, status: ProposalStatus) -> Result<(), ProposalError> {
+        self.ports
+            .store
+            .change_status(id, ProposalStatus::Applying, status)
+            .await
+            .map_err(ProposalError::Store)?;
+        self.announce(id, status).await;
+        Ok(())
+    }
+
+    async fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ProposalError> {
+        self.ports
+            .drafts
+            .draft(config)
+            .await
+            .map_err(|error| ProposalError::Config(Box::new(error)))
+    }
+
+    /// Tells every page that the proposal `id` now has `status`.
+    async fn announce(&self, id: &ProposalId, status: ProposalStatus) {
+        self.ports
+            .events
+            .publish(UiEvent::ProposalChanged {
+                proposal: id.to_string(),
+                status: status_dto(status),
+            })
+            .await;
     }
 
     async fn load(&self) -> Result<AgentConfig, ProposalError> {
@@ -362,12 +533,13 @@ impl Proposals {
             .change_status(&proposal.id, ProposalStatus::Pending, now)
             .await
             .map_err(ProposalError::Store)?;
-        proposal.status = if changed {
-            now
+        if changed {
+            proposal.status = now;
+            self.announce(&proposal.id, now).await;
         } else {
             // Another request moved it on first: it is as that one left it.
-            self.kept_status(&proposal.id).await?
-        };
+            proposal.status = self.kept_status(&proposal.id).await?;
+        }
         Ok(proposal)
     }
 
@@ -394,16 +566,46 @@ impl Proposals {
 }
 
 /// The status a page is told a proposal has.
-fn status_dto(status: ProposalStatus) -> ProposalStatusDto {
-    let _ = status;
-    todo!()
+pub fn status_dto(status: ProposalStatus) -> ProposalStatusDto {
+    match status {
+        ProposalStatus::Pending => ProposalStatusDto::Pending,
+        ProposalStatus::Applying => ProposalStatusDto::Applying,
+        ProposalStatus::Applied => ProposalStatusDto::Applied,
+        ProposalStatus::Failed => ProposalStatusDto::Failed,
+        ProposalStatus::Rejected => ProposalStatusDto::Rejected,
+        ProposalStatus::Withdrawn => ProposalStatusDto::Withdrawn,
+        ProposalStatus::Expired => ProposalStatusDto::Expired,
+        ProposalStatus::Stale => ProposalStatusDto::Stale,
+    }
 }
 
 /// The diff of `before` to `after`, with every secret `config` holds as
-/// text masked.
+/// text masked: each repository's and each of its further locations'.
+/// A proposal changes plans only, so the secrets are the same on both sides.
 fn masked_diff(config: &AgentConfig, before: &str, after: &str) -> String {
-    let _ = (config, before, after);
-    todo!()
+    let redactors: Vec<Redactor> = config
+        .repositories()
+        .values()
+        .flat_map(|repository| {
+            std::iter::once(repository.settings.redactor()).chain(
+                repository
+                    .locations
+                    .further
+                    .iter()
+                    .map(Location::redactor),
+            )
+        })
+        .collect();
+    Redactor::redact_together(&redactors, &unified_diff(before, after))
+}
+
+/// Whether `a` and `b` are one proposer: one token, or both no token.
+fn same_proposer(a: &Proposer, b: &Proposer) -> bool {
+    match (a, b) {
+        (Proposer::Token { id: a, .. }, Proposer::Token { id: b, .. }) => a == b,
+        (Proposer::NoToken, Proposer::NoToken) => true,
+        _ => false,
+    }
 }
 
 /// Whether `asker` may see a proposal `proposer` made: a token sees its

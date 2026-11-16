@@ -573,6 +573,59 @@ async fn a_rejection_keeps_a_reason_per_change_and_the_proposer_reads_it() {
 }
 
 #[tokio::test]
+async fn a_review_counts_only_its_own_proposers_rejections() {
+    let world = world().await;
+    let rejected = propose_as(
+        &world,
+        token("aaaaaaaaaaaa"),
+        ConfigChange::AddPlan(plan("home")),
+    )
+    .await
+    .unwrap();
+    world
+        .proposals
+        .reject(&rejected.id, vec![String::new()])
+        .await
+        .unwrap();
+    let other = propose_as(
+        &world,
+        token("bbbbbbbbbbbb"),
+        ConfigChange::AddPlan(plan("photos")),
+    )
+    .await
+    .unwrap();
+    let untokened = propose(&world, ConfigChange::AddPlan(plan("music")))
+        .await
+        .unwrap();
+    for made in [&other, &untokened] {
+        assert_eq!(world.proposals.review(&made.id).await.unwrap().rejected, 0);
+    }
+    assert_eq!(
+        world.proposals.review(&rejected.id).await.unwrap().rejected,
+        1
+    );
+    // A client with no token is one proposer too. A rejection holds that
+    // proposer back, so its second proposal comes first.
+    let untokened_again = propose(&world, ConfigChange::AddPlan(plan("videos")))
+        .await
+        .unwrap();
+    world
+        .proposals
+        .reject(&untokened.id, vec![String::new()])
+        .await
+        .unwrap();
+    assert_eq!(
+        world
+            .proposals
+            .review(&untokened_again.id)
+            .await
+            .unwrap()
+            .rejected,
+        1
+    );
+}
+
+#[tokio::test]
 async fn a_proposal_kept_comes_with_its_warnings() {
     let world = world().await;
     let mut copy = plan("copy");
