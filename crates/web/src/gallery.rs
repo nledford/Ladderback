@@ -17,12 +17,14 @@ use crate::backend::Progress as Reading;
 use crate::badge::BadgeState;
 use crate::components::{
     Checkbox, Confirmation, FolderLoader, FolderPage, FormField, ModalDialog, PauseUpdates,
-    Progress, RadioGroup, ReviewDialog, SortableTable, StatusBadge, Toast, Tree, show_toast,
+    Progress, RadioGroup, ReviewDialog, SortableTable, Spinner, StatusBadge, Toast, Tree,
+    show_toast,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
+use crate::spinner::LabelShown;
 use crate::text;
 use crate::variants::{Placement, Size, Tone};
 
@@ -546,6 +548,79 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     }
                 >
                     {t(msg::UI_GALLERY_FINISH_DEMO_RUN)}
+                </button>
+            </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_SPINNER_HEADING)}</h2>
+            // The defaults: Small (as tall as the text), Primary and Inline,
+            // its label beside it, as a step of a longer task shows it.
+            <p>
+                {t(msg::UI_GALLERY_SPINNER_STEP)} " "
+                <Spinner label=t(msg::UI_GALLERY_SPINNER_LOADING) />
+            </p>
+            // Every size, then every tone, each with its label hidden, so
+            // each is an image named by it. The Small one and the Primary
+            // one name no size or tone, so they show the defaults.
+            <p class="flex flex-wrap items-center gap-4">
+                <Spinner shown=LabelShown::Hidden label=t(msg::UI_GALLERY_SPINNER_SMALL) />
+                {[
+                    (Size::Medium, msg::UI_GALLERY_SPINNER_MEDIUM),
+                    (Size::Large, msg::UI_GALLERY_SPINNER_LARGE),
+                    (Size::XLarge, msg::UI_GALLERY_SPINNER_XLARGE),
+                ]
+                    .into_iter()
+                    .map(|(size, name)| {
+                        view! { <Spinner shown=LabelShown::Hidden size=size label=t(name) /> }
+                    })
+                    .collect_view()}
+            </p>
+            <p class="flex flex-wrap items-center gap-4">
+                <Spinner
+                    shown=LabelShown::Hidden
+                    size=Size::Medium
+                    label=t(msg::UI_GALLERY_SPINNER_PRIMARY)
+                />
+                {[
+                    (Tone::Secondary, msg::UI_GALLERY_SPINNER_SECONDARY),
+                    (Tone::Success, msg::UI_GALLERY_SPINNER_SUCCESS),
+                    (Tone::Warning, msg::UI_GALLERY_SPINNER_WARNING),
+                    (Tone::Error, msg::UI_GALLERY_SPINNER_ERROR),
+                    (Tone::Inherit, msg::UI_GALLERY_SPINNER_INHERIT),
+                ]
+                    .into_iter()
+                    .map(|(tone, name)| {
+                        view! {
+                            <Spinner
+                                shown=LabelShown::Hidden
+                                size=Size::Medium
+                                tone=tone
+                                label=t(name)
+                            />
+                        }
+                    })
+                    .collect_view()}
+            </p>
+            // Start, Center and End: each on a line of its own, whose start
+            // and end follow the page's direction, each a size of its own:
+            // a drawing shorter than the line, one as tall and one taller,
+            // so a long label's first line shows centered on each.
+            {[
+                (Placement::Start, Size::Small, msg::UI_GALLERY_SPINNER_START),
+                (Placement::Center, Size::Medium, msg::UI_GALLERY_SPINNER_CENTER),
+                (Placement::End, Size::XLarge, msg::UI_GALLERY_SPINNER_END),
+            ]
+                .into_iter()
+                .map(|(placement, size, name)| {
+                    view! { <Spinner placement=placement size=size label=t(name) /> }
+                })
+                .collect_view()}
+            // A button busy with what it started: unavailable but still
+            // reachable, named by the spinner's label, which inherits the
+            // button's text color.
+            <p>
+                <button type="button" aria-disabled="true">
+                    <Spinner tone=Tone::Inherit label=t(msg::UI_GALLERY_SPINNER_SAVING) />
                 </button>
             </p>
         </section>

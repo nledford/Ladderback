@@ -91,6 +91,10 @@ components:
     rounded: "{rounded.pill}"
     height: "0.5rem"
     width: "16rem"
+  spinner:
+    # The drawing's color (its arc); the label keeps the text's color.
+    textColor: "{colors.ladder-blue}"
+    size: "1em"
 ---
 
 # Design System: Ladderback
@@ -119,7 +123,7 @@ A white page (dark: near-black), graphite text, one blue, three status hues and 
 
 ### Primary
 
-- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, the skip link's border and a toast's edge. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
+- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border and a toast's edge. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
 
 ### Neutral
 
@@ -237,6 +241,16 @@ Every shared component takes the same three choices, defined once in `crates/web
 ### Progress Bar
 
 A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, with a Ladder Blue fill that eases to each report (0.4 s) and jumps under reduced motion. The current step sits on its own line above it.
+
+### Spinner
+
+- **Use:** a wait for something the page can't show yet. Where a spinner would start by itself beside content the reader can use and might turn past 5 s, the page shows the progress bar or words instead, since a spinner has no way to stop it (2.2.2); one the reader started, one over within 5 s, or one that is all the page shows while nothing can be used yet is fine. The technical design (§4.5) has the rule in full.
+- **Shape:** a faint full-circle track and a quarter arc with round ends, the arc turning steadily once in 0.9 s; under reduced motion it stands still, and its label carries the meaning.
+- **Size:** the shared sizes, in `em`, never pixels: Small (1em, as tall as the text, the default, inside a button or a line of text), Medium (1.5em), Large (2em) and XLarge (3em).
+- **Tone:** any of the shared tones, Primary (Ladder Blue) by default, Inherit (the text's color) inside a button or a toast. The tone colors the drawing only; the label keeps the text's color, so a Success, Warning or Error spinner still says in words what it waits for. The track is the arc's color at a quarter of its strength. Under forced colors the arc is the text's own color, as every tone is, and the track `GrayText`.
+- **Label:** always one, saying what the page waits for. Beside the spinner by default, where the drawing is hidden from a screen reader; where there's no room, the drawing is an image named by it.
+- **Placement:** the shared placements, on the spinner's line: Inline (the default), in its line of text, the label on the line's baseline and the drawing centered on the text; Start, Center or End, on a line of its own, which follow the page's direction, a long label wrapping beside the drawing, never under it, the drawing at its first line.
+- **The page's duties:** the spinner is no live region, so a wait the reader caused, and its end, are said through the announcer (4.1.3); the region it stands for is `aria-busy` until it is filled; a busy button takes `aria-disabled`, not `disabled`, so it keeps focus, and ignores presses until the work ends.
 
 ### Dialogs
 
