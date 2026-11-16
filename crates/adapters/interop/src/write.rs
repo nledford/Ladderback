@@ -24,8 +24,8 @@
 //! A password is written as the command or the file that reads it, and an
 //! option that is a reference or a secret is left out with the variable that
 //! rustic reads it from. An export asked to leave the commands out
-//! ([`ExportCommands::LeftOut`]) writes no `password-command` and no hook,
-//! and names each one it left out.
+//! ([`ExportCommands::LeftOut`]) writes no `password-command`, no option
+//! rustic runs as a command and no hook, and names each one it left out.
 
 use crate::KeyringCommand;
 use app::ports::{ExportCommands, ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
@@ -33,8 +33,8 @@ use domain::planning::{
     GlobFile, HookEntry, Hooks, KeepCount, KeepWithin, OnFailure, RepositorySettings,
 };
 use domain::secrets::{
-    KeyringEntry, Part, SecretRef, Template, is_secret_option, rclone_secret, url_credentials,
-    url_passwords,
+    KeyringEntry, Part, SecretRef, Template, is_command_option, is_secret_option, rclone_secret,
+    url_credentials, url_passwords,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -265,7 +265,7 @@ fn repository(
         (&OPTIONS_HOT, &settings.options_hot),
         (&OPTIONS_COLD, &settings.options_cold),
     ] {
-        options.push((table.key, text_options(table, values, notices)?));
+        options.push((table.key, text_options(table, values, commands, notices)?));
     }
     Ok(Repository {
         location,
@@ -313,14 +313,23 @@ fn text_of(value: &str) -> Option<String> {
 /// The options of `table` that are text and not secrets. The others are
 /// noted as left out with the variable to set instead. An option whose
 /// value is an address with a user or a password in it (`demo:pw@host`,
-/// with or without its scheme) is a secret, as a token may be the user.
+/// with or without its scheme) is a secret, as a token may be the user. An
+/// option rustic runs as a command is left out, and named, when `commands`
+/// says so.
 fn text_options(
     table: &OptionTable,
     options: &BTreeMap<String, String>,
+    commands: ExportCommands,
     notices: &mut Vec<ProfileNotice>,
 ) -> Result<BTreeMap<String, String>, ExportRefusal> {
     let mut kept = BTreeMap::new();
     for (name, value) in options {
+        if commands == ExportCommands::LeftOut && is_command_option(name) {
+            notices.push(ProfileNotice::CommandLeftOut {
+                key: format!("repository.{}.{name}", table.key),
+            });
+            continue;
+        }
         match text_of(value) {
             Some(text) if !is_secret_option(name) && url_credentials(&text).is_empty() => {
                 kept.insert(name.clone(), text);

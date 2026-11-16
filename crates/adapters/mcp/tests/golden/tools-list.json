@@ -3500,7 +3500,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "A plan as a profile the stock rustic reads, and what the export left out. A password stored in the configuration is refused, never written out; the password command and every hook are left out, each named in a notice.",
+    "description": "A plan as a profile the stock rustic reads, and what the export left out. A password stored in the configuration is refused, never written out; the password command, every option rustic runs as a command and every hook are left out, each named in a notice.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,

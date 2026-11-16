@@ -596,8 +596,9 @@ pub enum WarningCode {
     ProfileKeyringCommandMissing,
     /// An export left out a command the profile would run, as it was asked
     /// to: one for an AI agent or an API token has none (#856). The argument
-    /// `key` is its path in the profile: `repository.password-command`, or a
-    /// hook's list, as `global.hooks.run-before`.
+    /// `key` is its path in the profile: `repository.password-command`, an
+    /// option rustic runs as a command, as `repository.options.rclone-command`,
+    /// or a hook's list, as `global.hooks.run-before`.
     ProfileCommandLeftOut,
     /// A notification of an event wasn't delivered to its channel (§11). It
     /// is not tried again. The arguments: `event`, the event's name
@@ -1814,7 +1815,8 @@ pub struct ProfileExportQuery {
 }
 
 /// What an export does with the commands a profile runs: its
-/// `password-command` and each hook's command line.
+/// `password-command`, the options rustic runs as commands and each hook's
+/// command line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProfileCommands {

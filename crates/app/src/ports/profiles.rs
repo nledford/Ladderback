@@ -52,9 +52,9 @@ pub trait ProfileReader: Send + Sync {
 /// - the text holds only keys rustic knows, and no secret as text;
 /// - what Ladderback can't say in rustic's words is a [`ProfileNotice`] or a
 ///   [`ExportRefusal`], never silently dropped;
-/// - with [`ExportCommands::LeftOut`], the text holds no `password-command`
-///   and no hook, and a [`ProfileNotice::CommandLeftOut`] names each key left
-///   out.
+/// - with [`ExportCommands::LeftOut`], the text holds no `password-command`,
+///   no option rustic runs as a command and no hook, and a
+///   [`ProfileNotice::CommandLeftOut`] names each key left out.
 pub trait ProfileWriter: Send + Sync {
     fn render(&self, export: &PlanExport) -> Result<RenderedProfile, ExportRefusal>;
 }
@@ -129,8 +129,9 @@ pub enum ProfileNotice {
     /// were left out (decision 80).
     LocationsNotExported { further: usize },
     /// An export left out the command at `key`, its path in the profile
-    /// (`repository.password-command`, `global.hooks.run-before`), because
-    /// it was asked to leave every command out ([`ExportCommands::LeftOut`]).
+    /// (`repository.password-command`, `repository.options.rclone-command`,
+    /// `global.hooks.run-before`), because it was asked to leave every
+    /// command out ([`ExportCommands::LeftOut`]).
     CommandLeftOut { key: String },
 }
 
@@ -227,7 +228,9 @@ pub struct PlanExport {
 }
 
 /// What an export does with the commands a profile runs: its
-/// `password-command` and each hook's command line. A person wrote them, and
+/// `password-command`, the options rustic runs as commands (`rclone-command`,
+/// `post-create-command`, `post-delete-command`) and each hook's command
+/// line. A person wrote them, and
 /// one may carry a token (a health-check URL in a hook), so an export handed
 /// to an AI agent leaves them out (#856).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
