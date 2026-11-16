@@ -457,13 +457,10 @@ main:focus {
   padding-inline: 0.5rem;
 }
 
-/* The icon is as tall as the text and grows with it (1.4.4), centered on
+/* The icon (an `Icon`, as tall as the text, in its color) is centered on
    the label's line. */
-.badge-icon {
-  flex: none;
+.badge > .icon {
   align-self: center;
-  inline-size: 1em;
-  block-size: 1em;
 }
 
 .badge-loading {
