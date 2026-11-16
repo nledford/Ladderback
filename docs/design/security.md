@@ -63,7 +63,7 @@ This section decides who may use the web UI and the API, what every request is c
     - `read` opens `GET` and `HEAD` of the events stream, the operations, one operation, the plans, a plan's export as a profile, the repositories, a repository's snapshots, groups and stats as last read, a page of a snapshot's folder, the recent log (`GET /api/v1/log`, its lines masked as the daemon log's are, decision 111), and the session route, which answers a token `signed-out` with the build and no CSRF token: a token has no session, and signing in and out stay a session's (decision 95).
     - `run` opens starting a plan, cancelling an operation, testing a saved repository and reading a repository's stats now, which opens the repository as a test does and keeps the reading (decision 104).
     - `preview` opens the maintenance preview and a profile's preview from its text (decision 95).
-    - `propose` opens nothing yet.
+    - `propose` opens `GET` and `HEAD` of the proposals and of one proposal, making a proposal and withdrawing one (decision 89). A token sees and withdraws only the proposals it made, and another token's is `proposal-unknown`, as one never made is; nothing a token does approves a proposal or changes the configuration.
 
     A route the table doesn't name is for a session only, so a new route is closed to tokens until the table opens it.
 
