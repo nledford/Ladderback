@@ -30,7 +30,11 @@ impl Appearance {
 
     /// The class of `style.css` that draws a button so.
     pub fn class(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Filled => "button-filled",
+            Self::Outlined => "button-outlined",
+            Self::Ghost => "button-ghost",
+        }
     }
 }
 
@@ -49,7 +53,10 @@ impl Kind {
     /// The button's `type`. Never left out: a `<button>` without one sends
     /// the form it is in.
     pub fn attribute(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Button => "button",
+            Self::Submit => "submit",
+        }
     }
 }
 
@@ -74,68 +81,86 @@ impl Shape {
     /// Whether the label is written in the button, which names it: every
     /// button but an icon-only one.
     pub fn shows_label(self) -> bool {
-        todo!()
+        self != Self::IconOnly
     }
 
     /// The button's `aria-label`: its label, only where it isn't written in
     /// it, so a button's name is its visible words wherever it has them
     /// (2.5.3).
-    pub fn name(self, _label: &str) -> Option<String> {
-        todo!()
+    pub fn name(self, label: &str) -> Option<String> {
+        (!self.shows_label()).then(|| label.to_owned())
     }
 
     /// What stands before the label: a busy button's spinner, in its icon's
     /// place or before a label that has none; otherwise its icon, if any.
-    pub fn leading(self, _busy: bool) -> Leading {
-        todo!()
+    pub fn leading(self, busy: bool) -> Leading {
+        match (self, busy) {
+            (_, true) => Leading::Spinner,
+            (Self::Text, false) => Leading::Nothing,
+            (Self::IconAndText | Self::IconOnly, false) => Leading::Icon,
+        }
     }
 }
 
 /// The tone a button is drawn in when its page names none: Secondary, the
 /// neutral one, so a page says which action is its main one.
 pub fn default_tone() -> Tone {
-    todo!()
+    Tone::Secondary
 }
 
 /// The size a button is drawn at when its page names none: Medium, 2em
 /// tall, DESIGN.md's 2rem at the page's own text size.
 pub fn default_size() -> Size {
-    todo!()
+    Size::Medium
 }
 
 /// The appearance and tone a button is drawn in. A fill in `Inherit`, the
 /// color of the text around it, would need a label color checked against
 /// every color that text could take, so a `Filled` button in `Inherit` is
 /// drawn `Outlined`, its edge and label in the text's color.
-pub fn drawn(_appearance: Appearance, _tone: Tone) -> (Appearance, Tone) {
-    todo!()
+pub fn drawn(appearance: Appearance, tone: Tone) -> (Appearance, Tone) {
+    match (appearance, tone) {
+        (Appearance::Filled, Tone::Inherit) => (Appearance::Outlined, Tone::Inherit),
+        drawn => drawn,
+    }
 }
 
 /// The classes of the button: its appearance and tone as drawn, its size,
 /// which `style.css` makes its height and padding, and, for an icon-only
 /// button, the class that makes it square.
-pub fn button_class(_appearance: Appearance, _tone: Tone, _size: Size, _shape: Shape) -> String {
-    todo!()
+pub fn button_class(appearance: Appearance, tone: Tone, size: Size, shape: Shape) -> String {
+    let (appearance, tone) = drawn(appearance, tone);
+    let square = if shape == Shape::IconOnly {
+        " button-icon-only"
+    } else {
+        ""
+    };
+    format!(
+        "button {} {} {}{square}",
+        appearance.class(),
+        tone.class(),
+        size.class()
+    )
 }
 
 /// Whether a press reaches the page's handler: never while the button is
 /// unavailable or busy.
-pub fn takes_press(_disabled: bool, _busy: bool) -> bool {
-    todo!()
+pub fn takes_press(disabled: bool, busy: bool) -> bool {
+    !disabled && !busy
 }
 
 /// The button's `aria-disabled`: `true` while it takes no press, so a
 /// screen reader says it is unavailable while it keeps its place in the
 /// Tab order. Never the `disabled` attribute, which would drop focus to the
 /// page (A1).
-pub fn unavailable(_disabled: bool, _busy: bool) -> Option<&'static str> {
-    todo!()
+pub fn unavailable(disabled: bool, busy: bool) -> Option<&'static str> {
+    (!takes_press(disabled, busy)).then_some("true")
 }
 
 /// The button's `aria-pressed`: only on a toggle, the one a page gives a
 /// pressed state.
-pub fn pressed(_pressed: Option<bool>) -> Option<&'static str> {
-    todo!()
+pub fn pressed(pressed: Option<bool>) -> Option<&'static str> {
+    pressed.map(|pressed| if pressed { "true" } else { "false" })
 }
 
 #[cfg(test)]

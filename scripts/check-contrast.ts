@@ -34,7 +34,34 @@ const PAIRS = [
   { name: "warning tone on surface", fg: "--warning", bg: "--surface", min: 4.5 },
   { name: "error tone on page", fg: "--error", bg: "--bg", min: 4.5 },
   { name: "error tone on surface", fg: "--error", bg: "--surface", min: 4.5 },
+  ...buttonPairs(),
 ];
+
+// A button (components §4.5) in each tone but Inherit, whose colors are the
+// text's own: a Filled button's label (`--on-fill`) on its fill and on the
+// fill a step darker it takes on hover (lighter in the dark scheme); its
+// edge, which is the fill on a Filled button and the tone on an Outlined
+// one, against the page and a surface (1.4.11), and the hover's; and the
+// hover's label of an Outlined or a Ghost button on the surface it takes.
+// Their resting labels are the tone pairs above.
+function buttonPairs() {
+  const tones = [
+    { name: "primary", tone: "--accent", hover: "--accent-hover" },
+    { name: "secondary", tone: "--muted", hover: "--muted-hover" },
+    { name: "success", tone: "--success", hover: "--success-hover" },
+    { name: "warning", tone: "--warning", hover: "--warning-hover" },
+    { name: "error", tone: "--error", hover: "--error-hover" },
+  ];
+  return tones.flatMap(({ name, tone, hover }) => [
+    { name: `filled ${name} button`, fg: "--on-fill", bg: tone, min: 4.5 },
+    { name: `filled ${name} button, hovered`, fg: "--on-fill", bg: hover, min: 4.5 },
+    { name: `${name} button edge on page`, fg: tone, bg: "--bg", min: 3 },
+    { name: `${name} button edge on surface`, fg: tone, bg: "--surface", min: 3 },
+    { name: `${name} button edge on page, hovered`, fg: hover, bg: "--bg", min: 3 },
+    { name: `${name} button edge on surface, hovered`, fg: hover, bg: "--surface", min: 3 },
+    { name: `${name} button label on surface, hovered`, fg: hover, bg: "--surface", min: 4.5 },
+  ]);
+}
 
 const SCHEMES = [
   { name: "light", pick: tokensFromLight },

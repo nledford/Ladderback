@@ -24,6 +24,15 @@
   --success: #15803d;
   --warning: #b45309;
   --error: #b91c1c;
+  /* A button (§4.5): the label on a filled button, each tone's hover color,
+     a step darker here and lighter in the dark scheme, and the corner. */
+  --on-fill: #ffffff;
+  --accent-hover: #1e40af;
+  --muted-hover: #374151;
+  --success-hover: #166534;
+  --warning-hover: #92400e;
+  --error-hover: #991b1b;
+  --radius-small: 0.25rem;
   color-scheme: light dark;
 }
 
@@ -46,6 +55,12 @@
     --success: #4ade80;
     --warning: #fbbf24;
     --error: #f87171;
+    --on-fill: #111418;
+    --accent-hover: #aecbfa;
+    --muted-hover: #c8ced6;
+    --success-hover: #86efac;
+    --warning-hover: #fcd34d;
+    --error-hover: #fca5a5;
   }
 }
 
@@ -607,6 +622,163 @@ main:focus {
   color: var(--tone);
 }
 
+/* A button (§4.5): a native `<button>` drawn from the tokens, flat, its one
+   small corner. Its size is its height, in `em`, so it grows with the
+   reader's text (1.4.4) and stays at least 24 px a side at 100 % (2.5.8):
+   Small 1.75em, Medium 2em, Large 2.5em, XLarge 3em, its inline padding
+   growing with it. These are heights, not the shared scale's lengths, which
+   size a glyph: the icon and spinner inside stay as tall as the text. A
+   label too long for its line wraps inside the button, which then grows
+   taller. */
+.button {
+  --button-height: 2em;
+  --button-padding: 0.75em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  min-block-size: var(--button-height);
+  padding-block: 0;
+  padding-inline: var(--button-padding);
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  background-color: transparent;
+  color: var(--tone);
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* A row of actions stretches its items; a button in one keeps its own
+   height. */
+.actions > .button {
+  align-self: center;
+}
+
+.button.size-small {
+  --button-height: 1.75em;
+  --button-padding: 0.5em;
+}
+
+.button.size-large {
+  --button-height: 2.5em;
+  --button-padding: 1em;
+}
+
+.button.size-xlarge {
+  --button-height: 3em;
+  --button-padding: 1.25em;
+}
+
+.button-label {
+  min-inline-size: 0;
+}
+
+/* An icon-only button is square at every size. */
+.button-icon-only {
+  inline-size: var(--button-height);
+  padding-inline: 0;
+}
+
+.button-spinner {
+  display: inline-flex;
+}
+
+/* Each tone's hover color: a step darker, lighter in the dark scheme. */
+.button.tone-primary {
+  --tone-hover: var(--accent-hover);
+}
+
+.button.tone-secondary {
+  --tone-hover: var(--muted-hover);
+}
+
+.button.tone-success {
+  --tone-hover: var(--success-hover);
+}
+
+.button.tone-warning {
+  --tone-hover: var(--warning-hover);
+}
+
+.button.tone-error {
+  --tone-hover: var(--error-hover);
+}
+
+.button.tone-inherit {
+  --tone-hover: currentColor;
+}
+
+/* Filled: a fill in its tone, the label in `--on-fill` (each pair at 4.5:1
+   or more in the contrast gate); its fill is its edge, at 3:1 or more on
+   the page and on a surface (1.4.11). Outlined: an edge and a label in its
+   tone. Ghost: the label alone, its edge drawn only while pressed. */
+.button-filled {
+  background-color: var(--tone);
+  border-color: var(--tone);
+  color: var(--on-fill);
+}
+
+.button-outlined {
+  border-color: var(--tone);
+}
+
+/* Hover, on a button that takes presses: a fill a step darker (lighter in
+   the dark scheme), or the surface under a label and edge a step darker,
+   each pair in the contrast gate. Forced colors keep the reader's own. */
+@media (forced-colors: none) {
+  .button-filled:not([aria-disabled="true"]):hover {
+    background-color: var(--tone-hover);
+    border-color: var(--tone-hover);
+  }
+
+  .button-outlined:not([aria-disabled="true"]):hover,
+  .button-ghost:not([aria-disabled="true"]):hover {
+    background-color: var(--surface);
+    color: var(--tone-hover);
+  }
+
+  .button-outlined:not([aria-disabled="true"]):hover {
+    border-color: var(--tone-hover);
+  }
+}
+
+/* Pressed (a toggle): bolder, with an inset edge, never color alone (The
+   Weight Not Color Rule). The edge's extra pixel comes out of the inline
+   padding, so the thicker edge doesn't widen it. */
+.button[aria-pressed="true"] {
+  font-weight: 600;
+  border-style: inset;
+  border-width: 2px;
+  padding-inline: max(0px, calc(var(--button-padding) - 1px));
+}
+
+.button-icon-only[aria-pressed="true"] {
+  padding-inline: 0;
+}
+
+.button-ghost[aria-pressed="true"] {
+  border-color: var(--tone);
+}
+
+/* Forced colors: the reader's button colors, every appearance edged so it
+   still reads as a button; an unavailable one in the color of unavailable
+   text. Pressed keeps its weight and inset edge. */
+@media (forced-colors: active) {
+  .button,
+  .button-filled,
+  .button-outlined,
+  .button-ghost {
+    background-color: ButtonFace;
+    border-color: ButtonText;
+    color: ButtonText;
+  }
+
+  .button[aria-disabled="true"] {
+    border-color: GrayText;
+    color: GrayText;
+  }
+}
+
 /* A toast: visually above its neighbors while it lasts (§4.5). */
 .toast {
   background-color: var(--surface);
@@ -720,7 +892,7 @@ fieldset.choices > p {
   gap: 0.5rem;
 }
 
-.actions button {
+.actions button:not(.button) {
   min-block-size: 2rem;
   padding-inline: 0.75rem;
 }

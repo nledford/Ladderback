@@ -34,6 +34,7 @@ mod step_up_field;
 mod toast;
 pub(crate) mod tree;
 
+pub use button::Button;
 pub use checkbox::Checkbox;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};
 pub use form_field::FormField;
