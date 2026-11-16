@@ -112,7 +112,7 @@ Given("the plan {string} backs up to {string}", async function (this: BrowserWor
       "",
     ].join("\n"),
   );
-  const { child, url } = await startServer({
+  const { child, url } = await startServer(scratch, {
     LADDERBACK_CONFIG_DIR: configDir,
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),
     LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
@@ -205,7 +205,7 @@ Given(
         "",
       ].join("\n"),
     );
-    const { child, url } = await startServer({
+    const { child, url } = await startServer(scratch, {
       LADDERBACK_CONFIG_DIR: configDir,
       LADDERBACK_DATA_DIR: path.join(scratch, "data"),
       LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),

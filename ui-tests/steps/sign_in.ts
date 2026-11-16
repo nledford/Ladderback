@@ -14,7 +14,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 
 import { namePattern } from "../support/keyboard.ts";
-import { type BrowserWorld, binary, fixtureRepo, startServer } from "../support/world.ts";
+import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "../support/world.ts";
 import { expand } from "./repositories.ts";
 
 // How long a dialog or a focus move the page makes takes to show, with room.
@@ -35,7 +35,7 @@ function folders(scratch: string): Record<string, string> {
 async function setPassword(scratch: string, password: string): Promise<void> {
   const child = spawn(binary, ["set-password"], {
     stdio: ["pipe", "ignore", "pipe"],
-    env: { ...process.env, LC_ALL: "C", LANGUAGE: "", ...folders(scratch) },
+    env: binaryEnv(scratch, folders(scratch)),
   });
   let output = "";
   child.stderr.on("data", (chunk: Buffer) => {
@@ -55,7 +55,7 @@ Given(
     const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-sign-in-"));
     await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
     await setPassword(scratch, password);
-    const { child, url } = await startServer(folders(scratch));
+    const { child, url } = await startServer(scratch, folders(scratch));
     this.ownServer = { child, scratch };
     this.baseUrl = url;
   },
@@ -69,7 +69,7 @@ Given(
   "a daemon with sign-in off listening on every address for the host name {string}",
   async function (this: BrowserWorld, name: string) {
     const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-network-"));
-    const { child, url } = await startServer(folders(scratch), [
+    const { child, url } = await startServer(scratch, folders(scratch), [
       "--listen",
       "0.0.0.0:0",
       "--allowed-host",
@@ -86,7 +86,7 @@ Given(
 // password yet: one set while it runs waits for a restart to turn sign-in on.
 Given("a daemon with sign-in off", async function (this: BrowserWorld) {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-sign-in-off-"));
-  const { child, url } = await startServer(folders(scratch));
+  const { child, url } = await startServer(scratch, folders(scratch));
   this.ownServer = { child, scratch };
   this.baseUrl = url;
 });

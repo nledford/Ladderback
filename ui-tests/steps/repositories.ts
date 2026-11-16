@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 import { Given, Then, When } from "@cucumber/cucumber";
 
 import { journey, namePattern } from "../support/keyboard.ts";
-import { type BrowserWorld, binary, fixtureRepo, startServer } from "../support/world.ts";
+import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "../support/world.ts";
 import { api, ended } from "./maintenance.ts";
 
 // A test, a connection or a creation takes the engine a moment, in a debug
@@ -37,7 +37,7 @@ Given("a daemon with a scratch demo repository and no repositories", async funct
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const configDir = path.join(scratch, "config");
   await mkdir(configDir);
-  const { child, url } = await startServer({
+  const { child, url } = await startServer(scratch, {
     LADDERBACK_CONFIG_DIR: configDir,
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),
     LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
@@ -104,15 +104,9 @@ Given(
     const configDir = path.join(scratch, "config");
     const dataDir = path.join(scratch, "data");
     await mkdir(configDir);
-    const env = {
-      ...process.env,
-      LC_ALL: "C",
-      LANGUAGE: "",
-      LADDERBACK_CONFIG_DIR: configDir,
-      LADDERBACK_DATA_DIR: dataDir,
-    };
+    const env = binaryEnv(scratch, { LADDERBACK_CONFIG_DIR: configDir, LADDERBACK_DATA_DIR: dataDir });
     await promisify(execFile)(binary, ["import-profile", profile], { env });
-    const { child, url } = await startServer({
+    const { child, url } = await startServer(scratch, {
       LADDERBACK_CONFIG_DIR: configDir,
       LADDERBACK_DATA_DIR: dataDir,
       LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),

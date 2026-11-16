@@ -244,7 +244,7 @@ Given(
       path.join(configDir, "config.toml"),
       config.replace(local, 'maintenance = "none"').replace(id, `${id}\nhost = ${JSON.stringify(host)}`),
     );
-    const { child, url } = await startServer({
+    const { child, url } = await startServer(machine, {
       LADDERBACK_CONFIG_DIR: configDir,
       LADDERBACK_DATA_DIR: path.join(machine, "data"),
       LADDERBACK_CACHE_DIR: path.join(machine, "cache"),
