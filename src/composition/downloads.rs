@@ -164,14 +164,16 @@ impl http_adapter::Downloads for DownloadService {
     }
 
     /// The download under `ticket`; how it ends is written to the log on a
-    /// task of its own, once its pieces end or are dropped.
+    /// task of its own, once its pieces end or are dropped. Downloads whose
+    /// minute ran out are given up by the sweep, never by this request, so
+    /// a browser that hangs up can't leave one running in the log.
     async fn fetch(&self, ticket: DownloadTicket) -> Option<Handover> {
         let Download {
             file_name,
             shape,
             pieces,
             recorded,
-        } = self.downloads.fetch(&ticket).await.ok()?;
+        } = self.downloads.fetch(&ticket).ok()?;
         tokio::spawn(recorded);
         Some(Handover {
             file_name,

@@ -164,7 +164,9 @@ impl Downloads {
 
     /// Confirms `ask` by step-up, takes a download's turn, starts the
     /// engine's job and waits until it says what it found; the download
-    /// then waits for its browser under the ticket answered.
+    /// then waits for its browser under the ticket answered. The caller
+    /// runs it to its end, on a task of its own, as a restore's start: it
+    /// writes the log, and gives up the downloads whose minute ran out.
     pub async fn start(
         &self,
         op: OperationId,
@@ -262,10 +264,11 @@ impl Downloads {
     }
 
     /// The download waiting under `ticket`, taken so no one fetches it
-    /// again. Downloads whose minute ran out are given up first, and the
-    /// log records them cancelled.
-    pub async fn fetch(&self, ticket: &DownloadTicket) -> Result<Download, DownloadError> {
-        self.give_up_expired().await;
+    /// again; one whose minute ran out is unknown. It waits for nothing, so
+    /// a browser that hangs up can't cut it short: giving up the downloads
+    /// whose minute ran out is [`give_up_expired`](Self::give_up_expired)'s,
+    /// run by the agent, never by the request (#846).
+    pub fn fetch(&self, ticket: &DownloadTicket) -> Result<Download, DownloadError> {
         let confirmed = lock(&self.pending)
             .take(ticket, self.clock.now())
             .ok_or(DownloadError::TicketUnknown)?;
@@ -294,7 +297,9 @@ impl Downloads {
     }
 
     /// Gives up every confirmed download whose minute ran out: its job
-    /// stops, its turn is free again and the log records it cancelled.
+    /// stops, its turn is free again and the log records it cancelled. The
+    /// caller runs it to its end, on a task of its own: one dropped halfway
+    /// leaves the downloads it took running in the log.
     pub async fn give_up_expired(&self) {
         let expired = lock(&self.pending).expire(self.clock.now());
         for confirmed in expired {

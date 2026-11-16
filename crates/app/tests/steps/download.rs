@@ -347,7 +347,7 @@ impl Agent {
     async fn fetch_download(&mut self, index: usize) {
         let downloads = self.downloads().await;
         let ticket = self.ticket(index);
-        let mut fetched = downloads.fetch(&ticket).await;
+        let mut fetched = downloads.fetch(&ticket);
         if let Ok(download) = fetched.as_mut() {
             let recorded = std::mem::replace(&mut download.recorded, async {}.boxed());
             self.download.recording.push(tokio::spawn(recorded));
@@ -523,12 +523,14 @@ async fn hangs_up_while_written(agent: &mut Agent, seconds: i64) {
     let downloads = agent.downloads().await;
     let ticket = agent.ticket(agent.download.confirmed.len() - 1);
     agent.clock.advance(SignedDuration::from_secs(seconds));
-    // The browser's request gets as far as it can while the log is busy,
-    // then hangs up: the request is dropped wherever it waits.
+    // The browser's request runs while the log is busy, then hangs up.
+    // Fetching waits for nothing (#846); were it to wait again, poll it
+    // once here (`now_or_never`) and drop it, never `.await` it: the held
+    // log never answers.
     agent.download.log_held.store(true, Ordering::SeqCst);
-    let fetched = downloads.fetch(&ticket).now_or_never();
+    let fetched = downloads.fetch(&ticket);
     agent.download.log_held.store(false, Ordering::SeqCst);
-    agent.download.fetched = fetched;
+    agent.download.fetched = Some(fetched);
 }
 
 #[when("the agent gives up the downloads whose minute ran out")]

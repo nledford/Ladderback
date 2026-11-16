@@ -100,7 +100,7 @@ impl Agent {
             Ok(ticket) => ticket,
             Err(error) => panic!("the download wasn't confirmed: {error:?}"),
         };
-        let download = match downloads.fetch(&ticket).await {
+        let download = match downloads.fetch(&ticket) {
             Ok(download) => download,
             Err(error) => panic!("the download wasn't handed over: {error:?}"),
         };
