@@ -26,25 +26,31 @@ pub struct FullDiskAccessCheck {
 
 impl FullDiskAccessCheck {
     pub fn new(probe: Arc<dyn FullDiskAccessProbe>) -> Self {
-        let _ = (probe, PoisonError::<()>::into_inner);
-        todo!()
+        Self {
+            probe,
+            found: Mutex::new(None),
+        }
     }
 
     /// Runs the probe as the agent starts, and keeps what it found: the line
     /// the log then says, if any.
     pub async fn at_start(&self) -> Option<StartNote> {
-        todo!()
+        match self.check().await {
+            FullDiskAccess::Missing => Some(StartNote::FullDiskAccessMissing),
+            FullDiskAccess::Granted | FullDiskAccess::Unknown => None,
+        }
     }
 
     /// Runs the probe now, before a backup or when a person asks to check
     /// again, and keeps what it found.
     pub async fn check(&self) -> FullDiskAccess {
-        let _ = (&self.probe, &self.found);
-        todo!()
+        let found = self.probe.probe().await;
+        *self.found.lock().unwrap_or_else(PoisonError::into_inner) = Some(found);
+        found
     }
 
     /// What the last probe found; `None` before the first.
     pub fn found(&self) -> Option<FullDiskAccess> {
-        todo!()
+        *self.found.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }

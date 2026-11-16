@@ -123,7 +123,7 @@ pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
 /// Every kind of warning but [`WarningKind::Other`], the table the
 /// `op_warnings.code` column is read through, each by the code the domain
 /// writes for it ([`WarningKind::code`]).
-const WARNING_KINDS: [WarningKind; 8] = [
+const WARNING_KINDS: [WarningKind; 9] = [
     WarningKind::SourceUnreadable,
     WarningKind::Hook,
     WarningKind::MaintenancePartial,
@@ -132,6 +132,7 @@ const WARNING_KINDS: [WarningKind; 8] = [
     WarningKind::OtherHosts,
     WarningKind::LocationSkipped,
     WarningKind::SecretFileReadable,
+    WarningKind::FullDiskAccessMissing,
 ];
 
 /// The kind of warning stored as `code`. A code this version doesn't know,

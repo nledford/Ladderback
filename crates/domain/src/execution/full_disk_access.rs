@@ -31,8 +31,17 @@ impl FullDiskAccess {
     /// message as they were. Every other warning, and every warning when the
     /// grant was found or unknown, is as it came.
     pub fn explain(self, warning: Warning) -> Warning {
-        let _ = (warning, NOT_PERMITTED);
-        todo!()
+        let explained = self == Self::Missing
+            && warning.kind == WarningKind::SourceUnreadable
+            && warning.detail.contains(NOT_PERMITTED);
+        if explained {
+            Warning {
+                kind: WarningKind::FullDiskAccessMissing,
+                ..warning
+            }
+        } else {
+            warning
+        }
     }
 }
 

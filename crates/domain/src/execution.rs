@@ -305,7 +305,7 @@ impl WarningKind {
             Self::OtherHosts => "maintenance-other-hosts",
             Self::LocationSkipped => "location-skipped",
             Self::SecretFileReadable => "secret-file-readable",
-            Self::FullDiskAccessMissing => todo!(),
+            Self::FullDiskAccessMissing => "full-disk-access-missing",
             Self::Other => "unknown",
         }
     }

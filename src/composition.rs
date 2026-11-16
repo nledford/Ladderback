@@ -15,6 +15,7 @@ use app::announce::failure;
 use app::browse::{BrowseError, BrowseSnapshot, FolderReads};
 use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
+use app::full_disk_access::{FullDiskAccessCheck, StartNote};
 use app::history::{GetOperation, ListOperations};
 use app::interop::{ExportError, ImportError};
 use app::locations::{ChooseLocation, LocationReport};
@@ -785,6 +786,8 @@ async fn state_over(
         message: msg::CLI_CANNOT_FIND_OWN_PATH,
         args: vec![("detail", text(detail))],
     })?;
+    // Before serving: a missing grant is said in the log once, at the start.
+    let (full_disk_access, full_disk_access_route) = full_disk_access_over(&program).await;
     let mut workers = WorkerEngine::new(program, ["worker"]);
     if let Some(dir) = workers_cache(cache_dir) {
         tidy_workers_cache(&dir, recorded).await;
@@ -837,6 +840,7 @@ async fn state_over(
         // A repository's stats, read on request and after each check, are
         // kept in the operation log's database (§16, decision 104).
         readings: Arc::<SqliteStore>::clone(&log.store),
+        full_disk_access,
     });
     // `~/ladderback-restore`. With no home folder, or one that isn't
     // UTF-8, there is none: a restore to a new folder then needs
@@ -927,12 +931,53 @@ async fn state_over(
             updates: notice,
             // An empty one: the daemon's own puts the one its log feeds here.
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
-            // Off macOS, and until the daemon puts its probe here.
-            full_disk_access: http_adapter::FullDiskAccessRoute::default(),
+            full_disk_access: full_disk_access_route,
         },
         background,
         stopping,
     ))
+}
+
+/// The agent's Full Disk Access check and its routes (§16, decision NN): on
+/// macOS, the probe of `~/Library/Safari` under the home the daemon runs
+/// with, which a test's daemon has in its scratch folder, and System
+/// Settings' pane, showing `program`; nothing elsewhere. The probe runs once
+/// here, and a grant found missing is said in the log.
+async fn full_disk_access_over(
+    program: &std::path::Path,
+) -> (
+    Option<Arc<FullDiskAccessCheck>>,
+    http_adapter::FullDiskAccessRoute,
+) {
+    let Some(probe) = platform::full_disk_access::system_probe() else {
+        return (None, http_adapter::FullDiskAccessRoute::default());
+    };
+    let check = Arc::new(FullDiskAccessCheck::new(Arc::new(probe)));
+    if let Some(StartNote::FullDiskAccessMissing) = check.at_start().await {
+        log::warn!(
+            "this program hasn't been given Full Disk Access, so backups can't read Mail, Messages, Safari and other apps' data on this Mac: turn it on in System Settings, under Privacy & Security, then Full Disk Access; the start page shows how"
+        );
+    }
+    let pane = SystemSettings(platform::full_disk_access::SettingsPane::new(
+        program.to_path_buf(),
+    ));
+    (
+        Some(Arc::clone(&check)),
+        http_adapter::FullDiskAccessRoute::new(check, Arc::new(pane)),
+    )
+}
+
+/// System Settings' Full Disk Access pane, as the routes open it.
+struct SystemSettings(platform::full_disk_access::SettingsPane);
+
+#[async_trait]
+impl http_adapter::SettingsOpener for SystemSettings {
+    async fn open(&self) -> Result<(), http_adapter::SettingsUnopened> {
+        self.0
+            .open()
+            .await
+            .map_err(|detail| http_adapter::SettingsUnopened { detail })
+    }
 }
 
 /// Tells the channels of the agent's notification rules of the news on `bus`
@@ -1446,6 +1491,9 @@ struct PlanRunner {
     /// Where each reading of a repository's stats is kept (§16, decision
     /// 104): read on request, and after each check.
     readings: Arc<dyn app::ports::StatsStore>,
+    /// The agent's Full Disk Access check, run before each backup on macOS
+    /// (§16, decision NN); none elsewhere.
+    full_disk_access: Option<Arc<FullDiskAccessCheck>>,
 }
 
 impl PlanRunner {
@@ -1519,13 +1567,17 @@ impl PlanRunner {
 
     /// The use case that runs a backup with `setup`'s hooks.
     fn backup_use_case(&self, setup: HookSetup) -> RunOperation {
-        RunOperation::new(
+        let use_case = RunOperation::new(
             Arc::clone(&self.engine),
             Arc::new(SystemClock),
             Arc::clone(&self.store),
         )
         .with_hooks(Arc::clone(&self.hooks), setup)
-        .with_events(Arc::clone(&self.events))
+        .with_events(Arc::clone(&self.events));
+        match &self.full_disk_access {
+            Some(check) => use_case.with_full_disk_access(Arc::clone(check)),
+            None => use_case,
+        }
     }
 
     /// Parks `operation`'s cancel switch before its run starts — not lazily
@@ -2285,7 +2337,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
         WarningKind::LocationSkipped => WarningCode::LocationSkipped,
         WarningKind::SecretFileReadable => WarningCode::SecretFileReadable,
-        WarningKind::FullDiskAccessMissing => todo!(),
+        WarningKind::FullDiskAccessMissing => WarningCode::FullDiskAccessMissing,
         WarningKind::Other => WarningCode::Unknown,
     }
 }
@@ -5934,6 +5986,7 @@ mod tests {
             ends: app::retry::run_ends().0,
             runs: crate::composition::runs::Runs::default(),
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+            full_disk_access: None,
             writes: Arc::default(),
         };
         (runner, entered, open_gate, scratch)
@@ -11961,6 +12014,7 @@ mod repository_service_tests {
                 ends: app::retry::run_ends().0,
                 runs: crate::composition::runs::Runs::default(),
                 readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+                full_disk_access: None,
                 writes: Arc::default(),
             };
             let detail = detail.map(str::to_owned);
@@ -12011,6 +12065,7 @@ mod repository_service_tests {
                 ends: app::retry::run_ends().0,
                 runs: crate::composition::runs::Runs::default(),
                 readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+                full_disk_access: None,
                 writes: Arc::default(),
             };
 
@@ -12106,6 +12161,7 @@ mod repository_service_tests {
             ends: app::retry::run_ends().0,
             runs: crate::composition::runs::Runs::default(),
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+            full_disk_access: None,
             writes: Arc::default(),
         };
 
@@ -12360,6 +12416,7 @@ mod repository_service_tests {
             ends,
             runs: crate::composition::runs::Runs::default(),
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+            full_disk_access: None,
             writes: Arc::default(),
         };
         (runner, heard, scripted, plan)

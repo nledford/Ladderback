@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::execution::full_disk_access::FullDiskAccess;
@@ -16,31 +16,27 @@ pub struct FakeFullDiskAccessProbe {
 impl FakeFullDiskAccessProbe {
     /// A probe that finds `found` until told otherwise.
     pub fn new(found: FullDiskAccess) -> Self {
-        let _ = (
-            found,
-            Mutex::new(()),
-            AtomicUsize::new(0),
-            Ordering::Relaxed,
-        );
-        todo!()
+        Self {
+            found: Mutex::new(found),
+            asked: AtomicUsize::new(0),
+        }
     }
 
     /// What every later probe finds.
     pub fn set(&self, found: FullDiskAccess) {
-        let _ = found;
-        todo!()
+        *self.found.lock().unwrap_or_else(PoisonError::into_inner) = found;
     }
 
     /// How many times the probe ran.
     pub fn asked(&self) -> usize {
-        todo!()
+        self.asked.load(Ordering::SeqCst)
     }
 }
 
 #[async_trait]
 impl FullDiskAccessProbe for FakeFullDiskAccessProbe {
     async fn probe(&self) -> FullDiskAccess {
-        let _ = (&self.found, &self.asked);
-        todo!()
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        *self.found.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }

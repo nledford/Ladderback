@@ -55,6 +55,11 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
                 told.push_str(&line(localizer, msg::CLI_SERVICE_LINGER, &[]));
             }
             told.push_str(&keyring_said(localizer, &service, keyring));
+            told.push_str(&full_disk_access_said(
+                localizer,
+                service.needs_full_disk_access(),
+                &program,
+            ));
             to_stdout(&told)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -68,21 +73,15 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
 /// The note that says to grant the installed program Full Disk Access in
 /// System Settings, for a service that `needed` it (a launchd agent on
 /// macOS, §16 decision NN); nothing for any other.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "called from install in the change that implements it"
-    )
-)]
 fn full_disk_access_said(localizer: &Localizer, needed: bool, program: &ServicePath) -> String {
-    let _ = (
+    if !needed {
+        return String::new();
+    }
+    line(
         localizer,
-        needed,
-        program,
         msg::CLI_SERVICE_FULL_DISK_ACCESS,
-    );
-    todo!()
+        &[("program", MsgArg::Text(shown(Path::new(program.as_str()))))],
+    )
 }
 
 fn remove(localizer: &Localizer) -> io::Result<ExitCode> {

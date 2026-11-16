@@ -1,5 +1,6 @@
 //! Runs the manager's program: `systemctl`, `launchctl` or `loginctl`, found
 //! on the `PATH` it is given, with argv only and an environment of its own.
+//! The Full Disk Access pane's `open` runs through it too.
 
 use std::ffi::{OsStr, OsString};
 use std::process::Stdio;
@@ -51,7 +52,7 @@ impl Environment {
 }
 
 /// How one call of the manager ended.
-pub(super) enum Ended {
+pub(crate) enum Ended {
     /// It ended with 0, printing `out` on its standard output, perhaps cut
     /// short.
     Succeeded { out: String },
@@ -65,7 +66,7 @@ pub(super) enum Ended {
 /// # Errors
 ///
 /// The program could not be started, or did not end within `limit`.
-pub(super) async fn run(
+pub(crate) async fn run(
     program: &str,
     args: &[OsString],
     environment: &Environment,
@@ -140,7 +141,7 @@ async fn kept(pipe: Option<impl AsyncRead + Unpin>) -> Vec<u8> {
 }
 
 /// The command line as a person would type it.
-pub(super) fn shown(program: &str, args: &[OsString]) -> String {
+pub(crate) fn shown(program: &str, args: &[OsString]) -> String {
     let words: Vec<String> = std::iter::once(program.to_owned())
         .chain(args.iter().map(|arg| arg.to_string_lossy().into_owned()))
         .collect();

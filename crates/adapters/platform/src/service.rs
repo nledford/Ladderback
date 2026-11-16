@@ -17,7 +17,7 @@
 //! ([`Environment`]), through the spawn gate (decision 58), with argv only.
 
 mod files;
-mod manager;
+pub(crate) mod manager;
 mod program;
 
 use std::ffi::OsString;
@@ -300,8 +300,7 @@ impl UserService {
     /// agent on macOS, where nothing can ask for the grant; never a systemd
     /// service.
     pub fn needs_full_disk_access(&self) -> bool {
-        let _ = &self.kind;
-        todo!()
+        matches!(self.kind, Kind::Launchd { .. })
     }
 }
 

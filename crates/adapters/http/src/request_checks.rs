@@ -148,8 +148,8 @@ fn parse_authority(text: &str) -> Option<Authority<'_>> {
 /// default names the address it forwards to), so this alone doesn't place
 /// the browser.
 pub(crate) fn host_is_loopback(headers: &HeaderMap) -> bool {
-    let _ = headers;
-    todo!()
+    matches!(one(headers, &HOST), Header::Text(host)
+        if parse_authority(host).is_some_and(|authority| is_loopback_host(authority.host)))
 }
 
 fn is_loopback_host(host: &str) -> bool {
