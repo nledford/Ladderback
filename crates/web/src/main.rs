@@ -30,10 +30,15 @@ mod announcer;
 // `components.rs`'s `StatusBadge` is its glue.
 mod badge;
 // The shared component set, exercised by the gallery in a `gallery` build; a
-// build without the gallery has no user for it yet.
+// build without the gallery has no user for it yet, nor for the re-exports
+// of its root.
 #[cfg_attr(
     not(feature = "gallery"),
-    expect(dead_code, reason = "only the gallery uses the shared components yet")
+    expect(
+        dead_code,
+        unused_imports,
+        reason = "only the gallery uses the shared components yet"
+    )
 )]
 mod components;
 // What the Log page lists and copies, decided on the host;
