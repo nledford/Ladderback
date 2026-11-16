@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
-import type { Locator, Page } from "playwright";
+import { errors, type Locator, type Page } from "playwright";
 
 import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
@@ -10,6 +10,10 @@ import type { BrowserWorld } from "../support/world.ts";
 // such as the gallery, is crossed in stretches: a scenario first stops at a
 // named control partway down, then presses on from there.
 const MAX_TABS = 40;
+
+// Some of what a walk is after shows only once the daemon answers the page's
+// first read, as the pages' own steps wait for it; ten seconds is generous.
+const TARGET_PATIENCE_MS = 10_000;
 
 // A polite message waits up to two seconds for company, and its text is set a
 // moment after the region is cleared (§4.5); five seconds is generous.
@@ -35,10 +39,19 @@ When("I open the address {string}", async function (this: BrowserWorld, address:
   await this.open(address);
 });
 
-/** Presses `key` until focus is on the one element with this role and name. */
+/** Presses `key` until focus is on the one element with this role and name.
+ *  The walk starts once such an element shows: one the page builds from its
+ *  first read isn't there yet when the page opens, and presses made before it
+ *  is would run past the last stop onto the page body. */
 async function pressUntilFocusIsOn(world: BrowserWorld, key: string, role: string, name: string): Promise<void> {
   const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
+  try {
+    await target.first().waitFor({ state: "visible", timeout: TARGET_PATIENCE_MS });
+  } catch (error) {
+    if (!(error instanceof errors.TimeoutError)) throw error;
+    assert.fail(`the ${role} "${name}" did not show within ${TARGET_PATIENCE_MS / 1_000} s, so no ${key} press could reach it`);
+  }
   const focused = async () =>
     (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement));
   for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
