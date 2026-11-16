@@ -125,6 +125,32 @@ pub struct RepositorySecrets<'a> {
     pub resolved: &'a [SecretValue],
 }
 
+impl RepositorySecrets<'_> {
+    /// Every secret of the repository a redactor masks, as
+    /// [`Redactor::for_repository`] describes them, so a redactor can be
+    /// built from the secrets of several repositories at once.
+    pub fn values(self) -> Vec<SecretValue> {
+        let mut values = vec![self.password.clone()];
+        values.extend(self.derived());
+        values.extend_from_slice(self.resolved);
+        values
+    }
+
+    /// What the locations and the options hold that a redactor masks.
+    fn derived(self) -> Vec<SecretValue> {
+        std::iter::once(self.repository)
+            .chain(self.repo_hot)
+            .flat_map(location_secrets)
+            .chain(
+                [self.options, self.options_hot, self.options_cold]
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|(name, value)| option_secrets(name, value)),
+            )
+            .collect()
+    }
+}
+
 /// The secrets of a repository, counted as a job finds them, each once, in
 /// the bytes [`MAX_MASKED_BYTES`] caps: what a [`Redactor`] for it would be
 /// built from, before any of it is built. It has no `Debug` form: it holds
@@ -411,26 +437,12 @@ impl Redactor {
     /// holds a credential ([`is_secret_option`]), even one written inline;
     /// and `resolved`, what the references in its settings were resolved to.
     pub fn for_repository(repository: RepositorySecrets<'_>) -> Self {
-        let RepositorySecrets {
-            repository,
-            repo_hot,
-            password,
-            options,
-            options_hot,
-            options_cold,
-            resolved,
-        } = repository;
-        let derived: Vec<SecretValue> = std::iter::once(repository)
-            .chain(repo_hot)
-            .flat_map(location_secrets)
-            .chain(
-                [options, options_hot, options_cold]
-                    .iter()
-                    .flat_map(|set| set.iter())
-                    .flat_map(|(name, value)| option_secrets(name, value)),
-            )
-            .collect();
-        Self::new(std::iter::once(password).chain(&derived).chain(resolved))
+        let derived = repository.derived();
+        Self::new(
+            std::iter::once(repository.password)
+                .chain(&derived)
+                .chain(repository.resolved),
+        )
     }
 
     /// `text` with every needle in it replaced by [`REDACTED`]. Needles that

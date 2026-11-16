@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 
 use crate::notifications::{ChannelName, Notifications, RuleName};
+use crate::secrets::SecretValue;
 use crate::{PlanId, RepositoryAlias, RepositoryId};
 
 use super::{
@@ -275,6 +276,18 @@ impl AgentConfig {
 
     pub fn repository(&self, alias: &RepositoryAlias) -> Option<&RepositoryConfig> {
         self.repositories.get(alias)
+    }
+
+    /// What every repository's settings hold as text that a redactor masks,
+    /// at each of its locations ([`RepositorySettings::written_secrets`]):
+    /// a program the agent runs can print any of them, such as a hook that
+    /// shows the configuration file (security.md §10.2).
+    pub fn written_secrets(&self) -> Vec<SecretValue> {
+        self.repositories
+            .values()
+            .flat_map(RepositoryConfig::location_settings)
+            .flat_map(|settings| settings.written_secrets())
+            .collect()
     }
 
     /// How many repositories read their password from the OS keyring
