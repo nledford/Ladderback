@@ -90,8 +90,16 @@ impl OperationStore for InMemoryOperationStore {
         &self,
         repository: Option<&domain::RepositoryId>,
     ) -> Result<Option<OperationId>, StoreError> {
-        let _ = repository;
-        todo!()
+        Ok(self
+            .stored()
+            .values()
+            .map(|detail| &detail.record)
+            .find(|record| {
+                record
+                    .maintaining()
+                    .is_some_and(|held| repository.is_none_or(|asked| asked == held))
+            })
+            .map(|record| record.id))
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {

@@ -448,8 +448,19 @@ impl OperationStore for SqliteStore {
         &self,
         repository: Option<&domain::RepositoryId>,
     ) -> Result<Option<domain::OperationId>, StoreError> {
-        let _ = repository;
-        todo!()
+        let _call = self.call().await;
+        let query = match repository {
+            Some(repository) => {
+                sqlx::query(sql::FIND_MAINTENANCE_RUNNING_ON).bind(repository.as_str())
+            }
+            None => sqlx::query(sql::FIND_ANY_MAINTENANCE_RUNNING),
+        };
+        let found = query
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        // A row whose ID can't be read is an error, never "none runs".
+        found.as_ref().map(row::operation_id).transpose()
     }
 
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
