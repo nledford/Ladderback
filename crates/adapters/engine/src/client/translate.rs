@@ -381,6 +381,9 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::RestoreFolderUnset
                 | ErrorCode::FullDiskAccessNotLocal
                 | ErrorCode::FullDiskAccessSettingsUnopened
+                | ErrorCode::DownloadsBusy
+                | ErrorCode::EntryUnknown
+                | ErrorCode::DownloadUnknown
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }
