@@ -311,21 +311,27 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                 );
                 // The helpers that write a size and a duration hold bits of
                 // a unit, which a transform may leave as they were ("3 s"
-                // upside down), and `ui-instant` is a `DATETIME` call
+                // upside down), and `ui-instant` and the table demo's
+                // `ui-gallery-table-changed-on` are `DATETIME` calls
                 // through and through: the host's format is not the
                 // catalog's to transform (§8.4). `the_helpers_that_write_...`
                 // has them. `ui-snapshot-time-offset` holds only its two
                 // values and "UTC", a string literal a pseudolocale leaves
-                // as it is, `ui-stats-count` only its number, written in the
-                // locale's digits, and `ui-stats-size` only its size, which
+                // as it is, `ui-stats-count` and the table demo's
+                // `ui-gallery-table-files` only their number, written in the
+                // locale's digits, and `ui-stats-size` and the demo's
+                // `ui-gallery-table-size` only their size, which
                 // the size helper writes: there is no text of the catalog's
                 // to transform.
                 if id == msg::SIZE
                     || id == msg::DURATION
                     || id == msg::UI_INSTANT
+                    || id == msg::UI_GALLERY_TABLE_CHANGED_ON
                     || id == msg::UI_SNAPSHOT_TIME_OFFSET
                     || id == msg::UI_STATS_COUNT
+                    || id == msg::UI_GALLERY_TABLE_FILES
                     || id == msg::UI_STATS_SIZE
+                    || id == msg::UI_GALLERY_TABLE_SIZE
                 {
                     continue;
                 }

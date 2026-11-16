@@ -30,31 +30,57 @@ pub struct Sorted {
 /// descending. A press on a column sorted descending sorts it ascending
 /// again.
 pub fn press(sorted: Option<Sorted>, column: usize) -> Sorted {
-    let _ = (sorted, column);
-    todo!()
+    let direction = match sorted {
+        Some(Sorted {
+            column: last,
+            direction: Direction::Ascending,
+        }) if last == column => Direction::Descending,
+        _ => Direction::Ascending,
+    };
+    Sorted { column, direction }
 }
 
 /// The `aria-sort` of `column`'s header: `ascending` or `descending` on the
 /// column the table is sorted by, and none on any other, as the WAI-ARIA
 /// table pattern asks (one sorted column at a time).
 pub fn aria_sort(sorted: Option<Sorted>, column: usize) -> Option<&'static str> {
-    let _ = (sorted, column);
-    todo!()
+    match sorted? {
+        Sorted {
+            column: by,
+            direction: Direction::Ascending,
+        } if by == column => Some("ascending"),
+        Sorted {
+            column: by,
+            direction: Direction::Descending,
+        } if by == column => Some("descending"),
+        _ => None,
+    }
 }
 
 /// The glyph of `column`'s sort button, decoration beside its words: up and
 /// down while the table isn't sorted by it, up while it is sorted ascending,
 /// down while descending.
 pub fn glyph(sorted: Option<Sorted>, column: usize) -> LucideGlyph {
-    let _ = (sorted, column);
-    todo!()
+    match sorted {
+        Some(Sorted {
+            column: by,
+            direction: Direction::Ascending,
+        }) if by == column => LucideGlyph::ArrowUp,
+        Some(Sorted {
+            column: by,
+            direction: Direction::Descending,
+        }) if by == column => LucideGlyph::ArrowDown,
+        _ => LucideGlyph::ArrowUpDown,
+    }
 }
 
 /// Which of a column's two sentences says a sort `direction`, such as
 /// "Sorted by size, smallest first." and "Sorted by size, largest first.".
 pub fn sentence<'a>(direction: Direction, ascending: &'a str, descending: &'a str) -> &'a str {
-    let _ = (direction, ascending, descending);
-    todo!()
+    match direction {
+        Direction::Ascending => ascending,
+        Direction::Descending => descending,
+    }
 }
 
 /// What a column is sorted by in a row: a number (a size in bytes, an
@@ -75,8 +101,26 @@ pub type SortBy<'a, R> = (Direction, &'a dyn Fn(&R) -> SortKey);
 /// whose keys tie keeping the order given (a stable sort), whichever way it
 /// runs. Each row's sort key is read once.
 pub fn order<R, K>(rows: &[R], key: impl Fn(&R) -> K, by: Option<SortBy<'_, R>>) -> Vec<K> {
-    let _ = (rows, key, by);
-    todo!()
+    let Some((direction, sort_key)) = by else {
+        return rows.iter().map(key).collect();
+    };
+    let mut keyed: Vec<(SortKey, usize)> = rows
+        .iter()
+        .enumerate()
+        .map(|(at, row)| (sort_key(row), at))
+        .collect();
+    // The position given breaks a tie, ascending whichever way the keys run.
+    keyed.sort_by(|(a, at_a), (b, at_b)| {
+        let by_key = match direction {
+            Direction::Ascending => a.cmp(b),
+            Direction::Descending => b.cmp(a),
+        };
+        by_key.then(at_a.cmp(at_b))
+    });
+    keyed
+        .into_iter()
+        .filter_map(|(_, at)| rows.get(at).map(&key))
+        .collect()
 }
 
 /// Where the rows a table shows stand, as its caller knows it.
@@ -104,8 +148,12 @@ pub enum Shown {
 /// What shows while the rows are in `state` and there are `rows` of them:
 /// only a change of this builds the table again.
 pub fn shown(state: State, rows: usize) -> Shown {
-    let _ = (state, rows);
-    todo!()
+    match state {
+        State::Loading => Shown::Loading,
+        State::Unreachable => Shown::Unreachable,
+        State::Ready if rows == 0 => Shown::Empty,
+        State::Ready => Shown::Table,
+    }
 }
 
 /// How a column's cells are aligned: at the start of the line, or, for
@@ -122,7 +170,10 @@ impl Align {
     /// The class of `style.css` a cell, its header's and its footer's take:
     /// none at the start, where every cell already is.
     pub fn class(self) -> Option<&'static str> {
-        todo!()
+        match self {
+            Self::Start => None,
+            Self::End => Some("cell-end"),
+        }
     }
 }
 
@@ -133,7 +184,7 @@ pub struct Rem(pub f32);
 impl Rem {
     /// The width as CSS.
     pub fn css(self) -> String {
-        todo!()
+        format!("{}rem", self.0)
     }
 }
 
@@ -147,8 +198,7 @@ const PINNED_SHARE: u8 = 40;
 /// to leave the others room, its share of the frame (`cqi`: the frame is the
 /// size container around the table).
 pub fn row_header_width(width: Rem) -> String {
-    let _ = (width, PINNED_SHARE);
-    todo!()
+    format!("min({}, {PINNED_SHARE}cqi)", width.css())
 }
 
 /// The frame's `scroll-padding-inline-start`: the room the pinned row header
@@ -156,16 +206,22 @@ pub fn row_header_width(width: Rem) -> String {
 /// from beneath it. A percentage of the frame's own width, as a padding of a
 /// scroller's is.
 pub fn pinned_room(width: Rem) -> String {
-    let _ = width;
-    todo!()
+    format!("min({}, {PINNED_SHARE}%)", width.css())
 }
 
 /// The table's own width: the frame's (`100cqi`), or, where that is less
 /// than the row header's and the `columns`' widths added up, those widths,
 /// and the frame scrolls.
 pub fn table_width(row_header: Rem, columns: impl IntoIterator<Item = Rem>) -> String {
-    let _ = (row_header, columns.into_iter());
-    todo!()
+    // From 0.0: a float sum of nothing is -0.0, which would say "-0rem".
+    let sum = columns
+        .into_iter()
+        .fold(0.0_f32, |sum, Rem(width)| sum + width);
+    format!(
+        "max(100cqi, calc({} + {}))",
+        row_header_width(row_header),
+        Rem(sum).css()
+    )
 }
 
 /// What names a table: a caption above it, or the page's heading (a
@@ -189,20 +245,28 @@ pub enum Name {
 impl Name {
     /// The words of the table's `<caption>`, if a caption names it.
     pub fn caption(&self) -> Option<&str> {
-        todo!()
+        match self {
+            Self::Caption(words) => Some(words),
+            Self::Heading(_) => None,
+        }
     }
 
     /// The table's `aria-labelledby`: the heading's `id`, for a table named
     /// by one. A caption names its table without it.
     pub fn table_labelled_by(&self) -> Option<&str> {
-        todo!()
+        match self {
+            Self::Caption(_) => None,
+            Self::Heading(id) => Some(id),
+        }
     }
 
     /// The frame's `aria-labelledby`: the caption's `id`, `caption_id`, or
     /// the heading's.
     pub fn frame_labelled_by<'a>(&'a self, caption_id: &'a str) -> &'a str {
-        let _ = caption_id;
-        todo!()
+        match self {
+            Self::Caption(_) => caption_id,
+            Self::Heading(id) => id,
+        }
     }
 }
 

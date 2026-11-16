@@ -190,29 +190,123 @@ ui-gallery-demo-dialog-body = A dialog traps focus and returns it on close.
 # The button inside the demo dialog that closes it.
 ui-gallery-close-demo-dialog = Close the demo dialog
 
-# The heading of the gallery's data table demo.
-ui-gallery-table-heading = Data table
+# The heading of the gallery's table demo.
+ui-gallery-table-heading = Table
 
-# The data table demo's caption.
-ui-gallery-demo-repositories = Demo repositories
+# The legend of the table demo's choice of what its table shows.
+ui-gallery-table-shows = Demo table shows
 
-# The column header of the data table demo.
-ui-gallery-repository-column = Repository
+# A choice of the table demo: its rows.
+ui-gallery-table-shows-rows = Demo rows
 
-# The button in the table header that sorts the rows.
-ui-gallery-sort-by-repository = Sort by repository
+# A choice of the table demo: the rows on their way.
+ui-gallery-table-shows-loading = Demo loading
 
-# Announced politely when the table is sorted ascending.
-ui-gallery-sorted-ascending = Sorted by repository, ascending.
+# A choice of the table demo: no rows.
+ui-gallery-table-shows-empty = Demo empty
 
-# A repository row of the data table demo.
-ui-gallery-demo-repo-anchor = anchor
+# A choice of the table demo: rows that can't be read.
+ui-gallery-table-shows-unreachable = Demo unreachable
 
-# A repository row of the data table demo.
-ui-gallery-demo-repo-harbor = harbor
+# The caption of the table demo's table.
+ui-gallery-table-caption = Demo folders
 
-# A repository row of the data table demo.
-ui-gallery-demo-repo-moor = moor
+# The caption of the table demo's table in a narrow frame.
+ui-gallery-table-narrow-caption = Demo folders in a narrow frame
+
+# The caption of the table demo's table set right to left.
+ui-gallery-table-rtl-caption = Demo folders, right to left
+
+# Said in the table demo's place while its rows are on their way.
+ui-gallery-table-loading = Loading the demo folders…
+
+# Said in the table demo's place when it has no rows.
+ui-gallery-table-empty = No demo folders yet.
+
+# Said in the table demo's place when its rows can't be read.
+ui-gallery-table-unreachable = Ladderback can't be reached, so no demo folders show.
+
+# A demo folder's name, a row of the table demo.
+ui-gallery-table-photos = photos
+
+# A demo folder's name, a row of the table demo.
+ui-gallery-table-music = music
+
+# A demo folder's name, a row of the table demo.
+ui-gallery-table-documents = documents
+
+# A demo folder's name, a row of the table demo.
+ui-gallery-table-notes = notes
+
+# The table demo's column of folder names, each row's header.
+ui-gallery-table-name = Name
+
+# The table demo's column of folder sizes.
+ui-gallery-table-size-column = Size
+
+# The table demo's column of when each folder changed.
+ui-gallery-table-changed = Changed
+
+# The table demo's column of each folder's number of files.
+ui-gallery-table-files-column = Files
+
+# The table demo's column of each row's action.
+ui-gallery-table-actions = Actions
+
+# The header of the table demo's footer row, which adds up its columns.
+ui-gallery-table-total = Total
+
+# A demo folder's size.
+# $size (size): the size, such as 4.2 GiB.
+ui-gallery-table-size = { $size }
+
+# When a demo folder changed, a day.
+# $when (instant): when it changed.
+ui-gallery-table-changed-on = { DATETIME($when, dateStyle: "medium") }
+
+# A demo folder's number of files.
+# $count (number): how many files.
+ui-gallery-table-files = { $count }
+
+# A row's action in the table demo, named with its row: it adds a file to the folder.
+# $folder (text): the folder's name.
+ui-gallery-table-add-file = Add a file to { $folder }
+
+# The button in the table demo's Name header that sorts the rows by name.
+ui-gallery-table-sort-name = Sort by name
+
+# Announced politely when the table demo is sorted by name, A first.
+ui-gallery-table-sorted-name-up = Sorted by name, A to Z.
+
+# Announced politely when the table demo is sorted by name, Z first.
+ui-gallery-table-sorted-name-down = Sorted by name, Z to A.
+
+# The button in the table demo's Size header that sorts the rows by size.
+ui-gallery-table-sort-size = Sort by size
+
+# Announced politely when the table demo is sorted by size, the smallest first.
+ui-gallery-table-sorted-size-up = Sorted by size, smallest first.
+
+# Announced politely when the table demo is sorted by size, the largest first.
+ui-gallery-table-sorted-size-down = Sorted by size, largest first.
+
+# The button in the table demo's Changed header that sorts the rows by when they changed.
+ui-gallery-table-sort-changed = Sort by changed
+
+# Announced politely when the table demo is sorted by when its folders changed, the oldest first.
+ui-gallery-table-sorted-changed-up = Sorted by changed, oldest first.
+
+# Announced politely when the table demo is sorted by when its folders changed, the newest first.
+ui-gallery-table-sorted-changed-down = Sorted by changed, newest first.
+
+# The button in the table demo's Files header that sorts the rows by their number of files.
+ui-gallery-table-sort-files = Sort by files
+
+# Announced politely when the table demo is sorted by files, the fewest first.
+ui-gallery-table-sorted-files-up = Sorted by files, fewest first.
+
+# Announced politely when the table demo is sorted by files, the most first.
+ui-gallery-table-sorted-files-down = Sorted by files, most first.
 
 # The heading of the gallery's text field demo (§4.5): every kind, size and
 # state of the shared text field.

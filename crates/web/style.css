@@ -1328,6 +1328,70 @@ td {
   border-block-end: 1px solid var(--muted);
 }
 
+/* The shared table (components §4.5, `components/table.rs`). Each column is
+   as wide as its `<col>` says, in rem, never as wide as its content, so a
+   cell that changes moves no column (#194), and the table is as wide as its
+   frame (`100cqi`: the frame is its size container) or its columns,
+   whichever is wider. The frame scrolls sideways where the columns are wider
+   than the page: a small screen, or larger text. */
+.data-table-frame {
+  overflow-x: auto;
+}
+
+/* Borders kept apart with no space between them look as collapsed ones do,
+   and each cell keeps its own rule, which a pinned row header then carries
+   along: a collapsed border is the table's, and stays behind as it scrolls. */
+table.data-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+table.data-table caption {
+  text-align: start;
+}
+
+/* The space around the text follows the screen's width, as in the table of
+   operations, so at 320 px with 200 % text a column keeps a letter's room. */
+table.data-table :is(th, td) {
+  padding-inline: min(0.5rem, 1.25vw);
+}
+
+/* Numbers stand at the end of their column in figures of one width, so
+   their digits line up. */
+table.data-table .cell-end {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+table.data-table .cell-end .sort-header {
+  justify-content: flex-end;
+}
+
+/* Each row's header stays at the frame's start as it scrolls, so a reader
+   scrolled sideways still sees whose row it is, and the corner header above
+   them stays with them. Their fill is the page's, so the cells scrolled
+   under them don't show through. The header row isn't pinned: the frame
+   doesn't scroll vertically. */
+table.data-table :is(th[scope="row"], thead th:first-child) {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background-color: var(--bg);
+}
+
+@media (forced-colors: active) {
+  table.data-table :is(th[scope="row"], thead th:first-child) {
+    background-color: Canvas;
+  }
+}
+
+/* The gallery's narrow frame (`gallery.rs`), which shows a table scrolling
+   sideways on a screen of any width. */
+.gallery-narrow {
+  max-inline-size: 16rem;
+}
+
 /* A list in a cell, such as an operation's Result or a repository's
    locations, starts on the row's first line, level with the text of the
    cells beside it: no margin above or below, and only the indent its markers
