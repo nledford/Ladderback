@@ -5,8 +5,10 @@
 // install-service`, decision 64), then checks that the service runs this
 // checkout's build (scripts/build-identity.ts, decision 90).
 //
-//   1. `just install [args]`: a failed build stops here, before the running
-//      daemon is touched.
+//   1. `just install [args]`: a failed build, or a failed signing with
+//      LADDERBACK_SIGN_IDENTITY (scripts/install-signing.ts), stops here,
+//      before the running daemon is touched. A failed signing comes after
+//      the new program is installed, which the daemon runs at its next start.
 //   2. The installed program's `--version` must name the build of this
 //      checkout as it was when the install began, or nothing is restarted.
 //      It is asked again after the wait, just before step 4.
@@ -66,13 +68,14 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
+import { platform } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import type { Build } from "./build-identity.ts";
 import { checkoutBuild, shown, workspaceVersion } from "./build-identity.ts";
+import { binFolder, reinstallWarning } from "./install-signing.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DEFAULT_ADDRESS = "127.0.0.1:9898";
@@ -313,17 +316,6 @@ function same(build: Build, expected: Build | undefined, version: string): boole
   return build.version === expected.version && build.commit === expected.commit && build.dirty === expected.dirty;
 }
 
-/** Cargo's bin folder for `cargo install` with `args`. */
-function binFolder(args: string[]): string {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i] ?? "";
-    if (arg === "--root" && args[i + 1] !== undefined) return path.join(path.resolve(args[i + 1] ?? ""), "bin");
-    if (arg.startsWith("--root=")) return path.join(path.resolve(arg.slice("--root=".length)), "bin");
-  }
-  const root = process.env["CARGO_INSTALL_ROOT"] || process.env["CARGO_HOME"] || path.join(homedir(), ".cargo");
-  return path.join(root, "bin");
-}
-
 /** Runs `program` with `args` here, its output passed through; its exit status. */
 function run(program: string, args: string[]): number {
   const result = spawnSync(program, args, { cwd: ROOT, stdio: "inherit" });
@@ -363,7 +355,7 @@ async function main(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const ladderback = process.env["INSTALL_RESTART_LADDERBACK"] || path.join(binFolder(install), "ladderback");
+  const ladderback = process.env["INSTALL_RESTART_LADDERBACK"] || path.join(binFolder(install, process.env), "ladderback");
   const checked = installedBuild(ladderback, wanted, expected, version);
   if (checked !== true) {
     console.error(`install-restart: ${checked.why}. Not restarting; the running daemon is untouched.`);
@@ -387,9 +379,8 @@ async function main(argv: string[]): Promise<number> {
     return 1;
   }
 
-  if (platform() === "darwin") {
-    console.log("install-restart: macOS will ask again for each keychain item Ladderback reads: a local build is signed ad hoc, so the keychain sees a new program (#281).");
-  }
+  const warning = reinstallWarning(process.env, platform());
+  if (warning !== undefined) console.log(`install-restart: ${warning}`);
 
   const confirmed = await restarted(before, base, expected, version);
   if ("why" in confirmed) {

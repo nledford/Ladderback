@@ -441,11 +441,24 @@ web-release:
 # URL can't build that UI, so this checkout is the way in. The daemon starts its
 # own workers, so this one binary is all an installation needs. Arguments go to
 # `cargo install`: `just install --root ~/.local` installs into `~/.local/bin`.
-[doc('Install the ladderback release binary from this checkout (arguments go to cargo install).')]
+# On macOS, LADDERBACK_SIGN_IDENTITY names a code-signing identity in the
+# keychain to sign the installed binary with, so macOS's grants can carry over
+# to the next update (decision 71): `_signing-identity` refuses a name it can't
+# sign with before anything is built, and the install ends by signing the
+# binary (scripts/install-signing.ts). Without it, or elsewhere, nothing is
+# signed.
+[doc('Install the ladderback release binary from this checkout (arguments go to cargo install; LADDERBACK_SIGN_IDENTITY signs it on macOS).')]
 [group('release')]
 [positional-arguments]
-install *args: web-release
+install *args: _signing-identity web-release
     cargo install --locked --path . --profile dist {{ release_flags }} "$@"
+    @node scripts/install-signing.ts sign "$@"
+
+# Refuses, before `install` builds, a LADDERBACK_SIGN_IDENTITY that names no
+# valid code-signing identity on macOS.
+[private]
+_signing-identity:
+    @node scripts/install-signing.ts check
 
 # Updates an installed service from this checkout (#519): `install` with the
 # arguments, then waits until the daemon has no operation running or queued
