@@ -17,10 +17,17 @@ fn rendered(state: BadgeState, label: &str) -> String {
 /// The opening tag of the one `<svg>` in `html` and what it draws.
 fn icon(html: &str) -> (&str, &str) {
     let start = html.find("<svg").expect("the badge has an icon");
-    let tag_end = start + html[start..].find('>').unwrap();
+    let from_start = html.get(start..).expect("`find` answers a char boundary");
+    let tag_end = start + from_start.find('>').unwrap();
     let end = html.find("</svg>").unwrap();
     assert_eq!(html.matches("<svg").count(), 1, "one icon: {html}");
-    (&html[start..=tag_end], &html[tag_end + 1..end])
+    let tag = html
+        .get(start..=tag_end)
+        .expect("`>` is one byte, so its end is a boundary");
+    let drawn = html
+        .get(tag_end + 1..end)
+        .expect("both ends come from `find`");
+    (tag, drawn)
 }
 
 #[wasm_bindgen_test]
