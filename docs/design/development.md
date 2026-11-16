@@ -214,7 +214,12 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 
 `AGENTS.md` carries the short form of the rules every pull request follows. This section is the full text for stacking, titles, hotfixes, break-glass, the required check names, the `Check` jobs' test step limit, CI's pinned Node and runner images, the `release` label, and the jobs on the real service managers.
 
-**Stacking.** Don't stack pull requests unless it's truly unavoidable, meaning a change that can't land in independent pieces off `main`. Then keep the stack to two pull requests, say "stacked on #N" in both titles and the first line of both descriptions, and use GitHub's stacked pull requests (`gh stack`). Each layer passes every check on its own; a layer that changes behaviour starts with its own failing `test:` commit (`just red-first <branch below>`). A stack merges bottom-up with `gh stack merge`.
+**Stacking.** A pull request may stack on another that is still open when it builds on that work (a component that needs another component, the next slice of a feature) and waiting for the merge would hold it up. Pieces that can land independently still go off `main` separately. Keep the chain short: at most three pull requests, and two where possible. Every merge underneath means a rebase above, and a squash merge rewrites the base's commits, so a long chain turns each merge into rebases of everything above it. Don't start another layer on a chain that is already three deep: wait for the bottom one to merge.
+
+- **Naming:** say "stacked on #N" in the title and the first line of the description of each pull request above the bottom one. When its base merges and it targets `main`, take the words out of the title, since the title becomes the changelog line.
+- **Bases:** open each layer against the branch below it (GitHub's stacked pull requests, `gh stack`, or a plain base branch), so its diff shows only its own commits.
+- **Checks:** each layer passes every check on its own. A layer that changes behaviour starts with its own failing `test:` commit (`just red-first <branch below>`).
+- **Merging:** bottom-up. After a squash merge below, rebase the next layer onto `main` with `git rebase --onto origin/main <old base branch>`, which drops the base's original commits, then retarget it to `main`.
 
 **Title and squash commit.** The squash commit's subject is the pull request title, and the changelog is built from it, so the title is a Conventional Commit written for users: a type release-plz knows, no trailing full stop and no `(#N)`. Mark a change that breaks the public contract in §12.1 with `!` (`feat!: …`) and say in the body how to upgrade. `just check-pr-title "<title>"` runs CI's check.
 
