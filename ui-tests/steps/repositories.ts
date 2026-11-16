@@ -322,7 +322,8 @@ const ROLE_OF: Record<string, string> = {
 
 // A short name, a column's or a row's, or a button's, is not split across
 // lines: each line its text takes has a box of its own, so one line is one
-// distinct top.
+// distinct top. Only the text's own boxes count: a button's icon and the box
+// that wraps its label stand on the text's line, each at a top of its own.
 Then(
   /^the (button|column header|row header) "([^"]*)" sits on one line$/,
   async function (this: BrowserWorld, kind: string, name: string) {
@@ -331,10 +332,16 @@ Then(
     const target = journey(this.page).byRole(role, { name: namePattern(name) });
     assert.equal(await target.count(), 1, `the ${kind} "${name}" is not on the page once`);
     const lines = await target.evaluate((element) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const tops = [...range.getClientRects()].filter((box) => box.width > 0).map((box) => Math.round(box.top));
-      return new Set(tops).size;
+      const tops = new Set<number>();
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const box of range.getClientRects()) {
+          if (box.width > 0) tops.add(Math.round(box.top));
+        }
+      }
+      return tops.size;
     });
     assert.equal(lines, 1, `the ${kind} "${name}" takes ${lines} lines`);
   },

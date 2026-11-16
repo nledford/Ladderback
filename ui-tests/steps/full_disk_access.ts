@@ -24,6 +24,7 @@ type FoundState = "granted" | "missing" | "unknown";
 interface Scripted {
   state: FoundState;
   afterCheck: FoundState | null;
+  checkTakesMs: number;
   opensSettings: boolean;
   read: Promise<void>;
   wasRead: () => void;
@@ -39,7 +40,7 @@ function answers(world: BrowserWorld): Scripted {
   const known = scripted.get(world);
   if (known) return known;
   const { promise: read, resolve: wasRead } = Promise.withResolvers<void>();
-  const fresh: Scripted = { state: "unknown", afterCheck: null, opensSettings: false, read, wasRead };
+  const fresh: Scripted = { state: "unknown", afterCheck: null, checkTakesMs: 0, opensSettings: false, read, wasRead };
   scripted.set(world, fresh);
   world.contextRoutes.push(async (context) => {
     await context.route("**/api/v1/full-disk-access**", async (route) => {
@@ -49,6 +50,7 @@ function answers(world: BrowserWorld): Scripted {
         await route.fulfill({ json: { state: fresh.state, "opens-settings": fresh.opensSettings } });
         fresh.wasRead();
       } else if (request.method() === "POST" && path === "/api/v1/full-disk-access/check") {
+        if (fresh.checkTakesMs > 0) await new Promise((done) => setTimeout(done, fresh.checkTakesMs));
         if (fresh.afterCheck !== null) fresh.state = fresh.afterCheck;
         await route.fulfill({ json: { state: fresh.state, "opens-settings": fresh.opensSettings } });
       } else if (request.method() === "POST" && path === "/api/v1/full-disk-access/settings") {
@@ -80,6 +82,10 @@ Given("the browser runs on the agent's own Mac", function (this: BrowserWorld) {
 
 Given("the agent finds the grant when it checks again", function (this: BrowserWorld) {
   answers(this).afterCheck = "granted";
+});
+
+Given("the agent takes {int} seconds to check again", function (this: BrowserWorld, seconds: number) {
+  answers(this).checkTakesMs = seconds * 1_000;
 });
 
 Then("the page warns that Full Disk Access is missing", async function (this: BrowserWorld) {

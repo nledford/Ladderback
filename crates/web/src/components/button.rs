@@ -123,8 +123,8 @@ pub fn Button(
     view! {
         <button
             type=kind.attribute()
-            class=rules::button_class(appearance, tone, size, shape)
-            aria-label=move || shape.name(&label.get())
+            class=rules::button_class(appearance, tone, size, shape, false)
+            aria-label=move || shape.name(&label.get(), None)
             aria-disabled=move || rules::unavailable(disabled.get(), busy.get())
             aria-pressed=move || rules::pressed(pressed.map(|pressed| pressed.get()))
             on:click=press

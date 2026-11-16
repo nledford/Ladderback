@@ -9,6 +9,7 @@ use l10n::{MessageId, msg};
 use crate::maintenance::{
     self, Confirm, End, Fact, Kind, Outcome, Owner, Review, Stuck, Told, Wait,
 };
+use crate::variants::Tone;
 
 /// A catalog message and what its variables read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +78,12 @@ pub(crate) fn confirmation(confirm: Confirm) -> Words {
         Confirm::Prune => words(msg::UI_REVIEW_CONFIRM_PRUNE, Vec::new()),
         Confirm::Check => words(msg::UI_REVIEW_CONFIRM_CHECK, Vec::new()),
     }
+}
+
+/// The tone of the button that confirms a review: the color of errors for a
+/// run that deletes (a forget, a prune), Ladder Blue for the others.
+pub(crate) fn confirmation_tone(_confirm: Confirm) -> Tone {
+    todo!("the confirmation's tone")
 }
 
 /// What a fact of a review says: one sentence, or two for a prune, whose
@@ -492,6 +499,20 @@ mod tests {
             confirmation(Confirm::Check),
             said(msg::UI_REVIEW_CONFIRM_CHECK, &[])
         );
+    }
+
+    #[test]
+    fn a_confirmation_that_deletes_is_in_the_color_of_errors_and_the_others_in_ladder_blue() {
+        assert_eq!(
+            confirmation_tone(Confirm::Forget { snapshots: 2 }),
+            Tone::Error
+        );
+        assert_eq!(confirmation_tone(Confirm::Prune), Tone::Error);
+        assert_eq!(
+            confirmation_tone(Confirm::Adopt { snapshots: 5 }),
+            Tone::Primary
+        );
+        assert_eq!(confirmation_tone(Confirm::Check), Tone::Primary);
     }
 
     #[test]

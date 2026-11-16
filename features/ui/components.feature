@@ -500,7 +500,7 @@ Feature: The shared components in the gallery
   Scenario: A spinner with a visible label is read as its label, and a screen reader skips its drawing
     When I open the component gallery
     Then the "Spinner" demo shows the text "Loading the demo snapshots…" beside a spinner a screen reader skips
-    And the button "Saving the demo settings…" holds a spinner a screen reader skips
+    And the button "Save the demo notes" holds a spinner a screen reader skips
 
   Scenario: A spinner in a line of text stands on the line's baseline, its drawing centered on the text
     When I open the component gallery
@@ -765,6 +765,18 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Show the demo's hidden files"
     And I press Space
     Then the button "Show the demo's hidden files" is drawn bolder, with an inset edge
+    When I press Shift+Tab until focus is on the button "Demo work in progress"
+    And I press Space
+    Then the button "Demo work in progress" is drawn bolder, with an inset edge
+    And every pressed button of the "Button" demo is drawn in the reader's button colors, a Ghost one's edge too
+
+  Scenario: Under forced colors a busy button keeps the reader's button text, apart from an unavailable one
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Space
+    Then every busy button of the "Button" demo is drawn in the reader's button colors, its label and edge in the button text, not the color of unavailable text
 
   Scenario: Keyboard focus on a control shows its tooltip at once, beside the control, which it describes
     When I open the component gallery
