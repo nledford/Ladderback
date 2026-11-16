@@ -3,7 +3,7 @@
 // (§4.5): keyboard only, role-and-name locators, as everywhere in steps/.
 
 import assert from "node:assert/strict";
-import { readdir, rename } from "node:fs/promises";
+import { readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -14,7 +14,7 @@ import { expect } from "playwright/test";
 import { journey, namePattern } from "../support/keyboard.ts";
 import { type BrowserWorld, engine } from "../support/world.ts";
 import { clipboardPermissions } from "./api_tokens.ts";
-import { latestSnapshotOf } from "./maintenance.ts";
+import { latestSnapshotOf, sourcePath } from "./maintenance.ts";
 
 const PAGE_PATIENCE_MS = 10_000;
 
@@ -176,5 +176,20 @@ Then(
       held.some((entry) => path.basename(entry) === name),
       `the folder ${folder} holds ${JSON.stringify(held)}, not ${name}`,
     );
+  },
+);
+
+// The file the browser saved once the download was confirmed: its name, and
+// its bytes against the demo source's file the backup read.
+Then(
+  "the browser saves {string} holding what the plan backed up as {string}",
+  async function (this: BrowserWorld, saved: string, original: string) {
+    await expect.poll(() => this.downloads.length, { timeout: READ_PATIENCE_MS }).toBeGreaterThan(0);
+    const download = this.downloads[this.downloads.length - 1];
+    assert.ok(download, "the browser saved a file");
+    assert.equal(download.suggestedFilename(), saved);
+    const file = await download.path();
+    assert.ok(file, `the browser finished saving ${saved}: ${await download.failure()}`);
+    assert.deepEqual(await readFile(file), await readFile(path.join(sourcePath(this), original)));
   },
 );

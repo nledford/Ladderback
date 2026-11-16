@@ -46,6 +46,7 @@ pub(crate) fn test_state() -> AppState {
         profiles: Arc::new(NoProfiles),
         restores: Arc::new(NoRestores),
         proposals: Arc::new(NoProposals),
+        downloads: Arc::new(NoDownloads),
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
@@ -215,6 +216,27 @@ impl crate::Restores for NoRestores {
         _start: crate::RestoreStart,
     ) -> Result<api::RestoreStartedDto, crate::RestoreRefusal> {
         Err(crate::RestoreRefusal::SnapshotUnknown)
+    }
+}
+
+/// Takes no download: the checks never reach a route.
+pub(crate) struct NoDownloads;
+
+#[async_trait]
+impl crate::Downloads for NoDownloads {
+    async fn start(
+        &self,
+        _alias: String,
+        _start: crate::DownloadStart,
+    ) -> Result<domain::restore::download::DownloadTicket, crate::DownloadRefusal> {
+        Err(crate::DownloadRefusal::SnapshotUnknown)
+    }
+
+    async fn fetch(
+        &self,
+        _ticket: domain::restore::download::DownloadTicket,
+    ) -> Option<crate::Handover> {
+        None
     }
 }
 

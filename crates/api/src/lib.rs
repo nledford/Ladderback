@@ -451,6 +451,20 @@ pub enum ErrorCode {
     /// System Settings' Full Disk Access pane couldn't be opened: the agent
     /// isn't on macOS, or macOS refused to open it (§16, decision 115).
     FullDiskAccessSettingsUnopened,
+    /// Two downloads are under way on the agent, confirmed or being handed
+    /// over, and an agent runs two at a time (§10.4): nothing ran. A third
+    /// is refused rather than queued.
+    DownloadsBusy,
+    /// No download could be confirmed because the agent's system gave no
+    /// random bytes for its ticket (§10.4): nothing ran. The daemon's log
+    /// says why.
+    DownloadsUnavailable,
+    /// The snapshot holds no file or folder at the argument `path`, the
+    /// entry a download asked for (§10.4). Nothing was handed over.
+    EntryUnknown,
+    /// No download waits under the ticket asked for: it was fetched
+    /// already, its minute ran out, or it never was (§10.4).
+    DownloadUnknown,
     #[serde(other)]
     Unknown,
 }
@@ -1180,7 +1194,7 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::FolderUnknown => &[ArgSpec {
+            Self::FolderUnknown | Self::EntryUnknown => &[ArgSpec {
                 name: "path",
                 kind: ArgKind::Text,
                 optional: false,
@@ -1345,6 +1359,9 @@ impl ErrorCode {
             | Self::RestoreFolderUnset
             | Self::FullDiskAccessNotLocal
             | Self::FullDiskAccessSettingsUnopened
+            | Self::DownloadsBusy
+            | Self::DownloadsUnavailable
+            | Self::DownloadUnknown
             | Self::Unknown => &[],
         }
     }
@@ -2740,6 +2757,58 @@ mod tests {
             };
             assert_eq!(args, named, "{code:?}");
         }
+    }
+
+    #[test]
+    fn the_codes_of_a_download_are_named_on_the_wire_and_only_an_unknown_entry_names_its_path() {
+        for (code, wire) in [
+            (ErrorCode::DownloadsBusy, r#""downloads-busy""#),
+            (
+                ErrorCode::DownloadsUnavailable,
+                r#""downloads-unavailable""#,
+            ),
+            (ErrorCode::EntryUnknown, r#""entry-unknown""#),
+            (ErrorCode::DownloadUnknown, r#""download-unknown""#),
+        ] {
+            assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
+            let args: Vec<&str> = code.args().iter().map(|arg| arg.name).collect();
+            let named: &[&str] = if code == ErrorCode::EntryUnknown {
+                &["path"]
+            } else {
+                &[]
+            };
+            assert_eq!(args, named, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_download_request_travels_in_kebab_case_and_hides_its_confirmation_and_ticket() {
+        let request: DownloadRequestDto = serde_json::from_str(
+            r#"{"path":"home/docs","format":"zip","confirmation":"canary-admin-password"}"#,
+        )
+        .unwrap();
+        assert_eq!(request.format, ArchiveFormatDto::Zip);
+        let shown = format!("{request:?}");
+        assert!(!shown.contains("canary-admin-password"), "{shown}");
+        assert!(shown.contains("home/docs"), "{shown}");
+        assert!(
+            serde_json::from_str::<DownloadRequestDto>(
+                r#"{"path":"","format":"tar","confirmation":"x","extra":1}"#
+            )
+            .is_err()
+        );
+        let started = DownloadStartedDto {
+            ticket: "canary-ticket".to_owned(),
+        };
+        assert_eq!(
+            format!("{started:?}"),
+            r#"DownloadStartedDto { ticket: "[hidden]" }"#
+        );
+        assert_eq!(
+            serde_json::to_string(&started).unwrap(),
+            r#"{"ticket":"canary-ticket"}"#
+        );
     }
 
     #[test]
@@ -5145,6 +5214,57 @@ pub struct RestoreStartedDto {
     /// original paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+}
+
+/// The archive a downloaded folder is handed over as (§10.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArchiveFormatDto {
+    Tar,
+    Zip,
+}
+
+/// `POST /api/v1/repositories/{alias}/snapshots/{snapshot}/download`: the
+/// entry to download, the archive a folder goes as, and the step-up
+/// confirmation, as a restore asks for it. The confirmation is never
+/// logged or shown (I4): its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct DownloadRequestDto {
+    /// The entry's path in the snapshot, as [`RestorePreviewRequestDto`]
+    /// gives it; empty for the snapshot's top.
+    pub path: String,
+    /// The archive a folder is handed over as; a file goes as itself.
+    pub format: ArchiveFormatDto,
+    pub confirmation: String,
+}
+
+impl std::fmt::Debug for DownloadRequestDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DownloadRequestDto")
+            .field("path", &self.path)
+            .field("format", &self.format)
+            .field("confirmation", &"[hidden]")
+            .finish()
+    }
+}
+
+/// What `POST …/snapshots/{snapshot}/download` answers once the download
+/// is confirmed: the ticket its browser fetches it by, once, within a
+/// minute, at `GET /api/v1/downloads/{ticket}`. A capability: never logged
+/// or shown, and its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct DownloadStartedDto {
+    pub ticket: String,
+}
+
+impl std::fmt::Debug for DownloadStartedDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DownloadStartedDto")
+            .field("ticket", &"[hidden]")
+            .finish()
+    }
 }
 
 /// One recorded warning of an operation's detail: its typed code and the

@@ -18,12 +18,14 @@ use crate::ports::{
 
 mod admin_password;
 mod api_tokens;
+mod step_up;
 
 pub use admin_password::{
     PasswordChangeRefused, PasswordSet, SetPasswordRefused, set_admin_password,
     set_admin_password_leaving_sessions,
 };
 pub use api_tokens::{ApiTokenGrant, ApiTokenRefused, ApiTokensRefused, CreatedApiToken};
+pub(crate) use step_up::{StepUpRefused, confirm_step_up};
 
 /// The admin's sessions and the waits after failed sign-ins. The sessions
 /// are kept in memory, which decides while the daemon runs, and written

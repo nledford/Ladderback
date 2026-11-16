@@ -6,7 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use app::ports::{EngineEvent, EngineResult, SnapshotSummary};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use domain::execution::FailureReason;
+use domain::restore::download::PIECE_BYTES;
 use domain::secrets::Redactor;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{mpsc, watch};
@@ -199,6 +202,12 @@ impl Reading {
                 Absorbed::Refused(detail) => return Some((self.broken(detail), self)),
                 Absorbed::Passed(event) => event,
             };
+            if let WorkerEvent::Piece { bytes } = &event {
+                return Some(match piece(bytes) {
+                    Ok(piece) => (EngineEvent::Piece(piece), self),
+                    Err(detail) => (self.broken(detail), self),
+                });
+            }
             if let Some(event) = translate(event, &self.redactor) {
                 if matches!(event, EngineEvent::Succeeded(_) | EngineEvent::Failed(_)) {
                     self.done = true;
@@ -309,6 +318,21 @@ impl Reading {
             detail: self.redactor.redact(&detail),
         })
     }
+}
+
+/// A dump's piece as the worker wrote it, as base64: its bytes, which are
+/// at most [`PIECE_BYTES`].
+fn piece(text: &str) -> Result<Vec<u8>, String> {
+    let bytes = STANDARD
+        .decode(text)
+        .map_err(|error| format!("worker sent a piece that isn't base64: {error}"))?;
+    if bytes.len() > PIECE_BYTES {
+        return Err(format!(
+            "worker sent a piece of {} bytes, more than {PIECE_BYTES}",
+            bytes.len()
+        ));
+    }
+    Ok(bytes)
 }
 
 /// The longest line of events a worker may write: the protocol's message

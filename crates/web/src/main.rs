@@ -43,6 +43,9 @@ mod components;
 mod daemon_log;
 // The Log page's DOM glue; `daemon_log.rs` decides for it.
 mod daemon_log_page;
+// What downloading an entry of a snapshot sends and says, decided on the
+// host; `snapshot_page.rs` is its glue.
+mod download;
 // The focus-wrap decision is host-testable; components.rs (the DOM glue
 // around it) runs in a browser via the gallery's @ui scenarios.
 mod focus;

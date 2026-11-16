@@ -1,20 +1,22 @@
 //! A snapshot's page's DOM glue (technical design §4.4, §10.4): the route
 //! `/snapshots/{alias}/{snapshot}`, the snapshot's folders and files in a
 //! tree, each folder read as it is opened, and beside it the pane that
-//! restores the entry the tree selects. It decides nothing: the address of a
-//! page is the tree rules' `folder_url`, and the tree's keys, rows and
-//! answers are `components/tree/rules.rs`'s; what a restore sends, when it
-//! can be confirmed and what it says are `restore.rs`'s, host-tested. What
-//! stays here is asking the daemon and drawing the page; the journeys of
-//! `features/ui/snapshot_browser.feature` and `features/restore/restore.feature`
+//! restores or downloads the entry the tree selects. It decides nothing: the
+//! address of a page is the tree rules' `folder_url`, and the tree's keys,
+//! rows and answers are `components/tree/rules.rs`'s; what a restore sends,
+//! when it can be confirmed and what it says are `restore.rs`'s, and a
+//! download's are `download.rs`'s, host-tested. What stays here is asking
+//! the daemon and drawing the page; the journeys of
+//! `features/ui/snapshot_browser.feature`,
+//! `features/restore/restore.feature` and `features/restore/download.feature`
 //! run it in a browser, the `ws.rs` precedent.
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use api::{
-    FolderDto, MsgArg, RestoreDestinationDto, RestorePreviewDto, RestorePreviewRequestDto,
-    RestoreStartedDto,
+    DownloadStartedDto, FolderDto, MsgArg, RestoreDestinationDto, RestorePreviewDto,
+    RestorePreviewRequestDto, RestoreStartedDto,
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
@@ -28,6 +30,7 @@ use crate::components::{
     Confirmation, FolderLoader, FolderPage, RadioGroup, ReviewDialog, StepUp, StepUpField, Tree,
     Working, sentence_view,
 };
+use crate::download;
 use crate::live::{reply, say};
 use crate::repositories::Sentence;
 use crate::restore::{self, Asks, Dialog};
@@ -41,12 +44,15 @@ use crate::ws::{self, Got, Posted};
 /// to when it closes.
 const RESTORE_BUTTON: &str = "restore-open";
 
+/// The id of the button that opens the download dialog, which focus returns
+/// to when it closes.
+const DOWNLOAD_BUTTON: &str = "download-open";
+
 /// The values of the choice of where to restore.
 const NEW_FOLDER: &str = "new-folder";
 const IN_PLACE: &str = "in-place";
 
 /// The page of one snapshot of one repository, both named by its address.
-/// Download of what the tree selects is a later slice's (#564).
 #[component]
 pub(crate) fn Snapshot(localizer: Arc<Localizer>) -> impl IntoView {
     let params = use_params_map();
@@ -102,18 +108,19 @@ fn snapshot_view(localizer: Arc<Localizer>, alias: String, snapshot: String) -> 
             empty=text(&localizer, msg::UI_SNAPSHOT_EMPTY)
             selected=selected
         />
-        <RestorePane localizer=Arc::clone(&localizer) alias snapshot selected />
+        <EntryPane localizer=Arc::clone(&localizer) alias snapshot selected />
         <p>
             <A href="/snapshots">{text(&localizer, msg::UI_SNAPSHOT_BACK)}</A>
         </p>
     }
 }
 
-/// The pane beside the tree: a Restore button named for the entry the tree
-/// selects, and the dialog it opens, drawn anew at each opening for the
-/// entry selected then, so the tree moving under it changes nothing.
+/// The pane beside the tree: a Restore and a Download button named for the
+/// entry the tree selects, and the dialogs they open, each drawn anew at
+/// each opening for the entry selected then, so the tree moving under it
+/// changes nothing.
 #[component]
-fn RestorePane(
+fn EntryPane(
     localizer: Arc<Localizer>,
     alias: String,
     snapshot: String,
@@ -121,30 +128,34 @@ fn RestorePane(
 ) -> impl IntoView {
     let asks =
         Asks::of(use_context::<RwSignal<Standing>>().map(|standing| standing.get_untracked()));
-    let open = RwSignal::new(false);
-    let opening = RwSignal::new(None::<(u32, Selection)>);
+    let restore_open = RwSignal::new(false);
+    let restoring = RwSignal::new(None::<(u32, Selection)>);
+    let download_open = RwSignal::new(false);
+    let downloading = RwSignal::new(None::<(u32, Selection)>);
     let button_localizer = Arc::clone(&localizer);
     let empty = text(&localizer, msg::UI_RESTORE_PANE_EMPTY);
     let button = move || match selected.get() {
         Some(selection) => {
-            let label = text_with(
-                &button_localizer,
-                msg::UI_RESTORE_BUTTON,
-                &[("name", MsgArg::Text(selection.name.clone()))],
-            );
+            let named = [("name", MsgArg::Text(selection.name.clone()))];
+            let restore_label = text_with(&button_localizer, msg::UI_RESTORE_BUTTON, &named);
+            let download_label = text_with(&button_localizer, msg::UI_DOWNLOAD_BUTTON, &named);
+            let restored = selection.clone();
             view! {
                 <p>
                     <button
                         type="button"
                         id=RESTORE_BUTTON
-                        on:click=move |_| {
-                            let count = opening
-                                .with_untracked(|opened| opened.as_ref().map_or(0, |(n, _)| *n));
-                            opening.set(Some((count.wrapping_add(1), selection.clone())));
-                            open.set(true);
-                        }
+                        on:click=move |_| opened(restoring, restore_open, &restored)
                     >
-                        {label}
+                        {restore_label}
+                    </button>
+                    " "
+                    <button
+                        type="button"
+                        id=DOWNLOAD_BUTTON
+                        on:click=move |_| opened(downloading, download_open, &selection)
+                    >
+                        {download_label}
                     </button>
                 </p>
             }
@@ -152,26 +163,53 @@ fn RestorePane(
         }
         None => view! { <p>{empty.clone()}</p> }.into_any(),
     };
-    let dialog_localizer = Arc::clone(&localizer);
-    let dialog = move || {
-        opening.get().map(|(_, selection)| {
+    let restore_localizer = Arc::clone(&localizer);
+    let (restore_alias, restore_snapshot) = (alias.clone(), snapshot.clone());
+    let restore = move || {
+        restoring.get().map(|(_, selection)| {
             restore_dialog(
-                Arc::clone(&dialog_localizer),
+                Arc::clone(&restore_localizer),
+                restore_alias.clone(),
+                restore_snapshot.clone(),
+                selection,
+                asks,
+                restore_open,
+            )
+        })
+    };
+    let download_localizer = Arc::clone(&localizer);
+    let download = move || {
+        downloading.get().map(|(_, selection)| {
+            download_dialog(
+                Arc::clone(&download_localizer),
                 alias.clone(),
                 snapshot.clone(),
                 selection,
                 asks,
-                open,
+                download_open,
             )
         })
     };
     view! {
-        <section aria-labelledby="restore-pane-heading">
-            <h2 id="restore-pane-heading">{text(&localizer, msg::UI_RESTORE_PANE)}</h2>
+        <section aria-labelledby="entry-pane-heading">
+            <h2 id="entry-pane-heading">{text(&localizer, msg::UI_RESTORE_PANE)}</h2>
             {button}
-            {dialog}
+            {restore}
+            {download}
         </section>
     }
+}
+
+/// A dialog's button was pressed with `selection` selected: its dialog is
+/// drawn anew for it, under a count that changes at each opening, and opens.
+fn opened(
+    opening: RwSignal<Option<(u32, Selection)>>,
+    open: RwSignal<bool>,
+    selection: &Selection,
+) {
+    let count = opening.with_untracked(|opened| opened.as_ref().map_or(0, |(n, _)| *n));
+    opening.set(Some((count.wrapping_add(1), selection.clone())));
+    open.set(true);
 }
 
 /// The restore dialog of `selection`: what it restores, where to, what a
@@ -419,6 +457,167 @@ fn restore_dialog(
             }}
             <StepUpField
                 id="restore-step-up"
+                localizer=Arc::clone(&localizer)
+                step_up=step_up
+                value=value
+                error=error
+            />
+        </ReviewDialog>
+    }
+}
+
+/// The download dialog of `selection`: what it downloads, as which archive
+/// when it is a folder, and the step-up field it is confirmed with. On the
+/// daemon's ticket it closes, the page says the download started, and the
+/// browser is sent to the ticket's address, which it saves as a download.
+fn download_dialog(
+    localizer: Arc<Localizer>,
+    alias: String,
+    snapshot: String,
+    selection: Selection,
+    asks: Asks,
+    open: RwSignal<bool>,
+) -> impl IntoView {
+    let base = ws::origin();
+    let state = RwSignal::new(download::Dialog::new(
+        selection.path.clone(),
+        selection.folder,
+    ));
+    let asks_format = state.with_untracked(download::Dialog::asks_format);
+    let chosen = RwSignal::new(download::TAR);
+    let value = RwSignal::new(String::new());
+    let error = RwSignal::new(None::<String>);
+    let alert = RwSignal::new(None::<Sentence>);
+    let name = selection.name;
+    let title = text_with(
+        &localizer,
+        msg::UI_DOWNLOAD_BUTTON,
+        &[("name", MsgArg::Text(name.clone()))],
+    );
+    let summary = text_with(
+        &localizer,
+        msg::UI_DOWNLOAD_SUMMARY,
+        &[
+            ("name", MsgArg::Text(name.clone())),
+            ("snapshot", MsgArg::Text(short_id(&snapshot))),
+            ("alias", MsgArg::Text(alias.clone())),
+        ],
+    );
+    let step_up = match asks {
+        Asks::Password => StepUp::Password,
+        Asks::ShortId => StepUp::ShortId {
+            label: text(&localizer, msg::UI_RESTORE_SNAPSHOT_ID),
+            hint: text(&localizer, msg::UI_RESTORE_SNAPSHOT_ID_HINT),
+            short: short_id(&snapshot),
+        },
+    };
+    let alive = move || state.try_get_untracked().is_some();
+    let unreachable = Sentence::new(&text(&localizer, msg::UI_UNREACHABLE_BODY), None);
+    let start_url = format!("{base}{}", download::start_path(&alias, &snapshot));
+    let start_localizer = Arc::clone(&localizer);
+    let start = Callback::new(move |()| {
+        let Some(request) = state
+            .try_update(|dialog| dialog.confirm(chosen.get_untracked(), value.get_untracked()))
+            .flatten()
+        else {
+            return;
+        };
+        alert.set(None);
+        let url = start_url.clone();
+        let base = base.clone();
+        let localizer = Arc::clone(&start_localizer);
+        let unreachable = unreachable.clone();
+        let name = name.clone();
+        spawn_local(async move {
+            let words = |words: &Words| text_with(&localizer, words.id, &words.args);
+            let answer = ws::post(&url, &request).await;
+            if !alive() {
+                return;
+            }
+            state.update(download::Dialog::answered);
+            match answer {
+                Some(Posted::Done(body)) => match serde_json::from_str::<DownloadStartedDto>(&body)
+                {
+                    Ok(DownloadStartedDto { ticket }) => {
+                        let saved = format!("{base}{}", download::fetch_path(&ticket));
+                        let handed = web_sys::window()
+                            .is_some_and(|window| window.location().assign(&saved).is_ok());
+                        if handed {
+                            error.set(None);
+                            value.set(String::new());
+                            open.set(false);
+                            reply(Politeness::Polite, &words(&download::handed(&name)));
+                        } else {
+                            alert.set(Some(unreachable));
+                        }
+                    }
+                    Err(_) => alert.set(Some(unreachable)),
+                },
+                Some(Posted::Refused(code, args, detail)) => {
+                    match download::field_error(code, asks) {
+                        // Cleared first, so a second wrong try is said again.
+                        Some(said) => {
+                            error.set(None);
+                            tick().await;
+                            error.try_set(Some(words(&said)));
+                        }
+                        None => alert.set(Some(refused_sentence(
+                            &localizer,
+                            code,
+                            &args,
+                            detail.as_deref(),
+                        ))),
+                    }
+                }
+                None => alert.set(Some(unreachable)),
+            }
+        });
+    });
+    let format = asks_format.then(|| {
+        view! {
+            <RadioGroup
+                name="download-format"
+                legend=text(&localizer, msg::UI_DOWNLOAD_FORMAT)
+                description=text(&localizer, msg::UI_DOWNLOAD_FORMAT_HINT)
+                options=vec![
+                    (download::TAR, text(&localizer, msg::UI_DOWNLOAD_TAR)),
+                    (download::ZIP, text(&localizer, msg::UI_DOWNLOAD_ZIP)),
+                ]
+                chosen=chosen
+            />
+        }
+    });
+    view! {
+        <ReviewDialog
+            open=open
+            title=title
+            dismiss_label=text(&localizer, msg::UI_REVIEW_CANCEL)
+            confirm=Some(Confirmation {
+                label: text(&localizer, msg::UI_DOWNLOAD_CONFIRM),
+                action: start,
+            })
+            returns_to=DOWNLOAD_BUTTON.to_owned()
+            described_by="download-summary".to_owned()
+            working=Working {
+                active: Signal::derive(move || state.with(|dialog| dialog.starting)),
+                status: text(&localizer, msg::UI_DOWNLOAD_STARTING),
+            }
+        >
+            <p id="download-summary">{summary}</p>
+            {format}
+            {move || {
+                alert
+                    .get()
+                    .map(|sentence| {
+                        view! {
+                            <p class="form-error" role="alert">
+                                {sentence_view(sentence)}
+                            </p>
+                        }
+                    })
+            }}
+            <StepUpField
+                id="download-step-up"
                 localizer=Arc::clone(&localizer)
                 step_up=step_up
                 value=value

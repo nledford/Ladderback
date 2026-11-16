@@ -501,6 +501,7 @@ impl ForgetWorld {
                 Job::Backup(_) => "backup",
                 Job::Restore(_) => "restore",
                 Job::RestorePlan(_) => "restore-plan",
+                Job::Dump(_) => "dump",
             })
             .collect()
     }

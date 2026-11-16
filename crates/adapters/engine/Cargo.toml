@@ -13,6 +13,8 @@ app.workspace = true
 domain.workspace = true
 spawn-gate.workspace = true
 async-trait.workspace = true
+# A download's pieces travel in the protocol's JSON lines as base64.
+base64.workspace = true
 bytes.workspace = true
 futures.workspace = true
 jiff.workspace = true
@@ -24,7 +26,10 @@ rustic_backend.workspace = true
 rustic_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# A downloaded folder, written as the archive the person picked (§10.4).
+tar.workspace = true
 tokio = { workspace = true, features = ["process", "io-util", "rt", "macros", "time", "sync"] }
+zip.workspace = true
 
 # Signals and process groups: the daemon stops a worker with SIGTERM, which the
 # worker handles, and kills its whole process group; the worker also points its file
@@ -36,8 +41,6 @@ signal-hook.workspace = true
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
-# The Basic credentials an `rclone:` repository is read with (tests/retention.rs).
-base64.workspace = true
 tempfile.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

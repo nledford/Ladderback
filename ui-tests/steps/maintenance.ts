@@ -112,7 +112,7 @@ function configPath(world: BrowserWorld): string {
 }
 
 /** The source folder serveDemoPlans filled. */
-function sourcePath(world: BrowserWorld): string {
+export function sourcePath(world: BrowserWorld): string {
   assert.ok(world.ownServer, "this scenario's daemon was never started");
   return path.join(world.ownServer.scratch, "source");
 }

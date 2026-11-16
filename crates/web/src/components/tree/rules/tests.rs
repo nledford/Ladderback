@@ -237,7 +237,7 @@ fn a_folder_s_path_joins_the_names_rustic_records_never_those_shown() {
 }
 
 #[test]
-fn the_selection_is_the_entry_the_tab_stop_is_on_by_its_recorded_path_and_shown_name() {
+fn the_selection_is_the_entry_the_tab_stop_is_on_by_its_recorded_path_shown_name_and_kind() {
     let mut tree = opened();
     open_with(
         &mut tree,
@@ -250,6 +250,16 @@ fn the_selection_is_the_entry_the_tab_stop_is_on_by_its_recorded_path_and_shown_
         Some(Selection {
             path: "docs/a\\tb.txt".to_owned(),
             name: "a\tb.txt".to_owned(),
+            folder: false,
+        })
+    );
+    focus_on(&mut tree, "docs");
+    assert_eq!(
+        tree.selection(),
+        Some(Selection {
+            path: "docs".to_owned(),
+            name: "docs".to_owned(),
+            folder: true,
         })
     );
 }

@@ -157,7 +157,12 @@ impl Events {
 
     /// Writes one event as a flushed line. The caller holds the sink.
     fn write(&self, sink: &mut Sink, event: &WorkerEvent) -> io::Result<()> {
-        let mut line = serde_json::to_vec(&self.redacted(event))?;
+        let mut line = match event {
+            // A dump's own bytes: no text of the worker's to mask, and too
+            // many of them to copy for nothing.
+            WorkerEvent::Piece { .. } => serde_json::to_vec(event)?,
+            _ => serde_json::to_vec(&self.redacted(event))?,
+        };
         line.push(b'\n');
         sink.out.write_all(&line)?;
         sink.out.flush()?;

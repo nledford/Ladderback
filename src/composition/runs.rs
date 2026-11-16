@@ -80,6 +80,12 @@ impl Runs {
         self.lock().running
     }
 
+    /// Whether a restart holds new runs back: what is refused meanwhile
+    /// without being counted, as a download is.
+    pub(crate) fn held(&self) -> bool {
+        self.lock().held
+    }
+
     /// Starts no maintenance run from now on, until [`Self::release`]: a
     /// restart waits for the running ones.
     fn hold(&self) {

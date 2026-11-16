@@ -320,7 +320,8 @@ async fn both_backends_refuse_the_snapshots_of_a_repository_alike() {
 }
 
 /// The daemon's catalog, but listing `snapshots` as the repository `demo`'s,
-/// which the parity daemon has no real repository for.
+/// which the parity daemon has no real repository for, and `slow`'s as a
+/// listing that ran out of time.
 struct WithSnapshots {
     catalog: Arc<dyn http_adapter::Catalog>,
     snapshots: Vec<api::SnapshotDto>,
@@ -340,6 +341,9 @@ impl http_adapter::Catalog for WithSnapshots {
         &self,
         alias: String,
     ) -> Result<api::SnapshotsDto, http_adapter::SnapshotsError> {
+        if alias == "slow" {
+            return Err(http_adapter::SnapshotsError::TimedOut);
+        }
         if alias == "demo" {
             return Ok(api::SnapshotsDto {
                 snapshots: self.snapshots.clone(),
@@ -424,6 +428,27 @@ async fn both_backends_list_the_snapshots_alike_and_a_filter_keeps_the_same_of_e
         assert_eq!(kept_of(listed.clone()), kept, "{filter:?}");
         assert_eq!(kept_of(of_connect), kept, "{filter:?}");
     }
+}
+
+#[tokio::test]
+async fn both_backends_refuse_a_listing_that_ran_out_of_time_alike() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let daemon = a_daemon(scratch.path()).await;
+    let mut state = daemon.state.clone();
+    state.catalog = Arc::new(WithSnapshots {
+        catalog: Arc::clone(&daemon.state.catalog),
+        snapshots: Vec::new(),
+    });
+    let connect = connected_over(state.clone()).await;
+    let refused = InProcess::over(&state)
+        .snapshots("slow".to_owned())
+        .await
+        .expect_err("a listing that ran out of time is refused");
+    assert_eq!(
+        Err(refused.clone()),
+        connect.snapshots("slow".to_owned()).await
+    );
+    assert_eq!(wire_name(refused.code), "repository-read-timed-out");
 }
 
 /// Writes `text` as the file `name` in `folder`, readable by its owner

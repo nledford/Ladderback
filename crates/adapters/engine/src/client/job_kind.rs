@@ -2,16 +2,18 @@
 
 use api::WarningCode;
 use app::ports::{
-    EngineError, FakeEnd, FakeJob, ForgetJob, Job, MAX_JOB_IDS, RepositoryAccess, RestoreJob,
-    RestoreTarget, RewriteJob,
+    DumpJob, EngineError, FakeEnd, FakeJob, ForgetJob, Job, MAX_JOB_IDS, RepositoryAccess,
+    RestoreJob, RestoreTarget, RewriteJob,
 };
+use domain::browse::FolderPath;
 use domain::execution::WarningKind;
 use domain::planning::{GlobFile, SourceFilter};
+use domain::restore::download::ArchiveFormat;
 
 use crate::job::{
-    BackupJobSpec, BrowseJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning,
-    ForgetJobSpec, JobKind, PruneJobSpec, RepositorySpec, RestoreJobSpec, RestoreTargetSpec,
-    RewriteJobSpec, SourceFilterSpec,
+    ArchiveSpec, BackupJobSpec, BrowseJobSpec, CheckJobSpec, DumpJobSpec, FakeEndSpec, FakeJobSpec,
+    FakeWarning, ForgetJobSpec, JobKind, PruneJobSpec, RepositorySpec, RestoreJobSpec,
+    RestoreTargetSpec, RewriteJobSpec, SourceFilterSpec,
 };
 
 fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
@@ -55,21 +57,40 @@ fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
     }
 }
 
+/// An entry's names from the snapshot's top, as the worker matches them
+/// against the trees: its keys.
+fn entry_names(entry: &FolderPath) -> Vec<String> {
+    entry
+        .names()
+        .iter()
+        .map(|name| name.as_str().to_owned())
+        .collect()
+}
+
 /// A restore as the worker takes it: the entry by its keys, as a browse
 /// names its folder.
 fn restore_spec(job: RestoreJob) -> RestoreJobSpec {
     RestoreJobSpec {
         repo: repository_spec(job.repository),
         snapshot: job.snapshot,
-        entry: job
-            .entry
-            .names()
-            .iter()
-            .map(|name| name.as_str().to_owned())
-            .collect(),
+        entry: entry_names(&job.entry),
         target: match job.target {
             RestoreTarget::NewFolder(path) => RestoreTargetSpec::NewFolder { path },
             RestoreTarget::InPlace => RestoreTargetSpec::InPlace,
+        },
+        deadline_budget: job.deadline_budget,
+    }
+}
+
+/// A download's dump as the worker takes it: the entry by its keys.
+fn dump_spec(job: DumpJob) -> DumpJobSpec {
+    DumpJobSpec {
+        repo: repository_spec(job.repository),
+        snapshot: job.snapshot,
+        entry: entry_names(&job.entry),
+        archive: match job.format {
+            ArchiveFormat::Tar => ArchiveSpec::Tar,
+            ArchiveFormat::Zip => ArchiveSpec::Zip,
         },
         deadline_budget: job.deadline_budget,
     }
@@ -153,6 +174,7 @@ pub(super) fn job_kind(job: Job) -> Result<JobKind, EngineError> {
         Job::Stats(access) => JobKind::Stats(repository_spec(access)),
         Job::Restore(job) => JobKind::Restore(restore_spec(job)),
         Job::RestorePlan(job) => JobKind::RestorePlan(restore_spec(job)),
+        Job::Dump(job) => JobKind::Dump(dump_spec(job)),
         Job::Backup(job) => JobKind::Backup(BackupJobSpec {
             repo: repository_spec(job.repository),
             sources: job.sources,

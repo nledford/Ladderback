@@ -39,13 +39,14 @@ pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",
         OperationKind::Restore => "restore",
+        OperationKind::Download => "download",
     }
 }
 
 /// Every operation kind, the table the `kind` column is read through. `Ls` is
 /// in it though a listing is a read the log never writes (§9): a stored `ls`
 /// reads back as one, as it always has.
-const KINDS: [OperationKind; 10] = [
+const KINDS: [OperationKind; 11] = [
     OperationKind::Fake,
     OperationKind::Identify,
     OperationKind::Init,
@@ -56,6 +57,7 @@ const KINDS: [OperationKind; 10] = [
     OperationKind::Check,
     OperationKind::Ls,
     OperationKind::Restore,
+    OperationKind::Download,
 ];
 
 /// The kind [`kind_text`] writes as `text`; none for a word no kind is
@@ -587,6 +589,7 @@ mod tests {
             OperationKind::Check => "check",
             OperationKind::Ls => "ls",
             OperationKind::Restore => "restore",
+            OperationKind::Download => "download",
         }
     }
 

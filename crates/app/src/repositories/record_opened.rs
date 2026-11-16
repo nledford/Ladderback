@@ -312,7 +312,9 @@ async fn identified(
             EngineEvent::Started { .. }
             | EngineEvent::Progress(_)
             | EngineEvent::Warning(_)
-            | EngineEvent::Located(_) => {}
+            | EngineEvent::Located(_)
+            | EngineEvent::Dumping(_)
+            | EngineEvent::Piece(_) => {}
         }
     }
     Err(FailureReason::EngineExited { exit_code: None })

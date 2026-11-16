@@ -324,6 +324,7 @@ impl Tree {
         Some(Selection {
             path: self.path(index),
             name: node.entry.display.clone(),
+            folder: node.is_folder(),
         })
     }
 
@@ -663,12 +664,13 @@ impl Tree {
 }
 
 /// What the tree selects, which a pane beside it acts on: the entry the tab
-/// stop is on, by its path in the snapshot, the names rustic records, and by
-/// the name it shows.
+/// stop is on, by its path in the snapshot, the names rustic records, by the
+/// name it shows, and whether it is a folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Selection {
     pub(crate) path: String,
     pub(crate) name: String,
+    pub(crate) folder: bool,
 }
 
 /// The address of a page of a folder of snapshot `snapshot` of repository

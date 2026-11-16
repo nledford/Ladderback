@@ -394,6 +394,23 @@ error-full-disk-access-not-local = { -brand-name } opens System Settings only fo
 # The agent was asked to open System Settings at the Full Disk Access pane, and couldn't: it isn't on macOS, or macOS refused.
 error-full-disk-access-settings-unopened = { -brand-name } could not open System Settings. Open it yourself, choose Privacy & Security, then { -full-disk-access }, and turn it on for { -brand-name }.
 
+# Two downloads are already under way on this agent, confirmed or being
+# handed over, and an agent hands over two at a time, so nothing ran. The
+# third is refused rather than queued.
+error-downloads-busy = Two downloads are already under way on this agent, and it hands over two at a time, so nothing was downloaded. Wait for one to finish, then download again.
+
+# The agent's system gave no random bytes for a download's ticket, so the
+# download wasn't confirmed and nothing ran. The daemon's log says why.
+error-downloads-unavailable = { -brand-name } could not get the download ready, so nothing was downloaded. Its log says why; try again, and if it happens again, check the computer it runs on.
+
+# The snapshot holds no file or folder at the path a download named.
+# $path (text): the entry's path in the snapshot, its names joined by "/", such as source/docs/notes.txt.
+error-entry-unknown = The { -snapshot } has no file or folder { $path }, so nothing was downloaded. Choose a file or folder from the { -snapshot }'s tree.
+
+# No download waits under the ticket the browser asked for: it was fetched
+# already, its minute ran out, or it never existed.
+error-download-unknown = This download is no longer waiting: it was already fetched, or a minute passed before it was. Download it again.
+
 # This agent doesn't maintain the repository: its entry doesn't ask this
 # agent to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The

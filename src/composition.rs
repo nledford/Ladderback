@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
-use app::browse::{BrowseError, BrowseSnapshot, FolderReads};
+use app::browse::{BrowseError, BrowseSnapshot};
 use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::full_disk_access::{FullDiskAccessCheck, StartNote};
@@ -36,6 +36,7 @@ use app::ports::{
 use app::ports::{Keyring, KeyringError};
 use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
+use app::reads::ReadTurns;
 use app::recovery::RecoverOperations;
 use app::repositories::{
     ChangeMaintainer, ConfigWrites, ConnectRepository, CreateOffers, InitRepository,
@@ -76,12 +77,14 @@ use notify_adapter::HttpNotifier;
 use platform::SystemClock;
 use platform::admin_password::FileAdminPassword;
 use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
+use platform::random::OsRandom;
 use platform::{agent_id, dirs};
 use releases_adapter::GitHubReleases;
 use secrets::SystemSecrets;
 use store::SqliteStore;
 use uuid::Uuid;
 
+mod downloads;
 mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
@@ -624,7 +627,7 @@ pub(crate) async fn daemon(
         SignInDecided::On(password) => {
             let access = Arc::new(app::access::Access::new(
                 password,
-                random,
+                Arc::clone(&random),
                 Arc::new(SystemClock),
                 Arc::<SqliteStore>::clone(&daemon.log.store),
                 Arc::<SqliteStore>::clone(&daemon.log.store),
@@ -639,6 +642,12 @@ pub(crate) async fn daemon(
         &daemon.background.runner,
         daemon.background.restore_folder.clone(),
         &daemon.state.sign_in,
+    ));
+    // So is a download's, its tickets drawn from the daemon's one source.
+    daemon.state.downloads = Arc::new(downloads::DownloadService::new(
+        &daemon.background.runner,
+        &daemon.state.sign_in,
+        random,
     ));
     daemon.state.exposure = exposure;
     daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
@@ -860,6 +869,11 @@ async fn state_over(
         restore_folder.clone(),
         &sign_in,
     ));
+    let downloads: Arc<dyn http_adapter::Downloads> = Arc::new(downloads::DownloadService::new(
+        &runner,
+        &sign_in,
+        Arc::new(OsRandom),
+    ));
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
@@ -899,6 +913,7 @@ async fn state_over(
         link: Arc::clone(&conditions.link),
         sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
         reads: Arc::default(),
+        listings: Arc::default(),
     });
     let notice = Arc::new(UpdateNotice::new());
     let background = Background {
@@ -924,6 +939,7 @@ async fn state_over(
             profiles,
             restores,
             proposals,
+            downloads,
             sign_in,
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
@@ -1397,10 +1413,12 @@ fn log_location(report: LocationReport) {
 
 /// Whether the job is an operation, which the history has a row for, so a
 /// page can show its progress and warnings there (§4.4). The reads (the look
-/// that names a repository, a listing, a stats read, a prune's plan) and the
-/// initialising of a repository answer their request and are written to no
-/// log (§9): a page told of their news would show it on no row, or on the row
-/// of the run that read, which keeps none of it (#308).
+/// that names a repository, a listing, a stats read, a prune's or a
+/// restore's plan) and the initialising of a repository answer their request
+/// and are written to no log (§9): a page told of their news would show it
+/// on no row, or on the row of the run that read, which keeps none of it
+/// (#308). A download has a row, but its use case writes it, not a run, and
+/// its news is the pieces its browser reads, never told to a page.
 fn is_operation(job: &Job) -> bool {
     match job {
         Job::Identify(_)
@@ -1410,7 +1428,8 @@ fn is_operation(job: &Job) -> bool {
         | Job::Browse(_)
         | Job::Stats(_)
         | Job::PrunePlan(_)
-        | Job::RestorePlan(_) => false,
+        | Job::RestorePlan(_)
+        | Job::Dump(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
@@ -1448,7 +1467,13 @@ impl Publish {
             // that doesn't have it yet. The run announces both.
             // The choice of location is the run's record, which the
             // operation's row shows once the run writes it.
-            E::Started { .. } | E::Succeeded(_) | E::Failed(_) | E::Located(_) => None,
+            // A dump's header and pieces go to its download alone.
+            E::Started { .. }
+            | E::Succeeded(_)
+            | E::Failed(_)
+            | E::Located(_)
+            | E::Dumping(_)
+            | E::Piece(_) => None,
         }
     }
 }
@@ -2294,7 +2319,8 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         | EngineResult::Probed(_)
         | EngineResult::Snapshots(_)
         | EngineResult::Folder(_)
-        | EngineResult::Stats(_) => None,
+        | EngineResult::Stats(_)
+        | EngineResult::Dump(_) => None,
     }
 }
 
@@ -2311,6 +2337,7 @@ fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",
         OperationKind::Restore => "restore",
+        OperationKind::Download => "download",
     }
 }
 
@@ -2676,7 +2703,10 @@ struct ConfigCatalog {
     sources: Arc<dyn NormalizeSources>,
     /// The turns to read a folder of a snapshot, which every browse shares
     /// (decision 102).
-    reads: Arc<FolderReads>,
+    reads: Arc<ReadTurns>,
+    /// The turns to list a repository's snapshots, which every listing
+    /// shares (#710).
+    listings: Arc<ReadTurns>,
 }
 
 #[async_trait]
@@ -2777,59 +2807,16 @@ impl Catalog for ConfigCatalog {
         let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
         let listing = ListSnapshots::new(
             Arc::clone(&self.engine),
+            Arc::new(SystemClock),
             ResolveRepository::new(Arc::new(SystemSecrets::default()))
                 .telling(Arc::new(log_secret_warning)),
+            Arc::clone(&self.listings),
         )
         .list(OperationId::from_uuid(Uuid::now_v7()), &alias, repository)
         .await;
-        // A secret: its code and the words a command or the platform gave,
-        // masked of every secret of the repository, in the log as in the
-        // answer (I4).
-        let refused = |refusal: SecretRefusal| {
-            log::warn!(
-                "the snapshots of {} could not be listed: {:?}{}",
-                alias.as_str(),
-                refusal.code,
-                refusal
-                    .detail
-                    .as_deref()
-                    .map_or_default(|detail| format!(" ({detail})"))
-            );
-            SnapshotsError::SecretRefused(refusal)
-        };
         let listed = match listing {
             Ok(listed) => listed,
-            Err(SnapshotError::Resolve(error)) => {
-                return Err(refused(
-                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await,
-                ));
-            }
-            Err(SnapshotError::Engine(EngineError::SecretsTooLargeToMask { field, limit })) => {
-                return Err(refused(too_much_to_mask(field, limit)));
-            }
-            Err(error) => {
-                if let SnapshotError::Failed(reason) = &error
-                    && let Some(told) = told_failure(reason)
-                {
-                    log::warn!(
-                        "the snapshots of {} could not be listed: {told:?}",
-                        alias.as_str()
-                    );
-                    return Err(told);
-                }
-                let said = failure_redactor(&repository.settings, &SystemSecrets::default())
-                    .await
-                    .redact(&format!("{error:?}"));
-                log::warn!(
-                    "the snapshots of {} could not be listed: {said}",
-                    alias.as_str()
-                );
-                return Err(SnapshotsError::Unavailable {
-                    code: ErrorCode::EngineUnavailable,
-                    args: Vec::new(),
-                    detail: None,
-                });
-            }
+            Err(error) => return Err(listing_refusal(&alias, &repository.settings, error).await),
         };
         let snapshots = listed
             .iter()
@@ -2854,7 +2841,6 @@ impl Catalog for ConfigCatalog {
         folder: FolderPath,
         from: u64,
     ) -> Result<api::FolderDto, FolderError> {
-        use app::maintenance::MaintenanceError;
         // The repository is refused as its listing is (`snapshots`).
         let unknown = || FolderError::Repository(SnapshotsError::Unknown);
         let alias = RepositoryAlias::parse(&alias).map_err(|_| unknown())?;
@@ -2881,56 +2867,9 @@ impl Catalog for ConfigCatalog {
             from,
         )
         .await;
-        // A secret: its code and the words a command or the platform gave,
-        // masked of every secret of the repository, in the log as in the
-        // answer (I4).
-        let refused = |refusal: SecretRefusal| {
-            log::warn!(
-                "a folder of a snapshot of {} could not be read: {:?}{}",
-                alias.as_str(),
-                refusal.code,
-                refusal
-                    .detail
-                    .as_deref()
-                    .map_or_default(|detail| format!(" ({detail})"))
-            );
-            FolderError::Repository(SnapshotsError::SecretRefused(refusal))
-        };
         let page = match read {
             Ok(page) => page,
-            Err(BrowseError::SnapshotUnknown) => return Err(FolderError::SnapshotUnknown),
-            Err(BrowseError::FolderUnknown) => return Err(FolderError::FolderUnknown),
-            Err(BrowseError::Resolve(error)) => {
-                return Err(refused(
-                    secret_refusal(&error, &repository.settings, &SystemSecrets::default()).await,
-                ));
-            }
-            Err(BrowseError::Read(MaintenanceError::Failed(
-                FailureReason::SecretsTooLargeToMask { field, limit },
-            ))) => return Err(refused(too_much_to_mask(field, limit))),
-            Err(error) => {
-                if let BrowseError::Read(MaintenanceError::Failed(reason)) = &error
-                    && let Some(told) = told_failure(reason)
-                {
-                    log::warn!(
-                        "a folder of a snapshot of {} could not be read: {told:?}",
-                        alias.as_str()
-                    );
-                    return Err(FolderError::Repository(told));
-                }
-                let said = failure_redactor(&repository.settings, &SystemSecrets::default())
-                    .await
-                    .redact(&format!("{error:?}"));
-                log::warn!(
-                    "a folder of a snapshot of {} could not be read: {said}",
-                    alias.as_str()
-                );
-                return Err(FolderError::Repository(SnapshotsError::Unavailable {
-                    code: ErrorCode::EngineUnavailable,
-                    args: Vec::new(),
-                    detail: None,
-                }));
-            }
+            Err(error) => return Err(folder_refusal(&alias, &repository.settings, error).await),
         };
         Ok(api::FolderDto {
             path,
@@ -3003,6 +2942,135 @@ fn catalog_refusal(error: ConfigError) -> CatalogError {
         args,
         detail,
     })
+}
+
+/// The refusal of a read of a folder of a snapshot of `alias`, configured
+/// with `settings`, that failed with `error`. A secret: its code and the
+/// words a command or the platform gave, masked of every secret of the
+/// repository, in the log as in the answer (I4). A read that ran out of
+/// time by its own code; the rest by its code alone, its masked words in
+/// the log.
+async fn folder_refusal(
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    error: BrowseError,
+) -> FolderError {
+    use app::maintenance::MaintenanceError;
+    let refused = |refusal: SecretRefusal| {
+        log::warn!(
+            "a folder of a snapshot of {} could not be read: {:?}{}",
+            alias.as_str(),
+            refusal.code,
+            refusal
+                .detail
+                .as_deref()
+                .map_or_default(|detail| format!(" ({detail})"))
+        );
+        FolderError::Repository(SnapshotsError::SecretRefused(refusal))
+    };
+    match error {
+        BrowseError::SnapshotUnknown => FolderError::SnapshotUnknown,
+        BrowseError::FolderUnknown => FolderError::FolderUnknown,
+        BrowseError::Resolve(error) => {
+            refused(secret_refusal(&error, settings, &SystemSecrets::default()).await)
+        }
+        BrowseError::Read(MaintenanceError::Failed(FailureReason::SecretsTooLargeToMask {
+            field,
+            limit,
+        })) => refused(too_much_to_mask(field, limit)),
+        BrowseError::Read(MaintenanceError::TimedOut) => {
+            log::warn!(
+                "a folder of a snapshot of {} could not be read in time",
+                alias.as_str()
+            );
+            FolderError::Repository(SnapshotsError::TimedOut)
+        }
+        error => {
+            if let BrowseError::Read(MaintenanceError::Failed(reason)) = &error
+                && let Some(told) = told_failure(reason)
+            {
+                log::warn!(
+                    "a folder of a snapshot of {} could not be read: {told:?}",
+                    alias.as_str()
+                );
+                return FolderError::Repository(told);
+            }
+            let said = failure_redactor(settings, &SystemSecrets::default())
+                .await
+                .redact(&format!("{error:?}"));
+            log::warn!(
+                "a folder of a snapshot of {} could not be read: {said}",
+                alias.as_str()
+            );
+            FolderError::Repository(SnapshotsError::Unavailable {
+                code: ErrorCode::EngineUnavailable,
+                args: Vec::new(),
+                detail: None,
+            })
+        }
+    }
+}
+
+/// The refusal of a listing of the snapshots of `alias`, configured with
+/// `settings`, that failed with `error`. A secret: its code and the words a
+/// command or the platform gave, masked of every secret of the repository,
+/// in the log as in the answer (I4). A read that ran out of time by its own
+/// code; the rest by its code alone, its masked words in the log.
+async fn listing_refusal(
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    error: SnapshotError,
+) -> SnapshotsError {
+    let refused = |refusal: SecretRefusal| {
+        log::warn!(
+            "the snapshots of {} could not be listed: {:?}{}",
+            alias.as_str(),
+            refusal.code,
+            refusal
+                .detail
+                .as_deref()
+                .map_or_default(|detail| format!(" ({detail})"))
+        );
+        SnapshotsError::SecretRefused(refusal)
+    };
+    match error {
+        SnapshotError::Resolve(error) => {
+            refused(secret_refusal(&error, settings, &SystemSecrets::default()).await)
+        }
+        SnapshotError::Engine(EngineError::SecretsTooLargeToMask { field, limit }) => {
+            refused(too_much_to_mask(field, limit))
+        }
+        SnapshotError::TimedOut => {
+            log::warn!(
+                "the snapshots of {} could not be listed in time",
+                alias.as_str()
+            );
+            SnapshotsError::TimedOut
+        }
+        error => {
+            if let SnapshotError::Failed(reason) = &error
+                && let Some(told) = told_failure(reason)
+            {
+                log::warn!(
+                    "the snapshots of {} could not be listed: {told:?}",
+                    alias.as_str()
+                );
+                return told;
+            }
+            let said = failure_redactor(settings, &SystemSecrets::default())
+                .await
+                .redact(&format!("{error:?}"));
+            log::warn!(
+                "the snapshots of {} could not be listed: {said}",
+                alias.as_str()
+            );
+            SnapshotsError::Unavailable {
+                code: ErrorCode::EngineUnavailable,
+                args: Vec::new(),
+                detail: None,
+            }
+        }
+    }
 }
 
 impl ConfigCatalog {
@@ -6698,6 +6766,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6779,6 +6848,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -6878,6 +6948,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -7607,6 +7678,7 @@ mod tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11220,6 +11292,7 @@ mod repository_service_tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11260,6 +11333,7 @@ mod repository_service_tests {
             schedules,
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -11620,6 +11694,43 @@ mod repository_service_tests {
         );
     }
 
+    /// The settings of a repository whose read ran out of time.
+    fn timed_out_settings() -> RepositorySettings {
+        RepositorySettings {
+            repository: "/srv/slow".to_owned(),
+            repo_hot: None,
+            password: SecretRef::Command(
+                domain::secrets::CommandLine::parse("echo not-a-real-password").expect("a command"),
+            ),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        }
+    }
+
+    /// A listing that ran out of time is told as a read that timed out,
+    /// not as an engine that can't be started (#710).
+    #[tokio::test]
+    async fn a_listing_that_ran_out_of_time_is_refused_as_a_read_that_timed_out() {
+        let alias = RepositoryAlias::parse("slow").expect("an alias");
+        let refused = listing_refusal(&alias, &timed_out_settings(), SnapshotError::TimedOut).await;
+        assert_eq!(refused, SnapshotsError::TimedOut);
+    }
+
+    /// A folder read that ran out of time is told as a read that timed
+    /// out, not as an engine that can't be started.
+    #[tokio::test]
+    async fn a_folder_read_that_ran_out_of_time_is_refused_as_a_read_that_timed_out() {
+        let alias = RepositoryAlias::parse("slow").expect("an alias");
+        let refused = folder_refusal(
+            &alias,
+            &timed_out_settings(),
+            BrowseError::Read(app::maintenance::MaintenanceError::TimedOut),
+        )
+        .await;
+        assert_eq!(refused, FolderError::Repository(SnapshotsError::TimedOut));
+    }
+
     /// A browse whose password command fails is refused with the code of
     /// the failure, and neither the answer nor the log holds a secret of
     /// the repository (I4).
@@ -11957,6 +12068,7 @@ mod repository_service_tests {
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
                 reads: Arc::default(),
+                listings: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -11994,6 +12106,7 @@ mod repository_service_tests {
                 schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
                 sources: Arc::new(app::fakes::FakeSources),
                 reads: Arc::default(),
+                listings: Arc::default(),
                 link: Arc::new(NameWatch::new(
                     Arc::new(app::fakes::FakeNetworkLink::new()),
                     || {},
@@ -12877,6 +12990,7 @@ mod repository_service_tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -13023,6 +13137,7 @@ mod repository_service_tests {
             schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
+            listings: Arc::default(),
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
