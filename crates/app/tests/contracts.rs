@@ -476,6 +476,21 @@ async fn the_in_memory_event_bus_meets_the_event_bus_contract() {
     contract::event_bus::run(&InMemoryEventBusHarness).await;
 }
 
+struct InMemoryRecentLogHarness;
+
+impl contract::recent_log::RecentLogHarness for InMemoryRecentLogHarness {
+    fn log(&self) -> Arc<dyn app::ports::RecentLogStore> {
+        Arc::new(app::fakes::InMemoryRecentLog::new())
+    }
+}
+
+/// The in-memory recent log is the daemon's own (`app::recent_log`), so this
+/// run covers the real adapter too.
+#[test]
+fn the_in_memory_recent_log_meets_the_recent_log_contract() {
+    contract::recent_log::run(&InMemoryRecentLogHarness);
+}
+
 /// The fake reader gives the profile a harness method scripted, at the path
 /// the method returns, and the fake writer renders in memory.
 struct FakeProfilesHarness {

@@ -55,6 +55,8 @@ mod cache_steps;
 mod cli_output_steps;
 #[path = "steps/core_dumps.rs"]
 mod core_dumps_steps;
+#[path = "steps/daemon_log.rs"]
+mod daemon_log_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
 #[path = "steps/install_restart.rs"]

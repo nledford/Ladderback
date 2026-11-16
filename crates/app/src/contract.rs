@@ -15,6 +15,7 @@ pub mod operation_store;
 pub mod power;
 pub mod profiles;
 pub mod random;
+pub mod recent_log;
 pub mod release_feed;
 pub mod schedule_store;
 pub mod secrets;

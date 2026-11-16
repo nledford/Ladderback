@@ -12,6 +12,7 @@ mod operation_store;
 mod platform;
 mod profiles;
 mod random;
+mod recent_log;
 mod releases;
 mod retention;
 mod schedule_store;
@@ -54,6 +55,7 @@ pub use profiles::{
     ProfileReader, ProfileWriter, RenderedProfile,
 };
 pub use random::{Random, RandomUnavailable};
+pub use recent_log::RecentLogStore;
 pub use releases::{RELEASE_TIMEOUT, ReleaseFeed, ReleaseFeedError};
 pub use retention::{Retention, RetentionError};
 pub use schedule_store::{PendingRetry, PlannedRun, ReleaseCheck, ScheduleStore};

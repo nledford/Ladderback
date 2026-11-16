@@ -31,6 +31,7 @@ pub mod plans;
 pub mod ports;
 pub mod progress;
 pub mod queue;
+pub mod recent_log;
 pub mod recovery;
 pub mod repositories;
 pub mod restore;
