@@ -35,8 +35,9 @@ const COLLECTION: &str = "/org/freedesktop/secrets/collection/login";
 /// finds no items in it while it is, though the entry is there: the entry is
 /// refused as no keyring service to ask, in the words `keyring` gives a
 /// locked collection, never as missing (#483). The same service unlocked,
-/// finding nothing, has no such entry, and so has one whose collection
-/// doesn't say whether it is locked.
+/// finding nothing, has no such entry; one whose collection doesn't say
+/// whether it is locked leaves the missing entry unconfirmed, in the words of
+/// the call that failed.
 #[test]
 fn a_locked_keyring_that_finds_nothing_is_no_keyring_service() {
     if let Some(state) = std::env::var_os(IN_COPY) {
@@ -46,6 +47,11 @@ fn a_locked_keyring_that_finds_nothing_is_no_keyring_service() {
                 keyring::Error::NoStorageAccess(Box::new(dbus_secret_service::Error::Locked))
                     .to_string();
             assert_eq!(read, Err(Failure::NoService(said)));
+        } else if state == Keyring::Silent.name() {
+            assert!(
+                matches!(&read, Err(Failure::Unconfirmed(why)) if why.contains("the stand-in has no such method")),
+                "{read:?}"
+            );
         } else {
             assert_eq!(read, Err(Failure::NoEntry));
         }

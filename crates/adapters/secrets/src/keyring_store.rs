@@ -15,12 +15,38 @@ pub(crate) enum Failure {
     /// session bus to reach one by, or the service says its keyring is locked
     /// or its unlock prompt was dismissed. The platform's own words.
     NoService(String),
+    /// The Secret Service found no entry but couldn't say whether its
+    /// keyring is locked, where an entry goes unseen: the entry may be
+    /// there. The platform's words for why it couldn't say.
+    Unconfirmed(String),
+}
+
+/// What the Secret Service said when asked whether its keyring is locked.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Debug)]
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(dead_code, reason = "only the Secret Service, on Linux, is asked")
+)]
+pub(crate) enum Lock {
+    Unlocked,
+    /// Locked: the words `keyring` gives a locked collection.
+    Locked(String),
+    /// It couldn't be asked: the platform's words why.
+    Unknown(String),
 }
 
 /// A place secrets are kept under a service and a name. Calls may block
 /// (D-Bus, the macOS keychain): callers run them off the async executor.
 pub(crate) trait KeyringStore: Send + Sync {
     fn get(&self, service: &str, name: &str) -> Result<String, Failure>;
+
+    /// Writes `secret` to the entry, adding it or replacing what it held:
+    /// whoever calls this has made sure it may.
+    fn set(&self, service: &str, name: &str, secret: &str) -> Result<(), Failure>;
+
+    /// Deletes the entry; [`Failure::NoEntry`] when it isn't there.
+    fn delete(&self, service: &str, name: &str) -> Result<(), Failure>;
 }
 
 /// The store of the user's session: the macOS keychain, or the Secret
@@ -63,40 +89,60 @@ impl KeyringStore for Os {
     fn get(&self, service: &str, name: &str) -> Result<String, Failure> {
         keyring::Entry::new(service, name)
             .and_then(|entry| entry.get_password())
-            .map_err(|error| {
-                failure(error, THIS_STORE, || {
-                    cfg_select! {
-                        target_os = "linux" => { default_collection_locked() }
-                        // The keychain says when it is locked: never asked.
-                        _ => { None }
-                    }
-                })
-            })
+            .map_err(os_failure)
+    }
+
+    fn set(&self, service: &str, name: &str, secret: &str) -> Result<(), Failure> {
+        keyring::Entry::new(service, name)
+            .and_then(|entry| entry.set_password(secret))
+            .map_err(os_failure)
+    }
+
+    fn delete(&self, service: &str, name: &str) -> Result<(), Failure> {
+        keyring::Entry::new(service, name)
+            .and_then(|entry| entry.delete_credential())
+            .map_err(os_failure)
     }
 }
 
-/// What the Secret Service says when the collection under the alias
-/// `default`, where `keyring` keeps and looks for an entry, is locked: the
-/// words `keyring` gives a locked collection. `None` when it is unlocked or
-/// can't be asked, so a missing entry is never guessed to be locked.
+/// Why this machine's store refused a call.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn os_failure(error: keyring::Error) -> Failure {
+    failure(error, THIS_STORE, || {
+        cfg_select! {
+            target_os = "linux" => { default_collection_lock() }
+            // The keychain says when it is locked: never asked.
+            _ => { Lock::Unlocked }
+        }
+    })
+}
+
+/// Whether the collection under the alias `default`, where `keyring` keeps
+/// and looks for an entry, is locked, as the Secret Service says.
 #[cfg(target_os = "linux")]
-fn default_collection_locked() -> Option<String> {
+fn default_collection_lock() -> Lock {
     use dbus_secret_service::{EncryptionType, Error, SecretService};
-    let service = SecretService::connect(EncryptionType::Plain).ok()?;
-    let locked = service
-        .get_default_collection()
-        .and_then(|collection| collection.is_locked())
-        .ok()?;
-    locked.then(|| keyring::Error::NoStorageAccess(Box::new(Error::Locked)).to_string())
+    let locked = SecretService::connect(EncryptionType::Plain).and_then(|service| {
+        service
+            .get_default_collection()
+            .and_then(|collection| collection.is_locked())
+    });
+    match locked {
+        Ok(false) => Lock::Unlocked,
+        Ok(true) => {
+            Lock::Locked(keyring::Error::NoStorageAccess(Box::new(Error::Locked)).to_string())
+        }
+        Err(error) => Lock::Unknown(error.to_string()),
+    }
 }
 
 /// Why the OS store `store` gave no secret. `locked` asks the store whether
-/// its keyring is locked, and gives what it said when it is.
+/// its keyring is locked.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn failure(
     error: keyring::Error,
     store: OsStore,
-    locked: impl FnOnce() -> Option<String>,
+    locked: impl FnOnce() -> Lock,
 ) -> Failure {
     // `keyring` reports a Secret Service it can't reach as `PlatformFailure`
     // and a locked or missing collection as `NoStorageAccess`, but its
@@ -120,9 +166,14 @@ pub(crate) fn failure(
     match error {
         // oo7 finds no items in a locked collection, so `keyring` says there
         // is no entry where the entry may well be (#483): the service, asked
-        // whether its collection is locked, tells the two apart.
+        // whether its collection is locked, tells the two apart, and one that
+        // can't be asked leaves it unconfirmed.
         keyring::Error::NoEntry => match store {
-            OsStore::SecretService => locked().map_or(Failure::NoEntry, Failure::NoService),
+            OsStore::SecretService => match locked() {
+                Lock::Unlocked => Failure::NoEntry,
+                Lock::Locked(said) => Failure::NoService(said),
+                Lock::Unknown(why) => Failure::Unconfirmed(why),
+            },
             OsStore::Keychain => Failure::NoEntry,
         },
         // The error holds the bytes: a secret. Wipe them.
@@ -175,10 +226,21 @@ struct Unavailable;
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 impl KeyringStore for Unavailable {
     fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
-        Err(Failure::Unreachable(
-            "this platform has no OS keyring".to_owned(),
-        ))
+        Err(no_os_keyring())
     }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        Err(no_os_keyring())
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        Err(no_os_keyring())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn no_os_keyring() -> Failure {
+    Failure::Unreachable("this platform has no OS keyring".to_owned())
 }
 
 /// Entries held in memory, for tests.
@@ -209,5 +271,19 @@ impl KeyringStore for Memory {
             .get(&(service.to_owned(), name.to_owned()))
             .ok_or(Failure::NoEntry)?;
         String::from_utf8(bytes.clone()).map_err(|_| Failure::NotUnicode)
+    }
+
+    fn set(&self, service: &str, name: &str, secret: &str) -> Result<(), Failure> {
+        Memory::set(self, service, name, secret.as_bytes());
+        Ok(())
+    }
+
+    fn delete(&self, service: &str, name: &str) -> Result<(), Failure> {
+        self.entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&(service.to_owned(), name.to_owned()))
+            .map(|_| ())
+            .ok_or(Failure::NoEntry)
     }
 }
