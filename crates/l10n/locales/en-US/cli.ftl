@@ -199,6 +199,10 @@ cli-service-replaced = replaced the service { $file } and started it again
 # `loginctl enable-linger` is a command, typed as it is: keep it a string literal.
 cli-service-linger = to keep it running while you are logged out, run { "loginctl enable-linger" }
 
+# macOS only, after an install: nothing can ask macOS for Full Disk Access, so the person grants it to the installed program in System Settings.
+# $program (text): the path of the program the service runs.
+cli-service-full-disk-access = to back up Mail, Messages, Safari and other apps' data, turn on { -full-disk-access } for { $program } in System Settings, under Privacy & Security; without it, backups read less. The start page says whether it is missing
+
 # Linux only, after an install, when repositories read their password from the keyring: a service that lingers starts at boot, before the login that starts the Secret Service, so it can't read the password until someone logs in.
 # $count (number): how many repositories read their password from the keyring.
 # `password-file` is a setting and `chmod 600` a command, typed as they are: keep them string literals.

@@ -169,7 +169,7 @@ fn platform_dir(env: &impl Fn(&str) -> Option<OsString>, folder: Folder) -> Opti
     None
 }
 
-fn home(env: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+pub(crate) fn home(env: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     env_dir(env, "HOME")
 }
 

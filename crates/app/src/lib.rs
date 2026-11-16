@@ -20,6 +20,7 @@ pub mod browse;
 pub mod conditions;
 pub mod event_bus;
 pub mod execution;
+pub mod full_disk_access;
 pub mod globs;
 pub mod history;
 pub mod interop;

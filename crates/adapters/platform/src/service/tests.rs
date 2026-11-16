@@ -680,6 +680,15 @@ fn a_launchd_agent_runs_only_once_its_user_has_logged_in() {
     assert!(!faked.service.keyring_waits_for_login());
 }
 
+/// Nothing can ask macOS for Full Disk Access, so installing a launchd
+/// agent says to grant it (§16, decision 115); a systemd service has no such
+/// grant.
+#[test]
+fn only_a_launchd_agent_needs_full_disk_access() {
+    assert!(Faked::new(Which::Launchd).service.needs_full_disk_access());
+    assert!(!Faked::new(Which::Systemd).service.needs_full_disk_access());
+}
+
 /// `systemctl restart` and `disable --now` return only once the unit has
 /// stopped, which systemd gives up to its `TimeoutStopSec`: they are waited
 /// for while it stops, not given up at one call's limit (#543).

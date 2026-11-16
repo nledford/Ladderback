@@ -88,6 +88,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | WarningCode::LocationSecret
                 | WarningCode::GlobNeverMatches
                 | WarningCode::ProfileTagDropped
+                | WarningCode::FullDiskAccessMissing
                 | WarningCode::ProfileOptionLeftOut
                 | WarningCode::ProfileRetentionEmpty
                 | WarningCode::ProfileSettingKept
@@ -358,6 +359,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::RestoreInPlaceNotHere
                 | ErrorCode::RestoreHubNotAllowed
                 | ErrorCode::RestoreFolderUnset
+                | ErrorCode::FullDiskAccessNotLocal
+                | ErrorCode::FullDiskAccessSettingsUnopened
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

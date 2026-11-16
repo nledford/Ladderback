@@ -55,6 +55,11 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
                 told.push_str(&line(localizer, msg::CLI_SERVICE_LINGER, &[]));
             }
             told.push_str(&keyring_said(localizer, &service, keyring));
+            told.push_str(&full_disk_access_said(
+                localizer,
+                service.needs_full_disk_access(),
+                &program,
+            ));
             to_stdout(&told)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -63,6 +68,20 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
             Ok(ExitCode::FAILURE)
         }
     }
+}
+
+/// The note that says to grant the installed program Full Disk Access in
+/// System Settings, for a service that `needed` it (a launchd agent on
+/// macOS, §16 decision 115); nothing for any other.
+fn full_disk_access_said(localizer: &Localizer, needed: bool, program: &ServicePath) -> String {
+    if !needed {
+        return String::new();
+    }
+    line(
+        localizer,
+        msg::CLI_SERVICE_FULL_DISK_ACCESS,
+        &[("program", MsgArg::Text(shown(Path::new(program.as_str()))))],
+    )
 }
 
 fn remove(localizer: &Localizer) -> io::Result<ExitCode> {
@@ -293,7 +312,23 @@ mod tests {
     use app::ports::{ServiceError, ServiceProblem};
     use l10n::Localizer;
 
-    use super::{error_said, shown};
+    use domain::service::ServicePath;
+
+    use super::{error_said, full_disk_access_said, shown};
+
+    /// After installing a launchd agent, the note names the program to grant
+    /// Full Disk Access to, and where; a service that needs no grant gets
+    /// no note (§16, decision 115).
+    #[test]
+    fn the_full_disk_access_note_names_the_program_only_where_it_is_needed() {
+        let program = ServicePath::parse(Path::new("/opt/homebrew/bin/ladderback")).unwrap();
+        let localizer = Localizer::new(&[]);
+        let said = full_disk_access_said(&localizer, true, &program);
+        assert!(said.contains("/opt/homebrew/bin/ladderback"), "{said}");
+        assert!(said.contains("Full Disk Access"), "{said}");
+        assert!(said.contains("System Settings"), "{said}");
+        assert_eq!(full_disk_access_said(&localizer, false, &program), "");
+    }
 
     #[test]
     fn a_service_still_stopping_is_said_with_the_command_and_how_long_it_was_waited_for() {

@@ -38,6 +38,8 @@ mod operation_steps;
 mod adopt_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
+#[path = "steps/full_disk_access.rs"]
+mod full_disk_access_steps;
 #[path = "steps/other_hosts.rs"]
 mod other_hosts_steps;
 #[path = "steps/owner.rs"]
@@ -110,6 +112,7 @@ struct Agent {
     restore: restore_steps::RestoreWorld,
     recent_log: recent_log_steps::RecentLogWorld,
     maintainer: maintainer_steps::MaintainerWorld,
+    full_disk_access: full_disk_access_steps::FullDiskAccessWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -162,6 +165,7 @@ impl Agent {
             updates: Default::default(),
             recent_log: Default::default(),
             maintainer: Default::default(),
+            full_disk_access: Default::default(),
         }
     }
 

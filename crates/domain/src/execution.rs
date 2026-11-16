@@ -2,6 +2,7 @@
 
 pub mod conditions;
 pub mod deadline;
+pub mod full_disk_access;
 pub mod locations;
 pub mod next_run;
 pub mod plan_tags;
@@ -281,6 +282,11 @@ pub enum WarningKind {
     /// `secret` and `detail` the file's mode in octal (`0644`); never the
     /// secret (I4).
     SecretFileReadable,
+    /// On macOS, a source item the system refused (`EPERM`) during a backup
+    /// whose Full Disk Access probe, run before it, found the grant missing
+    /// (§16, decision 115): a [`Self::SourceUnreadable`] the grant explains.
+    /// `item`, `during` and `detail` are the engine's, as for that kind.
+    FullDiskAccessMissing,
     /// A warning this version doesn't know, for example from a newer worker.
     Other,
 }
@@ -299,6 +305,7 @@ impl WarningKind {
             Self::OtherHosts => "maintenance-other-hosts",
             Self::LocationSkipped => "location-skipped",
             Self::SecretFileReadable => "secret-file-readable",
+            Self::FullDiskAccessMissing => "full-disk-access-missing",
             Self::Other => "unknown",
         }
     }
@@ -789,6 +796,7 @@ mod tests {
             WarningKind::OtherHosts,
             WarningKind::LocationSkipped,
             WarningKind::SecretFileReadable,
+            WarningKind::FullDiskAccessMissing,
             WarningKind::Other,
         ]
         .into_iter()
@@ -805,6 +813,7 @@ mod tests {
                 "maintenance-other-hosts",
                 "location-skipped",
                 "secret-file-readable",
+                "full-disk-access-missing",
                 "unknown",
             ]
         );

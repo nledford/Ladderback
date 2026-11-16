@@ -4,6 +4,7 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use domain::execution::deadline::Deadline;
+use domain::execution::full_disk_access::FullDiskAccess;
 use domain::execution::{
     FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
 };
@@ -13,6 +14,7 @@ use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::announce::{announce_end, announce_start};
+use crate::full_disk_access::FullDiskAccessCheck;
 use crate::log_write::save_within_bound;
 use crate::ports::{
     Clock, Engine, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome, HookPhase,
@@ -50,6 +52,7 @@ pub struct RunOperation {
     store: Arc<dyn OperationStore>,
     hooks: Option<HookPlan>,
     events: Option<Arc<dyn EventBus>>,
+    full_disk_access: Option<Arc<FullDiskAccessCheck>>,
 }
 
 /// The runner and the three levels of hooks one run wraps (§6.1).
@@ -144,6 +147,7 @@ impl RunOperation {
             store,
             hooks: None,
             events: None,
+            full_disk_access: None,
         }
     }
 
@@ -160,6 +164,15 @@ impl RunOperation {
     /// write or not.
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
+        self
+    }
+
+    /// Runs `check`'s Full Disk Access probe before each backup, and records
+    /// each warning as what it found explains it (§16, decision 115): a
+    /// source item the system refused while the grant was missing gets the
+    /// grant's own warning.
+    pub fn with_full_disk_access(mut self, check: Arc<FullDiskAccessCheck>) -> Self {
+        self.full_disk_access = Some(check);
         self
     }
 
@@ -327,6 +340,12 @@ impl RunOperation {
     async fn drive(&self, run: &mut Run, job: Job, cancel: impl Future<Output = ()> + Send) {
         let budget = job.deadline_budget();
         let ruled = crate::locations::ruled_positions(&job);
+        // Run just before the backup, so a grant given since the last probe
+        // counts, and one taken away does too.
+        let found = match (&self.full_disk_access, &job) {
+            (Some(check), Job::Backup(_)) => Some(check.check().await),
+            _ => None,
+        };
         let RunningJob {
             events,
             mut control,
@@ -366,7 +385,7 @@ impl RunOperation {
                     };
                     self.arm_deadline(&event, budget, &mut deadline, &mut timer);
                     self.keep_result(run, &event).await;
-                    self.apply(run, event, &ruled);
+                    self.apply(run, event, &ruled, found);
                     if run.operation.status().is_finished() {
                         stop_past_deadline(run, &mut *control).await;
                         return;
@@ -510,8 +529,15 @@ impl RunOperation {
     }
 
     /// Applies `event` to the run's operation; `ruled` are the positions of
-    /// the repository's locations that have a rule.
-    fn apply(&self, run: &mut Run, event: EngineEvent, ruled: &[u8]) {
+    /// the repository's locations that have a rule, and `found` what the Full
+    /// Disk Access probe found before a backup, which explains its warnings.
+    fn apply(
+        &self,
+        run: &mut Run,
+        event: EngineEvent,
+        ruled: &[u8],
+        found: Option<FullDiskAccess>,
+    ) {
         let at = self.clock.now();
         let applied = match event {
             // A backup queued before its repository's ID was known names
@@ -520,7 +546,10 @@ impl RunOperation {
                 run.operation.start_on(at, repository.as_ref())
             }
             EngineEvent::Progress(_) => run.operation.report_progress(),
-            EngineEvent::Warning(warning) => run.operation.record_warning(warning),
+            EngineEvent::Warning(warning) => run.operation.record_warning(match found {
+                Some(found) => found.explain(warning),
+                None => warning,
+            }),
             EngineEvent::Succeeded(result) => {
                 let succeeded = run.operation.succeed(at);
                 if succeeded.is_ok() {
@@ -914,6 +943,7 @@ mod tests {
                 repository: Some(opened.clone()),
             },
             &[],
+            None,
         );
         assert_eq!(run.operation.status(), &OperationStatus::Running);
         assert_eq!(run.operation.target().repository, Some(opened));

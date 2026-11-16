@@ -17,7 +17,7 @@
 //! ([`Environment`]), through the spawn gate (decision 58), with argv only.
 
 mod files;
-mod manager;
+pub(crate) mod manager;
 mod program;
 
 use std::ffi::OsString;
@@ -293,6 +293,14 @@ impl UserService {
             Kind::Systemd => true,
             Kind::Launchd { .. } => false,
         }
+    }
+
+    /// Whether the person must grant the installed program Full Disk Access
+    /// for its backups to read everything (§16, decision 115): a launchd
+    /// agent on macOS, where nothing can ask for the grant; never a systemd
+    /// service.
+    pub fn needs_full_disk_access(&self) -> bool {
+        matches!(self.kind, Kind::Launchd { .. })
     }
 }
 

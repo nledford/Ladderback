@@ -209,6 +209,10 @@ async fn an_unreadable_file_is_a_warning_and_counted_as_an_error() {
             .is_some_and(|item| item.ends_with("locked.txt")),
         "{warning:?}"
     );
+    // The engine's message keeps the system's error number, by which the
+    // Full Disk Access rule tells a file's own permissions (13) from a
+    // missing grant (1).
+    assert!(warning.detail.contains("(os error 13)"), "{warning:?}");
     assert_eq!(backed_up(&events).error_count, 1);
 }
 

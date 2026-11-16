@@ -17,6 +17,7 @@ pub mod agent_id;
 pub mod data_dir_lock;
 pub mod dirs;
 pub mod dumps;
+pub mod full_disk_access;
 pub mod network;
 pub mod network_link;
 pub mod power;

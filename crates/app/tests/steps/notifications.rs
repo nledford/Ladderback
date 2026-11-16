@@ -129,7 +129,7 @@ impl NotificationsWorld {
         self.reports.extend(reports);
     }
 
-    async fn tell_end(&mut self, operation: &Operation) {
+    pub(crate) async fn tell_end(&mut self, operation: &Operation) {
         self.operations
             .save(operation, None)
             .await

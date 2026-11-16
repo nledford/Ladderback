@@ -143,6 +143,15 @@ fn parse_authority(text: &str) -> Option<Authority<'_>> {
     (name_like && port_ok).then_some(Authority { host })
 }
 
+/// Whether the request's one `Host` header names a loopback address. A
+/// proxy may forward a request under a loopback host of its own (nginx's
+/// default names the address it forwards to), so this alone doesn't place
+/// the browser.
+pub(crate) fn host_is_loopback(headers: &HeaderMap) -> bool {
+    matches!(one(headers, &HOST), Header::Text(host)
+        if parse_authority(host).is_some_and(|authority| is_loopback_host(authority.host)))
+}
+
 fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;

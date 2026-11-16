@@ -125,6 +125,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     RestoreInPlaceNotHere => msg::ERROR_RESTORE_IN_PLACE_NOT_HERE,
     RestoreHubNotAllowed => msg::ERROR_RESTORE_HUB_NOT_ALLOWED,
     RestoreFolderUnset => msg::ERROR_RESTORE_FOLDER_UNSET,
+    FullDiskAccessNotLocal => msg::ERROR_FULL_DISK_ACCESS_NOT_LOCAL,
+    FullDiskAccessSettingsUnopened => msg::ERROR_FULL_DISK_ACCESS_SETTINGS_UNOPENED,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,
     MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,
@@ -182,5 +184,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     NotificationUndelivered => msg::WARNING_NOTIFICATION_UNDELIVERED,
     CoreDumpsOn => msg::WARNING_CORE_DUMPS_ON,
     DebuggerAttachAllowed => msg::WARNING_DEBUGGER_ATTACH_ALLOWED,
+    FullDiskAccessMissing => msg::WARNING_FULL_DISK_ACCESS_MISSING,
     Unknown => msg::WARNING_UNKNOWN,
 });
