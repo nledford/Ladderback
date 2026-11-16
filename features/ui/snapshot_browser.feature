@@ -6,7 +6,8 @@ Feature: Browsing a snapshot's tree by keyboard
   repository as it is first opened. The journeys use the keyboard alone,
   against a daemon this run started with a demo plan and a scratch repository
   the plan has backed up to, so every folder they open is read from a real
-  snapshot. Download and Restore of a selected entry are not built yet.
+  snapshot. Restoring and downloading a selected entry have journeys of
+  their own, in features/restore/.
 
   Scenario: A snapshot opens from its plan's history, and its tree is one stop for Tab
     Given a demo plan "home" with a tiny scratch repository

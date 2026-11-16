@@ -1459,7 +1459,7 @@ ui-step-up-copy-failed = The browser would not let the page copy it. Select the 
 ui-restore-pane = Selected entry
 
 # What that pane says while the tree selects nothing.
-ui-restore-pane-empty = Select a folder or file in the tree to restore it.
+ui-restore-pane-empty = Select a folder or file in the tree to restore or download it.
 
 # The button that opens the restore dialog for the entry the tree selects, and that dialog's title.
 # $name (text): the entry's name, as the tree shows it.
@@ -1557,6 +1557,48 @@ ui-restore-failed = Restore of { $name } failed. The Operations page says why.
 # Said when the page stopped waiting for a restore, which goes on.
 # $name (text): the entry restored, as the tree shows it.
 ui-restore-unwatched = The daemon stopped answering, so this page can't say how the restore of { $name } ends. The Operations page will show it.
+
+## Downloading an entry of a snapshot from its page (§10.4): the Download
+## button beside the tree, its dialog and what is said once the browser has it.
+
+# The button that opens the download dialog for the entry the tree selects, and that dialog's title.
+# $name (text): the entry's name, as the tree shows it.
+ui-download-button = Download { $name }
+
+# What the download dialog says first, which a screen reader reads as the dialog opens.
+# $name (text): the entry's name, as the tree shows it.
+# $snapshot (text): the snapshot's short ID.
+# $alias (text): the repository's alias.
+ui-download-summary = This downloads { $name } as { -snapshot } { $snapshot } of { $alias } holds it, to this browser's downloads.
+
+# The name of the choice of archive a folder is downloaded as.
+ui-download-format = Archive format
+
+# What the choice of archive format says under its name: neither archive compresses what it holds.
+ui-download-format-hint = Either archive holds the files as they are, not compressed.
+
+# The choice to download a folder as a tar archive. The extension is a literal.
+ui-download-tar = Tar ({ ".tar" })
+
+# The choice to download a folder as a zip archive. The extension is a literal.
+ui-download-zip = Zip ({ ".zip" })
+
+# The download dialog's confirm button.
+ui-download-confirm = Download
+
+# Said in the download dialog while the download is being confirmed.
+ui-download-starting = Starting the download…
+
+# The step-up field's error with sign-in off, when what was typed is not the snapshot's short ID. Nothing was downloaded.
+# $length (count): how many characters the short ID has.
+ui-download-wrong-id = That is not this { -snapshot }'s ID. Type or paste { $length } characters shown above.
+
+# The step-up field's error with sign-in on, when what was typed is not the admin password. Nothing was downloaded.
+ui-download-wrong-password = That is not the admin password, so nothing was downloaded. Type it again, or fill it in from your password manager.
+
+# Said politely once the download was handed to the browser, which saves it as it does any download.
+# $name (text): the entry downloaded, as the tree shows it.
+ui-download-handed = Download of { $name } started. The browser saves it with its other downloads.
 
 ## A repository's stats at the end of the snapshots page (§4.4, §16 decision
 ## 104): four figures as last read, and a button that reads them now.

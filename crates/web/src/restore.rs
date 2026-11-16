@@ -18,7 +18,7 @@ use crate::wording::Words;
 
 /// How many characters of a snapshot's ID its short ID shows, as the page
 /// heading and the step-up field show it.
-const SHORT_ID_LENGTH: u64 = 8;
+pub(crate) const SHORT_ID_LENGTH: u64 = 8;
 
 /// The route that starts a restore of an entry of snapshot `snapshot` of the
 /// repository `alias`, each percent-encoded as a folder's address is.
