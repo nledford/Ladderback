@@ -49,6 +49,8 @@ ladderback/
 │  ├─ spawn-gate/             # the spawn gate: one child process starts at a time (decision 58); shared by every
 │  │                          # adapter that starts a child, the HTTP server's accept on macOS (decision 66) and the @e2e runner
 │  ├─ web/                    # Leptos CSR app (trunk); inbound adapter in the browser
+│  │  └─ src/components/      # the shared component set (§4.5): one file per component, its host-tested
+│  │                          # decisions in a child module, `<component>/rules.rs`
 │  ├─ l10n/                   # wasm-safe: Fluent bundle chain, locale negotiation, formatters (features icu,
 │  │                          # browser-intl, pseudo); build.rs generates message IDs from en-US
 │  │  └─ locales/<tag>/       # common.ftl, ui.ftl, notify.ftl, cli.ftl (en-US is the source locale)
