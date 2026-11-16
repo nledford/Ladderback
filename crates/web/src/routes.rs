@@ -20,8 +20,9 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, RadioGroup, StatusBadge,
-    SummaryItem, address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
+    Checkbox, ErrorSummary, PauseUpdates, Progress, RadioGroup, StatusBadge, SummaryItem,
+    TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
+    text_field,
 };
 use crate::full_disk_access_warning::FullDiskAccessWarning;
 use crate::live::{reply, say};
@@ -1489,34 +1490,40 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                     submit.run(Action::Test);
                 }
             >
-                <FormField
+                <TextField
                     id=Field::Name.id()
+                    localizer=Arc::clone(&localizer)
                     label=field_text(msg::UI_REPOSITORIES_NAME_LABEL)
                     description=field_text(msg::UI_REPOSITORIES_NAME_HINT)
                     error=problems.name
                     value=inputs.name
                 />
-                <FormField
+                <TextField
                     id=Field::Location.id()
+                    localizer=Arc::clone(&localizer)
                     label=field_text(msg::UI_REPOSITORIES_LOCATION_LABEL)
                     description=field_text(msg::UI_REPOSITORIES_LOCATION_HINT)
                     error=problems.location
                     value=inputs.location
+                    required=true
                 />
-                <FormField
+                <TextField
                     id=Field::HotStorage.id()
+                    localizer=Arc::clone(&localizer)
                     label=field_text(msg::UI_REPOSITORIES_HOT_LABEL)
                     description=field_text(msg::UI_REPOSITORIES_HOT_HINT)
                     error=problems.hot_storage
                     value=inputs.hot_storage
                 />
-                <FormField
+                <TextField
                     id=Field::Password.id()
+                    localizer=Arc::clone(&localizer)
                     label=field_text(msg::UI_REPOSITORIES_PASSWORD_LABEL)
                     description=field_text(msg::UI_REPOSITORIES_PASSWORD_HINT)
                     error=problems.password
                     value=inputs.password
-                    kind="password"
+                    kind=text_field::Kind::Password
+                    required=true
                 />
                 <RadioGroup
                     name=KEEP_PASSWORD_GROUP

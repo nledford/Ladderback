@@ -546,6 +546,9 @@ fn a_new_plan_starts_with_the_first_repository_and_nothing_else() {
 
 #[test]
 fn only_the_fields_a_plan_is_refused_without_are_marked_required() {
-    let required: Vec<Field> = Field::ALL.into_iter().filter(|field| field.required()).collect();
+    let required: Vec<Field> = Field::ALL
+        .into_iter()
+        .filter(|field| field.required())
+        .collect();
     assert_eq!(required, [Field::Name, Field::Repository, Field::Sources]);
 }

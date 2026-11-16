@@ -20,9 +20,9 @@ use crate::components::icon::Meaning;
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, Checkbox, Confirmation, FolderLoader, FolderPage, FormField, Icon, ModalDialog,
-    PauseUpdates, Progress, RadioGroup, ReviewDialog, SortableTable, Spinner, StatusBadge, StepUp,
-    StepUpField, Tip, Toast, Tooltip, Tree, show_toast,
+    Button, Checkbox, Confirmation, FolderLoader, FolderPage, Icon, ModalDialog, PauseUpdates,
+    Progress, RadioGroup, ReviewDialog, SortableTable, Spinner, StatusBadge, StepUp, StepUpField,
+    TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -122,11 +122,16 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     // dialog is open, what is typed and the error its confirm button shows,
     // whatever was typed.
     let step_up_open = RwSignal::new(false);
-    let step_up_value = RwSignal::new(String::new());
     let step_up_error = RwSignal::<Option<String>>::new(None);
     let step_up_wrong = t(msg::UI_GALLERY_DEMO_STEP_UP_WRONG);
     let step_up_body = t(msg::UI_GALLERY_DEMO_STEP_UP_BODY);
     let step_up_localizer = Arc::clone(&localizer);
+    // The admin password's field is drawn afresh at each opening, as a
+    // restore's is: the dialog opens again empty, a password shown there
+    // hidden. Keyed on the opening, not on `open` turning false, which a
+    // dialog closed with Escape and opened again at once may never see: its
+    // late `close` finds it open again and is left alone (`ReviewDialog`).
+    let step_up_opening = RwSignal::new(0_u32);
     let step_up_id_open = RwSignal::new(false);
     let step_up_id_value = RwSignal::new(String::new());
     let step_up_id_error = RwSignal::<Option<String>>::new(None);
@@ -252,60 +257,6 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     t(msg::UI_GALLERY_DEMO_REPO_ANCHOR),
                 ]
             />
-        </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_FORM_HEADING)}</h2>
-            <FormField
-                id="form-field-input"
-                value=form_value
-                label=t(msg::UI_GALLERY_REPOSITORY_NAME)
-                description=t(msg::UI_GALLERY_REPOSITORY_HINT)
-                error=form_error
-            />
-            <p>
-                // A second check of a corrected field clears the
-                // error, rewiring the input's description; only the
-                // error's arrival is announced.
-                <button
-                    type="button"
-                    on:click=move |_| {
-                        if form_error.get_untracked().is_some() {
-                            form_error.set(None);
-                        } else {
-                            form_error.set(Some(required_error.clone()));
-                            reply(Politeness::Polite, &required_error);
-                        }
-                    }
-                >
-                    {t(msg::UI_GALLERY_CHECK_REPOSITORY)}
-                </button>
-            </p>
-        </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_LINES_HEADING)}</h2>
-            <FormField
-                id="form-field-lines"
-                value=lines_value
-                label=t(msg::UI_GALLERY_DEMO_FOLDERS)
-                description=t(msg::UI_GALLERY_DEMO_FOLDERS_HINT)
-                error=lines_error
-                lines=3
-            />
-            <p>
-                <button
-                    type="button"
-                    on:click=move |_| {
-                        if lines_error.get_untracked().is_some() {
-                            lines_error.set(None);
-                        } else {
-                            lines_error.set(Some(folders_error.clone()));
-                            reply(Politeness::Polite, &folders_error);
-                        }
-                    }
-                >
-                    {t(msg::UI_GALLERY_CHECK_FOLDERS)}
-                </button>
-            </p>
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_CHECKBOX_HEADING)}</h2>
@@ -575,7 +526,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <section>
             <h2>{t(msg::UI_GALLERY_STEP_UP_HEADING)}</h2>
             <p>
-                <button type="button" id="gallery-step-up" on:click=move |_| step_up_open.set(true)>
+                <button
+                    type="button"
+                    id="gallery-step-up"
+                    on:click=move |_| {
+                        step_up_opening.update(|opening| *opening = opening.wrapping_add(1));
+                        step_up_open.set(true);
+                    }
+                >
                     {t(msg::UI_GALLERY_OPEN_STEP_UP)}
                 </button>
             </p>
@@ -591,13 +549,18 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 described_by="gallery-step-up-body".to_owned()
             >
                 <p id="gallery-step-up-body">{step_up_body}</p>
-                <StepUpField
-                    id="gallery-step-up-field"
-                    localizer=step_up_localizer
-                    step_up=StepUp::Password
-                    value=step_up_value
-                    error=step_up_error
-                />
+                {move || {
+                    step_up_opening.track();
+                    view! {
+                        <StepUpField
+                            id="gallery-step-up-field"
+                            localizer=Arc::clone(&step_up_localizer)
+                            step_up=StepUp::Password
+                            value=RwSignal::new(String::new())
+                            error=step_up_error
+                        />
+                    }
+                }}
             </ReviewDialog>
             <p>
                 <button
@@ -1015,6 +978,171 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     )
                 }}
             </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TEXT_FIELD_HEADING)}</h2>
+            <TextField
+                id="form-field-input"
+                localizer=Arc::clone(&localizer)
+                value=form_value
+                label=t(msg::UI_GALLERY_REPOSITORY_NAME)
+                description=t(msg::UI_GALLERY_REPOSITORY_HINT)
+                error=form_error
+            />
+            <p>
+                // A second check of a corrected field clears the
+                // error, rewiring the input's description; only the
+                // error's arrival is announced.
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        if form_error.get_untracked().is_some() {
+                            form_error.set(None);
+                        } else {
+                            form_error.set(Some(required_error.clone()));
+                            reply(Politeness::Polite, &required_error);
+                        }
+                    }
+                >
+                    {t(msg::UI_GALLERY_CHECK_REPOSITORY)}
+                </button>
+            </p>
+            <TextField
+                id="form-field-lines"
+                localizer=Arc::clone(&localizer)
+                value=lines_value
+                label=t(msg::UI_GALLERY_DEMO_FOLDERS)
+                description=t(msg::UI_GALLERY_DEMO_FOLDERS_HINT)
+                error=lines_error
+                kind=text_field::Kind::Lines { rows: 3 }
+            />
+            <p>
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        if lines_error.get_untracked().is_some() {
+                            lines_error.set(None);
+                        } else {
+                            lines_error.set(Some(folders_error.clone()));
+                            reply(Politeness::Polite, &folders_error);
+                        }
+                    }
+                >
+                    {t(msg::UI_GALLERY_CHECK_FOLDERS)}
+                </button>
+            </p>
+            // Each kind, then each state, then a field and a button of the
+            // same size in a row of actions, at every size. Last on the
+            // page, so its many stops for Tab come after every other demo's.
+            <TextField
+                id="gallery-text-field-password"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new(String::new())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_PASSWORD)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_PASSWORD_HINT)
+                kind=text_field::Kind::Password
+                autocomplete="current-password"
+            />
+            <TextField
+                id="gallery-text-field-copies"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new(String::new())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_COPIES)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_COPIES_HINT)
+                kind=text_field::Kind::Number
+            />
+            <TextField
+                id="gallery-text-field-time"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new(String::new())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_TIME)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_TIME_HINT)
+                icon=LucideGlyph::Clock
+            />
+            <TextField
+                id="gallery-text-field-plan"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new(String::new())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_PLAN)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_PLAN_HINT)
+                required=true
+            />
+            <TextField
+                id="gallery-text-field-host"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new(String::new())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_HOST)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_HOST_HINT)
+                error=RwSignal::new(Some(t(msg::UI_GALLERY_TEXT_FIELD_HOST_ERROR)))
+            />
+            <TextField
+                id="gallery-text-field-snapshot"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new("1a2b3c4d".to_owned())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_SNAPSHOT)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_SNAPSHOT_HINT)
+                kind=text_field::Kind::Code
+                access=text_field::Access::ReadOnly
+            />
+            <TextField
+                id="gallery-text-field-location"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new("/srv/demo".to_owned())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_LOCATION)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_LOCATION_HINT)
+                access=text_field::Access::Disabled
+            />
+            <TextField
+                id="gallery-text-field-keyring"
+                localizer=Arc::clone(&localizer)
+                value=RwSignal::new(String::new())
+                label=t(msg::UI_GALLERY_TEXT_FIELD_KEYRING)
+                description=t(msg::UI_GALLERY_TEXT_FIELD_KEYRING_HINT)
+                kind=text_field::Kind::Password
+                access=text_field::Access::Disabled
+            />
+            {[
+                (
+                    "gallery-text-field-small",
+                    Size::Small,
+                    msg::UI_GALLERY_TEXT_FIELD_SMALL,
+                    msg::UI_GALLERY_TEXT_FIELD_ADD_SMALL,
+                ),
+                (
+                    "gallery-text-field-medium",
+                    Size::Medium,
+                    msg::UI_GALLERY_TEXT_FIELD_MEDIUM,
+                    msg::UI_GALLERY_TEXT_FIELD_ADD_MEDIUM,
+                ),
+                (
+                    "gallery-text-field-large",
+                    Size::Large,
+                    msg::UI_GALLERY_TEXT_FIELD_LARGE,
+                    msg::UI_GALLERY_TEXT_FIELD_ADD_LARGE,
+                ),
+                (
+                    "gallery-text-field-xlarge",
+                    Size::XLarge,
+                    msg::UI_GALLERY_TEXT_FIELD_XLARGE,
+                    msg::UI_GALLERY_TEXT_FIELD_ADD_XLARGE,
+                ),
+            ]
+                .into_iter()
+                .map(|(id, size, label, add)| {
+                    view! {
+                        <div class="actions">
+                            <TextField
+                                id=id
+                                localizer=Arc::clone(&localizer)
+                                value=RwSignal::new(String::new())
+                                label=t(label)
+                                size=size
+                            />
+                            <Button content=Content::Text(t(add).into()) size=size />
+                        </div>
+                    }
+                })
+                .collect_view()}
         </section>
         // Last on the page, so a journey reaches its controls by Shift+Tab
         // from the page's start, and its last button sits at the foot.

@@ -13,8 +13,9 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::components::text_field::Kind;
 use crate::components::{
-    Checkbox, ErrorSummary, FormField, SummaryItem, recover_focus, trap_focus,
+    Checkbox, ErrorSummary, SummaryItem, TextField, recover_focus, trap_focus,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal};
 use crate::repositories::Sentence;
@@ -157,14 +158,16 @@ fn SignInForm(
                 submit();
             }
         >
-            <FormField
+            <TextField
                 id=field
+                localizer=Arc::clone(&localizer)
                 label=text(&localizer, msg::UI_SIGN_IN_PASSWORD_LABEL)
                 description=text(&localizer, msg::UI_SIGN_IN_PASSWORD_HINT)
                 error=error
                 value=value
-                kind="password"
+                kind=Kind::Password
                 autocomplete="current-password"
+                required=true
             />
             {keep_box}
             {(place == Place::Dialog).then(|| view! { <p role="alert">{move || alert.get()}</p> })}

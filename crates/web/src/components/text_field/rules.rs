@@ -25,7 +25,7 @@ pub enum Kind {
     /// the wheel changes. It takes whatever is typed or pasted, as every
     /// field does: a key that silently did nothing would say nothing of
     /// why (3.3.1), so the form refuses a value that isn't a number when
-    /// it is checked, its error beside the field.
+    /// it is checked, its error above the field.
     Number,
     /// A code typed or pasted back, such as a snapshot's short ID or a
     /// token: one line that isn't words, so never spell-checked and never
@@ -37,32 +37,39 @@ impl Kind {
     /// The rows of a many-lines field, which is a `<textarea>`; `None` for
     /// every one-line kind, an `<input>`.
     pub fn rows(self) -> Option<u32> {
-        todo!()
+        match self {
+            Self::Lines { rows } => Some(rows),
+            Self::Line | Self::Password | Self::Number | Self::Code => None,
+        }
     }
 
     /// The `<input>`'s `type`: `password` for a password while it is hidden,
     /// `text` for everything else, a number and a shown password too.
     pub fn input_type(self, shown: bool) -> &'static str {
-        todo!()
+        if self == Self::Password && !shown {
+            "password"
+        } else {
+            "text"
+        }
     }
 
     /// The `inputmode`: the keyboard of digits for a number, and the
     /// browser's own choice otherwise.
     pub fn input_mode(self) -> Option<&'static str> {
-        todo!()
+        (self == Self::Number).then_some("numeric")
     }
 
     /// The `spellcheck`: off for what isn't words (a list of paths, a
     /// password, a number, a code). A shown password is never sent to a
     /// spelling service.
     pub fn spellcheck(self) -> Option<&'static str> {
-        todo!()
+        (self != Self::Line).then_some("false")
     }
 
     /// The `autocapitalize`: off for a password, a number and a code, so a
     /// phone's keyboard changes nothing typed.
     pub fn autocapitalize(self) -> Option<&'static str> {
-        todo!()
+        matches!(self, Self::Password | Self::Number | Self::Code).then_some("off")
     }
 }
 
@@ -86,14 +93,18 @@ impl Access {
     /// The note that says the field's state in words, under its
     /// description, which describes the field too.
     pub fn note(self) -> Option<MessageId> {
-        todo!()
+        match self {
+            Self::Editable => None,
+            Self::ReadOnly => Some(msg::UI_TEXT_FIELD_READ_ONLY),
+            Self::Disabled => Some(msg::UI_TEXT_FIELD_DISABLED),
+        }
     }
 }
 
 /// The size a text field is drawn at when its page names none: Medium, 2em
 /// tall, a Medium button's height.
 pub fn default_size() -> Size {
-    todo!()
+    Size::Medium
 }
 
 /// The classes of the field's box, the edge around its input: its size,
@@ -101,31 +112,41 @@ pub fn default_size() -> Size {
 /// with a leading icon the room for it, and for a token's whole text the
 /// monospace and the width it takes.
 pub fn box_class(size: Size, icon: bool, token: bool) -> String {
-    todo!()
+    let icon = if icon { " text-field-with-icon" } else { "" };
+    let token = if token { " text-field-token" } else { "" };
+    format!("text-field-box {}{icon}{token}", size.class())
 }
 
 /// The ids a field's parts are wired by, each from the input's `id`.
 pub fn label_id(id: &str) -> String {
-    todo!()
+    format!("{id}-label")
 }
 
 pub fn description_id(id: &str) -> String {
-    todo!()
+    format!("{id}-description")
 }
 
 pub fn note_id(id: &str) -> String {
-    todo!()
+    format!("{id}-note")
 }
 
 pub fn error_id(id: &str) -> String {
-    todo!()
+    format!("{id}-error")
 }
 
 /// The input's `aria-describedby`: its description, the note of its state
 /// and its error, each while the field shows it, in the order they stand;
 /// none when it shows none.
 pub fn described_by(id: &str, description: bool, access: Access, error: bool) -> Option<String> {
-    todo!()
+    let parts: Vec<String> = [
+        description.then(|| description_id(id)),
+        access.note().map(|_| note_id(id)),
+        error.then(|| error_id(id)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
 }
 
 /// The marker a required field shows after its label, "(required)", or
@@ -133,48 +154,52 @@ pub fn described_by(id: &str, description: bool, access: Access, error: bool) ->
 /// marker (`aria-hidden`) and the field keeps its label as its name, which
 /// still begins with the words it shows (2.5.3).
 pub fn required_marker(required: bool) -> Option<MessageId> {
-    todo!()
+    required.then_some(msg::UI_TEXT_FIELD_REQUIRED)
 }
 
 /// The input's `aria-required`, beside the words after its label. Never
 /// the `required` attribute: a form checks its own fields (`novalidate`),
 /// and the browser's own check would draw an invalid state of its own.
 pub fn aria_required(required: bool) -> Option<&'static str> {
-    todo!()
+    required.then_some("true")
 }
 
 /// The input's `aria-invalid`: `true` while it shows an error.
 pub fn invalid(error: bool) -> Option<&'static str> {
-    todo!()
+    error.then_some("true")
 }
 
 /// The glyph of a password's show button, a toggle named "Show password":
 /// an eye while the password is shown (pressed), crossed out while it is
 /// hidden, as the icon toggle's bell is crossed out while off.
 pub fn show_glyph(shown: bool) -> LucideGlyph {
-    todo!()
+    if shown {
+        LucideGlyph::Eye
+    } else {
+        LucideGlyph::EyeOff
+    }
 }
 
 /// The role of the field's error: an alert, said as it appears, for a field
 /// in a dialog, as the dialog contract asks (§4.5); none otherwise, the page
 /// saying the error through its announcer.
 pub fn error_role(alert: bool) -> Option<&'static str> {
-    todo!()
+    alert.then_some("alert")
 }
 
 /// Whether a password's show button stands beside the field: beside a
 /// password only, and never beside an unavailable one, which leaves the Tab
 /// order with its field rather than leave a stop there that does nothing.
 pub fn shows_toggle(kind: Kind, access: Access) -> bool {
-    todo!()
+    kind == Kind::Password && access != Access::Disabled
 }
 
 /// Whether a shown password is hidden again as what the field holds changes
-/// to `value`: when its page sets it, clearing its form once it is sent or
-/// its dialog as it closes, rather than the reader typing `typed`. The next
-/// password typed there stays hidden until the reader asks to see it.
+/// to `value`: when its page sets it, clearing its form once it is sent,
+/// rather than the reader typing `typed`. The next password typed there
+/// stays hidden until the reader asks to see it.
 pub fn hides_again(typed: &str, value: &str) -> bool {
-    todo!()
+    typed != value
 }
 
 #[cfg(test)]
@@ -210,7 +235,12 @@ mod tests {
     #[test]
     fn a_number_asks_for_the_keyboard_of_digits_and_nothing_else_does() {
         assert_eq!(Kind::Number.input_mode(), Some("numeric"));
-        for kind in [Kind::Line, Kind::Lines { rows: 2 }, Kind::Password, Kind::Code] {
+        for kind in [
+            Kind::Line,
+            Kind::Lines { rows: 2 },
+            Kind::Password,
+            Kind::Code,
+        ] {
             assert_eq!(kind.input_mode(), None, "{kind:?}");
         }
     }
@@ -218,7 +248,12 @@ mod tests {
     #[test]
     fn only_words_are_spellchecked_and_only_secrets_numbers_and_codes_keep_their_case() {
         assert_eq!(Kind::Line.spellcheck(), None);
-        for kind in [Kind::Lines { rows: 2 }, Kind::Password, Kind::Number, Kind::Code] {
+        for kind in [
+            Kind::Lines { rows: 2 },
+            Kind::Password,
+            Kind::Number,
+            Kind::Code,
+        ] {
             assert_eq!(kind.spellcheck(), Some("false"), "{kind:?}");
         }
         for kind in [Kind::Password, Kind::Number, Kind::Code] {
@@ -237,7 +272,10 @@ mod tests {
 
     #[test]
     fn the_box_takes_its_size_from_the_shared_vocabulary_and_makes_room_for_an_icon() {
-        assert_eq!(box_class(Size::Medium, false, false), "text-field-box size-medium");
+        assert_eq!(
+            box_class(Size::Medium, false, false),
+            "text-field-box size-medium"
+        );
         assert_eq!(
             box_class(Size::XLarge, true, false),
             "text-field-box size-xlarge text-field-with-icon"
@@ -308,7 +346,12 @@ mod tests {
         assert!(shows_toggle(Kind::Password, Access::Editable));
         assert!(shows_toggle(Kind::Password, Access::ReadOnly));
         assert!(!shows_toggle(Kind::Password, Access::Disabled));
-        for kind in [Kind::Line, Kind::Lines { rows: 2 }, Kind::Number, Kind::Code] {
+        for kind in [
+            Kind::Line,
+            Kind::Lines { rows: 2 },
+            Kind::Number,
+            Kind::Code,
+        ] {
             for access in [Access::Editable, Access::ReadOnly, Access::Disabled] {
                 assert!(!shows_toggle(kind, access), "{kind:?} {access:?}");
             }
