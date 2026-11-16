@@ -129,6 +129,15 @@
 # the `@ui` scenarios of `features/ui/snapshot_browser.feature` and the tree
 # scenarios of `features/ui/components.feature` run the glue in Chromium.
 #
+# `crates/web/src/full_disk_access_warning.rs` is the DOM glue of the start
+# page's Full Disk Access warning (§16, decision NN): it reads what the
+# agent's probe found, draws the warning, sends Check again and the request
+# to open System Settings, says each answer and hands focus to the page's
+# heading when the warning goes. Whether it warns, whether it offers the
+# settings button, its steps and what each answer says are
+# `full_disk_access.rs`'s, mutated on the host; the `@ui` scenarios of
+# `features/ui/full_disk_access.feature` run the glue in Chromium.
+#
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
 # `main.rs`), and their tests run in `just test-wasm`.
@@ -149,6 +158,7 @@ exclude_globs = [
     "crates/web/src/daemon_log_page.rs",
     "crates/web/src/settings/password.rs",
     "crates/web/src/settings/sign_in.rs",
+    "crates/web/src/full_disk_access_warning.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [

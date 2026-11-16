@@ -23,6 +23,7 @@ use crate::components::{
     Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, RadioGroup, StatusBadge,
     SummaryItem, address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
 };
+use crate::full_disk_access_warning::FullDiskAccessWarning;
 use crate::live::{reply, say};
 use crate::operations::{self, Name, Said};
 use crate::pause::{self, Ends, Pausable};
@@ -143,6 +144,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     // page shows is (§8.4).
     let viewer = l10n::viewer_zone();
     let notice = Arc::clone(&localizer);
+    let full_disk_access = Arc::clone(&localizer);
     view! {
         <PageHeading>
             {move || {
@@ -154,6 +156,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
             }}
         </PageHeading>
         <SignInOff localizer=notice />
+        <FullDiskAccessWarning localizer=full_disk_access />
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),

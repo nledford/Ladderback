@@ -63,6 +63,45 @@ ui-start-on-demand = When started from Operations
 # is started by hand.
 ui-start-operations-link = Start a backup from the Operations page
 
+# The heading of the start page's warning, shown on macOS while Ladderback hasn't been given Full Disk Access. It names the warning's region.
+ui-full-disk-access-heading = { -full-disk-access } is missing
+
+# What the warning says under its heading, before its steps.
+ui-full-disk-access-body = macOS hasn't given { -brand-name } { -full-disk-access }, so backups leave out Mail, Messages, Safari and other programs' data. Nothing can ask macOS for it: only you can turn it on, in System Settings.
+
+# The warning's steps to turn Full Disk Access on, in order, as a numbered list. The first.
+ui-full-disk-access-step-open = Open System Settings, then choose Privacy & Security.
+
+# The second step.
+ui-full-disk-access-step-pane = Choose { -full-disk-access }.
+
+# The third step. "ladderback" is the name of the program's file, which Finder shows.
+ui-full-disk-access-step-turn-on = Turn { -full-disk-access } on for { -brand-name }. If it isn't in the list, choose the add button, then the program { "ladderback" } that runs { -brand-name }.
+
+# The fourth step: the button that asks Ladderback to look again is below the steps.
+ui-full-disk-access-step-check = Come back to this page and check again.
+
+# The warning's button, offered only to a browser on the same Mac as Ladderback: it opens System Settings at the Full Disk Access pane and shows Ladderback's program in Finder.
+ui-full-disk-access-open = Open { -full-disk-access } settings
+
+# Said once that button has opened System Settings.
+ui-full-disk-access-opened = System Settings is open at { -full-disk-access }, and Finder shows the program { "ladderback" }, ready to drag into the list.
+
+# The warning's button that asks Ladderback to look again whether it has Full Disk Access.
+ui-full-disk-access-check = Check again
+
+# Said when Ladderback looked again and still hasn't Full Disk Access: the warning stays.
+ui-full-disk-access-still-missing = { -full-disk-access } is still missing.
+
+# Said when Ladderback looked again and now has Full Disk Access: the warning is gone.
+ui-full-disk-access-granted = { -brand-name } has { -full-disk-access } now.
+
+# Said when Ladderback looked again and couldn't tell whether it has Full Disk Access, so the warning is gone.
+ui-full-disk-access-unknown = { -brand-name } can't tell whether it has { -full-disk-access }, so the warning is gone.
+
+# Said when a button of the warning got no answer from the daemon, so nothing changed.
+ui-full-disk-access-unreachable = The daemon that serves this page did not answer, so nothing changed. Try again in a moment.
+
 # The title of the page shown for an address nothing serves: the browser's tab
 # and history show it.
 ui-not-found-title = Page not found – { -brand-name }

@@ -54,6 +54,11 @@ mod focus;
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod formatting;
+// What the start page's Full Disk Access warning shows and says, decided on
+// the host; `full_disk_access_warning.rs` is its glue.
+mod full_disk_access;
+// The start page's Full Disk Access warning's DOM glue.
+mod full_disk_access_warning;
 #[cfg(feature = "gallery")]
 mod gallery;
 // The live regions' glue around the announcer.
