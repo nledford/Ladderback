@@ -20,7 +20,8 @@ use lepticons_data::Glyph;
 use leptos::prelude::*;
 use leptos::tachys::html::attribute::custom::custom_attribute;
 use leptos::task::{spawn_local, tick};
-use leptos::wasm_bindgen::JsCast;
+use leptos::wasm_bindgen::closure::Closure;
+use leptos::wasm_bindgen::{JsCast, JsValue};
 
 use crate::focus::{FocusWrap, focus_wrap};
 use crate::live::{PageClock, close_modal_when_gone, modal_gone, open_modal, pause, reply, resume};
@@ -554,6 +555,40 @@ pub fn RadioGroup(
             {choices}
         </fieldset>
     }
+}
+
+/// Writes `copied_text` to the clipboard, then says in `said`, a polite
+/// region of the dialog's own (the announcer waits while a modal is open),
+/// whether it is there. A page not served over HTTPS or from this computer
+/// has no clipboard, and a browser may refuse it: then it says `refused`,
+/// which tells the person to copy it by hand.
+pub(crate) fn copy_text(
+    copied_text: &str,
+    said: RwSignal<Option<String>>,
+    copied: String,
+    refused: String,
+) {
+    let clipboard = web_sys::window()
+        .and_then(|window| {
+            js_sys::Reflect::get(window.navigator().as_ref(), &"clipboard".into()).ok()
+        })
+        .and_then(|clipboard| clipboard.dyn_into::<web_sys::Clipboard>().ok());
+    let Some(clipboard) = clipboard else {
+        said.set(Some(refused));
+        return;
+    };
+    said.set(None);
+    let done = Closure::once(move |_: JsValue| {
+        said.try_set(Some(copied));
+    });
+    let failed = Closure::once(move |_: JsValue| {
+        said.try_set(Some(refused));
+    });
+    let _ = clipboard.write_text(copied_text).then2(&done, &failed);
+    // The promise calls one of them once, after this returns; each is a few
+    // bytes, left to the page rather than dropped before it is called.
+    done.forget();
+    failed.forget();
 }
 
 /// One problem of an [`ErrorSummary`]: what is wrong, and the field it is
