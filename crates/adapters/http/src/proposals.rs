@@ -87,8 +87,13 @@ pub enum ProposalsError {
 
 /// Who asks: the API token the request presented, else no token.
 fn asker(token: Option<axum::Extension<TokenOf>>) -> Proposer {
-    let _ = token;
-    todo!()
+    match token {
+        Some(axum::Extension(token)) => Proposer::Token {
+            id: token.grant.id,
+            label: token.grant.label,
+        },
+        None => Proposer::NoToken,
+    }
 }
 
 /// The proposals the asker may see.
@@ -96,8 +101,10 @@ pub(crate) async fn list(
     State(state): State<AppState>,
     token: Option<axum::Extension<TokenOf>>,
 ) -> Response {
-    let _ = (state, asker(token));
-    todo!()
+    match state.proposals.list(asker(token)).await {
+        Ok(proposals) => (StatusCode::OK, Json(proposals)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// Proposes the changes the body holds.
@@ -106,8 +113,13 @@ pub(crate) async fn propose(
     token: Option<axum::Extension<TokenOf>>,
     body: Result<Json<api::NewProposalDto>, JsonRejection>,
 ) -> Response {
-    let _ = (state, asker(token), body);
-    todo!()
+    let Ok(Json(proposal)) = body else {
+        return refusal(&ProposalsError::InvalidBody);
+    };
+    match state.proposals.propose(asker(token), proposal).await {
+        Ok(made) => (StatusCode::CREATED, Json(made)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// The proposal the path names.
@@ -116,8 +128,10 @@ pub(crate) async fn read(
     token: Option<axum::Extension<TokenOf>>,
     Path(id): Path<String>,
 ) -> Response {
-    let _ = (state, asker(token), id);
-    todo!()
+    match state.proposals.proposal(asker(token), id).await {
+        Ok(proposal) => (StatusCode::OK, Json(proposal)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// Withdraws the proposal the path names.
@@ -126,14 +140,77 @@ pub(crate) async fn withdraw(
     token: Option<axum::Extension<TokenOf>>,
     Path(id): Path<String>,
 ) -> Response {
-    let _ = (state, asker(token), id);
-    todo!()
+    match state.proposals.withdraw(asker(token), id).await {
+        Ok(proposal) => (StatusCode::OK, Json(proposal)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
-/// The typed refusal of `error`, with the status of its kind.
+/// A count as a message argument carries it.
+fn count(value: usize) -> api::MsgArg {
+    api::MsgArg::Count(u64::try_from(value).unwrap_or(u64::MAX))
+}
+
+/// The typed refusal of `error`, with the status of its kind: a body that
+/// isn't a proposal is 400; a proposal the configuration wouldn't take, 422;
+/// a proposer at its limit, or a proposal no longer pending, 409; a
+/// proposal the asker can't see, 404; and the daemon unable to read or keep
+/// them now, 503.
 fn refusal(error: &ProposalsError) -> Response {
-    let _ = (error, refused, StatusCode::OK, Json(()).into_response());
-    todo!()
+    use api::{ErrorCode, MsgArg};
+    let text = |value: &str| MsgArg::Text(value.to_owned());
+    let (status, code, args) = match error {
+        ProposalsError::InvalidBody => {
+            (StatusCode::BAD_REQUEST, ErrorCode::InvalidBody, Vec::new())
+        }
+        ProposalsError::Empty => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ProposalEmpty,
+            Vec::new(),
+        ),
+        ProposalsError::Invalid {
+            change,
+            field,
+            problem,
+        } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ProposalInvalid,
+            vec![
+                ("change", count(*change)),
+                ("field", text(field)),
+                ("problem", text(problem.as_str())),
+            ],
+        ),
+        ProposalsError::TooLarge { what, limit } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::ProposalTooLarge,
+            vec![("what", text(what)), ("limit", count(*limit))],
+        ),
+        ProposalsError::Limit { limit } => (
+            StatusCode::CONFLICT,
+            ErrorCode::ProposalLimit,
+            vec![("limit", count(*limit))],
+        ),
+        ProposalsError::Unknown { proposal } => (
+            StatusCode::NOT_FOUND,
+            ErrorCode::ProposalUnknown,
+            vec![("proposal", text(proposal))],
+        ),
+        ProposalsError::NotPending { status } => (
+            StatusCode::CONFLICT,
+            ErrorCode::ProposalNotPending,
+            vec![("status", text(status.as_str()))],
+        ),
+        ProposalsError::Unavailable { code, args, detail } => {
+            return refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                *code,
+                args.clone(),
+                detail.clone(),
+            );
+        }
+    };
+    refused(status, code, args, None)
 }
 
 #[cfg(test)]

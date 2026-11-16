@@ -107,6 +107,12 @@ pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
         {
             Some(Scope::Preview)
         }
+        // A token sees and withdraws only the proposals it made (§16,
+        // decision 89).
+        ["proposals"] | ["proposals", _] if reads => Some(Scope::Propose),
+        ["proposals"] | ["proposals", _, "withdraw"] if method == Method::POST => {
+            Some(Scope::Propose)
+        }
         _ => None,
     }
 }
