@@ -279,14 +279,13 @@ impl AgentConfig {
     }
 
     /// What every repository's settings hold as text that a redactor masks,
-    /// at each of its locations ([`RepositorySettings::written_secrets`]):
+    /// at each of its locations ([`RepositoryConfig::written_secrets`]):
     /// a program the agent runs can print any of them, such as a hook that
     /// shows the configuration file (security.md §10.2).
     pub fn written_secrets(&self) -> Vec<SecretValue> {
         self.repositories
             .values()
-            .flat_map(RepositoryConfig::location_settings)
-            .flat_map(|settings| settings.written_secrets())
+            .flat_map(RepositoryConfig::written_secrets)
             .collect()
     }
 

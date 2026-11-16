@@ -423,6 +423,29 @@ impl RepositoryConfig {
             .collect()
     }
 
+    /// What the entry holds as text that a redactor masks, at each of its
+    /// locations ([`RepositorySettings::written_secrets`]), read where it is
+    /// written: a further location holds no password of its own.
+    pub fn written_secrets(&self) -> Vec<SecretValue> {
+        let none = SecretValue::new("");
+        let mut secrets = self.settings.written_secrets();
+        for location in &self.locations.further {
+            secrets.extend(
+                RepositorySecrets {
+                    repository: &location.repository,
+                    repo_hot: location.repo_hot.as_deref(),
+                    password: &none,
+                    options: &location.options,
+                    options_hot: &location.options_hot,
+                    options_cold: &location.options_cold,
+                    resolved: &[],
+                }
+                .values(),
+            );
+        }
+        secrets
+    }
+
     /// Each location's rule, in order, the first included; `None` for a
     /// location with no rule.
     pub fn location_rules(&self) -> Vec<Option<&LocationRule>> {
