@@ -6,6 +6,7 @@
 use jiff::{SignedDuration, Timestamp};
 
 use crate::SnapshotId;
+use crate::access::step_up::short_id;
 
 /// How many downloads run at once on an agent: each is a worker holding
 /// the repository's whole index, for as long as the browser reads.
@@ -35,7 +36,10 @@ pub enum ArchiveFormat {
 impl ArchiveFormat {
     /// The file name's extension, without its dot.
     pub fn extension(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Tar => "tar",
+            Self::Zip => "zip",
+        }
     }
 }
 
@@ -58,8 +62,40 @@ pub fn download_file_name(
     snapshot: &SnapshotId,
     shape: DownloadShape,
 ) -> String {
-    let _ = (shown, host, snapshot, shape);
-    todo!()
+    let stem = match shown {
+        Some(shown) => safe_file_name(shown),
+        None => safe_file_name(&format!("{host}-{}", short_id(snapshot))),
+    };
+    match shape {
+        DownloadShape::File { .. } => stem,
+        DownloadShape::Archive(format) => format!("{stem}.{}", format.extension()),
+    }
+}
+
+/// The name a download is saved under when nothing of `name` is left.
+const FALLBACK_NAME: &str = "download";
+
+/// `name` as one file name every common system takes: each separator,
+/// control and character Windows refuses becomes `_`, leading dots go (no
+/// hidden file, never `.` or `..`), and nothing left is
+/// [`FALLBACK_NAME`].
+fn safe_file_name(name: &str) -> String {
+    let replaced: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | '"' | '<' | '>' | ':' | '|' | '?' | '*') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let kept = replaced.trim_start_matches('.');
+    if kept.is_empty() {
+        FALLBACK_NAME.to_owned()
+    } else {
+        kept.to_owned()
+    }
 }
 
 /// The capability a confirmed download is fetched by: random bytes no one
@@ -70,8 +106,7 @@ pub struct DownloadTicket([u8; TICKET_BYTES]);
 
 impl std::fmt::Debug for DownloadTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = f;
-        todo!()
+        f.write_str("DownloadTicket([hidden])")
     }
 }
 
@@ -82,13 +117,52 @@ impl DownloadTicket {
 
     /// The ticket as it travels: lower-case hex.
     pub fn encode(&self) -> String {
-        todo!()
+        self.0
+            .iter()
+            .fold(String::with_capacity(2 * TICKET_BYTES), |mut text, byte| {
+                text.push(hex_digit(byte >> 4));
+                text.push(hex_digit(byte & 0x0f));
+                text
+            })
     }
 
     /// The ticket `text` writes, if it writes one.
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = text;
-        todo!()
+        let digits = text.as_bytes();
+        if digits.len() != 2 * TICKET_BYTES {
+            return None;
+        }
+        let mut bytes = [0; TICKET_BYTES];
+        let (pairs, _) = digits.as_chunks::<2>();
+        for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {
+            *byte = (hex_value(*high)? << 4) | hex_value(*low)?;
+        }
+        Some(Self(bytes))
+    }
+
+    /// Whether `other` is this ticket, in a time that doesn't tell how
+    /// much of it matched, so a guess learns nothing from the answer's
+    /// speed.
+    fn same_as(&self, other: &Self) -> bool {
+        self.0
+            .iter()
+            .zip(other.0.iter())
+            .fold(0, |differ, (a, b)| differ | (a ^ b))
+            == 0
+    }
+}
+
+/// The lower-case hex digit of a nibble.
+fn hex_digit(nibble: u8) -> char {
+    char::from_digit(u32::from(nibble), 16).unwrap_or('0')
+}
+
+/// The nibble a lower-case hex digit writes.
+fn hex_value(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        _ => None,
     }
 }
 
@@ -110,23 +184,43 @@ impl<T> PendingDownloads<T> {
     /// Keeps `held` under `ticket` from `now` on. Gives it back when
     /// [`MAX_PENDING`] downloads still wait.
     pub fn hold(&mut self, ticket: DownloadTicket, now: Timestamp, held: T) -> Result<(), T> {
-        let _ = (ticket, now, &self.waiting);
-        Err(held)
+        let waiting = self
+            .waiting
+            .iter()
+            .filter(|(_, since, _)| !expired(*since, now))
+            .count();
+        if waiting >= MAX_PENDING {
+            return Err(held);
+        }
+        self.waiting.push((ticket, now, held));
+        Ok(())
     }
 
     /// What `ticket` holds, taken out so no one fetches it again; none when
     /// no download waits under it or its time has run out.
     pub fn take(&mut self, ticket: &DownloadTicket, now: Timestamp) -> Option<T> {
-        let _ = (ticket, now);
-        todo!()
+        let index = self
+            .waiting
+            .iter()
+            .position(|(held, since, _)| held.same_as(ticket) && !expired(*since, now))?;
+        Some(self.waiting.swap_remove(index).2)
     }
 
     /// Gives up every download whose time ran out by `now`, handing back
     /// what each held so it can be let go.
     pub fn expire(&mut self, now: Timestamp) -> Vec<T> {
-        let _ = now;
-        todo!()
+        let (gone, kept) = std::mem::take(&mut self.waiting)
+            .into_iter()
+            .partition(|(_, since, _)| expired(*since, now));
+        self.waiting = kept;
+        gone.into_iter().map(|(_, _, held)| held).collect()
     }
+}
+
+/// Whether a download held `since` has waited past [`TICKET_LIFETIME`] by
+/// `now`.
+fn expired(since: Timestamp, now: Timestamp) -> bool {
+    now.duration_since(since) > TICKET_LIFETIME
 }
 
 #[cfg(test)]
