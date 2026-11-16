@@ -22,15 +22,20 @@ pub(crate) fn install(events: Events) {
 
 /// The one line a panic is reported as.
 fn report(payload: &(dyn Any + Send), location: Option<&Location<'_>>, events: &Events) -> String {
-    let message = payload
-        .downcast_ref::<&str>()
-        .map(|message| (*message).to_owned())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "the panic carries no text".to_owned());
+    let message = message(payload);
     let place = location.map_or_default(|place| {
         format!(" at {}:{}:{}", place.file(), place.line(), place.column())
     });
     events.redact_text(&format!("ladderback worker panicked{place}: {message}"))
+}
+
+/// The text a panic carries, as `panic!` and `unwrap` give it.
+pub(super) fn message(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "the panic carries no text".to_owned())
 }
 
 #[cfg(test)]

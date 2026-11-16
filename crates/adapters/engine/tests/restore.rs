@@ -257,3 +257,25 @@ async fn a_restore_in_place_overwrites_and_adds_and_deletes_nothing() {
     );
     assert_eq!(fs::read_to_string(docs.join("extra.txt")).unwrap(), "extra");
 }
+
+/// rustic writes a file's contents on threads of its own and panics when a
+/// write is refused; the worker reports that as the target refusing the
+/// restore, not as an engine that stopped.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_read_only_original_that_differs_fails_the_restore_in_place_as_an_unwritable_target() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let restorable = Restorable::new().await;
+    let notes = restorable.source.join("docs/notes.md");
+    fs::write(&notes, "changed").unwrap();
+    fs::set_permissions(&notes, fs::Permissions::from_mode(0o444)).unwrap();
+    if fs::OpenOptions::new().write(true).open(&notes).is_ok() {
+        testkit::skip!("this user writes a read-only file (root?)");
+    }
+
+    let events = restorable.restore("docs", RestoreTarget::InPlace).await;
+
+    assert_eq!(failed(&events), &FailureReason::RestoreTargetUnwritable);
+    assert_eq!(fs::read_to_string(&notes).unwrap(), "changed");
+}

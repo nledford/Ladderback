@@ -8,6 +8,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 
 use api::ErrorCode;
@@ -15,10 +16,11 @@ use jiff::SignedDuration;
 use rustic_core::repofile::{Metadata, Node, NodeType, SnapshotId as RusticSnapshotId};
 use rustic_core::{
     IndexedTree, LocalDestination, LsOptions, OpenStatus, Repository, RestoreOptions, RestoreStats,
-    RusticError, TreeId,
+    RusticError, RusticResult, TreeId,
 };
 
 use super::convert::JobError;
+use super::panic_hook;
 use super::repository::{open, repository_id};
 use super::{Context, Done};
 use crate::job::{OpResult, RestoreJobSpec, RestorePlanResult, RestoreResult, RestoreTargetSpec};
@@ -47,9 +49,9 @@ pub(crate) fn restore(ctx: &Context, job: &RestoreJobSpec) -> Result<Done, JobEr
         .prepare_restore(&options, listing.clone(), &destination, false)
         .map_err(|error| restore_failure(&error))?;
     let result = restore_result(&plan.stats, plan.restore_size);
-    repository
-        .restore(plan, &options, listing, &destination)
-        .map_err(|error| restore_failure(&error))?;
+    written(std::panic::catch_unwind(AssertUnwindSafe(|| {
+        repository.restore(plan, &options, listing, &destination)
+    })))?;
     // Everything is written: nothing is left that the deadline guards.
     ctx.disarm();
     ctx.report(OpResult::Restore(result))?;
@@ -219,6 +221,35 @@ fn unwritable(error: &io::Error) -> bool {
     )
 }
 
+/// The end of rustic's writes. rustic writes the contents of files on
+/// threads of its own and unwraps each write and pack read there, so a write
+/// the file system refuses, a full disk or a lost pack panics; the panic is
+/// caught and told as a failure, never as a worker that stopped (§13.5). Its
+/// text is the only account of the cause: the refusals `unwritable` names
+/// are `restore-target-unwritable` by their kind in it.
+fn written(
+    outcome: Result<RusticResult<()>, Box<dyn std::any::Any + Send>>,
+) -> Result<(), JobError> {
+    match outcome {
+        Ok(result) => result.map_err(|error| restore_failure(&error)),
+        Err(payload) => {
+            let message = panic_hook::message(payload.as_ref());
+            let refused = ["kind: PermissionDenied", "kind: ReadOnlyFilesystem"]
+                .iter()
+                .any(|kind| message.contains(kind));
+            let detail = format!("rustic stopped while writing the restore: {message}");
+            Err(if refused {
+                JobError::Failed {
+                    code: ErrorCode::RestoreTargetUnwritable,
+                    detail,
+                }
+            } else {
+                JobError::failed(detail)
+            })
+        }
+    }
+}
+
 /// What a restore wrote, from its plan's counts: a file to restore and a file
 /// to modify are both written.
 fn restore_result(stats: &RestoreStats, bytes: u64) -> RestoreResult {
@@ -240,5 +271,36 @@ fn plan_result(stats: &RestoreStats, bytes: u64) -> RestorePlanResult {
         files_unchanged: stats.files.unchanged.saturating_add(stats.files.verified),
         files_kept: stats.files.additional.saturating_add(stats.dirs.additional),
         bytes_to_write: bytes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn code_of_panic(text: &str) -> Option<ErrorCode> {
+        match written(Err(Box::new(text.to_owned()))) {
+            Err(JobError::Failed { code, detail }) => {
+                assert!(detail.contains(text), "{detail}");
+                Some(code)
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_refused_write_that_panicked_is_an_unwritable_target_and_anything_else_a_failure() {
+        let refused = r#"called `Result::unwrap()` on an `Err` value: Os { code: 13, kind: PermissionDenied, message: "Permission denied" }"#;
+        let read_only =
+            r#"Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }"#;
+        let full = r#"Os { code: 28, kind: StorageFull, message: "No space left on device" }"#;
+        assert_eq!(
+            [refused, read_only, full].map(code_of_panic),
+            [
+                Some(ErrorCode::RestoreTargetUnwritable),
+                Some(ErrorCode::RestoreTargetUnwritable),
+                Some(ErrorCode::OperationFailed),
+            ]
+        );
     }
 }
