@@ -583,9 +583,14 @@ impl Ownership {
 
     /// What turning maintenance from this agent on (`maintain_here`) or
     /// off does to a repository whose entry asks for `request` (§7.3).
+    /// A `hub` request is replaced when turned on and left as it is when
+    /// turned off: this agent doesn't maintain it either way.
     pub fn change(request: Maintenance, maintain_here: bool) -> OwnershipChange {
-        let _ = (request, maintain_here);
-        todo!()
+        match (Self::owned_here(request), maintain_here) {
+            (false, true) => OwnershipChange::TakeOver,
+            (true, false) => OwnershipChange::GiveUp,
+            (true, true) | (false, false) => OwnershipChange::Unchanged,
+        }
     }
 
     /// The request of a repository this agent gives up maintaining: `none`,
@@ -595,8 +600,10 @@ impl Ownership {
     /// another machine while this one still runs, two maintainers at once
     /// (I1).
     pub fn give_up(running: Option<OperationId>) -> Result<Maintenance, OperationId> {
-        let _ = running;
-        todo!()
+        match running {
+            Some(running) => Err(running),
+            None => Ok(Maintenance::None),
+        }
     }
 }
 
