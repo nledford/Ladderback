@@ -56,6 +56,7 @@ nice = 10
 allow-hub-restore = false        # §10.4
 locale = "en-US"                 # notification text (§8.4); defaults to the POSIX locale, then en-US
 check-for-updates = true         # the daily release check (§5, §10.7); false never asks
+restore-folder = "/srv/restores" # where restores into a new folder go (§10.4); absolute; defaults to ~/ladderback-restore
 
 [hub]                            # optional
 url = "https://hub.example.lan:9899"
