@@ -3,8 +3,9 @@ use std::sync::Arc;
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
+use super::button::Content;
 use super::text_field::Kind;
-use super::{TextField, copy_text};
+use super::{Button, TextField, copy_text};
 use crate::text;
 
 /// What a step-up confirmation asks for (§10.4): the admin password with
@@ -72,17 +73,12 @@ pub fn StepUpField(
                     kind=Kind::Code
                 >
                     <p>
-                        <button
-                            type="button"
-                            on:click=move |_| copy_text(
-                                &short,
-                                said,
-                                copied.clone(),
-                                refused.clone(),
-                            )
-                        >
-                            {copy_label}
-                        </button>
+                        <Button
+                            content=Content::Text(copy_label.into())
+                            on_press=Callback::new(move |()| {
+                                copy_text(&short, said, copied.clone(), refused.clone());
+                            })
+                        />
                         " "
                         <span aria-live="polite" aria-atomic="true">
                             {move || said.get()}

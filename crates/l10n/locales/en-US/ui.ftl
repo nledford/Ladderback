@@ -479,9 +479,10 @@ ui-gallery-spinner-start = Loading at the start of the line…
 ui-gallery-spinner-center = Loading in the middle of the line…
 ui-gallery-spinner-end = Loading at the end of the line…
 
-# A demo button that is busy saving: the label of the spinner inside it, which
-# names the button.
-ui-gallery-spinner-saving = Saving the demo settings…
+# A demo button busy with the save it started: its label names the action,
+# as a busy button's does, and a spinner a screen reader skips stands before
+# it.
+ui-gallery-spinner-save = Save the demo notes
 
 # The heading of the gallery's icon demo (§4.5): one Lucide glyph, beside
 # words or inside a control.

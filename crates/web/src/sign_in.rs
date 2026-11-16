@@ -10,12 +10,13 @@ use std::sync::Arc;
 
 use api::MsgArg;
 use l10n::{Localizer, msg};
+use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::components::text_field::Kind;
+use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    Checkbox, ErrorSummary, SummaryItem, TextField, recover_focus, trap_focus,
+    Button, Checkbox, ErrorSummary, SummaryItem, TextField, recover_focus, text_field, trap_focus,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal};
 use crate::repositories::Sentence;
@@ -23,6 +24,7 @@ use crate::routes::{PageHeading, refusal, text_with};
 use crate::session::{
     Answer, SignInOffNotice, Signed, Standing, about_the_password, asks_to_keep, lacking,
 };
+use crate::variants::Tone;
 use crate::{text, ws};
 
 /// Where a sign-in form stands, which decides how it says a problem: the
@@ -165,16 +167,20 @@ fn SignInForm(
                 description=text(&localizer, msg::UI_SIGN_IN_PASSWORD_HINT)
                 error=error
                 value=value
-                kind=Kind::Password
+                kind=text_field::Kind::Password
                 autocomplete="current-password"
                 required=true
             />
             {keep_box}
             {(place == Place::Dialog).then(|| view! { <p role="alert">{move || alert.get()}</p> })}
             <p class="actions">
-                <button type="submit" aria-disabled=move || busy.get().then_some("true")>
-                    {text(&localizer, msg::UI_SIGN_IN_SUBMIT)}
-                </button>
+                <Button
+                    content=Content::Text(text(&localizer, msg::UI_SIGN_IN_SUBMIT).into())
+                    appearance=Appearance::Filled
+                    tone=Tone::Primary
+                    kind=Kind::Submit
+                    busy=busy
+                />
             </p>
         </form>
     }
@@ -339,14 +345,14 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
             <p id="idle-warning-body">{text(&localizer, msg::UI_IDLE_WARNING_BODY)}</p>
             <p role="alert">{move || unanswered.get().then(|| unreachable.clone())}</p>
             <p class="actions">
-                <button
-                    type="button"
+                <Button
+                    content=Content::Text(text(&localizer, msg::UI_IDLE_WARNING_STAY).into())
+                    appearance=Appearance::Filled
+                    tone=Tone::Primary
                     node_ref=stay
-                    aria-disabled=move || busy.get().then_some("true")
-                    on:click=move |_| keep()
-                >
-                    {text(&localizer, msg::UI_IDLE_WARNING_STAY)}
-                </button>
+                    busy=busy
+                    on_press=Callback::new(move |()| keep())
+                />
             </p>
         </dialog>
     }
@@ -364,7 +370,7 @@ pub(crate) fn SignOut(
     failed: RwSignal<bool>,
 ) -> impl IntoView {
     let busy = RwSignal::new(false);
-    let sign_out = move |_| {
+    let sign_out = move |()| {
         if busy.get_untracked() {
             return;
         }
@@ -380,14 +386,15 @@ pub(crate) fn SignOut(
         });
     };
     view! {
-        <button
-            type="button"
-            class="sign-out"
-            aria-disabled=move || busy.get().then_some("true")
-            on:click=sign_out
-        >
-            {text(&localizer, msg::UI_SIGN_OUT)}
-        </button>
+        <Button
+            content=Content::IconAndText {
+                glyph: LucideGlyph::LogOut.into(),
+                label: text(&localizer, msg::UI_SIGN_OUT).into(),
+            }
+            appearance=Appearance::Ghost
+            busy=busy
+            on_press=Callback::new(sign_out)
+        />
     }
 }
 

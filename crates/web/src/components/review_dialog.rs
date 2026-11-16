@@ -1,13 +1,20 @@
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
+use leptos::wasm_bindgen::JsCast;
 
-use super::{return_focus, trap_focus};
+use super::button::{Appearance, Content};
+use super::{Button, return_focus, trap_focus};
 use crate::live::{close_modal_when_gone, modal_gone, open_modal};
+use crate::variants::Tone;
 
-/// What a review's confirm button says, and what pressing it does.
+/// What a review's confirm button says, the tone it is drawn in (`Error`
+/// for one that deletes or ends something, `Primary` otherwise), and what
+/// pressing it does. The confirm button is the review's one filled button;
+/// a second way to go ahead (`also`) is outlined in its tone.
 #[derive(Clone)]
 pub struct Confirmation {
     pub label: String,
+    pub tone: Tone,
     pub action: Callback<()>,
 }
 
@@ -129,39 +136,68 @@ pub fn ReviewDialog(
         }
     });
     let body = children();
+    // Which button that goes ahead was pressed, so only it shows the wait:
+    // the confirm one (1) or `also` (2).
+    let pressed_choice = RwSignal::new(0_u8);
+    let (confirm_button, also_button) = (
+        NodeRef::<leptos::html::Button>::new(),
+        NodeRef::<leptos::html::Button>::new(),
+    );
     let choice = {
         let held_id = held_id.clone();
-        move |Confirmation { label, action }| {
+        move |Confirmation {
+                  label,
+                  tone,
+                  action,
+              }: Confirmation,
+              which: u8,
+              appearance: Appearance,
+              node_ref: NodeRef<leptos::html::Button>| {
             let held_id = held_id.clone();
             view! {
-                <button
-                    type="button"
-                    aria-disabled=move || {
-                        (busy.get() || held.with(Option::is_some)).then_some("true")
-                    }
-                    aria-describedby=move || { held.with(Option::is_some).then(|| held_id.clone()) }
-                    on:click=move |_| {
-                        if busy.get_untracked() {
-                            return;
-                        }
-                        if held.with_untracked(Option::is_some) {
-                            pressed_held.set(false);
-                            spawn_local(async move {
-                                tick().await;
-                                pressed_held.try_set(true);
-                            });
-                        } else {
-                            action.run(());
-                        }
-                    }
-                >
-                    {label}
-                </button>
+                <Button
+                    content=Content::Text(label.into())
+                    appearance=appearance
+                    tone=tone
+                    node_ref=node_ref
+                    busy=Signal::derive(move || busy.get() && pressed_choice.get() == which)
+                    disabled=Signal::derive(move || busy.get() || held.with(Option::is_some))
+                    described_by=Signal::derive(move || {
+                        held.with(Option::is_some).then(|| held_id.clone())
+                    })
+                    on_press=Callback::new(move |()| {
+                        pressed_choice.set(which);
+                        action.run(());
+                    })
+                />
             }
         }
     };
-    let confirm = confirm.map(choice.clone());
-    let also = also.map(choice);
+    let confirm = confirm
+        .map(|confirmation| choice.clone()(confirmation, 1, Appearance::Filled, confirm_button));
+    let also = also.map(|confirmation| choice(confirmation, 2, Appearance::Outlined, also_button));
+    // A held button that goes ahead takes no press, as an unavailable button
+    // doesn't, but its press still bubbles here, where it says the reason.
+    let press_held = move |event: web_sys::MouseEvent| {
+        if busy.get_untracked() || held.with_untracked(Option::is_none) {
+            return;
+        }
+        let target = event
+            .target()
+            .and_then(|target| target.dyn_into::<web_sys::Node>().ok());
+        let goes_ahead = [confirm_button, also_button].into_iter().any(|button| {
+            button
+                .get_untracked()
+                .is_some_and(|button| button.contains(target.as_ref()))
+        });
+        if goes_ahead {
+            pressed_held.set(false);
+            spawn_local(async move {
+                tick().await;
+                pressed_held.try_set(true);
+            });
+        }
+    };
     view! {
         // A `close` event that finds the dialog open is late, for a closing
         // the dialog was opened again since (see above): that closing was
@@ -206,19 +242,17 @@ pub fn ReviewDialog(
                     }
                 }}
             </p>
-            <p class="actions">
-                <button
-                    type="button"
+            <p class="actions" on:click=press_held>
+                <Button
+                    content=Content::Text(dismiss_label.into())
                     node_ref=dismiss
-                    aria-disabled=move || busy.get().then_some("true")
-                    on:click=move |_| {
-                        if !busy.get_untracked() && let Some(dialog) = dialog.get() {
+                    disabled=busy
+                    on_press=Callback::new(move |()| {
+                        if let Some(dialog) = dialog.get() {
                             dialog.close();
                         }
-                    }
-                >
-                    {dismiss_label}
-                </button>
+                    })
+                />
                 {confirm}
                 {also}
             </p>

@@ -89,10 +89,7 @@ impl Shape {
     /// named with its row; otherwise its label, only where it isn't written
     /// in it, so a button's name is its visible words wherever it has them.
     pub fn name(self, label: &str, fuller: Option<String>) -> Option<String> {
-        match fuller {
-            Some(_) => todo!("a fuller name names the button"),
-            None => (!self.shows_label()).then(|| label.to_owned()),
-        }
+        fuller.or_else(|| (!self.shows_label()).then(|| label.to_owned()))
     }
 
     /// What stands before the label: a busy button's spinner, in its icon's
@@ -148,7 +145,7 @@ pub fn button_class(
     } else {
         ""
     };
-    let busy = if busy { todo!("a busy button's class") } else { "" };
+    let busy = if busy { " button-busy" } else { "" };
     format!(
         "button {} {} {}{square}{busy}",
         appearance.class(),

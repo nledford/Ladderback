@@ -144,11 +144,14 @@ keyring = { version = "3.6.3", default-features = false }
 # a typed enum and each icon's SVG shapes, without a renderer. Every icon of
 # an enabled category is compiled into the wasm, used or not, so the defaults
 # (all 42 categories) are off and only the smallest set holding the icons in
-# use is on, 296 icons: `notifications` (circle-check, triangle-alert),
-# `time` (clock), `cursors` (loader-circle), `shapes` (circle-dashed) and
-# `math` (circle-x, circle-slash) for the status badges, and `accessibility`
-# (eye, eye-off) for the text field's Show password button.
-lepticons-data = { version = "0.1.2", default-features = false, features = ["notifications", "time", "cursors", "shapes", "math", "accessibility"] }
+# use is on: for the status badges `notifications` (circle-check,
+# triangle-alert), `time` (clock), `cursors` (loader-circle), `shapes`
+# (circle-dashed) and `math` (circle-x, circle-slash); for the buttons, which
+# add plus (`math`) and pencil (`cursors`), `arrows` (arrow-up, arrow-down,
+# play, rotate-ccw, log-out), `multimedia` (pause) and `files` (trash),
+# turned on by the maintainer and measured in technical design §8.1; and
+# `accessibility` (eye, eye-off) for the text field's Show password button.
+lepticons-data = { version = "0.1.2", default-features = false, features = ["notifications", "time", "cursors", "shapes", "math", "accessibility", "arrows", "multimedia", "files"] }
 leptos = { version = "0.8.23", features = ["csr"] }
 leptos_router = "0.8"
 log = "0.4.35"

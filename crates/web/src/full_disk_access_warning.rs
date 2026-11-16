@@ -14,12 +14,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::button::{Appearance, Button, Content};
 use crate::components::{hand_focus_when_gone, sentence_view};
 use crate::full_disk_access::{STEPS, opens_settings, said_after_check, warns};
 use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::{PAGE_HEADING_ID, refused_sentence};
 use crate::text;
+use crate::variants::Tone;
 use crate::ws::{self, Got, Posted};
 
 /// The warning's heading, which names its region.
@@ -30,6 +32,13 @@ const READ_PATH: &str = "/api/v1/full-disk-access";
 const CHECK_PATH: &str = "/api/v1/full-disk-access/check";
 const SETTINGS_PATH: &str = "/api/v1/full-disk-access/settings";
 
+/// The warning's two requests, one at a time.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Request {
+    Check,
+    Open,
+}
+
 /// The start page's warning that macOS hasn't given the agent Full Disk
 /// Access: why it matters, the steps, the button that opens System Settings
 /// for a browser on the agent's own Mac, and Check again. Nothing shows
@@ -37,7 +46,9 @@ const SETTINGS_PATH: &str = "/api/v1/full-disk-access/settings";
 #[component]
 pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView {
     let found = RwSignal::<Option<FullDiskAccessDto>>::new(None);
-    let busy = RwSignal::new(false);
+    // The request a button sent, while the daemon answers it: that button
+    // is busy, the other unavailable, so neither takes a press.
+    let pending = RwSignal::<Option<Request>>::new(None);
     // A button's answer that isn't a new reading: a refusal, or none at all.
     let problem = RwSignal::<Option<Sentence>>::new(None);
     let url = format!("{}{READ_PATH}", ws::origin());
@@ -54,17 +65,14 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
     let offers_settings = Memo::new(move |_| opens_settings(found.get().as_ref()));
 
     let check_localizer = Arc::clone(&localizer);
-    let check = move |_| {
-        if busy.get_untracked() {
-            return;
-        }
-        busy.set(true);
+    let check = Callback::new(move |()| {
+        pending.set(Some(Request::Check));
         problem.set(None);
         let localizer = Arc::clone(&check_localizer);
         spawn_local(async move {
             let url = format!("{}{CHECK_PATH}", ws::origin());
             let posted = ws::post(&url, &serde_json::Map::new()).await;
-            busy.try_set(false);
+            pending.try_set(None);
             match posted {
                 Some(Posted::Done(answer)) => {
                     match serde_json::from_str::<FullDiskAccessDto>(&answer) {
@@ -93,20 +101,17 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
                 }
             }
         });
-    };
+    });
 
     let open_localizer = Arc::clone(&localizer);
-    let open = move |_| {
-        if busy.get_untracked() {
-            return;
-        }
-        busy.set(true);
+    let open = Callback::new(move |()| {
+        pending.set(Some(Request::Open));
         problem.set(None);
         let localizer = Arc::clone(&open_localizer);
         spawn_local(async move {
             let url = format!("{}{SETTINGS_PATH}", ws::origin());
             let posted = ws::post(&url, &serde_json::Map::new()).await;
-            busy.try_set(false);
+            pending.try_set(None);
             match posted {
                 Some(Posted::Done(_)) => reply(
                     Politeness::Polite,
@@ -125,7 +130,7 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
                 }
             }
         });
-    };
+    });
 
     let heading = text(&localizer, msg::UI_FULL_DISK_ACCESS_HEADING);
     let body = text(&localizer, msg::UI_FULL_DISK_ACCESS_BODY);
@@ -139,7 +144,6 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
             // the page's heading, never to the page itself (WCAG 2.4.3).
             hand_focus_when_gone(check_button, PAGE_HEADING_ID.to_owned());
             let open_label = open_label.clone();
-            let (open, check) = (open.clone(), check.clone());
             view! {
                 <section class="full-disk-access" aria-labelledby=HEADING_ID>
                     <h2 id=HEADING_ID>{heading.clone()}</h2>
@@ -149,29 +153,32 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
                     </ol>
                     <div class="actions">
                         {move || {
-                            let open = open.clone();
                             offers_settings
                                 .get()
                                 .then(|| {
                                     view! {
-                                        <button
-                                            type="button"
-                                            aria-disabled=move || busy.get().then_some("true")
-                                            on:click=open
-                                        >
-                                            {open_label.clone()}
-                                        </button>
+                                        <Button
+                                            content=Content::Text(open_label.clone().into())
+                                            appearance=Appearance::Filled
+                                            tone=Tone::Primary
+                                            busy=Signal::derive(move || {
+                                                pending.get() == Some(Request::Open)
+                                            })
+                                            disabled=Signal::derive(move || {
+                                                pending.get() == Some(Request::Check)
+                                            })
+                                            on_press=open
+                                        />
                                     }
                                 })
                         }}
-                        <button
-                            type="button"
+                        <Button
+                            content=Content::Text(check_label.clone().into())
                             node_ref=check_button
-                            aria-disabled=move || busy.get().then_some("true")
-                            on:click=check
-                        >
-                            {check_label.clone()}
-                        </button>
+                            busy=Signal::derive(move || pending.get() == Some(Request::Check))
+                            disabled=Signal::derive(move || pending.get() == Some(Request::Open))
+                            on_press=check
+                        />
                     </div>
                     <p role="alert">{move || problem.get().map(sentence_view)}</p>
                 </section>

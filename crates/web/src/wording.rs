@@ -82,8 +82,11 @@ pub(crate) fn confirmation(confirm: Confirm) -> Words {
 
 /// The tone of the button that confirms a review: the color of errors for a
 /// run that deletes (a forget, a prune), Ladder Blue for the others.
-pub(crate) fn confirmation_tone(_confirm: Confirm) -> Tone {
-    todo!("the confirmation's tone")
+pub(crate) fn confirmation_tone(confirm: Confirm) -> Tone {
+    match confirm {
+        Confirm::Forget { .. } | Confirm::Prune => Tone::Error,
+        Confirm::Adopt { .. } | Confirm::Check => Tone::Primary,
+    }
 }
 
 /// What a fact of a review says: one sentence, or two for a prune, whose
