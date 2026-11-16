@@ -700,6 +700,14 @@ Accessibility is designed in from the first screen, not audited in at the end. T
 
 **Exceptions.** A page that builds its own version of a widget the set has gives the reason in its pull request and lists it here, with where it lives. None is listed yet.
 
+**The shared vocabulary** (§16, decision 108). Every shared component takes its color, size and placement from one vocabulary, `crates/web/src/variants.rs`, each value a class of `style.css` (DESIGN.md, "Shared Vocabulary"), as each is built or reworked (#776); none draws with it yet. The status badge keeps its states' own pairs for its text (decision 103). A component's row above names any tone it leaves out because it makes no sense there, and the lengths it gives each size:
+
+- **Tone:** `Primary` (Ladder Blue, `--accent`; the default), `Secondary` (`--muted`), `Success`, `Warning` and `Error` (the status hues `--success`, `--warning` and `--error`), and `Inherit` (`currentColor`, for a part inside another component, such as a spinner in a button). A tone's class sets `--tone`, which the component draws with. A tone never carries the meaning alone (1.4.1, A2): the component says it in words or an icon too. Each tone's token is at 4.5:1 on `--bg` and `--surface` in both schemes (`just test-contrast`), and under forced colors every tone draws in the text's own color (`currentColor`, which the mode makes `CanvasText`), so the words tell them apart.
+- **Size:** `Small`, `Medium`, `Large` and `XLarge`, which each component maps to `em` lengths of its own, so a size grows with the reader's text (1.4.4). No default.
+- **Placement:** `Inline` (the default: in the line of text, as wide as what it holds), and `Start`, `Center` and `End`, a line of its own with the part at its start, middle or end, in logical properties, so `Start` is the right in a right-to-left page. The class goes on the line, an element of the component's own around its part, never on the part's root: it sets the line's `display`, which a root's own `display` would override (a badge) or which would stretch a boxed root across the line (a button).
+
+The gallery's "Shared vocabulary" demo shows every value named in words, and `features/ui/components.feature` checks each tone's color and swatch, each tone but `Inherit` apart from the text around it, `Inherit` following that text inside an outer tone, every tone in the system's text color under forced colors, and the placements in both directions.
+
 **Live updates (A3).** `UiEvent`s update the page visually, but only the **announcer** talks to screen readers.
 
 - **Two regions:** a polite `role="status"` and an assertive `role="alert"`. Both sit in the static `index.html`, outside the Leptos mount point, empty and never `display: none`, so they exist before anything is written to them.

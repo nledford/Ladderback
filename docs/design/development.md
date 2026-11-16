@@ -196,7 +196,7 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 
 #### 13.7.5 A shared UI component
 
-1. The component in `crates/web/src/components.rs`, from native elements first (§4.5).
+1. The component in `crates/web/src/components.rs`, from native elements first (§4.5), taking its tone, size and placement from the shared vocabulary (`crates/web/src/variants.rs`), and its row in §4.5's table naming any tone it leaves out and the `em` lengths it gives each size.
 2. Its entry in the gallery (`crates/web/src/gallery.rs`), with every state it can show.
 3. A row in both Scenario Outlines of `features/ui/components.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.ts`.
 4. Contract scenarios for its behaviour in the same file, with steps that find it by role and name and drive it by keyboard alone.

@@ -241,6 +241,41 @@ ui-gallery-badge-heading = Status badge
 # The empty badge of the status badge demo: a badge with nothing to tell.
 ui-gallery-badge-empty = Empty
 
+# The heading of the gallery's demo of the shared vocabulary (§4.5): the
+# tones, sizes and placements every shared component takes.
+ui-gallery-vocabulary-heading = Shared vocabulary
+
+# The headings of the vocabulary demo's three lists, which name the lists
+# too.
+ui-gallery-tones-heading = Tones
+ui-gallery-sizes-heading = Sizes
+ui-gallery-placements-heading = Placements
+
+# The tones, each written in its own color beside a swatch of it: Primary is
+# the accent for action, Secondary the neutral one, Success, Warning and
+# Error the three status colors, and Inherit the color of the text around a
+# part, such as a spinner in a button.
+ui-gallery-tone-primary = Primary
+ui-gallery-tone-secondary = Secondary
+ui-gallery-tone-success = Success
+ui-gallery-tone-warning = Warning
+ui-gallery-tone-error = Error
+ui-gallery-tone-inherit = Inherit
+
+# The sizes, each beside a swatch drawn at that size, smallest first.
+ui-gallery-size-small = Small
+ui-gallery-size-medium = Medium
+ui-gallery-size-large = Large
+ui-gallery-size-xlarge = Extra large
+
+# The placements, each beside a swatch placed so in its line: in the line of
+# text, or on a line of its own at its start, in its middle or at its end,
+# in the page's direction.
+ui-gallery-placement-inline = Inline
+ui-gallery-placement-start = Start
+ui-gallery-placement-center = Center
+ui-gallery-placement-end = End
+
 # The heading of the gallery's progress demo.
 ui-gallery-progress-heading = Progress
 

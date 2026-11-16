@@ -10,7 +10,10 @@
 import { readFile } from "node:fs/promises";
 
 // The pairs the UI relies on, each with its WCAG threshold. Badge variants
-// pair each badge's text token with its background token.
+// pair each badge's text token with its background token. The tones of the
+// shared vocabulary (variants.rs) draw text and strokes on the page and on
+// a surface, so each tone's token is paired with both: Primary is the link
+// pairs, Secondary the muted text, Inherit the text around it.
 const PAIRS = [
   { name: "text on surface", fg: "--fg", bg: "--surface", min: 4.5 },
   { name: "muted text on surface", fg: "--muted", bg: "--surface", min: 4.5 },
@@ -24,6 +27,13 @@ const PAIRS = [
   { name: "link on page", fg: "--accent", bg: "--bg", min: 4.5 },
   { name: "form error on page", fg: "--badge-error-fg", bg: "--bg", min: 4.5 },
   { name: "table rule on page", fg: "--muted", bg: "--bg", min: 3 },
+  { name: "secondary tone on page", fg: "--muted", bg: "--bg", min: 4.5 },
+  { name: "success tone on page", fg: "--success", bg: "--bg", min: 4.5 },
+  { name: "success tone on surface", fg: "--success", bg: "--surface", min: 4.5 },
+  { name: "warning tone on page", fg: "--warning", bg: "--bg", min: 4.5 },
+  { name: "warning tone on surface", fg: "--warning", bg: "--surface", min: 4.5 },
+  { name: "error tone on page", fg: "--error", bg: "--bg", min: 4.5 },
+  { name: "error tone on surface", fg: "--error", bg: "--surface", min: 4.5 },
 ];
 
 const SCHEMES = [

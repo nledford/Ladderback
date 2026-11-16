@@ -125,6 +125,16 @@ mod wording;
 )]
 mod toast;
 
+// The shared vocabulary of tones, sizes and placements every shared
+// component takes, mapped to `style.css`'s hooks on the host. Only the
+// gallery draws with it yet, and the host tests check it, so only a build of
+// neither leaves it unused.
+#[cfg_attr(
+    all(not(feature = "gallery"), not(test)),
+    expect(dead_code, reason = "only the gallery draws with the vocabulary yet")
+)]
+mod variants;
+
 use plans_page::Plans;
 use routes::{NotFound, Operations, Repositories, Start};
 use session::{SignInOffNotice, Standing, Title};
