@@ -100,6 +100,7 @@ fn each_event_is_named_as_section_11_names_it_and_read_back_by_that_name() {
             "forget.failed",
             "prune.failed",
             "check.failed",
+            "restore.failed",
         ]
     );
     for kind in EventKind::ALL {
@@ -132,6 +133,7 @@ fn a_start_pings_start_a_success_or_warning_pings_success_and_a_failure_or_retry
         EventKind::ForgetFailed,
         EventKind::PruneFailed,
         EventKind::CheckFailed,
+        EventKind::RestoreFailed,
     ] {
         assert_eq!(kind.ping(), Ping::Fail, "{kind:?}");
     }
@@ -148,6 +150,7 @@ fn only_a_backup_tells_its_start() {
         OperationKind::Prune,
         OperationKind::Check,
         OperationKind::Init,
+        OperationKind::Restore,
     ] {
         assert_eq!(EventKind::started(kind), None, "{kind:?}");
     }
@@ -171,13 +174,18 @@ fn a_backup_tells_each_ending_and_maintenance_only_its_failure() {
         (OperationKind::Forget, Failed, Some(EventKind::ForgetFailed)),
         (OperationKind::Prune, Failed, Some(EventKind::PruneFailed)),
         (OperationKind::Check, Failed, Some(EventKind::CheckFailed)),
-
+        (
+            OperationKind::Restore,
+            Failed,
+            Some(EventKind::RestoreFailed),
+        ),
         (OperationKind::Forget, Succeeded, None),
         (OperationKind::Prune, SucceededWithWarnings, None),
         (OperationKind::Check, Succeeded, None),
         (OperationKind::Adopt, Failed, None),
         (OperationKind::Init, Failed, None),
         (OperationKind::Identify, Failed, None),
+        (OperationKind::Restore, Succeeded, None),
     ];
     for (kind, outcome, event) in told {
         assert_eq!(

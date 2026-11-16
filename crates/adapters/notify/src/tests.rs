@@ -179,6 +179,10 @@ fn a_default_message_names_the_plan_or_the_repository_and_the_code() {
         says(EventKind::CheckFailed),
         "The check of demo-repo failed (operation-failed)."
     );
+    assert_eq!(
+        says(EventKind::RestoreFailed),
+        "Restoring files from demo-repo failed (operation-failed)."
+    );
 }
 
 #[test]
@@ -315,6 +319,7 @@ fn each_event_has_a_title_that_says_what_happened() {
             "Forgetting old snapshots failed",
             "Prune failed",
             "Check failed",
+            "Restore failed",
         ]
     );
 }

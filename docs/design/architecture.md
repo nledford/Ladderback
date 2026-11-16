@@ -123,7 +123,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 
 | Event | Consumed by |
 |---|---|
-| `OperationQueued`, `OperationStarted`, `OperationFinished { outcome }` | UI live updates, sync outbox, notifications (`backup.*`, `forget.failed`, `prune.failed`, `check.failed`) |
+| `OperationQueued`, `OperationStarted`, `OperationFinished { outcome }` | UI live updates, sync outbox, notifications (`backup.*`, `forget.failed`, `prune.failed`, `check.failed`, `restore.failed`) |
 | `SnapshotCreated` | Snapshot catalog refresh |
 | `RetryScheduled`, `BackupMissed` | Notifications (`backup.retrying`, `backup.missed`) |
 | `CheckFoundErrors` | Notifications (`check.errors`) |
