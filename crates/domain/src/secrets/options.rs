@@ -74,6 +74,21 @@ pub(super) fn is_rclone_secret_option(name: &str) -> bool {
     is_secret_option(name) || RCLONE_SECRET_NAMES.contains(&normalised(name).as_str())
 }
 
+/// The options of the pinned `rustic_backend` that are run as commands:
+/// `rclone-command` starts rclone (`rclone.rs`), and the local backend runs
+/// `post-create-command` and `post-delete-command` (`local.rs`).
+const COMMAND_OPTIONS: [&str; 3] = [
+    "rclone-command",
+    "post-create-command",
+    "post-delete-command",
+];
+
+/// Whether rustic runs the value of a backend option of this name as a
+/// command. rustic reads each only as it is written here.
+pub fn is_command_option(name: &str) -> bool {
+    COMMAND_OPTIONS.contains(&name)
+}
+
 /// `name` in lower case with `-` read as `_`.
 fn normalised(name: &str) -> String {
     name.to_ascii_lowercase().replace('-', "_")
@@ -232,6 +247,22 @@ mod tests {
         assert!(!is_secret_option("key"));
         for name in ["key_file", "access_key_id", "use_password", "host", ""] {
             assert!(!is_rclone_secret_option(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn only_the_options_rustic_runs_are_commands() {
+        for name in COMMAND_OPTIONS {
+            assert!(is_command_option(name), "{name}");
+        }
+        for name in [
+            "rclone_command",
+            "Rclone-Command",
+            "command",
+            "connections",
+            "",
+        ] {
+            assert!(!is_command_option(name), "{name}");
         }
     }
 }
