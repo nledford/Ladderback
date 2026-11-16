@@ -165,10 +165,12 @@ fn archived(path: &Path) -> Result<(), JobError> {
 }
 
 /// A zip entry's name: the path's names joined by `/`, as zip names them,
-/// each one made text where it isn't.
+/// each one made text where it isn't. A `\` becomes `_`: zip separates
+/// folders by `/` only, but many Windows extractors take `\` for one too,
+/// and `..\x` would then land outside the folder (decision 113).
 fn zip_name(path: &Path) -> String {
     path.iter()
-        .map(|name| name.to_string_lossy())
+        .map(|name| name.to_string_lossy().replace('\\', "_"))
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -466,6 +468,34 @@ mod tests {
         );
         assert!(zip.by_name("docs/latest").unwrap().is_symlink());
         assert!(zip.by_name("docs/deep/").unwrap().is_dir());
+    }
+
+    #[test]
+    fn a_zip_entry_name_holds_no_backslash_while_a_tar_entry_keeps_it() {
+        // On Unix `\` is a name's own character, but many Windows unzippers
+        // take it for a folder: `..\evil` would land outside the folder.
+        let listed = || {
+            vec![
+                (PathBuf::from("..\\evil"), file("notes.txt", 5)),
+                (PathBuf::from("a\\b.txt"), file("notes.txt", 5)),
+            ]
+        };
+        let zip = zip::ZipArchive::new(Cursor::new(
+            archive(ArchiveSpec::Zip, None, listed()).unwrap(),
+        ))
+        .unwrap();
+        let mut names: Vec<String> = zip
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, [".._evil", "a_b.txt"]);
+        let tar = untar(&archive(ArchiveSpec::Tar, None, listed()).unwrap());
+        assert_eq!(
+            tar.into_keys().collect::<Vec<_>>(),
+            ["..\\evil", "a\\b.txt"],
+            "a tar entry keeps its exact name"
+        );
     }
 
     #[test]
