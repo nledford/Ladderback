@@ -41,9 +41,22 @@ pub(crate) enum Offer {
 }
 
 impl Offer {
+    /// This build's offer. The `pseudo` feature makes a development build,
+    /// which offers every catalog; a release, built without it, offers the
+    /// tags `offered-locales.txt` lists. One expression rather than a
+    /// constant per feature, so both builds compile both variants.
+    pub(crate) const BUILD: Self = if cfg!(feature = "pseudo") {
+        Self::Every
+    } else {
+        Self::Listed(LISTED)
+    };
+
     /// Whether the catalog of `tag` is offered.
-    pub(crate) fn includes(self, _tag: &str) -> bool {
-        todo!()
+    pub(crate) fn includes(self, tag: &str) -> bool {
+        match self {
+            Self::Every => true,
+            Self::Listed(tags) => tags.contains(&tag),
+        }
     }
 }
 

@@ -1,0 +1,7 @@
+# The languages a release offers, one tag a line (technical design §8.4,
+# decision 101). A build without the default features, as a release is,
+# negotiates only over these; a development build offers every catalog in
+# locales/, so a translation can be reviewed before it is listed here. List
+# a language only when `just translations <tag>` finds every message of it
+# current. en-US, the source locale, is always listed.
+en-US
