@@ -8,7 +8,8 @@
 
 use app::ports::{
     BackupSummary, CheckSummary, EngineResult, FolderAnswer, ForgetSummary, ProbeAnswer,
-    PrunePlanSummary, PruneSummary, RewriteSummary, SnapshotSummary,
+    PrunePlanSummary, PruneSummary, RestorePlanSummary, RestoreSummary, RewriteSummary,
+    SnapshotSummary,
 };
 use domain::browse::FolderPage;
 use domain::maintenance::RepositoryStats;
@@ -92,6 +93,22 @@ pub(crate) enum Summary {
         total_size: u64,
         stored_size: u64,
         raw_size: u64,
+    },
+    /// What a restore wrote (§10.4).
+    Restore {
+        files_restored: u64,
+        files_unchanged: u64,
+        folders_restored: u64,
+        bytes_restored: u64,
+    },
+    /// A read's result: a restore's dry run is never logged as an
+    /// operation, so no row holds this variant either.
+    RestorePlan {
+        files_added: u64,
+        files_overwritten: u64,
+        files_unchanged: u64,
+        files_kept: u64,
+        bytes_to_write: u64,
     },
 }
 
@@ -203,6 +220,19 @@ impl From<&EngineResult> for Summary {
                 total_size: stats.total_size,
                 stored_size: stats.stored_size,
                 raw_size: stats.raw_size,
+            },
+            EngineResult::Restore(summary) => Self::Restore {
+                files_restored: summary.files_restored,
+                files_unchanged: summary.files_unchanged,
+                folders_restored: summary.folders_restored,
+                bytes_restored: summary.bytes_restored,
+            },
+            EngineResult::RestorePlan(summary) => Self::RestorePlan {
+                files_added: summary.files_added,
+                files_overwritten: summary.files_overwritten,
+                files_unchanged: summary.files_unchanged,
+                files_kept: summary.files_kept,
+                bytes_to_write: summary.bytes_to_write,
             },
         }
     }
@@ -327,6 +357,30 @@ impl From<Summary> for EngineResult {
                 total,
                 next: None,
             })),
+            Summary::Restore {
+                files_restored,
+                files_unchanged,
+                folders_restored,
+                bytes_restored,
+            } => Self::Restore(RestoreSummary {
+                files_restored,
+                files_unchanged,
+                folders_restored,
+                bytes_restored,
+            }),
+            Summary::RestorePlan {
+                files_added,
+                files_overwritten,
+                files_unchanged,
+                files_kept,
+                bytes_to_write,
+            } => Self::RestorePlan(RestorePlanSummary {
+                files_added,
+                files_overwritten,
+                files_unchanged,
+                files_kept,
+                bytes_to_write,
+            }),
         }
     }
 }

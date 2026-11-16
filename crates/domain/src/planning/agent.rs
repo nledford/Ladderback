@@ -9,7 +9,8 @@ use crate::notifications::{ChannelName, Notifications, RuleName};
 use crate::{PlanId, RepositoryAlias, RepositoryId};
 
 use super::{
-    Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig, RepositorySettings, ValueKind,
+    Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig, RepositorySettings,
+    RestoreFolder, ValueKind,
 };
 
 /// How many operations an agent runs at once: from 1 to
@@ -76,6 +77,9 @@ pub struct AgentSettings {
     pub locale: Option<Locale>,
     /// Whether it asks for Ladderback's newest release once a day.
     pub update_check: UpdateCheck,
+    /// The folder its restores into a new folder are made under, when it
+    /// isn't `ladderback-restore` in the home folder (§10.4).
+    pub restore_folder: Option<RestoreFolder>,
 }
 
 /// Whether the agent asks for Ladderback's newest release once a day, to
@@ -522,6 +526,7 @@ mod tests {
         assert!(!settings.allow_hub_restore);
         assert_eq!(settings.locale, None);
         assert_eq!(settings.update_check, UpdateCheck::On);
+        assert_eq!(settings.restore_folder, None);
     }
 
     #[test]
@@ -543,6 +548,7 @@ mod tests {
             allow_hub_restore: true,
             locale: Some(Locale::parse("en-US").unwrap()),
             update_check: UpdateCheck::Off,
+            restore_folder: Some(RestoreFolder::parse("/srv/restores").unwrap()),
         };
         let hooks = Hooks {
             run_before: vec![crate::planning::HookEntry::parse("true").unwrap()],

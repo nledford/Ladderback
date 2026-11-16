@@ -15,9 +15,9 @@ use domain::planning::{
     GroupBy, HookEntry, Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale,
     Location, LocationRule, Locations, MAX_LOCATIONS, MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES,
     Maintenance, NameFilter, NetworkKind, NetworkName, Nice, OnFailure, Overlap, Plan,
-    RepositoryConfig, RepositoryField, RepositorySettings, RetentionPolicy, RetryPolicy, Schedule,
-    Source, SourceFilter, UpdateCheck, ValueKind, Violation, check_location, check_location_count,
-    check_option_value, check_options, parse_duration,
+    RepositoryConfig, RepositoryField, RepositorySettings, RestoreFolder, RetentionPolicy,
+    RetryPolicy, Schedule, Source, SourceFilter, UpdateCheck, ValueKind, Violation, check_location,
+    check_location_count, check_option_value, check_options, parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
@@ -175,6 +175,10 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
         .locale
         .map(|text| reader.value(&path.key("locale"), Locale::parse(&text)))
         .transpose()?;
+    let restore_folder = table
+        .restore_folder
+        .map(|text| reader.value(&path.key("restore-folder"), RestoreFolder::parse(&text)))
+        .transpose()?;
     Ok(AgentSettings {
         hostname,
         concurrency,
@@ -185,6 +189,7 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
             Some(false) => UpdateCheck::Off,
             Some(true) | None => UpdateCheck::On,
         },
+        restore_folder,
     })
 }
 

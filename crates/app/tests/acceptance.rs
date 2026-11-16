@@ -59,6 +59,8 @@ mod plans_steps;
 mod recovery_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
+#[path = "steps/restore.rs"]
+mod restore_steps;
 #[path = "steps/schedule.rs"]
 mod schedule_steps;
 #[path = "steps/scheduler.rs"]
@@ -98,6 +100,7 @@ struct Agent {
     plans: plans_steps::PlansWorld,
     stats: stats_steps::StatsWorld,
     updates: updates_steps::UpdatesWorld,
+    restore: restore_steps::RestoreWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -140,6 +143,7 @@ impl Agent {
             interop: Default::default(),
             locations: Default::default(),
             recovery: Default::default(),
+            restore: Default::default(),
             announcement: Default::default(),
             preview: Default::default(),
             notifications: Default::default(),

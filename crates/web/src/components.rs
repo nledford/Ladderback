@@ -20,7 +20,8 @@ use lepticons_data::Glyph;
 use leptos::prelude::*;
 use leptos::tachys::html::attribute::custom::custom_attribute;
 use leptos::task::{spawn_local, tick};
-use leptos::wasm_bindgen::JsCast;
+use leptos::wasm_bindgen::closure::Closure;
+use leptos::wasm_bindgen::{JsCast, JsValue};
 
 use crate::focus::{FocusWrap, focus_wrap};
 use crate::live::{PageClock, close_modal_when_gone, modal_gone, open_modal, pause, reply, resume};
@@ -195,6 +196,12 @@ pub struct Working {
 /// anything and Escape does not close the dialog, so a review that is being
 /// confirmed is never dismissed from under the request it sent.
 ///
+/// While `held` says why the run can't be confirmed yet, such as a dry run
+/// still reading, the buttons that go ahead stay where a keyboard and a
+/// screen reader find them, `aria-disabled` and described by that reason,
+/// shown beside them; pressing one does nothing but say the reason in the
+/// dialog's polite region. Dismissing still works.
+///
 /// `starts_on` is a button in `children` focus starts on instead of the
 /// dismiss button, for a dialog whose dismissal loses something, such as a
 /// secret shown once, which a stray Enter would then throw away.
@@ -208,6 +215,7 @@ pub fn ReviewDialog(
     returns_to: String,
     described_by: String,
     #[prop(optional)] working: Option<Working>,
+    #[prop(optional)] held: Option<Signal<Option<String>>>,
     #[prop(optional)] fallback: Option<String>,
     #[prop(optional)] starts_on: Option<NodeRef<leptos::html::Button>>,
     children: Children,
@@ -223,6 +231,17 @@ pub fn ReviewDialog(
         None => (Signal::stored(false), String::new()),
     };
     let title_id = format!("{returns_to}-title");
+    let held_id = format!("{returns_to}-held");
+    let held = held.unwrap_or_else(|| Signal::stored(None));
+    // Whether a button that goes ahead was pressed while held, so the polite
+    // region says why; cleared first on each press, so a second press is said
+    // again.
+    let pressed_held = RwSignal::new(false);
+    Effect::new(move |_| {
+        if held.with(Option::is_none) {
+            pressed_held.set(false);
+        }
+    });
     let (opener, opener_fallback) = (returns_to.clone(), fallback.clone());
     Effect::new(move |_| {
         let wanted = open.get();
@@ -245,22 +264,38 @@ pub fn ReviewDialog(
         }
     });
     let body = children();
-    let choice = move |Confirmation { label, action }| {
-        view! {
-            <button
-                type="button"
-                aria-disabled=move || busy.get().then_some("true")
-                on:click=move |_| {
-                    if !busy.get_untracked() {
-                        action.run(());
+    let choice = {
+        let held_id = held_id.clone();
+        move |Confirmation { label, action }| {
+            let held_id = held_id.clone();
+            view! {
+                <button
+                    type="button"
+                    aria-disabled=move || {
+                        (busy.get() || held.with(Option::is_some)).then_some("true")
                     }
-                }
-            >
-                {label}
-            </button>
+                    aria-describedby=move || { held.with(Option::is_some).then(|| held_id.clone()) }
+                    on:click=move |_| {
+                        if busy.get_untracked() {
+                            return;
+                        }
+                        if held.with_untracked(Option::is_some) {
+                            pressed_held.set(false);
+                            spawn_local(async move {
+                                tick().await;
+                                pressed_held.try_set(true);
+                            });
+                        } else {
+                            action.run(());
+                        }
+                    }
+                >
+                    {label}
+                </button>
+            }
         }
     };
-    let confirm = confirm.map(choice);
+    let confirm = confirm.map(choice.clone());
     let also = also.map(choice);
     view! {
         <dialog
@@ -281,8 +316,24 @@ pub fn ReviewDialog(
         >
             <h3 id=title_id.clone()>{title}</h3>
             {body}
+            {move || {
+                held.get()
+                    .map(|reason| {
+                        view! {
+                            <p id=held_id.clone() class="text-muted">
+                                {reason}
+                            </p>
+                        }
+                    })
+            }}
             <p aria-live="polite" aria-atomic="true">
-                {move || busy.get().then(|| status.clone())}
+                {move || {
+                    if busy.get() {
+                        Some(status.clone())
+                    } else {
+                        held.get().filter(|_| pressed_held.get())
+                    }
+                }}
             </p>
             <p class="actions">
                 <button
@@ -554,6 +605,153 @@ pub fn RadioGroup(
             {choices}
         </fieldset>
     }
+}
+
+/// What a step-up confirmation asks for (§10.4): the admin password with
+/// sign-in on, and with sign-in off the short ID of what is confirmed, shown
+/// beside the field, which `label` and `hint` name ("Snapshot ID").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StepUp {
+    Password,
+    ShortId {
+        label: String,
+        hint: String,
+        short: String,
+    },
+}
+
+/// The step-up field (§4.5, §10.4): the one field a restore, a download or
+/// an approval is confirmed with, which is no test of memory or transcription
+/// (3.3.8). The admin password is a `current-password` field, so a password
+/// manager fills it in; a short ID is shown as text that can be selected,
+/// with a button that copies it, and the field takes a paste. Nothing here
+/// blocks a paste. Its error is an alert, since the field sits in a dialog
+/// (the Dialog contract), and marks the input invalid; the caller sets it,
+/// and clears it before setting it again so a second wrong try is heard.
+/// `value` holds what is typed, so the caller reads and clears it.
+#[component]
+pub fn StepUpField(
+    id: &'static str,
+    localizer: Arc<Localizer>,
+    step_up: StepUp,
+    value: RwSignal<String>,
+    error: RwSignal<Option<String>>,
+) -> impl IntoView {
+    let described_by = format!("{id}-description");
+    let error_id = format!("{id}-error");
+    let error_in_error = error_id.clone();
+    let description_ids = {
+        let described_by = described_by.clone();
+        move || {
+            if error.get().is_some() {
+                format!("{described_by} {error_id}")
+            } else {
+                described_by.clone()
+            }
+        }
+    };
+    let invalid = move || error.get().is_some().then_some("true");
+    let (label, kind, autocomplete, description, copy) = match step_up {
+        StepUp::Password => (
+            text(&localizer, msg::UI_STEP_UP_PASSWORD_LABEL),
+            "password",
+            "current-password",
+            view! { <p id=described_by>{text(&localizer, msg::UI_STEP_UP_PASSWORD_HINT)}</p> }
+                .into_any(),
+            None,
+        ),
+        StepUp::ShortId { label, hint, short } => {
+            let said = RwSignal::new(None::<String>);
+            let copied = text(&localizer, msg::UI_STEP_UP_COPIED);
+            let refused = text(&localizer, msg::UI_STEP_UP_COPY_FAILED);
+            let shown = short.clone();
+            let copy = view! {
+                <p>
+                    <button
+                        type="button"
+                        on:click=move |_| copy_text(&short, said, copied.clone(), refused.clone())
+                    >
+                        {text(&localizer, msg::UI_STEP_UP_COPY)}
+                    </button>
+                    " "
+                    <span aria-live="polite" aria-atomic="true">
+                        {move || said.get()}
+                    </span>
+                </p>
+            };
+            (
+                label,
+                "text",
+                "off",
+                view! { <p id=described_by>{hint} " " <code class="short-id">{shown}</code></p> }
+                    .into_any(),
+                Some(copy),
+            )
+        }
+    };
+    view! {
+        <div class="field">
+            <label for=id>{label}</label>
+            {description}
+            {copy}
+            <input
+                id=id
+                type=kind
+                autocomplete=autocomplete
+                spellcheck="false"
+                autocapitalize="off"
+                prop:value=move || value.get()
+                on:input=move |event| value.set(event_target_value(&event))
+                aria-describedby=description_ids
+                aria-invalid=invalid
+            />
+            {move || {
+                error
+                    .get()
+                    .map(|text| {
+                        view! {
+                            <p id=error_in_error.clone() class="form-error" role="alert">
+                                {text}
+                            </p>
+                        }
+                    })
+            }}
+        </div>
+    }
+}
+
+/// Writes `copied_text` to the clipboard, then says in `said`, a polite
+/// region of the dialog's own (the announcer waits while a modal is open),
+/// whether it is there. A page not served over HTTPS or from this computer
+/// has no clipboard, and a browser may refuse it: then it says `refused`,
+/// which tells the person to copy it by hand.
+pub(crate) fn copy_text(
+    copied_text: &str,
+    said: RwSignal<Option<String>>,
+    copied: String,
+    refused: String,
+) {
+    let clipboard = web_sys::window()
+        .and_then(|window| {
+            js_sys::Reflect::get(window.navigator().as_ref(), &"clipboard".into()).ok()
+        })
+        .and_then(|clipboard| clipboard.dyn_into::<web_sys::Clipboard>().ok());
+    let Some(clipboard) = clipboard else {
+        said.set(Some(refused));
+        return;
+    };
+    said.set(None);
+    let done = Closure::once(move |_: JsValue| {
+        said.try_set(Some(copied));
+    });
+    let failed = Closure::once(move |_: JsValue| {
+        said.try_set(Some(refused));
+    });
+    let _ = clipboard.write_text(copied_text).then2(&done, &failed);
+    // The promise calls one of them once, after this returns; each is a few
+    // bytes, left to the page rather than dropped before it is called.
+    done.forget();
+    failed.forget();
 }
 
 /// One problem of an [`ErrorSummary`]: what is wrong, and the field it is
@@ -1160,6 +1358,8 @@ fn row_id(prefix: &str, row: tree::Row) -> String {
 /// by its entry's name and described by what it is: its kind, size and
 /// modification time. A refused page is said in an alert under the tree;
 /// `empty` is said in place of a tree when the top folder holds nothing.
+/// `selected` follows what the tree selects ([`tree::Tree::selection`]), for
+/// a pane beside it that acts on that entry.
 #[component]
 pub(crate) fn Tree(
     localizer: Arc<Localizer>,
@@ -1168,6 +1368,7 @@ pub(crate) fn Tree(
     id: String,
     loader: FolderLoader,
     empty: String,
+    #[prop(optional)] selected: Option<RwSignal<Option<tree::Selection>>>,
 ) -> impl IntoView {
     let rtl = localizer.direction() == Direction::Rtl;
     let loading = text(&localizer, msg::UI_LOADING);
@@ -1178,6 +1379,10 @@ pub(crate) fn Tree(
     let mut initial = tree::Tree::new();
     let first = initial.start();
     let state = RwSignal::new(initial);
+    if let Some(selected) = selected {
+        let selection = Memo::new(move |_| state.with(tree::Tree::selection));
+        Effect::new(move |_| selected.set(selection.get()));
+    }
     // Puts focus on the row holding the tab stop once it is drawn.
     let focus_stop = move || {
         let Some(stop) = state.with_untracked(tree::Tree::tab_stop) else {

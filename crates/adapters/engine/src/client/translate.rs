@@ -5,7 +5,7 @@ use api::{ErrorCode, WarningCode};
 use app::ports::{
     BackupSummary, CheckSummary, EngineEvent, EngineResult, FolderAnswer, ForgetSummary,
     ProbeAnswer, ProgressEvent, ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary,
-    RewriteSummary,
+    RestorePlanSummary, RestoreSummary, RewriteSummary,
 };
 use domain::browse::{Entry, EntryName, FolderPage, PAGE_ENTRIES};
 use domain::execution::{FailureReason, Warning, WarningKind};
@@ -188,6 +188,19 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 stored_size: r.stored_size,
                 raw_size: r.raw_size,
             }),
+            OpResult::Restore(r) => EngineResult::Restore(RestoreSummary {
+                files_restored: r.files_restored,
+                files_unchanged: r.files_unchanged,
+                folders_restored: r.folders_restored,
+                bytes_restored: r.bytes_restored,
+            }),
+            OpResult::RestorePlan(r) => EngineResult::RestorePlan(RestorePlanSummary {
+                files_added: r.files_added,
+                files_overwritten: r.files_overwritten,
+                files_unchanged: r.files_unchanged,
+                files_kept: r.files_kept,
+                bytes_to_write: r.bytes_to_write,
+            }),
             // The listing's end, which `Listing` turns into the list before
             // an event reaches here.
             OpResult::Snapshots { .. } => return None,
@@ -198,6 +211,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
             EngineEvent::Failed(match code {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
+                ErrorCode::RestoreTargetUnwritable => FailureReason::RestoreTargetUnwritable,
                 // A repository that already exists where one was to be
                 // initialised, and a location with no repository at all
                 // (decision 53), are the failures the agent reports as codes
@@ -314,6 +328,11 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::BodyTooLarge
                 | ErrorCode::ConfigFolderUnknown
                 | ErrorCode::RuntimeUnavailable
+                | ErrorCode::StepUpFailed
+                | ErrorCode::RestoreRunning
+                | ErrorCode::RestoreInPlaceNotHere
+                | ErrorCode::RestoreHubNotAllowed
+                | ErrorCode::RestoreFolderUnset
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

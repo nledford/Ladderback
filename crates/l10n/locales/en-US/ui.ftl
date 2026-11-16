@@ -345,6 +345,21 @@ ui-gallery-demo-secret-review-body = This demo secret is shown only once.
 # The button inside that review demo that focus starts on. The demo shows only where focus starts: pressing it does nothing.
 ui-gallery-copy-demo-secret = Copy the demo secret
 
+# The button that opens the review demo that is held: it can't be confirmed yet, and says why.
+ui-gallery-open-held-review = Open a held demo review
+
+# The accessible name and heading of the held review demo.
+ui-gallery-demo-held-review = Demo review on hold
+
+# What the held review demo says first.
+ui-gallery-demo-held-review-body = This demo review can't be confirmed yet. Nothing runs.
+
+# The held review demo's confirm button, which says why it is held when pressed.
+ui-gallery-confirm-held-review = Confirm the held demo review
+
+# Why the held review demo can't be confirmed, shown beside its confirm button and said when it is pressed.
+ui-gallery-demo-held-review-reason = The demo review waits for something that never comes.
+
 # The heading of the pause control's demo.
 ui-gallery-pause-heading = Pause control
 
@@ -429,6 +444,43 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # A demo button that is busy saving: the label of the spinner inside it, which
 # names the button.
 ui-gallery-spinner-saving = Saving the demo settings…
+
+# The heading of the gallery's demo of the step-up field (§4.5): the field a
+# restore is confirmed with, in a review dialog.
+ui-gallery-step-up-heading = Step-up field
+
+# The button that opens the step-up demo.
+ui-gallery-open-step-up = Open the demo step-up
+
+# The title of the step-up demo's dialog.
+ui-gallery-demo-step-up = Demo step-up
+
+# What the step-up demo's dialog says first. Nothing is checked or sent.
+ui-gallery-demo-step-up-body = A demo of the field a restore is confirmed with. Nothing is checked or sent.
+
+# The step-up demo's confirm button, which shows the field's error.
+ui-gallery-check-demo-step-up = Check the demo password
+
+# The error the step-up demo shows, whatever was typed.
+ui-gallery-demo-step-up-wrong = That is not the demo password. Type it again, or paste it.
+
+# The button that opens the step-up demo that asks for a short ID, as with sign-in off.
+ui-gallery-open-step-up-id = Open the demo short-ID step-up
+
+# The title of the dialog of the step-up demo that asks for a short ID.
+ui-gallery-demo-step-up-id = Demo short-ID step-up
+
+# The label of the short-ID step-up demo's field.
+ui-gallery-demo-step-up-id-label = Demo ID
+
+# What the short-ID step-up demo's field says under its label, before the demo short ID it shows.
+ui-gallery-demo-step-up-id-hint = Type or paste the demo ID to confirm:
+
+# The short-ID step-up demo's confirm button, which shows the field's error.
+ui-gallery-check-demo-step-up-id = Check the demo ID
+
+# The error the short-ID step-up demo shows, whatever was typed.
+ui-gallery-demo-step-up-id-wrong = That is not the demo ID. Type or paste the 8 characters shown above.
 
 ## The review dialog (§4.5): what a run would do, shown in a dialog before it
 ## runs. The gallery's demos and the snapshots page both use its buttons.
@@ -635,6 +687,19 @@ ui-result-removed =
         [one] { $removed } snapshot removed
        *[other] { $removed } snapshots removed
     }
+
+# One fact of a finished restore's result: the files it wrote, new or
+# overwritten.
+# $files (count): how many.
+ui-result-restored =
+    { $files ->
+        [one] { $files } file restored
+       *[other] { $files } files restored
+    }
+
+# One fact of a finished restore's result: the bytes it wrote.
+# $bytes (bytes): how much, as a size such as 1 MiB.
+ui-result-written = { $bytes } written
 
 # One fact of a finished adoption's result: the snapshots it rewrote into
 # the plan.
@@ -1192,6 +1257,131 @@ ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 # Announced politely when the settle-poll after a start or a cancel ran out
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
+
+## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
+## admin password with sign-in on, the short ID of what it confirms with
+## sign-in off. Paste and password managers work in it.
+
+# The label of the step-up field with sign-in on.
+ui-step-up-password-label = Admin password
+
+# What the step-up field says under its label with sign-in on.
+ui-step-up-password-hint = Type the admin password again, or fill it in from your password manager. Paste works here.
+
+# The button beside a short ID that copies it to the clipboard.
+ui-step-up-copy = Copy the ID
+
+# Said beside that button once the ID is on the clipboard.
+ui-step-up-copied = Copied.
+
+# Said beside that button when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
+ui-step-up-copy-failed = The browser would not let the page copy it. Select the ID and copy it yourself.
+
+## Restoring an entry of a snapshot from its page (§10.4): the Restore
+## button beside the tree, its dialog and what is said as it runs.
+
+# The heading of the pane beside a snapshot's tree that acts on the entry the tree selects.
+ui-restore-pane = Selected entry
+
+# What that pane says while the tree selects nothing.
+ui-restore-pane-empty = Select a folder or file in the tree to restore it.
+
+# The button that opens the restore dialog for the entry the tree selects, and that dialog's title.
+# $name (text): the entry's name, as the tree shows it.
+ui-restore-button = Restore { $name }
+
+# What the restore dialog says first, which a screen reader reads as the dialog opens.
+# $name (text): the entry's name, as the tree shows it.
+# $snapshot (text): the snapshot's short ID.
+# $alias (text): the repository's alias.
+ui-restore-summary = This restores { $name } as { -snapshot } { $snapshot } of { $alias } holds it. A restore never deletes a file.
+
+# The name of the choice of where to restore.
+ui-restore-where = Where to restore
+
+# The choice to restore into a folder made for this restore.
+ui-restore-new-folder = Into a new folder
+
+# The choice to restore over the original files, which adds and overwrites and never deletes.
+ui-restore-in-place = Over the original files
+
+# What the choice of where to restore says under its name.
+ui-restore-where-hint = A new folder is made for it in the agent's restore folder. Over the original files, it first reads what it would change.
+
+# Said in the restore dialog while the dry run of a restore over the original files reads what it would change.
+ui-restore-previewing = Reading what a restore over the original files would change…
+
+# What the dry run of a restore over the original files found, said in the restore dialog before it can be confirmed.
+# $added (count): files it would add, where nothing is.
+# $overwritten (count): files it would overwrite, which differ from the snapshot's.
+# $unchanged (count): files already as the snapshot holds them.
+ui-restore-preview =
+    { $added ->
+        [one] { $added } file added
+       *[other] { $added } files added
+    }, { $overwritten } overwritten, { $unchanged ->
+        [one] { $unchanged } left as it is
+       *[other] { $unchanged } left as they are
+    }. Files the { -snapshot } doesn't hold stay.
+
+# Beside the restore dialog's confirm button, while restoring over the original files waits for its dry run; also said when that button is pressed then.
+ui-restore-held-reading = Restoring over the original files waits until the dry run says what it would change.
+
+# Beside the restore dialog's confirm button, after the dry run of a restore over the original files couldn't be read; also said when that button is pressed then.
+ui-restore-held-unread = The dry run couldn't be read, so nothing is restored over the original files. Read it again, or restore into a new folder.
+
+# The button in the restore dialog that asks for the dry run again, after it couldn't be read.
+ui-restore-read-again = Read the dry run again
+
+# The label of the step-up field with sign-in off: the snapshot's short ID.
+ui-restore-snapshot-id = Snapshot ID
+
+# What the step-up field says under its label with sign-in off, before the short ID it shows.
+ui-restore-snapshot-id-hint = Type or paste this { -snapshot }'s short ID to confirm:
+
+# The restore dialog's confirm button.
+ui-restore-confirm = Restore
+
+# Said in the restore dialog while the restore is being started.
+ui-restore-starting = Starting the restore…
+
+# The step-up field's error with sign-in off, when what was typed is not the snapshot's short ID. Nothing was restored.
+# $length (count): how many characters the short ID has.
+ui-restore-wrong-id = That is not this { -snapshot }'s ID. Type or paste { $length } characters shown above.
+
+# The step-up field's error with sign-in on, when what was typed is not the admin password. Nothing was restored.
+ui-restore-wrong-password = That is not the admin password, so nothing was restored. Type it again, or fill it in from your password manager.
+
+# Said politely once a restore started, while it runs.
+# $name (text): the entry restored, as the tree shows it.
+ui-restore-running = Restore of { $name } started.
+
+# Said politely when a restore finished.
+# $name (text): the entry restored, as the tree shows it.
+ui-restore-finished = Restore of { $name } finished.
+
+# Said politely when a restore into a new folder finished, naming that folder.
+# $name (text): the entry restored, as the tree shows it.
+# $folder (text): the folder made for the restore, its full path on the agent's computer.
+ui-restore-finished-into = Restore of { $name } finished. Its files are in { $folder }.
+
+# Said politely when a restore was cancelled. What it wrote before stays.
+# $name (text): the entry restored, as the tree shows it.
+ui-restore-cancelled = Restore of { $name } was cancelled. What it wrote before stays.
+
+# Said politely when a restore into a new folder was cancelled, naming that
+# folder. What it wrote before stays there.
+# $name (text): the entry restored, as the tree shows it.
+# $folder (text): the folder made for the restore, its full path on the agent's computer.
+ui-restore-cancelled-into = Restore of { $name } was cancelled. What it wrote before stays in { $folder }.
+
+# Said urgently when a restore failed. The Operations page says why.
+# $name (text): the entry restored, as the tree shows it.
+ui-restore-failed = Restore of { $name } failed. The Operations page says why.
+
+# Said when the page stopped waiting for a restore, which goes on.
+# $name (text): the entry restored, as the tree shows it.
+ui-restore-unwatched = The daemon stopped answering, so this page can't say how the restore of { $name } ends. The Operations page will show it.
 
 ## A repository's stats at the end of the snapshots page (§4.4, §16 decision
 ## 104): four figures as last read, and a button that reads them now.

@@ -313,6 +313,20 @@ impl Tree {
         Self::stop_in(self.focus, &self.rows())
     }
 
+    /// The entry the tab stop is on: nothing before the top folder is read,
+    /// nor on a row that reads more of a folder. Selection follows focus, as
+    /// a single-select tree's does.
+    pub(crate) fn selection(&self) -> Option<Selection> {
+        let Row::Entry(index) = self.tab_stop()? else {
+            return None;
+        };
+        let node = self.node(index)?;
+        Some(Selection {
+            path: self.path(index),
+            name: node.entry.display.clone(),
+        })
+    }
+
     fn stop_in(focus: Option<Row>, rows: &[Row]) -> Option<Row> {
         focus
             .filter(|focus| rows.contains(focus))
@@ -648,6 +662,15 @@ impl Tree {
     }
 }
 
+/// What the tree selects, which a pane beside it acts on: the entry the tab
+/// stop is on, by its path in the snapshot, the names rustic records, and by
+/// the name it shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Selection {
+    pub(crate) path: String,
+    pub(crate) name: String,
+}
+
 /// The address of a page of a folder of snapshot `snapshot` of repository
 /// `alias`, under `base`: each name percent-encoded, so no name a snapshot
 /// records can change which route or which folder is asked for.
@@ -665,7 +688,7 @@ pub(crate) fn folder_url(base: &str, alias: &str, snapshot: &str, path: &str, fr
 }
 
 /// `text` with every byte but an unreserved one (RFC 3986) percent-encoded.
-fn encoded(text: &str) -> String {
+pub(crate) fn encoded(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {

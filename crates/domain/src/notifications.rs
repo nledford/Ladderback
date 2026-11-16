@@ -48,6 +48,9 @@ pub enum EventKind {
     ForgetFailed,
     PruneFailed,
     CheckFailed,
+    /// A restore of a snapshot's entry failed (§10.4): its success and its
+    /// start are not told.
+    RestoreFailed,
 }
 
 /// How an operation ended, as far as a notification tells it.
@@ -69,7 +72,7 @@ pub enum Ping {
 
 impl EventKind {
     /// Every event, in the order rules list them.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::BackupStarted,
         Self::BackupSucceeded,
         Self::BackupWarning,
@@ -78,6 +81,7 @@ impl EventKind {
         Self::ForgetFailed,
         Self::PruneFailed,
         Self::CheckFailed,
+        Self::RestoreFailed,
     ];
 
     /// The event's name, as a rule, a template and a webhook's body say it:
@@ -92,6 +96,7 @@ impl EventKind {
             Self::ForgetFailed => "forget.failed",
             Self::PruneFailed => "prune.failed",
             Self::CheckFailed => "check.failed",
+            Self::RestoreFailed => "restore.failed",
         }
     }
 
@@ -112,7 +117,8 @@ impl EventKind {
             | Self::BackupRetrying
             | Self::ForgetFailed
             | Self::PruneFailed
-            | Self::CheckFailed => Ping::Fail,
+            | Self::CheckFailed
+            | Self::RestoreFailed => Ping::Fail,
         }
     }
 
@@ -123,7 +129,8 @@ impl EventKind {
     }
 
     /// The event an operation of `kind` makes when it ends with `outcome`. A
-    /// backup tells each ending; forget, prune and check only a failure.
+    /// backup tells each ending; forget, prune, check and restore only a
+    /// failure.
     pub fn ended(kind: OperationKind, outcome: Outcome) -> Option<Self> {
         match (kind, outcome) {
             (OperationKind::Backup, Outcome::Succeeded) => Some(Self::BackupSucceeded),
@@ -132,6 +139,7 @@ impl EventKind {
             (OperationKind::Forget, Outcome::Failed) => Some(Self::ForgetFailed),
             (OperationKind::Prune, Outcome::Failed) => Some(Self::PruneFailed),
             (OperationKind::Check, Outcome::Failed) => Some(Self::CheckFailed),
+            (OperationKind::Restore, Outcome::Failed) => Some(Self::RestoreFailed),
             _ => None,
         }
     }

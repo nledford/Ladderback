@@ -121,6 +121,7 @@ Feature: An agent's configuration
         | source           | home/demo              |
         | glob-file        | .excludes              |
         | locale           | en_US                  |
+        | restore-folder   | ladderback-restore     |
         | repository-alias | Not A Slug             |
         | concurrency      | 0                      |
         | nice             | 20                     |
@@ -152,6 +153,7 @@ Feature: An agent's configuration
         | source           | /home/demo             |
         | glob-file        | /home/demo/.excludes   |
         | locale           | en-US                  |
+        | restore-folder   | /srv/restores          |
         | repository-alias | nas                    |
         | concurrency      | 64                     |
         | nice             | 19                     |

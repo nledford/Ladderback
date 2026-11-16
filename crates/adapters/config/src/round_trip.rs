@@ -37,8 +37,8 @@ use domain::planning::{
     GroupBy, HookEntry, Hooks, Hostname, Interval, KeepCount, KeepWithin, Locale, Location,
     LocationRule, Locations, MAX_DURATION, MAX_LOCATIONS, MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES,
     MIN_INTERVAL, Maintenance, NameFilter, NetworkKind, NetworkName, Nice, OnFailure, Overlap,
-    Plan, RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter,
-    UpdateCheck,
+    Plan, RepositoryConfig, RestoreFolder, RetentionPolicy, RetryPolicy, Schedule, Source,
+    SourceFilter, UpdateCheck,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{PlanId, RepositoryAlias, RepositoryId};
@@ -265,6 +265,9 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
     let nice = 0..=i64::from(Nice::MAX);
     let locale = "[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8}){0,3}"
         .prop_filter_map("a locale", |text| Locale::parse(&text).ok());
+    let restore_folder = absolute().prop_filter_map("a path without NUL", |path| {
+        RestoreFolder::parse(&path).ok()
+    });
     (
         weighted(0.5, hostname),
         concurrency,
@@ -272,9 +275,18 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
         any::<bool>(),
         weighted(0.5, locale),
         prop_oneof![Just(UpdateCheck::On), Just(UpdateCheck::Off)],
+        weighted(0.5, restore_folder),
     )
         .prop_map(
-            |(hostname, concurrency, nice, allow_hub_restore, locale, update_check)| {
+            |(
+                hostname,
+                concurrency,
+                nice,
+                allow_hub_restore,
+                locale,
+                update_check,
+                restore_folder,
+            )| {
                 AgentSettings {
                     hostname,
                     concurrency: Concurrency::new(concurrency).expect("drawn in its range"),
@@ -282,6 +294,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
                     allow_hub_restore,
                     locale,
                     update_check,
+                    restore_folder,
                 }
             },
         )
@@ -1010,7 +1023,9 @@ fn same() -> impl Strategy<Value = Same> {
 
 fn drawn() -> impl Strategy<Value = Drawn> {
     (
-        (agent(), hooks()),
+        // Boxed, as the lists' strategies are: unboxed, the whole drawing
+        // overflowed the test thread's stack once `[agent]` had seven keys.
+        (agent().boxed(), hooks()),
         (
             vec(weighted(0.8, repository().boxed()), 0..=3),
             vec(weighted(0.8, plan().boxed()), 0..=4),

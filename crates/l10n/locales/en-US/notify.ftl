@@ -45,6 +45,11 @@ notify-prune-failed = The prune of { $repository } failed ({ $code }).
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 notify-check-failed = The check of { $repository } failed ({ $code }).
 
+# A restore of files from one of a repository's snapshots failed.
+# $repository (text): the repository's alias, such as nas, or the operation's ID when the agent has none for it.
+# $code (text): the failure's code, such as restore-target-unwritable, or none when it is unknown.
+notify-restore-failed = Restoring files from { $repository } failed ({ $code }).
+
 ### The title of a notification of each event (technical design §11): the
 ### line an ntfy topic shows above the message, on a phone's lock screen too.
 ### A short sentence that names what happened, with nothing of the event's
@@ -73,3 +78,6 @@ notify-title-prune-failed = Prune failed
 
 # The title of a notification that a check of a repository failed.
 notify-title-check-failed = Check failed
+
+# The title of a notification that a restore of files from a snapshot failed.
+notify-title-restore-failed = Restore failed

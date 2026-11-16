@@ -113,7 +113,7 @@ export async function serveDemoPlans(
   const configDir = path.join(scratch, "config");
   await mkdir(configDir);
   await writeFile(path.join(configDir, "config.toml"), config);
-  const { child, url } = await startServer({
+  const { child, url } = await startServer(scratch, {
     LADDERBACK_CONFIG_DIR: configDir,
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),
     LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),

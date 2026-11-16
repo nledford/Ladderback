@@ -330,6 +330,13 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
                 ("code", MsgArg::Text(code)),
             ],
         ),
+        EventKind::RestoreFailed => (
+            msg::NOTIFY_RESTORE_FAILED,
+            vec![
+                ("repository", MsgArg::Text(repository)),
+                ("code", MsgArg::Text(code)),
+            ],
+        ),
     };
     localizer.message(id, &args).text().to_owned()
 }
@@ -347,6 +354,7 @@ fn title(localizer: &Localizer, kind: EventKind) -> String {
         EventKind::ForgetFailed => msg::NOTIFY_TITLE_FORGET_FAILED,
         EventKind::PruneFailed => msg::NOTIFY_TITLE_PRUNE_FAILED,
         EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
+        EventKind::RestoreFailed => msg::NOTIFY_TITLE_RESTORE_FAILED,
     };
     localizer.message(id, &[]).text().to_owned()
 }

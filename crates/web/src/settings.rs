@@ -27,8 +27,6 @@ use api::{
 use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos::wasm_bindgen::closure::Closure;
-use leptos::wasm_bindgen::{JsCast, JsValue};
 
 use crate::announcer::Politeness;
 use crate::api_tokens::{
@@ -37,7 +35,7 @@ use crate::api_tokens::{
     revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
 };
 use crate::components::{
-    Checkbox, Confirmation, ErrorSummary, FormField, ReviewDialog, SummaryItem, Working,
+    Checkbox, Confirmation, ErrorSummary, FormField, ReviewDialog, SummaryItem, Working, copy_text,
     hand_focus_when_gone, sentence_view,
 };
 use crate::live::reply;
@@ -621,7 +619,7 @@ fn CreatedDialog(
                     node_ref=copy_button
                     on:click=move |_| {
                         if let Some(token) = secret.get_untracked() {
-                            copy(&token, said, copied.clone(), refused.clone());
+                            copy_text(&token, said, copied.clone(), refused.clone());
                         }
                     }
                 >
@@ -633,34 +631,6 @@ fn CreatedDialog(
             </p>
         </ReviewDialog>
     }
-}
-
-/// Writes `token` to the clipboard, then says in the dialog's own polite
-/// region (the announcer waits while a modal is open) whether it is there.
-/// A page not served over HTTPS or from this computer has no clipboard, and
-/// a browser may refuse it: then it says to copy the token by hand.
-fn copy(token: &str, said: RwSignal<Option<String>>, copied: String, refused: String) {
-    let clipboard = web_sys::window()
-        .and_then(|window| {
-            js_sys::Reflect::get(window.navigator().as_ref(), &"clipboard".into()).ok()
-        })
-        .and_then(|clipboard| clipboard.dyn_into::<web_sys::Clipboard>().ok());
-    let Some(clipboard) = clipboard else {
-        said.set(Some(refused));
-        return;
-    };
-    said.set(None);
-    let done = Closure::once(move |_: JsValue| {
-        said.try_set(Some(copied));
-    });
-    let failed = Closure::once(move |_: JsValue| {
-        said.try_set(Some(refused));
-    });
-    let _ = clipboard.write_text(token).then2(&done, &failed);
-    // The promise calls one of them once, after this returns; each is a few
-    // bytes, left to the page rather than dropped before it is called.
-    done.forget();
-    failed.forget();
 }
 
 /// The dialog that asks before the token is revoked, named for it: Cancel

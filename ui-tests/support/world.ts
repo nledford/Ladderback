@@ -5,6 +5,7 @@
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdirSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -132,25 +133,48 @@ export interface Server {
 // scenario that shows an available update gives the page one itself.
 export const NO_RELEASE_FEED = "http://127.0.0.1:9/";
 
+/** The environment a command of the binary runs in: the run's own, read in
+ *  English, with `HOME` and the XDG folders in `scratch/home`. A daemon that
+ *  falls back on the platform's folders, or a restore to a new folder under
+ *  the home, then writes into the scenario's scratch folder, never into the
+ *  developer's real Ladderback folders or home (as scripts/with-test-home.sh
+ *  does for the Rust tests). `extra` names what the caller has prepared, such
+ *  as Ladderback's own folders. */
+export function binaryEnv(scratch: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const home = path.join(scratch, "home");
+  mkdirSync(home, { recursive: true });
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    // The banner `startServer` reads is in English, whatever language the
+    // machine speaks: `C` makes the binary ignore LANGUAGE, which is cleared too.
+    LC_ALL: "C",
+    LANGUAGE: "",
+    HOME: home,
+    XDG_DATA_HOME: path.join(home, ".local", "share"),
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    XDG_CACHE_HOME: path.join(home, ".cache"),
+    XDG_STATE_HOME: path.join(home, ".local", "state"),
+  };
+  // A caller's own would name the developer's folders where a step names none.
+  delete env.LADDERBACK_CONFIG_DIR;
+  delete env.LADDERBACK_DATA_DIR;
+  delete env.LADDERBACK_CACHE_DIR;
+  return { ...env, ...extra };
+}
+
 // Starts one `ladderback serve` in scratch folders of its own, so two
-// daemons never contend on one database (the e2e suites hit that). `extraEnv`
-// names what a caller has already prepared, such as the config folder of a
-// scenario's demo plan; `args` follow `serve`, a loopback address by default.
+// daemons never contend on one database (the e2e suites hit that), with its
+// home in `scratch` (`binaryEnv`). `extraEnv` names what a caller has already
+// prepared, such as the config folder of a scenario's demo plan; `args`
+// follow `serve`, a loopback address by default.
 export function startServer(
+  scratch: string,
   extraEnv: Record<string, string> = {},
   args: string[] = ["--listen", "127.0.0.1:0"],
 ): Promise<Server> {
   const child = spawn(binary, ["serve", ...args], {
     stdio: ["ignore", "inherit", "pipe"],
-    // The banner below is read in English, whatever language the machine
-    // speaks: `C` makes the daemon ignore LANGUAGE, which is cleared too.
-    env: {
-      ...process.env,
-      LC_ALL: "C",
-      LANGUAGE: "",
-      LADDERBACK_RELEASES_URL: NO_RELEASE_FEED,
-      ...extraEnv,
-    },
+    env: binaryEnv(scratch, { LADDERBACK_RELEASES_URL: NO_RELEASE_FEED, ...extraEnv }),
   });
   return new Promise((resolve, reject) => {
     let output = "";
@@ -201,7 +225,7 @@ async function assertServesThisCheckoutsUi(url: string): Promise<void> {
 
 BeforeAll(async function () {
   serverScratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-shared-"));
-  const started = await startServer({
+  const started = await startServer(serverScratch, {
     LADDERBACK_CONFIG_DIR: path.join(serverScratch, "config"),
     LADDERBACK_DATA_DIR: path.join(serverScratch, "data"),
     LADDERBACK_CACHE_DIR: path.join(serverScratch, "cache"),

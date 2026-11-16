@@ -230,7 +230,7 @@ impl MaintenanceRefusal {
 
 /// The typed refusal of `error` on the repository `alias`, with the status
 /// of its kind.
-fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
+pub(crate) fn refusal(alias: &str, error: MaintenanceRefusal) -> Response {
     let (status, error) = answer(alias, error);
     (status, Json(error)).into_response()
 }

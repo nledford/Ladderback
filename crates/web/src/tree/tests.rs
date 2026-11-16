@@ -237,6 +237,34 @@ fn a_folder_s_path_joins_the_names_rustic_records_never_those_shown() {
 }
 
 #[test]
+fn the_selection_is_the_entry_the_tab_stop_is_on_by_its_recorded_path_and_shown_name() {
+    let mut tree = opened();
+    open_with(
+        &mut tree,
+        "docs",
+        whole(vec![shown_as("a\\tb.txt", "a\tb.txt", EntryKindDto::File)]),
+    );
+    focus_on(&mut tree, "a\\tb.txt");
+    assert_eq!(
+        tree.selection(),
+        Some(Selection {
+            path: "docs/a\\tb.txt".to_owned(),
+            name: "a\tb.txt".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn nothing_is_selected_before_the_top_folder_is_read_or_on_a_row_that_reads_more() {
+    let mut tree = Tree::new();
+    let request = tree.start().expect("the top folder is asked for");
+    assert_eq!(tree.selection(), None);
+    tree.answered(&request, Ok(page(vec![file("a.txt")], 2, Some(1))));
+    press(&mut tree, "End");
+    assert_eq!(tree.selection(), None);
+}
+
+#[test]
 fn right_on_an_open_folder_that_holds_nothing_stays() {
     let mut tree = opened();
     open_with(&mut tree, "empty", whole(Vec::new()));

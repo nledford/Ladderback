@@ -53,7 +53,8 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Target, Trigger, WarningKind};
 use domain::planning::{
     InterfaceKind, Link, Location, LocationRule, Maintenance, MixedLinkNote, NameFilter,
-    NotRecorded, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RuleNote,
+    NotRecorded, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RestoreFolder,
+    RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
@@ -83,6 +84,7 @@ mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
 mod profiles;
+mod restores;
 mod runs;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
@@ -312,6 +314,9 @@ impl RunConditions {
 /// beside them the release check, when there is a feed to ask.
 pub(crate) struct Background {
     runner: Arc<PlanRunner>,
+    /// Where a restore makes its new folder when `[agent] restore-folder`
+    /// is unset (§10.4): none on a machine without a home folder.
+    restore_folder: Option<RestoreFolder>,
     /// The queued operations recovery found, oldest first.
     queued: Vec<OperationRecord>,
     config: Arc<dyn ConfigStore>,
@@ -622,6 +627,13 @@ pub(crate) async fn daemon(
             SignIn::On(access)
         }
     };
+    // A restore's step-up follows the sign-in just decided, its one source:
+    // the admin password, in the sign-in waits, with sign-in on (§10.4).
+    daemon.state.restores = Arc::new(restores::RestoreService::new(
+        &daemon.background.runner,
+        daemon.background.restore_folder.clone(),
+        &daemon.state.sign_in,
+    ));
     daemon.state.exposure = exposure;
     daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
     Ok(daemon)
@@ -820,6 +832,24 @@ async fn state_over(
         // kept in the operation log's database (§16, decision 104).
         readings: Arc::<SqliteStore>::clone(&log.store),
     });
+    // `~/ladderback-restore`. With no home folder, or one that isn't
+    // UTF-8, there is none: a restore to a new folder then needs
+    // `[agent] restore-folder`, and never lands beside the database and
+    // the secrets in the data folder (§10.4).
+    let restore_folder = std::env::home_dir().and_then(|home| {
+        home.join("ladderback-restore")
+            .to_str()
+            .and_then(|folder| RestoreFolder::parse(folder).ok())
+    });
+    let sign_in = SignIn::Off {
+        password: Arc::new(FileAdminPassword::in_data_dir(data_dir)),
+        sessions: Arc::<SqliteStore>::clone(&log.store),
+    };
+    let restores: Arc<dyn http_adapter::Restores> = Arc::new(restores::RestoreService::new(
+        &runner,
+        restore_folder.clone(),
+        &sign_in,
+    ));
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
@@ -853,6 +883,7 @@ async fn state_over(
     let notice = Arc::new(UpdateNotice::new());
     let background = Background {
         runner,
+        restore_folder,
         queued: recovered.queued,
         config,
         schedules,
@@ -871,10 +902,8 @@ async fn state_over(
             repositories,
             plans,
             profiles,
-            sign_in: SignIn::Off {
-                password: Arc::new(FileAdminPassword::in_data_dir(data_dir)),
-                sessions: Arc::<SqliteStore>::clone(&log.store),
-            },
+            restores,
+            sign_in,
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
             restart: http_adapter::Restart::default(),
@@ -1314,13 +1343,15 @@ fn is_operation(job: &Job) -> bool {
         | Job::Ls(_)
         | Job::Browse(_)
         | Job::Stats(_)
-        | Job::PrunePlan(_) => false,
+        | Job::PrunePlan(_)
+        | Job::RestorePlan(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
         | Job::Rewrite(_)
         | Job::Prune(_)
-        | Job::Check(_) => true,
+        | Job::Check(_)
+        | Job::Restore(_) => true,
     }
 }
 
@@ -2173,10 +2204,16 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             rewritten: u64::try_from(rewrite.created.len()).unwrap_or(0),
             duration_ms,
         }),
+        EngineResult::Restore(restore) => Some(api::OperationResultDto::Restore {
+            files: restore.files_restored,
+            bytes: restore.bytes_restored,
+            duration_ms,
+        }),
         // Reads: a result no operation row holds, so the page shows none.
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
         | EngineResult::PrunePlan(_)
+        | EngineResult::RestorePlan(_)
         | EngineResult::Probed(_)
         | EngineResult::Snapshots(_)
         | EngineResult::Folder(_)
@@ -2196,6 +2233,7 @@ fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",
+        OperationKind::Restore => "restore",
     }
 }
 
@@ -3392,6 +3430,9 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             None,
         ),
         F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
+        F::RestoreTargetUnwritable => {
+            unavailable(ErrorCode::RestoreTargetUnwritable, Vec::new(), None)
+        }
         F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
         F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
         // Only a backup's before-hook stops a job this way: a repository job

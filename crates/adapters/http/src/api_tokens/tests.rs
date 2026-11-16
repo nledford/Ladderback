@@ -334,6 +334,17 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
         (Method::POST, "/api/v1/repositories/_init", None),
         (Method::POST, "/api/v1/repositories/home/init", None),
         (Method::POST, "/api/v1/repositories/home/maintenance", None),
+        // A restore needs step-up, which no token can carry (§10.5).
+        (
+            Method::POST,
+            "/api/v1/repositories/home/snapshots/abcd/restore",
+            None,
+        ),
+        (
+            Method::POST,
+            "/api/v1/repositories/home/snapshots/abcd/restore/preview",
+            None,
+        ),
         (Method::GET, "/api/v1/plans/home", None),
         (Method::PUT, "/api/v1/plans/home", None),
         (Method::DELETE, "/api/v1/plans/home", None),
@@ -461,6 +472,22 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
         post("/api/v1/repositories", &auth, "{}"),
         post("/api/v1/repositories/_test", &auth, "{}"),
         post("/api/v1/repositories/home/maintenance", &auth, "{}"),
+        post(
+            &format!(
+                "/api/v1/repositories/home/snapshots/{}/restore",
+                "ab".repeat(32)
+            ),
+            &auth,
+            r#"{"path":"","destination":"new-folder","confirmation":"abababab"}"#,
+        ),
+        post(
+            &format!(
+                "/api/v1/repositories/home/snapshots/{}/restore/preview",
+                "ab".repeat(32)
+            ),
+            &auth,
+            r#"{"path":""}"#,
+        ),
         post("/api/v1/plans", &auth, "{}"),
         get("/api/v1/plans/home", &auth),
         build(

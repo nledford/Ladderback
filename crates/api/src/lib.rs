@@ -370,6 +370,27 @@ pub enum ErrorCode {
     /// detail when it recorded many long warnings, which then names the
     /// `operation` (§4.6).
     DaemonAnswerTooLarge,
+    /// The step-up confirmation a restore asks for (§10.4) was not right:
+    /// the admin password with sign-in on, the snapshot's short ID with it
+    /// off. A wrong password counted as a failed sign-in. Nothing ran.
+    StepUpFailed,
+    /// A restore couldn't write where it was to write: the restore folder,
+    /// or a path it restores in place, refused it (§10.4). What it wrote
+    /// before stays.
+    RestoreTargetUnwritable,
+    /// A restore runs on the agent already, and an agent runs one at a time
+    /// (§10.4): nothing ran. The argument `operation` names the one running.
+    RestoreRunning,
+    /// A restore in place was asked for from elsewhere than the agent's own
+    /// web UI, the one place it is offered (§10.4): nothing ran.
+    RestoreInPlaceNotHere,
+    /// A restore was asked for through the hub, and the agent doesn't set
+    /// `allow-hub-restore` (§10.4): nothing ran.
+    RestoreHubNotAllowed,
+    /// A restore into a new folder was asked for, and the agent has no
+    /// folder to make it in: no home folder, and `[agent] restore-folder`
+    /// unset (§10.4). Nothing ran.
+    RestoreFolderUnset,
     #[serde(other)]
     Unknown,
 }
@@ -1063,7 +1084,7 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
-            Self::MaintenanceBusy => &[ArgSpec {
+            Self::MaintenanceBusy | Self::RestoreRunning => &[ArgSpec {
                 name: "operation",
                 kind: ArgKind::Text,
                 optional: false,
@@ -1193,6 +1214,11 @@ impl ErrorCode {
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
+            | Self::StepUpFailed
+            | Self::RestoreTargetUnwritable
+            | Self::RestoreInPlaceNotHere
+            | Self::RestoreHubNotAllowed
+            | Self::RestoreFolderUnset
             | Self::Unknown => &[],
         }
     }
@@ -2532,6 +2558,55 @@ mod tests {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);
             assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
         }
+    }
+
+    #[test]
+    fn the_codes_of_a_restore_are_named_on_the_wire_and_only_a_running_one_names_its_operation() {
+        for (code, wire) in [
+            (ErrorCode::StepUpFailed, r#""step-up-failed""#),
+            (
+                ErrorCode::RestoreTargetUnwritable,
+                r#""restore-target-unwritable""#,
+            ),
+            (ErrorCode::RestoreRunning, r#""restore-running""#),
+            (
+                ErrorCode::RestoreInPlaceNotHere,
+                r#""restore-in-place-not-here""#,
+            ),
+            (
+                ErrorCode::RestoreHubNotAllowed,
+                r#""restore-hub-not-allowed""#,
+            ),
+            (ErrorCode::RestoreFolderUnset, r#""restore-folder-unset""#),
+        ] {
+            assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
+            let args: Vec<&str> = code.args().iter().map(|arg| arg.name).collect();
+            let named: &[&str] = if code == ErrorCode::RestoreRunning {
+                &["operation"]
+            } else {
+                &[]
+            };
+            assert_eq!(args, named, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_restore_request_travels_in_kebab_case_and_its_debug_hides_the_confirmation() {
+        let request: RestoreRequestDto = serde_json::from_str(
+            r#"{"path":"home/docs","destination":"in-place","confirmation":"canary-admin-password"}"#,
+        )
+        .unwrap();
+        assert_eq!(request.destination, RestoreDestinationDto::InPlace);
+        let shown = format!("{request:?}");
+        assert!(!shown.contains("canary-admin-password"), "{shown}");
+        assert!(shown.contains("home/docs"), "{shown}");
+        assert!(
+            serde_json::from_str::<RestoreRequestDto>(
+                r#"{"path":"","destination":"new-folder","confirmation":"x","extra":1}"#
+            )
+            .is_err()
+        );
     }
 
     // The `plan-invalid` message and the Plans page select on these names,
@@ -4661,6 +4736,81 @@ pub struct MaintenanceRequestDto {
     pub selection: Option<String>,
 }
 
+/// Where a restore writes (§10.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestoreDestinationDto {
+    /// A folder made for this restore under the agent's restore folder.
+    NewFolder,
+    /// Over the original paths: adds and overwrites, never deletes.
+    InPlace,
+}
+
+/// `POST /api/v1/repositories/{alias}/snapshots/{snapshot}/restore/preview`:
+/// the entry whose restore in place a dry run is to tell.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RestorePreviewRequestDto {
+    /// The entry's path in the snapshot, its names joined by `/`; empty for
+    /// the snapshot's top.
+    pub path: String,
+}
+
+/// What restoring an entry in place would do, from a dry run that wrote
+/// nothing (§10.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RestorePreviewDto {
+    /// Files it would add, where nothing is.
+    pub added: u64,
+    /// Files it would overwrite, which differ from the snapshot's.
+    pub overwritten: u64,
+    /// Files already as the snapshot holds them.
+    pub unchanged: u64,
+    /// Entries the original holds and the snapshot doesn't: they stay. A
+    /// folder of them counts once.
+    pub kept: u64,
+    /// Bytes it would write.
+    pub bytes: u64,
+}
+
+/// `POST /api/v1/repositories/{alias}/snapshots/{snapshot}/restore`: the
+/// entry to restore, where to, and the step-up confirmation: the admin
+/// password with sign-in on, the snapshot's short ID otherwise. The
+/// confirmation is never logged or shown (I4): its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RestoreRequestDto {
+    /// The entry's path in the snapshot, as [`RestorePreviewRequestDto`]
+    /// gives it.
+    pub path: String,
+    pub destination: RestoreDestinationDto,
+    pub confirmation: String,
+}
+
+impl std::fmt::Debug for RestoreRequestDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RestoreRequestDto")
+            .field("path", &self.path)
+            .field("destination", &self.destination)
+            .field("confirmation", &"[hidden]")
+            .finish()
+    }
+}
+
+/// What `POST …/snapshots/{snapshot}/restore` answers once the restore
+/// started: its operation's ID and, for a restore into a new folder, that
+/// folder, so the person is told where its files are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RestoreStartedDto {
+    pub operation: String,
+    /// The folder made for the restore; absent when it restores over the
+    /// original paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
 /// One recorded warning of an operation's detail: its typed code and the
 /// free-form fields the engine reported.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -4728,6 +4878,13 @@ pub enum OperationResultDto {
     /// What an adoption produced: the snapshots rewritten.
     Adopt {
         rewritten: u64,
+        duration_ms: u64,
+    },
+    /// What a restore wrote: the files written, new or overwritten, and
+    /// their bytes.
+    Restore {
+        files: u64,
+        bytes: u64,
         duration_ms: u64,
     },
 }

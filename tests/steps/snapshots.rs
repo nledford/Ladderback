@@ -94,6 +94,9 @@ pub struct SnapshotsSetup {
     snapshot: Option<SnapshotId>,
     /// The folder the last browse opened, and the page it gave.
     opened: Option<(FolderPath, Result<FolderPage, BrowseError>)>,
+    /// The real path of the folder the snapshot's top stands for, when its
+    /// source was backed up at its own path.
+    backed_up_from: Option<PathBuf>,
 }
 
 impl Agent {
@@ -111,15 +114,29 @@ impl Agent {
     }
 
     /// A fresh operation ID for each use-case call.
-    fn next_snapshot_op(&mut self) -> OperationId {
+    pub(super) fn next_snapshot_op(&mut self) -> OperationId {
         self.runs += 1;
         OperationId::from_uuid(Uuid::from_u128(self.runs))
+    }
+
+    /// The snapshot the scenario made.
+    pub(super) fn snapshot_made(&self) -> SnapshotId {
+        self.snapshots
+            .snapshot
+            .clone()
+            .expect("the scenario made a snapshot")
+    }
+
+    /// The real path of the folder the snapshot's top stands for, when its
+    /// source was backed up at its own path: the scratch folder.
+    pub(super) fn snapshot_backed_up_from(&self) -> Option<&Path> {
+        self.snapshots.backed_up_from.as_deref()
     }
 
     /// The configuration's entry for the scenario's repository, under an
     /// alias of its own, recording no ID: a read opens whatever is at the
     /// location.
-    fn snapshot_entry(&self) -> domain::planning::RepositoryConfig {
+    pub(super) fn snapshot_entry(&self) -> domain::planning::RepositoryConfig {
         domain::planning::RepositoryConfig {
             locations: Default::default(),
             settings: self
@@ -350,14 +367,19 @@ fn source_tree(source: &Path) {
     }
 }
 
-#[given("a repository with a snapshot of a source folder")]
-async fn a_repository_with_a_snapshot_of_a_source_folder(agent: &mut Agent) {
+/// Backs up the browse scenarios' source, `source` in the scratch folder,
+/// into a new scratch repository: as `/source`, so the snapshot's top folder
+/// holds `source`, or, `at_own_path`, at the source's real path with its
+/// symbolic links resolved, so its original paths are inside the scratch
+/// folder, where a restore in place may write.
+async fn snapshot_of_source(agent: &mut Agent, at_own_path: bool) {
     let cold = agent.scratch().join("repo");
     init(&cold).await;
     let source = agent.scratch().join("source");
     let at = cold.clone();
     let snapshot = blocking(move || {
         source_tree(&source);
+        let source = fs::canonicalize(&source).expect("the source's real path");
         let repo = repository(&at)
             .open(&credentials())
             .expect("the scratch repository opens")
@@ -367,9 +389,12 @@ async fn a_repository_with_a_snapshot_of_a_source_folder(agent: &mut Agent) {
             .sanitize()
             .expect("the paths");
         let options = SnapshotOptions::default().host("demo-host".to_owned());
-        // Backed up as `/source`, so the snapshot's top folder holds `source`.
+        let mut backup = BackupOptions::default();
+        if !at_own_path {
+            backup = backup.as_path(PathBuf::from("/source"));
+        }
         repo.backup(
-            &BackupOptions::default().as_path(PathBuf::from("/source")),
+            &backup,
             &paths,
             options.to_snapshot().expect("the snapshot options"),
         )
@@ -378,8 +403,20 @@ async fn a_repository_with_a_snapshot_of_a_source_folder(agent: &mut Agent) {
     .await;
     agent.snapshots.snapshot =
         Some(SnapshotId::parse(&snapshot.id.to_hex()).expect("a snapshot ID"));
+    agent.snapshots.backed_up_from = at_own_path
+        .then(|| fs::canonicalize(agent.scratch()).expect("the scratch folder's real path"));
     agent.snapshots.cold = Some(cold.clone());
     agent.snapshot_settings().repository = text(&cold);
+}
+
+#[given("a repository with a snapshot of a source folder")]
+async fn a_repository_with_a_snapshot_of_a_source_folder(agent: &mut Agent) {
+    snapshot_of_source(agent, false).await;
+}
+
+#[given("a repository with a snapshot of a source folder at its own path")]
+async fn a_repository_with_a_snapshot_of_a_source_folder_at_its_own_path(agent: &mut Agent) {
+    snapshot_of_source(agent, true).await;
 }
 
 #[given("the snapshot has been forgotten")]

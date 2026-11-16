@@ -56,6 +56,9 @@ pub fn expected() -> AgentConfig {
         allow_hub_restore: true,
         locale: Some(Locale::parse("en-US").expect("a locale")),
         update_check: domain::planning::UpdateCheck::Off,
+        restore_folder: Some(
+            domain::planning::RestoreFolder::parse("/srv/restores").expect("a restore folder"),
+        ),
     };
     let hooks = Hooks {
         run_before: vec![hook("echo 'agent starting'")],

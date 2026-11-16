@@ -7,6 +7,7 @@ nice = 10
 allow-hub-restore = true
 locale = "en-US"
 check-for-updates = false
+restore-folder = "/srv/restores"
 
 [hooks]
 run-before = ["echo 'agent starting'"]

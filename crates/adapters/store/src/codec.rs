@@ -38,13 +38,14 @@ pub(crate) fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Prune => "prune",
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",
+        OperationKind::Restore => "restore",
     }
 }
 
 /// Every operation kind, the table the `kind` column is read through. `Ls` is
 /// in it though a listing is a read the log never writes (§9): a stored `ls`
 /// reads back as one, as it always has.
-const KINDS: [OperationKind; 9] = [
+const KINDS: [OperationKind; 10] = [
     OperationKind::Fake,
     OperationKind::Identify,
     OperationKind::Init,
@@ -54,6 +55,7 @@ const KINDS: [OperationKind; 9] = [
     OperationKind::Prune,
     OperationKind::Check,
     OperationKind::Ls,
+    OperationKind::Restore,
 ];
 
 /// The kind [`kind_text`] writes as `text`; none for a word no kind is
@@ -224,6 +226,7 @@ pub(crate) fn encode_failure(
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
         FailureReason::DaemonShutDown => ("daemon-shut-down", Vec::new(), None),
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
+        FailureReason::RestoreTargetUnwritable => ("restore-target-unwritable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
         FailureReason::SecretRefused { field, refusal } => (
@@ -332,6 +335,7 @@ pub(crate) fn decode_failure(
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
         "daemon-shut-down" => Ok(FailureReason::DaemonShutDown),
         "no-location-usable" => Ok(FailureReason::NoLocationUsable),
+        "restore-target-unwritable" => Ok(FailureReason::RestoreTargetUnwritable),
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
         "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
         "hook-failed" => Ok(FailureReason::HookFailed {
@@ -560,6 +564,7 @@ mod tests {
             OperationKind::Prune => "prune",
             OperationKind::Check => "check",
             OperationKind::Ls => "ls",
+            OperationKind::Restore => "restore",
         }
     }
 
@@ -578,7 +583,7 @@ mod tests {
     /// corrupt rather than guess at it.
     #[test]
     fn a_word_no_kind_is_written_as_reads_as_no_kind() {
-        for word in ["", "restore", "Backup", " backup", "backup ", "unknown"] {
+        for word in ["", "restores", "Backup", " backup", "backup ", "unknown"] {
             assert_eq!(kind_from_text(word), None, "{word:?}");
         }
     }

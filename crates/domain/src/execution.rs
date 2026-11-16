@@ -135,6 +135,10 @@ pub enum FailureReason {
     /// another one, or a secret of it was unavailable. The operation's
     /// locations say why, by position.
     NoLocationUsable,
+    /// A restore couldn't write where it was to write: the restore folder,
+    /// or a path it restores in place, refused it (§10.4). What it wrote
+    /// before stays.
+    RestoreTargetUnwritable,
     /// No location's rule held when the job started (decision 80): each
     /// rule wasn't met on the machine's network link, or couldn't be
     /// evaluated. The operation's locations say which, by position.
@@ -176,6 +180,7 @@ impl FailureReason {
             Self::DaemonStopped => "daemon-stopped",
             Self::DaemonShutDown => "daemon-shut-down",
             Self::NoLocationUsable => "no-location-usable",
+            Self::RestoreTargetUnwritable => "restore-target-unwritable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
             Self::PasswordNotAccepted => "password-not-accepted",
             Self::SecretRefused { refusal, .. } => refusal.code(),
@@ -321,6 +326,9 @@ pub enum OperationKind {
     /// Lists a repository's snapshots. A read, not an operation: it never
     /// takes an I7 slot and is never written to the operation log (§9).
     Ls,
+    /// Restores an entry of a snapshot into a new folder or in place
+    /// (§10.4). It only reads the repository: no I7 slot.
+    Restore,
 }
 
 impl OperationKind {
@@ -329,7 +337,9 @@ impl OperationKind {
     pub fn is_maintenance(self) -> bool {
         match self {
             Self::Forget | Self::Adopt | Self::Prune | Self::Check => true,
-            Self::Fake | Self::Identify | Self::Init | Self::Backup | Self::Ls => false,
+            Self::Fake | Self::Identify | Self::Init | Self::Backup | Self::Ls | Self::Restore => {
+                false
+            }
         }
     }
 }

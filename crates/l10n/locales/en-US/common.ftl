@@ -309,6 +309,33 @@ error-operation-not-running = Operation { $operation } has already ended, so the
 # $operation (text): the running operation's ID.
 error-maintenance-busy = Operation { $operation } is already maintaining this repository, and one repository runs one maintenance operation at a time. Wait for it to end, then ask again.
 
+# The confirmation a restore asks for first was not right: the admin
+# password with sign-in on, the snapshot's short ID with sign-in off.
+# Nothing was restored. A wrong password counts as a failed sign-in.
+error-step-up-failed = That confirmation is not right, so nothing was restored. Type the admin password, or, with sign-in off, the { -snapshot }'s short ID the dialog shows.
+
+# A restore could not write where it was to write: the restore folder, or a
+# path it restores in place, refused it. Whatever it wrote before stays.
+error-restore-target-unwritable = The restore could not write where it was to write, so it stopped. Make the restore folder, or the original files' folder, writable for the user { -brand-name } runs as, then restore again.
+
+# Another restore already runs on this agent, which runs one at a time, so
+# the request was refused and nothing ran.
+# $operation (text): the running restore's operation ID.
+error-restore-running = Restore { $operation } is already running, and this agent runs one restore at a time. Wait for it to end, then restore again.
+
+# A restore over the original files was asked for from elsewhere than this
+# agent's own web UI, the only place it is offered, so nothing ran.
+error-restore-in-place-not-here = A restore over the original files can only be started in this agent's own web UI, so nothing was restored. Restore into a new folder instead, or open the agent's web UI.
+
+# A restore was asked for through the hub, and this agent doesn't allow
+# restores from the hub, so nothing ran.
+error-restore-hub-not-allowed = This agent doesn't take restores from the hub, so nothing was restored. Set { "allow-hub-restore = true" } in the agent's configuration file to allow them.
+
+# A restore into a new folder was asked for, and this agent has no folder
+# to make it in: it has no home folder, and its configuration file doesn't
+# set restore-folder, so nothing ran.
+error-restore-folder-unset = This agent has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the agent's configuration file to a folder for restores, then try again.
+
 # This agent doesn't maintain the repository: its entry doesn't set
 # maintenance to local, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing was asked of the repository.

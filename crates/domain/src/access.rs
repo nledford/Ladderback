@@ -11,6 +11,7 @@ use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq;
 
 pub mod api_token;
+pub mod step_up;
 
 /// A session with an idle limit ends once it has gone this long unused. A
 /// session signed in with **Keep me signed in on this device** has none,

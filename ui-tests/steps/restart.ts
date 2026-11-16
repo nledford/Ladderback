@@ -28,6 +28,7 @@ const STOP_PATIENCE_MS = 20_000;
 Given("a daemon run by a service manager", async function (this: BrowserWorld) {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-restart-"));
   const { child, url } = await startServer(
+    scratch,
     {
       LADDERBACK_CONFIG_DIR: path.join(scratch, "config"),
       LADDERBACK_DATA_DIR: path.join(scratch, "data"),

@@ -548,7 +548,7 @@ impl Findings {
     }
 }
 
-/// How long to wait before reading a running maintenance's status again,
+/// How long to wait before reading a running operation's status again,
 /// after its `reads`-th read, counting from 1: a quarter of a second at
 /// first, so a run that ends in a moment is told at once, then every second,
 /// then every five, so a prune that takes an hour costs the daemon a few
@@ -573,58 +573,58 @@ const SECOND_READS: u32 = 80;
 /// seconds), a minute of a daemon that does not answer.
 const MAX_MISSES: u32 = 7;
 
-/// What the wait for a run does next.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Next {
+/// What the wait for an operation does after a read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Beat<'a> {
     /// Read again after this long.
     Again(Duration),
-    /// The run is over, and what the page lists of what it found.
-    Ended(End, Findings),
+    /// The operation is over, as this read of it says.
+    Ended(&'a OperationDetailDto),
     /// The daemon has not answered for too long to say how the run went.
     GaveUp,
 }
 
-/// The wait for one run to end: it counts the reads and the misses, and
-/// says after each what comes next.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Watch {
-    kind: Kind,
+/// The pace of the wait for one operation to end, whatever it runs: it
+/// counts the reads and the misses, and says after each what comes next. A
+/// maintenance run's wait and a restore's keep the same one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Pace {
     reads: u32,
     misses: u32,
 }
 
-impl Watch {
-    pub(crate) fn new(kind: Kind) -> Watch {
-        Watch {
-            kind,
-            reads: 0,
-            misses: 0,
-        }
-    }
-
-    /// What comes after a read of the run's operation: `None` is a read that
-    /// got no answer.
-    pub(crate) fn after(&mut self, read: Option<&OperationDetailDto>) -> Next {
+impl Pace {
+    /// What comes after a read of the operation: `None` is a read that got
+    /// no answer.
+    pub(crate) fn after<'a>(&mut self, read: Option<&'a OperationDetailDto>) -> Beat<'a> {
         match read {
-            Some(detail) if ended(&detail.operation.status) => Next::Ended(
-                End::read(self.kind, &detail.operation),
-                Findings::of(detail),
-            ),
+            Some(detail) if ended(&detail.operation.status) => Beat::Ended(detail),
             Some(_) => {
                 self.misses = 0;
                 self.reads = self.reads.saturating_add(1);
-                Next::Again(poll_delay(self.reads))
+                Beat::Again(poll_delay(self.reads))
             }
             None => {
                 self.misses = self.misses.saturating_add(1);
                 if self.misses >= MAX_MISSES {
-                    Next::GaveUp
+                    Beat::GaveUp
                 } else {
-                    Next::Again(reconnect_backoff(self.misses))
+                    Beat::Again(reconnect_backoff(self.misses))
                 }
             }
         }
     }
+}
+
+/// What the wait for an operation came to, whatever it runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Awaited {
+    /// The operation ended, as its last read says.
+    Ended(Box<OperationDetailDto>),
+    /// The daemon stayed silent for too long to go on waiting.
+    GaveUp,
+    /// The page that waited is gone.
+    Gone,
 }
 
 /// What the wait for a run came to.
@@ -636,6 +636,19 @@ pub(crate) enum Watched {
     GaveUp,
     /// The page that waited is gone.
     Gone,
+}
+
+impl Watched {
+    /// What the wait for a `kind` run came to.
+    pub(crate) fn of(kind: Kind, awaited: Awaited) -> Watched {
+        match awaited {
+            Awaited::Ended(detail) => {
+                Watched::Ended(End::read(kind, &detail.operation), Findings::of(&detail))
+            }
+            Awaited::GaveUp => Watched::GaveUp,
+            Awaited::Gone => Watched::Gone,
+        }
+    }
 }
 
 /// A request the page has out, which it waits on.
@@ -1624,10 +1637,10 @@ mod tests {
                 "pack 5ca1ab1e not referenced in index.",
             )],
         );
-        let mut watch = Watch::new(Kind::Check);
+        assert_eq!(Pace::default().after(Some(&detail)), Beat::Ended(&detail));
         assert_eq!(
-            watch.after(Some(&detail)),
-            Next::Ended(
+            Watched::of(Kind::Check, Awaited::Ended(Box::new(detail.clone()))),
+            Watched::Ended(
                 End::read(Kind::Check, &detail.operation),
                 Findings::of(&detail)
             )
@@ -1851,11 +1864,11 @@ mod tests {
 
     #[test]
     fn a_run_that_is_still_going_is_read_again_after_the_poll_delay() {
-        let mut watch = Watch::new(Kind::Prune);
+        let mut pace = Pace::default();
         for status in ["queued", "running"] {
             assert_eq!(
-                watch.after(Some(&read(status))),
-                Next::Again(Duration::from_millis(250)),
+                pace.after(Some(&read(status))),
+                Beat::Again(Duration::from_millis(250)),
                 "{status}"
             );
         }
@@ -1863,13 +1876,13 @@ mod tests {
 
     #[test]
     fn the_wait_slows_down_as_the_reads_pile_up() {
-        let mut watch = Watch::new(Kind::Prune);
+        let mut pace = Pace::default();
         for _ in 0..20 {
-            watch.after(Some(&read("running")));
+            pace.after(Some(&read("running")));
         }
         assert_eq!(
-            watch.after(Some(&read("running"))),
-            Next::Again(Duration::from_secs(1))
+            pace.after(Some(&read("running"))),
+            Beat::Again(Duration::from_secs(1))
         );
     }
 
@@ -1885,10 +1898,15 @@ mod tests {
             ("cancelled", Outcome::Cancelled, Politeness::Polite),
             ("failed", Outcome::Failed, Politeness::Assertive),
         ] {
-            let mut watch = Watch::new(Kind::Check);
+            let detail = read(status);
             assert_eq!(
-                watch.after(Some(&read(status))),
-                Next::Ended(
+                Pace::default().after(Some(&detail)),
+                Beat::Ended(&detail),
+                "{status}"
+            );
+            assert_eq!(
+                Watched::of(Kind::Check, Awaited::Ended(Box::new(detail.clone()))),
+                Watched::Ended(
                     End {
                         kind: Kind::Check,
                         outcome,
@@ -1902,50 +1920,56 @@ mod tests {
     }
 
     #[test]
+    fn a_wait_that_gave_up_or_whose_page_is_gone_is_told_as_such() {
+        assert_eq!(Watched::of(Kind::Prune, Awaited::GaveUp), Watched::GaveUp);
+        assert_eq!(Watched::of(Kind::Prune, Awaited::Gone), Watched::Gone);
+    }
+
+    #[test]
     fn a_read_that_got_no_answer_is_tried_again_after_a_growing_pause() {
-        let mut watch = Watch::new(Kind::Forget);
-        let pauses: Vec<Next> = (0..6).map(|_| watch.after(None)).collect();
+        let mut pace = Pace::default();
+        let pauses: Vec<Beat> = (0..6).map(|_| pace.after(None)).collect();
         assert_eq!(
             pauses,
-            [1, 2, 4, 8, 16, 30].map(|seconds| Next::Again(Duration::from_secs(seconds)))
+            [1, 2, 4, 8, 16, 30].map(|seconds| Beat::Again(Duration::from_secs(seconds)))
         );
     }
 
     #[test]
     fn the_wait_gives_up_when_the_daemon_stays_silent() {
-        let mut watch = Watch::new(Kind::Forget);
+        let mut pace = Pace::default();
         for _ in 0..6 {
-            assert_matches!(watch.after(None), Next::Again(_));
+            assert_matches!(pace.after(None), Beat::Again(_));
         }
-        assert_eq!(watch.after(None), Next::GaveUp);
+        assert_eq!(pace.after(None), Beat::GaveUp);
     }
 
     #[test]
     fn an_answer_forgives_the_reads_that_went_before_it() {
-        let mut watch = Watch::new(Kind::Forget);
+        let mut pace = Pace::default();
         for _ in 0..6 {
-            watch.after(None);
+            pace.after(None);
         }
-        assert_matches!(watch.after(Some(&read("running"))), Next::Again(_));
+        assert_matches!(pace.after(Some(&read("running"))), Beat::Again(_));
         assert_eq!(
-            watch.after(None),
-            Next::Again(Duration::from_secs(1)),
+            pace.after(None),
+            Beat::Again(Duration::from_secs(1)),
             "the misses start over"
         );
     }
 
     #[test]
     fn the_reads_that_got_no_answer_do_not_slow_the_poll() {
-        let mut watch = Watch::new(Kind::Forget);
+        let mut pace = Pace::default();
         for _ in 0..10 {
-            watch.after(None);
-            watch.after(Some(&read("running")));
+            pace.after(None);
+            pace.after(Some(&read("running")));
         }
         // The eleventh answered read: still within the quarter-second pace,
         // as it would not be if the ten misses counted as reads.
         assert_eq!(
-            watch.after(Some(&read("running"))),
-            Next::Again(Duration::from_millis(250))
+            pace.after(Some(&read("running"))),
+            Beat::Again(Duration::from_millis(250))
         );
     }
 

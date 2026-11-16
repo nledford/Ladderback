@@ -17,8 +17,8 @@ use crate::backend::Progress as Reading;
 use crate::badge::BadgeState;
 use crate::components::{
     Checkbox, Confirmation, FolderLoader, FolderPage, FormField, ModalDialog, PauseUpdates,
-    Progress, RadioGroup, ReviewDialog, SortableTable, Spinner, StatusBadge, Toast, Tree,
-    show_toast,
+    Progress, RadioGroup, ReviewDialog, SortableTable, Spinner, StatusBadge, StepUp, StepUpField,
+    Toast, Tree, show_toast,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -97,6 +97,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let empty_review_body = t(msg::UI_GALLERY_DEMO_EMPTY_REVIEW_BODY);
     let secret_review_body = t(msg::UI_GALLERY_DEMO_SECRET_REVIEW_BODY);
     let copy_demo_secret = t(msg::UI_GALLERY_COPY_DEMO_SECRET);
+    // The fourth is held: it says why it can't be confirmed, and never is.
+    let held_review_open = RwSignal::new(false);
+    let held_review_body = t(msg::UI_GALLERY_DEMO_HELD_REVIEW_BODY);
+    let held_review_reason = t(msg::UI_GALLERY_DEMO_HELD_REVIEW_REASON);
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
@@ -108,6 +112,26 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let demo_finished = backup_finished.clone();
     let banner_localizer = Arc::clone(&localizer);
     let resumed_localizer = Arc::clone(&localizer);
+    // The step-up demos, one per thing the field can ask for: whether each
+    // dialog is open, what is typed and the error its confirm button shows,
+    // whatever was typed.
+    let step_up_open = RwSignal::new(false);
+    let step_up_value = RwSignal::new(String::new());
+    let step_up_error = RwSignal::<Option<String>>::new(None);
+    let step_up_wrong = t(msg::UI_GALLERY_DEMO_STEP_UP_WRONG);
+    let step_up_body = t(msg::UI_GALLERY_DEMO_STEP_UP_BODY);
+    let step_up_localizer = Arc::clone(&localizer);
+    let step_up_id_open = RwSignal::new(false);
+    let step_up_id_value = RwSignal::new(String::new());
+    let step_up_id_error = RwSignal::<Option<String>>::new(None);
+    let step_up_id_wrong = t(msg::UI_GALLERY_DEMO_STEP_UP_ID_WRONG);
+    let step_up_id_body = t(msg::UI_GALLERY_DEMO_STEP_UP_BODY);
+    let step_up_id_localizer = Arc::clone(&localizer);
+    let step_up_id = StepUp::ShortId {
+        label: t(msg::UI_GALLERY_DEMO_STEP_UP_ID_LABEL),
+        hint: t(msg::UI_GALLERY_DEMO_STEP_UP_ID_HINT),
+        short: "1a2b3c4d".to_owned(),
+    };
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>
@@ -449,6 +473,15 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     {t(msg::UI_GALLERY_OPEN_SECRET_REVIEW)}
                 </button>
             </p>
+            <p>
+                <button
+                    type="button"
+                    id="gallery-held-review"
+                    on:click=move |_| held_review_open.set(true)
+                >
+                    {t(msg::UI_GALLERY_OPEN_HELD_REVIEW)}
+                </button>
+            </p>
             <ReviewDialog
                 open=review_open
                 title=t(msg::UI_GALLERY_DEMO_REVIEW)
@@ -498,6 +531,20 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     </button>
                 </p>
             </ReviewDialog>
+            <ReviewDialog
+                open=held_review_open
+                title=t(msg::UI_GALLERY_DEMO_HELD_REVIEW)
+                dismiss_label=t(msg::UI_REVIEW_CANCEL)
+                confirm=Some(Confirmation {
+                    label: t(msg::UI_GALLERY_CONFIRM_HELD_REVIEW),
+                    action: Callback::new(move |()| held_review_open.set(false)),
+                })
+                returns_to="gallery-held-review".to_owned()
+                described_by="gallery-held-review-body".to_owned()
+                held=Signal::stored(Some(held_review_reason))
+            >
+                <p id="gallery-held-review-body">{held_review_body}</p>
+            </ReviewDialog>
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TREE_HEADING)}</h2>
@@ -508,6 +555,65 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 loader=demo_tree(Arc::clone(&localizer))
                 empty=t(msg::UI_SNAPSHOT_EMPTY)
             />
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_STEP_UP_HEADING)}</h2>
+            <p>
+                <button type="button" id="gallery-step-up" on:click=move |_| step_up_open.set(true)>
+                    {t(msg::UI_GALLERY_OPEN_STEP_UP)}
+                </button>
+            </p>
+            <ReviewDialog
+                open=step_up_open
+                title=t(msg::UI_GALLERY_DEMO_STEP_UP)
+                dismiss_label=t(msg::UI_REVIEW_CLOSE)
+                confirm=Some(Confirmation {
+                    label: t(msg::UI_GALLERY_CHECK_DEMO_STEP_UP),
+                    action: Callback::new(move |()| step_up_error.set(Some(step_up_wrong.clone()))),
+                })
+                returns_to="gallery-step-up".to_owned()
+                described_by="gallery-step-up-body".to_owned()
+            >
+                <p id="gallery-step-up-body">{step_up_body}</p>
+                <StepUpField
+                    id="gallery-step-up-field"
+                    localizer=step_up_localizer
+                    step_up=StepUp::Password
+                    value=step_up_value
+                    error=step_up_error
+                />
+            </ReviewDialog>
+            <p>
+                <button
+                    type="button"
+                    id="gallery-step-up-id"
+                    on:click=move |_| step_up_id_open.set(true)
+                >
+                    {t(msg::UI_GALLERY_OPEN_STEP_UP_ID)}
+                </button>
+            </p>
+            <ReviewDialog
+                open=step_up_id_open
+                title=t(msg::UI_GALLERY_DEMO_STEP_UP_ID)
+                dismiss_label=t(msg::UI_REVIEW_CLOSE)
+                confirm=Some(Confirmation {
+                    label: t(msg::UI_GALLERY_CHECK_DEMO_STEP_UP_ID),
+                    action: Callback::new(move |()| {
+                        step_up_id_error.set(Some(step_up_id_wrong.clone()));
+                    }),
+                })
+                returns_to="gallery-step-up-id".to_owned()
+                described_by="gallery-step-up-id-body".to_owned()
+            >
+                <p id="gallery-step-up-id-body">{step_up_id_body}</p>
+                <StepUpField
+                    id="gallery-step-up-id-field"
+                    localizer=step_up_id_localizer
+                    step_up=step_up_id
+                    value=step_up_id_value
+                    error=step_up_id_error
+                />
+            </ReviewDialog>
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_PAUSE_HEADING)}</h2>

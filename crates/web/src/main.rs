@@ -77,6 +77,9 @@ mod progress;
 // What the restart section of Settings offers, says and waits for, decided
 // on the host; `settings.rs` is its glue.
 mod restart;
+// What restoring an entry of a snapshot sends, waits for and says, decided
+// on the host; `snapshot_page.rs` is its glue.
+mod restore;
 mod routes;
 // The Settings page's DOM glue; `api_tokens.rs` decides for it.
 mod settings;

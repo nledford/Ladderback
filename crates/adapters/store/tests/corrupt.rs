@@ -221,7 +221,7 @@ fn cases() -> Vec<Case> {
             good().with("status", "Succeeded"),
         ),
         broken("an empty status", "status", good().with("status", "")),
-        broken("an unknown kind", "kind", good().with("kind", "restore")),
+        broken("an unknown kind", "kind", good().with("kind", "copy")),
         broken(
             "an unknown trigger",
             "trigger",
@@ -389,7 +389,7 @@ fn cases() -> Vec<Case> {
         broken(
             "a summary of an unknown type",
             "summary_json",
-            bad_summary(r#"{"type":"restore"}"#),
+            bad_summary(r#"{"type":"copy"}"#),
         ),
         broken(
             "a summary with no type",

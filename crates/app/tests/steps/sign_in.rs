@@ -8,8 +8,8 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use app::access::{
-    Access, LiveSession, PasswordChangeRefused, PasswordSet, SetPasswordRefused, SignInRefused,
-    SignedIn, set_admin_password,
+    Access, LiveSession, PasswordChangeRefused, PasswordRefused, PasswordSet, SetPasswordRefused,
+    SignInRefused, SignedIn, set_admin_password,
 };
 use app::fakes::{
     InMemoryAdminPassword, InMemoryApiTokenStore, InMemorySessionStore, SeededRandom,
@@ -221,7 +221,7 @@ fn change_refused_wrong(agent: &mut Agent) {
     assert_eq!(
         agent.sign_in.changed,
         Some(Err(PasswordChangeRefused::Current(
-            SignInRefused::WrongPassword
+            PasswordRefused::WrongPassword
         )))
     );
 }
@@ -230,7 +230,7 @@ fn change_refused_wrong(agent: &mut Agent) {
 fn change_refused_wait(agent: &mut Agent, seconds: u64) {
     assert_eq!(
         agent.sign_in.changed,
-        Some(Err(PasswordChangeRefused::Current(SignInRefused::Wait {
+        Some(Err(PasswordChangeRefused::Current(PasswordRefused::Wait {
             seconds
         })))
     );

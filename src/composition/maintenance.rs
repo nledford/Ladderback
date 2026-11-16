@@ -484,7 +484,7 @@ async fn told<T>(
 /// routes tell it, by the code of its cause, with what a command or the
 /// platform said masked of every secret of `repository`'s settings (I4): those
 /// are read from the configuration as it stands now.
-async fn refusal(
+pub(super) async fn refusal(
     config: &dyn ConfigStore,
     repository: &RepositoryAlias,
     error: MaintenanceError,
@@ -570,6 +570,9 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
             None,
         ),
         F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
+        F::RestoreTargetUnwritable => {
+            unavailable(ErrorCode::RestoreTargetUnwritable, Vec::new(), None)
+        }
         F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
         F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
         // A read of the repository runs no hooks and creates nothing: these

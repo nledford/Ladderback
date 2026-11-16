@@ -22,6 +22,7 @@ mod logging;
 mod panic_hook;
 mod progress;
 mod repository;
+mod restore;
 mod stdio;
 pub(crate) mod tmp_files;
 mod watchdog;
@@ -363,6 +364,8 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         JobKind::Ls(repository) => jobs::ls(&ctx, repository),
         JobKind::Browse(job) => jobs::browse(&ctx, job),
         JobKind::Stats(repository) => jobs::stats(&ctx, repository),
+        JobKind::Restore(job) => restore::restore(&ctx, job),
+        JobKind::RestorePlan(job) => restore::plan(&ctx, job),
     };
     match outcome {
         Ok(Done::Result(result)) => {
@@ -413,6 +416,7 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
         JobKind::PrunePlan(job) => Some(&job.repo),
         JobKind::Check(job) => Some(&job.repo),
         JobKind::Browse(job) => Some(&job.repo),
+        JobKind::Restore(job) | JobKind::RestorePlan(job) => Some(&job.repo),
     }
 }
 

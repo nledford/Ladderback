@@ -139,6 +139,7 @@ fn rich_agent_settings() -> Option<AgentSettings> {
         allow_hub_restore: true,
         locale: Some(Locale::parse("en-US").ok()?),
         update_check: domain::planning::UpdateCheck::Off,
+        restore_folder: Some(domain::planning::RestoreFolder::parse("/srv/restores").ok()?),
     })
 }
 
