@@ -229,3 +229,44 @@ async fn at_debug_an_open_by_the_daemon_never_logs_a_credential_its_debug_form_e
     assert!(!log.contains("CANARY"), "the daemon's log leaks: {log}");
     assert!(!kept.contains("CANARY"), "the recent log leaks: {kept}");
 }
+
+/// At `debug`, the engine says it starts rclone without quoting the command
+/// line, which can carry a credential the redactor doesn't know, as a token
+/// typed into `rclone-command` (I4, #874); nor does anything the failed start
+/// logs.
+#[tokio::test]
+async fn at_debug_an_rclone_command_s_text_is_never_logged() {
+    let canary = "CANARY-typed-token";
+    let scratch = tempfile::tempdir().unwrap();
+    let pipe = Pipe::default();
+    set(logger(
+        Some("debug"),
+        Target::Pipe(Box::new(pipe.clone())),
+        WriteStyle::Never,
+    ));
+    let stand_in = format!(
+        "{} serve restic --token={canary}",
+        scratch.path().join("no-such-rclone").display()
+    );
+    let access = RepositoryAccess {
+        repository: "rclone:demo-remote:repo".to_owned(),
+        repo_hot: None,
+        password: SecretValue::new(PASSWORD),
+        id: None,
+        entry: None,
+        options: [("rclone-command".to_owned(), stand_in)].into(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
+        secrets: Vec::new(),
+    };
+    let removed = RusticRetention
+        .removes(&access, &RetentionPolicy::default(), &[])
+        .await;
+    let log = pipe.text();
+    assert!(removed.is_err(), "rclone can't start: {log}");
+    assert!(
+        log.contains("starting rclone"),
+        "the record that says rclone starts was written: {log}"
+    );
+    assert!(!log.contains(canary), "the daemon's log leaks: {log}");
+}

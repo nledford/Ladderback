@@ -458,3 +458,35 @@ async fn an_error_never_carries_the_rclone_server_s_credentials() {
         .unwrap_or(0);
     assert!(longest_hex < 64, "the detail leaks a credential: {detail}");
 }
+
+/// An `rclone-command` the daemon can't start, for an open of its own, fails
+/// without quoting its command line, which can carry a credential the
+/// redactor doesn't know, as a token typed into it (I4, #874): the failure
+/// says rclone couldn't start, and the operating system's reason.
+#[tokio::test]
+async fn an_rclone_command_that_cannot_start_is_not_quoted_in_the_failure() {
+    let canary = "CANARY-typed-token";
+    let scratch = tempfile::tempdir().unwrap();
+    let missing = scratch.path().join("no-such-rclone");
+    let access = rclone_repository(format!(
+        "{} serve restic --token={canary}",
+        missing.display()
+    ));
+    let error = RusticRetention
+        .removes(
+            &access,
+            &RetentionPolicy {
+                keep_last: Some(KeepCount::new(1).unwrap()),
+                ..RetentionPolicy::default()
+            },
+            &one_snapshot(),
+        )
+        .await
+        .expect_err("rclone can't start");
+    let RetentionError::Engine { detail } = &error else {
+        panic!("an engine failure, not {error:?}");
+    };
+    assert!(detail.contains("Could not start rclone"), "{detail}");
+    assert!(detail.contains("os error"), "the reason stays: {detail}");
+    assert!(!detail.contains(canary), "the detail leaks: {detail}");
+}
