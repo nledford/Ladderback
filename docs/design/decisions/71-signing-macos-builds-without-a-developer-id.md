@@ -5,6 +5,15 @@
 - **M3:** on macOS, `just install` signs the installed binary with a code-signing identity from the person's own keychain when they name one, always with the same fixed identifier (`codesign -i`). Without one it installs as before, with the ad-hoc signature the linker gives every arm64 binary. The Full Disk Access checks of §12 run on the signed build.
 - **From 0.3.1:** each release publishes the Linux archives (decision 54, amended by #582). A macOS archive waits for #344 (Developer ID signing and notarization, not scheduled); until then macOS users build from source.
 
+**Amended 2026-11-16 (the maintainer, #281):** how `just install` signs.
+
+- **The name:** the person names the identity in `LADDERBACK_SIGN_IDENTITY`, by its name or its SHA-1 hash, which `just install` and so `just install-restart` read; not a recipe argument, as the recipes' arguments go to `cargo install`.
+- **The identifier:** `io.github.nledford.ladderback`, the launchd agent's label.
+- **Refused before the build:** a name that `security find-identity -v -p codesigning` doesn't list as a valid identity's whole name or hash, or lists more than once, so a mistyped or untrusted certificate installs nothing. After the install it signs with that identity's hash, as `codesign` would also take a name as part of a longer one, then runs `codesign --verify` (scripts/install-signing.ts). A signing that fails then leaves the new binary installed, says how it is signed, and fails the recipe.
+- **The warning:** after a restart, `install-restart` warns that the keychain, Photos and Full Disk Access ask again for a build signed ad hoc; for a signed one, it says those grants should carry over, which is still unconfirmed, and that the keychain may still ask.
+
+Making the certificate is in the [install guide](../../guide/install.md#signing-your-build). The checks on a Mac are still to run: the Full Disk Access and Photos grants across an upgrade, the keychain's "Always Allow" across one (a certificate without an Apple team ID may not carry it), the grant reaching the worker, and the bare binary in System Settings.
+
 Why:
 
 - **The grant follows the signature.** TCC ties a Full Disk Access grant to the binary's designated requirement (§12). An ad-hoc signature's requirement is the binary's code hash (`cdhash H"…"`), so every rebuild is a different program to TCC and the grant is lost each time Ladderback is upgraded. A certificate's requirement is `identifier <id> and certificate leaf = H"…"`, the same for every build signed with that certificate under that identifier; checked with `codesign -d -r-` on two builds. That the grant then holds across an upgrade depends on TCC, not on `codesign`, so M3 confirms it on the current macOS release before the install guide tells anyone to rely on it. The identifier is fixed because `codesign` otherwise takes it from the file name, and a renamed copy would lose the grant.
