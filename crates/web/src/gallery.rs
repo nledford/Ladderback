@@ -4,6 +4,7 @@
 //! that queue a polite or an assertive message, and a dialog standing in for a
 //! modal.
 
+use std::num::NonZeroU8;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -18,13 +19,14 @@ use crate::backend::Progress as Reading;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
 use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
+use crate::components::skeleton::rules::{Rem as SkeletonRem, Shape, Share};
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Align, Button, Checkbox, Column, Confirmation, FolderLoader, FolderPage, Footer, Icon,
     LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, Rem, ReviewDialog,
-    Sentences, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Table, TextField,
-    Tip, Toast, Tooltip, Tree, show_toast, text_field,
+    Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Table,
+    TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -158,6 +160,37 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let form_sent = t(msg::UI_GALLERY_BUTTON_SENT);
     // The tooltip demo's icon-only button: its name, the tooltip's too.
     let schedule = t(msg::UI_GALLERY_TOOLTIP_SCHEDULE);
+    // The skeleton demo: whether its plan has come, which its toggle sets,
+    // the words that say the wait, and the plan's own lines.
+    let plan_shown = RwSignal::new(false);
+    let (plan_loading, plan_name) = (
+        t(msg::UI_GALLERY_SKELETON_LOADING),
+        t(msg::UI_GALLERY_SKELETON_PLAN),
+    );
+    let (plan_folder, plan_schedule, plan_keeps) = (
+        t(msg::UI_GALLERY_SKELETON_FOLDER),
+        t(msg::UI_GALLERY_SKELETON_SCHEDULE),
+        t(msg::UI_GALLERY_SKELETON_KEEPS),
+    );
+    // Its shapes: three lines standing for a paragraph (the plan's lines
+    // too), the last one shorter, a block standing for a field, and two
+    // lines standing for a short note.
+    let (paragraph, field, note) = (
+        Shape::Lines {
+            // Three lines: one, and two more.
+            count: NonZeroU8::MIN.saturating_add(2),
+            last: Share::percent(60),
+        },
+        Shape::Block {
+            inline: SkeletonRem::tenths(200),
+            block: SkeletonRem::tenths(25),
+        },
+        Shape::Lines {
+            // Two lines: one, and one more.
+            count: NonZeroU8::MIN.saturating_add(1),
+            last: Share::percent(40),
+        },
+    );
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>
@@ -996,6 +1029,57 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                         &[("count", MsgArg::Count(presses.get()))],
                     )
                 }}
+            </p>
+        </section>
+        // Its id finds the demo under a pseudolocale too, which renames its
+        // heading.
+        <section id="skeleton-demo">
+            <h2>{t(msg::UI_GALLERY_SKELETON_HEADING)}</h2>
+            // Three lines standing for a paragraph, the last one shorter,
+            // and a block standing for a field, each in the room its line
+            // of the page gives it.
+            <div class="my-4">
+                <Skeleton shape=paragraph />
+            </div>
+            <div class="my-4">
+                <Skeleton shape=field />
+            </div>
+            // On Ledger Gray, as in a toast or the pause banner, where the
+            // bars stand apart from it as they do from the page.
+            <div class="bg-surface my-4 p-4">
+                <Skeleton shape=note />
+            </div>
+            // A region whose content is on its way: busy, and saying the
+            // wait in words beside its skeleton, until the toggle below
+            // brings the content, three lines in the place of the
+            // skeleton's three, so nothing below moves and focus stays on
+            // the toggle. Nothing announces the arrival.
+            <div aria-busy=move || if plan_shown.get() { "false" } else { "true" }>
+                <p>
+                    {move || {
+                        if plan_shown.get() { plan_name.clone() } else { plan_loading.clone() }
+                    }}
+                </p>
+                {move || {
+                    if plan_shown.get() {
+                        view! {
+                            <p class="my-0">
+                                {plan_folder.clone()} <br /> {plan_schedule.clone()} <br />
+                                {plan_keeps.clone()}
+                            </p>
+                        }
+                            .into_any()
+                    } else {
+                        view! { <Skeleton shape=paragraph /> }.into_any()
+                    }
+                }}
+            </div>
+            <p>
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_SKELETON_SHOW).into())
+                    pressed=plan_shown
+                    on_press=Callback::new(move |()| plan_shown.update(|shown| *shown = !*shown))
+                />
             </p>
         </section>
         <section>

@@ -31,14 +31,14 @@ pub struct Share(u8);
 impl Share {
     /// `percent` of the room; over 100 is the whole room, since a line is
     /// never longer than its room.
-    pub const fn percent(percent: u8) -> Self {
-        Self(percent)
+    pub fn percent(percent: u8) -> Self {
+        Self(percent.min(100))
     }
 }
 
 impl fmt::Display for Share {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!("{self:?}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}%", self.0)
     }
 }
 
@@ -55,8 +55,8 @@ impl Rem {
 }
 
 impl fmt::Display for Rem {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!("{self:?}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}rem", self.0 / 10, self.0 % 10)
     }
 }
 
@@ -73,13 +73,32 @@ impl Shape {
     /// The skeleton's classes: what it stands for, which `style.css` lays
     /// out.
     pub fn class(self) -> &'static str {
-        todo!("{self:?}")
+        match self {
+            Self::Lines { .. } => "skeleton skeleton-lines",
+            Self::Block { .. } => "skeleton skeleton-block",
+        }
     }
 
     /// The bars the skeleton draws, in order: a line of text each, as tall
     /// as the text (1em), or the one block.
     pub fn bars(self) -> Vec<Bar> {
-        todo!("{self:?}")
+        match self {
+            Self::Lines { count, last } => {
+                let line = |inline: String| Bar {
+                    inline,
+                    block: "1em".to_owned(),
+                };
+                // `count` is at least 1, so the last line is always there.
+                let full = usize::from(count.get()) - 1;
+                let mut bars = vec![line("100%".to_owned()); full];
+                bars.push(line(last.to_string()));
+                bars
+            }
+            Self::Block { inline, block } => vec![Bar {
+                inline: inline.to_string(),
+                block: block.to_string(),
+            }],
+        }
     }
 }
 

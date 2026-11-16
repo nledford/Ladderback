@@ -47,6 +47,7 @@ pub(crate) use pause_updates::PauseUpdates;
 pub use progress::Progress;
 pub use radio_group::{LabelLanguage, RadioGroup};
 pub use review_dialog::{Confirmation, ReviewDialog, Working};
+pub use skeleton::Skeleton;
 pub use spinner::Spinner;
 pub use status_badge::StatusBadge;
 pub use step_up_field::{StepUp, StepUpField};

@@ -44,6 +44,11 @@ const PAIRS = [
   // text the text on page, a disabled one's muted text on surface.
   { name: "text field edge on page", fg: "--field-edge", bg: "--bg", min: 3 },
   { name: "text field edge on surface", fg: "--field-edge", bg: "--surface", min: 3 },
+  // A skeleton (components §4.5): its bars against the page and Ledger Gray.
+  // A floor for visibility, not a WCAG minimum: a skeleton carries no
+  // information, so 1.4.11 doesn't apply, but it must still be seen.
+  { name: "skeleton on page", fg: "--skeleton", bg: "--bg", min: 1.4 },
+  { name: "skeleton on surface", fg: "--skeleton", bg: "--surface", min: 1.4 },
 ];
 
 // A button (components §4.5) in each tone but Inherit, whose colors are the
