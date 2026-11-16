@@ -32,6 +32,7 @@ pub(crate) mod spinner;
 pub(crate) mod status_badge;
 mod step_up_field;
 mod toast;
+pub(crate) mod tooltip;
 pub(crate) mod tree;
 
 pub use button::Button;

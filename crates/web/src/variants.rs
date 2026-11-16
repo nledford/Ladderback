@@ -1,8 +1,8 @@
 //! The shared vocabulary of the component set (components §4.5; DESIGN.md,
-//! "Shared vocabulary"): the tones, sizes and placements every shared
+//! "Shared vocabulary"): the tones, sizes, placements and sides every shared
 //! component takes, so a component names one of these values rather than a
-//! color, a length or a side of its own. Each value is drawn by a class of
-//! `style.css`:
+//! color, a length or a side of its own. Each tone, size and placement is
+//! drawn by a class of `style.css`:
 //!
 //! - a tone's class sets one custom property, `--tone`, which the component
 //!   draws with (`var(--tone)`);
@@ -12,6 +12,10 @@
 //! - a placement's class goes on the line around a component's part and
 //!   places the part in it, in logical terms, so it follows the page's
 //!   direction.
+//!
+//! A side has no class: which side a floating part stands on depends on the
+//! room around its anchor, measured as the page is drawn, so the component
+//! that floats it decides it (`components/tooltip/rules.rs`).
 
 /// The color a component draws with, one token of `style.css` each. None
 /// carries meaning alone: a component that shows a tone says it in words or
@@ -129,6 +133,36 @@ impl Placement {
     }
 }
 
+/// Which side of the control it belongs to a floating part (a tooltip, later
+/// a popover) stands on, in the page's direction: `Start` is the left in
+/// English and the right in Arabic. A part with no room on its side stands
+/// on the opposite one, then on the other axis. Not a [`Placement`], which
+/// aligns a part in its own line rather than beside another.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Side {
+    /// Over the control. The default: a note above a control leaves the
+    /// lines below it, where the reader goes next, in view.
+    #[default]
+    Above,
+    /// Under the control.
+    Below,
+    /// Before the control, in the page's direction.
+    Start,
+    /// After the control, in the page's direction.
+    End,
+}
+
+impl Side {
+    /// Every side, in the order the gallery shows them.
+    #[cfg(test)]
+    pub const ALL: [Self; 4] = [Self::Above, Self::Below, Self::Start, Self::End];
+
+    /// The side across the control from this one.
+    pub fn opposite(self) -> Self {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +227,25 @@ mod tests {
             Placement::default(),
             Placement::Inline,
             "a component stays in its line"
+        );
+    }
+
+    #[test]
+    fn a_side_faces_the_side_across_the_control_and_is_above_unless_named() {
+        let opposites = [
+            (Side::Above, Side::Below),
+            (Side::Below, Side::Above),
+            (Side::Start, Side::End),
+            (Side::End, Side::Start),
+        ];
+        for (side, opposite) in opposites {
+            assert_eq!(side.opposite(), opposite, "{side:?}");
+        }
+        assert_eq!(Side::ALL.map(Side::opposite).map(Side::opposite), Side::ALL);
+        assert_eq!(
+            Side::default(),
+            Side::Above,
+            "a note leaves the next lines in view"
         );
     }
 }
