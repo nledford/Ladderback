@@ -99,6 +99,8 @@ mod shutdown_steps;
 mod sign_in_steps;
 #[path = "steps/snapshots.rs"]
 mod snapshots_steps;
+#[path = "steps/translations.rs"]
+mod translations_steps;
 
 const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 

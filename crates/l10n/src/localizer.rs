@@ -108,6 +108,13 @@ impl Localizer {
         Self::on::<format::Active>(preferences, catalogs)
     }
 
+    /// The same over the catalogs among `catalogs` that this build offers
+    /// (technical design §8.4, decision 101): a development build offers
+    /// every one, a release build only those `offered-locales.txt` lists.
+    pub fn offered(_preferences: &[LanguageIdentifier], _catalogs: &[Catalog]) -> Self {
+        todo!()
+    }
+
     /// The same, with host `H` writing numbers and instants: a test builds a
     /// localizer without one.
     pub(crate) fn on<H: format::Host>(
