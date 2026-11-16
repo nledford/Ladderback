@@ -1,6 +1,8 @@
-# Decision 98: No core dumps or debugger attach for the daemon and its workers
+# Decision 98: No core dumps or debugger attach for the daemon, its workers and the MCP server
 
 **As the daemon starts, before it resolves any secret, and as each worker starts, before it reads its job, the process sets its core-dump limit to 0, soft and hard (Linux and macOS), and on Linux clears its dumpable flag (`PR_SET_DUMPABLE` 0). A process that can't logs a warning by its code, `core-dumps-on` or `debugger-attach-allowed`, and goes on** (recorded 2026-11-15, §10.2; #351). Wiping a secret's bytes when it is dropped is a separate change (#600).
+
+**Amended 2026-11-15 (#719):** the MCP server, `ladderback mcp` in every mode, does the same as it starts, before it resolves any secret or reads its API token file, and logs the same warning when it can't. A session of its own, headless or in a scratch folder, resolves repository secrets as the daemon does, and connect mode keeps the token it read, for as long as its client keeps it running.
 
 ## Why
 
@@ -11,4 +13,4 @@
 - **A failure warns and starts anyway.** Neither call fails on a normal system; a security policy might refuse one. A daemon that stopped there would stop every backup for a protection it can do without, so it logs `core-dumps-on` or `debugger-attach-allowed` with the system's words, by its code (§13.7.1), and starts. A worker writes the same code to stderr, which the daemon logs as a warning; a worker reads no catalog.
 - **Not behind a port.** The core decides nothing here: the composition root calls the platform adapter (`platform::dumps::refuse`) as each process starts.
 
-Left out: macOS's `PT_DENY_ATTACH`, which refuses a debugger only, can be undone by anything that runs before it, and stops the crash reporter; `ladderback set-password`, `import-profile` and the other commands, which run briefly in a terminal; and swap. Programs the daemon and its workers start (rclone, secret commands, `secret-tool`, hooks) keep the limit of 0, but the kernel makes them dumpable again, so a process of the same user can read their memory and environment. A debugger of the same user that attaches to a worker in the instant between its start and its first call keeps what it has; the flag refuses only what comes after.
+Left out: macOS's `PT_DENY_ATTACH`, which refuses a debugger only, can be undone by anything that runs before it, and stops the crash reporter; `ladderback set-password`, `import-profile` and the other commands, which run briefly in a terminal; and swap. Programs the daemon, its workers and the MCP server start (rclone, secret commands, `secret-tool`, hooks) keep the limit of 0, but the kernel makes them dumpable again, so a process of the same user can read their memory and environment. A debugger of the same user that attaches to a worker in the instant between its start and its first call keeps what it has; the flag refuses only what comes after.
