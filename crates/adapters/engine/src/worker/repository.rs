@@ -64,23 +64,29 @@ pub(crate) fn new_repository(
 /// local folder is cleaned up after killed workers.
 ///
 /// A half on OpenDAL's `fs` whose root folder isn't there fails the job
-/// before its backend is set up, which would make that folder (decision 53).
-/// When the repository doesn't open, and only then: a password that opens no
-/// key fails the job with `password-not-accepted` (#481); a REST server's
-/// refusal of the credentials with `credentials-refused` (#478); and its
-/// folders are looked at: when each half is a folder on this machine
-/// holding nothing of a repository, the job fails with
-/// `repository-not-found`, and otherwise with the error opening gave, as it
-/// always did. A repository that opens costs no extra look.
+/// with `repository-config-not-found` (#525) before its backend is set up,
+/// which would make that folder (decision 53). When the repository doesn't
+/// open, and only then: a password that opens no key fails the job with
+/// `password-not-accepted` (#481); a REST server's refusal of the
+/// credentials with `credentials-refused` (#478), naming the half for a
+/// hot/cold repository (#521); and its folders are looked at: when each half
+/// is a folder on this machine holding nothing of a repository, the job
+/// fails with `repository-not-found`. Otherwise no config file found fails
+/// it with `repository-config-not-found` in rustic's words (#525), and any
+/// other error as it always did. A repository that opens costs no extra
+/// look.
 pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
     if let Some(root) = missing_fs_root(spec) {
-        return Err(JobError::failed(format!(
-            "the repository's root folder {} is not there",
-            root.display()
-        )));
+        return Err(JobError::Failed {
+            code: ErrorCode::RepositoryConfigNotFound,
+            detail: format!(
+                "the repository's root folder {} is not there",
+                root.display()
+            ),
+        });
     }
     let credentials = Credentials::password(spec.password.expose());
     let repository = match new_repository(ctx, spec)?.open(&credentials) {
@@ -103,7 +109,7 @@ pub(crate) fn open(
                     detail: "no repository config file is at the location".to_owned(),
                 });
             }
-            return Err(error.into());
+            return Err(config_not_found(&error).unwrap_or_else(|| error.into()));
         }
     };
     if let Some(expected) = &spec.id {
@@ -188,6 +194,22 @@ fn refused(error: &RusticError) -> bool {
         ["401 Unauthorized", "403 Forbidden", "PermissionDenied"]
             .iter()
             .any(|sign| text.contains(sign))
+    })
+}
+
+/// rustic_core's words when no half holds a config file (`repository.rs`),
+/// which come with no error code of their own.
+const NO_CONFIG: &str = "No repository config file found";
+
+/// The job's failure when opening found no config file where it looked, in
+/// rustic's words (#525): a folder that isn't there or can't be read, a
+/// server or a store that holds no repository, a repository that lost its
+/// config. Nothing tells an empty place from one out of reach.
+fn config_not_found(error: &RusticError) -> Option<JobError> {
+    let detail = error.display_log();
+    detail.contains(NO_CONFIG).then_some(JobError::Failed {
+        code: ErrorCode::RepositoryConfigNotFound,
+        detail,
     })
 }
 
