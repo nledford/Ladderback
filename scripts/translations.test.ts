@@ -11,6 +11,7 @@ import {
   accepting,
   entries,
   history,
+  leftOut,
   listing,
   parseSources,
   renderListing,
@@ -210,18 +211,44 @@ test("accepting drops the lines of messages English or the language no longer ha
   }
 });
 
-test("accepting every message takes the translated ones that aren't current, and keeps the rest", () => {
+test("accepting every message takes the translated ones not reviewed yet, and leaves the stale ones", () => {
   const source = entries("greeting = Hello there\nfarewell = Goodbye\nwelcome = Welcome\nsame = Same\n");
   const sources = new Map([
     ["greeting", HELLO],
     ["same", sourceHash("same = Same")],
+    ["gone", HELLO],
+    ["welcome", HELLO],
   ]);
   const result = accepting("de", source, ids("greeting", "farewell", "same"), sources, "all");
   assert.ok(typeof result !== "string", String(result));
-  assert.deepEqual(result.accepted, ["greeting", "farewell"]);
-  assert.equal(result.sources.get("greeting"), sourceHash("greeting = Hello there"));
+  assert.deepEqual(result.accepted, ["farewell"]);
+  assert.deepEqual(result.staleLeftOut, ["greeting"]);
+  assert.deepEqual(result.removed, ["gone", "welcome"]);
+  assert.equal(result.sources.get("greeting"), HELLO);
+  assert.equal(result.sources.get("farewell"), sourceHash("farewell = Goodbye"));
   assert.equal(result.sources.get("same"), sourceHash("same = Same"));
   assert.equal(result.sources.has("welcome"), false);
+});
+
+test("accepting a stale message by its ID takes it, and leaves nothing out", () => {
+  const source = entries("greeting = Hello there\n");
+  const result = accepting("de", source, ids("greeting"), new Map([["greeting", HELLO]]), ["greeting"]);
+  assert.ok(typeof result !== "string", String(result));
+  assert.deepEqual(result.accepted, ["greeting"]);
+  assert.deepEqual(result.staleLeftOut, []);
+  assert.equal(result.sources.get("greeting"), sourceHash("greeting = Hello there"));
+});
+
+test("accepting every message says which stale ones it left out, and how many", () => {
+  assert.equal(leftOut("de", []), null);
+  assert.equal(
+    leftOut("de", ["greeting"]),
+    "de: left out 1 stale message (greeting): name its ID to accept it after review",
+  );
+  assert.equal(
+    leftOut("de", ["farewell", "greeting"]),
+    "de: left out 2 stale messages (farewell, greeting): name their IDs to accept them after review",
+  );
 });
 
 test("accepting --all with IDs as well is refused, and writes nothing", (t) => {

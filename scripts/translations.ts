@@ -180,6 +180,12 @@ export function renderListing(
   return `${lines.join("\n")}\n`;
 }
 
+/** What `accept --all` says of the stale messages `ids` it left out:
+ * nothing when it left none. */
+export function leftOut(tag: string, ids: readonly string[]): string | null {
+  throw new Error(`todo: ${tag} ${ids.join(", ")}`);
+}
+
 /** The sources after accepting `ids` (`"all"`: every translated message
  * that isn't current) in the language `tag`, or why they can't be. A term of
  * the language's own is skipped: it has no English to record. The lines of
@@ -190,7 +196,7 @@ export function accepting(
   translated: ReadonlySet<string>,
   sources: ReadonlyMap<string, string>,
   ids: readonly string[] | "all",
-): { sources: Map<string, string>; accepted: string[]; removed: string[] } | string {
+): { sources: Map<string, string>; accepted: string[]; removed: string[]; staleLeftOut: string[] } | string {
   const hashes = new Map(english.map((entry) => [entry.id, sourceHash(entry.text)]));
   const chosen =
     ids === "all"
@@ -208,7 +214,7 @@ export function accepting(
   }
   const removed = [...next.keys()].filter((id) => !hashes.has(id) || !translated.has(id)).sort();
   for (const id of removed) next.delete(id);
-  return { sources: next, accepted, removed };
+  return { sources: next, accepted, removed, staleLeftOut: [] };
 }
 
 function git(dir: string, args: string[]): string | null {
