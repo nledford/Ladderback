@@ -10,7 +10,7 @@ use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use unic_langid::LanguageIdentifier;
 
 use crate::args::{MAX_ARGS, clamp_text, duration_parts, size_parts};
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, Offer};
 use crate::locale::{negotiate, source};
 use crate::pseudo::{self, Pseudo};
 use crate::{Direction, MessageId, code, format, msg};
@@ -95,27 +95,37 @@ impl fmt::Debug for Localizer {
 
 impl Localizer {
     /// A localizer for the `preferences`, best first, over the embedded
-    /// catalogs. Locales without a catalog are left out, and `en-US` is added
-    /// last, so every message has an answer.
+    /// catalogs this build offers ([`offered`](Self::offered)). Locales
+    /// without a catalog are left out, and `en-US` is added last, so every
+    /// message has an answer.
     pub fn new(preferences: &[LanguageIdentifier]) -> Self {
-        Self::from_catalogs(preferences, crate::catalog::catalogs())
+        Self::offered(preferences, crate::catalog::catalogs())
     }
 
-    /// The same over `catalogs`, which tests use to bring a catalog of their
-    /// own. Without an `en-US` catalog among them nothing ends the chain, and
-    /// a message no locale has is shown as its ID.
+    /// The same over every one of `catalogs`, which tests use to bring a
+    /// catalog of their own. Without an `en-US` catalog among them nothing
+    /// ends the chain, and a message no locale has is shown as its ID.
     pub fn from_catalogs(preferences: &[LanguageIdentifier], catalogs: &[Catalog]) -> Self {
-        Self::on::<format::Active>(preferences, catalogs)
+        Self::on::<format::Active>(preferences, catalogs, Offer::Every)
     }
 
-    /// The same, with host `H` writing numbers and instants: a test builds a
-    /// localizer without one.
+    /// The same over the catalogs among `catalogs` that this build offers
+    /// (technical design §8.4, decision 101): a development build offers
+    /// every one, a release build only those `offered-locales.txt` lists.
+    pub fn offered(preferences: &[LanguageIdentifier], catalogs: &[Catalog]) -> Self {
+        Self::on::<format::Active>(preferences, catalogs, Offer::BUILD)
+    }
+
+    /// The same, with host `H` writing numbers and instants (a test builds a
+    /// localizer without one), over the catalogs `offer` includes.
     pub(crate) fn on<H: format::Host>(
         preferences: &[LanguageIdentifier],
         catalogs: &[Catalog],
+        offer: Offer,
     ) -> Self {
         let known: Vec<(LanguageIdentifier, &Catalog)> = catalogs
             .iter()
+            .filter(|catalog| offer.includes(catalog.tag))
             .filter_map(|catalog| Some((catalog.tag.parse().ok()?, catalog)))
             .collect();
         let tags: Vec<LanguageIdentifier> = known.iter().map(|(tag, _)| tag.clone()).collect();
@@ -425,7 +435,8 @@ mod tests {
     #[test]
     fn a_localizer_whose_host_writes_no_instants_says_so() {
         let en_us = vec![source()];
-        let plain = Localizer::on::<format::NoHost>(&en_us, crate::catalog::catalogs());
+        let plain =
+            Localizer::on::<format::NoHost>(&en_us, crate::catalog::catalogs(), Offer::Every);
         assert!(!plain.writes_instants());
         assert!(Localizer::from_catalogs(&en_us, crate::catalog::catalogs()).writes_instants());
     }

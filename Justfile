@@ -106,6 +106,27 @@ lint: _ui-deps clippy
 decision-index:
     node scripts/decision-index.ts --write
 
+# List, for each translation (or the tags given), the messages that are
+# missing, translated but not yet reviewed, or stale: their en-US text has
+# changed since they were translated. Each stale one comes with the English
+# it was translated from, read from the git history, and the English now
+# (technical design §8.4, decision 101). Exits 0 whatever it finds.
+[doc('List missing, unreviewed and stale messages of each translation.')]
+[group('quality')]
+[positional-arguments]
+translations *tags:
+    node scripts/translations.ts list "$@"
+
+# After a review, record the en-US text the messages `ids` of `tag` were
+# translated from (`--all`: every translated message that isn't current), in
+# crates/l10n/locales/<tag>/sources.txt, so `just translations` finds them
+# current until that English changes.
+[doc('Record the English of translated messages accepted after review.')]
+[group('quality')]
+[positional-arguments]
+accept-translations tag *ids:
+    node scripts/translations.ts accept "$@"
+
 # Lint the GitHub Actions workflows and the repository's own actions:
 # actionlint for the workflows' syntax, expressions and shell steps, zizmor for
 # security (template injection, permissions, unpinned actions) in both.

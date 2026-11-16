@@ -9,6 +9,7 @@ mod codes;
 mod formatting;
 mod icu;
 mod language;
+mod offered;
 #[cfg(feature = "pseudo")]
 mod pseudo;
 #[cfg(not(feature = "pseudo"))]
