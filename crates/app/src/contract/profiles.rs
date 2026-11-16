@@ -479,10 +479,11 @@ fn a_tag_with_a_comma_is_refused(harness: &dyn ProfilesHarness) {
     );
 }
 
-/// With the commands left out, neither the password's command nor any hook
-/// is in the text, and a notice names each, in the order the profile would
-/// have had them: the agent's hooks, the password, the repository's hooks,
-/// then the plan's.
+/// With the commands left out, neither the password's command, an option
+/// rustic runs as a command, nor any hook is in the text, and a notice names
+/// each, in the order the profile would have had them: the agent's hooks,
+/// the password, the options, the repository's hooks, then the plan's. An
+/// option that holds a secret is still left out with its variable.
 fn every_command_left_out_is_named_and_none_is_written(harness: &dyn ProfilesHarness) {
     let Some(mut export) = export("/srv/demo-repo") else {
         return;
@@ -506,6 +507,15 @@ fn every_command_left_out_is_named_and_none_is_written(harness: &dyn ProfilesHar
     export.agent_hooks.run_before = vec![agent];
     export.repository.hooks.run_after = vec![repository];
     export.plan.hooks.run_failed = vec![plan];
+    export.repository.settings.options.insert(
+        "post-create-command".to_owned(),
+        "/usr/bin/curl -fsS https://hc.demo/CANARY-option".to_owned(),
+    );
+    export
+        .repository
+        .settings
+        .options
+        .insert("secret_access_key".to_owned(), "CANARY-secret".to_owned());
     export.commands = ExportCommands::LeftOut;
     let written = harness.writer().render(&export);
     assert!(written.is_ok(), "the export is made: {written:?}");
@@ -524,10 +534,20 @@ fn every_command_left_out_is_named_and_none_is_written(harness: &dyn ProfilesHar
         [
             "global.hooks.run-before",
             "repository.password-command",
+            "repository.options.post-create-command",
             "repository.hooks.run-after",
             "backup.snapshots.hooks.run-failed",
         ],
         "{:?}",
         profile.notices
     );
+    let options: Vec<&str> = profile
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            ProfileNotice::OptionLeftOut { option, .. } => Some(option.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(options, ["secret_access_key"], "{:?}", profile.notices);
 }

@@ -921,8 +921,9 @@ fn refused(answer: &serde_json::Value) -> bool {
 /// the configuration itself, each a plan's; `remote`, reached at two
 /// locations, with a password in each URL and options written inline, one
 /// under a credential's name and one under another name; and `hooked`, a
-/// plan's, whose password command and hooks a person wrote with a token in
-/// them, which an export over MCP leaves out (#856).
+/// plan's, whose password command, hooks and a command its backend runs a
+/// person wrote with a token in them, which an export over MCP leaves out
+/// (#856).
 fn canary_config(scratch: &std::path::Path) -> String {
     let file = scratch.join("password");
     std::fs::write(&file, format!("{CANARY}-file\n")).expect("the password file");
@@ -946,6 +947,7 @@ fn canary_config(scratch: &std::path::Path) -> String {
         options = {{ secret_access_key = \"{CANARY}-second-option\" }}\n\n\
         [repositories.hooked]\nrepository = \"/srv/backups/hooked\"\n\
         password-command = \"demo-vault read --token={CANARY}-password-command\"\n\
+        options = {{ post-create-command = \"/usr/bin/curl -fsS https://hc.demo/{CANARY}-option-command\" }}\n\
         hooks = {{ run-after = [\"curl -fsS https://hc.demo/{CANARY}-repository-hook\"] }}\n\n\
         [[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [\"{source}\"]\n\n\
         [[plans]]\nid = \"work\"\nrepository = \"vault\"\nsources = [\"{source}\"]\n\n\

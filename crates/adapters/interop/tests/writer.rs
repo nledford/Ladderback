@@ -1381,3 +1381,69 @@ fn every_password_read_by_a_command_is_left_out_and_a_password_file_stays() {
     );
     assert_eq!(commands_left_out(&profile.notices), Vec::<&str>::new());
 }
+
+/// An option rustic runs as a command is left out of each option table and
+/// named by its place, not as an option to set from a variable; the other
+/// options stay. Written, each is kept.
+#[test]
+fn every_option_rustic_runs_as_a_command_is_left_out_and_named() {
+    let mut export = export();
+    let settings = &mut export.repository.settings;
+    for (name, value) in [
+        ("connections", "4".to_owned()),
+        (
+            "post-create-command",
+            format!("/usr/bin/curl -fsS https://hc.demo/{CANARY}-create"),
+        ),
+        (
+            "post-delete-command",
+            format!("/usr/bin/curl -fsS https://hc.demo/{CANARY}-delete"),
+        ),
+    ] {
+        settings.options.insert(name.to_owned(), value);
+    }
+    settings.options_hot.insert(
+        "rclone-command".to_owned(),
+        format!("/usr/bin/rclone --header={CANARY}-hot"),
+    );
+    settings.options_cold.insert(
+        "rclone-command".to_owned(),
+        format!("/usr/bin/rclone --header={CANARY}-cold"),
+    );
+    export.commands = ExportCommands::LeftOut;
+    let profile = render(&export).expect("the export is made");
+    assert!(!profile.text.contains(CANARY), "{}", profile.text);
+    assert_has(&profile.text, "repository.options.connections", string("4"));
+    assert_eq!(
+        commands_left_out(&profile.notices),
+        [
+            "repository.options.post-create-command",
+            "repository.options.post-delete-command",
+            "repository.options-hot.rclone-command",
+            "repository.options-cold.rclone-command",
+        ]
+    );
+    assert!(
+        !profile
+            .notices
+            .iter()
+            .any(|notice| matches!(notice, ProfileNotice::OptionLeftOut { .. })),
+        "{:?}",
+        profile.notices
+    );
+    export.commands = ExportCommands::Written;
+    let profile = render(&export).expect("the export is made");
+    assert_has(
+        &profile.text,
+        "repository.options-hot.rclone-command",
+        string(&format!("/usr/bin/rclone --header={CANARY}-hot")),
+    );
+    assert_has(
+        &profile.text,
+        "repository.options.post-create-command",
+        string(&format!(
+            "/usr/bin/curl -fsS https://hc.demo/{CANARY}-create"
+        )),
+    );
+    assert_eq!(commands_left_out(&profile.notices), Vec::<&str>::new());
+}
