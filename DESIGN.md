@@ -196,7 +196,7 @@ Square by default, as the browser draws controls. Two radii exist: a full pill (
 
 ## Components
 
-Every component is plain and exact: a control looks like what the browser makes it, sized for the text it holds. The shared set lives in `crates/web/src/components.rs`; `/_gallery` (the `gallery` feature) shows each one.
+Every component is plain and exact: a control looks like what the browser makes it, sized for the text it holds. The shared set lives in `crates/web/src/components/`, one file per component; `/_gallery` (the `gallery` feature) shows each one.
 
 ### Shared Vocabulary
 
@@ -264,7 +264,7 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 
 ### Do:
 
-- **Do** use the shared components in `crates/web/src/components.rs` and add new ones to `/_gallery`, each taking its color, size and placement from the shared vocabulary.
+- **Do** use the shared components in `crates/web/src/components/` and add new ones to `/_gallery`, each taking its color, size and placement from the shared vocabulary.
 - **Do** take colors only from the custom properties in `style.css`, through `var()` or their Tailwind names (`text-muted`, `bg-surface`).
 - **Do** give every state words and an icon or weight as well as its color.
 - **Do** keep a changing table's columns still: fixed shares, or widths that don't depend on a cell's changing content.

@@ -24,6 +24,7 @@ use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsValue;
 use leptos_router::components::A;
 
+use crate::components::tree::rules::snapshot_href;
 use crate::components::{Confirmation, ReviewDialog, Working, recover_focus, sentence_view};
 use crate::live::say;
 use crate::maintenance::{
@@ -33,7 +34,6 @@ use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with};
 use crate::stats::{self, StatsPanel};
 use crate::text;
-use crate::tree::snapshot_href;
 use crate::wording::{self, Adoption, Words};
 use crate::ws::{self, Got, Posted};
 

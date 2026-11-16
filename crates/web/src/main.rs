@@ -26,14 +26,16 @@ use leptos_router::path;
 
 // What a screen reader is told about the page's own changes, and when.
 mod announcer;
-// What a status badge shows for each state, decided on the host;
-// `components.rs`'s `StatusBadge` is its glue.
-mod badge;
 // The shared component set, exercised by the gallery in a `gallery` build; a
-// build without the gallery has no user for it yet.
+// build without the gallery has no user for it yet, nor for the re-exports
+// of its root.
 #[cfg_attr(
     not(feature = "gallery"),
-    expect(dead_code, reason = "only the gallery uses the shared components yet")
+    expect(
+        dead_code,
+        unused_imports,
+        reason = "only the gallery uses the shared components yet"
+    )
 )]
 mod components;
 // What the Log page lists and copies, decided on the host;
@@ -76,9 +78,6 @@ mod pause;
 mod plans;
 // The Plans page's DOM glue; `plans.rs` decides for it.
 mod plans_page;
-// What a progress bar tells a screen reader, and when, decided on the host;
-// `components.rs`'s `Progress` is its glue.
-mod progress;
 // What the restart section of Settings offers, says and waits for, decided
 // on the host; `settings.rs` is its glue.
 mod restart;
@@ -104,25 +103,10 @@ mod stats;
 // Declared as `formatting` is, for the same reason.
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
-mod status_badge;
-// What a spinner looks like and how a screen reader meets it, decided on
-// the host; `components.rs`'s `Spinner` is its glue. Only the gallery shows
-// a spinner yet, and the host tests use these decisions, so only a build of
-// neither leaves them unused.
-#[cfg_attr(
-    all(not(feature = "gallery"), not(test)),
-    expect(dead_code, reason = "only the gallery shows a spinner yet")
-)]
-mod spinner;
-// Declared as `formatting` is, for the same reason.
-#[cfg(test)]
-#[cfg(target_arch = "wasm32")]
 mod time_zones;
-// A snapshot's page's DOM glue; `tree.rs` decides for its tree.
+// A snapshot's page's DOM glue; `components/tree/rules.rs` decides for its
+// tree.
 mod snapshot_page;
-// What a snapshot's tree shows and does, decided on the host;
-// `components.rs`'s `Tree` is its glue.
-mod tree;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
 mod ws;
@@ -131,16 +115,6 @@ mod ws;
 mod visit;
 // What the Snapshots page says, decided on the host.
 mod wording;
-
-// The toast's arrival and lifetime decisions are host-testable; the DOM
-// glue around them runs in a browser via the gallery's @ui scenarios. Only
-// the gallery shows a toast yet, and the host tests use these decisions, so
-// only a build of neither leaves them unused.
-#[cfg_attr(
-    all(not(feature = "gallery"), not(test)),
-    expect(dead_code, reason = "only the gallery shows a toast yet")
-)]
-mod toast;
 
 // The shared vocabulary of tones, sizes and placements every shared
 // component takes, mapped to `style.css`'s hooks on the host. Only the

@@ -2,7 +2,8 @@
 //! of the four whose text token on its background token the contrast gate
 //! checks, and its icon, a shape of its own for every state, so a reader who
 //! can't tell the colors apart scans a table of them without reading each
-//! label (A2). `components.rs`'s `StatusBadge` is the glue that draws them.
+//! label (A2). `components/status_badge.rs`'s `StatusBadge` is the glue that
+//! draws them.
 
 use lepticons_data::LucideGlyph;
 

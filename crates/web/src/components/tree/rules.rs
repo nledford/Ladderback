@@ -1,8 +1,8 @@
 //! What a snapshot's tree shows and does (technical design §4.5, "Tree"; §16,
 //! decision 102), decided on the host: which rows show, which one holds the
 //! tree's one tab stop, what a key does and which page of which folder it
-//! asks for, and what an answer changes. `components.rs`'s `Tree` is its DOM
-//! glue, which the `@ui` scenarios run in a browser.
+//! asks for, and what an answer changes. `components/tree.rs`'s `Tree` is its
+//! DOM glue, which the `@ui` scenarios run in a browser.
 //!
 //! The tree is an arena: node 0 is the snapshot's top folder, never a row of
 //! its own, and every other node an entry some folder's answer listed. A

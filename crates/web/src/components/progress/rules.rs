@@ -8,7 +8,7 @@
 //! Pure: the clock is the caller's, a [`Duration`] since any fixed instant
 //! (the page's `performance.now()`), so `cargo nextest run -p web` tests it
 //! on the host. The glue that holds the one timer and writes the attributes
-//! is `components.rs`'s `Progress`.
+//! is `components/progress.rs`'s `Progress`.
 
 use std::time::Duration;
 
