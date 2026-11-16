@@ -27,7 +27,8 @@
 // messages named (`--all`: every translated message that isn't current),
 // skips a term that is the language's own, and refuses, exiting 1, a message
 // en-US lacks or the language doesn't translate. Both exit 1 on a catalog
-// folder or sources.txt they can't read.
+// folder or sources.txt they can't read. `accept` also drops the lines of
+// messages en-US or the language no longer has, naming each one.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -183,14 +184,15 @@ export function renderListing(
 
 /** The sources after accepting `ids` (`"all"`: every translated message
  * that isn't current) in the language `tag`, or why they can't be. A term of
- * the language's own is skipped: it has no English to record. */
+ * the language's own is skipped: it has no English to record. The lines of
+ * messages en-US or the language no longer has are removed. */
 export function accepting(
   tag: string,
   english: readonly Entry[],
   translated: ReadonlySet<string>,
   sources: ReadonlyMap<string, string>,
   ids: readonly string[] | "all",
-): { sources: Map<string, string>; accepted: string[] } | string {
+): { sources: Map<string, string>; accepted: string[]; removed: string[] } | string {
   const hashes = new Map(english.map((entry) => [entry.id, sourceHash(entry.text)]));
   const chosen =
     ids === "all"
@@ -206,7 +208,9 @@ export function accepting(
     next.set(id, hash);
     accepted.push(id);
   }
-  return { sources: next, accepted };
+  const removed = [...next.keys()].filter((id) => !hashes.has(id) || !translated.has(id)).sort();
+  for (const id of removed) next.delete(id);
+  return { sources: next, accepted, removed };
 }
 
 function git(dir: string, args: string[]): string | null {
@@ -313,6 +317,7 @@ function main(argv: string[]): number {
     }
     writeFileSync(path.join(catalog.dir, SOURCES_FILE), renderSources(result.sources));
     for (const id of result.accepted) console.log(`${tag}: accepted ${id}`);
+    for (const id of result.removed) console.log(`${tag}: removed ${id}`);
     return 0;
   }
   throw new Error("usage: translations.ts (list [<tag>...] | accept <tag> (<id>... | --all)) [--locales <dir>]");

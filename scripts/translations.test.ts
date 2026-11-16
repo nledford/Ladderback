@@ -182,6 +182,21 @@ test("accepting a term only the translation has records nothing, and refuses not
   assert.deepEqual(result.sources, new Map([["greeting", HELLO]]));
 });
 
+test("accepting drops the lines of messages English or the language no longer has", () => {
+  const source = entries("greeting = Hello\nuntranslated = Gone here\n");
+  const sources = new Map([
+    ["gone", HELLO],
+    ["untranslated", HELLO],
+    ["greeting", HELLO],
+  ]);
+  for (const chosen of [["greeting"], "all"] as const) {
+    const result = accepting("de", source, ids("greeting"), sources, chosen);
+    assert.ok(typeof result !== "string", String(result));
+    assert.deepEqual(result.removed, ["gone", "untranslated"]);
+    assert.deepEqual(result.sources, new Map([["greeting", HELLO]]));
+  }
+});
+
 test("accepting every message takes the translated ones that aren't current, and keeps the rest", () => {
   const source = entries("greeting = Hello there\nfarewell = Goodbye\nwelcome = Welcome\nsame = Same\n");
   const sources = new Map([

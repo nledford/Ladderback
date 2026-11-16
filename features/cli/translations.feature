@@ -158,3 +158,22 @@ Feature: Keep a translation current
       """
       de: 2 of 2 messages current
       """
+
+  Scenario: Accepting drops the record of a message English no longer has
+    Given the English catalog holds:
+      """
+      greeting = Hello
+      """
+    When the owner accepts the German translation of "greeting"
+    Then the command exits with status 0
+    And the owner is told:
+      """
+      de: accepted greeting
+      de: removed farewell
+      """
+    When the owner lists the translations
+    Then the translations listed are:
+      """
+      de: 1 of 1 messages current
+        not in en-US: farewell
+      """

@@ -165,3 +165,8 @@ fn listed(agent: &mut Agent, step: &Step) {
     let ran = ran(agent);
     assert_eq!(ran.stdout, expected, "standard error: {}", ran.stderr);
 }
+
+#[then("the owner is told:")]
+fn told(agent: &mut Agent, step: &Step) {
+    listed(agent, step);
+}
