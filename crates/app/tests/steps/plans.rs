@@ -1,6 +1,7 @@
 //! Steps for `features/planning/plan_editor.feature`: a person creates,
 //! changes and deletes plans through the use case the Plans page calls, in
-//! the configuration the scheduler world's loop reads, or the one the forget
+//! the configuration the scheduler world's loop reads, bringing the
+//! proposals up to date as the daemon does, or in the one the forget
 //! world's maintenance reads.
 
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use domain::RepositoryAlias;
 use domain::planning::{AgentConfig, ChangeRefused, CronExpression, Plan, Schedule, Violation};
 
 use super::Agent;
+use super::proposals_steps::proposals;
 use super::scheduler_steps::{plan_id, plan_named, plan_on};
 
 /// The lock every write of the configuration holds, and what the last
@@ -41,6 +43,15 @@ impl PlansWorld {
     }
 }
 
+/// The edits of the configuration the scheduler world's loop reads, which
+/// bring the proposals world's proposals up to date, as the daemon's do.
+fn serving(agent: &Agent) -> EditPlans {
+    agent
+        .plans
+        .edits(agent.scheduler.config())
+        .with_proposals(Arc::new(proposals(agent)))
+}
+
 fn scheduled(mut plan: Plan, cron: &str) -> Plan {
     plan.schedule = Some(Schedule::new(
         CronExpression::parse(cron).expect("a cron expression"),
@@ -59,7 +70,7 @@ async fn no_plans(agent: &mut Agent) {
 
 #[when(expr = "a person creates the plan {string} scheduled {string}")]
 async fn creates(agent: &mut Agent, name: String, cron: String) {
-    let edits = agent.plans.edits(agent.scheduler.config());
+    let edits = serving(agent);
     let created = edits.create(scheduled(plan_named(&name), &cron)).await;
     agent.plans.edited = Some(created);
 }
@@ -67,7 +78,7 @@ async fn creates(agent: &mut Agent, name: String, cron: String) {
 #[when(expr = "a person creates the plan {string} into the repository {string}")]
 async fn creates_into(agent: &mut Agent, name: String, repository: String) {
     let repository = RepositoryAlias::parse(&repository).expect("the scenario's alias is valid");
-    let edits = agent.plans.edits(agent.scheduler.config());
+    let edits = serving(agent);
     let created = edits.create(plan_on(&name, repository)).await;
     agent.plans.edited = Some(created);
 }
@@ -82,17 +93,13 @@ async fn changes_schedule(agent: &mut Agent, name: String, cron: String) {
         .plan(&plan_id(&name))
         .cloned()
         .unwrap_or_else(|| plan_named(&name));
-    let changed = agent
-        .plans
-        .edits(config)
-        .change(scheduled(shown, &cron))
-        .await;
+    let changed = serving(agent).change(scheduled(shown, &cron)).await;
     agent.plans.edited = Some(changed);
 }
 
 #[when(expr = "a person deletes the plan {string} while the agent serves")]
 async fn deletes_while_serving(agent: &mut Agent, name: String) {
-    let edits = agent.plans.edits(agent.scheduler.config());
+    let edits = serving(agent);
     let deleted = edits.delete(&plan_id(&name)).await;
     assert_eq!(deleted, Ok(()), "the plan is deleted");
 }

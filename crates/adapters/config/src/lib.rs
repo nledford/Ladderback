@@ -25,6 +25,7 @@ mod files;
 #[cfg(test)]
 mod keys;
 mod locate;
+mod mask;
 #[cfg(test)]
 mod parity;
 mod plan;

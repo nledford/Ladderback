@@ -20,7 +20,9 @@ use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
 use domain::maintenance::{RepositoryStats, StatsReading};
-use domain::planning::{ConfigRevision, ProposalId, ProposalStatus, Proposer, Rationale};
+use domain::planning::{
+    ConfigRevision, ProposalId, ProposalStatus, Proposer, Rationale, RejectReason,
+};
 use domain::updates::Version;
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
@@ -568,5 +570,26 @@ pub(crate) fn proposal(row: &SqliteRow) -> Result<StoredProposal, StoreError> {
         status,
         created_at: reader.required_time("created_at")?,
         expires_at: reader.required_time("expires_at")?,
+        decided_at: reader.time("decided_at")?,
+        reasons: proposal_reasons(&reader)?,
+        approved_from: reader.id_of("approved_from", "network address", str::parse)?,
+        applied_as: reader.text("applied_as")?,
     })
+}
+
+/// A rejection's reasons, kept as a JSON array of strings; none when the
+/// column is NULL.
+fn proposal_reasons(reader: &Reader<'_>) -> Result<Vec<RejectReason>, StoreError> {
+    let Some(text) = reader.text("reasons")? else {
+        return Ok(Vec::new());
+    };
+    let reasons: Vec<String> = serde_json::from_str(&text)
+        .map_err(|_| reader.corrupt("reasons", "is not a JSON array of strings"))?;
+    reasons
+        .into_iter()
+        .map(|reason| {
+            RejectReason::parse(reason)
+                .ok_or_else(|| reader.corrupt("reasons", "holds one too long"))
+        })
+        .collect()
 }

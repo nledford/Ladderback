@@ -129,6 +129,17 @@ impl ConfigChanged {
             .unwrap_or_else(PoisonError::into_inner)
             .try_send(());
     }
+
+    /// Another teller of the same changes, for another writer of the
+    /// configuration: the scheduler hears either.
+    pub fn another(&self) -> Self {
+        Self(Mutex::new(
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
+        ))
+    }
 }
 
 /// The changes told, which the scheduler hears.

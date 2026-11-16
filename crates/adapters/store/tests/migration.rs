@@ -235,7 +235,8 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
             (10, true),
             (11, true),
             (12, true),
-            (13, true)
+            (13, true),
+            (14, true)
         ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
@@ -299,7 +300,8 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
             (10, true),
             (11, true),
             (12, true),
-            (13, true)
+            (13, true),
+            (14, true)
         ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
@@ -361,7 +363,8 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
             (10, true),
             (11, true),
             (12, true),
-            (13, true)
+            (13, true),
+            (14, true)
         ]
     );
     let check = store
@@ -454,7 +457,8 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (10, true),
             (11, true),
             (12, true),
-            (13, true)
+            (13, true),
+            (14, true)
         ]
     );
     let index: Option<String> = sqlx::query_scalar(
@@ -513,7 +517,7 @@ async fn a_database_at_version_9_gains_no_session_and_no_session_length_and_keep
     assert!(matches!(length, Ok(None)), "{length:?}");
     let mut raw = scratch.raw().await;
     assert_eq!(api_token_row(&mut raw).await, before);
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(13, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
 }
 
 #[tokio::test]
@@ -536,7 +540,7 @@ async fn a_database_at_version_10_gains_no_reading_and_keeps_its_sessions_length
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(13, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
 }
 
 #[tokio::test]
@@ -558,7 +562,7 @@ async fn a_database_at_version_11_gains_no_release_check_and_keeps_its_session_l
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(13, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
 }
 
 #[tokio::test]
@@ -577,5 +581,34 @@ async fn a_database_at_version_12_gains_no_proposal_and_keeps_its_release_check(
     let check = app::ports::ScheduleStore::release_check(&store).await;
     assert!(matches!(check, Ok(Some(_))), "{check:?}");
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(13, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
+}
+
+#[tokio::test]
+async fn a_database_at_version_13_keeps_its_proposals_with_nothing_decided() {
+    let scratch = Scratch::new();
+    let mut old = database_at_version(&scratch, 13).await;
+    sqlx::query(concat!(
+        "INSERT INTO proposals (id, token_id, token_label, base, changes, rationale, status, ",
+        "created_at, expires_at) VALUES ('aaaaaaaaaaaa', NULL, NULL, ?, '[]', '', 'pending', ",
+        "0, 172800000)"
+    ))
+    .bind("0".repeat(64))
+    .execute(&mut old)
+    .await
+    .expect("a proposal of version 13");
+    old.close().await.expect("the old database is closed");
+
+    let store = scratch.open().await;
+    let proposals = app::ports::ProposalStore::all(&store).await.unwrap();
+    let [kept] = proposals.as_slice() else {
+        panic!("one proposal: {proposals:?}");
+    };
+    assert_eq!(kept.status, domain::planning::ProposalStatus::Pending);
+    assert_eq!(kept.decided_at, None);
+    assert!(kept.reasons.is_empty());
+    assert_eq!(kept.approved_from, None);
+    assert_eq!(kept.applied_as, None);
+    let mut raw = scratch.raw().await;
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
 }

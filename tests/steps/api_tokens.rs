@@ -51,13 +51,13 @@ impl ApiTokensE2e {
 }
 
 /// Sends `request` to the daemon from a blocking thread: see [`blocking`].
-async fn exchange(agent: &Agent, request: Request) -> Response {
+pub(crate) async fn exchange(agent: &Agent, request: Request) -> Response {
     let addr = agent.web.server().addr;
     blocking(move || web::exchange(addr, &request)).await
 }
 
 /// A request in the admin's session, with its CSRF token and a JSON body.
-fn in_session(agent: &Agent, method: &str, path: &str, body: String) -> Request {
+pub(crate) fn in_session(agent: &Agent, method: &str, path: &str, body: String) -> Request {
     Request {
         method: method.to_owned(),
         path: path.to_owned(),

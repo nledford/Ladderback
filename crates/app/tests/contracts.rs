@@ -1126,3 +1126,32 @@ impl contract::notifier::NotifierHarness for FakeNotifierHarness {
 async fn the_recording_notifier_meets_the_notifier_contract() {
     contract::notifier::run(&FakeNotifierHarness::default()).await;
 }
+
+/// The in-memory configuration as both ports; a hand edit edits its
+/// comment.
+#[derive(Default)]
+struct InMemoryDrafts(Mutex<Option<Arc<InMemoryConfigStore>>>);
+
+#[async_trait]
+impl contract::config_drafts::DraftsHarness for InMemoryDrafts {
+    async fn empty(
+        &self,
+    ) -> (
+        Arc<dyn app::ports::ConfigStore>,
+        Arc<dyn app::ports::ConfigDrafts>,
+    ) {
+        let store = Arc::new(InMemoryConfigStore::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&store));
+        (store.clone(), store)
+    }
+
+    async fn edit_by_hand(&self) {
+        let store = self.0.lock().unwrap().clone().expect("a store was opened");
+        store.edit_comment("edited by hand");
+    }
+}
+
+#[tokio::test]
+async fn in_memory_config_store_meets_the_config_drafts_contract() {
+    contract::config_drafts::run(&InMemoryDrafts::default()).await;
+}

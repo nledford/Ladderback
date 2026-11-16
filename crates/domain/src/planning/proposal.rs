@@ -128,17 +128,7 @@ pub struct ConfigRevision(String);
 impl ConfigRevision {
     /// The revision of a configuration file whose bytes are `text`.
     pub fn of(text: &[u8]) -> Self {
-        use fmt::Write as _;
-        let digest = Sha256::digest(text);
-        Self(
-            digest
-                .iter()
-                .fold(String::with_capacity(REVISION_CHARS), |mut hex, byte| {
-                    // Writing to a `String` can't fail.
-                    let _ = write!(hex, "{byte:02x}");
-                    hex
-                }),
-        )
+        Self(sha256_hex(text))
     }
 
     /// The revision `text` names: exactly 64 lower-case hex digits, as
@@ -280,6 +270,14 @@ pub struct Proposal {
     pub created_at: Timestamp,
     /// [`PROPOSAL_LIFETIME`] after `created_at`.
     pub expires_at: Timestamp,
+    /// When a person rejected or approved it.
+    pub decided_at: Option<Timestamp>,
+    /// A person's reasons, one per change, once they rejected it; none
+    /// before.
+    pub rejection: Rejection,
+    /// The configuration history's version its apply kept: the file as it
+    /// was before, named for the proposal (decision 29).
+    pub applied_as: Option<String>,
 }
 
 impl Proposal {
@@ -332,6 +330,9 @@ impl Proposal {
             status: ProposalStatus::Pending,
             created_at: now,
             expires_at: now.saturating_add(PROPOSAL_LIFETIME).unwrap_or(now),
+            decided_at: None,
+            rejection: Rejection::default(),
+            applied_as: None,
         })
     }
 
@@ -365,6 +366,35 @@ fn sets_hooks(config: &AgentConfig, change: &ConfigChange) -> bool {
         ConfigChange::RemovePlan(_) => false,
     }
 }
+
+/// The SHA-256 of `bytes` in lower-case hex.
+fn sha256_hex(bytes: &[u8]) -> String {
+    sha256_hex_of(&[bytes])
+}
+
+/// The SHA-256 of `parts`, one after the other, in lower-case hex.
+fn sha256_hex_of(parts: &[&[u8]]) -> String {
+    use fmt::Write as _;
+    parts
+        .iter()
+        .fold(Sha256::new(), |hasher, part| hasher.chain_update(part))
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(REVISION_CHARS), |mut hex, byte| {
+            // Writing to a `String` can't fail.
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
+}
+
+mod decision;
+
+pub use decision::{
+    DiffHash, MAX_PER_HOUR, MAX_REASON_CHARS, PlanSetting, ProposalWarning, ProposerRecord,
+    QUIET_AFTER_REJECTION, RATE_WINDOW, REVISION_KEY_BYTES, RejectReason, Rejection,
+    RejectionRefused, RevisionKey, SHORT_PROPOSAL_ID_CHARS, Shown, ShownRevision, SummaryLine,
+    TooSoon, confirms_proposal, short_proposal_id,
+};
 
 #[cfg(test)]
 mod tests;

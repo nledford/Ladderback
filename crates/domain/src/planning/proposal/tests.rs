@@ -2,8 +2,10 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::RepositoryAlias;
+use crate::execution::plan_tags::UserTag;
 use crate::planning::{
-    GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings, Source, Violation,
+    GroupBy, Hooks, Hostname, KeepCount, Maintenance, RepositoryConfig, RepositorySettings, Source,
+    Violation,
 };
 use crate::secrets::SecretRef;
 
@@ -25,11 +27,16 @@ fn plan(name: &str) -> Plan {
 
 /// The repository `nas` and a plan for each of `plans`.
 fn config(plans: &[&str]) -> AgentConfig {
-    let entry = RepositoryConfig {
+    config_over(&["nas"], plans)
+}
+
+/// A repository for each of `repositories` and a plan for each of `plans`.
+fn config_over(repositories: &[&str], plans: &[&str]) -> AgentConfig {
+    let entry = |name: &str| RepositoryConfig {
         locations: Default::default(),
         id: None,
         settings: RepositorySettings {
-            repository: "/srv/nas".to_owned(),
+            repository: format!("/srv/{name}"),
             repo_hot: None,
             password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
             options: BTreeMap::new(),
@@ -43,7 +50,10 @@ fn config(plans: &[&str]) -> AgentConfig {
     AgentConfig::new(
         Default::default(),
         Hooks::default(),
-        BTreeMap::from([(alias("nas"), entry)]),
+        repositories
+            .iter()
+            .map(|name| (alias(name), entry(name)))
+            .collect(),
         plans.iter().map(|name| plan(name)).collect(),
     )
     .unwrap()
@@ -380,6 +390,48 @@ fn a_revision_reads_back_from_its_hex() {
 }
 
 #[test]
+fn a_shown_revision_is_the_sha256_of_the_key_then_the_revision() {
+    let key = RevisionKey::new([7; REVISION_KEY_BYTES]);
+    let shown = ShownRevision::of(&key, &ConfigRevision::of(b""));
+    // SHA-256 of 32 bytes of 7, then the 64 hex digits of the empty file's
+    // revision.
+    assert_eq!(
+        shown.as_str(),
+        "6b6906290822e563c1e3b3398850f5673effd51721cb81dadb4ab80ac0cce4e6"
+    );
+    assert_ne!(shown.as_str(), EMPTY_SHA256);
+    assert_eq!(ShownRevision::parse(shown.as_str()), Some(shown));
+}
+
+#[test]
+fn the_same_file_is_shown_another_revision_under_another_key() {
+    let revision = ConfigRevision::of(b"schema = 1\n");
+    let one = ShownRevision::of(&RevisionKey::new([1; REVISION_KEY_BYTES]), &revision);
+    let two = ShownRevision::of(&RevisionKey::new([2; REVISION_KEY_BYTES]), &revision);
+    assert_ne!(one, two);
+    assert_ne!(one.as_str(), revision.as_str());
+    assert_eq!(
+        one,
+        ShownRevision::of(&RevisionKey::new([1; REVISION_KEY_BYTES]), &revision)
+    );
+    assert_ne!(
+        one,
+        ShownRevision::of(
+            &RevisionKey::new([1; REVISION_KEY_BYTES]),
+            &ConfigRevision::of(b"schema = 2\n")
+        )
+    );
+}
+
+#[test]
+fn a_revision_key_never_shows_its_bytes() {
+    let key = RevisionKey::new([0xab; REVISION_KEY_BYTES]);
+    let shown = format!("{key:?}");
+    assert_eq!(shown, "RevisionKey([hidden])");
+    assert!(!shown.contains("171") && !shown.contains("ab"), "{shown}");
+}
+
+#[test]
 fn a_revision_of_another_length_or_alphabet_is_none() {
     for text in [
         EMPTY_SHA256.chars().skip(1).collect(),
@@ -390,4 +442,334 @@ fn a_revision_of_another_length_or_alphabet_is_none() {
     ] {
         assert_eq!(ConfigRevision::parse(&text), None, "{text}");
     }
+}
+
+// What a person decides, and the limits on proposing (decision 89).
+
+fn minutes(n: i64) -> SignedDuration {
+    SignedDuration::from_mins(n)
+}
+
+#[test]
+fn a_proposer_with_as_many_pending_as_it_may_is_refused_first() {
+    let record = ProposerRecord {
+        pending: 2,
+        made: Vec::new(),
+        last_rejected: Some(at(1_800_000_000)),
+    };
+    assert_eq!(record.admits(at(1_800_000_000), 2), Err(TooSoon::Pending));
+    assert!(matches!(
+        record.admits(at(1_800_000_000), 3),
+        Err(TooSoon::AfterRejection { .. })
+    ));
+}
+
+#[test]
+fn a_proposer_waits_five_minutes_after_a_rejection() {
+    let rejected = at(1_800_000_000);
+    let record = ProposerRecord {
+        last_rejected: Some(rejected),
+        ..ProposerRecord::default()
+    };
+    let until = rejected.checked_add(minutes(5)).unwrap();
+    let just_before = until.checked_sub(SignedDuration::from_millis(1)).unwrap();
+    assert_eq!(
+        record.admits(just_before, MAX_PENDING),
+        Err(TooSoon::AfterRejection { until })
+    );
+    assert_eq!(record.admits(until, MAX_PENDING), Ok(()));
+}
+
+#[test]
+fn a_proposer_makes_thirty_an_hour_and_one_more_once_the_oldest_is_an_hour_old() {
+    let now = at(1_800_003_600);
+    // 31 made: one more than an hour ago, which no longer counts, and 30
+    // within the hour, a minute apart, the oldest 59 minutes ago.
+    let mut made: Vec<Timestamp> = (0..30)
+        .map(|n| now.checked_sub(minutes(59 - n)).unwrap())
+        .collect();
+    made.push(now.checked_sub(minutes(61)).unwrap());
+    let record = ProposerRecord {
+        made,
+        ..ProposerRecord::default()
+    };
+    let until = now.checked_add(minutes(1)).unwrap();
+    assert_eq!(
+        record.admits(now, MAX_PENDING),
+        Err(TooSoon::Hourly { until })
+    );
+    assert_eq!(record.admits(until, MAX_PENDING), Ok(()));
+    let fewer = ProposerRecord {
+        made: record.made.iter().skip(1).copied().collect(),
+        ..ProposerRecord::default()
+    };
+    assert_eq!(fewer.admits(now, MAX_PENDING), Ok(()));
+}
+
+#[test]
+fn a_rejection_gives_one_reason_per_change_each_at_most_a_thousand_characters() {
+    let long = "x".repeat(MAX_REASON_CHARS);
+    let rejection = Rejection::new(2, vec![long.clone(), String::new()]).unwrap();
+    assert_eq!(
+        rejection
+            .reasons()
+            .iter()
+            .map(RejectReason::as_str)
+            .collect::<Vec<_>>(),
+        [long.as_str(), ""]
+    );
+    assert_eq!(
+        Rejection::new(2, vec![String::new()]),
+        Err(RejectionRefused::Count { changes: 2 })
+    );
+    assert_eq!(
+        Rejection::new(2, vec![String::new(), format!("{long}é")]),
+        Err(RejectionRefused::TooLong { index: 1 })
+    );
+    assert_eq!(RejectReason::parse(format!("{long}x")), None);
+}
+
+#[test]
+fn a_rejection_a_store_kept_gives_its_reasons_in_order() {
+    let reasons = ["Back up weekly instead", "", "Keep the old host"]
+        .map(|text| RejectReason::parse(text.to_owned()).unwrap());
+    let kept = Rejection::kept(reasons.to_vec());
+    assert_eq!(kept.reasons(), reasons);
+}
+
+#[test]
+fn an_approval_with_sign_in_off_is_confirmed_by_the_short_or_whole_id() {
+    let id = proposal_id();
+    let short = short_proposal_id(&id);
+    assert_eq!(short.len(), SHORT_PROPOSAL_ID_CHARS);
+    assert!(id.as_str().starts_with(short));
+    assert!(confirms_proposal(
+        &format!(" {} ", short.to_uppercase()),
+        &id
+    ));
+    assert!(confirms_proposal(id.as_str(), &id));
+    let other = ProposalId::from_bytes(&[9; TOKEN_BYTES]);
+    assert!(!confirms_proposal(short_proposal_id(&other), &id));
+    assert!(!confirms_proposal("", &id));
+    assert!(!confirms_proposal(id.as_str().get(..5).unwrap(), &id));
+}
+
+#[test]
+fn a_diff_hash_is_the_sha256_of_the_text() {
+    let hash = DiffHash::of("+[plans.home]\n");
+    assert_eq!(hash.as_str().len(), 64);
+    assert_eq!(DiffHash::parse(hash.as_str()), Some(hash.clone()));
+    assert_ne!(DiffHash::of("+[plans.homes]\n"), hash);
+    assert_eq!(DiffHash::parse("not a hash"), None);
+}
+
+#[test]
+fn the_summary_says_what_each_change_does_against_what_the_ones_before_made() {
+    let config = config(&["home"]);
+    let mut photos = plan("photos");
+    photos.label = Some("demo".to_owned());
+    let mut changed = plan("home");
+    changed.label = Some("demo".to_owned());
+    changed.sources = vec![Source::parse("/home/demo/other").unwrap()];
+    let proposal = drafted(
+        vec![
+            ConfigChange::AddPlan(plan("photos")),
+            ConfigChange::ChangePlan(photos),
+            ConfigChange::ChangePlan(changed),
+            ConfigChange::RemovePlan(id("photos")),
+        ],
+        &config,
+    );
+    assert_eq!(
+        proposal.summary(&config),
+        [
+            SummaryLine::AddsPlan(id("photos")),
+            SummaryLine::ChangesPlan {
+                plan: id("photos"),
+                settings: vec![PlanSetting::Label],
+            },
+            SummaryLine::ChangesPlan {
+                plan: id("home"),
+                settings: vec![PlanSetting::Label, PlanSetting::Sources],
+            },
+            SummaryLine::RemovesPlan(id("photos")),
+        ]
+    );
+}
+
+#[test]
+fn the_summary_ends_at_a_change_that_no_longer_applies() {
+    let proposal = drafted(
+        vec![
+            ConfigChange::RemovePlan(id("home")),
+            ConfigChange::AddPlan(plan("photos")),
+        ],
+        &config(&["home"]),
+    );
+    assert_eq!(proposal.summary(&config(&[])), []);
+}
+
+#[test]
+fn a_plan_over_the_same_sources_as_another_is_a_warning_not_a_refusal() {
+    let config = config(&["home"]);
+    let mut copy = plan("copy");
+    copy.sources = plan("home").sources;
+    let changes = vec![
+        ConfigChange::AddPlan(plan("photos")),
+        ConfigChange::AddPlan(copy),
+    ];
+    assert!(Proposal::check(&config, &changes).is_ok());
+    assert_eq!(
+        Proposal::warnings(&config, &changes),
+        [ProposalWarning::SameSources {
+            index: 1,
+            plan: id("copy"),
+            other: id("home"),
+        }]
+    );
+    assert_eq!(
+        Proposal::warnings(&config, &[ConfigChange::RemovePlan(id("home"))]),
+        []
+    );
+}
+
+#[test]
+fn a_glob_that_can_never_match_is_a_warning() {
+    let config = config(&[]);
+    let mut home = plan("home");
+    home.filter.globs = vec!["!/elsewhere/cache".to_owned()];
+    let warnings = Proposal::warnings(&config, &[ConfigChange::AddPlan(home)]);
+    assert_eq!(
+        warnings,
+        [ProposalWarning::GlobNeverMatches {
+            index: 0,
+            glob: "!/elsewhere/cache".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn a_glob_that_may_match_a_source_is_no_warning_and_a_sibling_path_is_one() {
+    // The plan's one source is `/home/demo/home`. A wildcard in the last
+    // segment leaves `/home/demo` as the fixed folder, which holds the
+    // source; a glob of the source itself names it.
+    let config = config(&[]);
+    let mut home = plan("home");
+    home.filter.globs = vec![
+        "/home/demo/home/cache".to_owned(),
+        "!/home/demo/*.tmp".to_owned(),
+        "/home/demo/ho*".to_owned(),
+        "/home/demo/home".to_owned(),
+        "*.log".to_owned(),
+        "/home/demo/homework".to_owned(),
+    ];
+    home.filter.iglobs = vec!["/HOME/Demo/Home/Mail/*".to_owned()];
+    let warnings = Proposal::warnings(&config, &[ConfigChange::AddPlan(home)]);
+    assert_eq!(
+        warnings,
+        [ProposalWarning::GlobNeverMatches {
+            index: 0,
+            glob: "/home/demo/homework".to_owned(),
+        }]
+    );
+}
+
+fn kept_daily(plan: &mut Plan) {
+    plan.retention.keep_daily = Some(KeepCount::new(7).unwrap());
+}
+
+fn needs_preview(changes: Vec<ConfigChange>, config: &AgentConfig) -> bool {
+    drafted(changes, config).needs_forget_preview(config)
+}
+
+#[test]
+fn a_retention_change_needs_the_forget_preview() {
+    let config = config(&["home"]);
+    let mut kept = plan("home");
+    kept_daily(&mut kept);
+    assert!(needs_preview(vec![ConfigChange::ChangePlan(kept)], &config));
+}
+
+#[test]
+fn a_new_plan_with_a_retention_policy_needs_the_forget_preview() {
+    // Its ID may be an orphaned group's plan, which only the repository
+    // tells; with no policy it forgets nothing, whatever the ID.
+    let config = config(&["home"]);
+    let mut kept = plan("photos");
+    kept_daily(&mut kept);
+    assert!(needs_preview(vec![ConfigChange::AddPlan(kept)], &config));
+    assert!(!needs_preview(
+        vec![ConfigChange::AddPlan(plan("photos"))],
+        &config
+    ));
+}
+
+#[test]
+fn a_change_of_a_plans_repository_needs_the_forget_preview() {
+    let config = config_over(&["nas", "usb"], &["home"]);
+    let mut moved = plan("home");
+    moved.repository = alias("usb");
+    assert!(needs_preview(
+        vec![ConfigChange::ChangePlan(moved)],
+        &config
+    ));
+}
+
+#[test]
+fn a_change_of_a_plans_host_needs_the_forget_preview() {
+    let config = config(&["home"]);
+    let mut hosted = plan("home");
+    hosted.host = Some(Hostname::parse("demo-host").unwrap());
+    assert!(needs_preview(
+        vec![ConfigChange::ChangePlan(hosted)],
+        &config
+    ));
+}
+
+#[test]
+fn every_removal_needs_the_forget_preview() {
+    let config = config(&["home"]);
+    assert!(needs_preview(
+        vec![ConfigChange::RemovePlan(id("home"))],
+        &config
+    ));
+}
+
+#[test]
+fn a_change_that_can_not_delete_needs_no_forget_preview() {
+    let config = config(&["home"]);
+    let mut changed = plan("home");
+    changed.label = Some("demo".to_owned());
+    changed.sources = vec![Source::parse("/home/demo/other").unwrap()];
+    changed.tags = vec![UserTag::new("demo").unwrap()];
+    assert!(!needs_preview(
+        vec![
+            ConfigChange::AddPlan(plan("photos")),
+            ConfigChange::ChangePlan(changed),
+        ],
+        &config
+    ));
+}
+
+#[test]
+fn each_change_is_read_against_what_the_ones_before_made_for_the_forget_preview() {
+    let config = config(&[]);
+    let mut kept = plan("photos");
+    kept_daily(&mut kept);
+    assert!(needs_preview(
+        vec![
+            ConfigChange::AddPlan(plan("photos")),
+            ConfigChange::ChangePlan(kept),
+        ],
+        &config
+    ));
+}
+
+#[test]
+fn a_change_that_no_longer_applies_needs_the_forget_preview() {
+    let proposal = drafted(
+        vec![ConfigChange::ChangePlan(plan("home"))],
+        &config(&["home"]),
+    );
+    assert!(proposal.needs_forget_preview(&config(&[])));
 }

@@ -8,6 +8,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use domain::Timestamp;
+use domain::planning::ProposalId;
 use jiff::tz::TimeZone;
 
 use crate::schema::{KEPT_VERSIONS, MAX_CONFIG_BYTES, over_cap};
@@ -133,25 +134,49 @@ fn stamp(at: Timestamp) -> String {
 ///
 /// The version is on disk, and so is its place in the folder, when this
 /// returns `Ok`.
-pub(crate) fn keep(path: &Path, old: &[u8], at: Timestamp) -> io::Result<()> {
-    keep_with(path, old, at, |folder| File::open(folder)?.sync_all())
+pub(crate) fn keep(
+    path: &Path,
+    old: &[u8],
+    at: Timestamp,
+    proposal: Option<&ProposalId>,
+) -> io::Result<String> {
+    let suffix = proposal
+        .map(|id| format!("-proposal-{id}"))
+        .unwrap_or_default();
+    keep_named(path, old, at, &suffix, |folder| {
+        File::open(folder)?.sync_all()
+    })
 }
 
 /// [`keep`] with the way a folder is flushed to disk given, so a test sees
 /// which folders are, and when: a power loss can't be made to happen.
+#[cfg(test)]
 fn keep_with(
     path: &Path,
     old: &[u8],
     at: Timestamp,
     flush_folder: impl Fn(&Path) -> io::Result<()>,
 ) -> io::Result<()> {
+    keep_named(path, old, at, "", flush_folder).map(|_| ())
+}
+
+/// [`keep_with`], the version's name ending in `suffix` before `.toml`;
+/// the name kept.
+fn keep_named(
+    path: &Path,
+    old: &[u8],
+    at: Timestamp,
+    suffix: &str,
+    flush_folder: impl Fn(&Path) -> io::Result<()>,
+) -> io::Result<String> {
     let folder = history_folder(path);
     private_folder(&folder)?;
     let number = versions(&folder)?
         .last()
         .map_or(Some(1), |(last, _)| last.checked_add(1))
         .ok_or_else(|| io::Error::other("the history has run out of version numbers"))?;
-    let version = folder.join(format!("{number:06}-{}.toml", stamp(at)));
+    let name = format!("{number:06}-{}{suffix}.toml", stamp(at));
+    let version = folder.join(&name);
     let mut kept = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -172,7 +197,7 @@ fn keep_with(
     // Forgetting is housekeeping: a version that can't be removed now is
     // removed by a later save, and must not fail this one.
     let _ = forget_old(&folder);
-    Ok(())
+    Ok(name)
 }
 
 /// Whether `text` is what [`stamp`] writes: `20261108T132021.123Z`.
@@ -186,11 +211,16 @@ fn is_stamp(text: &str) -> bool {
 }
 
 /// The number a kept version's name starts with: `000042` in
-/// `000042-20261108T132021.123Z.toml`. A name of another shape, such as a
-/// note someone left in the folder, isn't a version: it is not counted, and
-/// never forgotten.
+/// `000042-20261108T132021.123Z.toml`, or in
+/// `000042-20261108T132021.123Z-proposal-<id>.toml` for a proposal's apply.
+/// A name of another shape, such as a note someone left in the folder,
+/// isn't a version: it is not counted, and never forgotten.
 fn number_of(name: &str) -> Option<u64> {
-    let (number, stamp) = name.strip_suffix(".toml")?.split_once('-')?;
+    let (number, rest) = name.strip_suffix(".toml")?.split_once('-')?;
+    let stamp = match rest.split_once("-proposal-") {
+        Some((stamp, id)) => ProposalId::parse(id).map(|_| stamp)?,
+        None => rest,
+    };
     if !is_stamp(stamp) || number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
@@ -342,6 +372,16 @@ mod tests {
         let number = |name| number_of(name);
         assert_eq!(number("000042-20261108T132021.123Z.toml"), Some(42));
         assert_eq!(number("7-20261108T132021.123Z.toml"), Some(7));
+        assert_eq!(
+            number("000043-20261108T132021.123Z-proposal-abcdefghijkm.toml"),
+            Some(43),
+            "an apply's version names its proposal"
+        );
+        assert_eq!(
+            number("000043-20261108T132021.123Z-proposal-x.toml"),
+            None,
+            "and only a proposal's ID"
+        );
         assert_eq!(number("000042-20261108T132021.123Z.txt"), None);
         assert_eq!(
             number("20261108T132021.123Z-00.toml"),

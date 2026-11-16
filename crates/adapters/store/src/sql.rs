@@ -295,6 +295,18 @@ pub(crate) const COUNT_PENDING_PROPOSALS: &str = concat!(
     "WHERE status = 'pending' AND token_id IS ? AND expires_at > ?"
 );
 
+/// When one proposer made each of its proposals still kept, for the limit
+/// on proposals an hour; the ended ones forgotten beyond the newest few
+/// hundred bound it. Parameter: the proposer's token ID, as above.
+pub(crate) const PROPOSALS_MADE: &str = "SELECT created_at FROM proposals WHERE token_id IS ?";
+
+/// When a person last rejected one of a proposer's proposals, NULL if
+/// never. Parameter: the proposer's token ID, as above.
+pub(crate) const LAST_REJECTION: &str = concat!(
+    "SELECT MAX(decided_at) FROM proposals ",
+    "WHERE status = 'rejected' AND token_id IS ?"
+);
+
 /// Keeps a new proposal. Parameters: `id`, `token_id`, `token_label`,
 /// `base`, `changes`, `rationale`, `status`, `created_at`, `expires_at`.
 pub(crate) const INSERT_PROPOSAL: &str = concat!(
@@ -317,7 +329,7 @@ macro_rules! select_proposals {
     ($clause:literal) => {
         concat!(
             "SELECT id, token_id, token_label, base, changes, rationale, status, created_at, ",
-            "expires_at FROM proposals",
+            "expires_at, decided_at, reasons, approved_from, applied_as FROM proposals",
             $clause
         )
     };
@@ -333,3 +345,24 @@ pub(crate) const ALL_PROPOSALS: &str = select_proposals!(" ORDER BY created_at D
 /// Parameters: the new status, the proposal's ID, the status it must have.
 pub(crate) const CHANGE_PROPOSAL_STATUS: &str =
     "UPDATE proposals SET status = ? WHERE id = ? AND status = ?";
+
+/// Rejects a pending proposal. Parameters: `decided_at`, the reasons as a
+/// JSON array, the proposal's ID.
+pub(crate) const REJECT_PROPOSAL: &str = concat!(
+    "UPDATE proposals SET status = 'rejected', decided_at = ?, reasons = ? ",
+    "WHERE id = ? AND status = 'pending'"
+);
+
+/// Starts applying a pending proposal. Parameters: `decided_at`,
+/// `approved_from`, the proposal's ID.
+pub(crate) const APPROVE_PROPOSAL: &str = concat!(
+    "UPDATE proposals SET status = 'applying', decided_at = ?, approved_from = ? ",
+    "WHERE id = ? AND status = 'pending'"
+);
+
+/// Marks a proposal being applied applied. Parameters: `applied_as`, the
+/// proposal's ID.
+pub(crate) const PROPOSAL_APPLIED: &str = concat!(
+    "UPDATE proposals SET status = 'applied', applied_as = ? ",
+    "WHERE id = ? AND status = 'applying'"
+);

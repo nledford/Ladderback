@@ -238,6 +238,26 @@ pub enum ErrorCode {
     /// The proposal is not pending, so it can't be withdrawn. The argument
     /// `status` is its status's wire name.
     ProposalNotPending,
+    /// The configuration file changed since the "Pending changes" page
+    /// showed the proposal, or by hand during its apply, which kept the
+    /// hand edit: nothing was applied, and the proposal is pending for a
+    /// new review.
+    ProposalChanged,
+    /// The proposal holds a change that could delete snapshots, which is
+    /// approved only with the forget preview (decision 89, point 8): it
+    /// was not applied, and it stays pending for a person to reject.
+    ProposalNeedsForgetPreview,
+    /// The proposer made as many proposals in the last hour as it may.
+    /// The argument `seconds` is how long until it may propose again.
+    ProposalRate,
+    /// A person rejected one of the proposer's proposals a short while ago.
+    /// The argument `seconds` is how long until it may propose again.
+    ProposalAfterRejection,
+    /// A rejection's reasons don't fit its proposal. The argument `problem`
+    /// says how: `count`, another number of reasons than `change` changes;
+    /// or `too-long`, the reason for change `change`, from 1, is longer
+    /// than a reason may be.
+    ProposalReasons,
     /// The proposals couldn't be read or kept, or a proposal's ID couldn't
     /// be drawn; the daemon's log says why (decision 89).
     ProposalsUnavailable,
@@ -1190,6 +1210,23 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ProposalRate | Self::ProposalAfterRejection => &[ArgSpec {
+                name: "seconds",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
+            Self::ProposalReasons => &[
+                ArgSpec {
+                    name: "problem",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "change",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+            ],
             Self::RepositoryUnknown => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
@@ -1350,6 +1387,8 @@ impl ErrorCode {
             | Self::ApiTokenNoScope
             | Self::ApiTokensUnavailable
             | Self::ProposalsUnavailable
+            | Self::ProposalChanged
+            | Self::ProposalNeedsForgetPreview
             | Self::CurrentPasswordWrong
             | Self::AdminPasswordUnavailable
             | Self::SessionsUnavailable
@@ -2397,6 +2436,8 @@ mod tests {
             ErrorCode::ApiTokenNoScope,
             ErrorCode::ApiTokensUnavailable,
             ErrorCode::ProposalsUnavailable,
+            ErrorCode::ProposalChanged,
+            ErrorCode::ProposalNeedsForgetPreview,
             ErrorCode::CurrentPasswordWrong,
             ErrorCode::AdminPasswordUnavailable,
             ErrorCode::SessionsUnavailable,
@@ -2845,6 +2886,19 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_shows_what_it_binds_to_and_hides_its_confirmation() {
+        let approval = ApproveProposalDto {
+            revision: "demo-revision".to_owned(),
+            diff_hash: "demo-diff".to_owned(),
+            confirmation: "canary-admin-password".to_owned(),
+        };
+        assert_eq!(
+            format!("{approval:?}"),
+            r#"ApproveProposalDto { revision: "demo-revision", diff_hash: "demo-diff", confirmation: "[hidden]" }"#
+        );
+    }
+
+    #[test]
     fn a_restore_request_travels_in_kebab_case_and_its_debug_hides_the_confirmation() {
         let request: RestoreRequestDto = serde_json::from_str(
             r#"{"path":"home/docs","destination":"in-place","confirmation":"canary-admin-password"}"#,
@@ -3209,6 +3263,13 @@ pub enum UiEvent {
     AgentOnline { agent: String, at: String },
     /// An agent left the fleet.
     AgentOffline { agent: String, at: String },
+    /// A proposal's status changed (decision 89, point 14): facts only,
+    /// never its rationale, its changes or its proposer's label. A page
+    /// that shows proposals reads them again on hearing it.
+    ProposalChanged {
+        proposal: String,
+        status: ProposalStatusDto,
+    },
 }
 
 #[cfg(test)]
@@ -4019,6 +4080,34 @@ pub struct ProposalDto {
     pub expires_at: String,
     pub changes: Vec<ProposalChangeDto>,
     pub rationale: String,
+    /// When a person approved or rejected it; `null` until one did.
+    #[serde(default)]
+    pub decided_at: Option<String>,
+    /// A person's reason for rejecting each change, in order, `""` for a
+    /// change given none; empty unless it was rejected.
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    /// What the submission checks warn of, in the answer to its creation
+    /// only: the proposal was kept all the same.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<ProposalWarningDto>,
+}
+
+/// What the submission checks found that doesn't refuse a proposal
+/// (decision 89, point 5), by its `kind`. `change` counts from 1.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ProposalWarningDto {
+    /// The change leaves its plan `plan` backing up the same sources as
+    /// the plan `other`.
+    SameSources {
+        change: u64,
+        plan: String,
+        other: String,
+    },
+    /// The change leaves its plan with the glob `glob`, which can never
+    /// match, read against its sources as written.
+    GlobNeverMatches { change: u64, glob: String },
 }
 
 /// `GET /api/v1/proposals`: the proposals the asker may see, newest first.
@@ -4026,6 +4115,100 @@ pub struct ProposalDto {
 #[serde(rename_all = "kebab-case")]
 pub struct ProposalsDto {
     pub proposals: Vec<ProposalDto>,
+}
+
+/// A plan's setting, as a summary line names what a change changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlanSettingDto {
+    Repository,
+    Host,
+    Label,
+    Sources,
+    Tags,
+    Schedule,
+    Overlap,
+    Retry,
+    Filter,
+    Retention,
+}
+
+/// One line of the summary Ladderback writes of a proposal's changes
+/// (decision 89, point 4), by its `kind`; never the AI agent's words.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SummaryLineDto {
+    AddsPlan {
+        plan: String,
+    },
+    /// Changes these settings of the plan.
+    ChangesPlan {
+        plan: String,
+        settings: Vec<PlanSettingDto>,
+    },
+    RemovesPlan {
+        plan: String,
+    },
+}
+
+/// `GET /api/v1/proposals/{id}/review`, a browser session's only: the
+/// proposal as the "Pending changes" page shows it (decision 89, point 6).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProposalReviewDto {
+    pub proposal: ProposalDto,
+    /// What its changes do, one line each, in order.
+    pub summary: Vec<SummaryLineDto>,
+    /// The unified diff of `config.toml` an approval applies, each secret
+    /// the file holds masked; empty unless the proposal is pending.
+    pub diff: String,
+    /// The SHA-256, in hex, of the file the diff was rebuilt against, which
+    /// an approval sends back.
+    pub revision: String,
+    /// The SHA-256, in hex, of `diff`, which an approval sends back.
+    pub diff_hash: String,
+    /// Whether the file has changed since the proposal was drafted.
+    pub changed_since_drafted: bool,
+    /// Whether a change of it could delete snapshots: such a proposal is
+    /// approved only with the forget preview, so until then it is only
+    /// rejected (decision 89, point 8).
+    pub needs_forget_preview: bool,
+    /// How many of its proposer's kept proposals a person rejected.
+    pub rejected: u64,
+    /// The ID's first characters, which confirm an approval while sign-in
+    /// is off.
+    pub short_id: String,
+}
+
+/// `POST /api/v1/proposals/{id}/approve`, a browser session's only: what
+/// the page showed, from [`ProposalReviewDto`], and the step-up
+/// confirmation: the admin password with sign-in on, the proposal's short
+/// ID otherwise. The confirmation is never logged or shown (I4): its
+/// `Debug` hides it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ApproveProposalDto {
+    pub revision: String,
+    pub diff_hash: String,
+    pub confirmation: String,
+}
+
+impl std::fmt::Debug for ApproveProposalDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApproveProposalDto")
+            .field("revision", &self.revision)
+            .field("diff_hash", &self.diff_hash)
+            .field("confirmation", &"[hidden]")
+            .finish()
+    }
+}
+
+/// `POST /api/v1/proposals/{id}/reject`, a browser session's only: a
+/// reason for each change, in order, `""` for none.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RejectProposalDto {
+    pub reasons: Vec<String>,
 }
 
 /// What is wrong with an argument an [`ErrorCode::InvalidArguments`] names,

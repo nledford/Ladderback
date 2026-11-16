@@ -1,89 +1,208 @@
 //! Proposals (§16, decision 89): an AI agent, or another API client,
 //! proposes configuration changes for a person to confirm, lists and reads
-//! its proposals and withdraws one. Making a proposal checks its changes
-//! against the configuration by the configuration's rules and nothing else:
-//! no secret is resolved, no command runs and no location is contacted, and
-//! the configuration is never written. Reading proposals brings each pending
-//! one up to date first: expired from its expiry on, stale once a change of
-//! it no longer applies to the configuration as it is.
+//! its proposals and withdraws one; a person reviews one on the "Pending
+//! changes" page, then approves or rejects it. Making a proposal checks its
+//! changes against the configuration by the configuration's rules and
+//! nothing else: no secret is resolved, no command runs and no location is
+//! contacted, and the configuration is never written. Reading proposals
+//! brings each pending one up to date first: expired from its expiry on,
+//! stale once a change of it no longer applies to the configuration as it
+//! is. An approval is confirmed by step-up and bound to what the page
+//! showed; it is applied under the configuration's write lock, and only
+//! over the file as it was shown, so a hand edit is never overwritten.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
+use api::{ProposalStatusDto, UiEvent};
+use domain::access::Password;
 use domain::planning::{
-    AgentConfig, ConfigChange, ConfigRevision, MAX_ENDED, MAX_PENDING, Proposal, ProposalId,
-    ProposalRefused, ProposalStatus, Proposer, Rationale,
+    AgentConfig, ConfigChange, ConfigRevision, DiffHash, MAX_ENDED, MAX_PENDING, Proposal,
+    ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale, Rejection,
+    RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon, confirms_proposal,
 };
+use domain::secrets::Redactor;
 
+use crate::access::{Access, PasswordRefused};
 use crate::ports::{
-    Added, ChangeCodec, Clock, CodecError, ConfigError, ConfigStore, ProposalStore, Random,
-    RandomUnavailable, StoreError, StoredProposal,
+    Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError, ConfigStore,
+    EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError, StoredProposal,
 };
+use crate::repositories::ConfigWrites;
+use crate::schedule::ConfigChanged;
 
-/// Why a proposal was not made, read or withdrawn. Nothing was kept or
-/// changed.
+mod diff;
+
+pub use diff::unified_diff;
+
+/// Why a proposal was not made, read, withdrawn, approved or rejected.
+/// Nothing was kept or changed, except where a variant says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProposalError {
     /// The submission checks refused the proposal.
     Refused(ProposalRefused),
     /// Its proposer has [`MAX_PENDING`] proposals pending already.
     Full,
+    /// Its proposer may not propose again yet.
+    TooSoon(TooSoon),
     /// No proposal by that ID is kept that the asker may see.
     Unknown,
     /// The proposal has ended, or is being applied: only a pending one is
-    /// withdrawn.
+    /// withdrawn, approved or rejected.
     NotPending(ProposalStatus),
-    /// The configuration couldn't be read. Boxed: the error is large.
+    /// The reasons of a rejection don't fit its proposal.
+    Rejection(RejectionRefused),
+    /// The configuration is no longer what the page showed, or changed by
+    /// hand during the apply, which kept the hand edit: the proposal is
+    /// pending, for a person to review and approve again.
+    Changed,
+    /// The proposal holds a change that could delete snapshots, which is
+    /// approved only with the forget preview (decision 89, point 8): it
+    /// is still pending.
+    NeedsForgetPreview,
+    /// The step-up confirmation wasn't the admin password, or the
+    /// proposal's ID with sign-in off.
+    StepUpFailed,
+    /// Too many wrong passwords from this address: try again in `seconds`.
+    StepUpWait { seconds: u64 },
+    /// The admin password couldn't be checked.
+    StepUpUnavailable(String),
+    /// The configuration couldn't be read or written; an apply that failed
+    /// writing leaves the proposal failed. Boxed: the error is large.
     Config(Box<ConfigError>),
     /// The proposals couldn't be read or kept.
     Store(StoreError),
     /// The changes couldn't be written to be kept.
     Codec(CodecError),
-    /// The platform gave no random bytes for the proposal's ID.
+    /// The platform gave no random bytes for the proposal's ID, or none
+    /// for the key a page's revisions are shown under.
     Random(RandomUnavailable),
 }
 
-/// Makes, reads and withdraws proposals, kept in `store`, checked against
-/// the configuration `config`.
+/// A proposal kept, and what the submission checks warn of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Made {
+    pub proposal: Proposal,
+    pub warnings: Vec<ProposalWarning>,
+}
+
+/// A proposal applied: the configuration file holds its changes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Applied {
+    pub proposal: Proposal,
+    /// Why the store didn't record the apply, when it didn't: the file is
+    /// saved all the same, and the store shows the proposal being applied
+    /// until the daemon starts again ([`Proposals::recover`]).
+    pub unrecorded: Option<StoreError>,
+}
+
+/// A proposal as the "Pending changes" page shows it (decision 89, points
+/// 3, 4 and 6).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Review {
+    pub proposal: Proposal,
+    /// What its changes do, in Ladderback's words.
+    pub summary: Vec<SummaryLine>,
+    /// The diff of the file as it is to the file a pending proposal's
+    /// changes make, every secret the configuration holds masked; empty
+    /// for one that isn't pending.
+    pub diff: String,
+    /// What an approval of it is bound to: the file, keyed, and the diff
+    /// as shown, masked; the file's revision binds what the mask hides.
+    pub shown: Shown,
+    /// Whether the file has changed since the proposal was drafted.
+    pub changed_since_drafted: bool,
+    /// Whether a change of it could delete snapshots, so that only the
+    /// forget preview lets a person approve it; until then, it is rejected.
+    pub needs_forget_preview: bool,
+    /// How many of its proposer's kept proposals a person rejected.
+    pub rejected: usize,
+}
+
+/// A person's approval of a proposal, as the page sends it. The
+/// confirmation is never logged or shown (I4): its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApprovalAsk {
+    /// What the page showed.
+    pub shown: Shown,
+    /// The step-up confirmation: the admin password with sign-in on, the
+    /// proposal's ID with it off.
+    pub confirmation: String,
+    /// The browser's address, whose sign-in waits a wrong password counts
+    /// against.
+    pub address: IpAddr,
+}
+
+impl std::fmt::Debug for ApprovalAsk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApprovalAsk")
+            .field("shown", &self.shown)
+            .field("confirmation", &"[hidden]")
+            .field("address", &self.address)
+            .finish()
+    }
+}
+
+/// What [`Proposals`] works with.
+pub struct ProposalPorts {
+    pub store: Arc<dyn ProposalStore>,
+    pub codec: Arc<dyn ChangeCodec>,
+    pub config: Arc<dyn ConfigStore>,
+    /// The same configuration, for an apply.
+    pub drafts: Arc<dyn ConfigDrafts>,
+    /// The lock every write of the configuration holds.
+    pub writes: Arc<ConfigWrites>,
+    /// Told of each apply, so the scheduler reads the configuration again.
+    pub changed: ConfigChanged,
+    /// Where each status change is announced.
+    pub events: Arc<dyn EventBus>,
+    pub clock: Arc<dyn Clock>,
+    pub random: Arc<dyn Random>,
+    /// The key the revisions a page is shown are keyed with, drawn once
+    /// each daemon start, or why the platform gave none.
+    pub revision_key: Result<RevisionKey, RandomUnavailable>,
+}
+
+/// Makes, reads, withdraws, approves and rejects proposals.
 pub struct Proposals {
-    store: Arc<dyn ProposalStore>,
-    codec: Arc<dyn ChangeCodec>,
-    config: Arc<dyn ConfigStore>,
-    clock: Arc<dyn Clock>,
-    random: Arc<dyn Random>,
+    ports: ProposalPorts,
+    /// With sign-in on: checks the admin password of a step-up.
+    access: Option<Arc<Access>>,
 }
 
 impl Proposals {
-    pub fn new(
-        store: Arc<dyn ProposalStore>,
-        codec: Arc<dyn ChangeCodec>,
-        config: Arc<dyn ConfigStore>,
-        clock: Arc<dyn Clock>,
-        random: Arc<dyn Random>,
-    ) -> Self {
+    pub fn new(ports: ProposalPorts) -> Self {
         Self {
-            store,
-            codec,
-            config,
-            clock,
-            random,
+            ports,
+            access: None,
+        }
+    }
+
+    /// With sign-in on: an approval's step-up asks for the admin password,
+    /// checked by `access` in the client's sign-in waits.
+    #[must_use]
+    pub fn with_access(self, access: Arc<Access>) -> Self {
+        Self {
+            access: Some(access),
+            ..self
         }
     }
 
     /// Keeps a pending proposal of `changes` by `proposer`, drafted against
     /// the configuration `base`, once they pass the submission checks
-    /// ([`Proposal::draft`]) and the proposer has fewer than
-    /// [`MAX_PENDING`] pending. The oldest ended proposals beyond
-    /// [`MAX_ENDED`] are forgotten. It is made at the millisecond, so it is
-    /// answered as it is read back.
+    /// ([`Proposal::draft`]) and the proposer's record admits one more
+    /// ([`ProposerRecord::admits`](domain::planning::ProposerRecord::admits)).
+    /// The oldest ended proposals beyond [`MAX_ENDED`] are forgotten. It is
+    /// made at the millisecond, so it is answered as it is read back.
     pub async fn propose(
         &self,
         proposer: Proposer,
         base: ConfigRevision,
         changes: Vec<ConfigChange>,
         rationale: Rationale,
-    ) -> Result<Proposal, ProposalError> {
+    ) -> Result<Made, ProposalError> {
         let config = self.load().await?;
-        let bytes = self.random.token().map_err(ProposalError::Random)?;
+        let bytes = self.ports.random.token().map_err(ProposalError::Random)?;
         let proposal = Proposal::draft(
             ProposalId::from_bytes(&bytes),
             proposer,
@@ -91,26 +210,31 @@ impl Proposals {
             changes,
             rationale,
             &config,
-            to_the_millisecond(self.clock.now()),
+            to_the_millisecond(self.ports.clock.now()),
         )
         .map_err(ProposalError::Refused)?;
         let stored = self.stored(&proposal)?;
         match self
+            .ports
             .store
             .add(&stored, MAX_PENDING, MAX_ENDED)
             .await
             .map_err(ProposalError::Store)?
         {
-            Added::Kept => Ok(proposal),
-            Added::Full => Err(ProposalError::Full),
+            Admission::Kept => {}
+            Admission::Refused(TooSoon::Pending) => return Err(ProposalError::Full),
+            Admission::Refused(too_soon) => return Err(ProposalError::TooSoon(too_soon)),
         }
+        let warnings = Proposal::warnings(&config, &proposal.changes);
+        self.announce(&proposal.id, ProposalStatus::Pending).await;
+        Ok(Made { proposal, warnings })
     }
 
     /// The proposals `asker` may see, newest first, each brought up to
     /// date. A token sees the proposals it made; a client with no token
     /// sees them all.
     pub async fn list(&self, asker: &Proposer) -> Result<Vec<Proposal>, ProposalError> {
-        let all = self.store.all().await.map_err(ProposalError::Store)?;
+        let all = self.ports.store.all().await.map_err(ProposalError::Store)?;
         let mut config = None;
         let mut listed = Vec::new();
         for stored in all {
@@ -128,9 +252,18 @@ impl Proposals {
         Ok(listed)
     }
 
+    /// Brings every kept proposal up to date, as a save of the
+    /// configuration asks (decision 89, point 3): a pending one whose
+    /// change no longer applies goes stale now, announced, rather than at
+    /// its next read.
+    pub async fn refresh(&self) -> Result<(), ProposalError> {
+        self.list(&Proposer::NoToken).await.map(drop)
+    }
+
     /// The proposal `id`, brought up to date, if `asker` may see it.
     pub async fn get(&self, asker: &Proposer, id: &ProposalId) -> Result<Proposal, ProposalError> {
         let stored = self
+            .ports
             .store
             .get(id)
             .await
@@ -152,6 +285,7 @@ impl Proposals {
             return Err(ProposalError::NotPending(proposal.status));
         }
         let withdrawn = self
+            .ports
             .store
             .change_status(id, ProposalStatus::Pending, ProposalStatus::Withdrawn)
             .await
@@ -162,11 +296,252 @@ impl Proposals {
             return Err(ProposalError::NotPending(now));
         }
         proposal.status = ProposalStatus::Withdrawn;
+        self.announce(id, proposal.status).await;
         Ok(proposal)
     }
 
+    /// The proposal `id` as the "Pending changes" page shows it, brought up
+    /// to date: a page opening is a read like any other.
+    pub async fn review(&self, id: &ProposalId) -> Result<Review, ProposalError> {
+        let proposal = self.get(&Proposer::NoToken, id).await?;
+        let rejected = self
+            .ports
+            .store
+            .all()
+            .await
+            .map_err(ProposalError::Store)?
+            .iter()
+            .filter(|one| {
+                one.status == ProposalStatus::Rejected
+                    && same_proposer(&one.proposer, &proposal.proposer)
+            })
+            .count();
+        let config = self.load().await?;
+        let summary = proposal.summary(&config);
+        // Only a pending one is approved, so only its diff is shown; an
+        // ended one shows the file as it is.
+        let after = if proposal.status == ProposalStatus::Pending {
+            Proposal::check(&config, &proposal.changes).ok()
+        } else {
+            None
+        };
+        let draft = self.draft(after.as_ref().unwrap_or(&config)).await?;
+        let diff = if after.is_some() {
+            masked_diff(&config, &draft.before, &draft.after)
+        } else {
+            String::new()
+        };
+        Ok(Review {
+            changed_since_drafted: draft.revision != proposal.base,
+            needs_forget_preview: proposal.needs_forget_preview(&config),
+            shown: Shown {
+                revision: self.shown_revision(&draft.revision)?,
+                diff: DiffHash::of(&diff),
+            },
+            proposal,
+            summary,
+            diff,
+            rejected,
+        })
+    }
+
+    /// Approves the pending proposal `id` as `ask` says the page showed it,
+    /// once step-up confirms it, and applies it: under the configuration's
+    /// write lock, rebuilt against the file as it is, and saved only over
+    /// that file. A rebuild that isn't what the page showed, or a file
+    /// edited by hand meanwhile, leaves the proposal pending.
+    pub async fn approve(
+        &self,
+        id: &ProposalId,
+        ask: ApprovalAsk,
+    ) -> Result<Applied, ProposalError> {
+        self.step_up(id, &ask).await?;
+        let _writes = self.ports.writes.lock().await;
+        let mut proposal = self.get(&Proposer::NoToken, id).await?;
+        if proposal.status != ProposalStatus::Pending {
+            return Err(ProposalError::NotPending(proposal.status));
+        }
+        let config = self.load().await?;
+        // `get` found it applies; a hand edit since then is a change of
+        // the file the page showed.
+        let after =
+            Proposal::check(&config, &proposal.changes).map_err(|_| ProposalError::Changed)?;
+        if proposal.needs_forget_preview(&config) {
+            return Err(ProposalError::NeedsForgetPreview);
+        }
+        let draft = self.draft(&after).await?;
+        let rebuilt = Shown {
+            revision: self.shown_revision(&draft.revision)?,
+            diff: DiffHash::of(&masked_diff(&config, &draft.before, &draft.after)),
+        };
+        if rebuilt != ask.shown {
+            return Err(ProposalError::Changed);
+        }
+        let now = to_the_millisecond(self.ports.clock.now());
+        let approved = self
+            .ports
+            .store
+            .approve(id, now, Some(ask.address))
+            .await
+            .map_err(ProposalError::Store)?;
+        if !approved {
+            return Err(ProposalError::NotPending(self.kept_status(id).await?));
+        }
+        proposal.decided_at = Some(now);
+        self.announce(id, ProposalStatus::Applying).await;
+        match self
+            .ports
+            .drafts
+            .save_over(&draft.revision, &after, id)
+            .await
+        {
+            Ok(SavedOver::Saved { kept }) => {
+                self.ports.changed.tell();
+                // The file holds the changes whatever the store records: the
+                // answer is that it is applied, with why the store shows
+                // otherwise until the daemon starts again.
+                let unrecorded = self.ports.store.applied(id, kept.as_deref()).await.err();
+                proposal.status = ProposalStatus::Applied;
+                proposal.applied_as = kept;
+                self.announce(id, proposal.status).await;
+                Ok(Applied {
+                    proposal,
+                    unrecorded,
+                })
+            }
+            Ok(SavedOver::ChangedMeanwhile) => {
+                self.end_apply(id, ProposalStatus::Pending).await?;
+                Err(ProposalError::Changed)
+            }
+            Err(error) => {
+                self.end_apply(id, ProposalStatus::Failed).await?;
+                Err(ProposalError::Config(Box::new(error)))
+            }
+        }
+    }
+
+    /// Ends as failed every proposal still being applied, as a daemon that
+    /// stopped mid-apply left it, announcing each (decision 89, point 2):
+    /// called once, as the daemon starts, before any apply. Answers the
+    /// proposals it ended.
+    pub async fn recover(&self) -> Result<Vec<ProposalId>, StoreError> {
+        let mut ended = Vec::new();
+        for kept in self.ports.store.all().await? {
+            if kept.status == ProposalStatus::Applying
+                && self
+                    .ports
+                    .store
+                    .change_status(&kept.id, ProposalStatus::Applying, ProposalStatus::Failed)
+                    .await?
+            {
+                self.announce(&kept.id, ProposalStatus::Failed).await;
+                ended.push(kept.id);
+            }
+        }
+        Ok(ended)
+    }
+
+    /// Rejects the pending proposal `id` for `reasons`, one per change.
+    pub async fn reject(
+        &self,
+        id: &ProposalId,
+        reasons: Vec<String>,
+    ) -> Result<Proposal, ProposalError> {
+        let mut proposal = self.get(&Proposer::NoToken, id).await?;
+        if proposal.status != ProposalStatus::Pending {
+            return Err(ProposalError::NotPending(proposal.status));
+        }
+        let rejection =
+            Rejection::new(proposal.changes.len(), reasons).map_err(ProposalError::Rejection)?;
+        let now = to_the_millisecond(self.ports.clock.now());
+        let rejected = self
+            .ports
+            .store
+            .reject(id, now, rejection.reasons())
+            .await
+            .map_err(ProposalError::Store)?;
+        if !rejected {
+            return Err(ProposalError::NotPending(self.kept_status(id).await?));
+        }
+        proposal.status = ProposalStatus::Rejected;
+        proposal.decided_at = Some(now);
+        proposal.rejection = rejection;
+        self.announce(id, proposal.status).await;
+        Ok(proposal)
+    }
+
+    /// The step-up confirmation of `ask`: the admin password, in the
+    /// address's sign-in waits, with sign-in on; the proposal's short ID
+    /// otherwise.
+    async fn step_up(&self, id: &ProposalId, ask: &ApprovalAsk) -> Result<(), ProposalError> {
+        let Some(access) = &self.access else {
+            return if confirms_proposal(&ask.confirmation, id) {
+                Ok(())
+            } else {
+                Err(ProposalError::StepUpFailed)
+            };
+        };
+        // Nothing typed, or more than any password, is no attempt at it.
+        let attempt =
+            Password::parse(ask.confirmation.clone()).map_err(|_| ProposalError::StepUpFailed)?;
+        access
+            .step_up(ask.address, &attempt)
+            .await
+            .map(|_| ())
+            .map_err(|refused| match refused {
+                PasswordRefused::WrongPassword => ProposalError::StepUpFailed,
+                PasswordRefused::Wait { seconds } => ProposalError::StepUpWait { seconds },
+                PasswordRefused::Unavailable(text) => ProposalError::StepUpUnavailable(text),
+            })
+    }
+
+    /// Ends the apply of `id` with `status`, and announces it.
+    async fn end_apply(
+        &self,
+        id: &ProposalId,
+        status: ProposalStatus,
+    ) -> Result<(), ProposalError> {
+        self.ports
+            .store
+            .change_status(id, ProposalStatus::Applying, status)
+            .await
+            .map_err(ProposalError::Store)?;
+        self.announce(id, status).await;
+        Ok(())
+    }
+
+    async fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ProposalError> {
+        self.ports
+            .drafts
+            .draft(config)
+            .await
+            .map_err(|error| ProposalError::Config(Box::new(error)))
+    }
+
+    /// `revision` as a page is shown it: keyed with this daemon's key, so
+    /// the file's plain revision never leaves it.
+    fn shown_revision(&self, revision: &ConfigRevision) -> Result<ShownRevision, ProposalError> {
+        self.ports
+            .revision_key
+            .as_ref()
+            .map(|key| ShownRevision::of(key, revision))
+            .map_err(|error| ProposalError::Random(error.clone()))
+    }
+
+    /// Tells every page that the proposal `id` now has `status`.
+    async fn announce(&self, id: &ProposalId, status: ProposalStatus) {
+        self.ports
+            .events
+            .publish(UiEvent::ProposalChanged {
+                proposal: id.to_string(),
+                status: status_dto(status),
+            })
+            .await;
+    }
+
     async fn load(&self) -> Result<AgentConfig, ProposalError> {
-        self.config
+        self.ports
+            .config
             .load()
             .await
             .map_err(|error| ProposalError::Config(Box::new(error)))
@@ -174,7 +549,8 @@ impl Proposals {
 
     /// The status the proposal `id` is kept with now.
     async fn kept_status(&self, id: &ProposalId) -> Result<ProposalStatus, ProposalError> {
-        self.store
+        self.ports
+            .store
             .get(id)
             .await
             .map_err(ProposalError::Store)?
@@ -194,7 +570,7 @@ impl Proposals {
         stored: StoredProposal,
         config: &mut Option<AgentConfig>,
     ) -> Result<Proposal, ProposalError> {
-        let changes = self.codec.decode(&stored.changes).unwrap_or_default();
+        let changes = self.ports.codec.decode(&stored.changes).unwrap_or_default();
         let mut proposal = Proposal {
             id: stored.id,
             proposer: stored.proposer,
@@ -204,6 +580,9 @@ impl Proposals {
             status: stored.status,
             created_at: stored.created_at,
             expires_at: stored.expires_at,
+            decided_at: stored.decided_at,
+            rejection: Rejection::kept(stored.reasons),
+            applied_as: stored.applied_as,
         };
         if proposal.status != ProposalStatus::Pending {
             return Ok(proposal);
@@ -212,21 +591,23 @@ impl Proposals {
             Some(config) => config,
             None => config.insert(self.load().await?),
         };
-        let now = proposal.status_at(self.clock.now(), config);
+        let now = proposal.status_at(self.ports.clock.now(), config);
         if now == ProposalStatus::Pending {
             return Ok(proposal);
         }
         let changed = self
+            .ports
             .store
             .change_status(&proposal.id, ProposalStatus::Pending, now)
             .await
             .map_err(ProposalError::Store)?;
-        proposal.status = if changed {
-            now
+        if changed {
+            proposal.status = now;
+            self.announce(&proposal.id, now).await;
         } else {
             // Another request moved it on first: it is as that one left it.
-            self.kept_status(&proposal.id).await?
-        };
+            proposal.status = self.kept_status(&proposal.id).await?;
+        }
         Ok(proposal)
     }
 
@@ -236,6 +617,7 @@ impl Proposals {
             proposer: proposal.proposer.clone(),
             base: proposal.base.clone(),
             changes: self
+                .ports
                 .codec
                 .encode(&proposal.changes)
                 .map_err(ProposalError::Codec)?,
@@ -243,7 +625,44 @@ impl Proposals {
             status: proposal.status,
             created_at: proposal.created_at,
             expires_at: proposal.expires_at,
+            decided_at: proposal.decided_at,
+            reasons: proposal.rejection.reasons().to_vec(),
+            approved_from: None,
+            applied_as: proposal.applied_as.clone(),
         })
+    }
+}
+
+/// The status a page is told a proposal has.
+pub fn status_dto(status: ProposalStatus) -> ProposalStatusDto {
+    match status {
+        ProposalStatus::Pending => ProposalStatusDto::Pending,
+        ProposalStatus::Applying => ProposalStatusDto::Applying,
+        ProposalStatus::Applied => ProposalStatusDto::Applied,
+        ProposalStatus::Failed => ProposalStatusDto::Failed,
+        ProposalStatus::Rejected => ProposalStatusDto::Rejected,
+        ProposalStatus::Withdrawn => ProposalStatusDto::Withdrawn,
+        ProposalStatus::Expired => ProposalStatusDto::Expired,
+        ProposalStatus::Stale => ProposalStatusDto::Stale,
+    }
+}
+
+/// The diff of `before` to `after`, with every secret `config` holds as
+/// text masked: each repository's and each of its further locations'. The
+/// drafts mask each value of the file that holds one, however it is
+/// written ([`ConfigDraft`]); this masks what else holds one, such as a
+/// comment. A proposal changes plans only, so the secrets are the same on
+/// both sides.
+fn masked_diff(config: &AgentConfig, before: &str, after: &str) -> String {
+    Redactor::redact_together(&config.redactors(), &unified_diff(before, after))
+}
+
+/// Whether `a` and `b` are one proposer: one token, or both no token.
+fn same_proposer(a: &Proposer, b: &Proposer) -> bool {
+    match (a, b) {
+        (Proposer::Token { id: a, .. }, Proposer::Token { id: b, .. }) => a == b,
+        (Proposer::NoToken, Proposer::NoToken) => true,
+        _ => false,
     }
 }
 

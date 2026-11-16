@@ -43,7 +43,7 @@ When("I open the address {string}", async function (this: BrowserWorld, address:
  *  The walk starts once such an element shows: one the page builds from its
  *  first read isn't there yet when the page opens, and presses made before it
  *  is would run past the last stop onto the page body. */
-async function pressUntilFocusIsOn(world: BrowserWorld, key: string, role: string, name: string): Promise<void> {
+export async function pressUntilFocusIsOn(world: BrowserWorld, key: string, role: string, name: string): Promise<void> {
   const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
   try {

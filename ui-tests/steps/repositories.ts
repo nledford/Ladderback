@@ -216,7 +216,7 @@ Then("the page has {int} text boxes", async function (this: BrowserWorld, count:
 });
 
 // Focus moves once the answer is in, a moment after the element exists.
-async function focusComesTo(world: BrowserWorld, role: string, name: string, description: string): Promise<void> {
+export async function focusComesTo(world: BrowserWorld, role: string, name: string, description: string): Promise<void> {
   const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
   const deadline = Date.now() + ANSWER_PATIENCE_MS;

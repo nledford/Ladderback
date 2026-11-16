@@ -1,0 +1,552 @@
+//! The "Pending changes" page, the route `/proposals` (decision 89, point
+//! 6): the proposals still pending, each opened in a section of the page
+//! that shows its summary, the AI agent's words apart from it and the exact
+//! diff of the configuration file, then approves it with the step-up field
+//! or rejects it with a reason for each change. Which proposals it lists,
+//! the words of each line, whether Approve is offered and the requests it
+//! sends are `proposals.rs`'s, host-tested; this is the DOM glue, which the
+//! `@ui` scenarios of `features/ui/proposals.feature` run in Chromium.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use api::{ProposalDto, ProposalReviewDto, ProposalsDto, SummaryLineDto};
+use l10n::{Localizer, msg};
+use leptos::prelude::*;
+use leptos::task::{spawn_local, tick};
+
+use crate::announcer::Politeness;
+use crate::components::{
+    StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone, sentence_view, text_field,
+};
+use crate::live::reply;
+use crate::plans::Said;
+use crate::proposals::{
+    PROPOSALS_PATH, applied, approval, approve_path, can_approve, field_error, heading, pending,
+    reason_label, reject_path, rejected, rejected_before, rejection, review_id, review_label,
+    review_path, summary_line,
+};
+use crate::repositories::Sentence;
+use crate::restore::Asks;
+use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence, text_with};
+use crate::session::Standing;
+use crate::text;
+use crate::ws::{self, Got, Phase, Posted};
+
+/// The `id` of the open proposal's heading, which takes focus as it opens
+/// and names its section.
+const REVIEW_HEADING_ID: &str = "proposal-heading";
+
+/// The `id` of the open proposal's step-up field.
+const STEP_UP_ID: &str = "proposal-step-up";
+
+/// What the open proposal is waiting for the daemon to do, said beside the
+/// button that asked for it; while it waits, neither button sends again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Deciding {
+    Approving,
+    Rejecting,
+}
+
+/// The text of `said` in the page's language.
+fn say(localizer: &Localizer, (id, args): Said) -> String {
+    text_with(localizer, id, &args)
+}
+
+/// The sentence said when the daemon did not answer a request.
+fn unanswered(localizer: &Localizer) -> Sentence {
+    Sentence::new(&text(localizer, msg::UI_SESSION_UNREACHABLE), None)
+}
+
+/// The pending proposals as the page last read them: where the reading
+/// stands, the proposals (`None` until the read answers, and while it is
+/// refused), and a read the daemon refused, said in the list's place.
+#[derive(Clone, Copy)]
+struct List {
+    base: StoredValue<String>,
+    phase: RwSignal<Phase>,
+    proposals: RwSignal<Option<Vec<ProposalDto>>>,
+    refused: RwSignal<Option<Sentence>>,
+}
+
+impl List {
+    fn new() -> Self {
+        Self {
+            base: StoredValue::new(ws::origin()),
+            phase: RwSignal::new(Phase::Loading),
+            proposals: RwSignal::new(None),
+            refused: RwSignal::new(None),
+        }
+    }
+
+    fn url(self, path: &str) -> String {
+        format!("{}{path}", self.base.get_value())
+    }
+
+    /// Reads the proposals again.
+    async fn read(self, localizer: &Localizer) {
+        let Some(base) = self.base.try_get_value() else {
+            return;
+        };
+        let read = ws::get::<ProposalsDto>(&format!("{base}{PROPOSALS_PATH}")).await;
+        // The reader may have left the page before the answer came.
+        if self.phase.try_get_untracked().is_none() {
+            return;
+        }
+        match read {
+            Some(Got::Read(read)) => {
+                self.refused.set(None);
+                self.proposals.set(Some(pending(read.proposals)));
+                self.phase.set(Phase::Ready);
+            }
+            Some(Got::Refused(code, args, detail)) => {
+                self.refused.set(Some(refused_sentence(
+                    localizer,
+                    code,
+                    &args,
+                    detail.as_deref(),
+                )));
+                self.proposals.set(None);
+                self.phase.set(Phase::Ready);
+            }
+            None => self.phase.set(Phase::Unreachable),
+        }
+    }
+}
+
+/// The "Pending changes" page: the heading, which says when the daemon
+/// can't be reached, what the page is for, the list of pending proposals
+/// with a Review button each, and the proposal opened, in a section below.
+#[component]
+pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
+    let list = List::new();
+    let read_localizer = Arc::clone(&localizer);
+    spawn_local(async move { list.read(&read_localizer).await });
+
+    // The proposal open, as the daemon showed it, and why it could not
+    // open, said in its place.
+    let reviewing = RwSignal::<Option<ProposalReviewDto>>::new(None);
+    let not_opened = RwSignal::<Option<Sentence>>::new(None);
+    let open_localizer = Arc::clone(&localizer);
+    let open = Callback::new(move |id: String| {
+        not_opened.set(None);
+        let url = list.url(&review_path(&id));
+        let localizer = Arc::clone(&open_localizer);
+        spawn_local(async move {
+            match ws::get::<ProposalReviewDto>(&url).await {
+                Some(Got::Read(review)) => {
+                    reviewing.try_set(Some(review));
+                }
+                Some(Got::Refused(code, args, detail)) => {
+                    not_opened.try_set(Some(refused_sentence(
+                        &localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                }
+                None => {
+                    not_opened.try_set(Some(unanswered(&localizer)));
+                }
+            }
+        });
+    });
+
+    let heading = text(&localizer, msg::UI_PROPOSALS_HEADING);
+    let unreachable_heading = text(&localizer, msg::UI_UNREACHABLE_HEADING);
+    let body = text(&localizer, msg::UI_PROPOSALS_BODY);
+    let loading = text(&localizer, msg::UI_LOADING);
+    let unreachable = text(&localizer, msg::UI_UNREACHABLE_BODY);
+    let none = text(&localizer, msg::UI_PROPOSALS_NONE);
+    // With sign-in off, approving here is no safety boundary, and the page
+    // says so (decision 89, point 7).
+    let standing = use_context::<RwSignal<Standing>>();
+    let sign_in_off = text(&localizer, msg::UI_PROPOSALS_SIGN_IN_OFF);
+    let off = move || {
+        standing
+            .is_some_and(|standing| standing.get() == Standing::Off)
+            .then(|| view! { <p>{sign_in_off.clone()}</p> })
+    };
+    // What the list's place shows; a memo, so a read again that changes
+    // only which proposals are listed keeps the list, and its items follow
+    // in place.
+    let shape = Memo::new(move |_| {
+        (
+            list.phase.get(),
+            list.refused.get(),
+            list.proposals.with(|proposals| {
+                proposals
+                    .as_ref()
+                    .is_some_and(|proposals| !proposals.is_empty())
+            }),
+        )
+    });
+    let list_localizer = Arc::clone(&localizer);
+    let review_localizer = Arc::clone(&localizer);
+    view! {
+        <PageHeading>
+            {move || {
+                if list.phase.get() == Phase::Unreachable {
+                    unreachable_heading.clone()
+                } else {
+                    heading.clone()
+                }
+            }}
+        </PageHeading>
+        <p>{body}</p>
+        {off}
+        {move || match shape.get() {
+            (Phase::Loading, _, _) => view! { <p>{loading.clone()}</p> }.into_any(),
+            (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
+            (Phase::Ready, Some(sentence), _) => {
+                view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+            }
+            (Phase::Ready, None, true) => {
+                proposals_list(Arc::clone(&list_localizer), list, open).into_any()
+            }
+            (Phase::Ready, None, false) => view! { <p>{none.clone()}</p> }.into_any(),
+        }}
+        {move || {
+            not_opened.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+        }}
+        {move || {
+            reviewing
+                .get()
+                .map(|review| {
+                    view! {
+                        <Review
+                            localizer=Arc::clone(&review_localizer)
+                            list=list
+                            review=review
+                            reviewing=reviewing
+                        />
+                    }
+                })
+        }}
+    }
+}
+
+/// The list of pending proposals, named by the page's heading: a Review
+/// button each, named for the proposal and who proposed it. Its items are
+/// keyed by the proposal's ID, so a read again never replaces a button a
+/// reader has focused; one whose proposal goes while it holds focus hands
+/// focus to the page's heading.
+fn proposals_list(localizer: Arc<Localizer>, list: List, open: Callback<String>) -> impl IntoView {
+    view! {
+        <ul class="proposals" aria-labelledby=PAGE_HEADING_ID>
+            <For
+                each=move || list.proposals.get().unwrap_or_default()
+                key=|proposal: &ProposalDto| proposal.id.clone()
+                children=move |proposal: ProposalDto| {
+                    let label = say(&localizer, review_label(&proposal));
+                    let button = NodeRef::<leptos::html::Button>::new();
+                    hand_focus_when_gone(button, PAGE_HEADING_ID.to_owned());
+                    let id = proposal.id;
+                    view! {
+                        <li>
+                            <button
+                                type="button"
+                                id=review_id(&id)
+                                node_ref=button
+                                on:click=move |_| open.run(id.clone())
+                            >
+                                {label}
+                            </button>
+                        </li>
+                    }
+                }
+            />
+        </ul>
+    }
+}
+
+/// A summary line, and for a changed plan the settings it changes, listed
+/// under it.
+fn summary_item(localizer: &Localizer, line: &SummaryLineDto) -> impl IntoView + use<> {
+    let (said, settings) = summary_line(line);
+    let sentence = say(localizer, said);
+    let settings = (!settings.is_empty()).then(|| {
+        view! {
+            <ul>
+                {settings
+                    .into_iter()
+                    .map(|setting| view! { <li>{text(localizer, setting)}</li> })
+                    .collect_view()}
+            </ul>
+        }
+    });
+    view! { <li>{sentence} {settings}</li> }
+}
+
+/// The proposal open: its heading, which takes focus as it opens, what its
+/// changes do in Ladderback's words, the AI agent's words apart from them,
+/// whether the file changed since it was drafted, how often its proposer
+/// was rejected, the exact diff, then Approve, with the step-up field, and
+/// Reject, with a reason for each change. Once the daemon applies or
+/// rejects it, the page says so, reads the list again, closes the section
+/// and hands focus to the page's heading. A proposal that could delete
+/// snapshots offers no Approve and says why.
+#[component]
+fn Review(
+    localizer: Arc<Localizer>,
+    list: List,
+    review: ProposalReviewDto,
+    reviewing: RwSignal<Option<ProposalReviewDto>>,
+) -> impl IntoView {
+    let id = review.proposal.id.clone();
+    let asks =
+        Asks::of(use_context::<RwSignal<Standing>>().map(|standing| standing.get_untracked()));
+    let working = RwSignal::new(None::<Deciding>);
+    let approve_alert = RwSignal::new(None::<Sentence>);
+    let reject_alert = RwSignal::new(None::<Sentence>);
+    let heading_ref = NodeRef::<leptos::html::H2>::new();
+    Effect::new(move |_| {
+        if let Some(heading) = heading_ref.get() {
+            // A failed focus leaves focus where it was.
+            let _ = heading.focus();
+        }
+    });
+
+    // Once decided: said, the list read again, the section closed and
+    // focus handed to the page's heading, since the proposal's button has
+    // gone from the list.
+    let decided = move |localizer: Arc<Localizer>, said: Said| async move {
+        reply(Politeness::Polite, &say(&localizer, said));
+        list.read(&localizer).await;
+        if reviewing.try_set(None).is_some() {
+            return;
+        }
+        gloo_timers::future::sleep(Duration::ZERO).await;
+        focus_element(PAGE_HEADING_ID);
+    };
+
+    // Approve, with the step-up field's value and its error.
+    let value = RwSignal::new(String::new());
+    let error = RwSignal::new(None::<String>);
+    let short_id = review.short_id.clone();
+    let step_up = match asks {
+        Asks::Password => StepUp::Password,
+        Asks::ShortId => StepUp::ShortId {
+            label: text(&localizer, msg::UI_PROPOSAL_ID),
+            hint: text(&localizer, msg::UI_PROPOSAL_ID_HINT),
+            short: short_id.clone(),
+        },
+    };
+    let shown = StoredValue::new(review.clone());
+    let approve_url = list.url(&approve_path(&id));
+    let approve_localizer = Arc::clone(&localizer);
+    let approve_id = id.clone();
+    let approve = move || {
+        if working.get_untracked().is_some() {
+            return;
+        }
+        let Some(sent) = shown.with_value(|review| approval(review, value.get_untracked())) else {
+            return;
+        };
+        working.set(Some(Deciding::Approving));
+        approve_alert.set(None);
+        reply(
+            Politeness::Polite,
+            &text(&approve_localizer, msg::UI_PROPOSAL_APPROVING),
+        );
+        let url = approve_url.clone();
+        let localizer = Arc::clone(&approve_localizer);
+        let id = approve_id.clone();
+        let short_id = short_id.clone();
+        spawn_local(async move {
+            let answer = ws::post(&url, &sent).await;
+            if working.try_set(None).is_some() {
+                return;
+            }
+            match answer {
+                Some(Posted::Done(_)) => {
+                    value.set(String::new());
+                    error.set(None);
+                    decided(localizer, applied(&id)).await;
+                }
+                Some(Posted::Refused(code, args, detail)) => {
+                    match field_error(code, asks, &short_id) {
+                        // Cleared first, so a second wrong try is said again.
+                        Some(said) => {
+                            error.set(None);
+                            tick().await;
+                            error.try_set(Some(say(&localizer, said)));
+                        }
+                        None => approve_alert.set(Some(refused_sentence(
+                            &localizer,
+                            code,
+                            &args,
+                            detail.as_deref(),
+                        ))),
+                    }
+                }
+                None => approve_alert.set(Some(unanswered(&localizer))),
+            }
+        });
+    };
+
+    // Reject, with a reason field for each change, counted from 1.
+    let reasons: Vec<RwSignal<String>> = review
+        .proposal
+        .changes
+        .iter()
+        .map(|_| RwSignal::new(String::new()))
+        .collect();
+    let reason_fields = reasons
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let change = index.saturating_add(1);
+            view! {
+                <TextField
+                    id=format!("proposal-reason-{change}")
+                    localizer=Arc::clone(&localizer)
+                    label=say(&localizer, reason_label(change))
+                    description=text(&localizer, msg::UI_PROPOSAL_REASON_HINT)
+                    value=*value
+                    kind=text_field::Kind::Lines { rows: 3 }
+                />
+            }
+        })
+        .collect_view();
+    let reject_url = list.url(&reject_path(&id));
+    let reject_localizer = Arc::clone(&localizer);
+    let reject_id = id.clone();
+    let reject = move || {
+        if working.get_untracked().is_some() {
+            return;
+        }
+        let typed: Vec<String> = reasons
+            .iter()
+            .map(|reason| reason.get_untracked())
+            .collect();
+        let sent = rejection(&typed);
+        working.set(Some(Deciding::Rejecting));
+        reject_alert.set(None);
+        reply(
+            Politeness::Polite,
+            &text(&reject_localizer, msg::UI_PROPOSAL_REJECTING),
+        );
+        let url = reject_url.clone();
+        let localizer = Arc::clone(&reject_localizer);
+        let id = reject_id.clone();
+        spawn_local(async move {
+            let answer = ws::post(&url, &sent).await;
+            if working.try_set(None).is_some() {
+                return;
+            }
+            match answer {
+                Some(Posted::Done(_)) => decided(localizer, rejected(&id)).await,
+                Some(Posted::Refused(code, args, detail)) => reject_alert.set(Some(
+                    refused_sentence(&localizer, code, &args, detail.as_deref()),
+                )),
+                None => reject_alert.set(Some(unanswered(&localizer))),
+            }
+        });
+    };
+
+    let summary = review
+        .summary
+        .iter()
+        .map(|line| summary_item(&localizer, line))
+        .collect_view();
+    let rationale = if review.proposal.rationale.is_empty() {
+        view! { <p>{text(&localizer, msg::UI_PROPOSAL_RATIONALE_NONE)}</p> }.into_any()
+    } else {
+        view! {
+            <blockquote>
+                <p>
+                    <bdi>{review.proposal.rationale.clone()}</bdi>
+                </p>
+            </blockquote>
+        }
+        .into_any()
+    };
+    let changed_since = review
+        .changed_since_drafted
+        .then(|| view! { <p>{text(&localizer, msg::UI_PROPOSAL_CHANGED_SINCE)}</p> });
+    let approve_part = if can_approve(&review) {
+        let approving = text(&localizer, msg::UI_PROPOSAL_APPROVING);
+        view! {
+            <form
+                aria-labelledby="proposal-approve-heading"
+                novalidate
+                on:submit=move |event| {
+                    event.prevent_default();
+                    approve();
+                }
+            >
+                <StepUpField
+                    id=STEP_UP_ID
+                    localizer=Arc::clone(&localizer)
+                    step_up=step_up
+                    value=value
+                    error=error
+                />
+                <p class="actions">
+                    <button type="submit">{text(&localizer, msg::UI_PROPOSAL_APPROVE)}</button>
+                </p>
+            </form>
+            {move || {
+                (working.get() == Some(Deciding::Approving))
+                    .then(|| view! { <p>{approving.clone()}</p> })
+            }}
+            {move || {
+                approve_alert
+                    .get()
+                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            }}
+        }
+        .into_any()
+    } else {
+        view! { <p>{text(&localizer, msg::UI_PROPOSAL_NEEDS_FORGET_PREVIEW)}</p> }.into_any()
+    };
+    let rejecting = text(&localizer, msg::UI_PROPOSAL_REJECTING);
+    view! {
+        <section aria-labelledby=REVIEW_HEADING_ID>
+            <h2 id=REVIEW_HEADING_ID tabindex="-1" node_ref=heading_ref>
+                {say(&localizer, heading(&id))}
+            </h2>
+            <h3>{text(&localizer, msg::UI_PROPOSAL_SUMMARY_HEADING)}</h3>
+            <ul>{summary}</ul>
+            <h3>{text(&localizer, msg::UI_PROPOSAL_RATIONALE_HEADING)}</h3>
+            {rationale}
+            {changed_since}
+            <p>{say(&localizer, rejected_before(&review))}</p>
+            <h3 id="proposal-diff-heading">{text(&localizer, msg::UI_PROPOSAL_DIFF_HEADING)}</h3>
+            <pre class="proposal-diff">
+                <code>{review.diff.clone()}</code>
+            </pre>
+            <h3 id="proposal-approve-heading">
+                {text(&localizer, msg::UI_PROPOSAL_APPROVE_HEADING)}
+            </h3>
+            {approve_part}
+            <h3 id="proposal-reject-heading">
+                {text(&localizer, msg::UI_PROPOSAL_REJECT_HEADING)}
+            </h3>
+            <p>{text(&localizer, msg::UI_PROPOSAL_REJECT_BODY)}</p>
+            <form
+                aria-labelledby="proposal-reject-heading"
+                novalidate
+                on:submit=move |event| {
+                    event.prevent_default();
+                    reject();
+                }
+            >
+                {reason_fields}
+                <p class="actions">
+                    <button type="submit">{text(&localizer, msg::UI_PROPOSAL_REJECT)}</button>
+                </p>
+            </form>
+            {move || {
+                (working.get() == Some(Deciding::Rejecting))
+                    .then(|| view! { <p>{rejecting.clone()}</p> })
+            }}
+            {move || {
+                reject_alert
+                    .get()
+                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            }}
+        </section>
+    }
+}

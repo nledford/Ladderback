@@ -149,6 +149,13 @@ impl RepositorySettings {
         .values()
     }
 
+    /// Masks every secret these settings hold as text: the passwords in the
+    /// repository URLs, an inline password and what the options hold
+    /// ([`RepositorySettings::written_secrets`]).
+    pub fn redactor(&self) -> Redactor {
+        Redactor::new(&self.written_secrets())
+    }
+
     /// The location `secret` is written in: `repository` for
     /// [`InlineSecret::Location`], `repo-hot` for
     /// [`InlineSecret::LocationHot`], and none for a secret in a setting of
@@ -257,7 +264,7 @@ fn places(
 /// options hold is masked, and so are the passwords in the repository URLs.
 impl fmt::Debug for RepositorySettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let redactor = Redactor::new(&self.written_secrets());
+        let redactor = self.redactor();
         f.debug_struct("RepositorySettings")
             .field("repository", &redactor.redact(&self.repository))
             .field("repo_hot", &self.repo_hot.as_ref().map(|_| REDACTED))

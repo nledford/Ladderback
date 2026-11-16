@@ -74,6 +74,16 @@
 # dialog are `plans.rs`'s, mutated on the host; the `@ui` scenarios of
 # `features/ui/plans.feature` run the glue in Chromium.
 #
+# `crates/web/src/proposals_page.rs` is the DOM glue of the Pending changes
+# page (§4.4, decision 89, point 6): it sends the list, review, approve and
+# reject requests, holds the list's and the open proposal's signals, says
+# each answer, reads the list again once a proposal is decided, and moves
+# focus to the open proposal's heading and back to the page's. Which
+# proposals it lists, the words of each line, whether Approve is offered and
+# the paths and bodies of the requests it sends are `proposals.rs`'s,
+# mutated on the host; the `@ui` scenarios of `features/ui/proposals.feature`
+# run the glue in Chromium.
+#
 # `crates/web/src/daemon_log_page.rs` is the DOM glue of the Log page (§4.4,
 # #618): it reads the recent log, holds the choice of levels, draws the table
 # and copies the lines listed. Which lines a choice lists, the words of a
@@ -155,6 +165,7 @@ exclude_globs = [
     "crates/web/src/sign_in.rs",
     "crates/web/src/settings.rs",
     "crates/web/src/plans_page.rs",
+    "crates/web/src/proposals_page.rs",
     "crates/web/src/daemon_log_page.rs",
     "crates/web/src/settings/password.rs",
     "crates/web/src/settings/sign_in.rs",
@@ -223,6 +234,17 @@ exclude_re = [
     # `FolderPath::top` is `Self::default()`, the path that names no folder:
     # the mutant that returns `Default::default()` is the same code.
     'crates/domain/src/browse\.rs.*: replace FolderPath::top -> Self with Default::default\(\)$',
+    # A proposal's diff walks the table of longest common runs. The walk
+    # takes this branch only where `old[i] != new[j]`, the same test the
+    # table was filled by, so there `common[i][j]` is
+    # `max(common[i + 1][j], common[i][j + 1])`; and `i`, `j` are inside
+    # `old` and `new`, so that cell was written. The mutant's `j * 1` asks
+    # whether `x = common[i + 1][j]` is at least `max(x, y)`, with
+    # `y = common[i][j + 1]`, which holds exactly when `x >= y`: the
+    # original's question, so the same branch every time. The other mutants
+    # of the walk are not excluded and are caught. Named by line, so a moved
+    # line brings the mutant back to judge.
+    'crates/app/src/proposals/diff\.rs:174:65: replace \+ with \* in middle$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0

@@ -1967,6 +1967,8 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_OPERATIONS_TITLE
     } else if path == "/plans" {
         msg::UI_PLANS_TITLE
+    } else if path == "/proposals" {
+        msg::UI_PROPOSALS_TITLE
     } else if path == "/repositories" {
         msg::UI_REPOSITORIES_TITLE
     } else if path == "/snapshots" {
@@ -2024,6 +2026,11 @@ mod tests {
     #[test]
     fn the_plans_page_is_titled_with_the_product_name() {
         assert_eq!(title_of("/plans"), "Plans – Ladderback");
+    }
+
+    #[test]
+    fn the_pending_changes_page_is_titled_with_the_product_name() {
+        assert_eq!(title_of("/proposals"), "Pending changes – Ladderback");
     }
 
     #[test]

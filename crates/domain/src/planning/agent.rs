@@ -274,6 +274,24 @@ impl AgentConfig {
         &self.repositories
     }
 
+    /// A redactor for each repository's settings and for each of its
+    /// further locations: together they mask every secret the configuration
+    /// holds as text.
+    pub fn redactors(&self) -> Vec<crate::secrets::Redactor> {
+        self.repositories
+            .values()
+            .flat_map(|repository| {
+                std::iter::once(repository.settings.redactor()).chain(
+                    repository
+                        .locations
+                        .further
+                        .iter()
+                        .map(super::Location::redactor),
+                )
+            })
+            .collect()
+    }
+
     pub fn repository(&self, alias: &RepositoryAlias) -> Option<&RepositoryConfig> {
         self.repositories.get(alias)
     }
@@ -1319,5 +1337,28 @@ mod tests {
         entries.get_mut(&alias("cloud")).unwrap().settings.password = keyring("ladderback/cloud");
         let two = config(entries, vec![]).unwrap();
         assert_eq!(two.keyring_passwords(), 2);
+    }
+
+    /// A proposal's diff is masked with these, so a secret any repository
+    /// writes as text must be among them.
+    #[test]
+    fn the_redactors_mask_a_secret_every_repository_writes() {
+        let mut entries = repositories(&["home"]);
+        entries.get_mut(&alias("home")).unwrap().settings.repository =
+            "rest:https://demo:canary-pw-home@nas.example/".to_owned();
+        let mut cloud = at("rest:https://demo:canary-pw-cloud@cloud.example/", None);
+        cloud
+            .settings
+            .options
+            .insert("pass".to_owned(), "canary-option-cloud".to_owned());
+        entries.insert(alias("cloud"), cloud);
+        let config = config(entries, vec![]).unwrap();
+        let masked = crate::secrets::Redactor::redact_together(
+            &config.redactors(),
+            "canary-pw-home, canary-pw-cloud, canary-option-cloud",
+        );
+        for secret in ["canary-pw-home", "canary-pw-cloud", "canary-option-cloud"] {
+            assert!(!masked.contains(secret), "{secret} shows in {masked}");
+        }
     }
 }

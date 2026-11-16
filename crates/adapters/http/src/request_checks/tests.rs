@@ -177,6 +177,26 @@ impl crate::Proposals for NoProposals {
     ) -> Result<api::ProposalDto, crate::ProposalsError> {
         Err(crate::ProposalsError::InvalidBody)
     }
+
+    async fn review(&self, _id: String) -> Result<api::ProposalReviewDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
+
+    async fn approve(
+        &self,
+        _id: String,
+        _approval: crate::Approval,
+    ) -> Result<api::ProposalDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
+
+    async fn reject(
+        &self,
+        _id: String,
+        _reasons: Vec<String>,
+    ) -> Result<api::ProposalDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
 }
 
 /// Does nothing: the checks never reach a route.
