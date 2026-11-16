@@ -74,6 +74,16 @@
 # dialog are `plans.rs`'s, mutated on the host; the `@ui` scenarios of
 # `features/ui/plans.feature` run the glue in Chromium.
 #
+# `crates/web/src/proposals_page.rs` is the DOM glue of the Pending changes
+# page (§4.4, decision 89, point 6): it sends the list, review, approve and
+# reject requests, holds the list's and the open proposal's signals, says
+# each answer, reads the list again once a proposal is decided, and moves
+# focus to the open proposal's heading and back to the page's. Which
+# proposals it lists, the words of each line, whether Approve is offered and
+# the paths and bodies of the requests it sends are `proposals.rs`'s,
+# mutated on the host; the `@ui` scenarios of `features/ui/proposals.feature`
+# run the glue in Chromium.
+#
 # `crates/web/src/daemon_log_page.rs` is the DOM glue of the Log page (§4.4,
 # #618): it reads the recent log, holds the choice of levels, draws the table
 # and copies the lines listed. Which lines a choice lists, the words of a
@@ -155,6 +165,7 @@ exclude_globs = [
     "crates/web/src/sign_in.rs",
     "crates/web/src/settings.rs",
     "crates/web/src/plans_page.rs",
+    "crates/web/src/proposals_page.rs",
     "crates/web/src/daemon_log_page.rs",
     "crates/web/src/settings/password.rs",
     "crates/web/src/settings/sign_in.rs",

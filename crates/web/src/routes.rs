@@ -1917,6 +1917,8 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_OPERATIONS_TITLE
     } else if path == "/plans" {
         msg::UI_PLANS_TITLE
+    } else if path == "/proposals" {
+        msg::UI_PROPOSALS_TITLE
     } else if path == "/repositories" {
         msg::UI_REPOSITORIES_TITLE
     } else if path == "/snapshots" {

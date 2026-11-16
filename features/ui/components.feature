@@ -442,6 +442,7 @@ Feature: The shared components in the gallery
   Scenario Outline: A button's label grows with the reader's text size
     Given the reader sets the text size to 200 percent
     When I open the component gallery
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "<button>"
     Then the label of the button "<button>" is as large as the page's text
     And the page has no accessibility violations
@@ -628,6 +629,7 @@ Feature: The shared components in the gallery
 
   Scenario: A button is pressed by Enter and by Space
     When I open the component gallery
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Enter
     Then the "Button" demo shows the sentence "The demo buttons were pressed once."
@@ -694,6 +696,7 @@ Feature: The shared components in the gallery
 
   Scenario: An unavailable button stays in the Tab order, says it is unavailable and ignores Enter and Space
     When I open the component gallery
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Delete the demo snapshot"
     Then the button "Delete the demo snapshot" says it is unavailable, and is not disabled
@@ -705,6 +708,7 @@ Feature: The shared components in the gallery
   Scenario: A busy button keeps its name and its place in the Tab order, shows a spinner a screen reader skips, and ignores presses
     When I open the component gallery
     And the widths of the buttons "Check the demo repository" and "Refresh the demo" are noted
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Space
@@ -725,6 +729,7 @@ Feature: The shared components in the gallery
 
   Scenario: A toggle button keeps its one name and says it is pressed, drawn bolder with an inset edge
     When I open the component gallery
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Show the demo's hidden files"
     Then the button "Show the demo's hidden files" is not pressed
@@ -739,6 +744,7 @@ Feature: The shared components in the gallery
 
   Scenario: A submit button sends its form from the keyboard
     When I open the component gallery
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Enter
@@ -747,6 +753,7 @@ Feature: The shared components in the gallery
 
   Scenario: A busy submit button sends no form, from Enter or from Space
     When I open the component gallery
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Space
@@ -761,7 +768,8 @@ Feature: The shared components in the gallery
     Given the browser asks for "forced colors"
     When I open the component gallery
     Then every button of the "Button" demo is drawn in the reader's button colors, an unavailable one in the color of unavailable text
-    When I press Tab until focus is on the button "Filled Primary"
+    When I press Tab until focus is on the button "Open the modal stand-in"
+    And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Show the demo's hidden files"
     And I press Space
     Then the button "Show the demo's hidden files" is drawn bolder, with an inset edge

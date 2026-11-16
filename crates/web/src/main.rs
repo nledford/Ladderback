@@ -89,6 +89,8 @@ mod plans_page;
 // What the "Pending changes" page shows, sends and says, decided on the
 // host; `proposals_page.rs` is its glue.
 mod proposals;
+// The "Pending changes" page's DOM glue; `proposals.rs` decides for it.
+mod proposals_page;
 // What the restart section of Settings offers, says and waits for, decided
 // on the host; `settings.rs` is its glue.
 mod restart;
@@ -139,6 +141,7 @@ mod variants;
 
 use daemon_log_page::DaemonLog;
 use plans_page::Plans;
+use proposals_page::Proposals;
 use routes::{NotFound, Operations, Repositories, Start};
 use session::{SignInOffNotice, Standing, Title};
 use settings::Settings;
@@ -187,6 +190,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let gallery = Arc::clone(&localizer);
     let operations = Arc::clone(&localizer);
     let plans = Arc::clone(&localizer);
+    let proposals = Arc::clone(&localizer);
     let snapshots = Arc::clone(&localizer);
     let snapshot = Arc::clone(&localizer);
     let repositories = Arc::clone(&localizer);
@@ -204,6 +208,10 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
             <Route
                 path=path!("/plans")
                 view=move || view! { <Plans localizer=Arc::clone(&plans) /> }
+            />
+            <Route
+                path=path!("/proposals")
+                view=move || view! { <Proposals localizer=Arc::clone(&proposals) /> }
             />
             <Route
                 path=path!("/snapshots")
@@ -232,10 +240,11 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
 /// The pages' links, shown wherever the pages are.
 #[component]
 fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
-    let (label, operations, plans, snapshots, repositories, log, settings) = (
+    let (label, operations, plans, proposals, snapshots, repositories, log, settings) = (
         text(&localizer, msg::UI_NAV_LABEL),
         text(&localizer, msg::UI_NAV_OPERATIONS),
         text(&localizer, msg::UI_NAV_PLANS),
+        text(&localizer, msg::UI_NAV_PROPOSALS),
         text(&localizer, msg::UI_NAV_SNAPSHOTS),
         text(&localizer, msg::UI_NAV_REPOSITORIES),
         text(&localizer, msg::UI_NAV_LOG),
@@ -249,6 +258,9 @@ fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
                 </li>
                 <li>
                     <A href="/plans">{plans}</A>
+                </li>
+                <li>
+                    <A href="/proposals">{proposals}</A>
                 </li>
                 <li>
                     <A href="/snapshots">{snapshots}</A>

@@ -1305,6 +1305,14 @@ table.log td.message {
   white-space: pre-wrap;
 }
 
+/* A proposal's diff of the configuration file: its lines as written, wrapped
+   where the viewport is narrower than a line (1.4.10), so it never scrolls
+   sideways. */
+pre.proposal-diff {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* A sortable column's header: its text, then its sort button, apart by a gap
    on the same line when there is room, and the button on a line of its own
    below the text when there isn't. Inline, the two touched, and the button
