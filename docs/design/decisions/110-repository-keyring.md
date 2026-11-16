@@ -1,0 +1,18 @@
+# Decision 110: Keeping a typed repository password in the system keyring
+
+**The repository form can keep a typed password in the system keyring entry `ladderback/<alias>` and save a reference to it; the configuration file stays the preselected choice** (recorded 2026-11-15, #476, §4.4, §10.2). This replaces the part of decision 28's second item that said there is no keyring write yet; a typed password is still saved inline when the person keeps the first choice.
+
+`POST /api/v1/repositories` and `POST /api/v1/repositories/_init` take `keep-in-keyring` (absent is `false`). With it, the daemon keeps the inline password in the entry `ladderback/<alias>` through a new `Keyring` port, which the secrets adapter implements in one blocking call under the resolver's time limit, and saves `password-keyring = "ladderback/<alias>"` in its place. A request that asks for it with no alias, or with a password that is already a reference, is `invalid-body`. Connecting tests first, then keeps the password, then saves; creating keeps it before the job runs, so a missing keyring is refused before anything is created. A request that fails after it added the entry removes it again, except when a repository was created with that password and only the save failed: the entry may then be the only copy of it.
+
+A refusal is one of three codes at the password field, each with the `entry` and nothing saved: `keyring-unavailable` (no keyring service to ask), `keyring-unwritable` (it refused, failed or didn't answer in time) and `keyring-entry-taken`. The platform's words are the `detail`, masked of every secret of the repository, the typed password first (I4).
+
+Six choices carry the weight.
+
+1. **The form preselects the configuration file.** A keyring default would have every `@ui` scenario that connects a repository write a real keychain entry on a developer's machine, and fail on Linux CI, which has no Secret Service.
+2. **No probe of the keyring before the form is sent.** A machine with no keyring answers the submit with `keyring-unavailable` at the password field, which says what to choose instead, so a probe would only ask earlier what the submit already answers.
+3. **No "write a password file" choice.** The daemon doesn't choose where on disk a secret lives; the refusal names `password-file` for a person who wants one, written by hand.
+4. **The inline-secret note on a repository's row is unchanged.** There is no action to move a saved inline password into the keyring or to edit it; the note keeps saying where it is.
+5. **An entry is never overwritten.** One that holds another secret is refused as `keyring-entry-taken` and left as it is, since it may be the only copy of another repository's password; one that already holds the typed password is used as it is, and a failed request then leaves it. On Linux, an entry the Secret Service finds no item for, when it can't then say whether its `default` collection is locked, may be there unseen (#483): it is refused as `keyring-unavailable`, never written over.
+6. **Removing a repository by hand never deletes its entry.** Taking a repository out of `config.toml` leaves its keyring entry, which may be the only copy of a password that still opens the repository's data.
+
+No test writes to a real OS keyring: the acceptance scenarios and the composition root's tests keep passwords in the in-memory fake, and the adapter's own tests use doubles of its keyring store (in memory, one that never answers, one that refuses, one that can't say whether an entry is there) and, on Linux, a stand-in Secret Service on a private D-Bus.
