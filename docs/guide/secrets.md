@@ -15,7 +15,7 @@ The Repositories page saves the password you type into `config.toml`, and the pa
 
   On Linux the Secret Service starts with your desktop session: oo7 (`oo7-daemon`) on Fedora 45, GNOME Keyring, or KDE's KWallet, which hasn't been tested with Ladderback. Where there is none, the install script's closing notes say so. A service that keeps running while you are logged out (`loginctl enable-linger`) starts at boot, before you log in, and can't read the keyring until you do, which `ladderback install-service` points out. On a machine that backs up while you are logged out, use a password file instead.
 
-  The service can also start a little after Ladderback at login. A run that fires in those first moments, such as a catch-up run for one the machine slept through, then finds no keyring and fails once with the keyring unavailable, though the keyring answers a moment later and the plan's next run reads it. Running that plan again by hand once you are logged in backs it up.
+  The service can also start a little after Ladderback at login. A run that starts on its own in those first moments, such as a scheduled run or a catch-up run for one the machine slept through, then finds no keyring. In the first 2 minutes after Ladderback starts, it reads the keyring again every 10 seconds until the service answers, and Ladderback's log says it is waiting. A locked keyring, or an unlock prompt you dismissed, isn't asked again: that run fails at once with the keyring unavailable, as does a run or a test you start yourself. Running that plan again by hand once you are logged in and the keyring is unlocked backs it up.
 - **A password file** that only you can read. Ladderback reads its first line, and warns when others can read it:
 
   ```sh

@@ -21,7 +21,7 @@ use crate::conditions::NETWORK_WAIT;
 use crate::ports::{Clock, RepositoryAccess, Resolved, SavedEntry, SecretResolver};
 
 /// How long after the daemon starts a run nobody waits on holds for the
-/// session's keyring service: the network wait's bound (§5, decision NN).
+/// session's keyring service: the network wait's bound (§5, decision 116).
 pub const KEYRING_WAIT: domain::SignedDuration = NETWORK_WAIT;
 
 /// How often a held run reads again the keyring entry it couldn't read.
@@ -30,7 +30,7 @@ pub const KEYRING_POLL: domain::SignedDuration = domain::SignedDuration::from_se
 /// When the daemon started, read through its clock: a run nobody waits on
 /// holds for the session's keyring service only until the daemon has been
 /// up for [`KEYRING_WAIT`], the window in which the daemon can outrun the
-/// service at login (§5, decision NN).
+/// service at login (§5, decision 116).
 #[derive(Clone)]
 pub struct KeyringWait {
     clock: Arc<dyn Clock>,
