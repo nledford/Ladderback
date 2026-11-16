@@ -23,6 +23,8 @@ Setting up backups with an AI agent's help, a person confirming every change (#5
 
 Proposals land in parts: first they are kept and made, listed, read and withdrawn over the REST API, plans only and approved by nobody yet (decision 89's first amendment); then the "Pending changes" page, approval and rejection, with the rate limits and the submission warnings, a proposal that could delete snapshots being only rejected (its second amendment); then the forget preview, which lets a person approve that one too. The steps before them are outside the effort estimates above; if they aren't done when the rest of M3 is, the MCP proposal tools follow M3 rather than holding it back. Proposals made on the hub come later, with editing plans from the hub, through `UpdatePlan` (decision 2).
 
+**Where it stood at M3's release (0.4.0).** Plan writing and the Plans page's editor, writing a repository's password to the keyring (#476), the proposals' REST API and the "Pending changes" page are done. The forget preview, the dry run of a draft plan and the MCP proposal tools (#518) are not, so they follow M3, as the paragraph above allows. So does a proposal for a repository, a hook or a maintenance claim.
+
 | Milestone | Feature files |
 |---|---|
 | M1a | `execution/backup.feature` (warnings), `execution/cancel.feature`, `execution/deadline.feature` (`@e2e` with a real worker) |

@@ -15,7 +15,7 @@
 A self-hosted backup manager for [rustic](https://rustic.cli.rs): plans, schedules and one dashboard for every machine.
 
 > [!WARNING]
-> **Ladderback 0.3.0 runs scheduled backups, but it can't restore yet.** To get files back, use the `rustic` CLI, which restores from any repository Ladderback backs up to; try a restore with it before you rely on those backups. The snapshot browser and restores in Ladderback come in M3. Until the hub (M4), each machine runs its own Ladderback with its own web UI. The [roadmap](#roadmap) has the order.
+> **Ladderback 0.4.0 runs scheduled backups and restores from them in its web UI, but its restores are new.** Try one into a scratch folder before you rely on these backups. The `rustic` CLI restores from any repository Ladderback backs up to, and stays your fallback. AI agents can propose plans over the API, but not yet through MCP, and a proposal that could delete snapshots can only be rejected. Until the hub (M4), each machine runs its own Ladderback with its own web UI. The [roadmap](#roadmap) has the order.
 
 ## What it does
 
@@ -23,16 +23,17 @@ Without a manager, each machine runs rustic from its own cron job or timer. Fail
 
 **Today**, each machine runs its own Ladderback, with the web UI built in:
 
-- **Plans and schedules.** What to back up, from which machine, into which repository, how often, and how long to keep it. Missed runs on sleeping laptops catch up at the next wake, and notifications go to webhooks, ntfy and healthchecks.io.
+- **Plans and schedules.** What to back up, from which machine, into which repository, how often, and how long to keep it, written in `config.toml` or created, edited and deleted on the Plans page. Missed runs on sleeping laptops catch up at the next wake, and notifications go to webhooks, ntfy and healthchecks.io.
+- **Browse, restore and download.** Browse a snapshot's folders and files in an accessible tree. Restore a file or folder into a new folder by default. Restore in place, over the original files, only from the machine's own web UI, after a dry-run summary of what would change. Restores and downloads need a confirmation: the admin password, or the snapshot's short ID when sign-in is off. Download a file as itself, or a folder as a tar or zip archive. The Snapshots page also shows each repository's stats.
 - **Safe maintenance on shared repositories.** Backups never wait for a lock. One machine you choose maintains each repository, and Ladderback warns when it sees snapshots from other hosts in it.
 - **No lock-in.** Import existing rustic profiles and export any plan back to one, so the `rustic` CLI always stays an option.
 - **One self-contained program.** It runs headless on servers and as a user service on desktops and laptops. It is accessible (WCAG 2.2 AA) and localization-ready.
 - **Scriptable by AI agents.** `ladderback mcp` is an MCP server over stdio. An agent can read status, plans, repositories, snapshots and history, run a plan and wait for it, cancel a backup, test a repository, preview a forget or a profile import, and export a plan as a profile. It drives a running instance, with a scoped API token when sign-in is on; a headless session of its own when none is running; or a throwaway scratch setup to try it on. It can't restore, delete or change the configuration. `ladderback mcp call` runs the same tools from a shell or a script without an MCP client, printing each result as a line of JSON.
+- **Plan changes proposed by AI agents.** An agent whose API token has the `propose` scope can propose adding, changing or removing plans over the REST API, and nothing changes until a person approves it on the Pending changes page, with the same confirmation as a restore. Proposals can't yet touch repositories, hooks or maintenance, and the MCP server has no proposal tools yet.
 
 **Later** (see the [roadmap](#roadmap)):
 
-- **Careful restores (M3).** Restore into a new folder by default; in-place restore only from the machine's own UI, after a dry-run summary.
-- **Backup setups proposed by AI agents (M3, or soon after).** An agent will be able to propose a backup setup, which changes nothing until a person confirms it in the web UI.
+- **The rest of agent-proposed setups (after M3).** MCP tools for proposals, a dry run of a draft plan, and a forget preview, so that a person can approve a proposal that could delete snapshots; proposals for repositories, hooks and maintenance.
 - **One dashboard for every machine (M4).** Status, live progress, history, warnings and errors for every connected computer.
 - **One owner for each repository (M5).** Exactly one place runs forget, prune and check for each repository, whichever machines back up to it.
 - **Later, unscheduled.** Notifications to Gotify and email.
@@ -48,14 +49,15 @@ Ladderback borrows Backrest's user-facing model: repositories, plans, schedules,
 - back up **several machines into one shared repository**. In Backrest, each plan runs `restic forget` after its backup, which takes an exclusive lock and blocks other hosts' backups ([backrest#244](https://github.com/garethgeorge/backrest/issues/244)). In Ladderback, backups never wait for a lock, and with the hub (M5) one owner per repository runs maintenance;
 - don't want repository **passwords and backend keys copied to other machines**. Backrest's multi-host sync pushes shared repositories to clients, credentials included. with Ladderback's hub (M4), the hub keeps its own secrets, and agents never send theirs;
 - back up **laptops**. Missed runs catch up by default, and the scheduler notices sleep and wake;
-- want an **AI agent** to check on and run backups. Ladderback has an MCP server built in, `ladderback mcp`, which takes a token scoped to reading, running or previewing, and can't restore or delete;
+- want an **AI agent** to check on and run backups. Ladderback has an MCP server built in, `ladderback mcp`, which takes a token scoped to reading, running or previewing, and can't restore or delete. An agent can also propose plans over the API, which change nothing until a person approves them in the web UI;
 - want **secrets out of the config file**: a password command, the system keyring, a file or an environment variable. A missing secret fails the job instead of silently becoming an empty string;
 - want **time-based retention** (`keep-within-*`), not just counts;
-- already use **rustic profiles** and want to keep using the CLI on the same repositories.
+- already use **rustic profiles** and want to keep using the CLI on the same repositories;
+- want **restores that don't overwrite by accident**. A restore goes into a new folder by default, and one over the original files is offered only from the machine's own web UI, behind a dry-run summary and a confirmation.
 
 **Backrest is the better choice if you:**
 
-- need **restores from the web UI** today. Backrest is mature; Ladderback's first usable release (M2, 0.2.0) runs scheduled backups, but its snapshot browser and restores come in M3, and until then you restore with the `rustic` CLI;
+- want the **most proven restores**. Backrest is mature. Ladderback's web UI restores a file or folder, and downloads one as a file, a tar or a zip, but these arrived only in 0.4.0 (M3), and some cases are still open, such as an in-place restore over a path that has since become a folder or a symlink;
 - use **Windows**;
 - use **restic** and want to keep restic maintaining your repositories. Restic must never prune a repository Ladderback manages;
 - need **multiple user accounts** or a way to run **arbitrary repository commands** from the UI. Ladderback has neither;
@@ -99,13 +101,13 @@ Open the address it prints, `http://127.0.0.1:9898`, then:
 
 ## Roadmap
 
-The skeleton (M0), the backup engine (M1a), the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)) and schedules and errors (M2, released as [0.2.0](https://github.com/nledford/Ladderback/releases/tag/v0.2.0), with fixes from running it on real machines in [0.3.0](https://github.com/nledford/Ladderback/releases/tag/v0.3.0)) are in place: backups run on their schedules, with no restore in Ladderback yet. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. M2 is the first release worth using on your own machines; M3, to be released as 0.4.0, adds browsing and restoring snapshots.
+The skeleton (M0), the backup engine (M1a), the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)), schedules and errors (M2, released as [0.2.0](https://github.com/nledford/Ladderback/releases/tag/v0.2.0), with fixes from running it on real machines in [0.3.0](https://github.com/nledford/Ladderback/releases/tag/v0.3.0)) and browsing, restoring and automation (M3, released as [0.4.0](https://github.com/nledford/Ladderback/releases/tag/v0.4.0)) are in place: backups run on their schedules, and snapshots can be browsed, restored and downloaded in the web UI. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. M2 is the first release worth using on your own machines; M3 adds restores, so it is the first that can bring files back without the `rustic` CLI.
 
 - [x] **M0: Skeleton.** Workspace, CI, test tooling (acceptance scenarios, mutation testing, browser tests with accessibility checks), and an embedded web UI shell.
 - [x] **M1a: Engine.** Backups through `rustic_core` in an isolated worker process, with live progress, warnings, cancellation and deadlines.
 - [x] **M1b: Single-machine MVP.** Connect or create repositories; secrets; plans and hooks in `config.toml`; rustic profile import and export; manual backups with live progress; snapshot list; operation history; manual forget, prune and check.
 - [x] **M2: Schedules and errors.** Scheduler with catch-up after sleep, time zones and retries; notifications to webhooks, ntfy and healthchecks; systemd and launchd service install; optional sign-in. **First usable release.**
-- [ ] **M3: Browse, restore and automation.** Snapshot browser, restore into a new folder or in place, downloads as tar or zip, repository stats; scoped API tokens and an MCP server for AI agents; on macOS, builds from source that keep their Full Disk Access across upgrades.
+- [x] **M3: Browse, restore and automation.** Snapshot browser; restore into a new folder or in place; downloads as tar or zip; repository stats; scoped API tokens; an MCP server for AI agents; on macOS, builds from source that keep their Full Disk Access across upgrades. **First release with restores in the web UI.** Open after M3: the MCP tools for proposals, a dry run of a draft plan and a forget preview for proposals (the rest of [#518](https://github.com/nledford/Ladderback/issues/518)), and small restore fixes ([#814](https://github.com/nledford/Ladderback/issues/814), [#818](https://github.com/nledford/Ladderback/issues/818)).
 - [ ] **M4: Hub, visibility.** Pair machines with a hub; one dashboard for all of them; offline alerts.
 - [ ] **M5: Hub, control and maintenance.** Repository ownership; forget, prune and check managed from the hub; remote run and cancel; opt-in restores from the hub.
 - [ ] **M6: Polish.** A run condition for metered networks (running only on AC power, and waiting for the network after a wake, came in 0.2.0), charts, Docker image, release packages, database rebuild, user docs.
