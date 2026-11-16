@@ -16,6 +16,9 @@ use crate::text;
 use crate::variants::Size;
 
 pub(crate) mod rules;
+#[cfg(test)]
+#[cfg(target_arch = "wasm32")]
+mod tests;
 
 pub use rules::{Access, Kind};
 
@@ -34,7 +37,8 @@ pub use rules::{Access, Kind};
 /// its label. `icon` stands at its start, inside its edge, decoration a
 /// screen reader skips.
 ///
-/// `id` is the input's (an error summary's link points at it), and `value`
+/// `id` is the input's (an error summary's link points at it), a constant
+/// or one built for a field of a list, and `value`
 /// holds what is typed, so the caller reads and clears it. `autocomplete`
 /// is the input's token (1.3.5): `off` unless the field has a known
 /// purpose, such as `current-password`, which a password manager then fills
@@ -69,7 +73,7 @@ pub use rules::{Access, Kind};
 ///   where the note's words alone don't.
 #[component]
 pub fn TextField(
-    id: &'static str,
+    #[prop(into)] id: String,
     localizer: Arc<Localizer>,
     label: String,
     #[prop(optional, into)] description: Option<String>,
@@ -94,8 +98,10 @@ pub fn TextField(
         }
     });
     let has_description = description.is_some() || description_code.is_some();
-    let described_by =
-        move || rules::described_by(id, has_description, access, error.with(Option::is_some));
+    let described_by = {
+        let id = id.clone();
+        move || rules::described_by(&id, has_description, access, error.with(Option::is_some))
+    };
     let invalid = move || rules::invalid(error.with(Option::is_some));
     let shown = RwSignal::new(false);
     // What the reader last typed: a value the page sets instead, clearing
@@ -114,7 +120,7 @@ pub fn TextField(
     let control = match kind.rows() {
         Some(rows) => view! {
             <textarea
-                id=id
+                id=id.clone()
                 class="text-field-input"
                 rows=rows
                 autocomplete=autocomplete
@@ -137,7 +143,7 @@ pub fn TextField(
         .into_any(),
         None => view! {
             <input
-                id=id
+                id=id.clone()
                 node_ref=input_ref
                 class="text-field-input"
                 type=move || kind.input_type(shown.get())
@@ -187,7 +193,7 @@ pub fn TextField(
                 size=size
                 pressed=shown
                 on_press=show
-                attr:aria-describedby=rules::label_id(id)
+                attr:aria-describedby=rules::label_id(&id)
             />
         }
     });
@@ -198,18 +204,20 @@ pub fn TextField(
                 <code>{code}</code>
             }
         });
-        view! { <p id=rules::description_id(id)>{description}{code}</p> }
+        view! { <p id=rules::description_id(&id)>{description}{code}</p> }
     });
     let note = access.note().map(|note| {
         view! {
-            <p id=rules::note_id(id) class="text-field-note">
+            <p id=rules::note_id(&id) class="text-field-note">
                 {text(&localizer, note)}
             </p>
         }
     });
+    let label_id = rules::label_id(&id);
+    let error_id = rules::error_id(&id);
     view! {
         <div class="text-field">
-            <label id=rules::label_id(id) for=id>
+            <label id=label_id for=id>
                 {label}
                 {marker}
             </label>
@@ -221,11 +229,7 @@ pub fn TextField(
                     .get()
                     .map(|text| {
                         view! {
-                            <p
-                                id=rules::error_id(id)
-                                class="form-error"
-                                role=rules::error_role(alert)
-                            >
+                            <p id=error_id.clone() class="form-error" role=rules::error_role(alert)>
                                 {text}
                             </p>
                         }
