@@ -261,8 +261,14 @@ impl McpMode {
 }
 
 fn serve_mcp(mode: McpMode, plain: bool) -> ExitCode {
+    // First, as `serve` does: before a session of its own resolves any
+    // secret and before connect mode reads its token file (decision 98).
+    let unprotected = platform::dumps::refuse();
     logging::install(plain);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    for unprotected in &unprotected {
+        log::warn!("{}", dumps::daemon_line(&localizer, unprotected));
+    }
     finish(&localizer, run_mcp(&localizer, mode))
 }
 

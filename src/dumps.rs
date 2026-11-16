@@ -1,6 +1,6 @@
-//! What the daemon and a worker say when they couldn't turn off their core
-//! dumps or debugger attach as they started (decision 98): a warning, by its
-//! code, and the process goes on.
+//! What the daemon, the MCP server and a worker say when they couldn't turn
+//! off their core dumps or debugger attach as they started (decision 98): a
+//! warning, by its code, and the process goes on.
 
 use api::WarningCode;
 use l10n::Localizer;
@@ -17,8 +17,8 @@ fn said(unprotected: &Unprotected) -> (WarningCode, String) {
     }
 }
 
-/// The daemon's log line: the code, then its message in the reader's
-/// language, with the operating system's words.
+/// The log line of the daemon and of the MCP server: the code, then its
+/// message in the reader's language, with the operating system's words.
 pub(crate) fn daemon_line(localizer: &Localizer, unprotected: &Unprotected) -> String {
     let (code, detail) = said(unprotected);
     let message = localizer.warning(code, &[], Some(&detail));

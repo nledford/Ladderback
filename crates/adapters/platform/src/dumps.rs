@@ -1,8 +1,9 @@
 //! Core dumps and debugger attach, turned off for this process (technical
 //! design §10.2, decision 98). The daemon holds resolved repository
-//! passwords and its sign-in secrets, and a worker the secrets of its job: a
-//! core dump would write them to disk, and a debugger of the same user could
-//! read them, outside every rule of I4.
+//! passwords and its sign-in secrets, the MCP server the same secrets or the
+//! API token it read, and a worker the secrets of its job: a core dump would
+//! write them to disk, and a debugger of the same user could read them,
+//! outside every rule of I4.
 
 use std::io;
 
