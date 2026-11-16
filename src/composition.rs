@@ -2318,7 +2318,12 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
             .map(|alias| alias.as_str().to_owned()),
     )
     .map(|summary| {
-        summary.with_locations(record.locations.as_ref().map_or_default(locations_tried))
+        let summary =
+            summary.with_locations(record.locations.as_ref().map_or_default(locations_tried));
+        match &record.entry {
+            Some(entry) => summary.with_entry(entry.as_str().to_owned()),
+            None => summary,
+        }
     })
     .map_err(|invalid| log::warn!("an operation the page cannot show: {invalid:?}"))
     .ok()

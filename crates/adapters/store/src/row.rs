@@ -17,6 +17,7 @@ use domain::access::api_token::{
 };
 use domain::access::{KeptSession, PasswordFingerprint, SessionDigest, SessionLength};
 use domain::execution::locations::LocationsRecord;
+use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
 use domain::maintenance::{RepositoryStats, StatsReading};
@@ -470,6 +471,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
     let repository_alias =
         reader.id_of("repo_alias", "repository alias", RepositoryAlias::parse)?;
     let locations = reader.locations()?;
+    let entry = reader.text("entry")?.map(LoggedEntry::kept);
 
     Ok(OperationRecord {
         id,
@@ -485,7 +487,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         result,
         repository_alias,
         locations,
-        entry: None,
+        entry,
     })
 }
 

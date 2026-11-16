@@ -36,6 +36,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
+use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{
     FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus, Trigger, warning_kinds,
@@ -331,6 +332,7 @@ async fn write(
             Trigger::ApiToken { label, .. } => Some(label.as_str()),
             _ => None,
         })
+        .bind(operation.entry().map(LoggedEntry::as_str))
         .execute(&mut *conn)
         .await
         .map_err(unavailable)?;

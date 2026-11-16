@@ -4,6 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use domain::browse::{DisplayName, FolderPage, FolderPath};
 use domain::execution::deadline::KeepDelete;
+use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
 use domain::planning::{AgentConfig, Hostname, RepositoryConfig, SourceFilter, masked_options};
@@ -267,6 +268,18 @@ impl Job {
         Target {
             plan,
             repository: self.access().and_then(|access| access.id.clone()),
+        }
+    }
+
+    /// The entry of a snapshot the job reads, as the operation log names it,
+    /// masked with the repository's own secrets (I4, #847): a restore's and
+    /// a download's. `None` for every other job, a dry run included, which
+    /// the log never keeps.
+    pub fn entry(&self) -> Option<LoggedEntry> {
+        match self {
+            Self::Restore(job) => Some(LoggedEntry::of(&job.entry, &job.repository.redactor())),
+            Self::Dump(job) => Some(LoggedEntry::of(&job.entry, &job.repository.redactor())),
+            _ => None,
         }
     }
 }

@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::browse::FolderPath;
+use crate::browse::{DisplayName, FolderPath};
 use crate::secrets::Redactor;
 
 /// The longest entry the log names, in bytes. A path may name 256 folders of
@@ -23,15 +23,35 @@ const CUT_MARK: &str = "…";
 pub struct LoggedEntry(String);
 
 impl LoggedEntry {
-    /// `path` as the log names it: `/`, then its names joined by `/`, so the
-    /// snapshot's top is `/`; every secret `redactor` knows masked; every
-    /// character that would break the line or reorder it made visible, as a
-    /// name is shown ([`crate::browse::DisplayName`]); and a path longer than
-    /// [`MAX_LOGGED_ENTRY_BYTES`] cut to its end, on a character boundary,
-    /// after `…`.
+    /// `path` as the log names it: `/`, then its names as the file system
+    /// wrote them ([`crate::browse::EntryName::unescaped`]) joined by `/`, so
+    /// the snapshot's top is `/`; every secret `redactor` knows masked; every
+    /// character that would break the line or reorder it made visible, as
+    /// the snapshot's tree shows a name ([`DisplayName`]), and masked again,
+    /// so a secret that spells such a character's shown form stays hidden;
+    /// and a path longer than [`MAX_LOGGED_ENTRY_BYTES`] cut to its end, on a
+    /// character boundary, after `…`.
     pub fn of(path: &FolderPath, redactor: &Redactor) -> Self {
-        let _ = (path, redactor, CUT_MARK);
-        todo!("#847: name the entry a restore or a download read")
+        let mut written = String::from("/");
+        for (at, name) in path.names().iter().enumerate() {
+            if at > 0 {
+                written.push('/');
+            }
+            written.push_str(&name.unescaped());
+        }
+        let visible = DisplayName::new(&redactor.redact(&written));
+        let shown = redactor.redact(visible.as_str());
+        if shown.len() <= MAX_LOGGED_ENTRY_BYTES {
+            return Self(shown);
+        }
+        let room = MAX_LOGGED_ENTRY_BYTES.saturating_sub(CUT_MARK.len());
+        let start = (shown.len().saturating_sub(room)..shown.len())
+            .find(|at| shown.is_char_boundary(*at))
+            .unwrap_or(shown.len());
+        Self(format!(
+            "{CUT_MARK}{}",
+            shown.get(start..).unwrap_or_default()
+        ))
     }
 
     /// The entry as the log kept it, read back.

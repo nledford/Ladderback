@@ -64,13 +64,24 @@ pub(crate) fn progress_label(operation: &OperationSummaryDto) -> Words {
     }
 }
 
-/// The facts of `operation` its Result cell lists, in order: what it
-/// produced, none for a run that has not succeeded, then the location it
-/// used when its repository has several (decision 80), whatever became of
-/// the run. A fact the log did not keep, such as the bytes a backup an
-/// earlier version ran went through, is left out, never shown as zero.
+/// The facts of `operation` its Result cell lists, in order: the entry of a
+/// snapshot a restore or a download read (#847), then what it produced, none
+/// for a run that has not succeeded, then the location it used when its
+/// repository has several (decision 80), the entry and the location whatever
+/// became of the run. A fact the log did not keep, such as the bytes a backup
+/// an earlier version ran went through, is left out, never shown as zero.
 pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
-    let mut facts = operation.result.as_ref().map_or_default(produced);
+    let mut facts: Vec<Words> = operation
+        .entry
+        .iter()
+        .map(|entry| Words {
+            id: msg::UI_RESULT_ENTRY,
+            args: vec![("entry", text(entry))],
+        })
+        .collect();
+    if let Some(done) = &operation.result {
+        facts.extend(produced(done));
+    }
     if let Some((used, count)) = operation.used_location() {
         facts.push(Words {
             id: msg::UI_RESULT_USED_LOCATION,
@@ -321,6 +332,7 @@ mod tests {
             result,
             repository: repository.map(str::to_owned),
             locations: Vec::new(),
+            entry: None,
         }
     }
 

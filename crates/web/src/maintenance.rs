@@ -1439,6 +1439,7 @@ mod tests {
             result,
             repository: Some("demo".to_owned()),
             locations: Vec::new(),
+            entry: None,
         }
     }
 

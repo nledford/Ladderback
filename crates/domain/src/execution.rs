@@ -533,14 +533,16 @@ impl Operation {
 
     /// The operation, naming the entry of a snapshot it reads.
     pub fn with_entry(self, entry: logged_entry::LoggedEntry) -> Self {
-        let _ = (self, entry);
-        todo!("#847: name the entry a restore or a download read")
+        Self {
+            entry: Some(entry),
+            ..self
+        }
     }
 
     /// The entry of a snapshot the operation reads, when it was given
     /// ([`Self::with_entry`]).
     pub fn entry(&self) -> Option<&logged_entry::LoggedEntry> {
-        todo!("#847: name the entry a restore or a download read")
+        self.entry.as_ref()
     }
 
     /// Which location the run used and why each earlier one was skipped,
@@ -1019,6 +1021,16 @@ mod tests {
         op.start(t(10)).unwrap();
         op.succeed(t(20)).unwrap();
         assert_eq!(op.repository_alias(), Some(&alias));
+    }
+
+    #[test]
+    fn an_operation_keeps_the_entry_it_reads_through_its_run() {
+        let entry = logged_entry::LoggedEntry::kept("/demo/demo-1.txt".to_owned());
+        assert_eq!(queued().entry(), None);
+        let mut op = queued().with_entry(entry.clone());
+        op.start(t(10)).unwrap();
+        op.succeed(t(20)).unwrap();
+        assert_eq!(op.entry(), Some(&entry));
     }
 
     #[test]

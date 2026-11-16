@@ -295,7 +295,7 @@ impl OperationRecord {
             result: result.cloned(),
             repository_alias: operation.repository_alias().cloned(),
             locations: operation.locations().cloned(),
-            entry: None,
+            entry: operation.entry().cloned(),
         }
     }
 
@@ -322,8 +322,12 @@ impl OperationRecord {
             self.target.clone(),
             self.queued_at,
         );
-        Some(match &self.repository_alias {
+        let operation = match &self.repository_alias {
             Some(alias) => operation.with_repository_alias(alias.clone()),
+            None => operation,
+        };
+        Some(match &self.entry {
+            Some(entry) => operation.with_entry(entry.clone()),
             None => operation,
         })
     }
