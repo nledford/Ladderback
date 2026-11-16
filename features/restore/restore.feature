@@ -113,6 +113,13 @@ Feature: Restoring files from a snapshot
     And the person restores "home/photos" of the snapshot, confirming with "3f2a1b4c"
     Then the second restore is refused, naming the restore that runs
 
+  Scenario: A restore can start once the one before it has ended
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    Given sign-in is off
+    When the person restores "home/docs" of the snapshot, confirming with "3f2a1b4c"
+    And the person restores "home/photos" of the snapshot, confirming with "3f2a1b4c"
+    Then each restore started
+
   Scenario: A restore cancelled midway is recorded as cancelled
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
     Given sign-in is off

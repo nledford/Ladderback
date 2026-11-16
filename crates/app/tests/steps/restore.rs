@@ -589,6 +589,15 @@ fn ends_succeeded(agent: &mut Agent) {
     assert_eq!(agent.restore.status(), &OperationStatus::Succeeded);
 }
 
+#[then("each restore started")]
+fn each_started(agent: &mut Agent) {
+    assert!(
+        agent.restore.started.len() >= 2 && agent.restore.started.iter().all(Result::is_ok),
+        "every restore started: {:?}",
+        agent.restore.started
+    );
+}
+
 #[then("the restore ends as cancelled")]
 fn ends_cancelled(agent: &mut Agent) {
     assert_eq!(agent.restore.status(), &OperationStatus::Cancelled);
