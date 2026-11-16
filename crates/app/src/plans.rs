@@ -3,7 +3,8 @@
 //! [`AgentConfig`] aggregate keeps, and saved, under the lock every write of
 //! the daemon's configuration holds, so two writes can't undo each other.
 //! A change saved is told to the scheduler, which reads the configuration
-//! again at once, so a new or changed plan's next run shows without waiting.
+//! again at once, so a new or changed plan's next run shows without waiting,
+//! and brings the proposals up to date (decision 89, point 3).
 
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use domain::PlanId;
 use domain::planning::{AgentConfig, ChangeRefused, Plan};
 
 use crate::ports::{ConfigError, ConfigStore};
+use crate::proposals::Proposals;
 use crate::repositories::ConfigWrites;
 use crate::schedule::ConfigChanged;
 
@@ -30,6 +32,8 @@ pub struct EditPlans {
     config: Arc<dyn ConfigStore>,
     writes: Arc<ConfigWrites>,
     changed: ConfigChanged,
+    /// Brought up to date after each change saved.
+    proposals: Option<Arc<Proposals>>,
 }
 
 impl EditPlans {
@@ -42,13 +46,14 @@ impl EditPlans {
             config,
             writes,
             changed,
+            proposals: None,
         }
     }
 
     /// These edits, bringing `proposals` up to date after each change
     /// saved, so one the change made stale goes stale at once.
-    pub fn with_proposals(self, proposals: Arc<crate::proposals::Proposals>) -> Self {
-        let _ = proposals;
+    pub fn with_proposals(mut self, proposals: Arc<Proposals>) -> Self {
+        self.proposals = Some(proposals);
         self
     }
 
@@ -71,23 +76,32 @@ impl EditPlans {
     }
 
     /// Reads the configuration, changes it by `change` and saves what that
-    /// gives, holding the write lock throughout, then tells the scheduler.
+    /// gives, holding the write lock throughout, then tells the scheduler
+    /// and, the lock let go, brings the proposals up to date.
     async fn edit(
         &self,
         change: impl FnOnce(&AgentConfig) -> Result<AgentConfig, ChangeRefused>,
     ) -> Result<(), EditError> {
-        let _writing = self.writes.lock().await;
-        let loaded = self
-            .config
-            .load()
-            .await
-            .map_err(|error| EditError::Config(Box::new(error)))?;
-        let changed = change(&loaded).map_err(EditError::Refused)?;
-        self.config
-            .save(&changed)
-            .await
-            .map_err(|error| EditError::Config(Box::new(error)))?;
-        self.changed.tell();
+        {
+            let _writing = self.writes.lock().await;
+            let loaded = self
+                .config
+                .load()
+                .await
+                .map_err(|error| EditError::Config(Box::new(error)))?;
+            let changed = change(&loaded).map_err(EditError::Refused)?;
+            self.config
+                .save(&changed)
+                .await
+                .map_err(|error| EditError::Config(Box::new(error)))?;
+            self.changed.tell();
+        }
+        if let Some(proposals) = &self.proposals {
+            // The change is saved whatever this gives: a proposal it
+            // didn't bring up to date is brought up to date at its next
+            // read, as every read does.
+            proposals.refresh().await.ok();
+        }
         Ok(())
     }
 }

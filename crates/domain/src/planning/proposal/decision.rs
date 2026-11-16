@@ -310,8 +310,26 @@ impl Proposal {
     /// plan, which only a read of the repository tells. A change that no
     /// longer applies could, as far as anyone can tell.
     pub fn needs_forget_preview(&self, config: &AgentConfig) -> bool {
-        let _ = config;
-        todo!()
+        let mut after = config.clone();
+        for change in &self.changes {
+            let deletes = match change {
+                ConfigChange::AddPlan(plan) => !plan.retention.is_empty(),
+                ConfigChange::ChangePlan(plan) => after.plan(&plan.id).is_none_or(|kept| {
+                    kept.retention != plan.retention
+                        || kept.repository != plan.repository
+                        || kept.host != plan.host
+                }),
+                ConfigChange::RemovePlan(_) => true,
+            };
+            if deletes {
+                return true;
+            }
+            match after.apply(change) {
+                Ok(next) => after = next,
+                Err(_) => return true,
+            }
+        }
+        false
     }
 }
 

@@ -232,7 +232,7 @@ impl Proposals {
     /// change no longer applies goes stale now, announced, rather than at
     /// its next read.
     pub async fn refresh(&self) -> Result<(), ProposalError> {
-        todo!()
+        self.list(&Proposer::NoToken).await.map(drop)
     }
 
     /// The proposal `id`, brought up to date, if `asker` may see it.
@@ -308,8 +308,7 @@ impl Proposals {
         };
         Ok(Review {
             changed_since_drafted: draft.revision != proposal.base,
-            // Nothing is held back for the forget preview yet.
-            needs_forget_preview: false,
+            needs_forget_preview: proposal.needs_forget_preview(&config),
             shown: Shown {
                 revision: draft.revision,
                 diff: DiffHash::of(&diff),
@@ -342,6 +341,9 @@ impl Proposals {
         // the file the page showed.
         let after =
             Proposal::check(&config, &proposal.changes).map_err(|_| ProposalError::Changed)?;
+        if proposal.needs_forget_preview(&config) {
+            return Err(ProposalError::NeedsForgetPreview);
+        }
         let draft = self.draft(&after).await?;
         let rebuilt = Shown {
             revision: draft.revision.clone(),
