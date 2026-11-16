@@ -455,6 +455,10 @@ pub enum ErrorCode {
     /// over, and an agent runs two at a time (§10.4): nothing ran. A third
     /// is refused rather than queued.
     DownloadsBusy,
+    /// No download could be confirmed because the agent's system gave no
+    /// random bytes for its ticket (§10.4): nothing ran. The daemon's log
+    /// says why.
+    DownloadsUnavailable,
     /// The snapshot holds no file or folder at the argument `path`, the
     /// entry a download asked for (§10.4). Nothing was handed over.
     EntryUnknown,
@@ -1356,6 +1360,7 @@ impl ErrorCode {
             | Self::FullDiskAccessNotLocal
             | Self::FullDiskAccessSettingsUnopened
             | Self::DownloadsBusy
+            | Self::DownloadsUnavailable
             | Self::DownloadUnknown
             | Self::Unknown => &[],
         }
@@ -2758,6 +2763,10 @@ mod tests {
     fn the_codes_of_a_download_are_named_on_the_wire_and_only_an_unknown_entry_names_its_path() {
         for (code, wire) in [
             (ErrorCode::DownloadsBusy, r#""downloads-busy""#),
+            (
+                ErrorCode::DownloadsUnavailable,
+                r#""downloads-unavailable""#,
+            ),
             (ErrorCode::EntryUnknown, r#""entry-unknown""#),
             (ErrorCode::DownloadUnknown, r#""download-unknown""#),
         ] {

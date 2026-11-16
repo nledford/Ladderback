@@ -382,6 +382,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::FullDiskAccessNotLocal
                 | ErrorCode::FullDiskAccessSettingsUnopened
                 | ErrorCode::DownloadsBusy
+                | ErrorCode::DownloadsUnavailable
                 | ErrorCode::EntryUnknown
                 | ErrorCode::DownloadUnknown
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },

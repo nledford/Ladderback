@@ -81,9 +81,12 @@ pub enum DownloadRefusal {
     /// The address's wait after failed sign-ins has `seconds` left: the
     /// password wasn't checked.
     StepUpWait { seconds: u64 },
-    /// The admin password couldn't be checked, or no ticket could be
-    /// drawn: the platform's own words, for the daemon's log only.
+    /// The admin password couldn't be checked: the platform's own words,
+    /// for the daemon's log only.
     StepUpUnavailable(String),
+    /// No ticket could be drawn, the platform giving no random bytes: its
+    /// own words, for the daemon's log only.
+    TicketUnavailable(String),
     /// Two downloads are under way on the agent.
     Busy,
     /// The repository holds no snapshot by that ID.
@@ -249,8 +252,9 @@ fn entry_unknown(path: String) -> Response {
 /// The refusal of `error`, for the entry `path` of the snapshot `snapshot`
 /// of the repository `alias` as the request named them: a step-up that
 /// failed is 403, during a wait 429 with `Retry-After`, as a restore's; a
-/// third download beside two under way 409; a snapshot or an entry the
-/// repository doesn't hold 404; the rest as a read of the repository is.
+/// ticket that couldn't be drawn 503; a third download beside two under way
+/// 409; a snapshot or an entry the repository doesn't hold 404; the rest as
+/// a read of the repository is.
 fn refusal(alias: &str, snapshot: &str, path: &str, error: DownloadRefusal) -> Response {
     use api::ErrorCode;
     match error {
@@ -263,6 +267,13 @@ fn refusal(alias: &str, snapshot: &str, path: &str, error: DownloadRefusal) -> R
             refused(
                 StatusCode::SERVICE_UNAVAILABLE,
                 ErrorCode::SignInUnavailable,
+            )
+        }
+        DownloadRefusal::TicketUnavailable(detail) => {
+            log::warn!("a download could not be confirmed: {detail}");
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorCode::DownloadsUnavailable,
             )
         }
         DownloadRefusal::Busy => refused(StatusCode::CONFLICT, ErrorCode::DownloadsBusy),

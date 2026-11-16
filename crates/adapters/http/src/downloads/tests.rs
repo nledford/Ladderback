@@ -217,6 +217,11 @@ async fn each_refusal_of_a_start_has_its_status_and_code() {
             "sign-in-unavailable",
         ),
         (
+            DownloadRefusal::TicketUnavailable("no random bytes".to_owned()),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "downloads-unavailable",
+        ),
+        (
             DownloadRefusal::Busy,
             StatusCode::CONFLICT,
             "downloads-busy",

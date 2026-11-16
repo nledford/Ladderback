@@ -399,6 +399,10 @@ error-full-disk-access-settings-unopened = { -brand-name } could not open System
 # third is refused rather than queued.
 error-downloads-busy = Two downloads are already under way on this agent, and it hands over two at a time, so nothing was downloaded. Wait for one to finish, then download again.
 
+# The agent's system gave no random bytes for a download's ticket, so the
+# download wasn't confirmed and nothing ran. The daemon's log says why.
+error-downloads-unavailable = { -brand-name } could not get the download ready, so nothing was downloaded. Its log says why; try again, and if it happens again, check the computer it runs on.
+
 # The snapshot holds no file or folder at the path a download named.
 # $path (text): the entry's path in the snapshot, its names joined by "/", such as source/docs/notes.txt.
 error-entry-unknown = The { -snapshot } has no file or folder { $path }, so nothing was downloaded. Choose a file or folder from the { -snapshot }'s tree.

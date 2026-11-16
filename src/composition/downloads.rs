@@ -84,7 +84,7 @@ async fn refusal(
             return DownloadRefusal::StepUpUnavailable(detail);
         }
         DownloadError::RandomUnavailable => {
-            return DownloadRefusal::StepUpUnavailable(
+            return DownloadRefusal::TicketUnavailable(
                 "the platform gave no random bytes for the download's ticket".to_owned(),
             );
         }

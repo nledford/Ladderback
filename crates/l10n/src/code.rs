@@ -128,6 +128,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     FullDiskAccessNotLocal => msg::ERROR_FULL_DISK_ACCESS_NOT_LOCAL,
     FullDiskAccessSettingsUnopened => msg::ERROR_FULL_DISK_ACCESS_SETTINGS_UNOPENED,
     DownloadsBusy => msg::ERROR_DOWNLOADS_BUSY,
+    DownloadsUnavailable => msg::ERROR_DOWNLOADS_UNAVAILABLE,
     EntryUnknown => msg::ERROR_ENTRY_UNKNOWN,
     DownloadUnknown => msg::ERROR_DOWNLOAD_UNKNOWN,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
