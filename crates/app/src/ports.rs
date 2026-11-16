@@ -8,6 +8,7 @@ mod config_store;
 mod engine;
 mod event_bus;
 mod hooks;
+mod keyring;
 mod notifier;
 mod operation_store;
 mod platform;
@@ -45,6 +46,7 @@ pub use hooks::{
     HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,
     HookStatus, MAX_HOOK_OUTPUT_BYTES,
 };
+pub use keyring::{Kept, Keyring, KeyringError};
 pub use notifier::{
     Credentials, DELIVERY_TIMEOUT, Destination, Message, Notification, Notifier, NotifyError,
 };

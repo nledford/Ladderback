@@ -5,7 +5,7 @@ use domain::secrets::{
     SecretValue, SecretWarning, SourceName,
 };
 
-use crate::ports::{Resolved, SecretResolver};
+use crate::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
 
 /// Sets up the places secrets are read from, in memory for a fake and for
 /// real in a scratch directory for the real resolver, so the same checks run
@@ -15,6 +15,10 @@ pub trait SecretsHarness: Send + Sync {
     /// A resolver over everything set up so far. A command may run for a
     /// fraction of a second at most: the suite hangs one on purpose.
     fn resolver(&self) -> Arc<dyn SecretResolver>;
+
+    /// Where passwords are kept: the keyring the resolver reads, so an entry
+    /// kept here is one the resolver gives.
+    fn keyring(&self) -> Arc<dyn Keyring>;
 
     /// Sets a variable of the environment the resolver reads.
     fn set_env(&self, name: &str, value: &str);
@@ -42,6 +46,10 @@ pub trait SecretsHarness: Send + Sync {
     /// A keyring entry that holds nothing.
     fn empty_keyring_entry(&self) -> KeyringEntry;
 
+    /// A keyring entry that holds nothing, under a name of the harness's
+    /// choosing that includes `name`, and that no other call returns.
+    fn unused_keyring_entry(&self, name: &str) -> KeyringEntry;
+
     /// A command that prints exactly `stdout` and succeeds.
     fn printing(&self, stdout: &[u8]) -> CommandLine;
 
@@ -56,6 +64,14 @@ pub trait SecretsHarness: Send + Sync {
 }
 
 pub async fn run(harness: &dyn SecretsHarness) {
+    variables_and_files(harness).await;
+    commands(harness).await;
+    keyrings(harness).await;
+    a_secret_is_read_again_every_time(harness).await;
+    an_error_never_holds_a_secret(harness).await;
+}
+
+async fn variables_and_files(harness: &dyn SecretsHarness) {
     an_inline_secret_is_its_own_value(harness).await;
     a_variable_gives_its_value_as_it_is(harness).await;
     a_variable_that_is_not_set_is_missing_and_never_empty(harness).await;
@@ -67,6 +83,9 @@ pub async fn run(harness: &dyn SecretsHarness) {
     a_file_others_can_read_comes_with_a_warning(harness).await;
     the_credentials_directory_is_trusted(harness).await;
     a_link_out_of_the_credentials_directory_is_not_trusted(harness).await;
+}
+
+async fn commands(harness: &dyn SecretsHarness) {
     a_command_gives_the_first_line_of_its_output(harness).await;
     a_command_that_prints_nothing_is_missing(harness).await;
     a_command_that_fails_is_told_by_its_status_and_its_stderr(harness).await;
@@ -74,10 +93,14 @@ pub async fn run(harness: &dyn SecretsHarness) {
     a_failed_command_whose_output_ends_partway_through_a_line_quotes_nothing(harness).await;
     a_command_that_cannot_be_started_is_unreachable(harness).await;
     a_command_that_takes_too_long_is_timed_out(harness).await;
+}
+
+async fn keyrings(harness: &dyn SecretsHarness) {
     a_keyring_gives_the_secret_of_an_entry(harness).await;
     an_entry_that_is_not_there_is_missing(harness).await;
-    a_secret_is_read_again_every_time(harness).await;
-    an_error_never_holds_a_secret(harness).await;
+    a_kept_password_is_read_from_its_entry_and_kept_once(harness).await;
+    an_entry_that_holds_another_secret_is_never_overwritten(harness).await;
+    a_removed_entry_is_missing(harness).await;
 }
 
 async fn resolve(
@@ -478,6 +501,58 @@ async fn an_entry_that_is_not_there_is_missing(harness: &dyn SecretsHarness) {
             entry: entry.to_string()
         }))
     );
+}
+
+/// A password kept in an entry that wasn't there is the entry's secret, and
+/// keeping the same password again leaves the entry as it is.
+async fn a_kept_password_is_read_from_its_entry_and_kept_once(harness: &dyn SecretsHarness) {
+    let entry = harness.unused_keyring_entry("kept");
+    let keyring = harness.keyring();
+    let password = SecretValue::new("hunter2");
+    assert_eq!(keyring.keep(&entry, &password).await, Ok(Kept::Added));
+    let kept = SecretRef::Keyring(entry.clone());
+    assert_eq!(resolve(harness, &kept).await, gives("hunter2"));
+    assert_eq!(
+        keyring.keep(&entry, &password).await,
+        Ok(Kept::AlreadyThere)
+    );
+    assert_eq!(resolve(harness, &kept).await, gives("hunter2"));
+}
+
+/// An entry may be the only copy of a repository's password: one that holds
+/// another secret is refused and left as it is.
+async fn an_entry_that_holds_another_secret_is_never_overwritten(harness: &dyn SecretsHarness) {
+    let entry = harness.set_keyring_entry("taken", "the-first");
+    assert_eq!(
+        harness
+            .keyring()
+            .keep(&entry, &SecretValue::new("the-second"))
+            .await,
+        Err(KeyringError::Taken)
+    );
+    assert_eq!(
+        resolve(harness, &SecretRef::Keyring(entry)).await,
+        gives("the-first")
+    );
+}
+
+/// A removed entry is not there any more; removing one that isn't there is
+/// no error.
+async fn a_removed_entry_is_missing(harness: &dyn SecretsHarness) {
+    let entry = harness.unused_keyring_entry("removed");
+    let keyring = harness.keyring();
+    assert_eq!(
+        keyring.keep(&entry, &SecretValue::new("hunter2")).await,
+        Ok(Kept::Added)
+    );
+    assert_eq!(keyring.remove(&entry).await, Ok(()));
+    assert_eq!(
+        resolve(harness, &SecretRef::Keyring(entry.clone())).await,
+        Err(SecretError::missing(SourceName::Keyring {
+            entry: entry.to_string()
+        }))
+    );
+    assert_eq!(keyring.remove(&entry).await, Ok(()));
 }
 
 /// A resolver keeps nothing: a secret that was rotated since is read as it

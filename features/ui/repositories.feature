@@ -220,6 +220,18 @@ Feature: Repositories page
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
 
+  Scenario: The form offers to keep the password in the system keyring or the configuration file, the configuration file chosen
+    Given a daemon with a scratch demo repository and no repositories
+    When I open the address "/repositories"
+    And I press Tab until focus is on the textbox "Password"
+    And I press Tab until focus is on the radio "In the configuration file"
+    Then the radio "In the configuration file" of the group "Where to keep the password" is checked
+    And the radio "In the system keyring" of the group "Where to keep the password" is not checked
+    And the page shows the paragraph "The keyring entry is named ladderback/ followed by the repository's name. If this computer has no keyring, keep the password in the configuration file."
+    When I press the down arrow until focus is on the radio "In the system keyring"
+    Then the radio "In the system keyring" of the group "Where to keep the password" is checked
+    And the page has no accessibility violations
+
   Scenario: Connecting a repository to maintain from this agent offers its maintenance
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"

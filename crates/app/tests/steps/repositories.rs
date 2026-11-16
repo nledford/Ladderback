@@ -15,13 +15,13 @@ use cucumber::{given, then, when};
 use domain::execution::FailureReason;
 use domain::execution::deadline::REPOSITORY_JOB_BUDGET;
 use domain::planning::{AgentConfig, Maintenance, RepositoryConfig, RepositorySettings};
-use domain::secrets::{SecretRef, SecretValue};
+use domain::secrets::{KeyringEntry, SecretRef, SecretValue};
 use domain::{OperationId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
 
 use app::fakes::{FakeSecrets, InMemoryConfigStore};
 use app::ports::{
     Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
-    OperationStore, RunningJob,
+    KeyringError, OperationStore, RunningJob,
 };
 use app::repositories::{
     ConnectRepository, InitOutcome, RepositoryError, SavedEntryError, SavedInit, TestRepository,
@@ -92,6 +92,8 @@ impl From<SavedEntryError> for Outcome {
 pub struct RepositoriesWorld {
     engine: Arc<Scripted>,
     store: Arc<InMemoryConfigStore>,
+    /// The secrets the use cases read, and the keyring they keep passwords in.
+    secrets: Arc<FakeSecrets>,
     settings: RepositorySettings,
     id: RepositoryId,
     outcome: Option<Outcome>,
@@ -118,6 +120,7 @@ impl Default for RepositoriesWorld {
                 seen: Mutex::new(Vec::new()),
             }),
             store: Arc::new(InMemoryConfigStore::new()),
+            secrets: Arc::new(FakeSecrets::new()),
             settings: RepositorySettings {
                 repository: "/home/demo/scratch/cold".to_owned(),
                 repo_hot: Some("/home/demo/scratch/hot".to_owned()),
@@ -320,21 +323,30 @@ async fn tests(agent: &mut super::Agent) {
 
 #[when(expr = "the agent connects it as {string}")]
 async fn connects(agent: &mut super::Agent, name: String) {
-    connect(agent, name, Maintenance::None).await;
+    connect(agent, name, Maintenance::None, false).await;
 }
 
 #[when(expr = "the agent connects it as {string} to maintain it from this agent")]
 async fn connects_to_maintain(agent: &mut super::Agent, name: String) {
-    connect(agent, name, Maintenance::Local).await;
+    connect(agent, name, Maintenance::Local, false).await;
 }
 
-async fn connect(agent: &mut super::Agent, name: String, maintenance: Maintenance) {
-    let use_case = ConnectRepository::new(
+#[when(expr = "the agent connects it as {string}, keeping the password in the keyring")]
+async fn connects_keeping_in_keyring(agent: &mut super::Agent, name: String) {
+    connect(agent, name, Maintenance::None, true).await;
+}
+
+async fn connect(agent: &mut super::Agent, name: String, maintenance: Maintenance, keyring: bool) {
+    let secrets = agent.repositories.secrets.clone();
+    let mut use_case = ConnectRepository::new(
         agent.clock.clone(),
         agent.repositories.engine.clone(),
-        ResolveRepository::new(Arc::new(FakeSecrets::new())),
+        ResolveRepository::new(secrets.clone()),
         agent.repositories.store.clone(),
     );
+    if keyring {
+        use_case = use_case.keeping_password_in(secrets);
+    }
     let settings = agent.repositories.settings.clone();
     within(
         agent,
@@ -362,21 +374,32 @@ async fn connects_elsewhere(agent: &mut super::Agent, name: String) {
 
 #[when("the agent initialises the repository")]
 async fn initialises(agent: &mut super::Agent) {
-    initialise(agent, None).await;
+    initialise(agent, None, false).await;
 }
 
 #[when(expr = "the agent initialises the repository as {string}")]
 async fn initialises_as(agent: &mut super::Agent, name: String) {
-    initialise(agent, Some(name)).await;
+    initialise(agent, Some(name), false).await;
 }
 
-async fn initialise(agent: &mut super::Agent, name: Option<String>) {
-    let use_case = app::repositories::InitRepository::new(
+#[when(
+    expr = "the agent initialises the repository as {string}, keeping the password in the keyring"
+)]
+async fn initialises_keeping_in_keyring(agent: &mut super::Agent, name: String) {
+    initialise(agent, Some(name), true).await;
+}
+
+async fn initialise(agent: &mut super::Agent, name: Option<String>, keyring: bool) {
+    let secrets = agent.repositories.secrets.clone();
+    let mut use_case = app::repositories::InitRepository::new(
         agent.clock.clone(),
         agent.repositories.engine.clone(),
-        ResolveRepository::new(Arc::new(FakeSecrets::new())),
+        ResolveRepository::new(secrets.clone()),
         agent.repositories.store.clone(),
     );
+    if keyring {
+        use_case = use_case.keeping_password_in(secrets);
+    }
     let settings = agent.repositories.settings.clone();
     within(
         agent,
@@ -621,6 +644,152 @@ fn gave_up_on_time(agent: &mut super::Agent) {
             .expect("a time within range"),
         "the request waited for another time than the job's"
     );
+}
+
+/// The password the scenarios type, as written in the form.
+fn typed(agent: &super::Agent) -> &SecretValue {
+    let SecretRef::Inline(password) = &agent.repositories.settings.password else {
+        panic!("the scenarios' password is written inline");
+    };
+    password
+}
+
+fn entry(name: &str) -> KeyringEntry {
+    KeyringEntry::parse(name).expect("a keyring entry")
+}
+
+/// A server with no Secret Service, or a platform with no keyring to ask.
+#[given("a machine with no keyring service")]
+fn no_keyring_service(agent: &mut super::Agent) {
+    agent.repositories.secrets.remove_keyring_service();
+}
+
+#[given(expr = "the keyring entry {string} holds {string}")]
+fn entry_holds(agent: &mut super::Agent, name: String, secret: String) {
+    agent
+        .repositories
+        .secrets
+        .set_keyring_entry(&entry(&name), &secret);
+}
+
+#[given(expr = "the keyring entry {string} holds the typed password")]
+fn entry_holds_typed(agent: &mut super::Agent, name: String) {
+    let typed = typed(agent).expose().to_owned();
+    agent
+        .repositories
+        .secrets
+        .set_keyring_entry(&entry(&name), &typed);
+}
+
+#[then(expr = "the keyring entry {string} holds {string}")]
+fn entry_still_holds(agent: &mut super::Agent, name: String, secret: String) {
+    assert_eq!(
+        agent.repositories.secrets.keyring_entry(&entry(&name)),
+        Some(secret)
+    );
+}
+
+#[then(expr = "the keyring entry {string} holds the typed password")]
+fn entry_holds_the_typed(agent: &mut super::Agent, name: String) {
+    assert_eq!(
+        agent
+            .repositories
+            .secrets
+            .keyring_entry(&entry(&name))
+            .as_deref(),
+        Some(typed(agent).expose())
+    );
+}
+
+#[then(expr = "the keyring has no entry {string}")]
+fn no_entry(agent: &mut super::Agent, name: String) {
+    assert_eq!(
+        agent.repositories.secrets.keyring_entry(&entry(&name)),
+        None
+    );
+}
+
+/// What is saved is the settings as typed, but for the password, which is a
+/// reference to the keyring entry: never the password itself.
+#[then(
+    expr = "the agent has the repository {string} configured with its password read from the keyring entry {string}"
+)]
+async fn configured_with_keyring(agent: &mut super::Agent, name: String, kept: String) {
+    let config = saved(agent).await;
+    let repository = config
+        .repository(&alias(&name))
+        .unwrap_or_else(|| panic!("no repository {name} was saved"));
+    let expected = RepositorySettings {
+        password: SecretRef::Keyring(entry(&kept)),
+        ..agent.repositories.settings.clone()
+    };
+    assert_eq!(repository.settings, expected);
+}
+
+#[then("the request is refused because there is no keyring to keep the password in")]
+fn refused_no_keyring(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Refused(RepositoryError::Keyring {
+            entry: refused,
+            error: KeyringError::Unavailable { .. },
+        })) => assert_eq!(refused.to_string(), "ladderback/demo"),
+        other => panic!("the request was not refused for a missing keyring: {other:?}"),
+    }
+}
+
+#[then("the request is refused because the keyring entry holds another password")]
+fn refused_entry_taken(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Refused(RepositoryError::Keyring {
+            entry: refused,
+            error: KeyringError::Taken,
+        })) => assert_eq!(refused.to_string(), "ladderback/demo"),
+        other => panic!("the request was not refused for a taken keyring entry: {other:?}"),
+    }
+}
+
+/// A location whose user name comes from a variable the agent doesn't have,
+/// so its settings can't be resolved for a job.
+#[given("its location names a variable that is not set")]
+fn location_names_unset_variable(agent: &mut super::Agent) {
+    agent.repositories.settings.repository =
+        "rest:http://${LADDERBACK_DEMO_NOT_SET}@nas.example.com:8000/".to_owned();
+}
+
+#[then("the request is refused because a secret can't be read")]
+fn refused_unresolved(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Refused(RepositoryError::Resolve(_))) => {}
+        other => panic!("the request was not refused for a secret: {other:?}"),
+    }
+}
+
+/// A location where the engine's initialisation finds a repository already.
+#[given("a location that already holds a repository")]
+fn already_holds(agent: &mut super::Agent) {
+    *agent
+        .repositories
+        .engine
+        .outcome
+        .lock()
+        .expect("the outcome") = Err(FailureReason::RepositoryExists);
+}
+
+#[then("the initialisation is refused because a repository already exists")]
+fn init_refused_exists(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Refused(RepositoryError::Exists)) => {}
+        other => panic!("the initialisation was not refused as existing: {other:?}"),
+    }
+}
+
+#[then("the engine initialised the repository with the typed password")]
+fn initialised_with_typed(agent: &mut super::Agent) {
+    let seen = agent.repositories.engine.seen.lock().expect("the jobs");
+    let [Job::Init(access)] = seen.as_slice() else {
+        panic!("the engine was not given one initialisation: {seen:?}");
+    };
+    assert_eq!(access.password.expose(), typed(agent).expose());
 }
 
 #[given(

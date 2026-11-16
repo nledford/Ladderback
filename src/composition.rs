@@ -24,6 +24,7 @@ use app::conditions::{NameWatch, NetworkWait};
 use app::notifications::{Notify, Report};
 use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
+use app::ports::{Keyring, KeyringError};
 use app::ports::SecretResolver;
 use app::ports::{
     AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
@@ -2947,6 +2948,9 @@ struct RepositoryService {
     /// Held across a use case's read-modify-write of the configuration, and
     /// shared with the record of an opened repository's ID.
     writes: Arc<ConfigWrites>,
+    /// Where a typed password is kept when the person chose the system
+    /// keyring (§10.2): the OS keyring the resolver reads.
+    keyring: Arc<dyn Keyring>,
 }
 
 impl RepositoryService {
@@ -2967,7 +2971,15 @@ impl RepositoryService {
             config,
             operations,
             writes,
+            keyring: Arc::new(SystemSecrets::default()),
         }
+    }
+
+    /// The service keeping typed passwords in `keyring` rather than in the
+    /// OS keyring, so that no test writes to the developer's own.
+    #[cfg(test)]
+    fn with_keyring(self, keyring: Arc<dyn Keyring>) -> Self {
+        Self { keyring, ..self }
     }
 }
 
@@ -3255,6 +3267,10 @@ async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Re
         }
         RepositoryError::Failed(reason) => failed_refusal(reason, settings),
         RepositoryError::Config(error) => config_refusal(error),
+        RepositoryError::Keyring { entry, error } => {
+            let _ = (entry, error);
+            todo!()
+        }
         RepositoryError::TimedOut => unavailable(ErrorCode::RepositoryTimedOut, Vec::new(), None),
     }
 }
@@ -8866,7 +8882,8 @@ mod repository_service_tests {
         })
     }
 
-    /// The service over `config` and an operation log of its own, empty.
+    /// The service over `config` and an operation log of its own, empty,
+    /// keeping passwords in a keyring of its own, never the OS's.
     fn service(engine: &Arc<Scripted>, config: Arc<dyn ConfigStore>) -> RepositoryService {
         RepositoryService::new(
             clock(),
@@ -8877,6 +8894,7 @@ mod repository_service_tests {
             Arc::new(app::fakes::InMemoryOperationStore::new()),
             Arc::default(),
         )
+        .with_keyring(Arc::new(FakeSecrets::new()))
     }
 
     /// A clock that jumps to the deadline of whoever sleeps on it, so a job
@@ -8917,6 +8935,7 @@ mod repository_service_tests {
             alias: alias.to_owned(),
             settings,
             maintain_here: false,
+            keep_in_keyring: false,
         }
     }
 
@@ -8924,6 +8943,7 @@ mod repository_service_tests {
         api::InitRepositoryDto {
             alias: alias.map(str::to_owned),
             settings,
+            keep_in_keyring: false,
         }
     }
 
@@ -9083,6 +9103,189 @@ mod repository_service_tests {
                 Some(saved_as),
                 "maintain-here {maintain_here}"
             );
+        }
+    }
+
+    /// [`service`], keeping passwords in `secrets`, which it also reads them
+    /// from.
+    fn service_keeping(
+        engine: &Arc<Scripted>,
+        config: Arc<dyn ConfigStore>,
+        secrets: Arc<FakeSecrets>,
+    ) -> RepositoryService {
+        RepositoryService::new(
+            clock(),
+            engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
+            ResolveRepository::new(secrets.clone()),
+            config,
+            Arc::new(app::fakes::InMemoryOperationStore::new()),
+            Arc::default(),
+        )
+        .with_keyring(secrets)
+    }
+
+    #[tokio::test]
+    async fn a_password_kept_in_the_keyring_is_saved_as_a_reference_to_its_entry() {
+        use domain::secrets::{KeyringEntry, SecretRef};
+        let entry = KeyringEntry::parse("ladderback/demo").expect("an entry");
+        for creates in [false, true] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let secrets = Arc::new(FakeSecrets::new());
+            let service = service_keeping(&engine, config.clone(), secrets.clone());
+            if creates {
+                service
+                    .init(api::InitRepositoryDto {
+                        keep_in_keyring: true,
+                        ..init(Some("demo"), settings_dto())
+                    })
+                    .await
+                    .map(|_| ())
+            } else {
+                service
+                    .connect(api::ConnectRepositoryDto {
+                        keep_in_keyring: true,
+                        ..connect("demo", settings_dto())
+                    })
+                    .await
+                    .map(|_| ())
+            }
+            .unwrap_or_else(|e| panic!("creates {creates}: {e:?}"));
+            let config = saved(&*config).await;
+            assert_eq!(
+                config.repository(&alias("demo")).map(|r| &r.settings.password),
+                Some(&SecretRef::Keyring(entry.clone())),
+                "creates {creates}"
+            );
+            assert_eq!(
+                secrets.keyring_entry(&entry).as_deref(),
+                Some("demo-password"),
+                "creates {creates}"
+            );
+        }
+    }
+
+    /// The keyring keeps a password typed for a repository saved under a
+    /// name: a request that asks for it with no name, or with a password
+    /// that is already a reference, is one the form never sends.
+    #[tokio::test]
+    async fn keeping_the_password_in_the_keyring_needs_a_name_and_a_typed_password() {
+        let referenced = RepositorySettingsDto {
+            password: PasswordDto::Env {
+                name: "DEMO_PASSWORD".to_owned(),
+            },
+            ..settings_dto()
+        };
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let secrets = Arc::new(FakeSecrets::new());
+        let service = service_keeping(&engine, config.clone(), secrets.clone());
+        assert_eq!(
+            service
+                .init(api::InitRepositoryDto {
+                    keep_in_keyring: true,
+                    ..init(None, settings_dto())
+                })
+                .await
+                .map(|_| ()),
+            Err(RepositoriesError::InvalidBody),
+            "no name"
+        );
+        assert_eq!(
+            service
+                .init(api::InitRepositoryDto {
+                    keep_in_keyring: true,
+                    ..init(Some("demo"), referenced.clone())
+                })
+                .await
+                .map(|_| ()),
+            Err(RepositoriesError::InvalidBody),
+            "a creation with a reference"
+        );
+        assert_eq!(
+            service
+                .connect(api::ConnectRepositoryDto {
+                    keep_in_keyring: true,
+                    ..connect("demo", referenced)
+                })
+                .await
+                .map(|_| ()),
+            Err(RepositoriesError::InvalidBody),
+            "a connection with a reference"
+        );
+        assert_eq!(jobs(&engine), 0);
+        assert!(saved(&*config).await.repositories().is_empty());
+    }
+
+    /// A keyring that refuses every password with its error, and has nothing
+    /// to remove.
+    struct Refusing(KeyringError);
+
+    #[async_trait]
+    impl Keyring for Refusing {
+        async fn keep(
+            &self,
+            _entry: &domain::secrets::KeyringEntry,
+            _password: &domain::secrets::SecretValue,
+        ) -> Result<app::ports::Kept, KeyringError> {
+            Err(self.0.clone())
+        }
+
+        async fn remove(&self, _entry: &domain::secrets::KeyringEntry) -> Result<(), KeyringError> {
+            Ok(())
+        }
+    }
+
+    /// Each refusal names the entry and nothing else; what the platform said
+    /// comes masked of the typed password (I4). A keyring that never answers
+    /// is one that couldn't keep it.
+    #[tokio::test]
+    async fn a_password_the_keyring_could_not_keep_is_refused_naming_its_entry() {
+        let said = "the keyring said demo-password".to_owned();
+        for (error, code, detail) in [
+            (
+                KeyringError::Unavailable {
+                    detail: said.clone(),
+                },
+                ErrorCode::KeyringUnavailable,
+                true,
+            ),
+            (
+                KeyringError::Unwritable {
+                    detail: said.clone(),
+                },
+                ErrorCode::KeyringUnwritable,
+                true,
+            ),
+            (
+                KeyringError::TimedOut { seconds: 5 },
+                ErrorCode::KeyringUnwritable,
+                false,
+            ),
+            (KeyringError::Taken, ErrorCode::KeyringEntryTaken, false),
+        ] {
+            let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+            let answer = service(&engine, config.clone())
+                .with_keyring(Arc::new(Refusing(error.clone())))
+                .connect(api::ConnectRepositoryDto {
+                    keep_in_keyring: true,
+                    ..connect("demo", settings_dto())
+                })
+                .await;
+            let Err(RepositoriesError::SecretRefused(refusal)) = answer else {
+                panic!("{error:?} was not refused as a secret: {answer:?}");
+            };
+            assert_eq!(refusal.code, code, "{error:?}");
+            assert_eq!(
+                refusal.args,
+                vec![("entry", MsgArg::Text("ladderback/demo".to_owned()))],
+                "{error:?}"
+            );
+            assert_eq!(refusal.detail.is_some(), detail, "{error:?}");
+            if let Some(shown) = &refusal.detail {
+                assert!(!shown.contains("demo-password"), "{error:?}: {shown}");
+                assert!(shown.contains("the keyring said"), "{error:?}: {shown}");
+            }
+            assert!(saved(&*config).await.repositories().is_empty(), "{error:?}");
         }
     }
 

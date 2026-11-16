@@ -1148,6 +1148,8 @@ struct Inputs {
     hot_storage: RwSignal<String>,
     password: RwSignal<String>,
     maintain_here: RwSignal<bool>,
+    /// Whether the person chose the system keyring for the typed password.
+    keep_in_keyring: RwSignal<bool>,
 }
 
 impl Inputs {
@@ -1158,6 +1160,7 @@ impl Inputs {
             hot_storage: RwSignal::new(String::new()),
             password: RwSignal::new(String::new()),
             maintain_here: RwSignal::new(false),
+            keep_in_keyring: RwSignal::new(false),
         }
     }
 
@@ -1177,6 +1180,7 @@ impl Inputs {
             hot_storage: self.hot_storage.get_untracked(),
             password: self.password.get_untracked(),
             maintain_here: self.maintain_here.get_untracked(),
+            keep_in_keyring: self.keep_in_keyring.get_untracked(),
         }
     }
 
@@ -2024,6 +2028,11 @@ mod tests {
             "the checkbox starts off"
         );
         inputs.maintain_here.set(true);
+        assert!(
+            !inputs.keep_in_keyring.get_untracked(),
+            "the configuration file is chosen first"
+        );
+        inputs.keep_in_keyring.set(true);
         // `Form` has no `Debug`, so that nothing can print a password: compare.
         assert!(
             inputs.read()
@@ -2033,6 +2042,7 @@ mod tests {
                     hot_storage: "/srv/hot".to_owned(),
                     password: "typed".to_owned(),
                     maintain_here: true,
+                    keep_in_keyring: true,
                 }
         );
         for field in FIELDS {
@@ -2050,6 +2060,14 @@ mod tests {
         inputs.clear();
         assert!(inputs.read() == Form::default());
         assert!(!inputs.maintain_here.get_untracked());
+    }
+
+    #[test]
+    fn clearing_the_form_chooses_the_configuration_file_again() {
+        let inputs = Inputs::new();
+        inputs.keep_in_keyring.set(true);
+        inputs.clear();
+        assert!(!inputs.keep_in_keyring.get_untracked());
     }
 
     #[test]

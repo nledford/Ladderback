@@ -64,19 +64,25 @@ impl RealHarness {
     fn next(&self) -> usize {
         self.commands.fetch_add(1, Ordering::Relaxed)
     }
+
+    fn system(&self) -> SystemSecrets {
+        let environment = self.environment.lock().unwrap().clone();
+        // The keyring last: a mutant that makes a builder method give a new
+        // resolver must not leave it reading the session's own store.
+        SystemSecrets::new()
+            .with_environment(environment)
+            .with_command_timeout(Duration::from_millis(500))
+            .with_keyring(self.keyring.clone())
+    }
 }
 
 impl SecretsHarness for RealHarness {
     fn resolver(&self) -> Arc<dyn SecretResolver> {
-        let environment = self.environment.lock().unwrap().clone();
-        // The keyring last: a mutant that makes a builder method give a new
-        // resolver must not leave it reading the session's own store.
-        Arc::new(
-            SystemSecrets::new()
-                .with_environment(environment)
-                .with_command_timeout(Duration::from_millis(500))
-                .with_keyring(self.keyring.clone()),
-        )
+        Arc::new(self.system())
+    }
+
+    fn keyring(&self) -> Arc<dyn app::ports::Keyring> {
+        Arc::new(self.system())
     }
 
     fn set_env(&self, name: &str, value: &str) {
@@ -127,6 +133,10 @@ impl SecretsHarness for RealHarness {
 
     fn empty_keyring_entry(&self) -> KeyringEntry {
         KeyringEntry::parse("ladderback-demo/nothing-here").unwrap()
+    }
+
+    fn unused_keyring_entry(&self, name: &str) -> KeyringEntry {
+        KeyringEntry::parse(&format!("ladderback-demo/{name}-{}", self.next())).unwrap()
     }
 
     fn printing(&self, stdout: &[u8]) -> CommandLine {

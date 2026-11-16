@@ -15,12 +15,13 @@ use std::sync::Arc;
 use domain::execution::FailureReason;
 use domain::execution::deadline::{Deadline, REPOSITORY_JOB_BUDGET};
 use domain::planning::{AgentConfig, Maintenance, RepositoryConfig, RepositorySettings};
+use domain::secrets::KeyringEntry;
 use domain::{OperationId, RepositoryAlias, RepositoryId};
 use futures::{FutureExt, StreamExt, pin_mut, select_biased};
 
 use crate::ports::{
-    Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, Problem,
-    RepositoryAccess, RunningJob, StoreError,
+    Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, Keyring,
+    KeyringError, Problem, RepositoryAccess, RunningJob, StoreError,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 
@@ -122,6 +123,12 @@ pub enum RepositoryError {
     Failed(FailureReason),
     /// The configuration couldn't be read or written.
     Config(ConfigError),
+    /// The typed password couldn't be kept in the repository's keyring
+    /// `entry`, so nothing was saved or created.
+    Keyring {
+        entry: KeyringEntry,
+        error: KeyringError,
+    },
     /// The repository didn't answer within its time, so the worker was
     /// stopped and nothing was saved.
     TimedOut,
@@ -147,6 +154,14 @@ impl InitRepository {
             resolve,
             config,
         }
+    }
+
+    /// With `keyring`, a repository saved under a name keeps a typed password
+    /// in its keyring entry (`ladderback/<alias>`) rather than in the
+    /// configuration, which saves a reference to the entry (§10.2).
+    pub fn keeping_password_in(self, keyring: Arc<dyn Keyring>) -> Self {
+        let _ = keyring;
+        todo!()
     }
 
     /// Initialises the repository the settings describe, and reports its ID.
@@ -294,6 +309,14 @@ impl ConnectRepository {
             resolve,
             config,
         }
+    }
+
+    /// With `keyring`, the repository keeps a typed password in its keyring
+    /// entry (`ladderback/<alias>`) rather than in the configuration, which
+    /// saves a reference to the entry (§10.2).
+    pub fn keeping_password_in(self, keyring: Arc<dyn Keyring>) -> Self {
+        let _ = keyring;
+        todo!()
     }
 
     /// Tests the repository and, once the test passed, saves it under `alias`
@@ -984,6 +1007,148 @@ mod tests {
                 .settings,
             settings()
         );
+    }
+
+    /// A configuration that reads as empty and can't be written, as a file on
+    /// a full disk.
+    struct Unwritable;
+
+    #[async_trait]
+    impl ConfigStore for Unwritable {
+        async fn load(&self) -> Result<domain::planning::AgentConfig, crate::ports::ConfigError> {
+            Ok(domain::planning::AgentConfig::default())
+        }
+
+        async fn save(
+            &self,
+            _config: &domain::planning::AgentConfig,
+        ) -> Result<(), crate::ports::ConfigError> {
+            Err(crate::ports::ConfigError::Unavailable {
+                file: "config.toml".to_owned(),
+                detail: "the disk is full".to_owned(),
+            })
+        }
+
+        async fn record_id(
+            &self,
+            _alias: &RepositoryAlias,
+            _read: &domain::planning::RepositoryConfig,
+            _id: &RepositoryId,
+        ) -> Result<(), crate::ports::RecordError> {
+            Ok(())
+        }
+    }
+
+    fn identifying() -> Arc<Scripted> {
+        Arc::new(Scripted {
+            outcome: Mutex::new(Ok(id())),
+            seen: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The repository was there before and its password is the one typed, so
+    /// an entry the connection added holds nothing that isn't kept elsewhere.
+    #[tokio::test]
+    async fn a_connection_that_cannot_be_saved_removes_the_keyring_entry_it_added() {
+        let secrets = Arc::new(FakeSecrets::new());
+        let use_case = ConnectRepository::new(
+            clock(),
+            identifying(),
+            ResolveRepository::new(secrets.clone()),
+            Arc::new(Unwritable),
+        )
+        .keeping_password_in(secrets.clone());
+        assert_matches!(
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
+            Err(RepositoryError::Config(_))
+        );
+        let entry = domain::secrets::KeyringEntry::for_repository(&alias());
+        assert_eq!(secrets.keyring_entry(&entry), None);
+    }
+
+    /// The repository now exists with the typed password, and the entry may
+    /// be the only copy of it left once the form is gone.
+    #[tokio::test]
+    async fn a_creation_that_cannot_be_saved_keeps_the_keyring_entry_of_the_repository_it_made() {
+        let secrets = Arc::new(FakeSecrets::new());
+        let engine = identifying();
+        let use_case = InitRepository::new(
+            clock(),
+            engine.clone(),
+            ResolveRepository::new(secrets.clone()),
+            Arc::new(Unwritable),
+        )
+        .keeping_password_in(secrets.clone());
+        assert_matches!(
+            use_case.init(op(), &settings(), Some(alias())).await,
+            Err(RepositoryError::Config(_))
+        );
+        let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        assert_matches!(seen.as_slice(), [Job::Init(_)]);
+        let entry = domain::secrets::KeyringEntry::for_repository(&alias());
+        assert_eq!(
+            secrets.keyring_entry(&entry).as_deref(),
+            Some("demo-password")
+        );
+    }
+
+    /// A creation that isn't saved keeps nothing: the keyring is for a
+    /// repository saved under a name.
+    #[tokio::test]
+    async fn a_creation_under_no_name_keeps_nothing_in_the_keyring() {
+        let secrets = Arc::new(FakeSecrets::new());
+        let config = Arc::new(InMemoryConfigStore::new());
+        let use_case = InitRepository::new(
+            clock(),
+            identifying(),
+            ResolveRepository::new(secrets.clone()),
+            config,
+        )
+        .keeping_password_in(secrets.clone());
+        assert_matches!(
+            use_case.init(op(), &settings(), None).await,
+            Ok(super::InitOutcome { saved: false, .. })
+        );
+        let entry = domain::secrets::KeyringEntry::for_repository(&alias());
+        assert_eq!(secrets.keyring_entry(&entry), None);
+    }
+
+    /// A password already given by a reference is saved as written, and
+    /// nothing is kept in the keyring.
+    #[tokio::test]
+    async fn a_password_given_by_a_reference_is_saved_as_written() {
+        let secrets = Arc::new(FakeSecrets::new());
+        secrets.set_env("DEMO_PASSWORD", "demo-password");
+        let config = Arc::new(InMemoryConfigStore::new());
+        let written = domain::planning::RepositorySettings {
+            password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+            ..settings()
+        };
+        let use_case = ConnectRepository::new(
+            clock(),
+            identifying(),
+            ResolveRepository::new(secrets.clone()),
+            config.clone(),
+        )
+        .keeping_password_in(secrets.clone());
+        assert_eq!(
+            use_case
+                .connect(op(), alias(), &written, Maintenance::None)
+                .await,
+            Ok(id())
+        );
+        let saved = config
+            .load()
+            .await
+            .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
+        let repository = saved
+            .repository(&alias())
+            .unwrap_or_else(|| panic!("the repository"));
+        assert_eq!(repository.settings, written);
+        let entry = domain::secrets::KeyringEntry::for_repository(&alias());
+        assert_eq!(secrets.keyring_entry(&entry), None);
     }
 
     /// The rules and channels of a configuration: one channel, and one rule

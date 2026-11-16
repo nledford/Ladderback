@@ -7,7 +7,7 @@ use domain::secrets::{
     command_failure, command_secret, decode, file_warning,
 };
 
-use crate::ports::{Resolved, SecretResolver};
+use crate::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
 
 /// What the fake does when told to run a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +115,11 @@ impl FakeSecrets {
         self.lock()
             .keyring
             .insert(entry.to_string(), secret.to_owned());
+    }
+
+    /// What the keyring entry holds, if it is there.
+    pub fn keyring_entry(&self, entry: &KeyringEntry) -> Option<String> {
+        self.lock().keyring.get(&entry.to_string()).cloned()
     }
 
     /// A machine with no keyring service to ask, as a server with no
@@ -272,6 +277,23 @@ impl SecretResolver for FakeSecrets {
                 })
             }
         }
+    }
+}
+
+#[async_trait]
+impl Keyring for FakeSecrets {
+    async fn keep(
+        &self,
+        entry: &KeyringEntry,
+        password: &domain::secrets::SecretValue,
+    ) -> Result<Kept, KeyringError> {
+        let _ = (entry, password);
+        todo!()
+    }
+
+    async fn remove(&self, entry: &KeyringEntry) -> Result<(), KeyringError> {
+        let _ = entry;
+        todo!()
     }
 }
 

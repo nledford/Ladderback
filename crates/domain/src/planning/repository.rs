@@ -9,8 +9,8 @@ use std::fmt;
 use super::{Hooks, InvalidValue, Locations, ValueKind};
 use crate::RepositoryId;
 use crate::secrets::{
-    InlineSecret, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS, REDACTED, Redactor,
-    RepositorySecrets, SecretRef, SecretValue, has_reference, is_secret_option,
+    InlineSecret, KeyringEntry, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS, REDACTED,
+    Redactor, RepositorySecrets, SecretRef, SecretValue, has_reference, is_secret_option,
     location_secret_written, url_password_written,
 };
 
@@ -73,6 +73,17 @@ impl RepositorySettings {
                 .try_for_each(|value| check_option_value(value))?;
         }
         Ok(())
+    }
+
+    /// These settings with their password read from the keyring `entry`
+    /// instead, and the password they held, when they hold it as written
+    /// (`password = "…"`): what a repository whose typed password the person
+    /// chose to keep in the system keyring is saved with (§10.2). `None` for
+    /// a password that is already a reference, which stays as written. The
+    /// rest of the settings is unchanged.
+    pub fn with_password_in_keyring(&self, entry: KeyringEntry) -> Option<(Self, SecretValue)> {
+        let _ = entry;
+        todo!()
     }
 
     /// Every secret these settings hold as text: a credential written in
@@ -409,6 +420,38 @@ impl RepositoryConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn settings_with(password: SecretRef) -> RepositorySettings {
+        RepositorySettings {
+            repository: "/srv/demo/cold".to_owned(),
+            repo_hot: Some("/srv/demo/hot".to_owned()),
+            password,
+            options: BTreeMap::from([("timeout".to_owned(), "30s".to_owned())]),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn a_typed_password_moves_to_the_keyring_entry_and_nothing_else_changes() {
+        let entry = KeyringEntry::parse("ladderback/demo").unwrap();
+        let typed = settings_with(SecretRef::Inline(SecretValue::new("demo-password")));
+        let (moved, password) = typed.with_password_in_keyring(entry.clone()).unwrap();
+        assert_eq!(password.expose(), "demo-password");
+        assert_eq!(moved, settings_with(SecretRef::Keyring(entry)));
+    }
+
+    #[test]
+    fn a_password_that_is_already_a_reference_does_not_move() {
+        let entry = KeyringEntry::parse("ladderback/demo").unwrap();
+        for password in [
+            SecretRef::Env("DEMO_PASSWORD".to_owned()),
+            SecretRef::Keyring(KeyringEntry::parse("other/demo").unwrap()),
+        ] {
+            let written = settings_with(password);
+            assert_eq!(written.with_password_in_keyring(entry.clone()), None);
+        }
+    }
 
     #[test]
     fn a_location_holds_at_most_64_kib_and_its_refusal_holds_none_of_it() {

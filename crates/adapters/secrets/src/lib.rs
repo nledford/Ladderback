@@ -235,3 +235,20 @@ impl SecretResolver for SystemSecrets {
         }
     }
 }
+
+#[async_trait]
+impl app::ports::Keyring for SystemSecrets {
+    async fn keep(
+        &self,
+        entry: &KeyringEntry,
+        password: &SecretValue,
+    ) -> Result<app::ports::Kept, app::ports::KeyringError> {
+        let _ = (entry, password);
+        todo!()
+    }
+
+    async fn remove(&self, entry: &KeyringEntry) -> Result<(), app::ports::KeyringError> {
+        let _ = entry;
+        todo!()
+    }
+}

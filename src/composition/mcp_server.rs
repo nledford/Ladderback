@@ -291,6 +291,7 @@ async fn seeded(folder: &Scratch, random: &dyn Random) -> Result<Daemon, Unseede
         .init(api::InitRepositoryDto {
             alias: None,
             settings,
+            keep_in_keyring: false,
         })
         .await;
     if let Err(error) = created {
