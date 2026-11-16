@@ -15,13 +15,13 @@ use std::sync::Arc;
 use domain::execution::FailureReason;
 use domain::execution::deadline::{Deadline, REPOSITORY_JOB_BUDGET};
 use domain::planning::{AgentConfig, Maintenance, RepositoryConfig, RepositorySettings};
-use domain::secrets::KeyringEntry;
+use domain::secrets::{KeyringEntry, SecretValue};
 use domain::{OperationId, RepositoryAlias, RepositoryId};
 use futures::{FutureExt, StreamExt, pin_mut, select_biased};
 
 use crate::ports::{
-    Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, Keyring,
-    KeyringError, Problem, RepositoryAccess, RunningJob, StoreError,
+    Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, Kept,
+    Keyring, KeyringError, Problem, RepositoryAccess, RunningJob, StoreError,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 
@@ -40,6 +40,7 @@ pub struct InitRepository {
     engine: Arc<dyn Engine>,
     resolve: ResolveRepository,
     config: Arc<dyn ConfigStore>,
+    keyring: Option<Arc<dyn Keyring>>,
 }
 
 /// What an initialisation gave: the new repository's ID, and whether the
@@ -94,6 +95,7 @@ pub struct ConnectRepository {
     engine: Arc<dyn Engine>,
     resolve: ResolveRepository,
     config: Arc<dyn ConfigStore>,
+    keyring: Option<Arc<dyn Keyring>>,
 }
 
 /// Why initialising, testing or connecting a repository failed. A typed code,
@@ -153,6 +155,7 @@ impl InitRepository {
             engine,
             resolve,
             config,
+            keyring: None,
         }
     }
 
@@ -160,8 +163,10 @@ impl InitRepository {
     /// in its keyring entry (`ladderback/<alias>`) rather than in the
     /// configuration, which saves a reference to the entry (§10.2).
     pub fn keeping_password_in(self, keyring: Arc<dyn Keyring>) -> Self {
-        let _ = keyring;
-        todo!()
+        Self {
+            keyring: Some(keyring),
+            ..self
+        }
     }
 
     /// Initialises the repository the settings describe, and reports its ID.
@@ -179,13 +184,33 @@ impl InitRepository {
         settings: &RepositorySettings,
         alias: Option<RepositoryAlias>,
     ) -> Result<InitOutcome, RepositoryError> {
+        let mut kept = None;
         if let Some(alias) = &alias {
             unused(&*self.config, alias, settings, None).await?;
         }
+        // Resolved before the password is kept, so settings that can't be
+        // resolved leave nothing in the keyring.
         let access = access(&self.resolve, settings).await?;
-        let id = run(&*self.clock, &*self.engine, op, Job::Init(access)).await?;
+        if let Some(alias) = &alias
+            && let Some(typed) = typed_password(self.keyring.as_deref(), alias, settings)
+        {
+            kept = Some(typed.keep().await?);
+        }
+        let created = run(&*self.clock, &*self.engine, op, Job::Init(access)).await;
+        let id = match created {
+            Ok(id) => id,
+            Err(error) => {
+                if let Some(kept) = &kept {
+                    kept.undo().await;
+                }
+                return Err(error);
+            }
+        };
+        // A repository now exists with the password, so a refused save leaves
+        // the entry, which may be the only copy of it once the form is gone.
         let saved = match alias {
             Some(alias) => {
+                let settings = kept.as_ref().map_or(settings, |kept| &kept.settings);
                 save(&*self.config, &alias, settings, &id, Maintenance::Local).await?;
                 true
             }
@@ -308,6 +333,7 @@ impl ConnectRepository {
             engine,
             resolve,
             config,
+            keyring: None,
         }
     }
 
@@ -315,8 +341,10 @@ impl ConnectRepository {
     /// entry (`ladderback/<alias>`) rather than in the configuration, which
     /// saves a reference to the entry (§10.2).
     pub fn keeping_password_in(self, keyring: Arc<dyn Keyring>) -> Self {
-        let _ = keyring;
-        todo!()
+        Self {
+            keyring: Some(keyring),
+            ..self
+        }
     }
 
     /// Tests the repository and, once the test passed, saves it under `alias`
@@ -332,8 +360,92 @@ impl ConnectRepository {
     ) -> Result<RepositoryId, RepositoryError> {
         let access = access(&self.resolve, settings).await?;
         let id = run(&*self.clock, &*self.engine, op, Job::Identify(access)).await?;
-        save(&*self.config, &alias, settings, &id, maintenance).await?;
+        let Some(typed) = typed_password(self.keyring.as_deref(), &alias, settings) else {
+            save(&*self.config, &alias, settings, &id, maintenance).await?;
+            return Ok(id);
+        };
+        // What saving refuses is refused before anything is kept, so a
+        // request refused for its alias or its repository keeps nothing.
+        unused(&*self.config, &alias, settings, Some(&id)).await?;
+        let kept = typed.keep().await?;
+        if let Err(error) = save(&*self.config, &alias, &kept.settings, &id, maintenance).await {
+            kept.undo().await;
+            return Err(error);
+        }
         Ok(id)
+    }
+}
+
+/// A typed password to keep in its repository's keyring entry, and the
+/// settings to save once it is kept, which name the entry instead.
+struct TypedPassword<'k> {
+    keyring: &'k dyn Keyring,
+    entry: KeyringEntry,
+    settings: RepositorySettings,
+    password: SecretValue,
+}
+
+/// The password of `settings` to keep in the keyring entry of `alias`, when
+/// there is a keyring to keep it in and the password is typed rather than a
+/// reference. `None` keeps nothing: the settings are saved as written.
+fn typed_password<'k>(
+    keyring: Option<&'k dyn Keyring>,
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+) -> Option<TypedPassword<'k>> {
+    let keyring = keyring?;
+    let entry = KeyringEntry::for_repository(alias);
+    let (settings, password) = settings.with_password_in_keyring(entry.clone())?;
+    Some(TypedPassword {
+        keyring,
+        entry,
+        settings,
+        password,
+    })
+}
+
+impl<'k> TypedPassword<'k> {
+    /// Keeps the password in its entry, which is never overwritten: an entry
+    /// holding another secret is refused with the keyring's error, naming the
+    /// entry.
+    #[expect(clippy::result_large_err, reason = "`RepositoryError`, as above")]
+    async fn keep(self) -> Result<KeptPassword<'k>, RepositoryError> {
+        let Self {
+            keyring,
+            entry,
+            settings,
+            password,
+        } = self;
+        match keyring.keep(&entry, &password).await {
+            Ok(kept) => Ok(KeptPassword {
+                settings,
+                keyring,
+                entry,
+                kept,
+            }),
+            Err(error) => Err(RepositoryError::Keyring { entry, error }),
+        }
+    }
+}
+
+/// A typed password kept in its repository's keyring entry: the settings to
+/// save, which name the entry, and what undoing it takes.
+struct KeptPassword<'k> {
+    settings: RepositorySettings,
+    keyring: &'k dyn Keyring,
+    entry: KeyringEntry,
+    kept: Kept,
+}
+
+impl KeptPassword<'_> {
+    /// Removes the entry when this request added it; one that was there
+    /// before holds what it held and is left. A removal that fails leaves the
+    /// entry holding the password the person typed, and the request's own
+    /// refusal is the one reported.
+    async fn undo(&self) {
+        if self.kept == Kept::Added {
+            let _ = self.keyring.remove(&self.entry).await;
+        }
     }
 }
 
@@ -1066,6 +1178,55 @@ mod tests {
         );
         let entry = domain::secrets::KeyringEntry::for_repository(&alias());
         assert_eq!(secrets.keyring_entry(&entry), None);
+    }
+
+    /// A keyring that keeps every password and can't remove one, as one that
+    /// locked between the two calls.
+    struct KeepsOnly(Arc<FakeSecrets>);
+
+    #[async_trait]
+    impl crate::ports::Keyring for KeepsOnly {
+        async fn keep(
+            &self,
+            entry: &domain::secrets::KeyringEntry,
+            password: &domain::secrets::SecretValue,
+        ) -> Result<crate::ports::Kept, crate::ports::KeyringError> {
+            self.0.keep(entry, password).await
+        }
+
+        async fn remove(
+            &self,
+            _entry: &domain::secrets::KeyringEntry,
+        ) -> Result<(), crate::ports::KeyringError> {
+            Err(crate::ports::KeyringError::Unwritable {
+                detail: "the keyring is locked".to_owned(),
+            })
+        }
+    }
+
+    /// The request's own refusal is the one reported, and the entry it
+    /// couldn't remove holds the typed password, which opens the repository.
+    #[tokio::test]
+    async fn a_connection_whose_entry_cannot_be_removed_reports_its_own_refusal() {
+        let secrets = Arc::new(FakeSecrets::new());
+        let use_case = ConnectRepository::new(
+            clock(),
+            identifying(),
+            ResolveRepository::new(secrets.clone()),
+            Arc::new(Unwritable),
+        )
+        .keeping_password_in(Arc::new(KeepsOnly(secrets.clone())));
+        assert_matches!(
+            use_case
+                .connect(op(), alias(), &settings(), Maintenance::None)
+                .await,
+            Err(RepositoryError::Config(_))
+        );
+        let entry = domain::secrets::KeyringEntry::for_repository(&alias());
+        assert_eq!(
+            secrets.keyring_entry(&entry).as_deref(),
+            settings().password.inline().map(SecretValue::expose)
+        );
     }
 
     /// The repository now exists with the typed password, and the entry may
