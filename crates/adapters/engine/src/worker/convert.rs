@@ -4,6 +4,7 @@
 use std::io;
 
 use api::{ErrorCode, WarningCode};
+use domain::execution::RepositoryHalf;
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::Hostname;
@@ -23,6 +24,13 @@ use crate::job::{BackupResult, CheckResult, PrunePlanResult, PruneResult, Source
 pub(crate) enum JobError {
     /// The job failed, and the daemon is told why.
     Failed { code: ErrorCode, detail: String },
+    /// A server the repository is on refused its credentials (HTTP 401 or
+    /// 403): `credentials-refused`, with `half` naming the half whose server
+    /// refused them when the repository has a hot half.
+    CredentialsRefused {
+        half: Option<RepositoryHalf>,
+        detail: String,
+    },
     /// The event stream broke, so there is no one to tell.
     Events(io::Error),
 }

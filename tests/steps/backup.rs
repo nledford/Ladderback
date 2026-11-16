@@ -399,9 +399,36 @@ fn failed_as_refused(agent: &mut Agent) {
     assert_eq!(
         status,
         domain::execution::OperationStatus::Failed {
-            reason: domain::execution::FailureReason::CredentialsRefused,
+            reason: domain::execution::FailureReason::CredentialsRefused { half: None },
         }
     );
+}
+
+/// The repository's folder goes, as an unplugged drive's does.
+#[given("the repository's folder is no longer there")]
+fn folder_gone(agent: &mut Agent) {
+    fs::remove_dir_all(&agent.repository().cold).expect("the repository's folder goes");
+}
+
+#[then(
+    "the operation ends as failed because no repository was found, in the engine's words naming the folder"
+)]
+fn failed_as_no_config(agent: &mut Agent) {
+    let cold = agent.repository().cold.to_string_lossy().into_owned();
+    let status = agent.operation().status().clone();
+    let domain::execution::OperationStatus::Failed {
+        reason: domain::execution::FailureReason::RepositoryConfigNotFound { detail },
+    } = &status
+    else {
+        panic!("the backup ended {status:?}");
+    };
+    assert!(detail.contains(&cold), "{detail} names no {cold}");
+}
+
+#[then("the repository's folder is still not there")]
+fn folder_still_gone(agent: &mut Agent) {
+    let cold = agent.repository().cold;
+    assert!(!cold.exists(), "{} was made", cold.display());
 }
 
 #[given("the agent has the wrong password for the repository")]

@@ -135,7 +135,14 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         F::RepositoryExists => ErrorDto::new(ErrorCode::RepositoryExists, [], None),
         F::RepositoryReplaced => ErrorDto::new(ErrorCode::RepositoryReplaced, [], None),
         F::RepositoryNotFound => ErrorDto::new(ErrorCode::RepositoryNotFound, [], None),
-        F::CredentialsRefused => ErrorDto::new(ErrorCode::CredentialsRefused, [], None),
+        F::RepositoryConfigNotFound { detail } => {
+            ErrorDto::new(ErrorCode::RepositoryConfigNotFound, [], said(detail))
+        }
+        F::CredentialsRefused { half } => ErrorDto::new(
+            ErrorCode::CredentialsRefused,
+            half.map(|half| ("half", MsgArg::Text(half.code().to_owned()))),
+            None,
+        ),
         F::SecretsTooLargeToMask { field, limit } => ErrorDto::new(
             ErrorCode::SecretsTooLargeToMask,
             std::iter::once((
@@ -226,8 +233,8 @@ pub fn refused(
 #[cfg(test)]
 mod tests {
     use domain::execution::{
-        FailureReason, Operation, OperationKind, OperationStatus, Target, Transition, Trigger,
-        Warning, WarningKind,
+        FailureReason, Operation, OperationKind, OperationStatus, RepositoryHalf, Target,
+        Transition, Trigger, Warning, WarningKind,
     };
     use domain::{OperationId, Timestamp, Uuid};
 
@@ -387,6 +394,35 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_of_the_credentials_names_the_half_its_server_refused() {
+        for (half, named) in [(RepositoryHalf::Cold, "cold"), (RepositoryHalf::Hot, "hot")] {
+            assert_eq!(
+                failure(&FailureReason::CredentialsRefused { half: Some(half) }),
+                ErrorDto::new(
+                    ErrorCode::CredentialsRefused,
+                    [("half", MsgArg::Text(named.to_owned()))],
+                    None
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn no_repository_config_is_shown_with_the_engines_masked_words() {
+        let said = "No repository config file found for `local:/media/usb/restic`.";
+        assert_eq!(
+            failure(&FailureReason::RepositoryConfigNotFound {
+                detail: said.to_owned()
+            }),
+            ErrorDto::new(
+                ErrorCode::RepositoryConfigNotFound,
+                [],
+                Some(said.to_owned())
+            )
+        );
+    }
+
+    #[test]
     fn every_failure_has_the_code_and_arguments_a_page_renders() {
         use ErrorCode as C;
         use FailureReason as F;
@@ -442,7 +478,25 @@ mod tests {
             (F::RepositoryExists, C::RepositoryExists, vec![]),
             (F::RepositoryReplaced, C::RepositoryReplaced, vec![]),
             (F::RepositoryNotFound, C::RepositoryNotFound, vec![]),
-            (F::CredentialsRefused, C::CredentialsRefused, vec![]),
+            (
+                F::RepositoryConfigNotFound {
+                    detail: "no config file".to_owned(),
+                },
+                C::RepositoryConfigNotFound,
+                vec![text("no config file")],
+            ),
+            (
+                F::CredentialsRefused { half: None },
+                C::CredentialsRefused,
+                vec![],
+            ),
+            (
+                F::CredentialsRefused {
+                    half: Some(RepositoryHalf::Hot),
+                },
+                C::CredentialsRefused,
+                vec![text("hot")],
+            ),
             (F::DaemonStopped, C::DaemonStopped, vec![]),
             (F::DaemonShutDown, C::DaemonShutDown, vec![]),
             (
@@ -569,8 +623,24 @@ mod tests {
                 ErrorDto::new(C::RepositoryNotFound, [], None),
             ),
             (
-                F::CredentialsRefused,
+                F::RepositoryConfigNotFound {
+                    detail: "no config file at local:/media/usb".to_owned(),
+                },
+                ErrorDto::new(
+                    C::RepositoryConfigNotFound,
+                    [],
+                    Some("no config file at local:/media/usb".to_owned()),
+                ),
+            ),
+            (
+                F::CredentialsRefused { half: None },
                 ErrorDto::new(C::CredentialsRefused, [], None),
+            ),
+            (
+                F::CredentialsRefused {
+                    half: Some(RepositoryHalf::Cold),
+                },
+                ErrorDto::new(C::CredentialsRefused, [("half", text("cold"))], None),
             ),
             (F::DaemonStopped, ErrorDto::new(C::DaemonStopped, [], None)),
             (

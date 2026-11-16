@@ -53,6 +53,12 @@ Feature: Backups
     When the agent backs up the plan
     Then the operation ends as failed because the server refused the credentials
 
+  Scenario: A backup to a repository folder that isn't there fails as no repository found, and makes no folder
+    Given the repository's folder is no longer there
+    When the agent backs up the plan
+    Then the operation ends as failed because no repository was found, in the engine's words naming the folder
+    And the repository's folder is still not there
+
   Scenario: A backup with the wrong password fails, saying the password was not accepted
     Given the agent has the wrong password for the repository
     When the agent backs up the plan

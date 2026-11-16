@@ -338,7 +338,7 @@ Feature: Maintenance of a repository on the Snapshots page
     When I open the address "/snapshots"
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    Then the page shows an alert containing "The operation failed"
+    Then the page shows an alert containing "No repository was found at this location"
     And the alert marks the sender's words as English
     And the page has no accessibility violations
 

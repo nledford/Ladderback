@@ -155,7 +155,8 @@ Later tables, columns and indexes arrive as migrations of the features that need
   - `repository-exists`
   - `repository-replaced` (no argument: the location holds another repository than the ID the configuration recorded, multi-machine.md §7.3)
   - `repository-not-found` (no argument and no detail: the job found an empty folder on this machine, local or OpenDAL `fs`, where the repository should be, decision 53)
-  - `credentials-refused` (no argument and no detail: a REST server answered 401 or 403 to the repository's credentials, decision 85)
+  - `repository-config-not-found` (no argument; the detail is the engine's words, or for an OpenDAL `fs` root folder that isn't there Ladderback's naming it: the job found no repository config file where it looked, decision 112)
+  - `credentials-refused` (no detail: a REST server answered 401 or 403 to the repository's credentials, decision 85; argument `half`, `cold` or `hot`, for a hot/cold repository, left out otherwise, and a stored half that is neither doesn't read back, decision 112)
   - `engine-start-timed-out`
   - `engine-exit-timed-out`
   - `hook-failed` (argument `exit_code`, left out when no exit status is known)

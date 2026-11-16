@@ -96,10 +96,19 @@ pub enum FailureReason {
     /// repository whose latest operation failed this way is one to create
     /// (decision 53).
     RepositoryNotFound,
+    /// No repository's config file was found at the location, and nothing
+    /// tells whether the place is empty or out of reach: a folder that isn't
+    /// there (an unplugged drive), a path that is no folder, a folder that
+    /// can't be read, or a server or a store that answered with no config
+    /// file. Never one to create from its row (decision 53). `detail` is the
+    /// engine's own message, masked of the repository's secrets.
+    RepositoryConfigNotFound { detail: String },
     /// The server the repository is on answered and refused the credentials
     /// it was sent (HTTP 401 or 403), so nothing was opened or written. Not
-    /// a missing repository: the server never said what is there.
-    CredentialsRefused,
+    /// a missing repository: the server never said what is there. `half`
+    /// names the half whose server refused them, for a hot/cold repository
+    /// only.
+    CredentialsRefused { half: Option<RepositoryHalf> },
     /// The engine's process didn't start the operation in time, so it never
     /// ran: it didn't read its job, or read it and sent nothing (not even a
     /// log line) before the start timeout, and it was killed.
@@ -176,7 +185,8 @@ impl FailureReason {
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",
-            Self::CredentialsRefused => "credentials-refused",
+            Self::RepositoryConfigNotFound { .. } => "repository-config-not-found",
+            Self::CredentialsRefused { .. } => "credentials-refused",
             Self::DaemonStopped => "daemon-stopped",
             Self::DaemonShutDown => "daemon-shut-down",
             Self::NoLocationUsable => "no-location-usable",
@@ -185,6 +195,32 @@ impl FailureReason {
             Self::PasswordNotAccepted => "password-not-accepted",
             Self::SecretRefused { refusal, .. } => refusal.code(),
         }
+    }
+}
+
+/// One half of a hot/cold repository: the cold half is its `repository`,
+/// which holds everything, and the hot half its `repo-hot`, which holds all
+/// but the data packs (§3.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RepositoryHalf {
+    Cold,
+    Hot,
+}
+
+impl RepositoryHalf {
+    /// The half's name on the wire and in the operation log: `cold` or `hot`.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Cold => "cold",
+            Self::Hot => "hot",
+        }
+    }
+
+    /// The half [`code`](Self::code) names, or `None` for any other text.
+    pub fn parse(code: &str) -> Option<Self> {
+        [Self::Cold, Self::Hot]
+            .into_iter()
+            .find(|half| half.code() == code)
     }
 }
 
@@ -1390,10 +1426,33 @@ mod tests {
 
     #[test]
     fn a_refusal_of_the_credentials_codes_as_credentials_refused() {
-        assert_eq!(
-            FailureReason::CredentialsRefused.code(),
-            "credentials-refused"
-        );
+        for half in [None, Some(RepositoryHalf::Cold), Some(RepositoryHalf::Hot)] {
+            assert_eq!(
+                FailureReason::CredentialsRefused { half }.code(),
+                "credentials-refused"
+            );
+        }
+    }
+
+    #[test]
+    fn no_repository_config_at_the_location_codes_as_repository_config_not_found() {
+        let reason = FailureReason::RepositoryConfigNotFound {
+            detail: "no config file".to_owned(),
+        };
+        assert_eq!(reason.code(), "repository-config-not-found");
+    }
+
+    /// A half is named `cold` or `hot`, and only those names read back.
+    #[test]
+    fn a_half_reads_back_from_its_name_and_from_nothing_else() {
+        assert_eq!(RepositoryHalf::Cold.code(), "cold");
+        assert_eq!(RepositoryHalf::Hot.code(), "hot");
+        for half in [RepositoryHalf::Cold, RepositoryHalf::Hot] {
+            assert_eq!(RepositoryHalf::parse(half.code()), Some(half));
+        }
+        for other in ["", "Hot", "warm", "hot "] {
+            assert_eq!(RepositoryHalf::parse(other), None, "{other:?}");
+        }
     }
 
     #[test]
@@ -1408,6 +1467,9 @@ mod tests {
             OperationStatus::Cancelled,
             failed(FailureReason::RepositoryExists),
             failed(FailureReason::DaemonStopped),
+            failed(FailureReason::RepositoryConfigNotFound {
+                detail: "no config file".to_owned(),
+            }),
         ] {
             assert!(!status.found_no_repository(), "{status:?}");
         }

@@ -549,8 +549,8 @@ async fn secret_refused(
 
 /// A read of the repository that ran and failed: the engine's own words for a
 /// failure it reports, a typed code for the rest. The engine redacts what it
-/// says.
-fn failed(reason: FailureReason) -> MaintenanceRefusal {
+/// says. A listing and a folder read tell their failures by it too (#637).
+pub(super) fn failed(reason: FailureReason) -> MaintenanceRefusal {
     use FailureReason as F;
     match reason {
         F::EngineFailed { detail } => MaintenanceRefusal::OperationFailed { detail },
@@ -583,7 +583,16 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         }
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
-        F::CredentialsRefused => unavailable(ErrorCode::CredentialsRefused, Vec::new(), None),
+        F::RepositoryConfigNotFound { detail } => {
+            MaintenanceRefusal::RepositoryConfigNotFound { detail }
+        }
+        F::CredentialsRefused { half } => unavailable(
+            ErrorCode::CredentialsRefused,
+            half.map(|half| ("half", text(half.code())))
+                .into_iter()
+                .collect(),
+            None,
+        ),
         F::SecretsTooLargeToMask { field, limit } => {
             MaintenanceRefusal::SecretRefused(super::too_much_to_mask(field, limit))
         }
@@ -1226,8 +1235,26 @@ mod tests {
                 MaintenanceRefusal::RepositoryNotFound,
             ),
             (
-                FailureReason::CredentialsRefused,
+                FailureReason::CredentialsRefused { half: None },
                 unavailable_with(ErrorCode::CredentialsRefused, Vec::new(), None),
+            ),
+            (
+                FailureReason::CredentialsRefused {
+                    half: Some(domain::execution::RepositoryHalf::Cold),
+                },
+                unavailable_with(
+                    ErrorCode::CredentialsRefused,
+                    vec![("half", text("cold"))],
+                    None,
+                ),
+            ),
+            (
+                FailureReason::RepositoryConfigNotFound {
+                    detail: "No repository config file found for `/srv/demo/repo`.".to_owned(),
+                },
+                MaintenanceRefusal::RepositoryConfigNotFound {
+                    detail: "No repository config file found for `/srv/demo/repo`.".to_owned(),
+                },
             ),
             (
                 FailureReason::SecretsTooLargeToMask {

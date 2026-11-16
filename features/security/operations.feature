@@ -67,7 +67,7 @@ Feature: The operation lifecycle
     And the plan's repository folder is gone
     When the daemon starts a backup of the plan "home"
     Then the history page shows the operation failed
-    And the history page gives the operation's failure as "operation-failed", in the engine's own words
+    And the history page gives the operation's failure as "repository-config-not-found", in the engine's own words
     And neither the history page nor the operation's detail shows "canary-not-a-secret"
 
   Scenario: Starting a backup whose password command fails is refused with that secret's problem

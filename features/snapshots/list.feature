@@ -24,6 +24,12 @@ Feature: Listing a repository's snapshots
     Then the listing fails
 
   @e2e
+  Scenario: A repository folder that isn't there fails the listing as no repository found, saying where it looked
+    Given a repository folder that isn't there
+    When the agent lists the repository's snapshots
+    Then the listing fails because no repository was found, in the engine's words naming the folder
+
+  @e2e
   Scenario: A wrong password fails the listing and lists nothing
     Given a repository with three snapshots
     And a wrong password is used for the repository

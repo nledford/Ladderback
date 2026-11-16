@@ -102,6 +102,10 @@ pub enum RepositoriesError {
     /// No repository is at the location: it is a folder on this machine
     /// holding nothing of a repository (decision 53).
     NotFound,
+    /// No repository's config file was found at the location, and nothing
+    /// tells whether it is empty or out of reach (#525): never one to create
+    /// from its row. `detail` is the engine's own words, masked.
+    ConfigNotFound { detail: String },
     /// A setting names a path on this machine by a relative one, which the
     /// daemon would read from its own working directory: `field` is the
     /// setting as the configuration names it (`repository`, `password`).
@@ -302,6 +306,12 @@ fn answer(error: &RepositoriesError) -> (StatusCode, api::ErrorDto) {
             ErrorCode::MaintenanceBusy,
             text("operation", operation),
             None,
+        ),
+        RepositoriesError::ConfigNotFound { detail } => refused(
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryConfigNotFound,
+            Vec::new(),
+            Some(detail.clone()),
         ),
         RepositoriesError::PathRelative { field } => refused(
             StatusCode::UNPROCESSABLE_ENTITY,

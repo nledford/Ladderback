@@ -248,6 +248,14 @@ fn a_location_with_no_repository(agent: &mut Agent) {
     agent.snapshot_settings().repository = text(&cold);
 }
 
+/// A repository's folder that isn't there, as an unplugged drive's isn't.
+#[given("a repository folder that isn't there")]
+fn a_repository_folder_that_is_not_there(agent: &mut Agent) {
+    let cold = agent.scratch().join("unplugged").join("repo");
+    agent.snapshots.cold = Some(cold.clone());
+    agent.snapshot_settings().repository = text(&cold);
+}
+
 #[given("a wrong password is used for the repository")]
 fn a_wrong_password(agent: &mut Agent) {
     agent.snapshot_settings().password = SecretRef::Inline(SecretValue::new("not-the-password"));
@@ -322,6 +330,21 @@ fn is_empty(agent: &mut Agent) {
 fn fails(agent: &mut Agent) {
     let listed = agent.snapshots.listed.take().expect("the listing ran");
     assert!(listed.is_err(), "the listing was {listed:?}");
+}
+
+#[then(
+    "the listing fails because no repository was found, in the engine's words naming the folder"
+)]
+fn fails_as_no_config(agent: &mut Agent) {
+    let listed = agent.snapshots.listed.take().expect("the listing ran");
+    let cold = text(agent.snapshots.cold.as_ref().expect("the location"));
+    let Err(SnapshotError::Failed(domain::execution::FailureReason::RepositoryConfigNotFound {
+        detail,
+    })) = &listed
+    else {
+        panic!("the listing was {listed:?}");
+    };
+    assert!(detail.contains(&cold), "{detail} names no {cold}");
 }
 
 /// The source the browse scenarios back up, under `source`: `docs` with two

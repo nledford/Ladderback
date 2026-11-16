@@ -244,8 +244,18 @@ Feature: AI agents and scripts use Ladderback through MCP
     And an MCP server connected to it
     When the daemon starts a backup of the plan "home"
     And the MCP client asks for that operation once it has ended
-    Then the result gives the operation's failure as "operation-failed", in the engine's own words
+    Then the result gives the operation's failure as "repository-config-not-found", in the engine's own words
     And nothing the MCP server wrote shows "canary-not-a-secret"
+
+  # A listing the engine ran and failed is told by the code of its failure,
+  # as the REST API tells it (#637): no repository config, not the engine
+  # being unavailable.
+  Scenario: Listing the snapshots of a repository whose folder is gone says no repository config was found
+    Given Ladderback is serving on loopback with the plan "home"
+    And the plan's repository folder is gone
+    And an MCP server connected to it
+    When the MCP client lists the snapshots of the repository "demo"
+    Then the result is the error "repository-config-not-found"
 
   Scenario: An agent runs a plan through the daemon and waits for it to finish
     Given Ladderback is serving on loopback with the plan "home"
@@ -352,7 +362,7 @@ Feature: AI agents and scripts use Ladderback through MCP
     Then the preview tells what a forget would let go of the plan "home", without a selection to start one
     When the repository's password file holds "canary-not-the-password", which isn't the repository's
     And the MCP client lists the snapshots of the repository "demo"
-    Then the result is the error "engine-unavailable"
+    Then the result is the error "password-not-accepted"
     When the MCP client tests the repository "demo"
     Then the test tells the first location's outcome as "password-not-accepted"
     When the MCP client previews a forget of the repository "demo"
@@ -372,7 +382,7 @@ Feature: AI agents and scripts use Ladderback through MCP
     Then the preview tells what a forget would let go of the plan "home", without a selection to start one
     When the repository's password file holds "canary-not-the-password", which isn't the repository's
     And the MCP client lists the snapshots of the repository "demo"
-    Then the result is the error "engine-unavailable"
+    Then the result is the error "password-not-accepted"
     When the MCP client tests the repository "demo"
     Then the test tells the first location's outcome as "password-not-accepted"
     When the MCP client previews a forget of the repository "demo"
