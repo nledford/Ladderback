@@ -43,22 +43,12 @@ impl FileConfigStore {
         self
     }
 
-    /// The file as it is now, named by the SHA-256 of its bytes in
-    /// lower-case hex: what a proposal was drafted against (decision 89).
-    /// No file is the revision of no text.
+    /// The file as it is now, by its [`ConfigRevision`]: what a proposal
+    /// was drafted against (decision 89). No file is the revision of no
+    /// text.
     pub async fn revision(&self) -> Result<ConfigRevision, ConfigError> {
-        use sha2::{Digest, Sha256};
-        use std::fmt::Write;
         let bytes = self.exclusively(|job| job.current_bytes()).await?;
-        let digest = Sha256::digest(bytes.unwrap_or_default());
-        let hex = digest
-            .iter()
-            .fold(String::with_capacity(64), |mut hex, byte| {
-                // Writing to a `String` can't fail.
-                let _ = write!(hex, "{byte:02x}");
-                hex
-            });
-        Ok(ConfigRevision::new(hex))
+        Ok(ConfigRevision::of(&bytes.unwrap_or_default()))
     }
 
     /// Runs `work` on a thread for blocking calls, behind the gate.

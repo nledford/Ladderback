@@ -59,7 +59,7 @@ fn proposal(seed: u8, proposer: Proposer, seconds: i64) -> StoredProposal {
     StoredProposal {
         id: ProposalId::from_bytes(&bytes(seed)),
         proposer,
-        base: ConfigRevision::new(format!("base-{seed}")),
+        base: ConfigRevision::of(format!("base-{seed}").as_bytes()),
         changes: format!("changes-{seed}"),
         rationale: Rationale::parse(format!("Back up folder {seed} every night."))
             .unwrap_or_default(),

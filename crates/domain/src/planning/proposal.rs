@@ -9,6 +9,7 @@
 use std::fmt;
 
 use jiff::{SignedDuration, Timestamp};
+use sha2::{Digest as _, Sha256};
 
 use super::{AgentConfig, ChangeRefused, Plan};
 use crate::PlanId;
@@ -115,14 +116,39 @@ pub enum Proposer {
     NoToken,
 }
 
-/// The configuration a proposal was drafted against: a hash of the file's
-/// text, which the store computes. Opaque here.
+/// Characters of a [`ConfigRevision`]: a SHA-256 in hex.
+const REVISION_CHARS: usize = 64;
+
+/// The configuration a proposal was drafted against: the SHA-256 of the
+/// file's bytes, in lower-case hex (decision 89). No file is the revision
+/// of no text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigRevision(String);
 
 impl ConfigRevision {
-    pub fn new(hash: String) -> Self {
-        Self(hash)
+    /// The revision of a configuration file whose bytes are `text`.
+    pub fn of(text: &[u8]) -> Self {
+        use fmt::Write as _;
+        let digest = Sha256::digest(text);
+        Self(
+            digest
+                .iter()
+                .fold(String::with_capacity(REVISION_CHARS), |mut hex, byte| {
+                    // Writing to a `String` can't fail.
+                    let _ = write!(hex, "{byte:02x}");
+                    hex
+                }),
+        )
+    }
+
+    /// The revision `text` names: exactly 64 lower-case hex digits, as
+    /// [`ConfigRevision::as_str`] gives them.
+    pub fn parse(text: &str) -> Option<Self> {
+        (text.len() == REVISION_CHARS
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+        .then(|| Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {

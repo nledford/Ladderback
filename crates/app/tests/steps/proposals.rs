@@ -92,7 +92,7 @@ async fn propose(
     proposals(agent)
         .propose(
             ai_agent(proposer),
-            ConfigRevision::new("demo-revision".to_owned()),
+            ConfigRevision::of(b"schema = 1\n"),
             changes,
             Rationale::default(),
         )

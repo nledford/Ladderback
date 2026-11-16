@@ -94,7 +94,7 @@ async fn propose_as(
         .proposals
         .propose(
             proposer,
-            ConfigRevision::new("base".to_owned()),
+            ConfigRevision::of(b"base"),
             vec![change],
             Rationale::default(),
         )
@@ -186,7 +186,7 @@ async fn a_proposal_whose_changes_cant_be_read_back_goes_stale_and_the_others_st
     let garbled = StoredProposal {
         id: ProposalId::parse("bbbbbbbbbbbb").unwrap(),
         proposer: Proposer::NoToken,
-        base: ConfigRevision::new("base".to_owned()),
+        base: ConfigRevision::of(b"base"),
         changes: "garbled".to_owned(),
         rationale: Rationale::default(),
         status: ProposalStatus::Pending,

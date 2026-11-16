@@ -555,10 +555,14 @@ pub(crate) fn proposal(row: &SqliteRow) -> Result<StoredProposal, StoreError> {
     let status = ProposalStatus::parse(&status_text).ok_or_else(|| {
         reader.corrupt("status", format!("{} is not a status", shown(&status_text)))
     })?;
+    let base_text = reader.required_text("base")?;
+    let base = ConfigRevision::parse(&base_text).ok_or_else(|| {
+        reader.corrupt("base", format!("{} is not a revision", shown(&base_text)))
+    })?;
     Ok(StoredProposal {
         id,
         proposer,
-        base: ConfigRevision::new(reader.required_text("base")?),
+        base,
         changes: reader.required_text("changes")?,
         rationale,
         status,

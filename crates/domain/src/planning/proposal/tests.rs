@@ -65,7 +65,7 @@ fn drafted(changes: Vec<ConfigChange>, config: &AgentConfig) -> Proposal {
     Proposal::draft(
         proposal_id(),
         Proposer::NoToken,
-        ConfigRevision::new("base".to_owned()),
+        ConfigRevision::of(b"base"),
         changes,
         Rationale::default(),
         config,
@@ -214,7 +214,7 @@ fn a_draft_whose_change_does_not_apply_is_refused() {
     let refused = Proposal::draft(
         proposal_id(),
         Proposer::NoToken,
-        ConfigRevision::new("base".to_owned()),
+        ConfigRevision::of(b"base"),
         vec![ConfigChange::ChangePlan(plan("home"))],
         Rationale::default(),
         &config(&[]),
@@ -347,4 +347,38 @@ fn an_id_of_another_length_or_alphabet_is_none() {
     assert_eq!(ProposalId::parse("aaaaaaaaaaaaa"), None);
     assert_eq!(ProposalId::parse("aaaaaaaaaaa1"), None);
     assert_eq!(ProposalId::parse("AAAAAAAAAAAA"), None);
+}
+
+const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+#[test]
+fn a_revision_is_the_sha256_of_the_files_bytes_in_lower_case_hex() {
+    assert_eq!(ConfigRevision::of(b"").as_str(), EMPTY_SHA256);
+    assert_eq!(
+        ConfigRevision::of(b"abc").as_str(),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+#[test]
+fn a_revision_reads_back_from_its_hex() {
+    let revision = ConfigRevision::of(b"schema = 1\n");
+    assert_eq!(ConfigRevision::parse(revision.as_str()), Some(revision));
+    assert_eq!(
+        ConfigRevision::parse(EMPTY_SHA256),
+        Some(ConfigRevision::of(b""))
+    );
+}
+
+#[test]
+fn a_revision_of_another_length_or_alphabet_is_none() {
+    for text in [
+        EMPTY_SHA256.chars().skip(1).collect(),
+        format!("{EMPTY_SHA256}0"),
+        EMPTY_SHA256.to_uppercase(),
+        EMPTY_SHA256.replacen('e', "g", 1),
+        String::new(),
+    ] {
+        assert_eq!(ConfigRevision::parse(&text), None, "{text}");
+    }
 }
