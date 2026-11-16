@@ -49,8 +49,11 @@ impl AgentConfig {
     /// [`AgentConfig::add_plan`], [`AgentConfig::change_plan`] or
     /// [`AgentConfig::remove_plan`].
     pub fn apply(&self, change: &ConfigChange) -> Result<Self, ChangeRefused> {
-        let _ = change;
-        todo!()
+        match change {
+            ConfigChange::AddPlan(plan) => self.add_plan(plan.clone()),
+            ConfigChange::ChangePlan(plan) => self.change_plan(plan.clone()),
+            ConfigChange::RemovePlan(id) => self.remove_plan(id),
+        }
     }
 }
 
@@ -67,14 +70,25 @@ impl ProposalId {
     /// The ID random `bytes` make: their first 60 bits, five to a
     /// character, in lower-case base32.
     pub fn from_bytes(bytes: &[u8; TOKEN_BYTES]) -> Self {
-        let _ = (bytes, BASE32);
-        todo!()
+        let bits = bytes
+            .iter()
+            .take(8)
+            .fold(0_u64, |bits, byte| (bits << 8) | u64::from(*byte));
+        Self(
+            (0..PROPOSAL_ID_CHARS)
+                .map(|index| {
+                    let quintet = (bits >> (59 - 5 * index)) & 31;
+                    let index = usize::try_from(quintet).unwrap_or(0);
+                    char::from(BASE32.get(index).copied().unwrap_or(b'a'))
+                })
+                .collect(),
+        )
     }
 
     /// Exactly [`PROPOSAL_ID_CHARS`] characters of lower-case base32.
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = text;
-        todo!()
+        (text.len() == PROPOSAL_ID_CHARS && text.bytes().all(|byte| BASE32.contains(&byte)))
+            .then(|| Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -124,8 +138,10 @@ pub struct Rationale(String);
 impl Rationale {
     /// `text`, unless it is longer than [`MAX_RATIONALE_CHARS`] characters.
     pub fn parse(text: String) -> Result<Self, ProposalRefused> {
-        let _ = text;
-        todo!()
+        if text.chars().count() > MAX_RATIONALE_CHARS {
+            return Err(ProposalRefused::RationaleTooLong);
+        }
+        Ok(Self(text))
     }
 
     pub fn as_str(&self) -> &str {
@@ -180,8 +196,7 @@ impl ProposalStatus {
 
     /// The status named `text`.
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = text;
-        todo!()
+        Self::ALL.into_iter().find(|status| status.as_str() == text)
     }
 
     /// Whether a proposal may go from this status to `next`: from pending
@@ -189,14 +204,20 @@ impl ProposalStatus {
     /// applied, failed, or back to pending when a hand edit stops the
     /// apply; from failed to applying again on a retry. Nothing else.
     pub fn can_become(self, next: Self) -> bool {
-        let _ = next;
-        todo!()
+        matches!(
+            (self, next),
+            (
+                Self::Pending,
+                Self::Applying | Self::Rejected | Self::Withdrawn | Self::Expired | Self::Stale
+            ) | (Self::Applying, Self::Applied | Self::Failed | Self::Pending)
+                | (Self::Failed, Self::Applying)
+        )
     }
 
     /// Whether the proposal has ended: it will never be applied unless a
     /// person retries a failed one.
     pub fn has_ended(self) -> bool {
-        todo!()
+        !matches!(self, Self::Pending | Self::Applying)
     }
 }
 
@@ -239,13 +260,29 @@ impl Proposal {
     /// The configuration `changes` make of `config`, each applied in order
     /// to what the ones before it made: the submission check, by the
     /// configuration's rules and nothing else. A proposal holds one change
-    /// at least and [`MAX_CHANGES`] at most.
+    /// at least and [`MAX_CHANGES`] at most, and gives no plan hooks of its
+    /// own: the commands a person must confirm one by one come with
+    /// approval (decision 89, point 6).
     pub fn check(
         config: &AgentConfig,
         changes: &[ConfigChange],
     ) -> Result<AgentConfig, ProposalRefused> {
-        let _ = (config, changes);
-        todo!()
+        if changes.is_empty() {
+            return Err(ProposalRefused::NoChanges);
+        }
+        if changes.len() > MAX_CHANGES {
+            return Err(ProposalRefused::TooManyChanges);
+        }
+        let mut after = config.clone();
+        for (index, change) in changes.iter().enumerate() {
+            if sets_hooks(&after, change) {
+                return Err(ProposalRefused::Hooks { index });
+            }
+            after = after
+                .apply(change)
+                .map_err(|refused| ProposalRefused::Change { index, refused })?;
+        }
+        Ok(after)
     }
 
     /// A pending proposal made at `now`, expiring [`PROPOSAL_LIFETIME`]
@@ -259,8 +296,17 @@ impl Proposal {
         config: &AgentConfig,
         now: Timestamp,
     ) -> Result<Self, ProposalRefused> {
-        let _ = (id, proposer, base, changes, rationale, config, now);
-        todo!()
+        Self::check(config, &changes)?;
+        Ok(Self {
+            id,
+            proposer,
+            base,
+            changes,
+            rationale,
+            status: ProposalStatus::Pending,
+            created_at: now,
+            expires_at: now.saturating_add(PROPOSAL_LIFETIME).unwrap_or(now),
+        })
     }
 
     /// What the proposal's status is at `now`, against the configuration
@@ -268,8 +314,29 @@ impl Proposal {
     /// otherwise stale when a change of it no longer applies. Any other
     /// status stays as it is.
     pub fn status_at(&self, now: Timestamp, config: &AgentConfig) -> ProposalStatus {
-        let _ = (now, config);
-        todo!()
+        if self.status != ProposalStatus::Pending {
+            self.status
+        } else if now >= self.expires_at {
+            ProposalStatus::Expired
+        } else if Self::check(config, &self.changes).is_err() {
+            ProposalStatus::Stale
+        } else {
+            ProposalStatus::Pending
+        }
+    }
+}
+
+/// Whether `change` gives a plan hooks other than those `config` holds for
+/// it: a new plan any, a changed plan others than its own. A change of a
+/// plan the configuration doesn't have is left for [`AgentConfig::apply`]
+/// to refuse.
+fn sets_hooks(config: &AgentConfig, change: &ConfigChange) -> bool {
+    match change {
+        ConfigChange::AddPlan(plan) => !plan.hooks.is_empty(),
+        ConfigChange::ChangePlan(plan) => config
+            .plan(&plan.id)
+            .is_some_and(|kept| kept.hooks != plan.hooks),
+        ConfigChange::RemovePlan(_) => false,
     }
 }
 
