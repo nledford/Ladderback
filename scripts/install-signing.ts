@@ -6,8 +6,8 @@
 // a keychain item's "Always Allow" to a program's signature. The linker's
 // ad-hoc signature changes with every build, so each update is a new program
 // to macOS; a certificate's signature under one fixed identifier stays the
-// same, so the grants should carry over (operations §12; on a Mac, #281
-// still confirms that they do).
+// same, so the grants carry over (operations §12; tested on macOS 27.3,
+// #281).
 //
 //   node scripts/install-signing.ts check
 //     Before `just install` builds anything: when an identity is named, it
@@ -149,8 +149,8 @@ export function signProgram(program: string, hash: string, env: Env): Refusal | 
 /**
  * What `just install-restart` says on `os` after a restart about the
  * permissions macOS may ask for again. On macOS without an identity, that the
- * keychain, Photos and Full Disk Access ask again; with one, that they should
- * carry over, which #281 is still confirming. Elsewhere nothing.
+ * keychain, Photos and Full Disk Access ask again; with one, that they carry
+ * over (tested on a Mac, #281). Elsewhere nothing.
  */
 export function reinstallWarning(env: Env, os: NodeJS.Platform): string | undefined {
   if (os !== "darwin") return undefined;
@@ -162,8 +162,7 @@ export function reinstallWarning(env: Env, os: NodeJS.Platform): string | undefi
     );
   }
   return (
-    `the program is signed with "${identity}", so macOS should keep the Full Disk Access and Photos grants it gave the last build signed with it; ` +
-    "that is still being confirmed (#281), and the keychain may still ask again for each item Ladderback reads."
+    `the program is signed with "${identity}", so macOS keeps the Full Disk Access, Photos and keychain grants it gave the last build signed with it (#281).`
   );
 }
 
