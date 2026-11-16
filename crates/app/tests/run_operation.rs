@@ -1605,6 +1605,7 @@ async fn a_queued_operation_cancelled_while_it_waits_ends_at_once_and_runs_nothi
         plan: domain::planning::Hooks::default(),
         plan_id: plan("home"),
         repository_alias: domain::RepositoryAlias::parse("nas").unwrap(),
+        redactor: Default::default(),
     };
     let use_case = RunOperation::new(
         engine.clone(),

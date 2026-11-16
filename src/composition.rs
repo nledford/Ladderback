@@ -1561,6 +1561,13 @@ impl PlanRunner {
                 })));
             }
         };
+        // The run's hooks are masked of every secret they can print, built
+        // once, now that the run's secrets are read (I4, security.md §10.2).
+        let redactor = Arc::new(
+            resolved
+                .access
+                .hooks_redactor(config, &self.hooks.environment_secrets()),
+        );
         let job = Job::Backup(BackupJob {
             repository: resolved.access,
             sources: plan.sources.iter().map(|s| s.as_str().to_owned()).collect(),
@@ -1578,6 +1585,7 @@ impl PlanRunner {
             plan: plan.hooks.clone(),
             plan_id: plan.id.clone(),
             repository_alias: plan.repository.clone(),
+            redactor,
         };
         Ok(BuiltBackup {
             job,
@@ -5938,6 +5946,7 @@ mod tests {
             &self,
             _entry: &domain::planning::HookEntry,
             _context: &HookContext,
+            _redactor: &domain::secrets::Redactor,
         ) -> HookOutcome {
             self.entered.send_modify(|seen| *seen += 1);
             let mut open = self.open.lock().await;
@@ -5949,6 +5958,10 @@ mod tests {
                 stdout: Default::default(),
                 stderr: Default::default(),
             }
+        }
+
+        fn environment_secrets(&self) -> Vec<domain::secrets::SecretValue> {
+            Vec::new()
         }
     }
 
@@ -12557,13 +12570,18 @@ mod repository_service_tests {
             &self,
             entry: &domain::planning::HookEntry,
             context: &app::ports::HookContext,
+            redactor: &domain::secrets::Redactor,
         ) -> HookOutcome {
-            let outcome = self.runner.run(entry, context).await;
+            let outcome = self.runner.run(entry, context, redactor).await;
             self.outcomes
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(outcome.clone());
             outcome
+        }
+
+        fn environment_secrets(&self) -> Vec<domain::secrets::SecretValue> {
+            self.runner.environment_secrets()
         }
     }
 

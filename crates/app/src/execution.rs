@@ -605,7 +605,7 @@ impl RunOperation {
         let setup = hooks.setup.clone();
         for entry in before_list(&setup) {
             let context = self.context(run, &setup, HookPhase::Before);
-            let outcome = hooks.runner.run(entry, &context).await;
+            let outcome = hooks.runner.run(entry, &context, &setup.redactor).await;
             if outcome.succeeded() {
                 continue;
             }
@@ -640,7 +640,7 @@ impl RunOperation {
         if let Some(phase) = phase {
             for entry in ending_list(&setup, phase) {
                 let context = self.context(run, &setup, phase);
-                let outcome = hooks.runner.run(entry, &context).await;
+                let outcome = hooks.runner.run(entry, &context, &setup.redactor).await;
                 if !outcome.succeeded() && entry.on_failure != OnFailure::Ignore {
                     self.warn(run, phase, &outcome);
                 }
@@ -648,7 +648,7 @@ impl RunOperation {
         }
         for entry in ending_list(&setup, HookPhase::Finally) {
             let context = self.context(run, &setup, HookPhase::Finally);
-            let outcome = hooks.runner.run(entry, &context).await;
+            let outcome = hooks.runner.run(entry, &context, &setup.redactor).await;
             if !outcome.succeeded() && entry.on_failure != OnFailure::Ignore {
                 self.warn(run, HookPhase::Finally, &outcome);
             }
@@ -821,6 +821,7 @@ mod tests {
             plan: lists("plan"),
             plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
             repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+            redactor: Default::default(),
         }
     }
 
@@ -1134,6 +1135,7 @@ mod tests {
                 plan,
                 plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
                 repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+                redactor: Default::default(),
             },
         );
         let mut run = succeeded_run();
@@ -1187,6 +1189,7 @@ mod tests {
             &self,
             _: &HookEntry,
             context: &crate::ports::HookContext,
+            _: &domain::secrets::Redactor,
         ) -> crate::ports::HookOutcome {
             use crate::ports::OperationStore;
             let held = self.store.get(context.operation).await;
@@ -1198,6 +1201,10 @@ mod tests {
                 stdout: crate::ports::HookOutput::default(),
                 stderr: crate::ports::HookOutput::default(),
             }
+        }
+
+        fn environment_secrets(&self) -> Vec<domain::secrets::SecretValue> {
+            Vec::new()
         }
     }
 
@@ -1228,6 +1235,7 @@ mod tests {
                 plan,
                 plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
                 repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+                redactor: Default::default(),
             },
         );
         let job = Job::Fake(FakeJob {

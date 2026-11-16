@@ -12,6 +12,7 @@ use app::ports::HookRunner;
 use app::ports::{HookContext, HookPhase, HookStatus};
 use async_trait::async_trait;
 use domain::planning::{HookEntry, OnFailure};
+use domain::secrets::Redactor;
 use domain::{OperationId, PlanId, RepositoryAlias};
 use hooks::ProcessHookRunner;
 
@@ -22,13 +23,23 @@ struct ProcessHooksHarness {
     counter: AtomicUsize,
 }
 
+/// The proxy URL the harness adds to the environment its runner's hooks are
+/// scrubbed from.
+const PROXY: &str = "http://demo:hunter3-proxy@proxy.demo:3128";
+
 impl ProcessHooksHarness {
     fn new() -> Self {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let log = scratch.path().join("log");
+        // This process's own environment, so a variable cargo sets that a
+        // hook must not keep is in it, behind a proxy that wants
+        // credentials.
+        let environment = std::env::vars_os()
+            .filter(|(name, _)| name != "HTTPS_PROXY")
+            .chain([("HTTPS_PROXY".into(), PROXY.into())]);
         Self {
             runner: ProcessHookRunner::with_timeout(Duration::from_millis(500))
-                .with_secret("hunter2-demo"),
+                .with_environment(environment),
             log,
             scratch,
             counter: AtomicUsize::new(0),
@@ -114,6 +125,10 @@ impl HooksHarness for ProcessHooksHarness {
         "hunter2-demo".to_owned()
     }
 
+    fn proxy_password(&self) -> String {
+        "hunter3-proxy".to_owned()
+    }
+
     fn leaked_env_var(&self) -> String {
         // Cargo sets this in every integration test, and it is not on the
         // worker's allow-list.
@@ -176,9 +191,12 @@ async fn a_hook_that_ignores_term_is_term_then_kill_stopped() {
         let started = std::time::Instant::now();
         // A runner that never stops the hook fails this test here; it must not
         // hang the run for something else to give up on.
-        let outcome = tokio::time::timeout(Duration::from_secs(30), runner.run(&hook, &context))
-            .await
-            .expect("the call was still running 30 s after it began");
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(30),
+            runner.run(&hook, &context, &Redactor::default()),
+        )
+        .await
+        .expect("the call was still running 30 s after it began");
         let elapsed = started.elapsed();
         assert_eq!(outcome.status, HookStatus::TimedOut);
         let lines = harness.written().await;

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use app::ports::{HookContext, HookPhase, HookRunner, HookStatus, MAX_HOOK_OUTPUT_BYTES};
 use domain::planning::{HookEntry, OnFailure};
+use domain::secrets::{Redactor, SecretValue};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
@@ -465,7 +466,7 @@ async fn what_a_hook_wrote_before_it_ended_is_kept_while_a_descendant_holds_its_
         ),
         &log,
     );
-    let outcome = runner.run(&entry, &context()).await;
+    let outcome = runner.run(&entry, &context(), &Redactor::default()).await;
     let _reaper = Reaper(pid_in(&lines(&log)));
     assert_eq!(outcome.status, HookStatus::Failed { exit_code: Some(3) });
     assert_eq!(outcome.stdout.text, "out\n");
@@ -492,7 +493,7 @@ async fn what_a_descendant_says_after_the_hook_was_reaped_is_kept() {
         ),
         &log,
     );
-    let outcome = runner.run(&entry, &context()).await;
+    let outcome = runner.run(&entry, &context(), &Redactor::default()).await;
     let _reaper = Reaper(pid_in(&lines(&log)));
     assert_eq!(outcome.status, HookStatus::Succeeded);
     assert_eq!(outcome.stdout.text, "late\n");
@@ -523,7 +524,7 @@ async fn a_descendant_cannot_write_to_a_hook_s_output_after_the_call_returned() 
         ),
         &log,
     );
-    let outcome = runner.run(&entry, &context()).await;
+    let outcome = runner.run(&entry, &context(), &Redactor::default()).await;
     let _reaper = Reaper(pid_in(&lines(&log)));
     assert_eq!(outcome.status, HookStatus::Succeeded);
     fs::write(scratch.path().join("log.go"), "").unwrap();
@@ -556,8 +557,12 @@ async fn the_call_lets_go_of_the_pipes_only_while_no_start_is_in_flight() {
         std::fs::write(&go, "").unwrap();
         start
     };
+    let redactor = Redactor::default();
     let (outcome, start) = tokio::join!(
-        within(Duration::from_secs(5), runner.run(&entry, &context)),
+        within(
+            Duration::from_secs(5),
+            runner.run(&entry, &context, &redactor),
+        ),
         start
     );
     let returned = Instant::now();
@@ -586,7 +591,11 @@ async fn a_hook_inherits_no_pipe_another_start_has_open() {
     )
     .unwrap();
     let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
-    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
+    let outcome = within(
+        Duration::from_secs(5),
+        runner.run(&entry, &context(), &Redactor::default()),
+    )
+    .await;
     assert_eq!(outcome.status, HookStatus::Succeeded);
     assert_eq!(
         outcome.stdout.text, "",
@@ -610,7 +619,8 @@ async fn a_hook_waits_for_the_gate_off_the_runtime() {
         tokio::task::yield_now().await;
         let _ = release.send(());
     };
-    let (outcome, ()) = tokio::join!(runner.run(&entry, &context), let_go);
+    let redactor = Redactor::default();
+    let (outcome, ()) = tokio::join!(runner.run(&entry, &context, &redactor), let_go);
     assert_eq!(outcome.status, HookStatus::Succeeded);
     assert!(
         stalled.join().unwrap(),
@@ -642,7 +652,8 @@ async fn the_call_waits_to_let_go_of_the_pipes_off_the_runtime() {
         let _ = release.send(());
         stalled
     };
-    let (outcome, stalled) = tokio::join!(runner.run(&entry, &context), let_go);
+    let redactor = Redactor::default();
+    let (outcome, stalled) = tokio::join!(runner.run(&entry, &context, &redactor), let_go);
     assert_eq!(outcome.status, HookStatus::Succeeded);
     assert!(
         stalled.join().unwrap(),
@@ -830,7 +841,11 @@ async fn a_runner_built_with_a_timeout_stops_the_hook_at_it() {
     let timeout = Duration::from_millis(300);
     let runner = ProcessHookRunner::with_timeout(timeout);
     let started = Instant::now();
-    let outcome = within(Duration::from_secs(5), runner.run(&entry, &context())).await;
+    let outcome = within(
+        Duration::from_secs(5),
+        runner.run(&entry, &context(), &Redactor::default()),
+    )
+    .await;
     assert_eq!(outcome.status, HookStatus::TimedOut);
     assert!(
         started.elapsed() >= timeout,
@@ -896,7 +911,11 @@ async fn the_output_of_a_hook_of_exactly_the_cap_is_whole_and_one_byte_more_is_c
             &format!("printf '%{written}s' ''\nprintf '%{written}s' '' >&2"),
             &log,
         );
-        let outcome = within(Duration::from_secs(25), runner.run(&entry, &context())).await;
+        let outcome = within(
+            Duration::from_secs(25),
+            runner.run(&entry, &context(), &Redactor::default()),
+        )
+        .await;
         assert_eq!(outcome.status, HookStatus::Succeeded);
         for (name, stream) in [("stdout", &outcome.stdout), ("stderr", &outcome.stderr)] {
             assert_eq!(
@@ -950,6 +969,11 @@ fn output_that_quotes_a_toml_file_is_masked_where_it_escapes_a_secret() {
 /// leave the rest unsaid, which is where such a split leaves the reader.
 const SPLIT_SECRET: &str = "hunter2-canary";
 
+/// The redactor of a run whose secret is [`SPLIT_SECRET`].
+fn split_secret() -> Redactor {
+    Redactor::new([&SecretValue::new(SPLIT_SECRET)])
+}
+
 /// A hook that ends while a process it started holds its pipes open is read
 /// for the grace and then left: what was read can end partway through a
 /// secret, and it is masked as a cut text (I4).
@@ -957,7 +981,7 @@ const SPLIT_SECRET: &str = "hunter2-canary";
 async fn output_a_descendant_holds_open_past_the_grace_is_masked_as_cut() {
     let scratch = TempDir::new().unwrap();
     let log = scratch.path().join("log");
-    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_secret(SPLIT_SECRET);
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
     let entry = sh(
         concat!(
             "sleep 300 &\n",
@@ -966,7 +990,11 @@ async fn output_a_descendant_holds_open_past_the_grace_is_masked_as_cut() {
         ),
         &log,
     );
-    let outcome = within(Duration::from_secs(8), runner.run(&entry, &context())).await;
+    let outcome = within(
+        Duration::from_secs(8),
+        runner.run(&entry, &context(), &split_secret()),
+    )
+    .await;
     let _reaper = Reaper(pid_in(&lines(&log)));
     assert_eq!(outcome.status, HookStatus::Succeeded);
     assert_eq!(outcome.stdout.text, "said ***");
@@ -984,9 +1012,13 @@ async fn output_of_a_hook_stopped_at_its_timeout_is_masked_as_cut() {
         "printf 'said hunter2-'; printf 'said hunter2-' >&2\nexec sleep 60",
         &scratch.path().join("log"),
     );
-    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(1)).with_secret(SPLIT_SECRET);
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(1));
     for _ in 0..3 {
-        let outcome = within(ENDS_ON_TERM, runner.run(&entry, &context())).await;
+        let outcome = within(
+            ENDS_ON_TERM,
+            runner.run(&entry, &context(), &split_secret()),
+        )
+        .await;
         assert_eq!(outcome.status, HookStatus::TimedOut);
         let texts = [&outcome.stdout.text, &outcome.stderr.text];
         for text in texts {
@@ -1011,12 +1043,16 @@ async fn output_of_a_hook_stopped_at_its_timeout_is_masked_as_cut() {
 #[tokio::test]
 async fn output_a_hook_cut_short_itself_leaves_nothing_of_a_secret() {
     let scratch = TempDir::new().unwrap();
-    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_secret(SPLIT_SECRET);
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10));
     let plain = sh(
         "printf 'said hello\\n'; printf 'said hello' >&2",
         &scratch.path().join("plain"),
     );
-    let outcome = within(Duration::from_secs(5), runner.run(&plain, &context())).await;
+    let outcome = within(
+        Duration::from_secs(5),
+        runner.run(&plain, &context(), &split_secret()),
+    )
+    .await;
     assert_eq!(outcome.status, HookStatus::Succeeded);
     assert_eq!(outcome.stdout.text, "said hello\n");
     assert_eq!(outcome.stderr.text, "said hello");
@@ -1024,8 +1060,55 @@ async fn output_a_hook_cut_short_itself_leaves_nothing_of_a_secret() {
         "printf 'said hunter2-'; printf 'said hunter2-' >&2\nexit 3",
         &scratch.path().join("cut"),
     );
-    let outcome = within(Duration::from_secs(5), runner.run(&cut, &context())).await;
+    let outcome = within(
+        Duration::from_secs(5),
+        runner.run(&cut, &context(), &split_secret()),
+    )
+    .await;
     assert_eq!(outcome.status, HookStatus::Failed { exit_code: Some(3) });
     assert_eq!(outcome.stdout.text, "said ***");
     assert_eq!(outcome.stderr.text, "said ***");
+}
+
+/// A runner given an environment starts its hooks with the allow-list of it
+/// and nothing else, and names the credentials of the proxy URLs it keeps
+/// as its environment's secrets: a hook that prints them has them masked by
+/// a redactor of those (§10.2, I4).
+#[tokio::test]
+async fn the_proxy_credentials_a_hook_is_given_are_masked_by_its_environment_secrets() {
+    use std::ffi::OsString;
+    let scratch = TempDir::new().unwrap();
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_environment([
+        (OsString::from("PATH"), path),
+        (
+            OsString::from("https_proxy"),
+            OsString::from("http://demo:canary-proxy@proxy.demo:3128"),
+        ),
+        (
+            OsString::from("DEMO_URL"),
+            OsString::from("http://demo:not-kept@demo.example"),
+        ),
+    ]);
+    let entry = sh(
+        r#"printf '%s|%s\n' "$https_proxy" "${DEMO_URL-unset}""#,
+        &scratch.path().join("log"),
+    );
+    let redactor = Redactor::new(&runner.environment_secrets());
+    let outcome = within(
+        Duration::from_secs(5),
+        runner.run(&entry, &context(), &redactor),
+    )
+    .await;
+    assert_eq!(outcome.status, HookStatus::Succeeded);
+    assert_eq!(outcome.stdout.text, "http://***@proxy.demo:3128|unset\n");
+}
+
+/// The proxy variables are looked at for credentials because a hook is
+/// given them.
+#[test]
+fn every_variable_looked_at_for_proxy_credentials_is_one_a_hook_keeps() {
+    for name in domain::secrets::PROXY_URL_VARIABLES {
+        assert!(crate::KEPT.contains(&name), "{name}");
+    }
 }
