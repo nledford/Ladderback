@@ -72,7 +72,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
 
 /// The note that says to grant the installed program Full Disk Access in
 /// System Settings, for a service that `needed` it (a launchd agent on
-/// macOS, §16 decision NN); nothing for any other.
+/// macOS, §16 decision 115); nothing for any other.
 fn full_disk_access_said(localizer: &Localizer, needed: bool, program: &ServicePath) -> String {
     if !needed {
         return String::new();
@@ -318,7 +318,7 @@ mod tests {
 
     /// After installing a launchd agent, the note names the program to grant
     /// Full Disk Access to, and where; a service that needs no grant gets
-    /// no note (§16, decision NN).
+    /// no note (§16, decision 115).
     #[test]
     fn the_full_disk_access_note_names_the_program_only_where_it_is_needed() {
         let program = ServicePath::parse(Path::new("/opt/homebrew/bin/ladderback")).unwrap();

@@ -1,4 +1,4 @@
-//! Full Disk Access on macOS (technical design §3.1, §16 decision NN): the
+//! Full Disk Access on macOS (technical design §3.1, §16 decision 115): the
 //! agent runs its Full Disk Access probe when it starts, before each backup
 //! and when a person asks it to check again, and keeps what the last probe
 //! found, which the start page reads. A backup takes the probe's answer from

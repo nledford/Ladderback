@@ -168,7 +168,7 @@ impl RunOperation {
     }
 
     /// Runs `check`'s Full Disk Access probe before each backup, and records
-    /// each warning as what it found explains it (§16, decision NN): a
+    /// each warning as what it found explains it (§16, decision 115): a
     /// source item the system refused while the grant was missing gets the
     /// grant's own warning.
     pub fn with_full_disk_access(mut self, check: Arc<FullDiskAccessCheck>) -> Self {

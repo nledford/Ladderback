@@ -207,7 +207,7 @@ This section decides what the daemon does: its HTTP server and API, the schedule
   1. It creates the data folder and takes its lock (`<data>/ladderback.lock`, §9) before it reads anything, so a second process on the folder is refused before it touches the configuration.
   2. It reads the configuration, opens the operation log, makes the event bus and starts the notifier (§11).
   3. It ends the operations that log still shows as running, announcing each, and reads the queued ones (`RecoverOperations`, §9, decision 91).
-  4. Only then does it build the engine and the router's state, bind the listener and print `listening on`.
+  4. Only then does it build the engine and the router's state, bind the listener and print `listening on`. On macOS, building the state runs the Full Disk Access probe once, and a grant found missing is one warning in the log (§16, decision 115).
   5. Then it runs the queued backups again and starts the scheduler (§5, decision 73).
 
   A start that can't lock the folder (`cli-data-dir-in-use`, or `cli-cannot-lock-data-dir` when the file system has no locks) or can't end those operations (`cli-cannot-recover-operations`) is a typed exit like the configuration's: it prints no `listening on` and serves nothing.
@@ -270,6 +270,11 @@ This section decides what the daemon does: its HTTP server and API, the schedule
   The start page lists them, with each next run in the reader's own time zone; the operations page offers a start button for each.
 
   Without plans, the start page says to connect a repository first, since a plan backs up to one by name, and links to the Repositories page; it always links to where a plan's format is described, §6.1 at the tag of the build's release on GitHub, so a build from `main` between releases links to the previous release's text (`routes::PLAN_FORMAT_URL`, #477).
+- **Full Disk Access API** (§16, decision 115). `GET /api/v1/full-disk-access` answers `{"state": …, "opens-settings": …}`: what the agent's Full Disk Access probe found last (`granted`, `missing`, `unknown`, or `not-applicable` off macOS), and whether this browser may ask for System Settings, which only a request from a loopback peer that names a loopback host may, on macOS. `POST /api/v1/full-disk-access/check` takes the empty JSON body `{}`, runs the probe again and answers the same body.
+
+  `POST /api/v1/full-disk-access/settings` takes `{}` too and opens System Settings at the Full Disk Access pane, then shows the daemon's program in Finder, answering `204`: `full-disk-access-not-local` (403) for any other request, and `full-disk-access-settings-unopened` (409 off macOS, 500 when `open` failed, its words in the daemon's log only). The routes take a session only: no API token scope reaches them.
+
+  The start page warns while the state is `missing`: a region named by its heading, "Full Disk Access is missing", with why it matters, the numbered steps, **Open Full Disk Access settings** when `opens-settings` is true, and **Check again**. When a check makes the warning go, focus moves to the page's heading.
 - **Repositories API.** `GET /api/v1/repositories` answers `{"repositories": […]}`, one row per configured repository in alias order:
   - `alias`.
   - `maintained-here` (whether this agent maintains it, §7.3: `true` only for `maintenance = "local"`; a row without it reads as `false`, so a page offers no maintenance it can't run).

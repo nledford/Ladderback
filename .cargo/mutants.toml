@@ -130,7 +130,7 @@
 # scenarios of `features/ui/components.feature` run the glue in Chromium.
 #
 # `crates/web/src/full_disk_access_warning.rs` is the DOM glue of the start
-# page's Full Disk Access warning (§16, decision NN): it reads what the
+# page's Full Disk Access warning (§16, decision 115): it reads what the
 # agent's probe found, draws the warning, sends Check again and the request
 # to open System Settings, says each answer and hands focus to the page's
 # heading when the warning goes. Whether it warns, whether it offers the

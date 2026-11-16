@@ -6,7 +6,7 @@ Feature: Full Disk Access on macOS
   refusal there means the grant is missing; any other answer, such as a
   missing folder, leaves it unknown, which is never reported as missing. The
   probe runs when the agent starts, before each backup, and when a person
-  asks to check again (decision NN). A backup that a source item refuses,
+  asks to check again (decision 115). A backup that a source item refuses,
   after a probe that found the grant missing, says so with a warning of its
   own, so its notification says why.
 

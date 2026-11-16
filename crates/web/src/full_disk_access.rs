@@ -1,5 +1,5 @@
 //! What the start page's Full Disk Access warning shows and says (§4.4, §16
-//! decision NN), decided on the host; `full_disk_access_warning.rs` draws it.
+//! decision 115), decided on the host; `full_disk_access_warning.rs` draws it.
 
 use api::{FullDiskAccessDto, FullDiskAccessStateDto};
 use l10n::{MessageId, msg};

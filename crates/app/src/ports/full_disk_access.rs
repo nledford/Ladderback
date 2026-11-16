@@ -1,4 +1,4 @@
-//! The Full Disk Access probe (technical design §3.1, §16 decision NN): on
+//! The Full Disk Access probe (technical design §3.1, §16 decision 115): on
 //! macOS, whether the person has granted the agent Full Disk Access, learned
 //! by listing a folder only that grant opens.
 

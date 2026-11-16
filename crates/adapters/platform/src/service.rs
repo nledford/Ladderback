@@ -296,7 +296,7 @@ impl UserService {
     }
 
     /// Whether the person must grant the installed program Full Disk Access
-    /// for its backups to read everything (§16, decision NN): a launchd
+    /// for its backups to read everything (§16, decision 115): a launchd
     /// agent on macOS, where nothing can ask for the grant; never a systemd
     /// service.
     pub fn needs_full_disk_access(&self) -> bool {

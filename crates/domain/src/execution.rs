@@ -284,7 +284,7 @@ pub enum WarningKind {
     SecretFileReadable,
     /// On macOS, a source item the system refused (`EPERM`) during a backup
     /// whose Full Disk Access probe, run before it, found the grant missing
-    /// (§16, decision NN): a [`Self::SourceUnreadable`] the grant explains.
+    /// (§16, decision 115): a [`Self::SourceUnreadable`] the grant explains.
     /// `item`, `during` and `detail` are the engine's, as for that kind.
     FullDiskAccessMissing,
     /// A warning this version doesn't know, for example from a newer worker.

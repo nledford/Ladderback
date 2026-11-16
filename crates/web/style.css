@@ -886,7 +886,7 @@ fieldset.choices > p {
   padding-inline-start: 1.25rem;
 }
 
-/* The start page's Full Disk Access warning (§16, decision NN): set apart by
+/* The start page's Full Disk Access warning (§16, decision 115): set apart by
    its border and named by its heading, never by color alone. */
 .full-disk-access {
   border: 2px solid var(--warning);

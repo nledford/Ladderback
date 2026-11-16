@@ -1,5 +1,5 @@
 //! The DOM glue of the start page's Full Disk Access warning (§4.4, §16
-//! decision NN): it reads what the agent's probe found, draws the warning,
+//! decision 115): it reads what the agent's probe found, draws the warning,
 //! sends Check again and the request to open System Settings, and hands
 //! focus to the page's heading when the warning goes from under it. Whether
 //! it warns, whether it offers the settings button, its steps and what each

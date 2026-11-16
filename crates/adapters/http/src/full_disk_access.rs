@@ -1,5 +1,5 @@
 //! The Full Disk Access routes, `/api/v1/full-disk-access` (§4.2, §16
-//! decision NN): the start page reads what the agent's Full Disk Access
+//! decision 115): the start page reads what the agent's Full Disk Access
 //! probe found last, asks it to check again, and, from a browser on the
 //! agent's own Mac, asks it to open System Settings' Full Disk Access pane.
 //! The routes aren't in the API tokens' scope table, so only a session (or

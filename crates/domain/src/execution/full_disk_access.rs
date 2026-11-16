@@ -1,4 +1,4 @@
-//! Full Disk Access on macOS (technical design §3.1, §16 decision NN): what
+//! Full Disk Access on macOS (technical design §3.1, §16 decision 115): what
 //! the agent's Full Disk Access probe found, and the rule that turns a source
 //! item the grant explains into a warning of its own.
 

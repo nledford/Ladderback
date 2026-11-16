@@ -111,7 +111,7 @@ pub struct AppState {
     /// (#618).
     pub recent_log: Arc<dyn app::ports::RecentLogStore>,
     /// What the Full Disk Access probe found, and what opens System
-    /// Settings' pane for it: neither off macOS (§16, decision NN).
+    /// Settings' pane for it: neither off macOS (§16, decision 115).
     pub full_disk_access: FullDiskAccessRoute,
 }
 

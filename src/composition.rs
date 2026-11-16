@@ -938,7 +938,7 @@ async fn state_over(
     ))
 }
 
-/// The agent's Full Disk Access check and its routes (§16, decision NN): on
+/// The agent's Full Disk Access check and its routes (§16, decision 115): on
 /// macOS, the probe of `~/Library/Safari` under the home the daemon runs
 /// with, which a test's daemon has in its scratch folder, and System
 /// Settings' pane, showing `program`; nothing elsewhere. The probe runs once
@@ -1492,7 +1492,7 @@ struct PlanRunner {
     /// 104): read on request, and after each check.
     readings: Arc<dyn app::ports::StatsStore>,
     /// The agent's Full Disk Access check, run before each backup on macOS
-    /// (§16, decision NN); none elsewhere.
+    /// (§16, decision 115); none elsewhere.
     full_disk_access: Option<Arc<FullDiskAccessCheck>>,
 }
 

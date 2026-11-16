@@ -445,11 +445,11 @@ pub enum ErrorCode {
     /// System Settings' Full Disk Access pane was asked to open from a
     /// browser that isn't on the agent's own Mac: the daemon opens it only
     /// for a request from its own machine, by a loopback address and a
-    /// loopback `Host` (§16, decision NN). Nothing opened; the page shows
+    /// loopback `Host` (§16, decision 115). Nothing opened; the page shows
     /// the steps instead.
     FullDiskAccessNotLocal,
     /// System Settings' Full Disk Access pane couldn't be opened: the agent
-    /// isn't on macOS, or macOS refused to open it (§16, decision NN).
+    /// isn't on macOS, or macOS refused to open it (§16, decision 115).
     FullDiskAccessSettingsUnopened,
     #[serde(other)]
     Unknown,
@@ -598,7 +598,7 @@ pub enum WarningCode {
     /// sent; the detail is the operating system's own words.
     DebuggerAttachAllowed,
     /// On macOS, a source item the system refused during a backup whose
-    /// Full Disk Access probe found the grant missing (§16, decision NN):
+    /// Full Disk Access probe found the grant missing (§16, decision 115):
     /// the grant explains why the item was left out. The detail is the
     /// engine's own message, as for `source-unreadable`.
     FullDiskAccessMissing,
@@ -4329,7 +4329,7 @@ pub enum RestartWhenDto {
 }
 
 /// What `GET /api/v1/full-disk-access` answers, and `POST …/check` once the
-/// probe has run again (§16, decision NN): what the agent's Full Disk Access
+/// probe has run again (§16, decision 115): what the agent's Full Disk Access
 /// probe found last, and whether this browser may ask the agent to open
 /// System Settings' Full Disk Access pane, which it may only from the
 /// agent's own Mac.

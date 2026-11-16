@@ -681,7 +681,7 @@ fn a_launchd_agent_runs_only_once_its_user_has_logged_in() {
 }
 
 /// Nothing can ask macOS for Full Disk Access, so installing a launchd
-/// agent says to grant it (§16, decision NN); a systemd service has no such
+/// agent says to grant it (§16, decision 115); a systemd service has no such
 /// grant.
 #[test]
 fn only_a_launchd_agent_needs_full_disk_access() {
