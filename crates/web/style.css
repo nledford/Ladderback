@@ -774,7 +774,8 @@ main:focus {
    text. A busy one (`.button-busy`), `aria-disabled` too, keeps the button
    text: it is at work, not unavailable, and its spinner's arc takes the
    text's color beside a GrayText track. Pressed keeps its weight and inset
-   edge. */
+   edge, a Ghost one's edge in the button text too: its tone's edge outranks
+   the rule above, so it is named again here. */
 @media (forced-colors: active) {
   .button,
   .button-filled,
@@ -783,6 +784,10 @@ main:focus {
     background-color: ButtonFace;
     border-color: ButtonText;
     color: ButtonText;
+  }
+
+  .button-ghost[aria-pressed="true"] {
+    border-color: ButtonText;
   }
 
   .button[aria-disabled="true"]:not(.button-busy) {
