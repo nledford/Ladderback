@@ -854,6 +854,13 @@ fn location_is(agent: &mut Agent, name: String, address: String, credentials: St
             world.pending_credentials = Some(user.to_owned());
             address.clone()
         }
+        // An rclone connection string's settings come before its `:path`.
+        ("a user and a password in its connection string", _) => {
+            let (remote, path) = address
+                .rsplit_once(':')
+                .expect("an rclone address ends in its path");
+            format!("{remote},user=demo,pass=canary-pass:{path}")
+        }
         ("a user and a password from a file", Some((scheme, rest))) => {
             format!("{scheme}://{from_file}{rest}")
         }
@@ -861,14 +868,19 @@ fn location_is(agent: &mut Agent, name: String, address: String, credentials: St
     };
     world.readdress(&name, &written);
     let options: Vec<(&str, &str)> = match credentials.as_str() {
-        "a user and a password in it" | "a user and a password from a file" | "no credential" => {
-            Vec::new()
-        }
+        "a user and a password in it"
+        | "a user and a password from a file"
+        | "a user and a password in its connection string"
+        | "no credential" => Vec::new(),
         "a credential option" => vec![("password", "canary-pass")],
         "the option http-insecure-tls set to true" => vec![("http-insecure-tls", "true")],
         "an http endpoint and a credential option" => vec![
             ("endpoint", "http://s3.example.lan"),
             ("secret_access_key", "canary-pass"),
+        ],
+        "an ftp endpoint and a credential option" => vec![
+            ("endpoint", "ftp://ftp.example.lan"),
+            ("password", "canary-pass"),
         ],
         other => panic!("no credentials are called {other:?}"),
     };
@@ -1401,6 +1413,8 @@ fn warning_names_neither(agent: &mut Agent) {
         "lan.example.lan",
         "canary-pass",
         "s3.example.lan",
+        "ftp.example.lan",
+        "dav.example.lan",
         "lan-userinfo",
         "hot.example.lan",
     ] {
