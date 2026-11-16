@@ -180,6 +180,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [110](decisions/110-repository-keyring.md) | Keeping a typed repository password in the system keyring |
 | [111](decisions/111-the-recent-log.md) | The recent log in the web UI |
 | [112](decisions/112-no-repository-config-and-the-half-a-server-refused.md) | How no repository config, the half a server refused and a listing's failure are told |
+| [113](decisions/113-shared-button.md) | A button drawn from the tokens, not the browser's own |
 
 ## 17. Open questions
 

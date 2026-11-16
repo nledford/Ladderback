@@ -467,6 +467,81 @@ ui-gallery-icon-xlarge = Demo icon at the Extra large size
 # on or off, and nothing else.
 ui-gallery-icon-notifications = Demo notifications
 
+# The heading of the gallery's button demo (§4.5).
+ui-gallery-button-heading = Button
+
+# The demo's buttons in each appearance (Filled, Outlined, Ghost) and each
+# tone of the shared vocabulary, each named by the two in words, so its
+# color never says them alone. A Filled button has no Inherit tone. The
+# appearance and tone names are the component's and the vocabulary's.
+ui-gallery-button-filled-primary = Filled Primary
+ui-gallery-button-filled-secondary = Filled Secondary
+ui-gallery-button-filled-success = Filled Success
+ui-gallery-button-filled-warning = Filled Warning
+ui-gallery-button-filled-error = Filled Error
+ui-gallery-button-outlined-primary = Outlined Primary
+ui-gallery-button-outlined-secondary = Outlined Secondary
+ui-gallery-button-outlined-success = Outlined Success
+ui-gallery-button-outlined-warning = Outlined Warning
+ui-gallery-button-outlined-error = Outlined Error
+ui-gallery-button-outlined-inherit = Outlined Inherit
+ui-gallery-button-ghost-primary = Ghost Primary
+ui-gallery-button-ghost-secondary = Ghost Secondary
+ui-gallery-button-ghost-success = Ghost Success
+ui-gallery-button-ghost-warning = Ghost Warning
+ui-gallery-button-ghost-error = Ghost Error
+ui-gallery-button-ghost-inherit = Ghost Inherit
+
+# The demo's buttons at each size of the shared vocabulary (Small, Medium,
+# Large, Extra large). The size names match the vocabulary demo's.
+ui-gallery-button-small = Demo button at the Small size
+ui-gallery-button-medium = Demo button at the Medium size
+ui-gallery-button-large = Demo button at the Large size
+ui-gallery-button-xlarge = Demo button at the Extra large size
+
+# A demo button with an icon (a calendar with a plus) before its label.
+ui-gallery-button-schedule = Schedule a demo backup
+
+# The names of the demo's icon-only buttons (an "i" in a circle), one at
+# each size: a screen reader reads each as the button's name.
+ui-gallery-button-details-small = Demo details at the Small size
+ui-gallery-button-details-medium = Demo details at the Medium size
+ui-gallery-button-details-large = Demo details at the Large size
+ui-gallery-button-details-xlarge = Demo details at the Extra large size
+
+# Three demo buttons that turn busy together: one with only its label, one
+# with an icon (a circle with a check) and one with only an icon (an arrow
+# turning round a clock), which this names.
+ui-gallery-button-save = Save the demo plan
+ui-gallery-button-check = Check the demo repository
+ui-gallery-button-refresh = Refresh the demo
+
+# A demo toggle button that makes the three buttons above busy while it is
+# pressed, and lets them go when it is pressed again.
+ui-gallery-button-working = Demo work in progress
+
+# A demo button that can't be used: it stays in the Tab order and ignores
+# presses.
+ui-gallery-button-delete = Delete the demo snapshot
+
+# A demo toggle button, pressed or not, which changes nothing but its own
+# state.
+ui-gallery-button-hidden-files = Show the demo's hidden files
+
+# A demo form's submit button, and what the page says politely when the
+# form is sent.
+ui-gallery-button-send = Send the demo form
+ui-gallery-button-sent = Demo form sent.
+
+# How many times the demo's buttons were pressed (the toggles not counted),
+# a sentence under them; $count is that number.
+ui-gallery-button-presses =
+    { $count ->
+        [0] The demo buttons haven't been pressed yet.
+        [one] The demo buttons were pressed once.
+       *[other] The demo buttons were pressed { $count } times.
+    }
+
 # The heading of the gallery's demo of the step-up field (§4.5): the field a
 # restore is confirmed with, in a review dialog.
 ui-gallery-step-up-heading = Step-up field

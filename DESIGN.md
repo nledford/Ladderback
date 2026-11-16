@@ -70,10 +70,29 @@ components:
     textColor: "{colors.success-fg}"
     rounded: "{rounded.pill}"
     padding: "0.125rem 0.5rem"
-  button:
+  button-filled:
+    # A row's one main action, in Primary; its label is the page's own
+    # background color, `--on-fill`, Paper Dark on the dark scheme's fill.
+    backgroundColor: "{colors.ladder-blue}"
+    textColor: "{colors.paper}"
     typography: "{typography.body}"
-    height: "2rem"
-    padding: "0 0.75rem"
+    rounded: "{rounded.sm}"
+    height: "2em"
+    padding: "0 0.75em"
+  button-outlined:
+    # The default, in Secondary: an edge and a label in its tone.
+    textColor: "{colors.slate-note}"
+    typography: "{typography.body}"
+    rounded: "{rounded.sm}"
+    height: "2em"
+    padding: "0 0.75em"
+  button-ghost:
+    # The label alone, for a row with many actions.
+    textColor: "{colors.slate-note}"
+    typography: "{typography.body}"
+    rounded: "{rounded.sm}"
+    height: "2em"
+    padding: "0 0.75em"
   field-input:
     typography: "{typography.body}"
     height: "2rem"
@@ -105,14 +124,14 @@ components:
 
 Ladderback's web UI is a ledger of backups: ruled rows of facts, each with its unit, read top to bottom. A page is a heading, a sentence that says where things stand, and a table or a form. The person comes to check that every machine is backed up, notice the one that isn't, and act; nothing on the page competes with that.
 
-The look is the browser's own, on purpose. Buttons, headings, checkboxes and dialogs are the native controls, sized to the text around them, so they behave the way the reader's browser, zoom, high-contrast mode and screen reader expect. Surfaces are flat. One blue carries links, focus and progress, three status hues tell what went well, what needs a look and what failed, always beside words, and four quiet status pairs say what a run is doing. Everything else is text.
+The look is plain, on purpose. Headings, checkboxes and dialogs are the browser's native controls, and a button is a native `<button>` drawn from the tokens, so it looks the same in every browser while it behaves the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and four quiet status pairs say what a run is doing. Everything else is text.
 
 Accessibility shapes the layout rather than decorating it: every layout holds at 320 px wide with text at 200 %, in both directions of writing, in light, dark and forced colors.
 
 **Key Characteristics:**
 
-- Native controls, flat surfaces, no shadows.
-- One accent, Ladder Blue, for action: links, the focus ring and progress. Three status hues beside it, never alone.
+- Native controls underneath, buttons drawn from the tokens, flat surfaces, no shadows.
+- One accent, Ladder Blue, for action: links, the focus ring, progress and a row's one Filled button. Three status hues beside it, never alone.
 - State is a labeled badge with an icon, never color alone.
 - Tables with one muted rule per row and columns that don't move as rows change.
 - Logical properties only; layouts follow the page's writing direction.
@@ -192,26 +211,30 @@ Flat. No element has a shadow. Depth is said with a Ledger Gray surface, a 1 px 
 
 ## Shapes
 
-Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner for toasts and the pause banner. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes.
+Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts and the pause banner. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes.
 
 ## Components
 
-Every component is plain and exact: a control looks like what the browser makes it, sized for the text it holds. The shared set lives in `crates/web/src/components/`, one file per component; `/_gallery` (the `gallery` feature) shows each one.
+Every component is plain and exact: a control is the browser's own element, sized for the text it holds, and a button is drawn from the tokens. The shared set lives in `crates/web/src/components/`, one file per component; `/_gallery` (the `gallery` feature) shows each one.
 
 ### Shared Vocabulary
 
 Every shared component takes the same three choices, defined once in `crates/web/src/variants.rs`, each a class of `style.css`, as it is built or reworked; the gallery's "Shared vocabulary" demo shows them all. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
 
-- **Tone:** Primary (Ladder Blue, the default, unless a component names its own, as the icon does), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
+- **Tone:** Primary (Ladder Blue, the default, unless a component names its own, as the icon and the button do), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
 - **Size:** Small, Medium, Large and XLarge, one scale every component shares, in `em`, so a size grows with the reader's text: Small 1em, Medium 1.5em, Large 2em, XLarge 3em. A size's class sets `--size`, which the component draws its length with, so a spinner and an icon of one size line up. A component that needs other lengths may deviate, saying why with it. The vocabulary has no default size: each component picks its own.
 - **Placement:** Inline (the default: in the line of text, as wide as what it holds), then Start, Center and End, each on a line of its own at its start, middle or end, in the page's direction. The class goes on the line, an element of the component's own around its part, never on the part's own box, which it would stretch.
 
 ### Buttons
 
-- **Shape and color:** the browser's native button. No custom fill, border or radius.
-- **Size:** at least 2rem tall in action rows and in the header (Sign out), 0.75rem inline padding.
-- **Disabled:** stays focusable (`aria-disabled="true"`), at 60 % opacity with a not-allowed cursor.
-- **Pressed (toggle):** bold text and an inset border, with a banner that says it in words.
+- **The component:** `Button`, a native `<button>` drawn from the tokens (decision 113). Pages move onto it from the browser's own button (#780).
+- **Appearance:** Filled, a fill in its tone with its label in the page's background color, for an action row's one main action, in Primary; Outlined, an edge and a label in its tone, the default, for the others; Ghost, the label alone, for a row with many. Secondary (Slate Note) unless the page names another tone; a Filled button has no Inherit.
+- **Shape:** one small corner (`rounded.sm`), flat: no shadow, no gradient, no pill.
+- **Size:** its height, in `em`: Small 1.75em, Medium 2em (the default, 2rem at the page's text size), Large 2.5em, XLarge 3em, the inline padding growing with it from 0.5em to 1.25em. An icon or spinner inside is as tall as the text; an icon-only button is square.
+- **Hover:** a step darker, lighter in the dark scheme, each pair contrast-checked.
+- **Unavailable and busy:** stay focusable (`aria-disabled="true"`), at 60 % opacity with a not-allowed cursor. A busy button's spinner takes its icon's place, or stands before words that have none; a button that must not move gets an icon.
+- **Pressed (toggle):** bold text and an inset edge; the pause button adds a banner that says it in words.
+- **Forced colors:** the reader's `ButtonFace`, its label and edge `ButtonText`, an unavailable one `GrayText`.
 - **Focus:** the global 3 px Ladder Blue ring, 2 px offset; `CanvasText` under forced colors.
 
 ### Status Badges
@@ -282,7 +305,7 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 
 - **Don't** add dashboard chrome: cards, gradients, glows, shadows or big hero numbers.
 - **Don't** repeat a failure in red across the page. It is stated once, as an error badge or one error message; no red banners, red rows or red headings.
-- **Don't** restyle native controls with custom fills, radii or borders.
+- **Don't** restyle a native control with custom fills, radii or borders outside its shared component: a button's look is `Button`'s.
 - **Don't** introduce a second accent color, a fourth status hue, or a color without a contrast-checked pair.
 - **Don't** set text or control sizes in pixels, or use physical properties (`left`, `width`, `margin-top`).
 - **Don't** animate anything that the reduced-motion rule can't turn off.

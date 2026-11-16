@@ -17,6 +17,7 @@ use leptos::wasm_bindgen::{JsCast, JsValue};
 use crate::focus::{FocusWrap, focus_wrap};
 use crate::repositories::{Run, Sentence, address_parts, runs};
 
+pub(crate) mod button;
 mod checkbox;
 mod error_summary;
 mod form_field;
@@ -33,6 +34,7 @@ mod step_up_field;
 mod toast;
 pub(crate) mod tree;
 
+pub use button::Button;
 pub use checkbox::Checkbox;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};
 pub use form_field::FormField;
