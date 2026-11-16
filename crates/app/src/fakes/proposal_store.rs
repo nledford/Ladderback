@@ -129,8 +129,11 @@ impl ProposalStore for InMemoryProposalStore {
         at: Timestamp,
         reasons: &[RejectReason],
     ) -> Result<bool, StoreError> {
-        let _ = (id, at, reasons);
-        todo!()
+        Ok(self.change(id, ProposalStatus::Pending, |one| {
+            one.status = ProposalStatus::Rejected;
+            one.decided_at = Some(to_the_millisecond(at));
+            one.reasons = reasons.to_vec();
+        }))
     }
 
     async fn approve(
@@ -139,12 +142,17 @@ impl ProposalStore for InMemoryProposalStore {
         at: Timestamp,
         from: Option<IpAddr>,
     ) -> Result<bool, StoreError> {
-        let _ = (id, at, from);
-        todo!()
+        Ok(self.change(id, ProposalStatus::Pending, |one| {
+            one.status = ProposalStatus::Applying;
+            one.decided_at = Some(to_the_millisecond(at));
+            one.approved_from = from;
+        }))
     }
 
     async fn applied(&self, id: &ProposalId, applied_as: Option<&str>) -> Result<bool, StoreError> {
-        let _ = (id, applied_as);
-        todo!()
+        Ok(self.change(id, ProposalStatus::Applying, |one| {
+            one.status = ProposalStatus::Applied;
+            one.applied_as = applied_as.map(str::to_owned);
+        }))
     }
 }

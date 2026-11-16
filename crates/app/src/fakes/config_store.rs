@@ -102,8 +102,13 @@ impl ConfigStore for InMemoryConfigStore {
 #[async_trait]
 impl ConfigDrafts for InMemoryConfigStore {
     async fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ConfigError> {
-        let _ = config;
-        todo!()
+        let current = self.saved().clone().unwrap_or_default();
+        let before = self.text(&current);
+        Ok(ConfigDraft {
+            revision: ConfigRevision::of(before.as_bytes()),
+            before,
+            after: self.text(config),
+        })
     }
 
     async fn save_over(
@@ -112,7 +117,22 @@ impl ConfigDrafts for InMemoryConfigStore {
         config: &AgentConfig,
         proposal: &ProposalId,
     ) -> Result<SavedOver, ConfigError> {
-        let _ = (base, config, proposal);
-        todo!()
+        let edit = self
+            .edit_before_save
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(edit) = edit {
+            self.edit_comment(&edit);
+        }
+        let current = self.saved().clone().unwrap_or_default();
+        if ConfigRevision::of(self.text(&current).as_bytes()) != *base {
+            return Ok(SavedOver::ChangedMeanwhile);
+        }
+        let mut history = self.history.lock().unwrap_or_else(PoisonError::into_inner);
+        let kept = format!("{:06}-proposal-{proposal}", history.len().saturating_add(1));
+        history.push(kept.clone());
+        *self.saved() = Some(config.clone());
+        Ok(SavedOver::Saved { kept: Some(kept) })
     }
 }
