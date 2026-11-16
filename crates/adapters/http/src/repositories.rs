@@ -307,7 +307,12 @@ fn answer(error: &RepositoriesError) -> (StatusCode, api::ErrorDto) {
             text("operation", operation),
             None,
         ),
-        RepositoriesError::ConfigNotFound { .. } => todo!(),
+        RepositoriesError::ConfigNotFound { detail } => refused(
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryConfigNotFound,
+            Vec::new(),
+            Some(detail.clone()),
+        ),
         RepositoriesError::PathRelative { field } => refused(
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::RepositoryPathRelative,

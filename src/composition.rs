@@ -3579,7 +3579,14 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::RepositoryExists => exists(settings),
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => RepositoriesError::NotFound,
-        F::CredentialsRefused { .. } | F::RepositoryConfigNotFound { .. } => todo!(),
+        F::RepositoryConfigNotFound { detail } => RepositoriesError::ConfigNotFound { detail },
+        F::CredentialsRefused { half } => unavailable(
+            ErrorCode::CredentialsRefused,
+            half.map(|half| ("half", text(half.code())))
+                .into_iter()
+                .collect(),
+            None,
+        ),
         F::SecretsTooLargeToMask { field, limit } => {
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }

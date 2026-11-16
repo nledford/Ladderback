@@ -201,8 +201,14 @@ pub(crate) fn encode_failure(
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::RepositoryReplaced => ("repository-replaced", Vec::new(), None),
         FailureReason::RepositoryNotFound => ("repository-not-found", Vec::new(), None),
-        FailureReason::RepositoryConfigNotFound { .. } => todo!(),
-        FailureReason::CredentialsRefused { .. } => todo!(),
+        FailureReason::RepositoryConfigNotFound { detail } => {
+            ("repository-config-not-found", Vec::new(), Some(detail))
+        }
+        FailureReason::CredentialsRefused { half } => (
+            "credentials-refused",
+            half.map_or_default(|half| text_arg("half", half.code().to_owned())),
+            None,
+        ),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
@@ -330,7 +336,10 @@ pub(crate) fn decode_failure(
         "repository-exists" => Ok(FailureReason::RepositoryExists),
         "repository-replaced" => Ok(FailureReason::RepositoryReplaced),
         "repository-not-found" => Ok(FailureReason::RepositoryNotFound),
-        "credentials-refused" => todo!(),
+        "repository-config-not-found" => {
+            Ok(FailureReason::RepositoryConfigNotFound { detail: detail()? })
+        }
+        "credentials-refused" => Ok(FailureReason::CredentialsRefused { half: half(&args)? }),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
@@ -412,6 +421,17 @@ fn refused(
         }
         _ => return Ok(None),
     }))
+}
+
+/// The half a refusal of the credentials names, if any: `cold` or `hot`.
+fn half(args: &[(String, MsgArg)]) -> Result<Option<RepositoryHalf>, BadColumn> {
+    match argument(args, "half") {
+        None => Ok(None),
+        Some(MsgArg::Text(half)) => RepositoryHalf::parse(half)
+            .map(Some)
+            .ok_or_else(|| bad("error_args", format!("half {} is no half", shown(half)))),
+        Some(_) => Err(bad("error_args", "half is not text")),
+    }
 }
 
 /// The text argument `name`, which the failure must have.

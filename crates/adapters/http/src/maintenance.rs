@@ -317,7 +317,12 @@ fn answer(alias: &str, error: MaintenanceRefusal) -> (StatusCode, api::ErrorDto)
             Vec::new(),
             None,
         ),
-        MaintenanceRefusal::RepositoryConfigNotFound { .. } => todo!(),
+        MaintenanceRefusal::RepositoryConfigNotFound { detail } => (
+            StatusCode::NOT_FOUND,
+            ErrorCode::RepositoryConfigNotFound,
+            Vec::new(),
+            Some(detail),
+        ),
         MaintenanceRefusal::OperationFailed { detail } => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::OperationFailed,

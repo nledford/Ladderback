@@ -135,7 +135,14 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         F::RepositoryExists => ErrorDto::new(ErrorCode::RepositoryExists, [], None),
         F::RepositoryReplaced => ErrorDto::new(ErrorCode::RepositoryReplaced, [], None),
         F::RepositoryNotFound => ErrorDto::new(ErrorCode::RepositoryNotFound, [], None),
-        F::RepositoryConfigNotFound { .. } | F::CredentialsRefused { .. } => todo!(),
+        F::RepositoryConfigNotFound { detail } => {
+            ErrorDto::new(ErrorCode::RepositoryConfigNotFound, [], said(detail))
+        }
+        F::CredentialsRefused { half } => ErrorDto::new(
+            ErrorCode::CredentialsRefused,
+            half.map(|half| ("half", MsgArg::Text(half.code().to_owned()))),
+            None,
+        ),
         F::SecretsTooLargeToMask { field, limit } => ErrorDto::new(
             ErrorCode::SecretsTooLargeToMask,
             std::iter::once((

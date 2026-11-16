@@ -8,7 +8,7 @@ use app::ports::{
     RestorePlanSummary, RestoreSummary, RewriteSummary,
 };
 use domain::browse::{Entry, EntryName, FolderPage, PAGE_ENTRIES};
-use domain::execution::{FailureReason, Warning, WarningKind};
+use domain::execution::{FailureReason, RepositoryHalf, Warning, WarningKind};
 use domain::maintenance::RepositoryStats;
 use domain::secrets::Redactor;
 
@@ -206,7 +206,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
             OpResult::Snapshots { .. } => return None,
         }),
         WorkerEvent::Snapshots { .. } => return None,
-        WorkerEvent::Failed { code, detail, .. } => {
+        WorkerEvent::Failed { code, args, detail } => {
             let detail = redactor.redact_clipped(&detail.unwrap_or_default(), TRUNCATED);
             EngineEvent::Failed(match code {
                 ErrorCode::InvalidJobSpec => FailureReason::JobRejected { detail },
@@ -226,9 +226,22 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 ErrorCode::RepositoryNotFound => FailureReason::RepositoryNotFound,
                 // A server refused the credentials (decision 85): nothing was
                 // read or written. The worker names the half whose server
-                // refused, for a hot/cold repository.
-                ErrorCode::CredentialsRefused => FailureReason::CredentialsRefused { half: None },
-                ErrorCode::RepositoryConfigNotFound => todo!(),
+                // refused, for a hot/cold repository; a name that is no
+                // half's names none.
+                ErrorCode::CredentialsRefused => FailureReason::CredentialsRefused {
+                    half: args.iter().find_map(|(name, arg)| match arg {
+                        api::MsgArg::Text(half) if name.as_str() == "half" => {
+                            RepositoryHalf::parse(half)
+                        }
+                        _ => None,
+                    }),
+                },
+                // No config file where the engine looked, and nothing tells
+                // an empty place from one out of reach (#525): the engine's
+                // words, masked, say where it looked.
+                ErrorCode::RepositoryConfigNotFound => {
+                    FailureReason::RepositoryConfigNotFound { detail }
+                }
                 // No key opened with the repository's password (#481): the
                 // code a repository of several locations fails with too.
                 ErrorCode::PasswordNotAccepted => FailureReason::PasswordNotAccepted,

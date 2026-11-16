@@ -185,7 +185,7 @@ impl FailureReason {
             Self::RepositoryExists => "repository-exists",
             Self::RepositoryReplaced => "repository-replaced",
             Self::RepositoryNotFound => "repository-not-found",
-            Self::RepositoryConfigNotFound { .. } => todo!(),
+            Self::RepositoryConfigNotFound { .. } => "repository-config-not-found",
             Self::CredentialsRefused { .. } => "credentials-refused",
             Self::DaemonStopped => "daemon-stopped",
             Self::DaemonShutDown => "daemon-shut-down",
@@ -210,12 +210,17 @@ pub enum RepositoryHalf {
 impl RepositoryHalf {
     /// The half's name on the wire and in the operation log: `cold` or `hot`.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Cold => "cold",
+            Self::Hot => "hot",
+        }
     }
 
     /// The half [`code`](Self::code) names, or `None` for any other text.
     pub fn parse(code: &str) -> Option<Self> {
-        todo!()
+        [Self::Cold, Self::Hot]
+            .into_iter()
+            .find(|half| half.code() == code)
     }
 }
 

@@ -583,7 +583,16 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         }
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
-        F::CredentialsRefused { .. } | F::RepositoryConfigNotFound { .. } => todo!(),
+        F::RepositoryConfigNotFound { detail } => {
+            MaintenanceRefusal::RepositoryConfigNotFound { detail }
+        }
+        F::CredentialsRefused { half } => unavailable(
+            ErrorCode::CredentialsRefused,
+            half.map(|half| ("half", text(half.code())))
+                .into_iter()
+                .collect(),
+            None,
+        ),
         F::SecretsTooLargeToMask { field, limit } => {
             MaintenanceRefusal::SecretRefused(super::too_much_to_mask(field, limit))
         }
