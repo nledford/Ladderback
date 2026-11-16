@@ -44,7 +44,11 @@ impl Log for EventLogger {
         // `Events::report`.
         self.events.report(&WorkerEvent::Log {
             level,
-            message: format!("{}: {}", record.target(), record.args()),
+            message: format!(
+                "{}: {}",
+                record.target(),
+                without_post_command(record.target(), record.args().to_string())
+            ),
         });
     }
 
@@ -57,6 +61,57 @@ pub(crate) fn install(events: Events) -> Result<(), SetLoggerError> {
     log::set_boxed_logger(Box::new(EventLogger::new(events)))?;
     log::set_max_level(MAX_LEVEL);
     Ok(())
+}
+
+/// The target of rustic's local backend, which runs a repository's
+/// `post-create-command` after it writes a file and its
+/// `post-delete-command` after it deletes one.
+const LOCAL_BACKEND: &str = "rustic_backend::local";
+
+/// `message`, a record of `target`, as the worker passes it on. When a post
+/// command fails, rustic's local backend warns with its whole line
+/// (`post-create: Error: …`), which can carry a credential the redactor
+/// doesn't know, such as a token typed into it (I4, #882). The warning says
+/// instead which option failed and why: the status it exited with, the
+/// system's reason it couldn't start, or why its line couldn't be split into
+/// words. A warning of a shape not known here says only which option failed.
+fn without_post_command(target: &str, message: String) -> String {
+    if target != LOCAL_BACKEND {
+        return message;
+    }
+    let (option, warning) = if let Some(warning) = message.strip_prefix("post-create: ") {
+        ("post-create-command", warning)
+    } else if let Some(warning) = message.strip_prefix("post-delete: ") {
+        ("post-delete-command", warning)
+    } else {
+        return message;
+    };
+    match post_command_failure(warning) {
+        Some(why) => format!("{option} {why}"),
+        None => format!(
+            "{option} failed; rustic's warning is left out, as it may quote the command line"
+        ),
+    }
+}
+
+/// Why a post command failed, from rustic's warning of it. The warning
+/// quotes the line before the reason, so the reason is what follows the
+/// last of its markers, whatever the line holds.
+fn post_command_failure(warning: &str) -> Option<String> {
+    if warning.starts_with("Error: Command was not successful: `") {
+        let (_, status) = warning.rsplit_once("` failed with status `")?;
+        let (status, _) = status.split_once('`')?;
+        Some(format!("ended with {status}"))
+    } else if warning.starts_with("Error: Failed to execute `") {
+        let (_, reason) = warning.rsplit_once(": caused by: ")?;
+        Some(format!("could not be started: {reason}"))
+    } else if warning.starts_with("Error: Failed to parse command input: `") {
+        let (_, reason) = warning.rsplit_once(" : (source: ")?;
+        let reason = reason.strip_suffix(')')?;
+        Some(format!("could not be split into words: {reason}"))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -133,5 +188,124 @@ mod tests {
         let logger = EventLogger::new(events);
         record_of(&logger, Level::Info, "rustic_core", "hello");
         assert_eq!(gave_up.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// The message the bridge sends for one warning of `target`.
+    fn bridged(target: &str, message: &str) -> String {
+        let (events, capture) = capture();
+        let logger = EventLogger::new(events);
+        record_of(&logger, Level::Warn, target, message);
+        match capture.parsed().as_slice() {
+            [WorkerEvent::Log { message, .. }] => message.clone(),
+            other => panic!("not one log event: {other:?}"),
+        }
+    }
+
+    /// rustic's local backend warns, quoting the whole command line, when a
+    /// `post-create-command` or `post-delete-command` can't start, can't be
+    /// split into words, or exits with an error. The bridge passes the
+    /// warning on with the option's name and the reason, without the line,
+    /// which can carry a credential the redactor doesn't know (I4, #882).
+    /// A line that holds rustic's own markers keeps its text out too. The
+    /// warnings are rustic's own at the pinned revision, so a version that
+    /// changes them fails here: one that stops quoting the line fails the
+    /// first assertion, and the rewrite can go.
+    #[test]
+    fn rustic_s_post_command_warnings_lose_the_command_line_and_keep_the_reason() {
+        use rustic_backend::LocalBackend;
+        use rustic_core::{FileType, Id, WriteBackend};
+
+        crate::client::test_support::capture_the_worker_log();
+        let scratch = tempfile::tempdir().unwrap();
+        let missing = scratch.path().join("no-such-hook");
+        for (option, line, canary, reason) in [
+            (
+                "post-create-command",
+                format!("{} --token=CANARY-start", missing.display()),
+                "CANARY-start",
+                "os error",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh -c 'exit 3' hook --token=CANARY-status".to_owned(),
+                "CANARY-status",
+                "exit status: 3",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh --token=CANARY-split 'unclosed".to_owned(),
+                "CANARY-split",
+                "missing closing quote",
+            ),
+            (
+                "post-delete-command",
+                "/bin/sh -c 'exit 4' hook --token=CANARY-delete".to_owned(),
+                "CANARY-delete",
+                "exit status: 4",
+            ),
+            (
+                "post-create-command",
+                format!("{} ': caused by: CANARY-marked-start'", missing.display()),
+                "CANARY-marked-start",
+                "os error",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh -c 'exit 5' hook '` failed with status `CANARY-marked-status'".to_owned(),
+                "CANARY-marked-status",
+                "exit status: 5",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh ' : (source: CANARY-marked-split)' 'unclosed".to_owned(),
+                "CANARY-marked-split",
+                "missing closing quote",
+            ),
+        ] {
+            let folder = scratch.path().join(canary);
+            let backend = LocalBackend::new(
+                folder.to_str().unwrap(),
+                [(option.to_owned(), line.clone())],
+            )
+            .unwrap();
+            let id = Id::random();
+            backend
+                .write_bytes(FileType::Snapshot, &id, false, b"demo".to_vec().into())
+                .unwrap();
+            backend.remove(FileType::Snapshot, &id, false).unwrap();
+            let Some(warning) = crate::client::test_support::local_backend_warning(canary) else {
+                panic!("rustic no longer quotes {line:?} in a warning");
+            };
+            let message = bridged("rustic_backend::local", &warning);
+            assert!(!message.contains(canary), "the line stays: {message}");
+            assert!(message.contains(option), "{message}");
+            assert!(message.contains(reason), "the reason is lost: {message}");
+        }
+    }
+
+    /// A warning of a post command in a shape the bridge doesn't know may
+    /// quote the line anywhere: only the option's name goes on.
+    #[test]
+    fn a_post_command_warning_of_an_unknown_shape_loses_its_text() {
+        let message = bridged(
+            "rustic_backend::local",
+            "post-delete: Error: something new about `notify --token=CANARY-new`",
+        );
+        assert!(!message.contains("CANARY-new"), "{message}");
+        assert!(message.contains("post-delete-command"), "{message}");
+    }
+
+    /// Only the local backend's warnings of a post command are rewritten.
+    #[test]
+    fn other_records_pass_as_they_are() {
+        for (target, message) in [
+            (
+                "rustic_backend::local",
+                "Option demo is not supported! Ignoring it.",
+            ),
+            ("rustic_core::repository", "post-create: Error: demo"),
+        ] {
+            assert_eq!(bridged(target, message), format!("{target}: {message}"));
+        }
     }
 }

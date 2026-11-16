@@ -32,8 +32,8 @@ const PASSWORD: &str = "demo-password";
 const STAND_IN_WORKER: &str = "cat > \"$1/spec.json\"; env > \"$1/environment.txt\"; \
      printf '%s\\n' \"$0\" \"$@\" > \"$1/arguments.txt\"";
 
-/// Everything the daemon logged for `ladderback::worker`.
-static WORKER_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Everything the daemon logged for `ladderback::worker`, with its level.
+static WORKER_LOG: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
 
 struct CapturingLogger;
 
@@ -47,7 +47,7 @@ impl log::Log for CapturingLogger {
             WORKER_LOG
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .push(record.args().to_string());
+                .push((record.level(), record.args().to_string()));
         }
     }
 
@@ -158,6 +158,13 @@ fn nowhere(agent: &mut Agent) {
     agent.secrets.repository = folder.display().to_string();
 }
 
+/// A local repository's folder, which the job that initializes it makes.
+#[given("a folder for a new repository")]
+fn new_folder(agent: &mut Agent) {
+    let folder = agent.scratch().join("new-repository");
+    agent.secrets.repository = folder.display().to_string();
+}
+
 /// An `rclone:` repository, which the engine reaches through the rclone its
 /// `rclone-command` option starts.
 #[given("an rclone repository")]
@@ -193,6 +200,17 @@ fn stand_in_worker(agent: &mut Agent) {
 
 #[when("the repository is identified")]
 async fn identified(agent: &mut Agent) {
+    run(agent, Job::Identify).await;
+}
+
+#[when("the repository is initialized")]
+async fn initialized(agent: &mut Agent) {
+    run(agent, Job::Init).await;
+}
+
+/// Resolves the scenario's settings and runs `job` on them, with the
+/// worker's log captured.
+async fn run(agent: &mut Agent, job: fn(app::ports::RepositoryAccess) -> Job) {
     capture_the_worker_log();
     let mut environment: Vec<(OsString, OsString)> = agent
         .secrets
@@ -226,7 +244,7 @@ async fn identified(agent: &mut Agent) {
         .expect("the settings resolve");
     agent.secrets.resolved = format!("{resolved:?}");
     agent
-        .run(Job::Identify(resolved.access), futures::future::pending())
+        .run(job(resolved.access), futures::future::pending())
         .await;
     // The daemon reads the worker's stderr beside its events.
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -259,6 +277,18 @@ fn failure_shows(agent: &mut Agent, text: String) {
     assert!(detail.contains(&text), "{text} is not in: {detail}");
 }
 
+#[then(expr = "the engine logged a warning saying {string} and {string}")]
+fn logged_warning(agent: &mut Agent, first: String, second: String) {
+    let _ = agent;
+    let logged = WORKER_LOG.lock().unwrap_or_else(PoisonError::into_inner);
+    assert!(
+        logged.iter().any(|(level, line)| *level == log::Level::Warn
+            && line.contains(&first)
+            && line.contains(&second)),
+        "no warning says {first:?} and {second:?}: {logged:?}"
+    );
+}
+
 /// The operation, the debug form of what was resolved and everything the
 /// daemon logged for the worker.
 #[then(expr = "nothing the engine reported or logged shows {string}")]
@@ -275,7 +305,7 @@ fn nothing_shows(agent: &mut Agent, secret: String) {
         !logged.is_empty(),
         "the log captured nothing, so it was not checked"
     );
-    for line in logged.iter() {
+    for (_, line) in logged.iter() {
         assert!(!line.contains(&secret), "{secret} is in the log: {line}");
     }
 }
