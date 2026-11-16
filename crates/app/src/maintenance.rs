@@ -44,6 +44,7 @@ use crate::ports::{
     RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
     SourcesError, Start, StoreError,
 };
+use crate::repositories::ConfigWrites;
 use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::PlanTags;
@@ -332,6 +333,11 @@ pub struct RunMaintenance {
     resolve: ResolveRepository,
     retention: Arc<dyn Retention>,
     config: Arc<dyn ConfigStore>,
+    /// The configuration's write lock, which a start holds while it reads
+    /// again that this agent maintains the repository and takes its slot: a
+    /// change of who maintains it (`ChangeMaintainer`) runs under the same
+    /// lock, so the two never interleave (I1).
+    writes: Arc<ConfigWrites>,
     agent: AgentId,
     /// This machine's own name, which the engine records on a snapshot when
     /// neither its plan nor the agent names a host (`Plan::snapshot_host`).
@@ -360,6 +366,7 @@ impl RunMaintenance {
         resolve: ResolveRepository,
         retention: Arc<dyn Retention>,
         config: Arc<dyn ConfigStore>,
+        writes: Arc<ConfigWrites>,
         agent: AgentId,
         hostname: String,
         sources: Arc<dyn NormalizeSources>,
@@ -371,6 +378,7 @@ impl RunMaintenance {
             resolve,
             retention,
             config,
+            writes,
             agent,
             hostname,
             sources,
@@ -552,8 +560,10 @@ impl RunMaintenance {
 
     /// Takes the assessed run's repository slot (I7): the operation is stored
     /// as running in the one step that decides it, or refused, naming the
-    /// operation that holds the repository, with nothing stored. On success
-    /// the run's own job has not been started: only `execute` starts it.
+    /// operation that holds the repository, with nothing stored. A run of a
+    /// repository this agent no longer maintains is refused with
+    /// [`MaintenanceError::NotOwner`], nothing stored. On success the run's
+    /// own job has not been started: only `execute` starts it.
     ///
     /// A call dropped while it waits for the log may already have stored the
     /// operation as running, and the row then holds the repository until
@@ -574,6 +584,13 @@ impl RunMaintenance {
             other_hosts,
             secret_warnings,
         } = assessment;
+        // Read again under the configuration's write lock, held until the
+        // slot is taken: maintenance turned off after the assessment, or
+        // while this waits, refuses the run with nothing stored, and a
+        // change of who maintains the repository waits for the run to hold
+        // its slot, which keeps it maintained here until it ends (I1).
+        let _writing = self.writes.lock().await;
+        self.maintained(&alias).await?;
         let mut operation = Operation::queue(
             id,
             job.kind(),
@@ -1973,6 +1990,13 @@ mod record_tests {
         async fn ever_succeeded(&self, _plan: &domain::PlanId) -> Result<bool, StoreError> {
             futures::future::pending().await
         }
+
+        async fn running_maintenance(
+            &self,
+            _repository: Option<&RepositoryId>,
+        ) -> Result<Option<OperationId>, StoreError> {
+            futures::future::pending().await
+        }
     }
 
     fn use_case(store: Arc<dyn OperationStore>) -> RunMaintenance {
@@ -1985,6 +2009,7 @@ mod record_tests {
             ResolveRepository::new(Arc::new(FakeSecrets::default())),
             Arc::new(FakeRetention),
             Arc::new(InMemoryConfigStore::new()),
+            Arc::default(),
             AgentId::from_uuid(Uuid::from_u128(1)),
             "demo-host".to_owned(),
             Arc::new(FakeSources),
@@ -2098,6 +2123,7 @@ mod config_tests {
             ResolveRepository::new(Arc::new(FakeSecrets::default())),
             Arc::new(FakeRetention),
             Arc::new(Mistaken),
+            Arc::default(),
             AgentId::from_uuid(Uuid::from_u128(1)),
             "demo-host".to_owned(),
             Arc::new(FakeSources),
@@ -2256,6 +2282,7 @@ mod cancel_tests {
             ResolveRepository::new(Arc::new(FakeSecrets::default())),
             Arc::new(FakeRetention),
             Arc::new(InMemoryConfigStore::new()),
+            Arc::default(),
             AgentId::from_uuid(Uuid::from_u128(1)),
             "demo-host".to_owned(),
             Arc::new(FakeSources),
@@ -2414,6 +2441,7 @@ mod secret_tests {
             ResolveRepository::new(Arc::new(secrets)),
             Arc::new(FakeRetention),
             Arc::new(configs),
+            Arc::default(),
             AgentId::from_uuid(Uuid::from_u128(1)),
             "demo-host".to_owned(),
             Arc::new(FakeSources),
@@ -2435,6 +2463,131 @@ mod secret_tests {
                 during: "secret".to_owned(),
                 detail: "0644".to_owned(),
             }]
+        );
+    }
+}
+
+/// A start reads again, under the configuration's write lock, that this
+/// agent maintains the repository, so a change of who maintains it never
+/// lands between that read and the slot (I1, decision 48).
+#[cfg(test)]
+#[cfg(feature = "fakes")]
+mod start_tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use domain::planning::{
+        AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
+    };
+    use domain::secrets::{SecretRef, SecretValue};
+    use domain::{AgentId, OperationId, Timestamp, Uuid};
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore,
+        InMemoryOperationStore,
+    };
+    use crate::ports::HistoryQuery;
+
+    fn alias() -> RepositoryAlias {
+        RepositoryAlias::parse("demo").expect("an alias")
+    }
+
+    fn config(maintenance: Maintenance) -> AgentConfig {
+        let repository = RepositoryConfig {
+            locations: Default::default(),
+            id: None,
+            settings: RepositorySettings {
+                repository: "/srv/demo/repo".to_owned(),
+                repo_hot: None,
+                password: SecretRef::Inline(SecretValue::new("demo-password")),
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+            },
+            maintenance,
+            group_by: GroupBy::default(),
+            hooks: Hooks::default(),
+        };
+        AgentConfig::new(
+            AgentSettings::default(),
+            Hooks::default(),
+            BTreeMap::from([(alias(), repository)]),
+            Vec::new(),
+        )
+        .expect("a valid configuration")
+    }
+
+    /// A check assessed while this agent maintained the repository.
+    fn assessed() -> MaintenanceAssessment {
+        MaintenanceAssessment {
+            operation: OperationId::from_uuid(Uuid::from_u128(1)),
+            alias: alias(),
+            job: Job::Check(CheckJob {
+                repository: RepositoryAccess {
+                    repository: "/srv/demo/repo".to_owned(),
+                    repo_hot: None,
+                    password: SecretValue::new("demo-password"),
+                    options: BTreeMap::new(),
+                    options_hot: BTreeMap::new(),
+                    options_cold: BTreeMap::new(),
+                    secrets: Vec::new(),
+                    id: Some(RepositoryId::parse(&"07".repeat(32)).expect("a repository ID")),
+                    entry: None,
+                },
+                read_data: false,
+            }),
+            partition: None,
+            other_hosts: OtherHosts::default(),
+            secret_warnings: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_start_waits_for_a_change_of_the_configuration_and_is_refused_once_it_gave_maintenance_up()
+     {
+        let configs = Arc::new(InMemoryConfigStore::new());
+        configs
+            .save(&config(Maintenance::Local))
+            .await
+            .expect("the configuration saves");
+        let writes: Arc<ConfigWrites> = Arc::default();
+        let store = Arc::new(InMemoryOperationStore::new());
+        let clock = Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH));
+        let use_case = RunMaintenance::new(
+            Arc::new(crate::fakes::SimulatedEngine::new(clock.clone())),
+            clock,
+            store.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            configs.clone(),
+            Arc::clone(&writes),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        );
+        // A change of who maintains the repository, under the lock as every
+        // write of the configuration is.
+        let writing = writes.lock().await;
+        let mut start = Box::pin(use_case.start(assessed()));
+        assert!(
+            (&mut start).now_or_never().is_none(),
+            "the start waits for the change of the configuration to end"
+        );
+        configs
+            .save(&config(Maintenance::None))
+            .await
+            .expect("the configuration saves");
+        drop(writing);
+        assert_eq!(start.await.err(), Some(MaintenanceError::NotOwner));
+        let logged = store
+            .list(&HistoryQuery::default())
+            .await
+            .expect("the log answers");
+        assert!(
+            logged.operations.is_empty(),
+            "nothing was stored: {:?}",
+            logged.operations
         );
     }
 }

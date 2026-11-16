@@ -1,7 +1,9 @@
 //! Steps for `features/maintenance/owner.feature`: a forget, a prune, a check
 //! and an adoption, and the preview of each, asked of a repository this agent
-//! doesn't maintain, against the scripted engine of the forget steps.
+//! doesn't maintain, against the scripted engine of the forget steps, and a
+//! run assessed before maintenance from this agent was turned off.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use cucumber::{given, then, when};
@@ -12,6 +14,7 @@ use super::Agent;
 use super::forget_steps::{assess_and_start, use_case};
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceError, MaintenanceKind};
 use app::ports::{HistoryQuery, OperationStore};
+use app::repositories::ChangeMaintainer;
 
 fn alias() -> RepositoryAlias {
     RepositoryAlias::parse("demo").expect("a repository alias")
@@ -98,4 +101,25 @@ async fn log_empty(agent: &mut Agent) {
         "nothing was written to the log: {:?}",
         page.operations
     );
+}
+
+#[when("maintenance of the repository from this agent is turned off")]
+async fn turned_off(agent: &mut Agent) {
+    let change = ChangeMaintainer::new(
+        agent.forget.store(),
+        Arc::clone(&agent.store) as _,
+        Arc::default(),
+    );
+    let now = change
+        .change(&alias(), false)
+        .await
+        .expect("nothing runs on the repository, so maintenance is turned off");
+    assert_eq!(now, Maintenance::None);
+}
+
+#[when("the assessed forget starts")]
+async fn assessed_starts(agent: &mut Agent) {
+    let assessment = agent.forget.take_assessed().expect("a forget was assessed");
+    let started = use_case(agent).start(assessment).await;
+    agent.forget.set_refused(started.err());
 }

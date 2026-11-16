@@ -29,6 +29,8 @@ mod locations_steps;
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
 
+#[path = "steps/maintainer.rs"]
+mod maintainer_steps;
 #[path = "steps/operation.rs"]
 mod operation_steps;
 
@@ -107,6 +109,7 @@ struct Agent {
     updates: updates_steps::UpdatesWorld,
     restore: restore_steps::RestoreWorld,
     recent_log: recent_log_steps::RecentLogWorld,
+    maintainer: maintainer_steps::MaintainerWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -158,6 +161,7 @@ impl Agent {
             stats: Default::default(),
             updates: Default::default(),
             recent_log: Default::default(),
+            maintainer: Default::default(),
         }
     }
 

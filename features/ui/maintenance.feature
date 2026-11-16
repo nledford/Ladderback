@@ -6,8 +6,10 @@ Feature: Maintenance of a repository on the Snapshots page
   each reviewed in a dialog before they run, and nothing changes until the
   review is confirmed. The journeys use the keyboard alone, against a daemon
   this run started with a demo plan and a scratch repository, so every
-  backup, forget and prune they start is real. Unmanaged history and
-  cancelling a running maintenance are not tried here.
+  backup, forget and prune they start is real. Maintenance from this agent
+  is turned on or off on the same page, each after a dialog that says what
+  it means. Unmanaged history and cancelling a running maintenance are not
+  tried here.
 
   Scenario: The snapshots page groups a repository's history under its plan
     Given a demo plan "home" with a tiny scratch repository
@@ -28,11 +30,66 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Enter
     Then the page shows the section heading "Orphaned history"
     And the page lists 2 snapshots
-    And the main content shows the line "This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans. To maintain it from this agent, set maintenance = \"local\" in the repository's entry in the configuration file."
+    And the main content shows the line "This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans."
     And the page offers no button "Forget snapshots"
     And the page offers no button "Prune unused data"
     And the page offers no button "Check the repository"
     And the page offers no adoption button into the plan "away"
+
+  Scenario: Maintenance from this agent is turned on after a warning that only one place may maintain a repository
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the repository "demo" has no maintenance setting
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Maintain from this agent"
+    And I press Enter
+    Then the dialog "Maintain demo from this agent" opens with focus inside it
+    And focus is on the button "Cancel"
+    And the dialog "Maintain demo from this agent" says "Only one place may maintain a repository"
+    When I press Escape
+    Then the dialog "Maintain demo from this agent" is closed
+    And focus is on the button "Maintain from this agent"
+    And the page offers no button "Forget snapshots"
+    When I press Enter
+    And I press Tab until focus is on the button "Turn on maintenance"
+    And I press Enter
+    Then the dialog "Maintain demo from this agent" is closed
+    And the polite region comes to contain "This agent now maintains demo."
+    And the page offers the button "Forget snapshots"
+    And the page offers the button "Stop maintaining from this agent"
+
+  Scenario: Maintenance from this agent is turned off after saying what stops
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Stop maintaining from this agent"
+    And I press Enter
+    Then the dialog "Stop maintaining demo from this agent" opens with focus inside it
+    And focus is on the button "Cancel"
+    And the dialog "Stop maintaining demo from this agent" says "nothing removes old snapshots until another place maintains it"
+    When I press Tab until focus is on the button "Turn off maintenance"
+    And I press Enter
+    Then the dialog "Stop maintaining demo from this agent" is closed
+    And the polite region comes to contain "This agent no longer maintains demo."
+    And the main content shows the line "This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans."
+    And the page offers no button "Forget snapshots"
+    And the page offers the button "Maintain from this agent"
+
+  Scenario: The dialog that turns maintenance on has no accessibility violations
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the repository "demo" has no maintenance setting
+    When I open the address "/snapshots"
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Maintain from this agent"
+    And I press Enter
+    Then the dialog "Maintain demo from this agent" opens with focus inside it
+    And the page has no accessibility violations
 
   Scenario: A forget is reviewed before it runs and changes nothing until it is confirmed
     Given a demo plan "home" with a tiny scratch repository

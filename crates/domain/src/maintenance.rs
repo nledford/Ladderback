@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::execution::plan_tags;
 use crate::planning::{AgentSettings, Maintenance, Plan, RetentionPolicy};
-use crate::{AgentId, Offset, PlanId, SnapshotId, Timestamp};
+use crate::{AgentId, Offset, OperationId, PlanId, SnapshotId, Timestamp};
 
 mod other_hosts;
 #[cfg(test)]
@@ -580,6 +580,47 @@ impl Ownership {
     pub fn owned_here(request: Maintenance) -> bool {
         matches!(request, Maintenance::Local)
     }
+
+    /// What turning maintenance from this agent on (`maintain_here`) or
+    /// off does to a repository whose entry asks for `request` (§7.3).
+    /// A `hub` request is replaced when turned on and left as it is when
+    /// turned off: this agent doesn't maintain it either way.
+    pub fn change(request: Maintenance, maintain_here: bool) -> OwnershipChange {
+        match (Self::owned_here(request), maintain_here) {
+            (false, true) => OwnershipChange::TakeOver,
+            (true, false) => OwnershipChange::GiveUp,
+            (true, true) | (false, false) => OwnershipChange::Unchanged,
+        }
+    }
+
+    /// The request of a repository this agent gives up maintaining: `none`,
+    /// unless `running`, a maintenance operation of it running here, still
+    /// runs. Then the entry keeps `local`, and the refusal names that
+    /// operation: once it was given up, the person could start another on
+    /// another machine while this one still runs, two maintainers at once
+    /// (I1).
+    pub fn give_up(running: Option<OperationId>) -> Result<Maintenance, OperationId> {
+        match running {
+            Some(running) => Err(running),
+            None => Ok(Maintenance::None),
+        }
+    }
+}
+
+/// What turning maintenance from this agent on or off does to a
+/// repository's request (§7.3, I1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnershipChange {
+    /// The request already says what was asked: nothing is written.
+    Unchanged,
+    /// This agent takes over: the request becomes `local`. Without a hub
+    /// nothing can tell whether another agent maintains the repository, so
+    /// the person who asks it has been told that only one place may, as
+    /// when connecting it.
+    TakeOver,
+    /// This agent gives up: the request becomes `none`, once
+    /// [`Ownership::give_up`] allows it.
+    GiveUp,
 }
 
 #[cfg(test)]
@@ -1429,5 +1470,46 @@ mod tests {
         assert!(Ownership::owned_here(Maintenance::Local));
         assert!(!Ownership::owned_here(Maintenance::None));
         assert!(!Ownership::owned_here(Maintenance::Hub));
+    }
+
+    #[test]
+    fn turning_maintenance_on_takes_over_a_repository_not_maintained_here() {
+        assert_eq!(
+            Ownership::change(Maintenance::None, true),
+            OwnershipChange::TakeOver
+        );
+        assert_eq!(
+            Ownership::change(Maintenance::Hub, true),
+            OwnershipChange::TakeOver
+        );
+        assert_eq!(
+            Ownership::change(Maintenance::Local, true),
+            OwnershipChange::Unchanged
+        );
+    }
+
+    #[test]
+    fn turning_maintenance_off_gives_up_only_a_repository_maintained_here() {
+        assert_eq!(
+            Ownership::change(Maintenance::Local, false),
+            OwnershipChange::GiveUp
+        );
+        // A hub request is left as it is: this agent doesn't maintain it
+        // either way.
+        assert_eq!(
+            Ownership::change(Maintenance::Hub, false),
+            OwnershipChange::Unchanged
+        );
+        assert_eq!(
+            Ownership::change(Maintenance::None, false),
+            OwnershipChange::Unchanged
+        );
+    }
+
+    #[test]
+    fn maintenance_is_given_up_only_while_none_of_it_runs_here() {
+        assert_eq!(Ownership::give_up(None), Ok(Maintenance::None));
+        let running = OperationId::from_uuid(crate::Uuid::from_u128(7));
+        assert_eq!(Ownership::give_up(Some(running)), Err(running));
     }
 }

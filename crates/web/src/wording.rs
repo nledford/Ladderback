@@ -344,6 +344,41 @@ pub(crate) fn unmanaged_stuck() -> Words {
     words(msg::UI_UNMANAGED_NO_PLAN, Vec::new())
 }
 
+/// What turning maintenance of a repository from this agent on or off says:
+/// the button that asks for it, the dialog that says what it means, and what
+/// is announced once it is done (§7.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Switch {
+    pub(crate) button: Words,
+    pub(crate) title: Words,
+    pub(crate) body: Words,
+    pub(crate) confirm: Words,
+    pub(crate) done: Words,
+}
+
+/// What the switch of the repository `alias` says while this agent
+/// `maintained` it or not: the one offers to stop, the other to start.
+pub(crate) fn switch(maintained: bool, alias: &str) -> Switch {
+    let named = || vec![("alias", text(alias))];
+    if maintained {
+        Switch {
+            button: words(msg::UI_MAINTAINER_OFF, Vec::new()),
+            title: words(msg::UI_MAINTAINER_OFF_TITLE, named()),
+            body: words(msg::UI_MAINTAINER_OFF_BODY, named()),
+            confirm: words(msg::UI_MAINTAINER_OFF_CONFIRM, Vec::new()),
+            done: words(msg::UI_MAINTAINER_OFF_DONE, named()),
+        }
+    } else {
+        Switch {
+            button: words(msg::UI_MAINTAINER_ON, Vec::new()),
+            title: words(msg::UI_MAINTAINER_ON_TITLE, named()),
+            body: words(msg::UI_MAINTAINER_ON_BODY, named()),
+            confirm: words(msg::UI_MAINTAINER_ON_CONFIRM, Vec::new()),
+            done: words(msg::UI_MAINTAINER_ON_DONE, named()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1104,5 +1139,44 @@ mod tests {
                 "{kind:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_switch_offers_to_start_maintaining_a_repository_not_maintained_here_and_to_stop_one_that_is()
+     {
+        let read = |switch: Switch| {
+            (
+                written(&switch.button),
+                written(&switch.title),
+                written(&switch.confirm),
+                written(&switch.done),
+            )
+        };
+        assert_eq!(
+            read(switch(false, "demo")),
+            (
+                "Maintain from this agent".to_owned(),
+                "Maintain demo from this agent".to_owned(),
+                "Turn on maintenance".to_owned(),
+                "This agent now maintains demo.".to_owned(),
+            )
+        );
+        assert_eq!(
+            read(switch(true, "demo")),
+            (
+                "Stop maintaining from this agent".to_owned(),
+                "Stop maintaining demo from this agent".to_owned(),
+                "Turn off maintenance".to_owned(),
+                "This agent no longer maintains demo.".to_owned(),
+            )
+        );
+        assert!(
+            written(&switch(false, "demo").body)
+                .contains("Only one place may maintain a repository")
+        );
+        assert!(
+            written(&switch(true, "demo").body)
+                .contains("nothing removes old snapshots until another place maintains it")
+        );
     }
 }

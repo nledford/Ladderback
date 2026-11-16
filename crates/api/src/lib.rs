@@ -262,11 +262,13 @@ pub enum ErrorCode {
     /// A request's body is larger than the most its route class takes
     /// (§10.1), so the route never ran. The argument `limit` is that most.
     BodyTooLarge,
-    /// Another maintenance operation already runs on the repository (I7):
-    /// nothing ran. The argument `operation` names the one that holds it.
+    /// A maintenance operation is running on this agent, so nothing was done:
+    /// one on the repository, for a maintenance run (I7), or possibly one on
+    /// another repository, for turning maintenance off (I1). The argument
+    /// `operation` names it.
     MaintenanceBusy,
     /// This agent doesn't maintain the repository: its entry doesn't ask for
-    /// `local` (I1, §7.3), so nothing was asked of it. The argument `alias`
+    /// `local` (I1, §7.3), so nothing in it was changed. The argument `alias`
     /// names it.
     MaintenanceNotOwner,
     /// The plan's retention policy is set and would keep nothing, so the
@@ -4156,6 +4158,17 @@ pub struct ConnectRepositoryDto {
     pub maintain_here: bool,
     #[serde(default)]
     pub keep_in_keyring: bool,
+}
+
+/// `PUT /api/v1/repositories/{alias}/maintainer`: turn maintenance of a
+/// saved repository from this agent on (`maintain-here: true`, its entry
+/// then asks for `local`) or off (`none`), §7.3. Answers 204; turning it off
+/// while a forget, prune, check or adoption of it runs here is refused with
+/// `maintenance-busy` (I1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MaintainerDto {
+    pub maintain_here: bool,
 }
 
 /// `POST /api/v1/repositories/_init`: create a repository where there is

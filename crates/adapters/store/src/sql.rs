@@ -57,6 +57,21 @@ pub(crate) const FIND_RUNNING_MAINTENANCE: &str = concat!(
     "AND kind IN ('forget', 'adopt', 'prune', 'check') AND id <> ? LIMIT 1"
 );
 
+/// The ID of the maintenance operation running on a repository, the one that
+/// holds its I7 slot. Parameter: the repository. The literals are those of
+/// the `one_maintenance_per_repo` index, so it serves the lookup.
+pub(crate) const FIND_MAINTENANCE_RUNNING_ON: &str = concat!(
+    "SELECT id FROM operations WHERE repo_uuid = ? AND status = 'running' ",
+    "AND kind IN ('forget', 'adopt', 'prune', 'check') LIMIT 1"
+);
+
+/// The ID of a maintenance operation running on any repository that names
+/// one, as the slot is held only by those.
+pub(crate) const FIND_ANY_MAINTENANCE_RUNNING: &str = concat!(
+    "SELECT id FROM operations WHERE repo_uuid IS NOT NULL AND status = 'running' ",
+    "AND kind IN ('forget', 'adopt', 'prune', 'check') LIMIT 1"
+);
+
 /// Parameter: the operation's ID.
 pub(crate) const GET_OPERATION: &str = select_operations!(" WHERE id = ?");
 

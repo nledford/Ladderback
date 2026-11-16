@@ -272,6 +272,13 @@ impl OperationStore for Journal {
     async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
         self.inner.ever_succeeded(plan).await
     }
+
+    async fn running_maintenance(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        self.inner.running_maintenance(repository).await
+    }
 }
 
 /// An operation log that refuses its first `refuse` writes, then works.
@@ -336,6 +343,13 @@ impl OperationStore for Flaky {
     async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
         self.inner.ever_succeeded(plan).await
     }
+
+    async fn running_maintenance(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        self.inner.running_maintenance(repository).await
+    }
 }
 
 /// An operation log whose writes, from the `passes`th on, never answer: a
@@ -390,6 +404,13 @@ impl OperationStore for Stalled {
 
     async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
         self.inner.ever_succeeded(plan).await
+    }
+
+    async fn running_maintenance(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        self.inner.running_maintenance(repository).await
     }
 }
 
@@ -1430,6 +1451,13 @@ impl OperationStore for Slow {
 
     async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
         self.inner.ever_succeeded(plan).await
+    }
+
+    async fn running_maintenance(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        self.inner.running_maintenance(repository).await
     }
 }
 

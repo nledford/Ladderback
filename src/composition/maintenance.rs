@@ -34,6 +34,7 @@ impl PlanRunner {
             self.resolve.as_ref().clone(),
             Arc::clone(&self.retention),
             Arc::clone(&self.config),
+            Arc::clone(&self.writes),
             self.agent_id,
             platform::hostname(),
             Arc::new(engine::RusticSources),

@@ -85,6 +85,12 @@ pub(crate) fn start_path(alias: &str) -> String {
     format!("/api/v1/repositories/{alias}/maintenance")
 }
 
+/// The route that turns maintenance of a repository from this agent on or
+/// off.
+pub(crate) fn maintainer_path(alias: &str) -> String {
+    format!("/api/v1/repositories/{alias}/maintainer")
+}
+
 /// The route that reads a run's operation: its status says how far it is.
 pub(crate) fn operation_path(operation: &str) -> String {
     format!("/api/v1/operations/{operation}")
@@ -1020,13 +1026,17 @@ mod tests {
     }
 
     #[test]
-    fn the_three_routes_are_under_the_repository() {
+    fn the_repository_routes_are_under_the_repository() {
         assert_eq!(groups_path("main"), "/api/v1/repositories/main/groups");
         assert_eq!(
             preview_path("main"),
             "/api/v1/repositories/main/maintenance/preview"
         );
         assert_eq!(start_path("main"), "/api/v1/repositories/main/maintenance");
+        assert_eq!(
+            maintainer_path("main"),
+            "/api/v1/repositories/main/maintainer"
+        );
     }
 
     #[test]

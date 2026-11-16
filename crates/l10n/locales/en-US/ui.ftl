@@ -920,8 +920,8 @@ ui-maintenance-heading = Maintenance of { $alias }
 # What the maintenance section says before its buttons.
 ui-maintenance-body = Each of these shows what it would do first. Nothing changes until you confirm.
 
-# What the maintenance section says instead, with no buttons, of a repository this agent does not maintain: its entry in the configuration file asks for maintenance by the hub or by nothing. What the person types is a string literal: keep it one, untranslated.
-ui-maintenance-elsewhere = This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans. To maintain it from this agent, set { "maintenance = \"local\"" } in the repository's entry in the configuration file.
+# What the maintenance section says instead, with no buttons but the one that turns maintenance from this agent on, of a repository this agent does not maintain: its entry asks for maintenance by the hub or by nothing.
+ui-maintenance-elsewhere = This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans.
 
 # The button that reviews a forget: the snapshots the plans' retention no longer keeps.
 ui-maintenance-forget = Forget snapshots
@@ -931,6 +931,45 @@ ui-maintenance-prune = Prune unused data
 
 # The button that reviews a check of the repository.
 ui-maintenance-check = Check the repository
+
+# The button after a repository's maintenance that asks this agent to maintain it, which first opens a dialog that says what that means.
+ui-maintainer-on = Maintain from this agent
+
+# The button after a repository's maintenance that asks this agent to stop maintaining it, which first opens a dialog that says what stops.
+ui-maintainer-off = Stop maintaining from this agent
+
+# The title of the dialog that asks before this agent maintains a repository.
+# $alias (text): the repository's alias, such as demo.
+ui-maintainer-on-title = Maintain { $alias } from this agent
+
+# What that dialog says: what maintaining means, and why to leave it off. Nothing can tell whether another agent maintains the repository, so the person is told that only one place may.
+# $alias (text): the repository's alias, such as demo.
+ui-maintainer-on-body = This agent will forget, prune and check { $alias }, and adopt history into its plans. Only one place may maintain a repository, so leave this off when another agent or the hub already does.
+
+# The button in that dialog that turns maintenance from this agent on.
+ui-maintainer-on-confirm = Turn on maintenance
+
+# The title of the dialog that asks before this agent stops maintaining a repository.
+# $alias (text): the repository's alias, such as demo.
+ui-maintainer-off-title = Stop maintaining { $alias } from this agent
+
+# What that dialog says: what stops, and that backups go on while nothing removes old snapshots.
+# $alias (text): the repository's alias, such as demo.
+ui-maintainer-off-body = This agent will stop forgetting, pruning and checking { $alias }, and adopting history into its plans. Backups go on, but nothing removes old snapshots until another place maintains it.
+
+# The button in that dialog that turns maintenance from this agent off.
+ui-maintainer-off-confirm = Turn off maintenance
+
+# Said in either dialog while the daemon saves the change.
+ui-maintainer-saving = Saving the change…
+
+# Announced once this agent maintains the repository.
+# $alias (text): the repository's alias, such as demo.
+ui-maintainer-on-done = This agent now maintains { $alias }.
+
+# Announced once this agent no longer maintains the repository.
+# $alias (text): the repository's alias, such as demo.
+ui-maintainer-off-done = This agent no longer maintains { $alias }.
 
 # What the maintenance section shows while a review is being prepared.
 ui-maintenance-preparing = Preparing the review…

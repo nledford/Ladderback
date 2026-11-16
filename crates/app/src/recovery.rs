@@ -232,6 +232,13 @@ mod tests {
             self.0.ever_succeeded(plan).await
         }
 
+        async fn running_maintenance(
+            &self,
+            repository: Option<&domain::RepositoryId>,
+        ) -> Result<Option<domain::OperationId>, StoreError> {
+            self.0.running_maintenance(repository).await
+        }
+
         async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {
             self.0.recover(reason).await
         }

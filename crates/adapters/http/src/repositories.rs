@@ -49,6 +49,16 @@ pub trait Repositories: Send + Sync {
     /// under `alias`, each as a job's choice would, and answers each one's
     /// outcome (decision 80). Records nothing.
     async fn test_saved(&self, alias: String) -> Result<api::LocationsTestDto, RepositoriesError>;
+
+    /// Turns maintenance of the repository the configuration holds under
+    /// `alias` from this agent on or off, writing only that setting of its
+    /// entry (§7.3). Turning it off while a maintenance operation of it runs
+    /// here is refused (I1).
+    async fn change_maintainer(
+        &self,
+        alias: String,
+        request: api::MaintainerDto,
+    ) -> Result<(), RepositoriesError>;
 }
 
 /// A refusal for a secret that couldn't be resolved or a template that isn't
@@ -74,6 +84,9 @@ pub enum RepositoriesError {
     InvalidBody,
     /// The configuration holds no repository under `alias`.
     Unknown { alias: String },
+    /// A maintenance operation of the repository, `operation`, runs here, so
+    /// this agent keeps maintaining it until that one ends (I1).
+    MaintenanceBusy { operation: String },
     /// The alias is not a name.
     AliasInvalid,
     /// The configuration already holds a repository under the alias.
@@ -184,6 +197,22 @@ pub(crate) async fn test_saved_repository(
     }
 }
 
+/// Turns maintenance of the repository the configuration holds under the
+/// path's alias from this agent on or off: 204, with nothing to say.
+pub(crate) async fn change_maintainer(
+    State(state): State<AppState>,
+    Path(alias): Path<String>,
+    body: Result<Json<api::MaintainerDto>, JsonRejection>,
+) -> Response {
+    let Ok(Json(request)) = body else {
+        return refusal(&RepositoriesError::InvalidBody);
+    };
+    match state.repositories.change_maintainer(alias, request).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => refusal(&error),
+    }
+}
+
 /// The refusal for a secret: 422, like a setting the daemon can't take.
 pub(crate) fn secret_refusal(secret: &SecretRefusal) -> Response {
     refused(
@@ -266,6 +295,12 @@ fn answer(error: &RepositoriesError) -> (StatusCode, api::ErrorDto) {
             StatusCode::NOT_FOUND,
             ErrorCode::RepositoryNotFound,
             Vec::new(),
+            None,
+        ),
+        RepositoriesError::MaintenanceBusy { operation } => refused(
+            StatusCode::CONFLICT,
+            ErrorCode::MaintenanceBusy,
+            text("operation", operation),
             None,
         ),
         RepositoriesError::PathRelative { field } => refused(

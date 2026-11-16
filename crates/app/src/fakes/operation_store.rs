@@ -86,6 +86,22 @@ impl OperationStore for InMemoryOperationStore {
         Ok(Start::Started)
     }
 
+    async fn running_maintenance(
+        &self,
+        repository: Option<&domain::RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        Ok(self
+            .stored()
+            .values()
+            .map(|detail| &detail.record)
+            .find(|record| {
+                record
+                    .maintaining()
+                    .is_some_and(|held| repository.is_none_or(|asked| asked == held))
+            })
+            .map(|record| record.id))
+    }
+
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
         Ok(self.stored().get(&id).cloned())
     }

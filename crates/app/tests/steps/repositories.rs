@@ -140,6 +140,18 @@ impl Default for RepositoriesWorld {
     }
 }
 
+impl RepositoriesWorld {
+    /// The configuration the scenarios' use cases save to.
+    pub fn config(&self) -> Arc<InMemoryConfigStore> {
+        self.store.clone()
+    }
+
+    /// The settings a scenario's repository is saved with.
+    pub fn settings(&self) -> &RepositorySettings {
+        &self.settings
+    }
+}
+
 fn id() -> RepositoryId {
     RepositoryId::parse(&"a".repeat(64)).expect("a repository ID")
 }

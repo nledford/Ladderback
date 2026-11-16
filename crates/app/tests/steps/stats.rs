@@ -367,6 +367,7 @@ async fn started_check(agent: &Agent) -> (RunMaintenance, PreparedMaintenance) {
         ResolveRepository::new(Arc::new(FakeSecrets::default())),
         Arc::new(FakeRetention),
         agent.forget.store(),
+        Arc::default(),
         self_agent(),
         MACHINE.to_owned(),
         Arc::new(FakeSources),

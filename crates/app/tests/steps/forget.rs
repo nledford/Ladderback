@@ -189,6 +189,11 @@ impl ForgetWorld {
         self.refused.take()
     }
 
+    /// Takes the run a scenario assessed and has not started.
+    pub fn take_assessed(&mut self) -> Option<MaintenanceAssessment> {
+        self.assessed.take()
+    }
+
     /// Releases the job the engine holds, whether or not the run has reached
     /// the hold yet: the hold takes the release when it gets there. A release
     /// no hold takes (a prune's or a check's) stays for the scenario's next
@@ -684,6 +689,7 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
                     _ => Arc::new(FakeRetention),
                 },
                 agent.forget.store.clone(),
+                Arc::default(),
                 self_agent(),
                 MACHINE.to_owned(),
                 Arc::new(ScriptedSources {

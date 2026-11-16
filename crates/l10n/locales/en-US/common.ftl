@@ -352,10 +352,11 @@ error-operation-unknown = There is no operation { $operation }. List the operati
 error-operation-not-running = Operation { $operation } has already ended, so there is nothing to cancel.
 
 
-# Another maintenance operation already runs on the repository, so the
-# request was refused and nothing ran.
+# A maintenance operation is running on this agent, so the request was
+# refused and nothing was done. For a maintenance run it is this
+# repository's; for turning maintenance off it may be another repository's.
 # $operation (text): the running operation's ID.
-error-maintenance-busy = Operation { $operation } is already maintaining this repository, and one repository runs one maintenance operation at a time. Wait for it to end, then ask again.
+error-maintenance-busy = Maintenance operation { $operation } is running on this agent, so nothing was done. Wait for it to end, then ask again.
 
 # The confirmation a restore asks for first was not right: the admin
 # password with sign-in on, the snapshot's short ID with sign-in off.
@@ -384,11 +385,13 @@ error-restore-hub-not-allowed = This agent doesn't take restores from the hub, s
 # set restore-folder, so nothing ran.
 error-restore-folder-unset = This agent has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the agent's configuration file to a folder for restores, then try again.
 
-# This agent doesn't maintain the repository: its entry doesn't set
-# maintenance to local, so a forget, a prune, a check or an adoption, or the
-# preview of one, was refused and nothing was asked of the repository.
+# This agent doesn't maintain the repository: its entry doesn't ask this
+# agent to maintain it, so a forget, a prune, a check or an adoption, or the
+# preview of one, was refused and nothing in the repository was changed. The
+# refusal can come after the repository was read, when maintenance from this
+# agent was turned off meanwhile.
 # $alias (text): the repository's alias, such as demo.
-error-maintenance-not-owner = This agent does not maintain the repository { $alias }, so nothing was asked of it. To maintain it from this agent, set { "maintenance = \"local\"" } in its entry in the configuration file.
+error-maintenance-not-owner = This agent does not maintain the repository { $alias }, so nothing in it was changed. To maintain it from this agent, turn its maintenance on from the Snapshots page.
 
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.
