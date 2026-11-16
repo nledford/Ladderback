@@ -35,7 +35,7 @@ pub(crate) enum Pseudo {
 
 impl Pseudo {
     /// Every pseudolocale this build has: none without the `pseudo` feature.
-    const ALL: &[Self] = &[
+    pub(crate) const ALL: &[Self] = &[
         #[cfg(feature = "pseudo")]
         Self::Accented,
         #[cfg(feature = "pseudo")]

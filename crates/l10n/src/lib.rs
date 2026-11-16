@@ -49,6 +49,7 @@ mod format;
 ))]
 mod icu;
 mod id;
+mod languages;
 mod locale;
 mod localizer;
 pub mod msg;
@@ -70,5 +71,6 @@ pub fn viewer_zone() -> Option<api::IanaZone> {
 }
 
 pub use id::MessageId;
+pub use languages::{Language, languages};
 pub use locale::{BrowserLanguages, Direction, PosixEnv};
 pub use localizer::{Formatted, Localizer};

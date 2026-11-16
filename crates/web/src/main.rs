@@ -64,6 +64,9 @@ mod full_disk_access;
 mod full_disk_access_warning;
 #[cfg(feature = "gallery")]
 mod gallery;
+// What Settings' Language section offers, shows chosen and keeps, decided on
+// the host; `settings/language.rs` is its glue.
+mod language_choice;
 // The live regions' glue around the announcer.
 mod live;
 // What the admin password's and the API tokens' sections of Settings

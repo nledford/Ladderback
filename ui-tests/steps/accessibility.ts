@@ -74,6 +74,12 @@ When("I press the down arrow until focus is on the {word} {string}", async funct
   await pressUntilFocusIsOn(this, "ArrowDown", role, name);
 });
 
+// WebKit doesn't wrap from the last choice to the first, so a walk to an
+// earlier choice goes up rather than down past the end.
+When("I press the up arrow until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
+  await pressUntilFocusIsOn(this, "ArrowUp", role, name);
+});
+
 Then("focus is on the radio {string}", async function (this: BrowserWorld, name: string) {
   const radio = journey(this.page).byRole("radio", { name: namePattern(name) });
   assert.equal(await radio.count(), 1, `the radio "${name}" is not on the page once`);

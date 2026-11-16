@@ -41,6 +41,7 @@ fn browser_languages() -> BrowserLanguages {
         .collect();
     BrowserLanguages {
         requested,
+        chosen: None,
         languages,
     }
 }
