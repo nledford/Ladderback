@@ -110,6 +110,11 @@ test("a translation or a source of a message English no longer has is listed apa
   assert.deepEqual(found.unknown, ["gone", "left"]);
 });
 
+test("a term only the translation has is the language's own, and isn't listed", () => {
+  const found = listing("ja", entries("greeting = Hello\n"), ids("greeting", "-snapshot", "left"), new Map());
+  assert.deepEqual(found.unknown, ["left"]);
+});
+
 test("the listing gives each stale message's English then and now", () => {
   const found = listing("de", entries("greeting = Hello there\n"), ids("greeting"), new Map([["greeting", HELLO]]));
   const then = (id: string, hash: string): string | null => (id === "greeting" && hash === HELLO ? "greeting = Hello" : null);
@@ -167,6 +172,14 @@ test("accepting a message English doesn't have, or the language doesn't translat
   const source = entries("greeting = Hello\n");
   assert.equal(accepting("de", source, ids("greeting"), new Map(), ["welcome"]), "de: en-US has no message welcome");
   assert.equal(accepting("de", source, ids(), new Map(), ["greeting"]), "de: greeting isn't translated");
+});
+
+test("accepting a term only the translation has records nothing, and refuses nothing", () => {
+  const source = entries("greeting = Hello\n");
+  const result = accepting("ja", source, ids("greeting", "-snapshot"), new Map(), ["-snapshot", "greeting"]);
+  assert.ok(typeof result !== "string", String(result));
+  assert.deepEqual(result.accepted, ["greeting"]);
+  assert.deepEqual(result.sources, new Map([["greeting", HELLO]]));
 });
 
 test("accepting every message takes the translated ones that aren't current, and keeps the rest", () => {

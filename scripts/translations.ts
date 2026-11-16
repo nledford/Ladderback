@@ -15,16 +15,19 @@
 //   was translated from, found in the git history of locales/en-US, and the
 //   English now.
 //
-// Translations and lines of messages en-US no longer has are listed apart.
+// Translations and lines of messages en-US no longer has are listed apart,
+// except a term only the language has (`-snapshot` in ja): that one is the
+// language's own, with no English to be translated from.
 //
 // Usage:
 //   node scripts/translations.ts list [<tag>...] [--locales <dir>]
 //   node scripts/translations.ts accept <tag> (<id>... | --all) [--locales <dir>]
 //
 // `list` exits 0 whatever it finds; `accept` writes the lines of the
-// messages named (`--all`: every translated message that isn't current) and
-// refuses, exiting 1, a message en-US lacks or the language doesn't
-// translate. Both exit 1 on a catalog folder or sources.txt they can't read.
+// messages named (`--all`: every translated message that isn't current),
+// skips a term that is the language's own, and refuses, exiting 1, a message
+// en-US lacks or the language doesn't translate. Both exit 1 on a catalog
+// folder or sources.txt they can't read.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -141,8 +144,15 @@ export function listing(
     else found.current += 1;
   }
   const known = new Set(english.map((entry) => entry.id));
-  found.unknown = [...new Set([...translated, ...sources.keys()])].filter((id) => !known.has(id)).sort();
+  found.unknown = [...new Set([...translated, ...sources.keys()])]
+    .filter((id) => !known.has(id) && !ownTerm(id, translated))
+    .sort();
   return found;
+}
+
+/** Whether `id`, which en-US lacks, is a term of the language's own. */
+function ownTerm(id: string, translated: ReadonlySet<string>): boolean {
+  return id.startsWith("-") && translated.has(id);
 }
 
 const indented = (text: string, by: string): string[] => text.split("\n").map((line) => (line === "" ? "" : by + line));
@@ -172,7 +182,8 @@ export function renderListing(
 }
 
 /** The sources after accepting `ids` (`"all"`: every translated message
- * that isn't current) in the language `tag`, or why they can't be. */
+ * that isn't current) in the language `tag`, or why they can't be. A term of
+ * the language's own is skipped: it has no English to record. */
 export function accepting(
   tag: string,
   english: readonly Entry[],
@@ -186,13 +197,16 @@ export function accepting(
       ? english.map((entry) => entry.id).filter((id) => translated.has(id) && sources.get(id) !== hashes.get(id))
       : ids;
   const next = new Map(sources);
+  const accepted: string[] = [];
   for (const id of chosen) {
     const hash = hashes.get(id);
+    if (hash === undefined && ownTerm(id, translated)) continue;
     if (hash === undefined) return `${tag}: ${SOURCE_TAG} has no message ${id}`;
     if (!translated.has(id)) return `${tag}: ${id} isn't translated`;
     next.set(id, hash);
+    accepted.push(id);
   }
-  return { sources: next, accepted: [...chosen] };
+  return { sources: next, accepted };
 }
 
 function git(dir: string, args: string[]): string | null {

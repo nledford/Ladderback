@@ -141,3 +141,20 @@ Feature: Keep a translation current
     When the owner accepts the German translation of "welcome"
     Then the command exits with status 1
     And standard error says "de: en-US has no message welcome"
+
+  Scenario: A term only the translation has is the language's own
+    Given the German catalog holds:
+      """
+      -hallo = Hallo
+      greeting = { -hallo }
+      farewell = Auf Wiedersehen
+          .title = Verlassen
+      """
+    When the owner accepts the German translation of "-hallo"
+    Then the command exits with status 0
+    And standard output is empty
+    When the owner lists the translations
+    Then the translations listed are:
+      """
+      de: 2 of 2 messages current
+      """
