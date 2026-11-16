@@ -307,7 +307,9 @@ try *args: build
 # `LADDERBACK_BIN` names another. A first argument that names one of
 # Playwright's engines (`chromium`, `firefox`, `webkit`) picks the browser, as
 # in `just test-ui webkit --name 'Sign in'`; without one, `LADDERBACK_UI_BROWSER`
-# picks it, and Chromium when that is unset. The rest go to cucumber-js.
+# picks it, and Chromium when that is unset. `LADDERBACK_UI_WORKERS` sets how
+# many scenarios run at once (3 when unset; 1 runs them one at a time). The rest
+# go to cucumber-js.
 [doc('Run the @ui scenarios in a browser engine (default chromium) against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]

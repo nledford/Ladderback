@@ -10,7 +10,7 @@
 // page when a step sends it, and only then.
 //
 // Only the daemon's answers are played. The page is the real one, served by the
-// run's own daemon, and a request this does not answer, such as a start or a
+// real daemon, and a request this does not answer, such as a start or a
 // cancel unless a step asked, goes on to that daemon.
 
 import type { BrowserContext, Route, WebSocketRoute } from "playwright";
@@ -85,7 +85,7 @@ export class ScriptedDaemon {
   /** The warnings this daemon adds to rows of the repositories list, by the
    *  repository's alias (`warnOfRepository`). */
   #repositoryWarnings = new Map<string, Warning[]>();
-  /** Whether the run's own daemon has ended every session (`endSessions`):
+  /** Whether the real daemon has ended every session (`endSessions`):
    *  the history is then that daemon's to answer, which refuses it, until
    *  the page signs in again; and how many readings it refused so. */
   #sessionsEnded = false;
@@ -163,7 +163,7 @@ export class ScriptedDaemon {
 
   /** Adds `warning` to the row of `alias` in the repositories list, as the
    *  daemon gives one when it notes something of that repository; the rest
-   *  of the list is the run's own daemon's answer, and a warning it already
+   *  of the list is the real daemon's answer, and a warning it already
    *  gives is not given twice. */
   warnOfRepository(alias: string, warning: Warning): void {
     this.#repositoryWarnings.set(alias, [...(this.#repositoryWarnings.get(alias) ?? []), warning]);
@@ -197,7 +197,7 @@ export class ScriptedDaemon {
       await route.fulfill({ json });
       if (open !== null && open === this.#stream) this.#readsSinceTheOpening += 1;
     });
-    // A sign-in that the run's own daemon accepts gives the history back to
+    // A sign-in that the real daemon accepts gives the history back to
     // this script.
     await context.route("**/api/v1/session", async (route) => {
       if (route.request().method() !== "POST" || !this.#sessionsEnded) return route.fallback();
@@ -298,14 +298,14 @@ export class ScriptedDaemon {
     return this.#streamsOpened;
   }
 
-  /** The run's own daemon has ended every session, as an admin password set
+  /** The real daemon has ended every session, as an admin password set
    *  anew does: the page's readings of the history go on to it, which refuses
    *  them, until the page signs in again. */
   endSessions(): void {
     this.#sessionsEnded = true;
   }
 
-  /** Waits until the run's own daemon has refused a reading of the history
+  /** Waits until the real daemon has refused a reading of the history
    *  since the sessions ended, or says it never was asked. */
   async untilAReadIsRefused(): Promise<void> {
     const end = Date.now() + STREAM_PATIENCE_MS;

@@ -1,6 +1,7 @@
-// Starts one real `ladderback serve` for the run and a fresh browser page per
-// scenario. The daemon must serve the web UI this checkout built, which the
-// run checks before its first scenario.
+// Starts one real `ladderback serve` for each worker of the run (one for the
+// run when its scenarios run one at a time; `cucumber.ts`) and a fresh browser
+// page per scenario. The daemon must serve the web UI this checkout built,
+// which each worker checks before its first scenario.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -247,9 +248,10 @@ export class BrowserWorld extends World {
    *  answer of the real daemon's that the step changes on its way. */
   contextRoutes: Array<(context: BrowserContext) => Promise<void>> = [];
   /** The daemon this scenario started, when its Given did; `null` shares the
-   *  run's own daemon. */
+   *  worker's shared daemon. */
   ownServer: OwnServer | null = null;
-  /** Where this scenario's pages are served from; `null` is the run's daemon. */
+  /** Where this scenario's pages are served from; `null` is the worker's
+   *  shared daemon. */
   baseUrl: string | null = null;
   /** What the page's scripts threw, so a step can say it threw nothing. */
   scriptErrors: string[] = [];

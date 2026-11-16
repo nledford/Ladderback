@@ -392,7 +392,14 @@ function runScenario(
     const ui = path.join(dir, "ui-tests");
     const config = existsSync(path.join(ui, "cucumber.ts")) ? ["--config", "cucumber.ts"] : [];
     result = run("node_modules/.bin/cucumber-js", [...config, "--name", regex], ui, {
-      env: { LADDERBACK_BIN: path.join(targetDir("first"), "debug", "ladderback"), LADDERBACK_UI_BROWSER: engine },
+      // One worker: the filter matches one scenario, or the few rows of an
+      // outline, and each further worker would start its own browser and
+      // daemon for them (§13.2).
+      env: {
+        LADDERBACK_BIN: path.join(targetDir("first"), "debug", "ladderback"),
+        LADDERBACK_UI_BROWSER: engine,
+        LADDERBACK_UI_WORKERS: "1",
+      },
       timeout: TEST_TIMEOUT_MS,
     });
   }
