@@ -117,13 +117,21 @@ impl Job {
         }
     }
 
-    /// Keeps `old` in the history, then replaces the file with `text`.
-    fn replace(&self, old: Option<&[u8]>, text: &str) -> Result<(), ConfigError> {
-        if let Some(old) = old {
-            files::keep(&self.path, old, self.clock.now())
-                .map_err(|error| self.unavailable(&error))?;
-        }
-        files::write(&self.path, text.as_bytes()).map_err(|error| self.unavailable(&error))
+    /// Keeps `old` in the history, its version naming `proposal` when a
+    /// proposal's apply writes the file, then replaces the file with
+    /// `text`; the version kept.
+    fn replace(
+        &self,
+        old: Option<&[u8]>,
+        text: &str,
+        proposal: Option<&ProposalId>,
+    ) -> Result<Option<String>, ConfigError> {
+        let kept = old
+            .map(|old| files::keep(&self.path, old, self.clock.now(), proposal))
+            .transpose()
+            .map_err(|error| self.unavailable(&error))?;
+        files::write(&self.path, text.as_bytes()).map_err(|error| self.unavailable(&error))?;
+        Ok(kept)
     }
 
     fn not_utf8(&self) -> ConfigError {
@@ -146,23 +154,60 @@ impl Job {
             // The file is only replaced once it is known to be valid, and
             // only after the version the user wrote is safe in the history.
             let current = render_as(&self.path, &parsed.config, self.schemas.current)?;
-            self.replace(Some(text.as_bytes()), &current)?;
+            self.replace(Some(text.as_bytes()), &current, None)?;
         }
         Ok(parsed.config)
     }
 
-    /// Writes `config` over the file: as an edit of the file as it is when
-    /// one can be made, so what a person wrote around the change stays, and
-    /// otherwise in the daemon's layout, as a first save writes it.
-    fn save(&self, config: &AgentConfig) -> Result<(), ConfigError> {
+    /// The text a save of `config` writes over the file `old`: an edit of
+    /// it when one can be made, so what a person wrote around the change
+    /// stays, and otherwise the daemon's layout, as a first save writes it.
+    fn rendered(&self, old: Option<&[u8]>, config: &AgentConfig) -> Result<String, ConfigError> {
         let rendered = render_as(&self.path, config, self.schemas.current)?;
-        let old = self.current_bytes()?;
-        let text = old
-            .as_deref()
+        Ok(old
             .and_then(|old| std::str::from_utf8(old).ok())
             .and_then(|old| saved(&self.path, old, config, &rendered, &self.schemas))
-            .unwrap_or(rendered);
-        self.replace(old.as_deref(), &text)
+            .unwrap_or(rendered))
+    }
+
+    /// Writes `config` over the file, as [`Job::rendered`] gives it.
+    fn save(&self, config: &AgentConfig) -> Result<(), ConfigError> {
+        let old = self.current_bytes()?;
+        let text = self.rendered(old.as_deref(), config)?;
+        self.replace(old.as_deref(), &text, None).map(|_| ())
+    }
+
+    /// The file as it is, and as a save of `config` would write it.
+    fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ConfigError> {
+        let old = self.current_bytes()?;
+        let after = self.rendered(old.as_deref(), config)?;
+        let before = String::from_utf8(old.unwrap_or_default()).map_err(|_| self.not_utf8())?;
+        Ok(ConfigDraft {
+            revision: ConfigRevision::of(before.as_bytes()),
+            before,
+            after,
+        })
+    }
+
+    /// Saves `config` as [`Job::save`] does, only while the file is the
+    /// revision `base`, checked again just before the write: the gate
+    /// keeps this store's own writes out, the check a hand edit.
+    fn save_over(
+        &self,
+        base: &ConfigRevision,
+        config: &AgentConfig,
+        proposal: &ProposalId,
+    ) -> Result<SavedOver, ConfigError> {
+        let old = self.current_bytes()?;
+        if ConfigRevision::of(old.as_deref().unwrap_or_default()) != *base {
+            return Ok(SavedOver::ChangedMeanwhile);
+        }
+        let text = self.rendered(old.as_deref(), config)?;
+        if self.current_bytes()? != old {
+            return Ok(SavedOver::ChangedMeanwhile);
+        }
+        let kept = self.replace(old.as_deref(), &text, Some(proposal))?;
+        Ok(SavedOver::Saved { kept })
     }
 
     /// Records `id` in the entry `alias` by adding one key to the file as
@@ -199,7 +244,8 @@ impl Job {
         if now.as_deref() != Some(bytes.as_slice()) {
             return Err(RecordError::NotInPlace(NotInPlace::ChangedMeanwhile));
         }
-        self.replace(Some(&bytes), &edited)
+        self.replace(Some(&bytes), &edited, None)
+            .map(|_| ())
             .map_err(RecordError::Store)
     }
 }
@@ -231,8 +277,8 @@ impl ConfigStore for FileConfigStore {
 #[async_trait]
 impl ConfigDrafts for FileConfigStore {
     async fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ConfigError> {
-        let _ = config;
-        todo!()
+        let config = config.clone();
+        self.exclusively(move |job| job.draft(&config)).await
     }
 
     async fn save_over(
@@ -241,8 +287,9 @@ impl ConfigDrafts for FileConfigStore {
         config: &AgentConfig,
         proposal: &ProposalId,
     ) -> Result<SavedOver, ConfigError> {
-        let _ = (base, config, proposal);
-        todo!()
+        let (base, config, proposal) = (base.clone(), config.clone(), proposal.clone());
+        self.exclusively(move |job| job.save_over(&base, &config, &proposal))
+            .await
     }
 }
 
