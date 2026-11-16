@@ -189,16 +189,6 @@ exclude_re = [
     # the next byte, which is under 256. They never share a bit, so `|` and
     # `^` give the same number. Other bits (`&`) are caught.
     'crates/domain/src/planning/proposal\.rs.*: replace \| with \^ in ProposalId::from_bytes$',
-    # `Os::get` is the call to the session's own store (the macOS keychain,
-    # the Secret Service); what its errors become is `failure`, which is
-    # tested. Its test, `the_os_keyring_keeps_and_gives_back_a_secret`,
-    # writes to that store, so it runs only when LADDERBACK_TEST_OS_KEYRING=1
-    # asks for it, which a mutation run does not. Every other test reads a
-    # keyring held in memory.
-    'crates/adapters/secrets/src/keyring_store\.rs.*: replace <impl KeyringStore for Os>::get ',
-    # Compiled only where there is no OS keyring (neither macOS nor Linux): on
-    # the hosts that run mutants the mutant builds and nothing calls it.
-    'crates/adapters/secrets/src/keyring_store\.rs.*: replace <impl KeyringStore for Unavailable>::get ',
     # `HttpNotifier::in_locale` keeps the localizer of the last agent locale
     # it wrote in (for a message's text and its ntfy title), so the catalogs
     # are read once a locale rather than once a message. A guard of `false`

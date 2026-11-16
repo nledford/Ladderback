@@ -265,6 +265,10 @@ impl SecretsHarness for FakeSecretsHarness {
         self.secrets.clone()
     }
 
+    fn keyring(&self) -> Arc<dyn app::ports::Keyring> {
+        self.secrets.clone()
+    }
+
     fn set_env(&self, name: &str, value: &str) {
         self.secrets.set_env(name, value);
     }
@@ -299,6 +303,11 @@ impl SecretsHarness for FakeSecretsHarness {
 
     fn empty_keyring_entry(&self) -> KeyringEntry {
         KeyringEntry::parse("ladderback-demo/empty").unwrap()
+    }
+
+    fn unused_keyring_entry(&self, name: &str) -> KeyringEntry {
+        let number = self.commands.fetch_add(1, Ordering::Relaxed);
+        KeyringEntry::parse(&format!("ladderback-demo/{name}-{number}")).unwrap()
     }
 
     fn printing(&self, stdout: &[u8]) -> CommandLine {

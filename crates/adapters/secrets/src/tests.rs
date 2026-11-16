@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use app::contract::secrets::SecretsHarness;
-use app::ports::{Resolved, SecretResolver};
+use app::ports::{Keyring, KeyringError, Resolved, SecretResolver};
 use domain::secrets::{
     CommandLine, FileRead, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError, SecretRef,
     SecretValue, SecretWarning, SourceName,
@@ -64,19 +64,25 @@ impl RealHarness {
     fn next(&self) -> usize {
         self.commands.fetch_add(1, Ordering::Relaxed)
     }
+
+    fn system(&self) -> SystemSecrets {
+        let environment = self.environment.lock().unwrap().clone();
+        // The keyring last: a mutant that makes a builder method give a new
+        // resolver must not leave it reading the session's own store.
+        SystemSecrets::new()
+            .with_environment(environment)
+            .with_command_timeout(Duration::from_millis(500))
+            .with_keyring(self.keyring.clone())
+    }
 }
 
 impl SecretsHarness for RealHarness {
     fn resolver(&self) -> Arc<dyn SecretResolver> {
-        let environment = self.environment.lock().unwrap().clone();
-        // The keyring last: a mutant that makes a builder method give a new
-        // resolver must not leave it reading the session's own store.
-        Arc::new(
-            SystemSecrets::new()
-                .with_environment(environment)
-                .with_command_timeout(Duration::from_millis(500))
-                .with_keyring(self.keyring.clone()),
-        )
+        Arc::new(self.system())
+    }
+
+    fn keyring(&self) -> Arc<dyn app::ports::Keyring> {
+        Arc::new(self.system())
     }
 
     fn set_env(&self, name: &str, value: &str) {
@@ -127,6 +133,10 @@ impl SecretsHarness for RealHarness {
 
     fn empty_keyring_entry(&self) -> KeyringEntry {
         KeyringEntry::parse("ladderback-demo/nothing-here").unwrap()
+    }
+
+    fn unused_keyring_entry(&self, name: &str) -> KeyringEntry {
+        KeyringEntry::parse(&format!("ladderback-demo/{name}-{}", self.next())).unwrap()
     }
 
     fn printing(&self, stdout: &[u8]) -> CommandLine {
@@ -1085,6 +1095,14 @@ impl KeyringStore for Locked {
     fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
         Err(Failure::Unreachable("the keychain is locked".to_owned()))
     }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        Err(Failure::Unreachable("the keychain is locked".to_owned()))
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        Err(Failure::Unreachable("the keychain is locked".to_owned()))
+    }
 }
 
 #[tokio::test]
@@ -1111,6 +1129,14 @@ struct NoService;
 
 impl KeyringStore for NoService {
     fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
+        Err(Failure::NoService("no session bus".to_owned()))
+    }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        Err(Failure::NoService("no session bus".to_owned()))
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
         Err(Failure::NoService("no session bus".to_owned()))
     }
 }
@@ -1144,6 +1170,16 @@ impl KeyringStore for Stuck {
         std::thread::sleep(self.0);
         Err(Failure::NoEntry)
     }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        std::thread::sleep(self.0);
+        Ok(())
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        std::thread::sleep(self.0);
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -1167,6 +1203,120 @@ async fn a_keyring_that_does_not_answer_in_time_is_timed_out() {
         started.elapsed() < Duration::from_secs(2),
         "it waited {:?}",
         started.elapsed()
+    );
+}
+
+/// A keyring call that outlives the limit is timed out, and so is a removal.
+#[tokio::test]
+async fn keeping_a_password_in_a_keyring_that_does_not_answer_in_time_is_timed_out() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let started = Instant::now();
+    let secrets =
+        resolver(Duration::from_millis(300)).with_keyring(Arc::new(Stuck(Duration::from_secs(3))));
+    assert_eq!(
+        secrets.keep(&entry, &SecretValue::new("hunter2")).await,
+        Err(KeyringError::TimedOut { seconds: 1 })
+    );
+    assert_eq!(
+        secrets.remove(&entry).await,
+        Err(KeyringError::TimedOut { seconds: 1 })
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "it waited {:?}",
+        started.elapsed()
+    );
+}
+
+/// With no service to ask, nothing is kept or removed and the platform's
+/// words say why; a store that refuses for any other reason couldn't write.
+#[tokio::test]
+async fn a_keyring_that_cannot_keep_a_password_says_why() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let password = SecretValue::new("hunter2");
+    let no_service = resolver(Duration::from_secs(1)).with_keyring(Arc::new(NoService));
+    let unavailable = KeyringError::Unavailable {
+        detail: "no session bus".to_owned(),
+    };
+    assert_eq!(
+        no_service.keep(&entry, &password).await,
+        Err(unavailable.clone())
+    );
+    assert_eq!(no_service.remove(&entry).await, Err(unavailable));
+    let locked = resolver(Duration::from_secs(1)).with_keyring(Arc::new(Locked));
+    let unwritable = KeyringError::Unwritable {
+        detail: "the keychain is locked".to_owned(),
+    };
+    assert_eq!(
+        locked.keep(&entry, &password).await,
+        Err(unwritable.clone())
+    );
+    assert_eq!(locked.remove(&entry).await, Err(unwritable));
+}
+
+/// A Secret Service that finds no entry and can't say whether its keyring
+/// is locked, where an entry goes unseen, and so whether one is there.
+#[derive(Default)]
+struct Unconfirmed {
+    writes: AtomicUsize,
+}
+
+impl KeyringStore for Unconfirmed {
+    fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
+        Err(Failure::Unconfirmed("no session bus".to_owned()))
+    }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        Err(Failure::Unconfirmed("no session bus".to_owned()))
+    }
+}
+
+/// An entry that may be there, unseen in a keyring that may be locked, is
+/// never written over: the keep is refused as no keyring service to ask, in
+/// the words why, and so is a removal that can't tell the entry is gone. A
+/// read still finds it missing.
+#[tokio::test]
+async fn an_entry_that_may_be_there_unseen_is_never_written_over() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let store = Arc::new(Unconfirmed::default());
+    let secrets = resolver(Duration::from_secs(1)).with_keyring(store.clone());
+    let unavailable = KeyringError::Unavailable {
+        detail: "no session bus".to_owned(),
+    };
+    assert_eq!(
+        secrets.keep(&entry, &SecretValue::new("hunter2")).await,
+        Err(unavailable.clone())
+    );
+    assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+    assert_eq!(secrets.remove(&entry).await, Err(unavailable));
+    assert_eq!(
+        secrets.resolve(&SecretRef::Keyring(entry)).await,
+        Err(SecretError::missing(SourceName::Keyring {
+            entry: "ladderback-demo/nas".to_owned()
+        }))
+    );
+}
+
+/// An entry that holds something that isn't text holds another secret: it
+/// is refused and left as it is.
+#[tokio::test]
+async fn an_entry_that_holds_what_is_not_text_is_never_overwritten() {
+    let memory = Arc::new(Memory::default());
+    memory.set("ladderback-demo", "binary", &[b'a', 0xff]);
+    let secrets = resolver(Duration::from_secs(1)).with_keyring(memory.clone());
+    let entry = KeyringEntry::parse("ladderback-demo/binary").unwrap();
+    assert_eq!(
+        secrets.keep(&entry, &SecretValue::new("hunter2")).await,
+        Err(KeyringError::Taken)
+    );
+    assert_eq!(
+        KeyringStore::get(&*memory, "ladderback-demo", "binary"),
+        Err(Failure::NotUnicode)
     );
 }
 
@@ -1232,16 +1382,31 @@ fn the_os_keyring_is_used_only_when_it_is_asked_for() {
     assert!(os_keyring_enabled(Some(OsStr::new("1"))));
 }
 
+/// Where there is no OS keyring, every call is refused as a store that can't
+/// be reached: nothing is read, kept or deleted, where the `keyring` crate's
+/// in-memory mock would keep the secret.
+#[test]
+fn a_platform_without_an_os_keyring_reads_keeps_and_deletes_nothing() {
+    use crate::keyring_store::Unavailable;
+    let refused = || Failure::Unreachable("this platform has no OS keyring".to_owned());
+    assert_eq!(Unavailable.get("ladderback-demo", "nas"), Err(refused()));
+    assert_eq!(
+        Unavailable.set("ladderback-demo", "nas", "hunter2"),
+        Err(refused())
+    );
+    assert_eq!(Unavailable.delete("ladderback-demo", "nas"), Err(refused()));
+}
+
 /// What the OS store's errors become. A value that is not text comes back
 /// with its bytes, which are a secret: they are dropped (I4). A keychain that
 /// refuses is one that can't be reached.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn an_os_keyring_error_says_why_and_holds_no_secret() {
-    use crate::keyring_store::{OsStore, failure};
+    use crate::keyring_store::{Lock, OsStore, failure};
     for store in [OsStore::Keychain, OsStore::SecretService] {
         assert_eq!(
-            failure(keyring::Error::NoEntry, store, || None),
+            failure(keyring::Error::NoEntry, store, || Lock::Unlocked),
             Failure::NoEntry
         );
         assert_eq!(
@@ -1265,29 +1430,38 @@ fn an_os_keyring_error_says_why_and_holds_no_secret() {
 /// The probe of whether a keyring is locked, for an error that must not ask:
 /// only a missing entry is worth the question.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn never_asked() -> Option<String> {
+fn never_asked() -> crate::keyring_store::Lock {
     panic!("the store was asked whether its keyring is locked")
 }
 
 /// A Secret Service that finds no entry is asked whether its keyring is
 /// locked: oo7 finds no items in a locked collection, whether the entry is in
 /// it or not (#483). Locked, the entry is refused as no keyring service to
-/// ask, in the service's words; unlocked, or when the service can't say, it
-/// is missing. The keychain, which says when it is locked, is never asked.
+/// ask, in the service's words; unlocked, it is missing; when the service
+/// can't say, the missing entry is unconfirmed, in the words why. The
+/// keychain, which says when it is locked, is never asked.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn a_secret_service_that_finds_no_entry_in_a_locked_keyring_is_no_keyring_service() {
-    use crate::keyring_store::{OsStore, failure};
+    use crate::keyring_store::{Lock, OsStore, failure};
     let said = "Secret Service: object locked";
     assert_eq!(
-        failure(keyring::Error::NoEntry, OsStore::SecretService, || Some(
-            said.to_owned()
-        )),
+        failure(keyring::Error::NoEntry, OsStore::SecretService, || {
+            Lock::Locked(said.to_owned())
+        }),
         Failure::NoService(said.to_owned())
     );
     assert_eq!(
-        failure(keyring::Error::NoEntry, OsStore::SecretService, || None),
+        failure(keyring::Error::NoEntry, OsStore::SecretService, || {
+            Lock::Unlocked
+        }),
         Failure::NoEntry
+    );
+    assert_eq!(
+        failure(keyring::Error::NoEntry, OsStore::SecretService, || {
+            Lock::Unknown("no session bus".to_owned())
+        }),
+        Failure::Unconfirmed("no session bus".to_owned())
     );
     assert_eq!(
         failure(keyring::Error::NoEntry, OsStore::Keychain, never_asked),

@@ -615,6 +615,23 @@ error-location-too-many-credentials = The repository's { $field } is an rclone c
 # The slash is the character a full path starts with: keep it as it is.
 error-repository-path-relative = The repository's { $field } is a path that does not start with /, so it would be read from whichever folder { -brand-name } was started in. Write it in full, starting with /.
 
+# The person chose to keep the password they typed for a repository in the system keyring, and this computer has no keyring service to keep it in: no Secret Service runs, there is no session bus to reach one by, or its keyring is locked. Nothing was saved.
+# $entry (text): the keyring entry, as service/name, such as ladderback/home-nas.
+# $detail (text): the message of the platform, shown as it came with secrets masked.
+# `password-file` is a setting, typed as it is: keep it a string literal.
+error-keyring-unavailable = { -brand-name } could not keep the password in the keyring entry { $entry }, because this computer has no keyring service it can use, so nothing was saved. A server, or a service that starts before anyone logs in, usually has none. Keep the password in the configuration file instead, or in a file the configuration names ({ "password-file" }).
+    .with-detail = { -brand-name } could not keep the password in the keyring entry { $entry }, because this computer has no keyring service it can use ({ $detail }), so nothing was saved. A server, or a service that starts before anyone logs in, usually has none. Keep the password in the configuration file instead, or in a file the configuration names ({ "password-file" }).
+
+# The person chose to keep the password they typed for a repository in the system keyring, and the keyring refused it, failed, or did not answer in time. Nothing was saved.
+# $entry (text): the keyring entry, as service/name.
+# $detail (text): the message of the platform, shown as it came with secrets masked.
+error-keyring-unwritable = { -brand-name } could not keep the password in the keyring entry { $entry }, so nothing was saved. Check that the keyring is unlocked and try again, or keep the password in the configuration file.
+    .with-detail = { -brand-name } could not keep the password in the keyring entry { $entry } ({ $detail }), so nothing was saved. Check that the keyring is unlocked and try again, or keep the password in the configuration file.
+
+# The person chose to keep the password they typed for a repository in the system keyring, and its entry already holds another password, which is never replaced: it may be the only copy of another repository's password. Nothing was saved.
+# $entry (text): the keyring entry, as service/name.
+error-keyring-entry-taken = The keyring entry { $entry } already holds another password, which { -brand-name } never replaces, so nothing was saved. Choose another name for the repository, or keep the password in the configuration file.
+
 ## Profile codes: importing and exporting a rustic profile (technical design §6.2)
 
 # The profile, or a profile it uses, could not be read.

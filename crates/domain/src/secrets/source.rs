@@ -129,6 +129,23 @@ impl KeyringEntry {
     }
 }
 
+/// The keyring service whose entries Ladderback writes itself.
+const KEYRING_SERVICE: &str = "ladderback";
+
+impl KeyringEntry {
+    /// The entry the repository saved under `alias` keeps its password in
+    /// when the person chooses the system keyring: the service `ladderback`,
+    /// the alias as the name (`ladderback/<alias>`, §10.2). An alias is a
+    /// name of lower-case letters, digits and hyphens, so the entry is always
+    /// one `parse` reads back.
+    pub fn for_repository(alias: &crate::RepositoryAlias) -> Self {
+        Self {
+            service: KEYRING_SERVICE.to_owned(),
+            name: alias.as_str().to_owned(),
+        }
+    }
+}
+
 impl std::fmt::Display for KeyringEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}", self.service, self.name)
@@ -138,6 +155,16 @@ impl std::fmt::Display for KeyringEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_repository_keeps_its_password_in_the_entry_named_after_it() {
+        let alias = crate::RepositoryAlias::parse("home-nas").unwrap();
+        let entry = KeyringEntry::for_repository(&alias);
+        assert_eq!(entry.service(), "ladderback");
+        assert_eq!(entry.name(), "home-nas");
+        assert_eq!(entry.to_string(), "ladderback/home-nas");
+        assert_eq!(KeyringEntry::parse(&entry.to_string()), Ok(entry));
+    }
 
     #[test]
     fn a_password_file_gives_its_first_line_without_the_line_ending() {

@@ -82,6 +82,10 @@ pub(crate) struct Form {
     /// Off unless the person turns it on: only one place may maintain a
     /// repository, and another may already do it (I1).
     pub(crate) maintain_here: bool,
+    /// Whether a typed password is to be kept in the system keyring rather
+    /// than in the configuration file. The configuration file unless the
+    /// person chooses the keyring (§4.4).
+    pub(crate) keep_in_keyring: bool,
 }
 
 impl Form {
@@ -139,6 +143,7 @@ impl Form {
             alias: self.alias().to_owned(),
             settings: self.settings(),
             maintain_here: self.maintain_here,
+            keep_in_keyring: self.keeps_in_keyring(),
         }
     }
 
@@ -150,7 +155,15 @@ impl Form {
                 .filter(|name| !name.is_empty())
                 .map(str::to_owned),
             settings: self.settings(),
+            keep_in_keyring: self.keeps_in_keyring(),
         }
+    }
+
+    /// Whether the request asks to keep the typed password in the system
+    /// keyring: only for a repository saved under a name, whose entry the
+    /// name gives (§10.2).
+    fn keeps_in_keyring(&self) -> bool {
+        self.keep_in_keyring && !self.alias().is_empty()
     }
 }
 
@@ -198,8 +211,12 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
     match code {
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
         // The repository answered, and the password typed opened none of
-        // its keys (#481).
-        ErrorCode::PasswordNotAccepted => Some(Field::Password),
+        // its keys (#481); or the password typed couldn't be kept in the
+        // keyring the person chose (§10.2).
+        ErrorCode::PasswordNotAccepted
+        | ErrorCode::KeyringUnavailable
+        | ErrorCode::KeyringUnwritable
+        | ErrorCode::KeyringEntryTaken => Some(Field::Password),
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
         | ErrorCode::SecretKeyringUnavailable
@@ -690,6 +707,7 @@ mod tests {
             hot_storage: String::new(),
             password: "not-a-real-password".to_owned(),
             maintain_here: false,
+            keep_in_keyring: false,
         }
     }
 
@@ -758,6 +776,7 @@ mod tests {
             hot_storage: " ".to_owned(),
             password: " ".to_owned(),
             maintain_here: false,
+            keep_in_keyring: false,
         };
         assert_eq!(
             spaces.missing(Action::Connect),
@@ -895,6 +914,35 @@ mod tests {
     }
 
     #[test]
+    fn a_connection_keeps_the_password_in_the_keyring_only_when_the_form_chose_it() {
+        assert!(!form().connect_request().keep_in_keyring);
+        let chosen = Form {
+            keep_in_keyring: true,
+            ..form()
+        };
+        assert!(chosen.connect_request().keep_in_keyring);
+    }
+
+    /// A creation under no name saves nothing, so there is nothing to keep
+    /// the password for: the choice goes only with a name.
+    #[test]
+    fn a_creation_keeps_the_password_in_the_keyring_only_with_a_name() {
+        let chosen = Form {
+            keep_in_keyring: true,
+            ..form()
+        };
+        assert!(chosen.create_request().keep_in_keyring);
+        assert!(!form().create_request().keep_in_keyring);
+        for blank in ["", "   "] {
+            let unnamed = Form {
+                name: blank.to_owned(),
+                ..chosen.clone()
+            };
+            assert!(!unnamed.create_request().keep_in_keyring, "{blank:?}");
+        }
+    }
+
+    #[test]
     fn a_creation_names_the_repository_only_when_the_form_does() {
         let named = form().create_request();
         assert_eq!(named.alias.as_deref(), Some("copy"));
@@ -950,6 +998,21 @@ mod tests {
             ),
             Some(Field::Password)
         );
+    }
+
+    #[test]
+    fn a_password_the_keyring_could_not_keep_belongs_to_the_password_field() {
+        for code in [
+            ErrorCode::KeyringUnavailable,
+            ErrorCode::KeyringUnwritable,
+            ErrorCode::KeyringEntryTaken,
+        ] {
+            assert_eq!(
+                field_of(code, &[("entry".into(), text("ladderback/copy"))]),
+                Some(Field::Password),
+                "{code:?}"
+            );
+        }
     }
 
     #[test]

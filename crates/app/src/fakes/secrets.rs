@@ -7,7 +7,7 @@ use domain::secrets::{
     command_failure, command_secret, decode, file_warning,
 };
 
-use crate::ports::{Resolved, SecretResolver};
+use crate::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
 
 /// What the fake does when told to run a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +115,11 @@ impl FakeSecrets {
         self.lock()
             .keyring
             .insert(entry.to_string(), secret.to_owned());
+    }
+
+    /// What the keyring entry holds, if it is there.
+    pub fn keyring_entry(&self, entry: &KeyringEntry) -> Option<String> {
+        self.lock().keyring.get(&entry.to_string()).cloned()
     }
 
     /// A machine with no keyring service to ask, as a server with no
@@ -246,13 +251,7 @@ impl SecretResolver for FakeSecrets {
                 let source = SourceName::Keyring {
                     entry: entry.to_string(),
                 };
-                let unavailable = if state.no_keyring_service {
-                    Some("no session bus")
-                } else if state.keyring_locked {
-                    Some("the keyring is locked")
-                } else {
-                    None
-                };
+                let unavailable = keyring_unavailable(&state);
                 if let Some(detail) = unavailable {
                     return Err(SecretError {
                         source,
@@ -272,6 +271,57 @@ impl SecretResolver for FakeSecrets {
                 })
             }
         }
+    }
+}
+
+#[async_trait]
+impl Keyring for FakeSecrets {
+    async fn keep(
+        &self,
+        entry: &KeyringEntry,
+        password: &domain::secrets::SecretValue,
+    ) -> Result<Kept, KeyringError> {
+        let mut state = self.lock();
+        unavailable(&state)?;
+        match state.keyring.get(&entry.to_string()) {
+            Some(held) if held == password.expose() => Ok(Kept::AlreadyThere),
+            Some(_) => Err(KeyringError::Taken),
+            None => {
+                state
+                    .keyring
+                    .insert(entry.to_string(), password.expose().to_owned());
+                Ok(Kept::Added)
+            }
+        }
+    }
+
+    async fn remove(&self, entry: &KeyringEntry) -> Result<(), KeyringError> {
+        let mut state = self.lock();
+        unavailable(&state)?;
+        state.keyring.remove(&entry.to_string());
+        Ok(())
+    }
+}
+
+/// A keyring with no service to ask, or a locked one, as the resolver reads
+/// it: what keeping or removing an entry is refused with there.
+fn unavailable(state: &State) -> Result<(), KeyringError> {
+    match keyring_unavailable(state) {
+        Some(detail) => Err(KeyringError::Unavailable {
+            detail: detail.to_owned(),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Why the keyring can't be asked, in the platform's words, if it can't.
+fn keyring_unavailable(state: &State) -> Option<&'static str> {
+    if state.no_keyring_service {
+        Some("no session bus")
+    } else if state.keyring_locked {
+        Some("the keyring is locked")
+    } else {
+        None
     }
 }
 

@@ -2,6 +2,8 @@
 
 **A form that tests, connects or creates a repository over three underscore-prefixed routes, saving a typed password inline** (recorded 2026-11-10, §4.2, §4.4).
 
+**Item 2 amended by decision 110** (2026-11-15, #476): the form can now keep a typed password in the system keyring entry `ladderback/<alias>` instead, and saves a reference to it; the configuration file stays the preselected choice. The rest of this record is kept as it was decided.
+
 `POST /api/v1/repositories/_test`, `POST /api/v1/repositories` and `POST /api/v1/repositories/_init` take the configuration's own `settings`; the underscore keeps an alias, which is a slug, from ever colliding with `/repositories/{alias}`.
 
 `GET /api/v1/repositories` now answers rows, not bare aliases (a clean cutover; the Snapshots page reads the alias from a row), with the location masked and the password as its source, never its value (I4).

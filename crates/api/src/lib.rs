@@ -179,6 +179,22 @@ pub enum ErrorCode {
     /// daemon was started. The argument `field` names the setting
     /// (`repository`, `repo-hot`, `password`, `options-cold.http-cacert`).
     RepositoryPathRelative,
+    /// The password typed for a repository was to be kept in the system
+    /// keyring, and this computer has no keyring service to keep it in: on
+    /// Linux no Secret Service, no session bus to reach one by, or a locked
+    /// keyring. Nothing was saved or created. The argument `entry` names the
+    /// keyring entry (`service/name`); the platform's words, masked, are the
+    /// `detail`.
+    KeyringUnavailable,
+    /// The password typed for a repository was to be kept in the system
+    /// keyring, and the keyring refused it, failed or didn't answer in time.
+    /// As `KeyringUnavailable`.
+    KeyringUnwritable,
+    /// The password typed for a repository was to be kept in the system
+    /// keyring, and its entry already holds another secret, which is never
+    /// overwritten. Nothing was saved or created. The argument `entry` names
+    /// the entry (`service/name`).
+    KeyringEntryTaken,
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
@@ -1008,6 +1024,13 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::KeyringUnavailable | Self::KeyringUnwritable | Self::KeyringEntryTaken => {
+                &[ArgSpec {
+                    name: "entry",
+                    kind: ArgKind::Text,
+                    optional: false,
+                }]
+            }
             Self::SecretsTooLargeToMask => &[
                 ArgSpec {
                     name: "limit",
@@ -2235,6 +2258,17 @@ mod tests {
             ErrorCode::RepositoryPathRelative,
         ] {
             assert_eq!(code.args(), &[named[0]], "{code:?}");
+        }
+        for code in [
+            ErrorCode::KeyringUnavailable,
+            ErrorCode::KeyringUnwritable,
+            ErrorCode::KeyringEntryTaken,
+        ] {
+            assert_eq!(
+                code.args(),
+                &[spec("entry", ArgKind::Text, false)],
+                "{code:?}"
+            );
         }
         assert_eq!(
             ErrorCode::SecretExpansionTooLong.args(),
@@ -4110,6 +4144,9 @@ pub struct TestRepositoryDto {
 /// `POST /api/v1/repositories`: test the repository, and save it under
 /// `alias` once the test passed. `maintain-here` asks this agent to maintain
 /// it (`maintenance = "local"`, §7.3); left out or `false`, nobody is asked.
+/// `keep-in-keyring` keeps a typed (inline) password in the system keyring
+/// entry `ladderback/<alias>` and saves a reference to it (§10.2); left out
+/// or `false`, the password is saved as it was sent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ConnectRepositoryDto {
@@ -4117,16 +4154,21 @@ pub struct ConnectRepositoryDto {
     pub settings: RepositorySettingsDto,
     #[serde(default)]
     pub maintain_here: bool,
+    #[serde(default)]
+    pub keep_in_keyring: bool,
 }
 
 /// `POST /api/v1/repositories/_init`: create a repository where there is
-/// none, and save it under `alias` when one is given.
+/// none, and save it under `alias` when one is given. `keep-in-keyring`, as
+/// for [`ConnectRepositoryDto`], needs an `alias`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct InitRepositoryDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
     pub settings: RepositorySettingsDto,
+    #[serde(default)]
+    pub keep_in_keyring: bool,
 }
 
 /// What testing or connecting a repository answers: its ID, as rustic
@@ -5655,6 +5697,7 @@ mod repository_request_tests {
                 alias: "demo".into(),
                 settings: settings(),
                 maintain_here: false,
+                keep_in_keyring: false,
             }
         );
         for secret in [

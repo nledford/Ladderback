@@ -22,7 +22,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use app::ports::{Resolved, SecretResolver};
+use app::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
 use async_trait::async_trait;
 use domain::secrets::{
     FileRead, KeyringEntry, Problem, SecretError, SecretRef, SecretValue, SourceName, decode,
@@ -182,7 +182,10 @@ impl SystemSecrets {
         let got = self.limited(&source, reading).await?;
         match got {
             Ok(secret) => Ok(resolved(decode(&source, secret.as_bytes(), |text| text)?)),
-            Err(Failure::NoEntry) => Err(SecretError::missing(source.clone())),
+            // As a read finds it: no entry it can tell is there.
+            Err(Failure::NoEntry | Failure::Unconfirmed(_)) => {
+                Err(SecretError::missing(source.clone()))
+            }
             Err(Failure::NotUnicode) => Err(fail(Problem::NotUnicode)),
             Err(Failure::Unreachable(detail)) => Err(fail(Problem::Unreachable { detail })),
             Err(Failure::NoService(detail)) => Err(fail(Problem::KeyringUnavailable { detail })),
@@ -198,27 +201,38 @@ impl SystemSecrets {
         source: &SourceName,
         reading: tokio::task::JoinHandle<T>,
     ) -> Result<T, SecretError> {
-        match tokio::time::timeout(self.command_timeout, reading).await {
-            Ok(Ok(read)) => Ok(read),
-            Ok(Err(error)) => Err(unfinished(source.clone(), &error)),
-            Err(_elapsed) => Err(SecretError {
+        self.within(reading)
+            .await
+            .map_err(|unfinished| SecretError {
                 source: source.clone(),
-                problem: Problem::TimedOut {
-                    seconds: command::whole_seconds_up(self.command_timeout),
+                problem: match unfinished {
+                    Unfinished::TimedOut { seconds } => Problem::TimedOut { seconds },
+                    Unfinished::Lost(detail) => Problem::Unreachable { detail },
                 },
+            })
+    }
+
+    /// A blocking call, waited for within the time limit, as [`limited`]
+    /// waits for a read.
+    ///
+    /// [`limited`]: Self::limited
+    async fn within<T>(&self, call: tokio::task::JoinHandle<T>) -> Result<T, Unfinished> {
+        match tokio::time::timeout(self.command_timeout, call).await {
+            Ok(Ok(done)) => Ok(done),
+            Ok(Err(error)) => Err(Unfinished::Lost(error.to_string())),
+            Err(_elapsed) => Err(Unfinished::TimedOut {
+                seconds: command::whole_seconds_up(self.command_timeout),
             }),
         }
     }
 }
 
-/// A blocking read that was lost: it panicked or the runtime is shutting down.
-fn unfinished(source: SourceName, error: &tokio::task::JoinError) -> SecretError {
-    SecretError {
-        source,
-        problem: Problem::Unreachable {
-            detail: error.to_string(),
-        },
-    }
+/// Why a blocking call gave no answer.
+enum Unfinished {
+    /// It outlived the time limit, in whole seconds.
+    TimedOut { seconds: u64 },
+    /// It was lost: it panicked or the runtime is shutting down.
+    Lost(String),
 }
 
 #[async_trait]
@@ -233,5 +247,72 @@ impl SecretResolver for SystemSecrets {
                 .map(resolved),
             SecretRef::Keyring(entry) => self.keyring(entry).await,
         }
+    }
+}
+
+#[async_trait]
+impl Keyring for SystemSecrets {
+    /// Reads the entry, then writes it only when it isn't there, all in one
+    /// blocking call within the time limit. An entry holding anything but
+    /// the password, text or not, is another secret and is left as it is.
+    async fn keep(
+        &self,
+        entry: &KeyringEntry,
+        password: &SecretValue,
+    ) -> Result<Kept, KeyringError> {
+        let store = Arc::clone(&self.keyring);
+        let (service, name) = (entry.service().to_owned(), entry.name().to_owned());
+        let password = password.clone();
+        // Wrapped where it is read, as a resolved entry is.
+        let keeping = tokio::task::spawn_blocking(move || {
+            match store.get(&service, &name).map(Zeroizing::new) {
+                Ok(held) if held.as_str() == password.expose() => Ok(Kept::AlreadyThere),
+                Ok(_) | Err(Failure::NotUnicode) => Err(KeyringError::Taken),
+                Err(Failure::NoEntry) => store
+                    .set(&service, &name, password.expose())
+                    .map(|()| Kept::Added)
+                    .map_err(refused),
+                Err(failure) => Err(refused(failure)),
+            }
+        });
+        self.within(keeping).await.map_err(unanswered)?
+    }
+
+    /// Deletes the entry within the time limit; one that isn't there is
+    /// already as asked.
+    async fn remove(&self, entry: &KeyringEntry) -> Result<(), KeyringError> {
+        let store = Arc::clone(&self.keyring);
+        let (service, name) = (entry.service().to_owned(), entry.name().to_owned());
+        let removing = tokio::task::spawn_blocking(move || match store.delete(&service, &name) {
+            Ok(()) | Err(Failure::NoEntry) => Ok(()),
+            Err(failure) => Err(refused(failure)),
+        });
+        self.within(removing).await.map_err(unanswered)?
+    }
+}
+
+/// Why the store refused to write or delete an entry.
+fn refused(failure: Failure) -> KeyringError {
+    match failure {
+        Failure::NoService(detail) => KeyringError::Unavailable { detail },
+        Failure::Unreachable(detail) => KeyringError::Unwritable { detail },
+        // An entry that holds what isn't text holds another secret.
+        Failure::NotUnicode => KeyringError::Taken,
+        // Only a read finds no entry: a write that says so anyway failed,
+        // with no words of the platform's.
+        Failure::NoEntry => KeyringError::Unwritable {
+            detail: String::new(),
+        },
+        // The entry may be there, unseen in a locked keyring: never written
+        // over, never said to be gone.
+        Failure::Unconfirmed(detail) => KeyringError::Unavailable { detail },
+    }
+}
+
+/// A keyring call that gave no answer, as the port reports it.
+fn unanswered(unfinished: Unfinished) -> KeyringError {
+    match unfinished {
+        Unfinished::TimedOut { seconds } => KeyringError::TimedOut { seconds },
+        Unfinished::Lost(detail) => KeyringError::Unwritable { detail },
     }
 }

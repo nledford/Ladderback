@@ -257,6 +257,9 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::TemplateInvalid
                 | ErrorCode::LocationTooManyCredentials
                 | ErrorCode::RepositoryPathRelative
+                | ErrorCode::KeyringUnavailable
+                | ErrorCode::KeyringUnwritable
+                | ErrorCode::KeyringEntryTaken
                 | ErrorCode::EngineExited
                 | ErrorCode::ProtocolViolated
                 | ErrorCode::EngineStartTimedOut
