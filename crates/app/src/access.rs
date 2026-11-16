@@ -217,9 +217,10 @@ pub enum RestoreFailed {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StepUpConfirmed;
 
-/// Why a step-up password confirmed nothing.
+/// Why a password entered as the admin password was refused, however it was
+/// asked for: at a sign-in, a step-up (§10.4) or a change of password.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StepUpRefused {
+pub enum PasswordRefused {
     /// The password is not the admin password: it counted as a failed
     /// sign-in.
     WrongPassword,
@@ -228,6 +229,16 @@ pub enum StepUpRefused {
     Wait { seconds: u64 },
     /// The admin password could not be checked: the platform's own text.
     Unavailable(String),
+}
+
+impl From<PasswordRefused> for SignInRefused {
+    fn from(refused: PasswordRefused) -> Self {
+        match refused {
+            PasswordRefused::WrongPassword => Self::WrongPassword,
+            PasswordRefused::Wait { seconds } => Self::Wait { seconds },
+            PasswordRefused::Unavailable(text) => Self::Unavailable(text),
+        }
+    }
 }
 
 impl Access {
@@ -330,19 +341,19 @@ impl Access {
         &self,
         client: Client,
         attempt: &Password,
-    ) -> Result<PasswordFingerprint, SignInRefused> {
+    ) -> Result<PasswordFingerprint, PasswordRefused> {
         let now = self.clock.now();
         self.lock()
             .waits
             .attempt(client, now)
-            .map_err(|left| SignInRefused::Wait {
+            .map_err(|left| PasswordRefused::Wait {
                 seconds: api_tokens::seconds_left(left),
             })?;
-        let unavailable = |error| SignInRefused::Unavailable(format!("{error:?}"));
+        let unavailable = |error| PasswordRefused::Unavailable(format!("{error:?}"));
         let under = self.password.fingerprint().map_err(unavailable)?;
         match self.password.verify(attempt).await {
             Ok(true) => Ok(under),
-            Ok(false) => Err(SignInRefused::WrongPassword),
+            Ok(false) => Err(PasswordRefused::WrongPassword),
             Err(error) => Err(unavailable(error)),
         }
     }
@@ -421,21 +432,11 @@ impl Access {
         &self,
         address: IpAddr,
         attempt: &Password,
-    ) -> Result<StepUpConfirmed, StepUpRefused> {
+    ) -> Result<StepUpConfirmed, PasswordRefused> {
         let client = Client::of(address);
-        match self.check(client, attempt).await {
-            Ok(_) => {
-                self.lock().waits.succeeded(client);
-                Ok(StepUpConfirmed)
-            }
-            Err(SignInRefused::WrongPassword) => Err(StepUpRefused::WrongPassword),
-            Err(SignInRefused::Wait { seconds }) => Err(StepUpRefused::Wait { seconds }),
-            Err(SignInRefused::Unavailable(text)) => Err(StepUpRefused::Unavailable(text)),
-            // A check never writes to the store.
-            Err(SignInRefused::Store(error)) => {
-                Err(StepUpRefused::Unavailable(format!("{error:?}")))
-            }
-        }
+        self.check(client, attempt).await?;
+        self.lock().waits.succeeded(client);
+        Ok(StepUpConfirmed)
     }
 
     /// The session of `token`, if it is live, used once more by asking,

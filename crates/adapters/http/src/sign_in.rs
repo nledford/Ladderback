@@ -17,8 +17,8 @@ use api::{
     SignInStateDto,
 };
 use app::access::{
-    Access, PasswordChangeRefused, PasswordSet, PasswordWaiting, SetPasswordRefused, SignInRefused,
-    set_admin_password,
+    Access, PasswordChangeRefused, PasswordRefused, PasswordSet, PasswordWaiting,
+    SetPasswordRefused, SignInRefused, set_admin_password,
 };
 use app::ports::{AdminPassword, SessionStore};
 use axum::extract::{ConnectInfo, Request, State};
@@ -502,24 +502,19 @@ pub(crate) async fn set_password(State(sign_in): State<SignIn>, request: Request
             forget_cookie(&mut response);
             response
         }
-        Err(PasswordChangeRefused::Current(SignInRefused::WrongPassword)) => {
+        Err(PasswordChangeRefused::Current(PasswordRefused::WrongPassword)) => {
             refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong)
         }
-        Err(PasswordChangeRefused::Current(SignInRefused::Wait { seconds })) => {
+        Err(PasswordChangeRefused::Current(PasswordRefused::Wait { seconds })) => {
             wait_refused(seconds)
         }
-        Err(PasswordChangeRefused::Current(SignInRefused::Unavailable(detail))) => {
+        Err(PasswordChangeRefused::Current(PasswordRefused::Unavailable(detail))) => {
             log::warn!("the admin password could not be checked: {detail}");
             refused(
                 StatusCode::SERVICE_UNAVAILABLE,
                 ErrorCode::AdminPasswordUnavailable,
             )
         }
-        // Not met: checking the current password keeps no session. Answered
-        // as a sign-in's would be.
-        Err(PasswordChangeRefused::Current(SignInRefused::Store(error))) => sessions_unavailable(
-            &format!("a session could not be kept in the database: {error}"),
-        ),
         Err(PasswordChangeRefused::New(refusal)) => set_refused(refusal),
     }
 }

@@ -9,7 +9,7 @@ use std::net::IpAddr;
 
 use domain::access::{Client, Password, PasswordProblem};
 
-use super::{Access, SignInRefused};
+use super::{Access, PasswordRefused};
 use crate::ports::{AdminPassword, SessionStore, StoreError};
 
 /// Why a new admin password was not set.
@@ -27,10 +27,10 @@ pub enum SetPasswordRefused {
 /// Why the admin password was not changed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PasswordChangeRefused {
-    /// The current password was refused as a sign-in with it would be: not
-    /// the admin password (counted), during the client's wait (unchecked), or
-    /// not checkable.
-    Current(SignInRefused),
+    /// The current password was refused as at a sign-in: not the admin
+    /// password (counted), during the client's wait (unchecked), or not
+    /// checkable.
+    Current(PasswordRefused),
     /// The current password was right, and the new one was not set.
     New(SetPasswordRefused),
 }

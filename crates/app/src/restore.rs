@@ -20,7 +20,7 @@ use domain::restore::{
 use domain::secrets::SecretWarning;
 use domain::{OperationId, RepositoryAlias, SnapshotId, TimeZone};
 
-use crate::access::{Access, StepUpRefused};
+use crate::access::{Access, PasswordRefused};
 use crate::execution::{Finished, Queued, RunOperation};
 use crate::maintenance::{MaintenanceError, run_read};
 use crate::ports::{
@@ -286,9 +286,9 @@ impl Restores {
             .await
             .map(|_| ())
             .map_err(|refused| match refused {
-                StepUpRefused::WrongPassword => RestoreError::StepUpFailed,
-                StepUpRefused::Wait { seconds } => RestoreError::StepUpWait { seconds },
-                StepUpRefused::Unavailable(text) => RestoreError::StepUpUnavailable(text),
+                PasswordRefused::WrongPassword => RestoreError::StepUpFailed,
+                PasswordRefused::Wait { seconds } => RestoreError::StepUpWait { seconds },
+                PasswordRefused::Unavailable(text) => RestoreError::StepUpUnavailable(text),
             })
     }
 

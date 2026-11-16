@@ -250,11 +250,11 @@ fn a_right_step_up_password_starts_the_addresss_waits_over_and_a_wrong_one_count
     let access = access(&clock);
     let wrong = password("not-the-password");
     let step_up = |attempt: &Password| access.step_up(HOME, attempt).now_or_never().unwrap();
-    assert_eq!(step_up(&wrong), Err(StepUpRefused::WrongPassword));
+    assert_eq!(step_up(&wrong), Err(PasswordRefused::WrongPassword));
     assert_eq!(access.remembered_addresses(), 1);
     assert_eq!(
         step_up(&password("demo-admin-pass")),
-        Err(StepUpRefused::Wait { seconds: 1 })
+        Err(PasswordRefused::Wait { seconds: 1 })
     );
     clock.advance(SignedDuration::from_secs(1));
     assert_eq!(step_up(&password("demo-admin-pass")), Ok(StepUpConfirmed));
