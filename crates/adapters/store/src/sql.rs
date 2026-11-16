@@ -268,3 +268,53 @@ pub(crate) const KEEP_RELEASE_CHECK: &str = concat!(
     "ON CONFLICT(id) DO UPDATE SET checked_at = excluded.checked_at, ",
     "update_version = excluded.update_version"
 );
+
+/// How many proposals one proposer has pending at the moment a new one is
+/// made: those past their expiry are left out, though nothing has marked
+/// them expired yet. Parameters: the proposer's token ID, NULL for the
+/// clients with no token (`IS` matches NULL to NULL), and the new
+/// proposal's `created_at`. The status is a literal, so the statement
+/// serves from `proposals_by_status`.
+pub(crate) const COUNT_PENDING_PROPOSALS: &str = concat!(
+    "SELECT COUNT(*) FROM proposals ",
+    "WHERE status = 'pending' AND token_id IS ? AND expires_at > ?"
+);
+
+/// Keeps a new proposal. Parameters: `id`, `token_id`, `token_label`,
+/// `base`, `changes`, `rationale`, `status`, `created_at`, `expires_at`.
+pub(crate) const INSERT_PROPOSAL: &str = concat!(
+    "INSERT INTO proposals ",
+    "(id, token_id, token_label, base, changes, rationale, status, created_at, expires_at) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+);
+
+/// Forgets the ended proposals beyond the newest so many, the oldest first
+/// and, among those made in the same millisecond, by ID. Parameter: how many
+/// ended ones are kept.
+pub(crate) const FORGET_OLD_PROPOSALS: &str = concat!(
+    "DELETE FROM proposals WHERE id IN (",
+    "SELECT id FROM proposals WHERE status NOT IN ('pending', 'applying') ",
+    "ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?)"
+);
+
+/// The columns `row::proposal` reads.
+macro_rules! select_proposals {
+    ($clause:literal) => {
+        concat!(
+            "SELECT id, token_id, token_label, base, changes, rationale, status, created_at, ",
+            "expires_at FROM proposals",
+            $clause
+        )
+    };
+}
+
+/// Parameter: the proposal's ID.
+pub(crate) const GET_PROPOSAL: &str = select_proposals!(" WHERE id = ?");
+
+/// Every proposal, newest first; of two made in the same millisecond, the
+/// one kept last.
+pub(crate) const ALL_PROPOSALS: &str = select_proposals!(" ORDER BY created_at DESC, rowid DESC");
+
+/// Parameters: the new status, the proposal's ID, the status it must have.
+pub(crate) const CHANGE_PROPOSAL_STATUS: &str =
+    "UPDATE proposals SET status = ? WHERE id = ? AND status = ?";

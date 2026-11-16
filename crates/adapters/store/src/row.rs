@@ -10,6 +10,7 @@ use std::fmt::Display;
 
 use app::ports::{
     EngineResult, OperationRecord, PendingRetry, PlannedRun, ReleaseCheck, StoreError,
+    StoredProposal,
 };
 use domain::access::api_token::{
     ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, Scope, Scopes,
@@ -19,6 +20,7 @@ use domain::execution::locations::LocationsRecord;
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
 use domain::maintenance::{RepositoryStats, StatsReading};
+use domain::planning::{ConfigRevision, ProposalId, ProposalStatus, Proposer, Rationale};
 use domain::updates::Version;
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::Row;
@@ -518,4 +520,49 @@ pub(crate) fn warning_kind(row: &SqliteRow) -> Result<(String, WarningKind), Sto
     };
     let code = reader.required_text("code")?;
     Ok((operation, codec::warning_kind_from_text(&code)))
+}
+
+/// A proposal as `sql::GET_PROPOSAL` and `sql::ALL_PROPOSALS` read it. Its
+/// proposer is a token's ID and label, both set, or neither for a client
+/// with no token.
+pub(crate) fn proposal(row: &SqliteRow) -> Result<StoredProposal, StoreError> {
+    let mut reader = Reader {
+        row,
+        scope: "a proposal".to_owned(),
+    };
+    let id_text = reader.required_text("id")?;
+    let id = ProposalId::parse(&id_text)
+        .ok_or_else(|| reader.corrupt("id", format!("{} is not a proposal ID", shown(&id_text))))?;
+    reader.scope = format!("proposal {}", id.as_str());
+    let proposer = match (reader.text("token_id")?, reader.text("token_label")?) {
+        (None, None) => Proposer::NoToken,
+        (Some(token), Some(label)) => Proposer::Token {
+            id: ApiTokenId::parse(&token).ok_or_else(|| {
+                reader.corrupt(
+                    "token_id",
+                    format!("{} is not an API token ID", shown(&token)),
+                )
+            })?,
+            label: ApiTokenLabel::new(label)
+                .map_err(|_| reader.corrupt("token_label", "is not an API token label"))?,
+        },
+        (Some(_), None) => return Err(reader.corrupt("token_label", "is NULL")),
+        (None, Some(_)) => return Err(reader.corrupt("token_id", "is NULL")),
+    };
+    let rationale = Rationale::parse(reader.required_text("rationale")?)
+        .map_err(|_| reader.corrupt("rationale", "is too long"))?;
+    let status_text = reader.required_text("status")?;
+    let status = ProposalStatus::parse(&status_text).ok_or_else(|| {
+        reader.corrupt("status", format!("{} is not a status", shown(&status_text)))
+    })?;
+    Ok(StoredProposal {
+        id,
+        proposer,
+        base: ConfigRevision::new(reader.required_text("base")?),
+        changes: reader.required_text("changes")?,
+        rationale,
+        status,
+        created_at: reader.required_time("created_at")?,
+        expires_at: reader.required_time("expires_at")?,
+    })
 }
