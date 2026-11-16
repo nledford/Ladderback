@@ -301,6 +301,7 @@ function main(argv: string[]): number {
   if (command === "accept") {
     const [tag, ...ids] = rest;
     if (tag === undefined || ids.length === 0) throw new Error("usage: accept <tag> (<id>... | --all)");
+    if (ids.includes("--all") && ids.length > 1) throw new Error("accept: --all takes no IDs");
     const catalog = translation(tag);
     const result = accepting(
       tag,

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -222,6 +222,22 @@ test("accepting every message takes the translated ones that aren't current, and
   assert.equal(result.sources.get("greeting"), sourceHash("greeting = Hello there"));
   assert.equal(result.sources.get("same"), sourceHash("same = Same"));
   assert.equal(result.sources.has("welcome"), false);
+});
+
+test("accepting --all with IDs as well is refused, and writes nothing", (t) => {
+  const locales = mkdtempSync(path.join(tmpdir(), "translations-"));
+  t.after(() => rmSync(locales, { recursive: true, force: true }));
+  for (const tag of ["en-US", "de"]) {
+    mkdirSync(path.join(locales, tag));
+    writeFileSync(path.join(locales, tag, "main.ftl"), "greeting = Hello\n");
+  }
+  const script = path.join(import.meta.dirname, "translations.ts");
+  const result = spawnSync(process.execPath, [script, "accept", "de", "greeting", "--all", "--locales", locales], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /--all takes no IDs/);
+  assert.equal(existsSync(path.join(locales, "de", "sources.txt")), false);
 });
 
 /** Runs git in `dir`, with no configuration but the repository's own. */
