@@ -175,6 +175,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [107](decisions/107-the-update-notice.md) | The update notice |
 | [108](decisions/108-component-vocabulary.md) | One vocabulary of tones, sizes and placements |
 | [109](decisions/109-restore.md) | How a restore is started from the web UI |
+| [111](decisions/111-the-recent-log.md) | The recent log in the web UI |
 
 ## 17. Open questions
 
