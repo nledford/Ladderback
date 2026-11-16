@@ -244,7 +244,7 @@ fn refusal_gives_platform_message(agent: &mut Agent) {
 }
 
 #[given(expr = "Ladderback is serving on loopback with sign-in on and the admin password {string}")]
-async fn serving_with_sign_in(agent: &mut Agent, password: String) {
+pub(crate) async fn serving_with_sign_in(agent: &mut Agent, password: String) {
     is_set(agent, password).await;
     web::serve_on_loopback(agent).await;
 }
@@ -383,6 +383,16 @@ fn changes_over_http(agent: &mut Agent, current: String, new: String) {
         body: admin_password_body(Some(&current), &new),
     });
     web::send(agent);
+}
+
+#[then(expr = "the answer holds {string}")]
+fn answer_holds(agent: &mut Agent, text: String) {
+    let response = agent.web.response();
+    assert!(
+        response.body.contains(&text),
+        "the answer doesn't hold {text:?}: {:?}",
+        response.body
+    );
 }
 
 #[then(expr = "the answer doesn't hold {string}")]

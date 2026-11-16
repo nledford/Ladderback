@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
@@ -26,8 +26,13 @@ pub trait Profiles: Send + Sync {
     ) -> Result<api::ProfileImportDto, ProfilesError>;
 
     /// The plan whose ID is `plan` as a profile the stock `rustic` reads,
-    /// and what was left out of it.
-    async fn export(&self, plan: String) -> Result<api::ProfileExportDto, ProfilesError>;
+    /// its commands written or left out as `commands` says, and what was
+    /// left out of it.
+    async fn export(
+        &self,
+        plan: String,
+        commands: api::ProfileCommands,
+    ) -> Result<api::ProfileExportDto, ProfilesError>;
 }
 
 /// Why a profile request was refused. None holds a secret: a refusal names
@@ -108,9 +113,18 @@ pub(crate) async fn preview(
     }
 }
 
-/// The plan the path names as a profile.
-pub(crate) async fn export(State(state): State<AppState>, Path(plan): Path<String>) -> Response {
-    match state.profiles.export(plan).await {
+/// The plan the path names as a profile, its commands left out when the
+/// query asks it to.
+pub(crate) async fn export(
+    State(state): State<AppState>,
+    Path(plan): Path<String>,
+    Query(_query): Query<api::ProfileExportQuery>,
+) -> Response {
+    match state
+        .profiles
+        .export(plan, api::ProfileCommands::Written)
+        .await
+    {
         Ok(exported) => (StatusCode::OK, Json(exported)).into_response(),
         Err(error) => error.into_response(),
     }
@@ -167,11 +181,15 @@ mod tests {
             self.preview.clone()
         }
 
-        async fn export(&self, plan: String) -> Result<api::ProfileExportDto, ProfilesError> {
+        async fn export(
+            &self,
+            plan: String,
+            commands: api::ProfileCommands,
+        ) -> Result<api::ProfileExportDto, ProfilesError> {
             self.asked
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .push(plan);
+                .push(format!("{plan}:{commands:?}"));
             self.export.clone()
         }
     }
@@ -199,8 +217,12 @@ mod tests {
     }
 
     fn export(plan: &str) -> Request<Body> {
+        export_asking(&format!("/api/v1/plans/{plan}/profile"))
+    }
+
+    fn export_asking(uri: &str) -> Request<Body> {
         Request::builder()
-            .uri(format!("/api/v1/plans/{plan}/profile"))
+            .uri(uri)
             .header(header::HOST, "127.0.0.1:8080")
             .body(Body::empty())
             .unwrap()
@@ -263,7 +285,40 @@ mod tests {
             serde_json::from_str::<api::ProfileExportDto>(&answer).unwrap(),
             exported
         );
-        assert_eq!(profiles.asked(), ["home"]);
+        assert_eq!(profiles.asked(), ["home:Written"]);
+    }
+
+    /// With sign-in off no request carries a session or a token, so the MCP
+    /// server in connect mode asks for the profile without its commands
+    /// (#856); a request that doesn't ask gets them, and a value the query
+    /// doesn't take is refused before the export is asked for.
+    #[tokio::test]
+    async fn an_export_leaves_the_commands_out_only_when_the_query_asks_it_to() {
+        let profiles = Arc::new(Scripted {
+            export: Ok(api::ProfileExportDto {
+                text: "[repository]\n".to_owned(),
+                notices: Vec::new(),
+            }),
+            ..Scripted::answering(ProfilesError::InvalidBody)
+        });
+        for uri in [
+            "/api/v1/plans/home/profile?commands=left-out",
+            "/api/v1/plans/home/profile?commands=written",
+            "/api/v1/plans/home/profile?other=left-out",
+        ] {
+            let (status, answer) = send(Arc::clone(&profiles), export_asking(uri)).await;
+            assert_eq!(status, StatusCode::OK, "{uri}: {answer}");
+        }
+        let (status, _) = send(
+            Arc::clone(&profiles),
+            export_asking("/api/v1/plans/home/profile?commands=none"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            profiles.asked(),
+            ["home:LeftOut", "home:Written", "home:Written"]
+        );
     }
 
     #[tokio::test]

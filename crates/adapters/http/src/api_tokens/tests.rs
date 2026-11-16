@@ -1208,3 +1208,101 @@ fn only_a_bearer_header_is_a_token_and_two_are_none() {
         Some(None)
     ));
 }
+
+/// Exports any plan, and remembers what each export was asked to do with
+/// the profile's commands.
+#[derive(Default)]
+struct Exports(Mutex<Vec<api::ProfileCommands>>);
+
+#[async_trait]
+impl crate::Profiles for Exports {
+    async fn preview(
+        &self,
+        _request: api::ProfilePreviewDto,
+    ) -> Result<api::ProfileImportDto, crate::ProfilesError> {
+        Err(crate::ProfilesError::InvalidBody)
+    }
+
+    async fn export(
+        &self,
+        _plan: String,
+        commands: api::ProfileCommands,
+    ) -> Result<api::ProfileExportDto, crate::ProfilesError> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(commands);
+        Ok(api::ProfileExportDto {
+            text: "[repository]\n".to_owned(),
+            notices: Vec::new(),
+        })
+    }
+}
+
+impl Daemon {
+    /// Asks for the profile at `uri` with `headers`, and answers what the
+    /// export was asked to do with its commands.
+    async fn export_asked(&self, uri: &str, headers: &[(&str, &str)]) -> api::ProfileCommands {
+        let exports = Arc::new(Exports::default());
+        let mut state = self.state();
+        state.profiles = exports.clone();
+        let response = router(Arc::new(NoUi), RequestChecks::default(), state)
+            .oneshot(get(uri, headers))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        let asked = exports.0.lock().unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(asked.len(), 1, "{uri}: {asked:?}");
+        asked[0]
+    }
+}
+
+/// A token is a program's, perhaps an AI agent's: whatever its scopes and
+/// whatever it asks, its export leaves out the commands a person wrote,
+/// which may carry a token of their own (#856).
+#[tokio::test]
+async fn a_token_s_export_leaves_the_commands_out_whatever_it_asks() {
+    let daemon = Daemon::new();
+    for scopes in [
+        &[Scope::Read][..],
+        &[Scope::Read, Scope::Run, Scope::Preview, Scope::Propose],
+    ] {
+        let token = daemon.token(scopes).await;
+        for uri in [
+            "/api/v1/plans/home/profile",
+            "/api/v1/plans/home/profile?commands=written",
+            "/api/v1/plans/home/profile?commands=left-out",
+        ] {
+            assert_eq!(
+                daemon.export_asked(uri, &[("authorization", &token)]).await,
+                api::ProfileCommands::LeftOut,
+                "{scopes:?} {uri}"
+            );
+        }
+    }
+}
+
+/// The signed-in person's export writes the commands, unless it asks for
+/// them left out.
+#[tokio::test]
+async fn a_session_s_export_writes_the_commands_unless_it_asks_them_left_out() {
+    let daemon = Daemon::new();
+    let (cookie, _) = daemon.signed_in().await;
+    for (uri, commands) in [
+        ("/api/v1/plans/home/profile", api::ProfileCommands::Written),
+        (
+            "/api/v1/plans/home/profile?commands=written",
+            api::ProfileCommands::Written,
+        ),
+        (
+            "/api/v1/plans/home/profile?commands=left-out",
+            api::ProfileCommands::LeftOut,
+        ),
+    ] {
+        assert_eq!(
+            daemon.export_asked(uri, &[("cookie", &cookie)]).await,
+            commands,
+            "{uri}"
+        );
+    }
+}

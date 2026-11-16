@@ -1794,6 +1794,27 @@ pub struct ProfileExportDto {
     pub notices: Vec<WarningDto>,
 }
 
+/// The query `GET /api/v1/plans/{id}/profile` takes: `commands=left-out`
+/// leaves the profile's commands out, as the MCP tool `export_profile` asks
+/// (#856). Without it the export writes them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct ProfileExportQuery {
+    pub commands: ProfileCommands,
+}
+
+/// What an export does with the commands a profile runs: its
+/// `password-command` and each hook's command line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProfileCommands {
+    /// Written, as the web UI's and the command line's exports have them.
+    #[default]
+    Written,
+    /// Left out, each named by a `profile-command-left-out` notice.
+    LeftOut,
+}
+
 /// What a command prints in `--json` mode when it refused: the typed error,
 /// under the key `error`, which no document of a command that did what it
 /// was asked has.

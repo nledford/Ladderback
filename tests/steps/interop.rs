@@ -757,3 +757,20 @@ async fn same_removals(agent: &mut Agent) {
         .collect();
     assert_eq!(removed, agent.interop.rustic_removes);
 }
+
+#[then(expr = "the answer notes that {string} was left out because it runs a command")]
+fn answer_notes_command_left_out(agent: &mut Agent, key: String) {
+    let body = &agent.web.response().body;
+    let answer: serde_json::Value = serde_json::from_str(body)
+        .unwrap_or_else(|error| panic!("an export's answer is JSON ({error}): {body:?}"));
+    let notes = answer["notices"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no notices: {body}"));
+    assert!(
+        notes
+            .iter()
+            .any(|note| note["code"] == "profile-command-left-out"
+                && note["args"]["key"]["value"] == key.as_str()),
+        "no note that {key:?} was left out: {body}"
+    );
+}

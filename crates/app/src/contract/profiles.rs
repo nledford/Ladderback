@@ -5,15 +5,15 @@ use std::sync::Arc;
 
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::{
-    GroupBy, Hooks, KeepCount, Location, Maintenance, Plan, RepositoryConfig, RepositorySettings,
-    RetentionPolicy, Source,
+    GroupBy, HookEntry, Hooks, KeepCount, Location, Maintenance, OnFailure, Plan, RepositoryConfig,
+    RepositorySettings, RetentionPolicy, Source,
 };
-use domain::secrets::{FileRead, Part, SecretRef, SecretValue, Template};
+use domain::secrets::{CommandLine, FileRead, Part, SecretRef, SecretValue, Template};
 use domain::{AgentId, PlanId, RepositoryAlias, Uuid};
 
 use crate::ports::{
-    ExportRefusal, PlanExport, ProfileError, ProfileNotice, ProfileProblem, ProfileReader,
-    ProfileWriter,
+    ExportCommands, ExportRefusal, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
+    ProfileReader, ProfileWriter,
 };
 
 /// Sets up the profile files the reader reads, in memory for a fake and for
@@ -67,6 +67,7 @@ pub async fn run(harness: &dyn ProfilesHarness) {
     a_repository_of_several_locations_is_written_at_its_first_with_a_notice(harness);
     a_location_with_a_password_in_its_url_is_refused_and_never_written(harness);
     a_tag_with_a_comma_is_refused(harness);
+    every_command_left_out_is_named_and_none_is_written(harness);
 }
 
 fn alias(text: &str) -> Option<RepositoryAlias> {
@@ -244,6 +245,7 @@ fn export(location: &str) -> Option<PlanExport> {
         agent_hooks: Hooks::default(),
         agent: domain::planning::AgentSettings::default(),
         tags: PlanTags::new(plan_id, AgentId::from_uuid(Uuid::from_u128(1))),
+        commands: ExportCommands::Written,
     })
 }
 
@@ -474,5 +476,58 @@ fn a_tag_with_a_comma_is_refused(harness: &dyn ProfilesHarness) {
             tag: "a,b".to_owned()
         }),
         "{written:?}"
+    );
+}
+
+/// With the commands left out, neither the password's command nor any hook
+/// is in the text, and a notice names each, in the order the profile would
+/// have had them: the agent's hooks, the password, the repository's hooks,
+/// then the plan's.
+fn every_command_left_out_is_named_and_none_is_written(harness: &dyn ProfilesHarness) {
+    let Some(mut export) = export("/srv/demo-repo") else {
+        return;
+    };
+    let Ok(command) = CommandLine::new("demo-vault", ["read", "--token=CANARY-password"]) else {
+        return;
+    };
+    export.repository.settings.password = SecretRef::Command(command);
+    let hook = |name: &str| {
+        HookEntry::new(
+            "curl",
+            [format!("https://hc.demo/CANARY-{name}")],
+            OnFailure::Warn,
+        )
+        .ok()
+    };
+    let (Some(agent), Some(repository), Some(plan)) = (hook("agent"), hook("repo"), hook("plan"))
+    else {
+        return;
+    };
+    export.agent_hooks.run_before = vec![agent];
+    export.repository.hooks.run_after = vec![repository];
+    export.plan.hooks.run_failed = vec![plan];
+    export.commands = ExportCommands::LeftOut;
+    let written = harness.writer().render(&export);
+    assert!(written.is_ok(), "the export is made: {written:?}");
+    let Ok(profile) = written else { return };
+    assert!(!profile.text.contains("CANARY"), "{}", profile.text);
+    let left_out: Vec<&str> = profile
+        .notices
+        .iter()
+        .filter_map(|notice| match notice {
+            ProfileNotice::CommandLeftOut { key } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        left_out,
+        [
+            "global.hooks.run-before",
+            "repository.password-command",
+            "repository.hooks.run-after",
+            "backup.snapshots.hooks.run-failed",
+        ],
+        "{:?}",
+        profile.notices
     );
 }

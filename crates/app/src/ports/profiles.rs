@@ -51,7 +51,10 @@ pub trait ProfileReader: Send + Sync {
 /// Contract (checked by `contract::profiles`):
 /// - the text holds only keys rustic knows, and no secret as text;
 /// - what Ladderback can't say in rustic's words is a [`ProfileNotice`] or a
-///   [`ExportRefusal`], never silently dropped.
+///   [`ExportRefusal`], never silently dropped;
+/// - with [`ExportCommands::LeftOut`], the text holds no `password-command`
+///   and no hook, and a [`ProfileNotice::CommandLeftOut`] names each key left
+///   out.
 pub trait ProfileWriter: Send + Sync {
     fn render(&self, export: &PlanExport) -> Result<RenderedProfile, ExportRefusal>;
 }
@@ -125,6 +128,10 @@ pub enum ProfileNotice {
     /// first: rustic has no fallback, so the `further` locations after it
     /// were left out (decision 80).
     LocationsNotExported { further: usize },
+    /// An export left out the command at `key`, its path in the profile
+    /// (`repository.password-command`, `global.hooks.run-before`), because
+    /// it was asked to leave every command out ([`ExportCommands::LeftOut`]).
+    CommandLeftOut { key: String },
 }
 
 /// Why a profile couldn't be read. `file` is the path as the user gave it, or
@@ -215,6 +222,21 @@ pub struct PlanExport {
     /// The two tags that make a snapshot this plan's, and that the profile's
     /// forget is scoped by.
     pub tags: PlanTags,
+    /// Whether the commands the profile runs are written.
+    pub commands: ExportCommands,
+}
+
+/// What an export does with the commands a profile runs: its
+/// `password-command` and each hook's command line. A person wrote them, and
+/// one may carry a token (a health-check URL in a hook), so an export handed
+/// to an AI agent leaves them out (#856).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ExportCommands {
+    /// Every command is written, as the person's own export has it.
+    #[default]
+    Written,
+    /// No command is written, and a notice names each one left out.
+    LeftOut,
 }
 
 /// A profile as text, and what the writer left out of it.

@@ -8,7 +8,9 @@ mod common;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 
-use app::ports::{ExportRefusal, PlanExport, ProfileNotice, ProfileReader, ProfileWriter};
+use app::ports::{
+    ExportCommands, ExportRefusal, PlanExport, ProfileNotice, ProfileReader, ProfileWriter,
+};
 use common::{Scratch, nas};
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::{
@@ -71,6 +73,7 @@ fn export() -> PlanExport {
         agent_hooks: Hooks::default(),
         agent: domain::planning::AgentSettings::default(),
         tags: PlanTags::new(id("home"), agent()),
+        commands: ExportCommands::Written,
     }
 }
 
@@ -1243,4 +1246,138 @@ fn every_key_written_is_a_key_rustic_has() {
             "snapshot-filter"
         ]
     );
+}
+
+// --- Commands left out (#856) ---------------------------------------------
+
+/// A text a person may have typed into a command, as a token in a
+/// health-check URL.
+const CANARY: &str = "CANARY-856";
+
+/// The plan, its password read by a command and hooks at every level, each
+/// with the canary in an argument, to be exported with its commands left
+/// out.
+fn with_commands_left_out() -> PlanExport {
+    let mut export = export();
+    export.repository.settings.password = SecretRef::Command(
+        CommandLine::new(
+            "demo-vault",
+            ["read", &format!("--token={CANARY}-password")],
+        )
+        .expect("a command"),
+    );
+    export.agent_hooks.run_before = vec![entry(&format!(
+        "curl -fsS https://hc.demo/{CANARY}-agent/start"
+    ))];
+    export.repository.hooks.run_after = vec![entry(&format!(
+        "curl -fsS https://hc.demo/{CANARY}-repository"
+    ))];
+    export.plan.hooks.run_failed = vec![
+        HookEntry::new(
+            "curl",
+            [format!("https://hc.demo/{CANARY}-plan/fail")],
+            OnFailure::Warn,
+        )
+        .expect("a hook"),
+    ];
+    export.plan.hooks.run_finally = vec![entry(&format!("echo {CANARY}-finally"))];
+    export.commands = ExportCommands::LeftOut;
+    export
+}
+
+/// The keys a notice says were left out because they run a command, in
+/// order.
+fn commands_left_out(notices: &[ProfileNotice]) -> Vec<&str> {
+    notices
+        .iter()
+        .filter_map(|notice| match notice {
+            ProfileNotice::CommandLeftOut { key } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_plan_exported_with_its_commands_left_out_holds_none_and_names_each_in_order() {
+    let profile = render(&with_commands_left_out()).expect("the export is made");
+    let text = &profile.text;
+    assert!(!text.contains(CANARY), "{text}");
+    for path in [
+        "repository.password-command",
+        "global.hooks",
+        "repository.hooks",
+        "backup.snapshots.0.hooks",
+    ] {
+        assert_hasnt(text, path);
+    }
+    // The rest of the profile is as it is with the commands written.
+    assert_has(text, "repository.repository", string("/srv/demo-repo"));
+    assert_has(text, "backup.snapshots.0.name", string("home"));
+    assert_has(text, "forget.group-by", string(""));
+    assert_eq!(
+        commands_left_out(&profile.notices),
+        [
+            "global.hooks.run-before",
+            "repository.password-command",
+            "repository.hooks.run-after",
+            "backup.snapshots.hooks.run-failed",
+            "backup.snapshots.hooks.run-finally",
+        ]
+    );
+    // Written, the same plan holds each command and no such notice.
+    let mut export = with_commands_left_out();
+    export.commands = ExportCommands::Written;
+    let profile = render(&export).expect("the export is made");
+    assert_has(
+        &profile.text,
+        "repository.password-command",
+        string(&format!("demo-vault read --token={CANARY}-password")),
+    );
+    for path in [
+        "global.hooks.run-before",
+        "repository.hooks.run-after",
+        "backup.snapshots.0.hooks.run-failed",
+        "backup.snapshots.0.hooks.run-finally",
+    ] {
+        assert!(at(&parsed(&profile.text), path).is_some(), "{path}");
+    }
+    assert_eq!(commands_left_out(&profile.notices), Vec::<&str>::new());
+}
+
+/// Every password Ladderback reads with a command, a variable's and the
+/// keyring's too, is left out; a password file runs nothing and stays. A
+/// keyring command left out isn't looked for on the `PATH`.
+#[test]
+fn every_password_read_by_a_command_is_left_out_and_a_password_file_stays() {
+    for password in [
+        SecretRef::Env("DEMO_PASSWORD".to_owned()),
+        SecretRef::Keyring(KeyringEntry::parse("demo service/demo").expect("an entry")),
+    ] {
+        let mut export = export();
+        export.repository.settings.password = password;
+        export.commands = ExportCommands::LeftOut;
+        let profile = render(&export).expect("the export is made");
+        assert_hasnt(&profile.text, "repository.password-command");
+        assert_eq!(
+            commands_left_out(&profile.notices),
+            ["repository.password-command"]
+        );
+        assert!(
+            !profile
+                .notices
+                .iter()
+                .any(|notice| matches!(notice, ProfileNotice::KeyringCommandMissing { .. })),
+            "{:?}",
+            profile.notices
+        );
+    }
+    let mut export = export();
+    export.commands = ExportCommands::LeftOut;
+    let profile = render(&export).expect("the export is made");
+    assert_has(
+        &profile.text,
+        "repository.password-file",
+        string("/srv/demo-password"),
+    );
+    assert_eq!(commands_left_out(&profile.notices), Vec::<&str>::new());
 }

@@ -2682,6 +2682,7 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
                 MsgArg::Count(u64::try_from(further).unwrap_or(u64::MAX)),
             )],
         ),
+        ProfileNotice::CommandLeftOut { .. } => todo!(),
     };
     Notice { code, args }
 }

@@ -8,7 +8,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 
-use app::ports::{PlanExport, ProfileWriter};
+use app::ports::{ExportCommands, PlanExport, ProfileWriter};
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::planning::{
     GroupBy, HookEntry, Hooks, Hostname, KeepCount, KeepWithin, Maintenance, OnFailure, Plan,
@@ -93,6 +93,7 @@ fn export() -> PlanExport {
         agent_hooks: quiet(),
         agent: domain::planning::AgentSettings::default(),
         tags: PlanTags::new(id, AgentId::from_uuid(Uuid::from_u128(1))),
+        commands: ExportCommands::Written,
     }
 }
 

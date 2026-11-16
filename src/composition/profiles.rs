@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use app::interop::{ExportError, ExportProfile, ImportError, ImportProfile};
-use app::ports::{ConfigError, ConfigStore, NormalizeSources};
+use app::ports::{ConfigError, ConfigStore, ExportCommands, NormalizeSources};
 use async_trait::async_trait;
 use domain::{AgentId, PlanId, RepositoryAlias};
 use http_adapter::{Profiles, ProfilesError};
@@ -75,12 +75,16 @@ impl Profiles for ProfileService {
         }
     }
 
-    async fn export(&self, plan: String) -> Result<api::ProfileExportDto, ProfilesError> {
+    async fn export(
+        &self,
+        plan: String,
+        _commands: api::ProfileCommands,
+    ) -> Result<api::ProfileExportDto, ProfilesError> {
         // A name that is not a plan ID is not a plan of the configuration.
         let Ok(id) = PlanId::parse(&plan) else {
             return Err(ProfilesError::PlanUnknown { plan });
         };
-        match self.export.export(&id).await {
+        match self.export.export(&id, ExportCommands::Written).await {
             Ok(exported) => Ok(api::ProfileExportDto {
                 text: exported.text,
                 notices: exported

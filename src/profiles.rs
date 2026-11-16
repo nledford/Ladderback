@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use app::interop::{ExportProfile, ImportProfile, Imported};
-use app::ports::ConfigStore;
+use app::ports::{ConfigStore, ExportCommands};
 use config_adapter::FileConfigStore;
 use domain::{PlanId, RepositoryAlias};
 use interop::{FileProfileReader, KeyringCommand, RusticProfileWriter};
@@ -317,7 +317,8 @@ fn export(localizer: &Localizer, plan: &str) -> io::Result<ExitCode> {
     let path = std::env::var_os("PATH");
     let writer = RusticProfileWriter::new(KeyringCommand::of_this_platform(), path.as_deref());
     let use_case = ExportProfile::new(Arc::new(writer), config, agent);
-    match runtime.block_on(use_case.export(&plan_id)) {
+    // The person's own export: every command the profile runs is written.
+    match runtime.block_on(use_case.export(&plan_id, ExportCommands::Written)) {
         Ok(exported) => {
             for notice in exported.notices {
                 warn(localizer, &profile_notice(notice))?;

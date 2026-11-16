@@ -33,8 +33,8 @@ use domain::{AgentId, PlanId, RepositoryAlias};
 
 use crate::globs::never_matching_globs;
 use crate::ports::{
-    ConfigError, ConfigStore, ExportRefusal, ImportedProfile, NormalizeSources, PlanExport,
-    Problem, ProfileError, ProfileNotice, ProfileReader, ProfileWriter,
+    ConfigError, ConfigStore, ExportCommands, ExportRefusal, ImportedProfile, NormalizeSources,
+    PlanExport, Problem, ProfileError, ProfileNotice, ProfileReader, ProfileWriter,
 };
 
 /// Imports a rustic profile: reads it through the [`ProfileReader`], checks
@@ -317,8 +317,13 @@ impl ExportProfile {
         }
     }
 
-    /// The profile of the plan `plan`.
-    pub async fn export(&self, plan: &PlanId) -> Result<ExportedProfile, ExportError> {
+    /// The profile of the plan `plan`, its commands written or left out as
+    /// `commands` says.
+    pub async fn export(
+        &self,
+        plan: &PlanId,
+        _commands: ExportCommands,
+    ) -> Result<ExportedProfile, ExportError> {
         let config = self.config.load().await.map_err(ExportError::Config)?;
         let found = config
             .plan(plan)
@@ -346,6 +351,7 @@ impl ExportProfile {
                 agent_hooks: config.hooks().clone(),
                 agent: config.agent().clone(),
                 tags: PlanTags::new(found.id.clone(), self.agent),
+                commands: ExportCommands::Written,
             })
             .map_err(ExportError::Render)?;
         Ok(ExportedProfile {

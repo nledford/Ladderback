@@ -43,6 +43,15 @@ Feature: Export a plan as a rustic profile
       Then the export succeeds
       And the export notes that the option "token" was left out for the variable "RUSTIC_REPO_OPT_TOKEN"
 
+    # A person wrote each command, and one may carry a token, as a hook's
+    # health-check address does: a profile handed to an AI agent has none.
+    Scenario: An export for an AI agent leaves out every command the profile would run
+      Given the configuration holds the repository "nas"
+      And the configuration holds the plan "home" for the repository "nas"
+      When the plan "home" is exported for an AI agent
+      Then the export succeeds
+      And the profile writer was asked to leave out every command the profile would run
+
   @e2e
   Rule: The profile holds only what rustic reads, scoped to the plan
 
@@ -495,3 +504,49 @@ Feature: Export a plan as a rustic profile
       Then the operation ends as succeeded with warnings
       And rustic would have removed 2 snapshots
       And Ladderback removed exactly the snapshots rustic would have removed
+
+  # Only a person signed in with the admin password gets the commands: an API
+  # token, whatever its scopes, is a program's, perhaps an AI agent's.
+  @e2e
+  Rule: Over the API, only a signed-in session gets the commands a profile runs
+
+    Background:
+      Given the daemon's config file holds:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-command = "demo-vault read --token=CANARY-856-password"
+        hooks = { run-after = ["curl -fsS https://hc.demo/CANARY-856-repository"] }
+
+        [[plans]]
+        id = "home"
+        repository = "nas"
+        sources = ["/home/demo"]
+        hooks = { run-failed = ["curl -fsS https://hc.demo/CANARY-856-plan"] }
+        """
+      And Ladderback is serving on loopback with that config file, sign-in on and the admin password "demo-admin-pass"
+      And the admin has signed in over HTTP with "demo-admin-pass"
+
+    Scenario: An API token that may read gets the profile without its commands
+      Given the admin has created an API token over HTTP with the scopes "read" and the label "reader"
+      And a "GET" request for "/api/v1/plans/home/profile" with the API token
+      When the request is sent
+      Then the request is answered with status 200
+      And the answer doesn't hold "CANARY-856"
+      And the answer notes that "repository.password-command" was left out because it runs a command
+      And the answer notes that "repository.hooks.run-after" was left out because it runs a command
+      And the answer notes that "backup.snapshots.hooks.run-failed" was left out because it runs a command
+
+    Scenario: A signed-in session gets the whole profile, and none of its commands when it asks so
+      Given a "GET" request for "/api/v1/plans/home/profile" with the session cookie
+      When the request is sent
+      Then the request is answered with status 200
+      And the answer holds "--token=CANARY-856-password"
+      And the answer holds "https://hc.demo/CANARY-856-plan"
+      Given a "GET" request for "/api/v1/plans/home/profile?commands=left-out" with the session cookie
+      When the request is sent
+      Then the request is answered with status 200
+      And the answer doesn't hold "CANARY-856"
+      And the answer notes that "repository.password-command" was left out because it runs a command
