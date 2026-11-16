@@ -1195,6 +1195,8 @@ fn row_id(prefix: &str, row: tree::Row) -> String {
 /// by its entry's name and described by what it is: its kind, size and
 /// modification time. A refused page is said in an alert under the tree;
 /// `empty` is said in place of a tree when the top folder holds nothing.
+/// `selected` follows what the tree selects ([`tree::Tree::selection`]), for
+/// a pane beside it that acts on that entry.
 #[component]
 pub(crate) fn Tree(
     localizer: Arc<Localizer>,
@@ -1203,6 +1205,7 @@ pub(crate) fn Tree(
     id: String,
     loader: FolderLoader,
     empty: String,
+    #[prop(optional)] selected: Option<RwSignal<Option<tree::Selection>>>,
 ) -> impl IntoView {
     let rtl = localizer.direction() == Direction::Rtl;
     let loading = text(&localizer, msg::UI_LOADING);
@@ -1213,6 +1216,10 @@ pub(crate) fn Tree(
     let mut initial = tree::Tree::new();
     let first = initial.start();
     let state = RwSignal::new(initial);
+    if let Some(selected) = selected {
+        let selection = Memo::new(move |_| state.with(tree::Tree::selection));
+        Effect::new(move |_| selected.set(selection.get()));
+    }
     // Puts focus on the row holding the tab stop once it is drawn.
     let focus_stop = move || {
         let Some(stop) = state.with_untracked(tree::Tree::tab_stop) else {
