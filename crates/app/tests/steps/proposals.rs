@@ -96,7 +96,8 @@ impl ProposalsWorld {
 }
 
 /// The proposals use case over the configuration the scheduler world's
-/// loop reads, on the scenario's clock, with sign-in off.
+/// loop reads, on the scenario's clock, with sign-in off. Built again for
+/// each step, as one daemon's: under the same revision key.
 pub(crate) fn proposals(agent: &Agent) -> Proposals {
     let config = agent.scheduler.config();
     Proposals::new(ProposalPorts {
@@ -109,6 +110,9 @@ pub(crate) fn proposals(agent: &Agent) -> Proposals {
         events: agent.proposals.events.clone(),
         clock: agent.clock.clone(),
         random: agent.proposals.random.clone(),
+        revision_key: Ok(domain::planning::RevisionKey::new(
+            [5; domain::planning::REVISION_KEY_BYTES],
+        )),
     })
 }
 

@@ -390,6 +390,48 @@ fn a_revision_reads_back_from_its_hex() {
 }
 
 #[test]
+fn a_shown_revision_is_the_sha256_of_the_key_then_the_revision() {
+    let key = RevisionKey::new([7; REVISION_KEY_BYTES]);
+    let shown = ShownRevision::of(&key, &ConfigRevision::of(b""));
+    // SHA-256 of 32 bytes of 7, then the 64 hex digits of the empty file's
+    // revision.
+    assert_eq!(
+        shown.as_str(),
+        "6b6906290822e563c1e3b3398850f5673effd51721cb81dadb4ab80ac0cce4e6"
+    );
+    assert_ne!(shown.as_str(), EMPTY_SHA256);
+    assert_eq!(ShownRevision::parse(shown.as_str()), Some(shown));
+}
+
+#[test]
+fn the_same_file_is_shown_another_revision_under_another_key() {
+    let revision = ConfigRevision::of(b"schema = 1\n");
+    let one = ShownRevision::of(&RevisionKey::new([1; REVISION_KEY_BYTES]), &revision);
+    let two = ShownRevision::of(&RevisionKey::new([2; REVISION_KEY_BYTES]), &revision);
+    assert_ne!(one, two);
+    assert_ne!(one.as_str(), revision.as_str());
+    assert_eq!(
+        one,
+        ShownRevision::of(&RevisionKey::new([1; REVISION_KEY_BYTES]), &revision)
+    );
+    assert_ne!(
+        one,
+        ShownRevision::of(
+            &RevisionKey::new([1; REVISION_KEY_BYTES]),
+            &ConfigRevision::of(b"schema = 2\n")
+        )
+    );
+}
+
+#[test]
+fn a_revision_key_never_shows_its_bytes() {
+    let key = RevisionKey::new([0xab; REVISION_KEY_BYTES]);
+    let shown = format!("{key:?}");
+    assert_eq!(shown, "RevisionKey([hidden])");
+    assert!(!shown.contains("171") && !shown.contains("ab"), "{shown}");
+}
+
+#[test]
 fn a_revision_of_another_length_or_alphabet_is_none() {
     for text in [
         EMPTY_SHA256.chars().skip(1).collect(),

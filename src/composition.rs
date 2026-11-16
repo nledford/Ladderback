@@ -903,6 +903,7 @@ async fn state_over(
         writes: Arc::clone(&writes),
         changed: changed.another(),
         events: Arc::clone(&bus),
+        revision_key: proposals::revision_key(),
     };
     let plans: Arc<dyn Plans> = Arc::new(plans::PlanService::new(
         Arc::clone(&config),

@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use api::{ChangeProblem, ErrorCode, PlanProblem, ProposalChangeDto};
-use app::ports::{ConfigError, ConfigStore, EventBus, Problem, ProposalStore};
+use app::ports::{
+    ConfigError, ConfigStore, EventBus, Problem, ProposalStore, Random as _, RandomUnavailable,
+};
 use app::proposals::{ApprovalAsk, ProposalError, ProposalPorts, Proposals};
 use app::repositories::ConfigWrites;
 use app::schedule::ConfigChanged;
@@ -15,9 +17,9 @@ use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::PlanId;
 use domain::planning::{
-    ChangeRefused, ConfigChange, ConfigRevision, DiffHash, MAX_CHANGES, MAX_PENDING,
-    MAX_RATIONALE_CHARS, PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalWarning,
-    Proposer, Rationale, RejectionRefused, Shown, SummaryLine, TooSoon, short_proposal_id,
+    ChangeRefused, ConfigChange, DiffHash, MAX_CHANGES, MAX_PENDING, MAX_RATIONALE_CHARS,
+    PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalWarning, Proposer, Rationale,
+    RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon, short_proposal_id,
 };
 use http_adapter::{Approval, PlansError, ProposalsError, SignIn};
 use platform::SystemClock;
@@ -40,6 +42,16 @@ pub(super) struct ProposalParts {
     /// Wakes the scheduler after an apply.
     pub(super) changed: ConfigChanged,
     pub(super) events: Arc<dyn EventBus>,
+    /// The key this daemon start shows the file's revisions under
+    /// ([`revision_key`]): held here, so every service built over these
+    /// parts shows the same file the same.
+    pub(super) revision_key: Result<RevisionKey, RandomUnavailable>,
+}
+
+/// A key to show the configuration's revisions under, drawn from the
+/// platform's random source, once each daemon start; never kept.
+pub(super) fn revision_key() -> Result<RevisionKey, RandomUnavailable> {
+    OsRandom.token().map(RevisionKey::new)
 }
 
 impl ProposalParts {
@@ -56,6 +68,7 @@ impl ProposalParts {
             events: Arc::clone(&self.events),
             clock: Arc::new(SystemClock),
             random: Arc::new(OsRandom),
+            revision_key: self.revision_key.clone(),
         })
     }
 }
@@ -192,7 +205,7 @@ impl http_adapter::Proposals for ProposalService {
         // A revision or a hash that is none no rebuild gives: the page
         // showed something else.
         let (Some(revision), Some(diff)) = (
-            ConfigRevision::parse(&approval.revision),
+            ShownRevision::parse(&approval.revision),
             DiffHash::parse(&approval.diff_hash),
         ) else {
             return Err(ProposalsError::Changed);
@@ -561,6 +574,7 @@ sources = ["/home/demo"]
             writes: Arc::default(),
             changed: app::schedule::config_changes().0,
             events: Arc::new(app::event_bus::BroadcastEventBus::new()),
+            revision_key: revision_key(),
         };
         (ProposalService::new(&parts, sign_in), scratch, file)
     }

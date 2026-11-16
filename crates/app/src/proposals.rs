@@ -19,7 +19,7 @@ use domain::access::Password;
 use domain::planning::{
     AgentConfig, ConfigChange, ConfigRevision, DiffHash, MAX_ENDED, MAX_PENDING, Proposal,
     ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale, Rejection,
-    RejectionRefused, Shown, SummaryLine, TooSoon, confirms_proposal,
+    RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon, confirms_proposal,
 };
 use domain::secrets::Redactor;
 
@@ -74,7 +74,8 @@ pub enum ProposalError {
     Store(StoreError),
     /// The changes couldn't be written to be kept.
     Codec(CodecError),
-    /// The platform gave no random bytes for the proposal's ID.
+    /// The platform gave no random bytes for the proposal's ID, or none
+    /// for the key a page's revisions are shown under.
     Random(RandomUnavailable),
 }
 
@@ -96,8 +97,8 @@ pub struct Review {
     /// changes make, every secret the configuration holds masked; empty
     /// for one that isn't pending.
     pub diff: String,
-    /// What an approval of it is bound to: the file and the diff as shown,
-    /// masked; the file's revision binds what the mask hides.
+    /// What an approval of it is bound to: the file, keyed, and the diff
+    /// as shown, masked; the file's revision binds what the mask hides.
     pub shown: Shown,
     /// Whether the file has changed since the proposal was drafted.
     pub changed_since_drafted: bool,
@@ -136,6 +137,9 @@ pub struct ProposalPorts {
     pub events: Arc<dyn EventBus>,
     pub clock: Arc<dyn Clock>,
     pub random: Arc<dyn Random>,
+    /// The key the revisions a page is shown are keyed with, drawn once
+    /// each daemon start, or why the platform gave none.
+    pub revision_key: Result<RevisionKey, RandomUnavailable>,
 }
 
 /// Makes, reads, withdraws, approves and rejects proposals.
@@ -310,7 +314,7 @@ impl Proposals {
             changed_since_drafted: draft.revision != proposal.base,
             needs_forget_preview: proposal.needs_forget_preview(&config),
             shown: Shown {
-                revision: draft.revision,
+                revision: self.shown_revision(&draft.revision)?,
                 diff: DiffHash::of(&diff),
             },
             proposal,
@@ -346,7 +350,7 @@ impl Proposals {
         }
         let draft = self.draft(&after).await?;
         let rebuilt = Shown {
-            revision: draft.revision.clone(),
+            revision: self.shown_revision(&draft.revision)?,
             diff: DiffHash::of(&masked_diff(&config, &draft.before, &draft.after)),
         };
         if rebuilt != ask.shown {
@@ -468,6 +472,16 @@ impl Proposals {
             .draft(config)
             .await
             .map_err(|error| ProposalError::Config(Box::new(error)))
+    }
+
+    /// `revision` as a page is shown it: keyed with this daemon's key, so
+    /// the file's plain revision never leaves it.
+    fn shown_revision(&self, revision: &ConfigRevision) -> Result<ShownRevision, ProposalError> {
+        self.ports
+            .revision_key
+            .as_ref()
+            .map(|key| ShownRevision::of(key, revision))
+            .map_err(|error| ProposalError::Random(error.clone()))
     }
 
     /// Tells every page that the proposal `id` now has `status`.

@@ -20,6 +20,7 @@ use crate::fakes::{
 struct World {
     proposals: Arc<Proposals>,
     store: Arc<InMemoryProposalStore>,
+    codec: Arc<FakeChangeCodec>,
     config: Arc<InMemoryConfigStore>,
     clock: Arc<FakeClock>,
     events: Arc<InMemoryEventBus>,
@@ -71,24 +72,47 @@ async fn world() -> World {
         Timestamp::from_second(1_800_000_000).unwrap(),
     ));
     let events = Arc::new(InMemoryEventBus::new());
-    let proposals = Arc::new(Proposals::new(ProposalPorts {
-        store: store.clone(),
-        codec: Arc::new(FakeChangeCodec::new()),
-        config: config.clone(),
-        drafts: config.clone(),
-        writes: Arc::default(),
-        changed: crate::schedule::config_changes().0,
-        events: events.clone(),
-        clock: clock.clone(),
-        random: Arc::new(SeededRandom::new(7)),
-    }));
+    let codec = Arc::new(FakeChangeCodec::new());
     World {
-        proposals,
+        proposals: Arc::new(Proposals::new(ProposalPorts {
+            store: store.clone(),
+            codec: codec.clone(),
+            config: config.clone(),
+            drafts: config.clone(),
+            writes: Arc::default(),
+            changed: crate::schedule::config_changes().0,
+            events: events.clone(),
+            clock: clock.clone(),
+            random: Arc::new(SeededRandom::new(7)),
+            revision_key: Ok(key(3)),
+        })),
         store,
+        codec,
         config,
         clock,
         events,
     }
+}
+
+fn key(byte: u8) -> RevisionKey {
+    RevisionKey::new([byte; domain::planning::REVISION_KEY_BYTES])
+}
+
+/// The proposals of `world` as the daemon started again holds them, under
+/// `revision_key`: the same store, codec and file.
+fn restarted(world: &World, revision_key: Result<RevisionKey, RandomUnavailable>) -> Proposals {
+    Proposals::new(ProposalPorts {
+        store: world.store.clone(),
+        codec: world.codec.clone(),
+        config: world.config.clone(),
+        drafts: world.config.clone(),
+        writes: Arc::default(),
+        changed: crate::schedule::config_changes().0,
+        events: world.events.clone(),
+        clock: world.clock.clone(),
+        random: Arc::new(SeededRandom::new(7)),
+        revision_key,
+    })
 }
 
 async fn propose(world: &World, change: ConfigChange) -> Result<Proposal, ProposalError> {
@@ -322,14 +346,76 @@ async fn a_review_shows_the_diff_it_binds_an_approval_to_and_whether_the_file_ch
     assert_eq!(
         review.shown,
         Shown {
-            revision: draft.revision,
+            revision: ShownRevision::of(&key(3), &draft.revision),
             diff: DiffHash::of(&diff),
         }
+    );
+    assert_ne!(
+        review.shown.revision.as_str(),
+        draft.revision.as_str(),
+        "never the file's plain revision, a hash of its secrets too"
     );
     assert_eq!(review.summary, [SummaryLine::AddsPlan(plan("home").id)]);
     // Drafted against the revision of "base", which the file never was.
     assert!(review.changed_since_drafted);
     assert_eq!(review.rejected, 0);
+}
+
+#[tokio::test]
+async fn the_same_file_is_shown_another_revision_after_a_restart() {
+    let world = world().await;
+    let made = propose(&world, ConfigChange::AddPlan(plan("home")))
+        .await
+        .unwrap();
+    let before = world.proposals.review(&made.id).await.unwrap();
+    let after = restarted(&world, Ok(key(4)))
+        .review(&made.id)
+        .await
+        .unwrap();
+    assert_ne!(before.shown.revision, after.shown.revision);
+    assert_eq!(before.shown.diff, after.shown.diff);
+}
+
+#[tokio::test]
+async fn an_approval_of_what_a_page_showed_before_a_restart_changes_nothing() {
+    let world = world().await;
+    let made = propose(&world, ConfigChange::AddPlan(plan("home")))
+        .await
+        .unwrap();
+    let ask = as_shown(&world, &made.id).await;
+    assert_eq!(
+        restarted(&world, Ok(key(4))).approve(&made.id, ask).await,
+        Err(ProposalError::Changed)
+    );
+    assert_eq!(
+        world.store.get(&made.id).await.unwrap().unwrap().status,
+        ProposalStatus::Pending
+    );
+    assert!(world.config.load().await.unwrap().plans().is_empty());
+}
+
+#[tokio::test]
+async fn with_no_key_to_show_a_revision_under_a_review_or_an_approval_is_refused() {
+    let world = world().await;
+    let made = propose(&world, ConfigChange::AddPlan(plan("home")))
+        .await
+        .unwrap();
+    let ask = as_shown(&world, &made.id).await;
+    let unavailable = RandomUnavailable("no entropy".to_owned());
+    let keyless = restarted(&world, Err(unavailable.clone()));
+    assert_eq!(
+        keyless.review(&made.id).await.map(drop),
+        Err(ProposalError::Random(unavailable.clone()))
+    );
+    assert_eq!(
+        keyless.approve(&made.id, ask).await.map(drop),
+        Err(ProposalError::Random(unavailable))
+    );
+    assert_eq!(
+        world.store.get(&made.id).await.unwrap().unwrap().status,
+        ProposalStatus::Pending
+    );
+    assert!(world.config.load().await.unwrap().plans().is_empty());
 }
 
 #[tokio::test]

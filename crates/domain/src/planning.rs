@@ -45,9 +45,9 @@ pub use proposal::{
     ConfigChange, ConfigRevision, DiffHash, MAX_CHANGES, MAX_ENDED, MAX_PENDING, MAX_PER_HOUR,
     MAX_RATIONALE_CHARS, MAX_REASON_CHARS, PROPOSAL_ID_CHARS, PROPOSAL_LIFETIME, PlanSetting,
     Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer,
-    ProposerRecord, QUIET_AFTER_REJECTION, RATE_WINDOW, Rationale, RejectReason, Rejection,
-    RejectionRefused, SHORT_PROPOSAL_ID_CHARS, Shown, SummaryLine, TooSoon, confirms_proposal,
-    short_proposal_id,
+    ProposerRecord, QUIET_AFTER_REJECTION, RATE_WINDOW, REVISION_KEY_BYTES, Rationale,
+    RejectReason, Rejection, RejectionRefused, RevisionKey, SHORT_PROPOSAL_ID_CHARS, Shown,
+    ShownRevision, SummaryLine, TooSoon, confirms_proposal, short_proposal_id,
 };
 pub use repository::{
     GroupBy, Maintenance, RepositoryConfig, RepositorySettings, check_location, check_option_value,

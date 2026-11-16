@@ -4,8 +4,9 @@
 //! a rejection's reasons, and how often a proposer may propose.
 
 use jiff::{SignedDuration, Timestamp};
+use subtle::ConstantTimeEq as _;
 
-use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex};
+use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex, sha256_hex_of};
 use crate::PlanId;
 use crate::planning::{AgentConfig, Plan, Source};
 
@@ -168,12 +169,67 @@ impl DiffHash {
     }
 }
 
+/// Bytes of a [`RevisionKey`].
+pub const REVISION_KEY_BYTES: usize = 32;
+
+/// The key a daemon draws once each start, from its random source, to key
+/// the revisions its pages are shown ([`ShownRevision`]). Held in memory
+/// only: never logged, kept or sent, so its `Debug` hides it.
+#[derive(Clone)]
+pub struct RevisionKey([u8; REVISION_KEY_BYTES]);
+
+impl RevisionKey {
+    pub fn new(bytes: [u8; REVISION_KEY_BYTES]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl std::fmt::Debug for RevisionKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RevisionKey([hidden])")
+    }
+}
+
+/// The configuration file a page was shown, as the page holds it: the
+/// SHA-256, in lower-case hex, of the daemon's [`RevisionKey`] followed by
+/// the file's [`ConfigRevision`]. Never the file's plain revision, which is
+/// a hash of its bytes, inline secrets included: without the key, a guess
+/// at a secret can't be checked against it (I4). A key of fixed length
+/// ahead of the revision is enough for a binding compared for equality.
+/// Compared in constant time.
+#[derive(Clone, Debug)]
+pub struct ShownRevision(String);
+
+impl ShownRevision {
+    /// The revision `revision` as a page is shown it under `key`.
+    pub fn of(key: &RevisionKey, revision: &ConfigRevision) -> Self {
+        Self(sha256_hex_of(&[&key.0, revision.as_str().as_bytes()]))
+    }
+
+    /// The revision `text` names, as [`ShownRevision::as_str`] gives it.
+    pub fn parse(text: &str) -> Option<Self> {
+        ConfigRevision::parse(text).map(|_| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq for ShownRevision {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_bytes().ct_eq(other.0.as_bytes()).into()
+    }
+}
+
+impl Eq for ShownRevision {}
+
 /// What the page showed a person: the configuration file the diff was
 /// rebuilt against and the diff (decision 89, point 6). An approval holds
 /// only while both are still what a rebuild gives.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Shown {
-    pub revision: ConfigRevision,
+    pub revision: ShownRevision,
     pub diff: DiffHash,
 }
 

@@ -369,8 +369,16 @@ fn sets_hooks(config: &AgentConfig, change: &ConfigChange) -> bool {
 
 /// The SHA-256 of `bytes` in lower-case hex.
 fn sha256_hex(bytes: &[u8]) -> String {
+    sha256_hex_of(&[bytes])
+}
+
+/// The SHA-256 of `parts`, one after the other, in lower-case hex.
+fn sha256_hex_of(parts: &[&[u8]]) -> String {
     use fmt::Write as _;
-    Sha256::digest(bytes)
+    parts
+        .iter()
+        .fold(Sha256::new(), |hasher, part| hasher.chain_update(part))
+        .finalize()
         .iter()
         .fold(String::with_capacity(REVISION_CHARS), |mut hex, byte| {
             // Writing to a `String` can't fail.
@@ -383,8 +391,9 @@ mod decision;
 
 pub use decision::{
     DiffHash, MAX_PER_HOUR, MAX_REASON_CHARS, PlanSetting, ProposalWarning, ProposerRecord,
-    QUIET_AFTER_REJECTION, RATE_WINDOW, RejectReason, Rejection, RejectionRefused,
-    SHORT_PROPOSAL_ID_CHARS, Shown, SummaryLine, TooSoon, confirms_proposal, short_proposal_id,
+    QUIET_AFTER_REJECTION, RATE_WINDOW, REVISION_KEY_BYTES, RejectReason, Rejection,
+    RejectionRefused, RevisionKey, SHORT_PROPOSAL_ID_CHARS, Shown, ShownRevision, SummaryLine,
+    TooSoon, confirms_proposal, short_proposal_id,
 };
 
 #[cfg(test)]
