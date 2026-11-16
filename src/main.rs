@@ -265,11 +265,12 @@ fn serve_mcp(mode: McpMode, plain: bool) -> ExitCode {
     finish(&localizer, run_mcp(&localizer, mode))
 }
 
-/// The start of a process that will hold secrets, the daemon or the MCP
-/// server: first, before any secret is resolved or a token read, its core
-/// dumps and debugger attach turned off (decision 98), then its log and the
-/// reader's language, and a warning for each protection it couldn't set.
-fn start_protected(plain: bool) -> Localizer {
+/// The start of a process that will hold secrets, the daemon, the MCP
+/// server or a one-shot command: first, before any secret is resolved or a
+/// token read, its core dumps and debugger attach turned off (decision 98),
+/// then its log and the reader's language, and a warning for each
+/// protection it couldn't set.
+pub(crate) fn start_protected(plain: bool) -> Localizer {
     let unprotected = platform::dumps::refuse();
     logging::install(plain);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
