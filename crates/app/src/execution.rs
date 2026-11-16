@@ -1299,4 +1299,80 @@ mod tests {
         let first = seen.first().expect("an ending hook read the log");
         assert_eq!(first.result, None);
     }
+
+    /// A secret only the run's redactor knows.
+    const CANARY: &str = "canary-of-the-run";
+
+    /// Every hook writes the canary and succeeds; what the redactor it was
+    /// handed made of the canary is recorded with its program.
+    struct MasksTheCanary {
+        masked: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ports::HookRunner for MasksTheCanary {
+        async fn run(
+            &self,
+            entry: &HookEntry,
+            _: &crate::ports::HookContext,
+            redactor: &domain::secrets::Redactor,
+        ) -> crate::ports::HookOutcome {
+            self.masked
+                .lock()
+                .unwrap()
+                .push((entry.command.program().to_owned(), redactor.redact(CANARY)));
+            crate::ports::HookOutcome {
+                status: crate::ports::HookStatus::Succeeded,
+                stdout: crate::ports::HookOutput::default(),
+                stderr: crate::ports::HookOutput::default(),
+            }
+        }
+
+        fn environment_secrets(&self) -> Vec<domain::secrets::SecretValue> {
+            Vec::new()
+        }
+    }
+
+    /// Every hook of a run is handed the run's redactor, the agent's, the
+    /// repository's and the plan's, in every phase: before and after a run
+    /// that succeeded, failed and finally after one that failed (security.md
+    /// §10.2, #853).
+    #[tokio::test]
+    async fn every_hook_of_a_run_is_handed_the_runs_redactor() {
+        use domain::secrets::{Redactor, SecretValue};
+
+        let runner = Arc::new(MasksTheCanary {
+            masked: std::sync::Mutex::new(Vec::new()),
+        });
+        let use_case = use_case().with_hooks(
+            runner.clone(),
+            HookSetup {
+                redactor: Arc::new(Redactor::new([&SecretValue::new(CANARY)])),
+                ..setup()
+            },
+        );
+        use_case
+            .run_before_hooks(&mut run_of(operation(OperationKind::Backup)))
+            .await;
+        use_case.run_ending_hooks(&mut succeeded_run()).await;
+        use_case.run_ending_hooks(&mut failed_run()).await;
+
+        let masked = runner.masked.lock().unwrap().clone();
+        let programs: std::collections::BTreeSet<&str> =
+            masked.iter().map(|(program, _)| program.as_str()).collect();
+        let every_hook: std::collections::BTreeSet<String> = ["agent", "repository", "plan"]
+            .iter()
+            .flat_map(|level| {
+                ["before", "after", "failed", "finally"].map(|phase| format!("{level}-{phase}"))
+            })
+            .collect();
+        assert_eq!(
+            programs,
+            every_hook.iter().map(String::as_str).collect(),
+            "every hook of every level and phase ran"
+        );
+        for (program, text) in &masked {
+            assert_eq!(text, "***", "{program} was handed the run's redactor");
+        }
+    }
 }
