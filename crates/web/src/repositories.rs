@@ -976,6 +976,8 @@ mod tests {
             ErrorCode::SecretCommandFailed,
             ErrorCode::SecretCommandOutputOpen,
             ErrorCode::SecretCommandTimedOut,
+            ErrorCode::SecretKeyringTimedOut,
+            ErrorCode::SecretFileTimedOut,
             ErrorCode::SecretInProcessArguments,
             ErrorCode::SecretExpansionTooLong,
             ErrorCode::SecretsTooLargeToMask,

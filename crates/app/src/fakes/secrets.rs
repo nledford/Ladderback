@@ -31,8 +31,9 @@ pub enum Script {
     Hangs,
 }
 
-/// What a fake resolver reports for a command that hangs: the real one
-/// reports the limit it was given, which is a minute unless set otherwise.
+/// What a fake resolver reports for a command, a keyring or a file that
+/// doesn't answer: the real one reports the limit it was given, which is a
+/// minute unless set otherwise.
 const FAKE_TIME_LIMIT_SECONDS: u64 = 60;
 
 /// How often a keyring entry may be read while the keyring can't be asked
@@ -64,6 +65,11 @@ struct State {
     /// The keyring is locked: every keyring read fails, entry or not.
     keyring_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
+    /// The keyring doesn't answer, as a macOS keychain waiting on a prompt
+    /// nobody answered: every keyring read outlives the time limit.
+    keyring_stalls: bool,
+    /// Paths whose reads outlive the time limit, as on a hung network mount.
+    stalled_files: BTreeSet<String>,
     /// Link path to what it leads to.
     links: BTreeMap<String, String>,
     reads: Vec<SecretRef>,
@@ -152,6 +158,18 @@ impl FakeSecrets {
         self.lock().service_starts = Some((clock, at));
     }
 
+    /// A keyring that doesn't answer, as a macOS keychain waiting on a
+    /// prompt nobody answered: every keyring entry fails as `TimedOut`.
+    pub fn stall_keyring(&self) {
+        self.lock().keyring_stalls = true;
+    }
+
+    /// A file at `path` whose read doesn't answer, as one on a network
+    /// mount that hung: reading it fails as `TimedOut`.
+    pub fn stall_file(&self, path: &str) {
+        self.lock().stalled_files.insert(path.to_owned());
+    }
+
     /// What running `command` does. A command with no script can't be started.
     pub fn script(&self, command: &CommandLine, script: Script) {
         self.lock().commands.insert(
@@ -213,6 +231,14 @@ impl SecretResolver for FakeSecrets {
                         },
                     });
                 };
+                if state.stalled_files.contains(&real) {
+                    return Err(SecretError {
+                        source,
+                        problem: Problem::TimedOut {
+                            seconds: FAKE_TIME_LIMIT_SECONDS,
+                        },
+                    });
+                }
                 if state.directories.contains(&real) {
                     return Err(SecretError {
                         source,
@@ -268,6 +294,14 @@ impl SecretResolver for FakeSecrets {
                 let source = SourceName::Keyring {
                     entry: entry.to_string(),
                 };
+                if state.keyring_stalls {
+                    return Err(SecretError {
+                        source,
+                        problem: Problem::TimedOut {
+                            seconds: FAKE_TIME_LIMIT_SECONDS,
+                        },
+                    });
+                }
                 let unavailable = keyring_unavailable(&state);
                 if let Some((detail, cause)) = unavailable {
                     // A run that spins on a keyring it can't ask would hang

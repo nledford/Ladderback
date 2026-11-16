@@ -175,16 +175,13 @@ impl ResolveError {
                         source,
                         detail: said(detail),
                     },
-                    // Only a command is run for a time; a file or a keyring
-                    // that doesn't answer is a source that can't be read.
                     Problem::TimedOut { seconds } => match secret.source {
                         SourceName::Command { .. } => SettingRefusal::SecretCommandTimedOut {
                             source,
                             seconds: *seconds,
                         },
-                        SourceName::Keyring { .. }
-                        | SourceName::File { .. }
-                        | SourceName::Env { .. } => SettingRefusal::SecretUnreadable {
+                        SourceName::Keyring { .. } | SourceName::File { .. } => todo!(),
+                        SourceName::Env { .. } => SettingRefusal::SecretUnreadable {
                             source,
                             detail: None,
                         },
@@ -908,8 +905,7 @@ mod tests {
     }
 
     /// A secret that couldn't be read is refused by what was wrong, naming
-    /// where it was looked for; only a command is run for a time, so a
-    /// keyring or a file that doesn't answer is a source that can't be read.
+    /// where it was looked for.
     #[test]
     fn each_secret_that_cant_be_read_is_refused_by_what_was_wrong() {
         use SettingRefusal as R;
@@ -978,22 +974,6 @@ mod tests {
                 },
             ),
             (
-                keyring("ladderback/demo"),
-                Problem::TimedOut { seconds: 30 },
-                R::SecretUnreadable {
-                    source: "ladderback/demo".to_owned(),
-                    detail: None,
-                },
-            ),
-            (
-                file("/srv/demo/password"),
-                Problem::TimedOut { seconds: 30 },
-                R::SecretUnreadable {
-                    source: "/srv/demo/password".to_owned(),
-                    detail: None,
-                },
-            ),
-            (
                 command("pass"),
                 Problem::OutputCut,
                 R::SecretCommandOutputOpen {
@@ -1004,6 +984,64 @@ mod tests {
         for (source, problem, refusal) in cases {
             let error = unresolved(Field::Password, source, problem);
             assert_eq!(error.refusal(&nothing_to_mask()), Ok(refusal), "{error:?}");
+        }
+    }
+
+    /// A keyring or a file that doesn't answer within the time limit is
+    /// refused as that, keeping where it was looked for and the seconds, and
+    /// never as a source that can't be read, whose advice is wrong for it
+    /// (#891): a keychain prompt nobody answered is the usual cause on macOS.
+    #[test]
+    fn a_keyring_or_file_that_does_not_answer_in_time_is_refused_with_its_seconds() {
+        use SettingRefusal as R;
+        let cases = [
+            (
+                keyring("ladderback/demo"),
+                R::SecretKeyringTimedOut {
+                    source: "ladderback/demo".to_owned(),
+                    seconds: 60,
+                },
+            ),
+            (
+                file("/srv/demo/password"),
+                R::SecretFileTimedOut {
+                    source: "/srv/demo/password".to_owned(),
+                    seconds: 60,
+                },
+            ),
+        ];
+        for (source, refusal) in cases {
+            let error = unresolved(Field::Password, source, Problem::TimedOut { seconds: 60 });
+            assert_eq!(error.refusal(&nothing_to_mask()), Ok(refusal), "{error:?}");
+        }
+    }
+
+    /// Where a keyring or a file that didn't answer in time was looked for is
+    /// masked of the repository's secrets, as any refused source is (I4).
+    #[test]
+    fn a_timed_out_keyring_or_file_is_named_with_the_repositorys_secrets_masked() {
+        use SettingRefusal as R;
+        let secret = SecretValue::new(CANARY);
+        let redactor = Redactor::new([&secret]);
+        let cases = [
+            (
+                keyring(&format!("ladderback/{CANARY}")),
+                R::SecretKeyringTimedOut {
+                    source: "ladderback/***".to_owned(),
+                    seconds: 5,
+                },
+            ),
+            (
+                file(&format!("/srv/{CANARY}/password")),
+                R::SecretFileTimedOut {
+                    source: "/srv/***/password".to_owned(),
+                    seconds: 5,
+                },
+            ),
+        ];
+        for (source, refusal) in cases {
+            let error = unresolved(Field::Password, source, Problem::TimedOut { seconds: 5 });
+            assert_eq!(error.refusal(&redactor), Ok(refusal), "{error:?}");
         }
     }
 

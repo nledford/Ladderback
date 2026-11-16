@@ -690,37 +690,3 @@ async fn a_keyring_with_no_service_is_refused_with_what_to_use_instead() {
         assert!(text.contains(expected), "{expected}: {text}");
     }
 }
-
-/// A file or a keyring that doesn't answer in time is a source that
-/// can't be read, not a command that ran for too long.
-#[tokio::test]
-async fn a_file_or_keyring_that_does_not_answer_in_time_is_unreadable_not_a_slow_command() {
-    use domain::secrets::{Problem, SourceName};
-    let settings = settings_of(settings_dto()).expect("settings");
-    for (source, field) in [
-        (
-            SourceName::File {
-                path: "/mnt/nfs/pw".to_owned(),
-            },
-            "/mnt/nfs/pw",
-        ),
-        (
-            SourceName::Keyring {
-                entry: "ladderback/demo".to_owned(),
-            },
-            "ladderback/demo",
-        ),
-    ] {
-        let error = unresolved(Field::Password, source, Problem::TimedOut { seconds: 60 });
-        let refusal = secret_refusal(&error, &settings, &SystemSecrets::default()).await;
-        assert_eq!(refusal.code, ErrorCode::SecretUnreadable, "{field}");
-        assert_eq!(
-            refusal.args,
-            vec![
-                ("field", MsgArg::Text("password".to_owned())),
-                ("source", MsgArg::Text(field.to_owned())),
-            ]
-        );
-        assert_eq!(refusal.detail, None);
-    }
-}

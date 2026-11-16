@@ -655,6 +655,10 @@ error-secret-command-timed-out = { $seconds ->
    *[other] The command { $source }, which gives the repository's { $field }, did not finish in { $seconds } seconds, so { -brand-name } stopped it.
   }
 
+error-secret-keyring-timed-out = { $source }
+
+error-secret-file-timed-out = { $source }
+
 # A setting that a program is started with refers to a secret.
 # $field (text): where in the settings it is.
 error-secret-in-process-arguments = The repository's { $field } is handed to a program as an argument, so it cannot refer to a secret: every user of the computer could read it there. Write the value out, or put the secret where the program reads it on its own.

@@ -274,6 +274,7 @@ fn refusal_args(refusal: &SettingRefusal) -> Vec<(&'static str, MsgArg)> {
             source: from,
             seconds,
         } => vec![source(from), ("seconds", MsgArg::Count(*seconds))],
+        R::SecretKeyringTimedOut { .. } | R::SecretFileTimedOut { .. } => todo!(),
         R::SecretExpansionTooLong { limit } => vec![("limit", MsgArg::Bytes(*limit))],
         R::TemplateInvalid { at } => at
             .map(|at| ("at", MsgArg::Text(at.to_string())))
@@ -838,6 +839,14 @@ mod tests {
                 source: "pass".to_owned(),
                 seconds: 30,
             },
+            R::SecretKeyringTimedOut {
+                source: "ladderback/demo".to_owned(),
+                seconds: 60,
+            },
+            R::SecretFileTimedOut {
+                source: "/mnt/share/demo.password".to_owned(),
+                seconds: 60,
+            },
             R::SecretCommandOutputOpen {
                 source: "pass".to_owned(),
             },
@@ -876,7 +885,7 @@ mod tests {
             };
             assert_eq!(back, reason);
         }
-        assert_eq!(codes.len(), 13, "one code per refusal: {codes:?}");
+        assert_eq!(codes.len(), 15, "one code per refusal: {codes:?}");
     }
 
     /// A refusal's columns that lack what its code needs, or hold it as the

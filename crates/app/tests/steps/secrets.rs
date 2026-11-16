@@ -214,6 +214,16 @@ fn keyring_locked(agent: &mut Agent) {
     agent.secrets.store.lock_keyring();
 }
 
+#[given("the keyring doesn't answer in time")]
+fn keyring_stalls(agent: &mut Agent) {
+    agent.secrets.store.stall_keyring();
+}
+
+#[given(expr = "the file {string} doesn't answer in time")]
+fn file_stalls(agent: &mut Agent, path: String) {
+    agent.secrets.store.stall_file(&path);
+}
+
 #[given(expr = "the command {string} prints {string}")]
 fn command_prints(agent: &mut Agent, command: String, stdout: String) {
     let stdout = text(&stdout).into_bytes();
@@ -798,6 +808,42 @@ fn failed_for_a_missing_entry(agent: &mut Agent, entry: String) {
             reason: FailureReason::SecretRefused {
                 field: "password".to_owned(),
                 refusal: SettingRefusal::SecretMissing { source: entry },
+            }
+        }
+    );
+}
+
+#[then(
+    expr = "the operation ends as failed because the keyring entry {string} of the password didn't answer within {int} seconds"
+)]
+fn failed_for_a_keyring_that_did_not_answer(agent: &mut Agent, entry: String, seconds: u64) {
+    assert_eq!(
+        agent.operation().status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::SecretRefused {
+                field: "password".to_owned(),
+                refusal: SettingRefusal::SecretKeyringTimedOut {
+                    source: entry,
+                    seconds,
+                },
+            }
+        }
+    );
+}
+
+#[then(
+    expr = "the operation ends as failed because the file {string} of the password didn't answer within {int} seconds"
+)]
+fn failed_for_a_file_that_did_not_answer(agent: &mut Agent, path: String, seconds: u64) {
+    assert_eq!(
+        agent.operation().status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::SecretRefused {
+                field: "password".to_owned(),
+                refusal: SettingRefusal::SecretFileTimedOut {
+                    source: path,
+                    seconds,
+                },
             }
         }
     );
