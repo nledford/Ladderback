@@ -1360,9 +1360,20 @@ ui-restore-running = Restore of { $name } started.
 # $name (text): the entry restored, as the tree shows it.
 ui-restore-finished = Restore of { $name } finished.
 
+# Said politely when a restore into a new folder finished, naming that folder.
+# $name (text): the entry restored, as the tree shows it.
+# $folder (text): the folder made for the restore, its full path on the agent's computer.
+ui-restore-finished-into = Restore of { $name } finished. Its files are in { $folder }.
+
 # Said politely when a restore was cancelled. What it wrote before stays.
 # $name (text): the entry restored, as the tree shows it.
 ui-restore-cancelled = Restore of { $name } was cancelled. What it wrote before stays.
+
+# Said politely when a restore into a new folder was cancelled, naming that
+# folder. What it wrote before stays there.
+# $name (text): the entry restored, as the tree shows it.
+# $folder (text): the folder made for the restore, its full path on the agent's computer.
+ui-restore-cancelled-into = Restore of { $name } was cancelled. What it wrote before stays in { $folder }.
 
 # Said urgently when a restore failed. The Operations page says why.
 # $name (text): the entry restored, as the tree shows it.

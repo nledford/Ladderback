@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use api::{
     FolderDto, MsgArg, RestoreDestinationDto, RestorePreviewDto, RestorePreviewRequestDto,
+    RestoreStartedDto,
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
@@ -286,11 +287,7 @@ fn restore_dialog(
         state.with(|dialog| dialog.destination == RestoreDestinationDto::InPlace)
     });
     let held_words = words.clone();
-    let held = Signal::derive(move || {
-        state
-            .with(Dialog::held)
-            .map(|reason| held_words(&reason))
-    });
+    let held = Signal::derive(move || state.with(Dialog::held).map(|reason| held_words(&reason)));
     let preview_words = words.clone();
     let preview = move || {
         state
@@ -321,19 +318,23 @@ fn restore_dialog(
             }
             state.update(Dialog::answered);
             match answer {
-                Some(Posted::Done(body)) => match ws::started_operation(&body) {
-                    Some(operation) => {
-                        error.set(None);
-                        value.set(String::new());
-                        open.set(false);
-                        reply(Politeness::Polite, &words(&restore::running(&name)));
-                        let awaited = ws::await_operation(&base, &operation, || true).await;
-                        if let Some((said, politeness)) = restore::ended(&name, &awaited) {
-                            say(politeness, &words(&said));
+                Some(Posted::Done(body)) => {
+                    match serde_json::from_str::<RestoreStartedDto>(&body) {
+                        Ok(RestoreStartedDto { operation, folder }) => {
+                            error.set(None);
+                            value.set(String::new());
+                            open.set(false);
+                            reply(Politeness::Polite, &words(&restore::running(&name)));
+                            let awaited = ws::await_operation(&base, &operation, || true).await;
+                            if let Some((said, politeness)) =
+                                restore::ended(&name, folder.as_deref(), &awaited)
+                            {
+                                say(politeness, &words(&said));
+                            }
                         }
+                        Err(_) => alert.set(Some(unreachable)),
                     }
-                    None => alert.set(Some(unreachable)),
-                },
+                }
                 Some(Posted::Refused(code, args, detail)) => {
                     match restore::field_error(code, asks) {
                         // Cleared first, so a second wrong try is said again.

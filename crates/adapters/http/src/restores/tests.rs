@@ -11,6 +11,15 @@ use crate::request_checks::tests::{NoUi, test_state};
 use crate::{RequestChecks, router};
 
 const OPERATION: &str = "018f0000-0000-7000-8000-000000000001";
+const FOLDER: &str = "/home/demo/ladderback-restore/laptop-3f2a1b4c-20270115-080000";
+
+/// A start that answered, naming `folder` when it makes one.
+fn started(folder: Option<&str>) -> Result<api::RestoreStartedDto, RestoreRefusal> {
+    Ok(api::RestoreStartedDto {
+        operation: OPERATION.to_owned(),
+        folder: folder.map(str::to_owned),
+    })
+}
 
 /// The snapshot the requests name: 64 hex digits.
 fn snapshot() -> String {
@@ -23,12 +32,12 @@ const HOME: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7))
 /// asked, the confirmation included.
 struct Scripted {
     preview: Result<api::RestorePreviewDto, RestoreRefusal>,
-    start: Result<String, RestoreRefusal>,
+    start: Result<api::RestoreStartedDto, RestoreRefusal>,
     asked: Mutex<Vec<(String, String)>>,
 }
 
 impl Scripted {
-    fn answering(start: Result<String, RestoreRefusal>) -> Arc<Self> {
+    fn answering(start: Result<api::RestoreStartedDto, RestoreRefusal>) -> Arc<Self> {
         Arc::new(Self {
             preview: Err(RestoreRefusal::SnapshotUnknown),
             start,
@@ -59,7 +68,11 @@ impl Restores for Scripted {
         self.preview.clone()
     }
 
-    async fn start(&self, alias: String, start: RestoreStart) -> Result<String, RestoreRefusal> {
+    async fn start(
+        &self,
+        alias: String,
+        start: RestoreStart,
+    ) -> Result<api::RestoreStartedDto, RestoreRefusal> {
         let RestoreStart {
             snapshot,
             entry,
@@ -124,8 +137,8 @@ async fn body_of(response: Response) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn a_start_reads_the_request_and_answers_the_operation() {
-    let restores = Scripted::answering(Ok(OPERATION.to_owned()));
+async fn a_start_reads_the_request_and_answers_the_operation_and_its_folder() {
+    let restores = Scripted::answering(started(Some(FOLDER)));
     let (status, response) = send(
         Arc::clone(&restores),
         post(&start_path(&snapshot()), NEW_FOLDER),
@@ -134,7 +147,7 @@ async fn a_start_reads_the_request_and_answers_the_operation() {
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(
         body_of(response).await,
-        serde_json::json!({ "operation": OPERATION })
+        serde_json::json!({ "operation": OPERATION, "folder": FOLDER })
     );
     assert_eq!(
         restores.asked(),
@@ -149,11 +162,16 @@ async fn a_start_reads_the_request_and_answers_the_operation() {
 }
 
 #[tokio::test]
-async fn an_in_place_start_asks_for_in_place() {
-    let restores = Scripted::answering(Ok(OPERATION.to_owned()));
+async fn an_in_place_start_asks_for_in_place_and_names_no_folder() {
+    let restores = Scripted::answering(started(None));
     let body = r#"{"path":"","destination":"in-place","confirmation":"3f2a1b4c"}"#;
-    let (status, _) = send(Arc::clone(&restores), post(&start_path(&snapshot()), body)).await;
+    let (status, response) =
+        send(Arc::clone(&restores), post(&start_path(&snapshot()), body)).await;
     assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        body_of(response).await,
+        serde_json::json!({ "operation": OPERATION })
+    );
     let asked = restores.asked();
     assert!(
         asked
@@ -237,7 +255,7 @@ async fn a_second_restore_names_the_one_that_runs() {
 
 #[tokio::test]
 async fn what_no_restore_could_name_is_refused_unasked() {
-    let restores = Scripted::answering(Ok(OPERATION.to_owned()));
+    let restores = Scripted::answering(started(Some(FOLDER)));
     for (path, body, status, code) in [
         (
             start_path("not-a-snapshot"),
@@ -279,7 +297,7 @@ async fn what_no_restore_could_name_is_refused_unasked() {
 
 #[tokio::test]
 async fn a_start_without_its_connection_s_address_is_refused() {
-    let restores = Scripted::answering(Ok(OPERATION.to_owned()));
+    let restores = Scripted::answering(started(Some(FOLDER)));
     let mut request = post(&start_path(&snapshot()), NEW_FOLDER);
     request
         .extensions_mut()

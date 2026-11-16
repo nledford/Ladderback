@@ -165,7 +165,7 @@ impl crate::Restores for NoRestores {
         &self,
         _alias: String,
         _start: crate::RestoreStart,
-    ) -> Result<String, crate::RestoreRefusal> {
+    ) -> Result<api::RestoreStartedDto, crate::RestoreRefusal> {
         Err(crate::RestoreRefusal::SnapshotUnknown)
     }
 }

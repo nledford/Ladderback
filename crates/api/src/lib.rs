@@ -4798,6 +4798,19 @@ impl std::fmt::Debug for RestoreRequestDto {
     }
 }
 
+/// What `POST …/snapshots/{snapshot}/restore` answers once the restore
+/// started: its operation's ID and, for a restore into a new folder, that
+/// folder, so the person is told where its files are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RestoreStartedDto {
+    pub operation: String,
+    /// The folder made for the restore; absent when it restores over the
+    /// original paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
 /// One recorded warning of an operation's detail: its typed code and the
 /// free-form fields the engine reported.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,8 +3,9 @@
 // (§4.5): keyboard only, role-and-name locators, as everywhere in steps/.
 
 import assert from "node:assert/strict";
-import { rename } from "node:fs/promises";
+import { readdir, rename } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
@@ -147,3 +148,33 @@ When("the repository is put back", async function (this: BrowserWorld) {
 Then("the dialog {string} alerts nothing", async function (this: BrowserWorld, name: string) {
   await expect(dialogOf(this, name).getByRole("alert")).toHaveCount(0);
 });
+
+// Where a restore into a new folder put its files, as the polite region says
+// once it finished: a folder made in the daemon's restore folder, which is in
+// its scratch home. A host name may hold dots, so the folder ends at the dot
+// that ends the sentence.
+const FILES_ARE_IN = /Its files are in (.+?)\.(?:\s|$)/;
+
+Then(
+  "the polite region names the new folder in the agent's restore folder, holding {string}",
+  async function (this: BrowserWorld, name: string) {
+    assert.ok(this.ownServer, "this scenario's daemon was never started");
+    const restoreFolder = path.join(this.ownServer.scratch, "home", "ladderback-restore");
+    const status = journey(this.page).byRole("status");
+    const deadline = Date.now() + READ_PATIENCE_MS;
+    let said = FILES_ARE_IN.exec(await heard(status));
+    while (said === null && Date.now() < deadline) {
+      await sleep(100);
+      said = FILES_ARE_IN.exec(await heard(status));
+    }
+    assert.ok(said, `the polite region never named a folder (last read ${JSON.stringify(await heard(status))})`);
+    const folder = said[1];
+    assert.ok(folder, "the polite region named an empty folder");
+    assert.equal(path.dirname(folder), restoreFolder, `the folder ${folder} is not in the restore folder`);
+    const held = await readdir(folder, { recursive: true });
+    assert.ok(
+      held.some((entry) => path.basename(entry) === name),
+      `the folder ${folder} holds ${JSON.stringify(held)}, not ${name}`,
+    );
+  },
+);

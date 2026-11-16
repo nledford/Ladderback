@@ -109,6 +109,7 @@ fn config_error(error: ConfigError) -> RestoreError {
 pub struct PreparedRestore {
     queued: Queued,
     operation: OperationId,
+    folder: Option<String>,
     slot: Slot,
 }
 
@@ -116,6 +117,12 @@ impl PreparedRestore {
     /// The operation the restore runs as.
     pub fn operation(&self) -> OperationId {
         self.operation
+    }
+
+    /// The new folder the restore writes into, so the person can be told
+    /// where its files are; none when it restores over the original paths.
+    pub fn folder(&self) -> Option<&str> {
+        self.folder.as_deref()
     }
 }
 
@@ -242,6 +249,10 @@ impl Restores {
             }
             None => RestoreTarget::InPlace,
         };
+        let folder = match &target {
+            RestoreTarget::NewFolder(folder) => Some(folder.clone()),
+            RestoreTarget::InPlace => None,
+        };
         let job = Job::Restore(RestoreJob {
             repository: access,
             snapshot: request.snapshot().clone(),
@@ -261,6 +272,7 @@ impl Restores {
         Ok(PreparedRestore {
             queued,
             operation: op,
+            folder,
             slot,
         })
     }

@@ -34,6 +34,8 @@ use super::Agent;
 #[derive(Default)]
 pub struct RestoreE2e {
     finished: Option<Finished>,
+    /// The new folder the restore's start named, if it named one.
+    folder: Option<String>,
     preview: Option<Result<RestorePlanSummary, RestoreError>>,
 }
 
@@ -158,6 +160,7 @@ impl Agent {
             Ok(prepared) => prepared,
             Err(error) => panic!("the restore didn't start: {error:?}"),
         };
+        self.restore.folder = prepared.folder().map(str::to_owned);
         self.restore.finished = Some(restores.run(prepared, futures::future::pending()).await);
     }
 
@@ -261,6 +264,15 @@ fn the_new_folder_holds(
             .unwrap_or_else(|error| panic!("{name} in {folder:?}: {error}"));
         assert_eq!(read, content, "{name}");
     }
+}
+
+#[then("the started restore named that new folder")]
+fn named_that_folder(agent: &mut Agent) {
+    let made: Vec<String> = fs::read_dir(agent.restore_folder())
+        .expect("the restore folder was made")
+        .map(|entry| text(&entry.expect("an entry of the restore folder").path()).to_owned())
+        .collect();
+    assert_eq!(made, Vec::from_iter(agent.restore.folder.clone()));
 }
 
 #[then("the agent's restore folder is still empty")]

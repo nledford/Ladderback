@@ -139,7 +139,7 @@ impl http_adapter::Restores for RestoreService {
         &self,
         repository: String,
         start: RestoreStart,
-    ) -> Result<String, RestoreRefusal> {
+    ) -> Result<api::RestoreStartedDto, RestoreRefusal> {
         // Counted as a maintenance run is, so a restart waits for it
         // (decision 94); while one waits, no restore starts.
         let Some(maintaining) = self.runs.maintaining() else {
@@ -188,13 +188,16 @@ impl http_adapter::Restores for RestoreService {
             let cancel = async move {
                 let _ = cancel.await;
             };
-            let _ = started.send(Ok(()));
+            let _ = started.send(Ok(prepared.folder().map(str::to_owned)));
             let finished = restores.run(prepared, cancel).await;
             registry.finish(&operation);
             super::log_ended(&finished);
         }));
         match wait_for_start.await {
-            Ok(answer) => answer.map(|()| operation.as_uuid().hyphenated().to_string()),
+            Ok(answer) => answer.map(|folder| api::RestoreStartedDto {
+                operation: operation.as_uuid().hyphenated().to_string(),
+                folder,
+            }),
             Err(_) => Err(RestoreRefusal::Repository(
                 MaintenanceRefusal::Unavailable {
                     code: ErrorCode::OperationFailed,

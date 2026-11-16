@@ -24,6 +24,7 @@ Feature: Restoring files from a snapshot
     Given sign-in is on with the admin password "canary-admin-password"
     When the person restores "home/docs" of the snapshot, confirming with "canary-admin-password"
     Then the engine restores "home/docs" into the new folder "/home/demo/ladderback-restore/laptop-3f2a1b4c-20270115-080000"
+    And the started restore names its new folder "/home/demo/ladderback-restore/laptop-3f2a1b4c-20270115-080000"
     And the restore ends as succeeded
     And the history shows the restore, started by hand
 
@@ -59,6 +60,7 @@ Feature: Restoring files from a snapshot
     And the history shows no operation
     When the person restores "home/docs" of the snapshot in place, confirming with "3f2a1b4c"
     Then the engine restores "home/docs" over its original paths, deleting nothing
+    And the started restore names no new folder
     And the restore ends as succeeded
 
   Scenario: A restore without the admin password is refused
@@ -140,6 +142,7 @@ Feature: Restoring files from a snapshot
     When the agent restores "source/docs" of the snapshot into a new folder
     Then the restore ends as succeeded
     And the new folder holds "notes.md" with "hello" and "report.txt" with "hello world"
+    And the started restore named that new folder
 
   @e2e
   Scenario: A restore in place overwrites what the snapshot changed and keeps what it doesn't hold
@@ -180,7 +183,8 @@ Feature: Restoring files from a snapshot
     And I press Tab until focus is on the button "Restore"
     And I press Enter
     Then the dialog "Restore demo-1.txt" is closed
-    And the polite region comes to contain "Restore of demo-1.txt finished."
+    And the polite region comes to contain "Restore of demo-1.txt finished. Its files are in "
+    And the polite region names the new folder in the agent's restore folder, holding "demo-1.txt"
     And the page has no accessibility violations
 
   @ui

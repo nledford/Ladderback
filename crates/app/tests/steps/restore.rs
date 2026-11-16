@@ -77,6 +77,8 @@ pub struct RestoreWorld {
     started: Vec<Result<OperationId, RestoreError>>,
     /// A restore started and not yet run.
     pending: Option<PreparedRestore>,
+    /// The new folder the last restore that started named, if one did.
+    folder: Option<Option<String>>,
     /// A restore started and held unrun for the rest of the scenario, so it
     /// keeps the agent's restore slot.
     held: Option<PreparedRestore>,
@@ -306,6 +308,7 @@ impl RestoreWorld {
         match restores.start(op, ask).await {
             Ok(prepared) => {
                 self.started.push(Ok(prepared.operation()));
+                self.folder = Some(prepared.folder().map(str::to_owned));
                 self.pending = Some(prepared);
             }
             Err(error) => self.started.push(Err(error)),
@@ -569,6 +572,16 @@ fn restores_over(agent: &mut Agent, entry: String) {
     assert_eq!(job.entry, path(&entry));
     // In place adds and overwrites; the target has no way to delete.
     assert_eq!(job.target, RestoreTarget::InPlace);
+}
+
+#[then(expr = "the started restore names its new folder {string}")]
+fn names_its_folder(agent: &mut Agent, folder: String) {
+    assert_eq!(agent.restore.folder, Some(Some(folder)));
+}
+
+#[then("the started restore names no new folder")]
+fn names_no_folder(agent: &mut Agent) {
+    assert_eq!(agent.restore.folder, Some(None));
 }
 
 #[then("the restore ends as succeeded")]

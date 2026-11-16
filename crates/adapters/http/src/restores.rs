@@ -16,7 +16,7 @@ use domain::browse::FolderPath;
 use domain::restore::Destination;
 
 use crate::maintenance::{self, MaintenanceRefusal};
-use crate::{AppState, StartedOperation, folder_unknown, refused, refused_with, snapshot_unknown};
+use crate::{AppState, folder_unknown, refused, refused_with, snapshot_unknown};
 
 /// What the restore routes ask of the daemon, the snapshot and the entry
 /// already read as domain values.
@@ -33,8 +33,13 @@ pub trait Restores: Send + Sync {
     ) -> Result<api::RestorePreviewDto, RestoreRefusal>;
 
     /// Confirms `start` by step-up and starts it, asked for in the agent's
-    /// own web UI, returning the operation's ID.
-    async fn start(&self, alias: String, start: RestoreStart) -> Result<String, RestoreRefusal>;
+    /// own web UI, returning the operation's ID and the new folder it
+    /// writes into, if it makes one.
+    async fn start(
+        &self,
+        alias: String,
+        start: RestoreStart,
+    ) -> Result<api::RestoreStartedDto, RestoreRefusal>;
 }
 
 /// A restore a request asks for, read from its path and body.
@@ -115,7 +120,8 @@ pub(crate) async fn preview(
 }
 
 /// `POST …/snapshots/{snapshot}/restore`: confirms the body's restore by
-/// step-up and starts it. The answer is the operation's ID.
+/// step-up and starts it. The answer is the operation's ID and, into a new
+/// folder, that folder.
 pub(crate) async fn start(
     State(state): State<AppState>,
     Path((alias, snapshot)): Path<(String, String)>,
@@ -166,9 +172,7 @@ pub(crate) async fn start(
         confirmation,
     };
     match state.restores.start(alias.clone(), start).await {
-        Ok(operation) => {
-            (StatusCode::ACCEPTED, Json(StartedOperation { operation })).into_response()
-        }
+        Ok(started) => (StatusCode::ACCEPTED, Json(started)).into_response(),
         Err(error) => refusal(&alias, &snapshot, error),
     }
 }

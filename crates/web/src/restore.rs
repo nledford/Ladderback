@@ -222,19 +222,43 @@ pub(crate) fn running(name: &str) -> Words {
 
 /// What the wait for the restore of the entry shown as `name` came to is
 /// said as, and how, by its operation's status as a maintenance run's end
-/// is: a failure assertively, the rest politely. Nothing is said when the
-/// page that waited is gone.
-pub(crate) fn ended(name: &str, awaited: &Awaited) -> Option<(Words, Politeness)> {
+/// is: a failure assertively, the rest politely. A restore into a new
+/// folder that finished or was cancelled names `folder`, where its files
+/// are. Nothing is said when the page that waited is gone.
+pub(crate) fn ended(
+    name: &str,
+    folder: Option<&str>,
+    awaited: &Awaited,
+) -> Option<(Words, Politeness)> {
     let (id, politeness) = match awaited {
-        Awaited::Ended(detail) => match detail.operation.status.as_str() {
-            "failed" => (msg::UI_RESTORE_FAILED, Politeness::Assertive),
-            "cancelled" => (msg::UI_RESTORE_CANCELLED, Politeness::Polite),
-            _ => (msg::UI_RESTORE_FINISHED, Politeness::Polite),
+        Awaited::Ended(detail) => match (detail.operation.status.as_str(), folder) {
+            ("failed", _) => (msg::UI_RESTORE_FAILED, Politeness::Assertive),
+            ("cancelled", Some(folder)) => {
+                return Some((
+                    into(msg::UI_RESTORE_CANCELLED_INTO, name, folder),
+                    Politeness::Polite,
+                ));
+            }
+            ("cancelled", None) => (msg::UI_RESTORE_CANCELLED, Politeness::Polite),
+            (_, Some(folder)) => {
+                return Some((
+                    into(msg::UI_RESTORE_FINISHED_INTO, name, folder),
+                    Politeness::Polite,
+                ));
+            }
+            (_, None) => (msg::UI_RESTORE_FINISHED, Politeness::Polite),
         },
         Awaited::GaveUp => (msg::UI_RESTORE_UNWATCHED, Politeness::Polite),
         Awaited::Gone => return None,
     };
     Some((named(id, name), politeness))
+}
+
+/// The words `id` says of the restore of `name` into `folder`.
+fn into(id: l10n::MessageId, name: &str, folder: &str) -> Words {
+    let mut words = named(id, name);
+    words.args.push(("folder", MsgArg::Text(folder.to_owned())));
+    words
 }
 
 fn named(id: l10n::MessageId, name: &str) -> Words {
@@ -516,13 +540,13 @@ mod tests {
             ("failed", msg::UI_RESTORE_FAILED, Politeness::Assertive),
         ] {
             assert_eq!(
-                ended("a.txt", &awaited(status)),
+                ended("a.txt", None, &awaited(status)),
                 Some((Words { id, args: name() }, politeness)),
                 "{status}"
             );
         }
         assert_eq!(
-            ended("a.txt", &Awaited::GaveUp),
+            ended("a.txt", None, &Awaited::GaveUp),
             Some((
                 Words {
                     id: msg::UI_RESTORE_UNWATCHED,
@@ -531,6 +555,63 @@ mod tests {
                 Politeness::Polite
             ))
         );
-        assert_eq!(ended("a.txt", &Awaited::Gone), None);
+        assert_eq!(ended("a.txt", None, &Awaited::Gone), None);
+    }
+
+    #[test]
+    fn a_restore_into_a_new_folder_names_it_once_it_finished_or_was_cancelled() {
+        const FOLDER: &str = "/home/demo/ladderback-restore/laptop-3f2a1b4c-20270115-080000";
+        let into = || {
+            vec![
+                ("name", MsgArg::Text("a.txt".to_owned())),
+                ("folder", MsgArg::Text(FOLDER.to_owned())),
+            ]
+        };
+        let name = || vec![("name", MsgArg::Text("a.txt".to_owned()))];
+        for (status, said) in [
+            (
+                "succeeded",
+                Words {
+                    id: msg::UI_RESTORE_FINISHED_INTO,
+                    args: into(),
+                },
+            ),
+            (
+                "succeeded-with-warnings",
+                Words {
+                    id: msg::UI_RESTORE_FINISHED_INTO,
+                    args: into(),
+                },
+            ),
+            (
+                "cancelled",
+                Words {
+                    id: msg::UI_RESTORE_CANCELLED_INTO,
+                    args: into(),
+                },
+            ),
+            // A failure sends the person to the Operations page; the folder
+            // may hold nothing.
+            (
+                "failed",
+                Words {
+                    id: msg::UI_RESTORE_FAILED,
+                    args: name(),
+                },
+            ),
+        ] {
+            assert_eq!(
+                ended("a.txt", Some(FOLDER), &awaited(status)).map(|(said, _)| said),
+                Some(said),
+                "{status}"
+            );
+        }
+        assert_eq!(
+            ended("a.txt", Some(FOLDER), &Awaited::GaveUp).map(|(said, _)| said),
+            Some(Words {
+                id: msg::UI_RESTORE_UNWATCHED,
+                args: name(),
+            })
+        );
     }
 }
