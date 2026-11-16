@@ -1,0 +1,16 @@
+# Decision 108: One vocabulary of tones, sizes and placements
+
+**Every shared component takes its color, size and placement from one vocabulary, `crates/web/src/variants.rs`, as it is built or reworked: the tones Primary, Secondary, Success, Warning, Error and Inherit; the sizes Small, Medium, Large and XLarge; the placements Inline, Start, Center and End. Success, Warning and Error draw in three status hues of their own, beside the one accent for action, and never carry a meaning alone** (recorded 2026-11-15, §4.5; decided by the maintainer on #798, part of #776).
+
+## Why
+
+- **One set of words for every component.** The shared component set (#776) grows by some twenty components. Without one vocabulary each would name its colors, sizes and sides its own way, and a page would learn each one. Each value is a class of `style.css`, so a component names a value of the module and never a color, a length or a side.
+- **Tones.** Primary is Ladder Blue (`--accent`), the default; Secondary is Slate Note (`--muted`); Inherit is `currentColor`, the color of the text around a part inside another component, such as a spinner in a button. There is no Info tone: Primary covers it. A component's §4.5 row names any tone it leaves out because it makes no sense there.
+- **Three status hues, never alone.** Tick Green (`--success`), Flag Amber (`--warning`) and Red Ink (`--error`) are real, recognisable hues, each at 4.5:1 or more on `--bg` and `--surface` in light and dark, every pair in `scripts/check-contrast.ts`. DESIGN.md's One Blue Rule had allowed one accent and no other hue; it now allows one accent for action plus these three, which a part always pairs with words or an icon (1.4.1, A2). Under forced colors each is `CanvasText`, so the words tell the tones apart. The badge pairs keep their own text tokens.
+- **Sizes carry no numbers.** A small spinner and a small button share no length, so each component maps the four sizes to `em` lengths of its own, written in its §4.5 row, and a size grows with the reader's text (1.4.4). For the same reason there is no default size.
+- **Placements in logical terms.** Inline (the default) keeps a part in its line of text; Start, Center and End put it on a line of its own, at its start, middle or end in the page's direction, so Start is the right in a right-to-left page (§8.4). The class goes on the line, an element of the component's own around its part, never on the part's root: it sets the line's `display`, which a badge's own would override and which would stretch a button across the line.
+
+## Left out
+
+- **Info, and a fourth status hue.** Primary covers information; a new meaning still gets words, weight or an icon (DESIGN.md, Don'ts).
+- **A default size.** Each component picks its own.

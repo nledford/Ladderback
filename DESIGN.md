@@ -21,6 +21,12 @@ colors:
   error-bg: "#fee2e2"
   success-fg: "#052e16"
   success-bg: "#dcfce7"
+  tick-green: "#15803d"
+  tick-green-dark: "#4ade80"
+  flag-amber: "#b45309"
+  flag-amber-dark: "#fbbf24"
+  red-ink: "#b91c1c"
+  red-ink-dark: "#f87171"
 typography:
   body:
     fontFamily: "system-ui, sans-serif"
@@ -95,21 +101,21 @@ components:
 
 Ladderback's web UI is a ledger of backups: ruled rows of facts, each with its unit, read top to bottom. A page is a heading, a sentence that says where things stand, and a table or a form. The person comes to check that every machine is backed up, notice the one that isn't, and act; nothing on the page competes with that.
 
-The look is the browser's own, on purpose. Buttons, headings, checkboxes and dialogs are the native controls, sized to the text around them, so they behave the way the reader's browser, zoom, high-contrast mode and screen reader expect. Surfaces are flat. One blue carries links, focus and progress, and four quiet status pairs say what a run is doing. Everything else is text.
+The look is the browser's own, on purpose. Buttons, headings, checkboxes and dialogs are the native controls, sized to the text around them, so they behave the way the reader's browser, zoom, high-contrast mode and screen reader expect. Surfaces are flat. One blue carries links, focus and progress, three status hues tell what went well, what needs a look and what failed, always beside words, and four quiet status pairs say what a run is doing. Everything else is text.
 
 Accessibility shapes the layout rather than decorating it: every layout holds at 320 px wide with text at 200 %, in both directions of writing, in light, dark and forced colors.
 
 **Key Characteristics:**
 
 - Native controls, flat surfaces, no shadows.
-- One accent, Ladder Blue, for links, the focus ring and progress.
+- One accent, Ladder Blue, for action: links, the focus ring and progress. Three status hues beside it, never alone.
 - State is a labeled badge with an icon, never color alone.
 - Tables with one muted rule per row and columns that don't move as rows change.
 - Logical properties only; layouts follow the page's writing direction.
 
 ## Colors
 
-A white page (dark: near-black), graphite text, one blue, and four soft status pairs. Every color is a CSS custom property in `crates/web/style.css`, redefined under `prefers-color-scheme: dark`; `tailwind.css` maps the same properties as Tailwind colors, so `style.css` stays the one source. `just test-contrast` checks every pair the UI relies on.
+A white page (dark: near-black), graphite text, one blue, three status hues and four soft status pairs. Every color is a CSS custom property in `crates/web/style.css`, redefined under `prefers-color-scheme: dark`; `tailwind.css` maps the same properties as Tailwind colors, so `style.css` stays the one source. `just test-contrast` checks every pair the UI relies on.
 
 ### Primary
 
@@ -124,11 +130,17 @@ A white page (dark: near-black), graphite text, one blue, and four soft status p
 
 ### Status
 
-Each state is a text token on a background token, swapped between schemes rather than recolored: Loading (blue), Empty (gray), Error (dark red on pale red), Success (dark green on pale green). The error text color also draws the form error and the error summary's border.
+The status badges: each state is a text token on a background token, swapped between schemes rather than recolored: Loading (blue), Empty (gray), Error (dark red on pale red), Success (dark green on pale green). The error text color also draws the form error and the error summary's border. A badge's text keeps its pair; the status hues below are not drawn on a badge's background.
+
+The status hues: a color a part draws in to tell how something went, on the page or a surface, at 4.5:1 or more on both and lighter in dark mode. They are the Success, Warning and Error tones of the shared vocabulary (Components), and under forced colors each becomes the reader's text color.
+
+- **Tick Green** (`--success`): something ended well.
+- **Flag Amber** (`--warning`): something needs a look.
+- **Red Ink** (`--error`): something failed.
 
 ### Named Rules
 
-**The One Blue Rule.** Ladder Blue is the only accent. A new meaning gets words, weight or an icon, not a new hue.
+**The One Blue Rule.** Ladder Blue is the one accent for action. Beside it stand three status hues, Tick Green, Flag Amber and Red Ink, which never carry a meaning alone: a part drawn in one says it in words or an icon too. Any other new meaning gets words, weight or an icon, not a new hue.
 
 **The Pair Rule.** A color is added as a text-and-background pair with a contrast check in `scripts/check-contrast.ts`, never as a lone value.
 
@@ -182,6 +194,14 @@ Square by default, as the browser draws controls. Two radii exist: a full pill (
 
 Every component is plain and exact: a control looks like what the browser makes it, sized for the text it holds. The shared set lives in `crates/web/src/components.rs`; `/_gallery` (the `gallery` feature) shows each one.
 
+### Shared Vocabulary
+
+Every shared component takes the same three choices, defined once in `crates/web/src/variants.rs`, each a class of `style.css`, as it is built or reworked; the gallery's "Shared vocabulary" demo shows them all. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
+
+- **Tone:** Primary (Ladder Blue, the default), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
+- **Size:** Small, Medium, Large and XLarge. Each component maps them to `em` lengths of its own, listed with it, so a size grows with the reader's text. There is no default size.
+- **Placement:** Inline (the default: in the line of text, as wide as what it holds), then Start, Center and End, each on a line of its own at its start, middle or end, in the page's direction. The class goes on the line, an element of the component's own around its part, never on the part's own box, which it would stretch.
+
 ### Buttons
 
 - **Shape and color:** the browser's native button. No custom fill, border or radius.
@@ -230,7 +250,7 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 
 ### Do:
 
-- **Do** use the shared components in `crates/web/src/components.rs` and add new ones to `/_gallery`.
+- **Do** use the shared components in `crates/web/src/components.rs` and add new ones to `/_gallery`, each taking its color, size and placement from the shared vocabulary.
 - **Do** take colors only from the custom properties in `style.css`, through `var()` or their Tailwind names (`text-muted`, `bg-surface`).
 - **Do** give every state words and an icon or weight as well as its color.
 - **Do** keep a changing table's columns still: fixed shares, or widths that don't depend on a cell's changing content.
@@ -241,6 +261,6 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 - **Don't** add dashboard chrome: cards, gradients, glows, shadows or big hero numbers.
 - **Don't** repeat a failure in red across the page. It is stated once, as an error badge or one error message; no red banners, red rows or red headings.
 - **Don't** restyle native controls with custom fills, radii or borders.
-- **Don't** introduce a second accent color, or a color without a contrast-checked pair.
+- **Don't** introduce a second accent color, a fourth status hue, or a color without a contrast-checked pair.
 - **Don't** set text or control sizes in pixels, or use physical properties (`left`, `width`, `margin-top`).
 - **Don't** animate anything that the reduced-motion rule can't turn off.
