@@ -1,4 +1,4 @@
-# Decision NN: How a restore is started from the web UI
+# Decision 109: How a restore is started from the web UI
 
 **A restore takes one entry of one snapshot, by default into a new folder under the agent's restore folder, or in place over the original files from the agent's own web UI only, and never deletes a file. Every restore is confirmed by step-up first, the admin password with sign-in on and the snapshot's short ID otherwise, through two routes a browser session alone reaches. An agent runs one restore at a time, with no hooks** (recorded 2026-11-15, §10.4, §4.5; that a restore runs no hooks, and that it never falls back on the data folder, decided by the maintainer on #563, 2026-11-15).
 
