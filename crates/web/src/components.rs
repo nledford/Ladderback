@@ -20,6 +20,7 @@ use crate::repositories::{Run, Sentence, address_parts, runs};
 mod checkbox;
 mod error_summary;
 mod form_field;
+pub(crate) mod icon;
 mod modal_dialog;
 mod pause_updates;
 mod progress;
