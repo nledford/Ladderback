@@ -5,6 +5,10 @@
 
 use l10n::Language;
 
+/// The `id` of the section, which the page's address names by its fragment
+/// when the page is shown again after a save, so focus comes back to it.
+pub(crate) const SECTION_ID: &str = "language";
+
 /// The `id` of the section's heading.
 pub(crate) const HEADING_ID: &str = "language-heading";
 
@@ -21,23 +25,30 @@ pub(crate) const BROWSER: &str = "browser";
 /// languages, worded `browser`, then each language `languages` holds, by its
 /// own name.
 pub(crate) fn options(browser: String, languages: &[Language]) -> Vec<(&'static str, String)> {
-    let _ = (browser, languages);
-    todo!()
+    std::iter::once((BROWSER, browser))
+        .chain(
+            languages
+                .iter()
+                .map(|language| (language.tag, language.name.clone())),
+        )
+        .collect()
 }
 
 /// The choice shown chosen: the language `kept` names when it is one of
 /// `languages`, else the browser's languages. What the browser kept is
 /// outside input, and a choice it no longer offers is no choice.
 pub(crate) fn chosen(kept: Option<&str>, languages: &[Language]) -> &'static str {
-    let _ = (kept, languages);
-    todo!()
+    kept.and_then(|kept| to_keep(kept, languages))
+        .unwrap_or(BROWSER)
 }
 
 /// The tag saving the choice `value` keeps in the browser: the language's
 /// own, or none for the browser's languages, which forgets the one kept.
 pub(crate) fn to_keep(value: &str, languages: &[Language]) -> Option<&'static str> {
-    let _ = (value, languages);
-    todo!()
+    languages
+        .iter()
+        .find(|language| language.tag == value)
+        .map(|language| language.tag)
 }
 
 #[cfg(test)]

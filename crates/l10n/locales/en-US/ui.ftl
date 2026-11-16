@@ -367,6 +367,18 @@ ui-gallery-demo-weekly = Every week
 # The third choice of the demo radio group.
 ui-gallery-demo-monthly = Every month
 
+# The legend of the second demo radio group, whose choices are named in other languages.
+ui-gallery-demo-language = Demo language
+
+# A choice of the second demo radio group: the name of English, written in English. Not translated.
+ui-gallery-demo-english = { "English" }
+
+# A choice of the second demo radio group: the name of Japanese, written in Japanese, which the group marks as Japanese. Not translated.
+ui-gallery-demo-japanese = { "日本語" }
+
+# A choice of the second demo radio group: the name of Arabic, written in Arabic, which the group marks as Arabic, running right to left. Not translated.
+ui-gallery-demo-arabic = { "العربية" }
+
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge
 
@@ -2423,8 +2435,8 @@ ui-language-heading = Language
 # The legend of the choice of the web UI's language. Each choice after the first is a language named in itself (ui-language-name), as its readers write it.
 ui-language-legend = Show { -brand-name } in
 
-# The description under that legend. The choice is kept in this browser alone, not by the daemon.
-ui-language-hint = Kept in this browser. With the browser's languages, { -brand-name } uses the first of them it offers, and American English if it offers none.
+# The description under that legend. The choice is kept in this browser alone, not by the daemon. Saving loads the page again, which drops anything else Settings is showing, such as a new API token's secret, so the hint says so.
+ui-language-hint = Kept in this browser. Saving reloads the page, which clears anything else Settings is showing. With the browser's languages, { -brand-name } uses the first of them it offers, and American English if it offers none.
 
 # The first choice of the web UI's language: no language of its own, but the languages the browser's settings list, best first. The one chosen until another is.
 ui-language-browser = The browser's languages

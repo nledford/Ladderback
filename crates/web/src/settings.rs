@@ -1,4 +1,6 @@
-//! The Settings page, the route `/settings` (§4.4): its admin password
+//! The Settings page, the route `/settings` (§4.4): the language of the web
+//! UI (§8.4, decision 101), kept in this browser, whose glue is
+//! `settings/language.rs`; its admin password
 //! (security §10.1, decision 70), set with sign-in off and changed in a
 //! session, whose glue is `settings/password.rs`; its API tokens
 //! (decision 93), listed, created and revoked in a session; and the restart
@@ -13,9 +15,11 @@
 //! signal only while that dialog is open: leaving the dialog, however it is
 //! left, clears it from the page (I4).
 
+mod language;
 mod password;
 mod sign_in;
 
+use language::LanguageSection;
 use password::AdminPassword;
 use sign_in::SignInSection;
 
@@ -92,9 +96,11 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     });
     let waiting_localizer = Arc::clone(&localizer);
     let restart_localizer = Arc::clone(&localizer);
+    let language_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         {move || waiting.get().map(|id| view! { <p>{text(&waiting_localizer, id)}</p> })}
+        <LanguageSection localizer=language_localizer />
         {password}
         <ApiTokens localizer=localizer />
         <RestartSection localizer=restart_localizer />
