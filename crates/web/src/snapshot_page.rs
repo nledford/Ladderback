@@ -2,10 +2,10 @@
 //! `/snapshots/{alias}/{snapshot}`, the snapshot's folders and files in a
 //! tree, each folder read as it is opened, and beside it the pane that
 //! restores the entry the tree selects. It decides nothing: the address of a
-//! page is `tree::folder_url`, and the tree's keys, rows and answers are
-//! `tree.rs`'s; what a restore sends, when it can be confirmed and what it
-//! says are `restore.rs`'s, host-tested. What stays here is asking the
-//! daemon and drawing the page; the journeys of
+//! page is the tree rules' `folder_url`, and the tree's keys, rows and
+//! answers are `components/tree/rules.rs`'s; what a restore sends, when it
+//! can be confirmed and what it says are `restore.rs`'s, host-tested. What
+//! stays here is asking the daemon and drawing the page; the journeys of
 //! `features/ui/snapshot_browser.feature` and `features/restore/restore.feature`
 //! run it in a browser, the `ws.rs` precedent.
 
@@ -23,6 +23,7 @@ use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 
 use crate::announcer::Politeness;
+use crate::components::tree::rules::{Selection, folder_url};
 use crate::components::{
     Confirmation, FolderLoader, FolderPage, RadioGroup, ReviewDialog, StepUp, StepUpField, Tree,
     Working, sentence_view,
@@ -33,7 +34,6 @@ use crate::restore::{self, Asks, Dialog};
 use crate::routes::{PageHeading, refused_sentence, short_id, text_with};
 use crate::session::Standing;
 use crate::text;
-use crate::tree::{Selection, folder_url};
 use crate::wording::Words;
 use crate::ws::{self, Got, Posted};
 

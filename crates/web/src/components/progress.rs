@@ -6,11 +6,13 @@ use leptos::prelude::*;
 
 use super::hand_focus_when_gone;
 use crate::live::PageClock;
-use crate::progress::{
-    Clear, Next, Teller, Told, Wake, percent, progress_text, value_text, wait_for,
-};
 use crate::routes::text_with;
 use crate::text;
+use rules::{Clear, Next, Teller, Told, Wake, percent, progress_text, value_text, wait_for};
+
+// What a progress bar tells a screen reader, and when, decided on the host;
+// `Progress` is its glue.
+mod rules;
 
 /// A progress bar (§4.5; §16, decision 83): `role="progressbar"`, named
 /// `label`, and a stop in the tab order, so a keyboard user reaches it and

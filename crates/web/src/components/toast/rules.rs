@@ -1,8 +1,8 @@
 //! The toast's arrival announcement and lifetime (technical design §4.5): a
 //! toast is announced politely once — assertive is only for destructive
 //! results — stays on screen for [`TOAST_MS`] and goes unannounced. The
-//! decisions are host-decidable, so they are tested here; `components.rs`
-//! applies them to the DOM.
+//! decisions are host-decidable, so they are tested here;
+//! `components/toast.rs` applies them to the DOM.
 
 use std::cell::Cell;
 use std::time::Duration;

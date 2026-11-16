@@ -14,7 +14,8 @@ use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
-use crate::badge::BadgeState;
+use crate::components::spinner::rules::LabelShown;
+use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Checkbox, Confirmation, FolderLoader, FolderPage, FormField, ModalDialog, PauseUpdates,
     Progress, RadioGroup, ReviewDialog, SortableTable, Spinner, StatusBadge, StepUp, StepUpField,
@@ -24,7 +25,6 @@ use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
-use crate::spinner::LabelShown;
 use crate::text;
 use crate::variants::{Placement, Size, Tone};
 

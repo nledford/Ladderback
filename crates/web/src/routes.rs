@@ -18,7 +18,7 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
-use crate::badge::BadgeState;
+use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
     address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,

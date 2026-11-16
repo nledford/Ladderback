@@ -1,7 +1,17 @@
 use leptos::prelude::*;
 
-use crate::spinner::{self, LabelShown};
 use crate::variants::{Placement, Size, Tone};
+use rules::LabelShown;
+
+// What a spinner looks like and how a screen reader meets it, decided on
+// the host; `Spinner` is its glue. Only the gallery shows a spinner yet, and
+// the host tests use these decisions, so only a build of neither leaves them
+// unused.
+#[cfg_attr(
+    all(not(feature = "gallery"), not(test)),
+    expect(dead_code, reason = "only the gallery shows a spinner yet")
+)]
+pub(crate) mod rules;
 
 /// A spinner (§4.5): a drawing that turns while the page waits for something
 /// it can't show yet, always with its `label`, which says what it waits for.
@@ -12,7 +22,7 @@ use crate::variants::{Placement, Size, Tone};
 /// By default the label is shown beside the drawing as ordinary text, which
 /// a screen reader reads, and the drawing is `aria-hidden`; where there is no
 /// room for it (`shown=LabelShown::Hidden`), the drawing is `role="img"`
-/// named by the label. [`crate::spinner`] decides both. Its `tone`, `size`
+/// named by the label. [`rules`] decides both. Its `tone`, `size`
 /// and `placement` come from the shared vocabulary (decision 108): Primary,
 /// Small and Inline unless the caller names others. The tone colors the
 /// drawing only, the label keeping the text's color; the size is the
@@ -47,13 +57,13 @@ use crate::variants::{Placement, Size, Tone};
 pub fn Spinner(
     #[prop(into)] label: Signal<String>,
     #[prop(optional)] shown: LabelShown,
-    #[prop(default = spinner::default_size())] size: Size,
+    #[prop(default = rules::default_size())] size: Size,
     #[prop(optional)] tone: Tone,
     #[prop(optional)] placement: Placement,
 ) -> impl IntoView {
     view! {
         <span class=placement.class()>
-            <span class=spinner::spinner_class(tone, size)>
+            <span class=rules::spinner_class(tone, size)>
                 // A track and a quarter arc of one circle (r 9: 56.55
                 // around), the arc starting at the top, stroked in the
                 // drawing's color, its tone. The arc turns inside its group,

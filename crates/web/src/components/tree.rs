@@ -12,7 +12,10 @@ use super::{focus_element, sentence_view};
 use crate::repositories::Sentence;
 use crate::routes::{instant, text_with};
 use crate::text;
-use crate::tree;
+
+// What a snapshot's tree shows and does, decided on the host; `Tree` is its
+// glue.
+pub(crate) mod rules;
 
 /// What reads a page of a folder of a snapshot's tree: given the folder's
 /// path and the position the page starts at, the page, or the refusal as the
@@ -23,22 +26,22 @@ pub(crate) type FolderLoader = Rc<dyn Fn(String, u64) -> FolderPage>;
 pub(crate) type FolderPage = Pin<Box<dyn Future<Output = Result<FolderDto, Sentence>>>>;
 
 /// The `id` of a row of the tree whose rows' ids start with `prefix`.
-fn row_id(prefix: &str, row: tree::Row) -> String {
+fn row_id(prefix: &str, row: rules::Row) -> String {
     match row {
-        tree::Row::Entry(node) => format!("{prefix}-{node}"),
-        tree::Row::More(folder) => format!("{prefix}-more-{folder}"),
+        rules::Row::Entry(node) => format!("{prefix}-{node}"),
+        rules::Row::More(folder) => format!("{prefix}-more-{folder}"),
     }
 }
 
 /// A snapshot's tree (§4.5, "Tree"): a WAI-ARIA tree, one stop for Tab with
 /// a roving `tabindex`, each folder read through `loader` as it is first
 /// opened, a page at a time. What a key does, which rows show and what an
-/// answer changes are `tree.rs`'s, host-tested; this draws the rows, sends
+/// answer changes are `rules.rs`'s, host-tested; this draws the rows, sends
 /// what they ask for and moves focus where the tree says. Each row is named
 /// by its entry's name and described by what it is: its kind, size and
 /// modification time. A refused page is said in an alert under the tree;
 /// `empty` is said in place of a tree when the top folder holds nothing.
-/// `selected` follows what the tree selects ([`tree::Tree::selection`]), for
+/// `selected` follows what the tree selects ([`rules::Tree::selection`]), for
 /// a pane beside it that acts on that entry.
 #[component]
 pub(crate) fn Tree(
@@ -48,7 +51,7 @@ pub(crate) fn Tree(
     id: String,
     loader: FolderLoader,
     empty: String,
-    #[prop(optional)] selected: Option<RwSignal<Option<tree::Selection>>>,
+    #[prop(optional)] selected: Option<RwSignal<Option<rules::Selection>>>,
 ) -> impl IntoView {
     let rtl = localizer.direction() == Direction::Rtl;
     let loading = text(&localizer, msg::UI_LOADING);
@@ -56,16 +59,16 @@ pub(crate) fn Tree(
     let zone = StoredValue::new(l10n::viewer_zone());
     let prefix = StoredValue::new(id);
     let loader = StoredValue::new_local(loader);
-    let mut initial = tree::Tree::new();
+    let mut initial = rules::Tree::new();
     let first = initial.start();
     let state = RwSignal::new(initial);
     if let Some(selected) = selected {
-        let selection = Memo::new(move |_| state.with(tree::Tree::selection));
+        let selection = Memo::new(move |_| state.with(rules::Tree::selection));
         Effect::new(move |_| selected.set(selection.get()));
     }
     // Puts focus on the row holding the tab stop once it is drawn.
     let focus_stop = move || {
-        let Some(stop) = state.with_untracked(tree::Tree::tab_stop) else {
+        let Some(stop) = state.with_untracked(rules::Tree::tab_stop) else {
             return;
         };
         let id = row_id(&prefix.get_value(), stop);
@@ -77,15 +80,15 @@ pub(crate) fn Tree(
     // Sends a request, and takes its answer if the tree is still there. An
     // answer that moves the tab stop from a row that went (the row that read
     // a page) moves focus with it, when focus was on that row.
-    let fetch = move |request: tree::Request| {
+    let fetch = move |request: rules::Request| {
         let future = loader.with_value(|load| load(request.path.clone(), request.from));
         spawn_local(async move {
             let answer = future.await;
-            let Some(before) = state.try_with_untracked(tree::Tree::tab_stop) else {
+            let Some(before) = state.try_with_untracked(rules::Tree::tab_stop) else {
                 return;
             };
             state.update(|tree| tree.answered(&request, answer));
-            let after = state.with_untracked(tree::Tree::tab_stop);
+            let after = state.with_untracked(rules::Tree::tab_stop);
             if let (Some(before), Some(after)) = (before, after)
                 && before != after
             {
@@ -109,12 +112,12 @@ pub(crate) fn Tree(
     }
     // Each change walks the tree once: every row reads what it says from
     // `views`, and redraws only when that changes.
-    let views = Memo::new(move |_| state.with(tree::Tree::views));
+    let views = Memo::new(move |_| state.with(rules::Tree::views));
     let has_rows = Memo::new(move |_| views.with(|views| !views.rows.is_empty()));
-    let starting = Memo::new(move |_| state.with(tree::Tree::starting));
-    let is_empty = Memo::new(move |_| state.with(tree::Tree::is_empty));
+    let starting = Memo::new(move |_| state.with(rules::Tree::starting));
+    let is_empty = Memo::new(move |_| state.with(rules::Tree::is_empty));
     let failure = Memo::new(move |_| state.with(|tree| tree.failure().cloned()));
-    let describe = move |kind: tree::State, entry: &EntryDto| {
+    let describe = move |kind: rules::State, entry: &EntryDto| {
         let localizer = localizer.get_value();
         let mut args = vec![
             ("kind", MsgArg::Text(kind.kind().to_owned())),
@@ -132,16 +135,16 @@ pub(crate) fn Tree(
     };
     // A row's level and its entry never change; what it says besides is its
     // `RowView`.
-    let row_view = move |row: tree::Row| {
+    let row_view = move |row: rules::Row| {
         let id = row_id(&prefix.get_value(), row);
         let about_id = format!("{id}-about");
         let level = state.with_untracked(|tree| tree.place(row).0);
-        let indent = format!("{}rem", 0.25 + 1.5 * f64::from(tree::indent_steps(level)));
+        let indent = format!("{}rem", 0.25 + 1.5 * f64::from(rules::indent_steps(level)));
         let entry = match row {
-            tree::Row::Entry(node) => {
+            rules::Row::Entry(node) => {
                 state.with_untracked(|tree| tree.node(node).map(|node| node.entry.clone()))
             }
-            tree::Row::More(_) => None,
+            rules::Row::More(_) => None,
         };
         let says = Memo::new(move |_| views.with(|views| views.get(row)).unwrap_or_default());
         let entry_name = entry
@@ -149,8 +152,8 @@ pub(crate) fn Tree(
             .map(|entry| entry.display.clone())
             .unwrap_or_default();
         let name = move || match row {
-            tree::Row::Entry(_) => entry_name.clone(),
-            tree::Row::More(_) => says.with(|says| {
+            rules::Row::Entry(_) => entry_name.clone(),
+            rules::Row::More(_) => says.with(|says| {
                 text_with(
                     &localizer.get_value(),
                     msg::UI_TREE_MORE,

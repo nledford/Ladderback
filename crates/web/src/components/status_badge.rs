@@ -1,6 +1,15 @@
-use crate::badge::BadgeState;
 use lepticons_data::Glyph;
 use leptos::prelude::*;
+use rules::BadgeState;
+
+// What a status badge shows for each state, decided on the host;
+// `StatusBadge` is its glue.
+pub(crate) mod rules;
+// The badge as the browser build draws it, run by `just test-wasm`; declared
+// as `main.rs` declares `formatting`, for the same reason.
+#[cfg(test)]
+#[cfg(target_arch = "wasm32")]
+mod tests;
 
 /// A status badge: a short labeled state on a colored pill, one of
 /// `badge-loading`, `badge-empty`, `badge-error` or `badge-success`, whose

@@ -26,11 +26,11 @@ mod progress;
 mod radio_group;
 mod review_dialog;
 mod sortable_table;
-mod spinner;
-mod status_badge;
+pub(crate) mod spinner;
+pub(crate) mod status_badge;
 mod step_up_field;
 mod toast;
-mod tree;
+pub(crate) mod tree;
 
 pub use checkbox::Checkbox;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};

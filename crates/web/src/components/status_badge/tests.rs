@@ -5,7 +5,7 @@
 use leptos::prelude::*;
 use wasm_bindgen_test::wasm_bindgen_test;
 
-use crate::badge::BadgeState;
+use super::rules::BadgeState;
 use crate::components::StatusBadge;
 
 /// The badge for `state`, labeled `label`, as HTML.

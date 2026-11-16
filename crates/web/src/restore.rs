@@ -11,9 +11,9 @@ use api::{
 use l10n::msg;
 
 use crate::announcer::Politeness;
+use crate::components::tree::rules::encoded;
 use crate::maintenance::Awaited;
 use crate::session::Standing;
-use crate::tree::encoded;
 use crate::wording::Words;
 
 /// How many characters of a snapshot's ID its short ID shows, as the page

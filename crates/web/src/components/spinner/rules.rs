@@ -2,7 +2,7 @@
 //! §4.5): the classes of its tone and size, taken from the shared vocabulary
 //! (`variants.rs`), the size it is drawn at when its page names none, and
 //! whether its label is shown beside it or carried by the drawing as its
-//! name. `components.rs`'s `Spinner` is the glue that draws it.
+//! name. `components/spinner.rs`'s `Spinner` is the glue that draws it.
 
 use crate::variants::{Size, Tone};
 
