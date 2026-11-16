@@ -6,20 +6,59 @@
 
 use std::sync::Arc;
 
-use api::{ChangeProblem, ErrorCode, PlanProblem, ProposalChangeDto, ProposalStatusDto};
-use app::ports::{ConfigError, Problem};
-use app::proposals::{ProposalError, Proposals};
+use api::{ChangeProblem, ErrorCode, PlanProblem, ProposalChangeDto};
+use app::ports::{ConfigError, ConfigStore, EventBus, Problem, ProposalStore};
+use app::proposals::{ApprovalAsk, ProposalError, ProposalPorts, Proposals};
+use app::repositories::ConfigWrites;
+use app::schedule::ConfigChanged;
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::PlanId;
 use domain::planning::{
-    ChangeRefused, ConfigChange, MAX_CHANGES, MAX_PENDING, MAX_RATIONALE_CHARS, Proposal,
-    ProposalId, ProposalRefused, ProposalStatus, Proposer, Rationale,
+    ChangeRefused, ConfigChange, ConfigRevision, DiffHash, MAX_CHANGES, MAX_PENDING,
+    MAX_RATIONALE_CHARS, PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalWarning,
+    Proposer, Rationale, RejectionRefused, Shown, SummaryLine, TooSoon, short_proposal_id,
 };
-use http_adapter::{PlansError, ProposalsError};
+use http_adapter::{Approval, PlansError, ProposalsError, SignIn};
+use platform::SystemClock;
+use platform::random::OsRandom;
 
 use super::config_unusable;
 use super::plans::{problem_of, violated};
+
+/// What the proposals are kept and applied over, kept apart from the
+/// service so the daemon builds the service again once sign-in is
+/// decided, as it does the restores'.
+pub(super) struct ProposalParts {
+    /// The configuration file: its revision, and the drafts and saves of
+    /// an apply.
+    pub(super) file: Arc<FileConfigStore>,
+    pub(super) store: Arc<dyn ProposalStore>,
+    pub(super) config: Arc<dyn ConfigStore>,
+    /// The lock every write of the configuration holds.
+    pub(super) writes: Arc<ConfigWrites>,
+    /// Wakes the scheduler after an apply.
+    pub(super) changed: ConfigChanged,
+    pub(super) events: Arc<dyn EventBus>,
+}
+
+impl ProposalParts {
+    /// The proposals over these parts, with no step-up: enough to bring
+    /// them up to date when a plan is saved (decision 89, point 3).
+    pub(super) fn proposals(&self) -> Proposals {
+        Proposals::new(ProposalPorts {
+            store: Arc::clone(&self.store),
+            codec: Arc::new(config_adapter::JsonChangeCodec),
+            config: Arc::clone(&self.config),
+            drafts: Arc::<FileConfigStore>::clone(&self.file),
+            writes: Arc::clone(&self.writes),
+            changed: self.changed.another(),
+            events: Arc::clone(&self.events),
+            clock: Arc::new(SystemClock),
+            random: Arc::new(OsRandom),
+        })
+    }
+}
 
 pub(super) struct ProposalService {
     /// The configuration file, for the revision a proposal is drafted
@@ -29,8 +68,19 @@ pub(super) struct ProposalService {
 }
 
 impl ProposalService {
-    pub(super) fn new(file: Arc<FileConfigStore>, proposals: Proposals) -> Self {
-        Self { file, proposals }
+    /// The proposals over `parts`, an approval confirmed as `sign_in`
+    /// says: by the admin password with sign-in on, by the proposal's
+    /// short ID with it off (decision 89, point 6).
+    pub(super) fn new(parts: &ProposalParts, sign_in: &SignIn) -> Self {
+        let proposals = parts.proposals();
+        let proposals = match sign_in {
+            SignIn::On(access) => proposals.with_access(Arc::clone(access)),
+            SignIn::Off { .. } => proposals,
+        };
+        Self {
+            file: Arc::clone(&parts.file),
+            proposals,
+        }
     }
 }
 
@@ -69,7 +119,9 @@ impl http_adapter::Proposals for ProposalService {
                 ProposalError::Refused(refused) => refused_at(refused, &proposal.changes),
                 error => refused(error, ""),
             })?;
-        shown(made.proposal)
+        let mut answered = shown(made.proposal)?;
+        answered.warnings = made.warnings.into_iter().map(warning).collect();
+        Ok(answered)
     }
 
     async fn list(&self, asker: Proposer) -> Result<api::ProposalsDto, ProposalsError> {
@@ -109,6 +161,121 @@ impl http_adapter::Proposals for ProposalService {
             .await
             .map_err(|error| refused(error, &id))?;
         shown(withdrawn)
+    }
+
+    async fn review(&self, id: String) -> Result<api::ProposalReviewDto, ProposalsError> {
+        let named = named(&id)?;
+        let review = self
+            .proposals
+            .review(&named)
+            .await
+            .map_err(|error| refused(error, &id))?;
+        Ok(api::ProposalReviewDto {
+            short_id: short_proposal_id(&review.proposal.id).to_owned(),
+            summary: review.summary.into_iter().map(summary_line).collect(),
+            diff: review.diff,
+            revision: review.shown.revision.as_str().to_owned(),
+            diff_hash: review.shown.diff.as_str().to_owned(),
+            changed_since_drafted: review.changed_since_drafted,
+            needs_forget_preview: review.needs_forget_preview,
+            rejected: u64::try_from(review.rejected).unwrap_or(u64::MAX),
+            proposal: shown(review.proposal)?,
+        })
+    }
+
+    async fn approve(
+        &self,
+        id: String,
+        approval: Approval,
+    ) -> Result<api::ProposalDto, ProposalsError> {
+        let named = named(&id)?;
+        // A revision or a hash that is none no rebuild gives: the page
+        // showed something else.
+        let (Some(revision), Some(diff)) = (
+            ConfigRevision::parse(&approval.revision),
+            DiffHash::parse(&approval.diff_hash),
+        ) else {
+            return Err(ProposalsError::Changed);
+        };
+        let approved = self
+            .proposals
+            .approve(
+                &named,
+                ApprovalAsk {
+                    shown: Shown { revision, diff },
+                    confirmation: approval.confirmation,
+                    address: approval.address,
+                },
+            )
+            .await
+            .map_err(|error| refused(error, &id))?;
+        shown(approved)
+    }
+
+    async fn reject(
+        &self,
+        id: String,
+        reasons: Vec<String>,
+    ) -> Result<api::ProposalDto, ProposalsError> {
+        let named = named(&id)?;
+        let rejected = self
+            .proposals
+            .reject(&named, reasons)
+            .await
+            .map_err(|error| refused(error, &id))?;
+        shown(rejected)
+    }
+}
+
+/// A submission check's warning as the routes answer it, its change
+/// counted from 1.
+fn warning(warning: ProposalWarning) -> api::ProposalWarningDto {
+    let change = |index: usize| u64::try_from(index.saturating_add(1)).unwrap_or(u64::MAX);
+    match warning {
+        ProposalWarning::SameSources { index, plan, other } => {
+            api::ProposalWarningDto::SameSources {
+                change: change(index),
+                plan: plan.as_str().to_owned(),
+                other: other.as_str().to_owned(),
+            }
+        }
+        ProposalWarning::GlobNeverMatches { index, glob } => {
+            api::ProposalWarningDto::GlobNeverMatches {
+                change: change(index),
+                glob,
+            }
+        }
+    }
+}
+
+/// A line of the summary as the page reads it.
+fn summary_line(line: SummaryLine) -> api::SummaryLineDto {
+    match line {
+        SummaryLine::AddsPlan(plan) => api::SummaryLineDto::AddsPlan {
+            plan: plan.as_str().to_owned(),
+        },
+        SummaryLine::ChangesPlan { plan, settings } => api::SummaryLineDto::ChangesPlan {
+            plan: plan.as_str().to_owned(),
+            settings: settings.into_iter().map(setting).collect(),
+        },
+        SummaryLine::RemovesPlan(plan) => api::SummaryLineDto::RemovesPlan {
+            plan: plan.as_str().to_owned(),
+        },
+    }
+}
+
+fn setting(setting: PlanSetting) -> api::PlanSettingDto {
+    match setting {
+        PlanSetting::Repository => api::PlanSettingDto::Repository,
+        PlanSetting::Host => api::PlanSettingDto::Host,
+        PlanSetting::Label => api::PlanSettingDto::Label,
+        PlanSetting::Sources => api::PlanSettingDto::Sources,
+        PlanSetting::Tags => api::PlanSettingDto::Tags,
+        PlanSetting::Schedule => api::PlanSettingDto::Schedule,
+        PlanSetting::Overlap => api::PlanSettingDto::Overlap,
+        PlanSetting::Retry => api::PlanSettingDto::Retry,
+        PlanSetting::Filter => api::PlanSettingDto::Filter,
+        PlanSetting::Retention => api::PlanSettingDto::Retention,
     }
 }
 
@@ -249,7 +416,7 @@ fn shown(proposal: Proposal) -> Result<api::ProposalDto, ProposalsError> {
             Proposer::Token { label, .. } => Some(label.as_str().to_owned()),
             Proposer::NoToken => None,
         },
-        status: status_dto(proposal.status),
+        status: app::proposals::status_dto(proposal.status),
         created_at: proposal.created_at.to_string(),
         expires_at: proposal.expires_at.to_string(),
         changes,
@@ -263,19 +430,6 @@ fn shown(proposal: Proposal) -> Result<api::ProposalDto, ProposalsError> {
             .collect(),
         warnings: Vec::new(),
     })
-}
-
-fn status_dto(status: ProposalStatus) -> ProposalStatusDto {
-    match status {
-        ProposalStatus::Pending => ProposalStatusDto::Pending,
-        ProposalStatus::Applying => ProposalStatusDto::Applying,
-        ProposalStatus::Applied => ProposalStatusDto::Applied,
-        ProposalStatus::Failed => ProposalStatusDto::Failed,
-        ProposalStatus::Rejected => ProposalStatusDto::Rejected,
-        ProposalStatus::Withdrawn => ProposalStatusDto::Withdrawn,
-        ProposalStatus::Expired => ProposalStatusDto::Expired,
-        ProposalStatus::Stale => ProposalStatusDto::Stale,
-    }
 }
 
 /// `error` as the routes answer it, `id` the proposal asked for. A store,
@@ -301,13 +455,35 @@ fn refused(error: ProposalError, id: &str) -> ProposalsError {
         ProposalError::Store(error) => unavailable("the store", error.to_string()),
         ProposalError::Codec(error) => unavailable("a proposal's changes", error.0),
         ProposalError::Random(error) => unavailable("random bytes", error.0),
-        ProposalError::TooSoon(_)
-        | ProposalError::Rejection(_)
-        | ProposalError::Changed
-        | ProposalError::NeedsForgetPreview
-        | ProposalError::StepUpFailed
-        | ProposalError::StepUpWait { .. }
-        | ProposalError::StepUpUnavailable(_) => todo!(),
+        ProposalError::TooSoon(TooSoon::Pending) => ProposalsError::Limit { limit: MAX_PENDING },
+        ProposalError::TooSoon(TooSoon::Hourly { until }) => too_soon(false, until),
+        ProposalError::TooSoon(TooSoon::AfterRejection { until }) => too_soon(true, until),
+        ProposalError::Rejection(RejectionRefused::Count { changes }) => {
+            ProposalsError::ReasonCount { changes }
+        }
+        ProposalError::Rejection(RejectionRefused::TooLong { index }) => {
+            ProposalsError::ReasonTooLong {
+                change: index.saturating_add(1),
+            }
+        }
+        ProposalError::Changed => ProposalsError::Changed,
+        ProposalError::NeedsForgetPreview => ProposalsError::NeedsForgetPreview,
+        ProposalError::StepUpFailed => ProposalsError::StepUpFailed,
+        ProposalError::StepUpWait { seconds } => ProposalsError::StepUpWait { seconds },
+        ProposalError::StepUpUnavailable(detail) => ProposalsError::StepUpUnavailable(detail),
+    }
+}
+
+/// A proposer's wait until `until`, in whole seconds rounded up, at least
+/// one: a wait that ends within this second still asks for one.
+fn too_soon(after_rejection: bool, until: domain::Timestamp) -> ProposalsError {
+    let left = until
+        .as_millisecond()
+        .saturating_sub(domain::Timestamp::now().as_millisecond());
+    let seconds = u64::try_from(left.saturating_add(999) / 1000).unwrap_or(0);
+    ProposalsError::TooSoon {
+        after_rejection,
+        seconds: seconds.max(1),
     }
 }
 
@@ -321,13 +497,18 @@ fn unusable(error: ConfigError) -> ProposalsError {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
 
     use api::{ChangeProblem, PlanProblem};
-    use app::ports::ConfigStore;
+    use app::access::Access;
+    use app::fakes::{
+        FakeClock, InMemoryAdminPassword, InMemoryApiTokenStore, InMemoryProposalStore,
+        InMemorySessionStore, SeededRandom,
+    };
+    use app::proposals::ApprovalAsk;
+    use domain::planning::{ProposalStatus, short_proposal_id};
     use http_adapter::Proposals as _;
-    use platform::SystemClock;
-    use platform::random::OsRandom;
     use serde_json::json;
 
     use super::*;
@@ -344,25 +525,124 @@ repository = "demo"
 sources = ["/home/demo"]
 "#;
 
+    const ADMIN_PASSWORD: &str = "demo-admin-pass";
+
     fn service() -> (ProposalService, tempfile::TempDir, std::path::PathBuf) {
+        service_with(&SignIn::Off {
+            password: Arc::new(InMemoryAdminPassword::default()),
+            sessions: Arc::new(InMemorySessionStore::new()),
+        })
+    }
+
+    /// Sign-in on, and the clock its waits run by.
+    fn signed_in() -> (SignIn, Arc<FakeClock>) {
+        let clock = Arc::new(FakeClock::new(
+            domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+        ));
+        let access = Access::new(
+            Arc::new(InMemoryAdminPassword::with(ADMIN_PASSWORD)),
+            Arc::new(SeededRandom::new(7)),
+            clock.clone(),
+            Arc::new(InMemoryApiTokenStore::new()),
+            Arc::new(InMemorySessionStore::new()),
+        );
+        (SignIn::On(Arc::new(access)), clock)
+    }
+
+    fn service_with(sign_in: &SignIn) -> (ProposalService, tempfile::TempDir, std::path::PathBuf) {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let file = scratch.path().join("config.toml");
         std::fs::write(&file, CONFIG).expect("the config file");
         let file_store = Arc::new(FileConfigStore::new(file.clone(), Arc::new(SystemClock)));
-        let config: Arc<dyn ConfigStore> = file_store.clone();
-        let proposals = Proposals::new(app::proposals::ProposalPorts {
-            store: Arc::new(app::fakes::InMemoryProposalStore::new()),
-            codec: Arc::new(config_adapter::JsonChangeCodec),
-            config,
-            drafts: file_store.clone(),
+        let parts = ProposalParts {
+            config: file_store.clone(),
+            file: file_store,
+            store: Arc::new(InMemoryProposalStore::new()),
             writes: Arc::default(),
             changed: app::schedule::config_changes().0,
             events: Arc::new(app::event_bus::BroadcastEventBus::new()),
-            clock: Arc::new(SystemClock),
-            random: Arc::new(OsRandom),
-        });
-        let service = ProposalService::new(file_store, proposals);
-        (service, scratch, file)
+        };
+        (ProposalService::new(&parts, sign_in), scratch, file)
+    }
+
+    /// Approves the proposal `id` as its review shows it, confirmed by
+    /// `confirmation`.
+    async fn approve(
+        service: &ProposalService,
+        id: &ProposalId,
+        confirmation: &str,
+    ) -> Result<Proposal, ProposalError> {
+        let review = service.proposals.review(id).await.expect("reviewed");
+        service
+            .proposals
+            .approve(
+                id,
+                ApprovalAsk {
+                    shown: review.shown,
+                    confirmation: confirmation.to_owned(),
+                    address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+                },
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn with_sign_in_on_only_the_admin_password_confirms_an_approval() {
+        let (sign_in, clock) = signed_in();
+        let (service, _scratch, file) = service_with(&sign_in);
+        let made = service
+            .propose(
+                Proposer::NoToken,
+                proposal(json!([{"kind": "add-plan", "plan": photos()}])),
+            )
+            .await
+            .expect("proposed");
+        let id = ProposalId::parse(&made.id).expect("an ID");
+        assert_eq!(
+            approve(&service, &id, short_proposal_id(&id)).await,
+            Err(ProposalError::StepUpFailed)
+        );
+        // A wrong confirmation counts in the sign-in waits: even the
+        // password isn't checked until the wait is over.
+        assert!(matches!(
+            approve(&service, &id, ADMIN_PASSWORD).await,
+            Err(ProposalError::StepUpWait { .. })
+        ));
+        assert_eq!(std::fs::read_to_string(&file).expect("the file"), CONFIG);
+        clock.advance(domain::SignedDuration::from_mins(1));
+        let approved = approve(&service, &id, ADMIN_PASSWORD)
+            .await
+            .expect("approved");
+        assert_eq!(approved.status, ProposalStatus::Applied);
+        assert_ne!(std::fs::read_to_string(&file).expect("the file"), CONFIG);
+    }
+
+    #[tokio::test]
+    async fn with_sign_in_off_the_short_id_confirms_an_approval() {
+        let (service, _scratch, file) = service();
+        let made = service
+            .propose(
+                Proposer::NoToken,
+                proposal(json!([{"kind": "add-plan", "plan": photos()}])),
+            )
+            .await
+            .expect("proposed");
+        let id = ProposalId::parse(&made.id).expect("an ID");
+        assert_eq!(
+            approve(&service, &id, ADMIN_PASSWORD).await,
+            Err(ProposalError::StepUpFailed)
+        );
+        let approved = approve(&service, &id, short_proposal_id(&id))
+            .await
+            .expect("approved");
+        assert_eq!(approved.status, ProposalStatus::Applied);
+        assert_ne!(std::fs::read_to_string(&file).expect("the file"), CONFIG);
+    }
+
+    /// A plan with no retention policy: adding it can't delete a snapshot,
+    /// so its approval needs no forget preview.
+    fn photos() -> serde_json::Value {
+        json!({"id": "photos", "repository": "demo", "sources": ["/home/demo/Pictures"]})
     }
 
     fn proposal(changes: serde_json::Value) -> api::NewProposalDto {

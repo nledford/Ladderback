@@ -56,7 +56,7 @@ pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use plans::{Plans, PlansError};
 pub use profiles::{Profiles, ProfilesError};
-pub use proposals::{Proposals, ProposalsError};
+pub use proposals::{Approval, Proposals, ProposalsError};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
     Exposure, InvalidHostName, RequestChecks, StartupRefusal, proxied_hosts, startup_rule,
@@ -551,6 +551,20 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/proposals/{id}/withdraw",
             axum::routing::post(proposals::withdraw),
+        )
+        // A session's only: the scope table names none of these, so a
+        // token is refused before it reaches them (decision 89, point 7).
+        .route(
+            "/api/v1/proposals/{id}/review",
+            axum::routing::get(proposals::review),
+        )
+        .route(
+            "/api/v1/proposals/{id}/approve",
+            axum::routing::post(proposals::approve),
+        )
+        .route(
+            "/api/v1/proposals/{id}/reject",
+            axum::routing::post(proposals::reject),
         )
         // `body_limit` bounds this body by its own class, over the 2 MiB
         // axum's JSON extractor would otherwise allow.

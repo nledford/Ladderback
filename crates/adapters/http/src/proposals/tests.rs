@@ -23,11 +23,20 @@ const PASSWORD: &str = "demo-admin-pass";
 const HOME: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 50_000);
 
 /// Answers every request with one proposal, or with the refusal it was
-/// given, and records who asked.
+/// given, and records who asked, and each approval and rejection.
 #[derive(Default)]
 struct Scripted {
     askers: Mutex<Vec<Proposer>>,
     refusal: Mutex<Option<ProposalsError>>,
+    decisions: Mutex<Vec<Decision>>,
+}
+
+/// What a route asked of the proposals beyond a proposer's requests.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Decision {
+    Review(String),
+    Approve(String, Approval),
+    Reject(String, Vec<String>),
 }
 
 impl Scripted {
@@ -49,6 +58,31 @@ impl Scripted {
 
     fn askers(&self) -> Vec<Proposer> {
         self.askers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Records `decision`, then answers as [`Scripted::answer`] does, with
+    /// no asker.
+    fn decide(&self, decision: Decision) -> Result<api::ProposalDto, ProposalsError> {
+        self.decisions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(decision);
+        match self
+            .refusal
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        {
+            Some(refusal) => Err(refusal),
+            None => Ok(proposal()),
+        }
+    }
+
+    fn decisions(&self) -> Vec<Decision> {
+        self.decisions
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -102,6 +136,39 @@ impl Proposals for Scripted {
         _id: String,
     ) -> Result<api::ProposalDto, ProposalsError> {
         self.answer(asker)
+    }
+
+    async fn review(&self, id: String) -> Result<api::ProposalReviewDto, ProposalsError> {
+        let proposal = self.decide(Decision::Review(id))?;
+        Ok(api::ProposalReviewDto {
+            proposal,
+            summary: vec![api::SummaryLineDto::RemovesPlan {
+                plan: "home".to_owned(),
+            }],
+            diff: "-[[plans]]\n".to_owned(),
+            revision: "a".repeat(64),
+            diff_hash: "b".repeat(64),
+            changed_since_drafted: false,
+            needs_forget_preview: true,
+            rejected: 0,
+            short_id: "abcdef".to_owned(),
+        })
+    }
+
+    async fn approve(
+        &self,
+        id: String,
+        approval: Approval,
+    ) -> Result<api::ProposalDto, ProposalsError> {
+        self.decide(Decision::Approve(id, approval))
+    }
+
+    async fn reject(
+        &self,
+        id: String,
+        reasons: Vec<String>,
+    ) -> Result<api::ProposalDto, ProposalsError> {
+        self.decide(Decision::Reject(id, reasons))
     }
 }
 
@@ -227,6 +294,8 @@ fn the_proposal_routes_need_the_propose_scope_and_no_others_open_to_it() {
         (Method::PUT, "/api/v1/proposals", None),
         (Method::GET, "/api/v1/proposals/abcdefghijkl/withdraw", None),
         (Method::POST, "/api/v1/proposals/abcdefghijkl/approve", None),
+        (Method::GET, "/api/v1/proposals/abcdefghijkl/review", None),
+        (Method::POST, "/api/v1/proposals/abcdefghijkl/reject", None),
         (Method::POST, "/api/v1/proposals//withdraw", None),
     ] {
         assert_eq!(required_scope(&method, path), scope, "{method} {path}");
@@ -403,6 +472,247 @@ async fn each_refusal_is_answered_with_the_status_and_code_of_its_kind() {
             ))
             .await;
         assert_eq!(response.status(), status, "{refusal:?}");
+        assert_eq!(json(response).await, expected, "{refusal:?}");
+    }
+}
+
+/// A signed-in browser's headers: its session cookie and CSRF token.
+async fn session_headers(daemon: &Daemon) -> Vec<(String, String)> {
+    let (cookie, csrf) = daemon.signed_in().await;
+    vec![
+        ("cookie".to_owned(), cookie),
+        (crate::CSRF_HEADER.as_str().to_owned(), csrf),
+    ]
+}
+
+fn borrowed(headers: &[(String, String)]) -> Vec<(&str, &str)> {
+    headers
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect()
+}
+
+const APPROVAL: &str = r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"demo-admin-pass"}"#;
+
+#[tokio::test]
+async fn no_token_reviews_approves_or_rejects_whatever_its_scopes() {
+    let daemon = Daemon::new();
+    let (bearer, _) = daemon
+        .token(&[Scope::Read, Scope::Run, Scope::Preview, Scope::Propose])
+        .await;
+    let auth = [("authorization", bearer.as_str())];
+    for request in [
+        get("/api/v1/proposals/abcdefghijkl/review", &auth),
+        post("/api/v1/proposals/abcdefghijkl/approve", &auth, APPROVAL),
+        post(
+            "/api/v1/proposals/abcdefghijkl/reject",
+            &auth,
+            r#"{"reasons":[""]}"#,
+        ),
+    ] {
+        let what = format!("{} {}", request.method(), request.uri());
+        let response = daemon.send(request).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{what}");
+        assert_eq!(
+            json(response).await,
+            serde_json::json!({
+                "code": "api-token-scope",
+                "args": { "scope": { "type": "text", "value": "session" } }
+            }),
+            "{what}"
+        );
+    }
+    assert!(daemon.proposals.decisions().is_empty());
+}
+
+#[tokio::test]
+async fn a_session_reviews_approves_and_rejects_as_its_requests_say() {
+    let daemon = Daemon::new();
+    let headers = session_headers(&daemon).await;
+    let headers = borrowed(&headers);
+    let reviewed = daemon
+        .send(get("/api/v1/proposals/abcdefghijkl/review", &headers))
+        .await;
+    assert_eq!(reviewed.status(), StatusCode::OK);
+    let reviewed = json(reviewed).await;
+    assert_eq!(reviewed["short-id"], "abcdef");
+    assert_eq!(reviewed["summary"][0]["kind"], "removes-plan");
+    let approved = daemon
+        .send(post(
+            "/api/v1/proposals/abcdefghijkl/approve",
+            &headers,
+            APPROVAL,
+        ))
+        .await;
+    assert_eq!(approved.status(), StatusCode::OK);
+    let rejected = daemon
+        .send(post(
+            "/api/v1/proposals/abcdefghijkl/reject",
+            &headers,
+            r#"{"reasons":["Back up weekly instead"]}"#,
+        ))
+        .await;
+    assert_eq!(rejected.status(), StatusCode::OK);
+    assert_eq!(
+        daemon.proposals.decisions(),
+        [
+            Decision::Review("abcdefghijkl".to_owned()),
+            Decision::Approve(
+                "abcdefghijkl".to_owned(),
+                Approval {
+                    revision: "aaaa".to_owned(),
+                    diff_hash: "bbbb".to_owned(),
+                    address: HOME.ip(),
+                    confirmation: PASSWORD.to_owned(),
+                }
+            ),
+            Decision::Reject(
+                "abcdefghijkl".to_owned(),
+                vec!["Back up weekly instead".to_owned()]
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_approval_or_rejection_that_is_not_one_is_refused_unread() {
+    let daemon = Daemon::new();
+    let headers = session_headers(&daemon).await;
+    let headers = borrowed(&headers);
+    for (path, body) in [
+        ("approve", "not json"),
+        ("approve", r#"{"revision":"aaaa","diff-hash":"bbbb"}"#),
+        (
+            "approve",
+            r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"x","colour":"red"}"#,
+        ),
+        ("reject", r#"{"reasons":"none"}"#),
+        ("reject", "{}"),
+    ] {
+        let response = daemon
+            .send(post(
+                &format!("/api/v1/proposals/abcdefghijkl/{path}"),
+                &headers,
+                body,
+            ))
+            .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(json(response).await["code"], "invalid-body", "{body}");
+    }
+    assert!(daemon.proposals.decisions().is_empty());
+}
+
+#[test]
+fn an_approval_never_shows_its_confirmation() {
+    let approval = Approval {
+        revision: "aaaa".to_owned(),
+        diff_hash: "bbbb".to_owned(),
+        address: HOME.ip(),
+        confirmation: "canary-step-up".to_owned(),
+    };
+    assert!(!format!("{approval:?}").contains("canary"));
+    let body: api::ApproveProposalDto = serde_json::from_str(
+        r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"canary-step-up"}"#,
+    )
+    .unwrap();
+    assert!(!format!("{body:?}").contains("canary"));
+}
+
+#[tokio::test]
+async fn each_refusal_of_a_decision_is_answered_with_the_status_and_code_of_its_kind() {
+    let count = |value: u64| serde_json::json!({ "type": "count", "value": value });
+    let text = |value: &str| serde_json::json!({ "type": "text", "value": value });
+    for (refusal, status, expected, retry_after) in [
+        (
+            ProposalsError::Changed,
+            StatusCode::CONFLICT,
+            serde_json::json!({ "code": "proposal-changed" }),
+            None,
+        ),
+        (
+            ProposalsError::NeedsForgetPreview,
+            StatusCode::CONFLICT,
+            serde_json::json!({ "code": "proposal-needs-forget-preview" }),
+            None,
+        ),
+        (
+            ProposalsError::ReasonCount { changes: 2 },
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({ "code": "proposal-reasons", "args": {
+                "problem": text("count"), "change": count(2),
+            }}),
+            None,
+        ),
+        (
+            ProposalsError::ReasonTooLong { change: 3 },
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({ "code": "proposal-reasons", "args": {
+                "problem": text("too-long"), "change": count(3),
+            }}),
+            None,
+        ),
+        (
+            ProposalsError::StepUpFailed,
+            StatusCode::FORBIDDEN,
+            serde_json::json!({ "code": "step-up-failed" }),
+            None,
+        ),
+        (
+            ProposalsError::StepUpWait { seconds: 4 },
+            StatusCode::TOO_MANY_REQUESTS,
+            serde_json::json!({ "code": "sign-in-wait", "args": { "seconds": count(4) } }),
+            Some("4"),
+        ),
+        (
+            ProposalsError::StepUpUnavailable("the data folder can't be read".to_owned()),
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({ "code": "sign-in-unavailable" }),
+            None,
+        ),
+        (
+            ProposalsError::TooSoon {
+                after_rejection: false,
+                seconds: 600,
+            },
+            StatusCode::TOO_MANY_REQUESTS,
+            serde_json::json!({ "code": "proposal-rate", "args": { "seconds": count(600) } }),
+            Some("600"),
+        ),
+        (
+            ProposalsError::TooSoon {
+                after_rejection: true,
+                seconds: 300,
+            },
+            StatusCode::TOO_MANY_REQUESTS,
+            serde_json::json!({ "code": "proposal-after-rejection", "args": {
+                "seconds": count(300),
+            }}),
+            Some("300"),
+        ),
+    ] {
+        let daemon = Daemon::new();
+        *daemon
+            .proposals
+            .refusal
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(refusal.clone());
+        let headers = session_headers(&daemon).await;
+        let response = daemon
+            .send(post(
+                "/api/v1/proposals/abcdefghijkl/approve",
+                &borrowed(&headers),
+                APPROVAL,
+            ))
+            .await;
+        assert_eq!(response.status(), status, "{refusal:?}");
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::RETRY_AFTER)
+                .map(|value| value.to_str().unwrap()),
+            retry_after,
+            "{refusal:?}"
+        );
         assert_eq!(json(response).await, expected, "{refusal:?}");
     }
 }

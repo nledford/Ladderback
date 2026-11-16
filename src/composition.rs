@@ -323,6 +323,9 @@ pub(crate) struct Background {
     /// Where a restore makes its new folder when `[agent] restore-folder`
     /// is unset (§10.4): none on a machine without a home folder.
     restore_folder: Option<RestoreFolder>,
+    /// What the proposals are kept and applied over, for the service the
+    /// daemon builds again once sign-in is decided.
+    proposals: proposals::ProposalParts,
     /// The queued operations recovery found, oldest first.
     queued: Vec<OperationRecord>,
     config: Arc<dyn ConfigStore>,
@@ -636,11 +639,16 @@ pub(crate) async fn daemon(
             SignIn::On(access)
         }
     };
-    // A restore's step-up follows the sign-in just decided, its one source:
-    // the admin password, in the sign-in waits, with sign-in on (§10.4).
+    // A restore's and a proposal's step-up follow the sign-in just decided,
+    // their one source: the admin password, in the sign-in waits, with
+    // sign-in on (§10.4; decision 89, point 6).
     daemon.state.restores = Arc::new(restores::RestoreService::new(
         &daemon.background.runner,
         daemon.background.restore_folder.clone(),
+        &daemon.state.sign_in,
+    ));
+    daemon.state.proposals = Arc::new(proposals::ProposalService::new(
+        &daemon.background.proposals,
         &daemon.state.sign_in,
     ));
     // So is a download's, its tickets drawn from the daemon's one source.
@@ -885,29 +893,24 @@ async fn state_over(
         Arc::clone(&writes),
     ));
     let (changed, changes) = app::schedule::config_changes();
-    let config_file_store = Arc::new(FileConfigStore::new(
-        config_file.clone(),
-        Arc::new(SystemClock),
-    ));
-    let proposal_ports = app::proposals::ProposalPorts {
+    let proposal_parts = proposals::ProposalParts {
+        file: Arc::new(FileConfigStore::new(
+            config_file.clone(),
+            Arc::new(SystemClock),
+        )),
         store: Arc::<SqliteStore>::clone(&log.store),
-        codec: Arc::new(config_adapter::JsonChangeCodec),
         config: Arc::clone(&config),
-        drafts: Arc::<FileConfigStore>::clone(&config_file_store),
         writes: Arc::clone(&writes),
         changed: changed.another(),
         events: Arc::clone(&bus),
-        clock: Arc::new(SystemClock),
-        random: Arc::new(platform::random::OsRandom),
     };
     let plans: Arc<dyn Plans> = Arc::new(plans::PlanService::new(
         Arc::clone(&config),
-        app::plans::EditPlans::new(Arc::clone(&config), writes, changed),
+        app::plans::EditPlans::new(Arc::clone(&config), writes, changed)
+            .with_proposals(Arc::new(proposal_parts.proposals())),
     ));
-    let proposals: Arc<dyn http_adapter::Proposals> = Arc::new(proposals::ProposalService::new(
-        config_file_store,
-        app::proposals::Proposals::new(proposal_ports),
-    ));
+    let proposals: Arc<dyn http_adapter::Proposals> =
+        Arc::new(proposals::ProposalService::new(&proposal_parts, &sign_in));
     let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService::new(
         Arc::clone(&config),
         config_file,
@@ -928,6 +931,7 @@ async fn state_over(
     let background = Background {
         runner,
         restore_folder,
+        proposals: proposal_parts,
         queued: recovered.queued,
         config,
         schedules,
