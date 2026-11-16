@@ -61,6 +61,16 @@ impl Pseudo {
         }
     }
 
+    /// The tag as text, as the choice of it in Settings is kept.
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            #[cfg(feature = "pseudo")]
+            Self::Accented => "en-XA",
+            #[cfg(feature = "pseudo")]
+            Self::Flipped => "ar-XB",
+        }
+    }
+
     /// The language a page in it declares in its `lang` attribute: its own tag
     /// for `en-XA`, and Arabic for `ar-XB`, which is why it runs right to left.
     pub(crate) fn language(self) -> LanguageIdentifier {

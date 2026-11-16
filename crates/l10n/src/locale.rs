@@ -7,6 +7,8 @@
 
 use unic_langid::{CharacterDirection, LanguageIdentifier, langid};
 
+use crate::pseudo::Pseudo;
+
 /// The most preferences one environment variable contributes. `LANGUAGE`
 /// is a list, and the environment is outside input.
 pub(crate) const MAX_PREFERENCES: usize = 16;
@@ -116,13 +118,27 @@ pub struct BrowserLanguages {
 }
 
 impl BrowserLanguages {
-    /// The languages asked for, best first: the requested locale, then the
-    /// browser's languages. A name that is not a language tag, or is longer
-    /// than [`MAX_NAME_LEN`] bytes, is left out, and so is `und`. At most
+    /// The languages asked for, best first: the requested locale, the one
+    /// chosen, then the browser's languages. A name that is not a language
+    /// tag, or is longer than [`MAX_NAME_LEN`] bytes, is left out, and so is
+    /// `und`. The one chosen counts only as Settings keeps it: a tag this
+    /// build offers, written exactly as [`languages`] gives it, so the page
+    /// is never in a language Settings doesn't show chosen. At most
     /// [`MAX_PREFERENCES`] of the browser's languages are kept, from the
     /// first four times as many looked at.
+    ///
+    /// A pseudolocale stands in for `en-US` wherever it comes, so none kept
+    /// or listed comes after a requested locale, which it would overrule.
+    ///
+    /// [`languages`]: crate::languages
     pub fn preferences(&self) -> Vec<LanguageIdentifier> {
         let requested = self.requested.as_deref().and_then(browser_tag);
+        let asked_for = requested.is_some();
+        let chosen = self
+            .chosen
+            .as_deref()
+            .filter(|chosen| crate::languages::offers(chosen))
+            .and_then(browser_tag);
         // Bounded, because the browser's list is outside input: at most four
         // entries are looked at for each one kept.
         let listed = self
@@ -131,7 +147,11 @@ impl BrowserLanguages {
             .take(MAX_PREFERENCES * 4)
             .filter_map(|name| browser_tag(name))
             .take(MAX_PREFERENCES);
-        requested.into_iter().chain(listed).collect()
+        let after = chosen
+            .into_iter()
+            .chain(listed)
+            .filter(|tag| !asked_for || Pseudo::from_tag(tag).is_none());
+        requested.into_iter().chain(after).collect()
     }
 }
 

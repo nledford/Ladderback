@@ -8,6 +8,8 @@
 //!   typo doesn't compile.
 //! - [`PosixEnv`] reads the locales a command-line program is asked to speak,
 //!   and [`BrowserLanguages`] the ones a web page is asked for.
+//! - [`languages`] lists the languages this build offers a person to choose,
+//!   each named in itself.
 //! - [`Localizer`] formats messages, and renders the codes of the API
 //!   ([`Localizer::error`], [`Localizer::warning`]), in a chain of locales that
 //!   always ends in `en-US`. It also tells a page which `lang` and which

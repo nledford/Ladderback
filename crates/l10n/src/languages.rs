@@ -6,7 +6,9 @@ use unic_langid::LanguageIdentifier;
 
 use crate::catalog::{Catalog, Offer};
 use crate::locale::Direction;
+use crate::localizer::Localizer;
 use crate::pseudo::Pseudo;
+use crate::{format, msg};
 
 /// A language this build offers.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,10 +33,42 @@ pub fn languages() -> Vec<Language> {
     languages_of(crate::catalog::catalogs(), Offer::BUILD, Pseudo::ALL)
 }
 
+/// Whether this build offers `tag`, written exactly as [`languages`] gives
+/// it: the one rule a kept choice meets, both for the page, which asks for it
+/// then, and for Settings, which shows it chosen then. It reads no catalog.
+pub(crate) fn offers(tag: &str) -> bool {
+    tags(crate::catalog::catalogs(), Offer::BUILD, Pseudo::ALL).any(|offered| offered == tag)
+}
+
+/// The tags of the catalogs among `catalogs` that `offer` includes, in their
+/// order, then those of `pseudos`.
+fn tags<'a>(
+    catalogs: &'a [Catalog],
+    offer: Offer,
+    pseudos: &'a [Pseudo],
+) -> impl Iterator<Item = &'static str> + 'a {
+    catalogs
+        .iter()
+        .map(|catalog| catalog.tag)
+        .filter(move |tag| offer.includes(tag))
+        .chain(pseudos.iter().map(|pseudo| pseudo.code()))
+}
+
 /// The languages among `catalogs` that `offer` includes, then `pseudos`.
+/// Each is named by its own catalog's `ui-language-name`, read through a
+/// localizer of that language alone, which a pseudolocale transforms.
 fn languages_of(catalogs: &[Catalog], offer: Offer, pseudos: &[Pseudo]) -> Vec<Language> {
-    let _ = (catalogs, offer, pseudos);
-    todo!()
+    tags(catalogs, offer, pseudos)
+        .filter_map(|tag| {
+            let own = Localizer::on::<format::Active>(&[tag.parse().ok()?], catalogs, offer);
+            Some(Language {
+                tag,
+                name: own.message(msg::UI_LANGUAGE_NAME, &[]).into_text(),
+                language: own.language(),
+                direction: own.direction(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
