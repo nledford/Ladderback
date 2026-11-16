@@ -32,6 +32,7 @@ pub(crate) mod spinner;
 pub(crate) mod status_badge;
 mod step_up_field;
 pub(crate) mod table;
+pub(crate) mod tabs;
 pub(crate) mod text_field;
 mod toast;
 pub(crate) mod tooltip;
