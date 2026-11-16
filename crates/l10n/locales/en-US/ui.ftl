@@ -430,6 +430,43 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # names the button.
 ui-gallery-spinner-saving = Saving the demo settings…
 
+# The heading of the gallery's demo of the step-up field (§4.5): the field a
+# restore is confirmed with, in a review dialog.
+ui-gallery-step-up-heading = Step-up field
+
+# The button that opens the step-up demo.
+ui-gallery-open-step-up = Open the demo step-up
+
+# The title of the step-up demo's dialog.
+ui-gallery-demo-step-up = Demo step-up
+
+# What the step-up demo's dialog says first. Nothing is checked or sent.
+ui-gallery-demo-step-up-body = A demo of the field a restore is confirmed with. Nothing is checked or sent.
+
+# The step-up demo's confirm button, which shows the field's error.
+ui-gallery-check-demo-step-up = Check the demo password
+
+# The error the step-up demo shows, whatever was typed.
+ui-gallery-demo-step-up-wrong = That is not the demo password. Type it again, or paste it.
+
+# The button that opens the step-up demo that asks for a short ID, as with sign-in off.
+ui-gallery-open-step-up-id = Open the demo short-ID step-up
+
+# The title of the dialog of the step-up demo that asks for a short ID.
+ui-gallery-demo-step-up-id = Demo short-ID step-up
+
+# The label of the short-ID step-up demo's field.
+ui-gallery-demo-step-up-id-label = Demo ID
+
+# What the short-ID step-up demo's field says under its label, before the demo short ID it shows.
+ui-gallery-demo-step-up-id-hint = Type or paste the demo ID to confirm:
+
+# The short-ID step-up demo's confirm button, which shows the field's error.
+ui-gallery-check-demo-step-up-id = Check the demo ID
+
+# The error the short-ID step-up demo shows, whatever was typed.
+ui-gallery-demo-step-up-id-wrong = That is not the demo ID. Type or paste the 8 characters shown above.
+
 ## The review dialog (§4.5): what a run would do, shown in a dialog before it
 ## runs. The gallery's demos and the snapshots page both use its buttons.
 
@@ -1205,6 +1242,25 @@ ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 # Announced politely when the settle-poll after a start or a cancel ran out
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
+
+## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
+## admin password with sign-in on, the short ID of what it confirms with
+## sign-in off. Paste and password managers work in it.
+
+# The label of the step-up field with sign-in on.
+ui-step-up-password-label = Admin password
+
+# What the step-up field says under its label with sign-in on.
+ui-step-up-password-hint = Type the admin password again, or fill it in from your password manager. Paste works here.
+
+# The button beside a short ID that copies it to the clipboard.
+ui-step-up-copy = Copy the ID
+
+# Said beside that button once the ID is on the clipboard.
+ui-step-up-copied = Copied.
+
+# Said beside that button when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
+ui-step-up-copy-failed = The browser would not let the page copy it. Select the ID and copy it yourself.
 
 ## A repository's stats at the end of the snapshots page (§4.4, §16 decision
 ## 104): four figures as last read, and a button that reads them now.
