@@ -761,7 +761,9 @@ async fn answered(
             EngineEvent::Started { .. }
             | EngineEvent::Progress(_)
             | EngineEvent::Warning(_)
-            | EngineEvent::Located(_) => {}
+            | EngineEvent::Located(_)
+            | EngineEvent::Dumping(_)
+            | EngineEvent::Piece(_) => {}
         }
     }
     None

@@ -57,6 +57,8 @@ mod cli_output_steps;
 mod core_dumps_steps;
 #[path = "steps/daemon_log.rs"]
 mod daemon_log_steps;
+#[path = "steps/download.rs"]
+mod download_steps;
 #[path = "steps/forget.rs"]
 mod forget_steps;
 #[path = "steps/install_restart.rs"]
@@ -142,6 +144,7 @@ struct Agent {
     mcp_call: mcp_call_steps::McpCallE2e,
     core_dumps: core_dumps_steps::CoreDumpsE2e,
     restore: restore_steps::RestoreE2e,
+    download: download_steps::DownloadE2e,
 }
 
 impl std::fmt::Debug for Agent {
@@ -200,6 +203,7 @@ impl Agent {
             mcp_call: mcp_call_steps::McpCallE2e::default(),
             core_dumps: core_dumps_steps::CoreDumpsE2e::default(),
             restore: restore_steps::RestoreE2e::default(),
+            download: download_steps::DownloadE2e::default(),
         }
     }
 

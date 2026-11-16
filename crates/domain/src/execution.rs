@@ -372,6 +372,10 @@ pub enum OperationKind {
     /// Restores an entry of a snapshot into a new folder or in place
     /// (§10.4). It only reads the repository: no I7 slot.
     Restore,
+    /// Hands an entry of a snapshot to the browser that asked for it
+    /// (§10.4). A read: no I7 slot, never queued; the log keeps it so the
+    /// history says who read what out of a repository.
+    Download,
 }
 
 impl OperationKind {
@@ -380,9 +384,13 @@ impl OperationKind {
     pub fn is_maintenance(self) -> bool {
         match self {
             Self::Forget | Self::Adopt | Self::Prune | Self::Check => true,
-            Self::Fake | Self::Identify | Self::Init | Self::Backup | Self::Ls | Self::Restore => {
-                false
-            }
+            Self::Fake
+            | Self::Identify
+            | Self::Init
+            | Self::Backup
+            | Self::Ls
+            | Self::Restore
+            | Self::Download => false,
         }
     }
 }

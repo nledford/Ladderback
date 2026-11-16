@@ -18,6 +18,7 @@ pub mod access;
 pub mod announce;
 pub mod browse;
 pub mod conditions;
+pub mod download;
 pub mod event_bus;
 pub mod execution;
 pub mod full_disk_access;

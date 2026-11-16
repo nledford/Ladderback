@@ -55,9 +55,9 @@ enum RestoreRun {
 #[derive(Default)]
 pub struct RestoreWorld {
     /// The scenario's snapshot and the host it records.
-    snapshot: Option<(SnapshotId, String)>,
+    pub(crate) snapshot: Option<(SnapshotId, String)>,
     /// The admin password, with sign-in on.
-    password: Option<String>,
+    pub(crate) password: Option<String>,
     allow_hub_restore: bool,
     /// The `restore-folder` the agent's configuration sets.
     restore_folder: Option<RestoreFolder>,
@@ -67,9 +67,9 @@ pub struct RestoreWorld {
     /// What the scripted dry run counts.
     plan: RestorePlanSummary,
     /// Every job the engine was given, oldest first.
-    jobs: Arc<Mutex<Vec<Job>>>,
+    pub(crate) jobs: Arc<Mutex<Vec<Job>>>,
     /// The operation log the restores write to.
-    log: Arc<InMemoryOperationStore>,
+    pub(crate) log: Arc<InMemoryOperationStore>,
     /// The use case, made at the first restore so the slot and the sign-in
     /// waits last the scenario.
     restores: Option<Arc<Restores>>,
@@ -200,7 +200,7 @@ impl Engine for Scripted {
 }
 
 impl RestoreWorld {
-    async fn config(&self) -> Arc<InMemoryConfigStore> {
+    pub(crate) async fn config(&self) -> Arc<InMemoryConfigStore> {
         let store = Arc::new(InMemoryConfigStore::new());
         let repositories = [(
             alias(),
@@ -323,7 +323,7 @@ impl RestoreWorld {
         }
     }
 
-    fn jobs(&self) -> Vec<Job> {
+    pub(crate) fn jobs(&self) -> Vec<Job> {
         self.jobs
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -355,7 +355,7 @@ impl RestoreWorld {
             .status()
     }
 
-    async fn history(&self) -> Vec<app::ports::OperationRecord> {
+    pub(crate) async fn history(&self) -> Vec<app::ports::OperationRecord> {
         self.log
             .list(&HistoryQuery {
                 plan: None,

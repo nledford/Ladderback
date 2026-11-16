@@ -35,12 +35,12 @@ pub use config_store::{
     RecordError,
 };
 pub use engine::{
-    BackupJob, BackupSummary, BrowseJob, CheckJob, CheckSummary, Engine, EngineError, EngineEvent,
-    EngineResult, FakeEnd, FakeJob, FolderAnswer, ForgetJob, ForgetSummary, Job, JobControl,
-    MAX_JOB_IDS, OperationStep, ProbeAnswer, ProgressEvent, ProgressKind, PruneJob,
-    PrunePlanSummary, PruneSummary, RepositoryAccess, RestoreJob, RestorePlanSummary,
-    RestoreSummary, RestoreTarget, RewriteJob, RewriteSummary, RunningJob, SavedEntry,
-    SnapshotSummary,
+    BackupJob, BackupSummary, BrowseJob, CheckJob, CheckSummary, DumpAnswer, DumpHeader, DumpJob,
+    Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, FolderAnswer, ForgetJob,
+    ForgetSummary, Job, JobControl, MAX_JOB_IDS, OperationStep, ProbeAnswer, ProgressEvent,
+    ProgressKind, PruneJob, PrunePlanSummary, PruneSummary, RepositoryAccess, RestoreJob,
+    RestorePlanSummary, RestoreSummary, RestoreTarget, RewriteJob, RewriteSummary, RunningJob,
+    SavedEntry, SnapshotSummary,
 };
 pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use full_disk_access::FullDiskAccessProbe;

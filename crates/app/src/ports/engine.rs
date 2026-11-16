@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use domain::browse::{FolderPage, FolderPath};
+use domain::browse::{DisplayName, FolderPage, FolderPath};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
@@ -163,6 +163,11 @@ pub enum Job {
     /// written to the operation log; what a person reviews before an
     /// in-place restore starts.
     RestorePlan(RestoreJob),
+    /// Hands one entry of a snapshot over a piece at a time, for a download
+    /// (§10.4): a file as itself, a folder as one archive. A read with a
+    /// backup's deadline: no I7 slot, never queued; the download use case
+    /// records it in the operation log itself.
+    Dump(DumpJob),
 }
 
 impl Job {
@@ -173,6 +178,7 @@ impl Job {
             Self::Fake(job) => job.deadline_budget,
             Self::Backup(job) => Some(job.deadline_budget),
             Self::Restore(job) => Some(job.deadline_budget),
+            Self::Dump(job) => Some(job.deadline_budget),
             Self::Forget(_)
             | Self::Rewrite(_)
             | Self::Identify(_)
@@ -206,6 +212,7 @@ impl Job {
             Self::Ls(_) | Self::Browse(_) | Self::Stats(_) => OperationKind::Ls,
             // A dry run is never recorded; it names the kind it plans.
             Self::Restore(_) | Self::RestorePlan(_) => OperationKind::Restore,
+            Self::Dump(_) => OperationKind::Download,
         }
     }
 
@@ -224,6 +231,7 @@ impl Job {
             Self::Prune(job) | Self::PrunePlan(job) => Some(&job.repository),
             Self::Check(job) => Some(&job.repository),
             Self::Browse(job) => Some(&job.repository),
+            Self::Dump(job) => Some(&job.repository),
             Self::Restore(job) | Self::RestorePlan(job) => Some(&job.repository),
         }
     }
@@ -243,6 +251,7 @@ impl Job {
             Self::Prune(job) | Self::PrunePlan(job) => Some(&mut job.repository),
             Self::Check(job) => Some(&mut job.repository),
             Self::Browse(job) => Some(&mut job.repository),
+            Self::Dump(job) => Some(&mut job.repository),
             Self::Restore(job) | Self::RestorePlan(job) => Some(&mut job.repository),
         }
     }
@@ -457,6 +466,44 @@ pub enum RestoreTarget {
     InPlace,
 }
 
+/// One entry of a snapshot to hand over for a download.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DumpJob {
+    pub repository: RepositoryAccess,
+    pub snapshot: SnapshotId,
+    /// The entry, by its keys from the snapshot's top; the top itself names
+    /// none and hands over the whole snapshot.
+    pub entry: FolderPath,
+    /// The archive a folder is handed over as; a file is handed over as
+    /// itself whatever it says.
+    pub format: domain::restore::download::ArchiveFormat,
+    /// A backup's budget in the same repository, as a restore's: a prune
+    /// may delete the packs it reads once `keep-delete` has passed (I3).
+    pub deadline_budget: SignedDuration,
+}
+
+/// What a dump found at its entry, told before its first piece.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DumpHeader {
+    /// A file as itself, or a folder as an archive.
+    pub shape: domain::restore::download::DownloadShape,
+    /// The entry's shown name (decision 102); none for the snapshot's top.
+    pub name: Option<DisplayName>,
+    /// The host the snapshot records, which names the top's archive.
+    pub host: String,
+}
+
+/// How a dump ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DumpAnswer {
+    /// Every piece was handed over: this many bytes in all.
+    Done { bytes: u64 },
+    /// The repository holds no snapshot by that ID.
+    SnapshotUnknown,
+    /// The snapshot holds no entry at that path.
+    EntryUnknown,
+}
+
 /// A scripted job: count `steps`, waiting `step_delay` before each, report
 /// `warnings` right after starting, then end as `end` says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -502,6 +549,11 @@ pub enum EngineEvent {
     /// why each earlier one was skipped (decision 80): the choice made when
     /// the job started, before any of the job's own events.
     Located(domain::execution::locations::LocationsRecord),
+    /// What a dump found at its entry, before its first [`Self::Piece`].
+    Dumping(DumpHeader),
+    /// The next piece of a dump, at most `PIECE_BYTES` long: the entry's
+    /// own bytes, never text to mask.
+    Piece(Vec<u8>),
 }
 
 /// One progress bar's change; `key` tells concurrent bars apart. A bar names
@@ -607,6 +659,8 @@ pub enum EngineResult {
     Restore(RestoreSummary),
     /// What a [`Job::RestorePlan`] found.
     RestorePlan(RestorePlanSummary),
+    /// How a [`Job::Dump`] ended.
+    Dump(DumpAnswer),
 }
 
 /// What a restore did, counted as rustic counts it.

@@ -26,6 +26,7 @@ import {
   type BrowserContextOptions,
   type BrowserType,
   chromium,
+  type Download,
   firefox,
   type Locator,
   type Page,
@@ -296,6 +297,9 @@ export class BrowserWorld extends World {
   /** The scenario's first page while it works in a second tab of the same
    *  browser, which shares its cookies; `null` while there is one tab. */
   firstTab: Page | null = null;
+  /** The files the browser saved, oldest first: a download's event comes
+   *  before the step that checks it starts, so every page keeps them. */
+  downloads: Download[] = [];
 
   async open(pathname = "/"): Promise<void> {
     if (browser === undefined) throw new Error("the browser is not running: BeforeAll failed");
@@ -350,6 +354,7 @@ export class BrowserWorld extends World {
    *  refuses, for the steps and the After hook to check. */
   #watch(page: Page): void {
     page.on("pageerror", (error) => this.scriptErrors.push(error.message));
+    page.on("download", (download) => this.downloads.push(download));
     // Chromium and WebKit write "Content Security Policy", Firefox
     // "Content-Security-Policy".
     page.on("console", (message) => {
@@ -369,6 +374,7 @@ Before(function (this: BrowserWorld) {
   this.scriptErrors = [];
   this.policyBlocks = [];
   this.expectsPolicyBlocks = false;
+  this.downloads = [];
   this.ownServer = null;
   this.baseUrl = null;
   this.fakeClock = false;

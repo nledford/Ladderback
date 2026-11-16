@@ -88,7 +88,7 @@ impl Agent {
     }
 
     /// The original path of `relative`, a path in the scratch folder.
-    fn original(&self, relative: &str) -> PathBuf {
+    pub(super) fn original(&self, relative: &str) -> PathBuf {
         self.scratch().join(relative)
     }
 
@@ -96,7 +96,7 @@ impl Agent {
     /// scratch folder: itself when the source was backed up as `/source`,
     /// the scratch folder's real path joined with it when it was backed up
     /// at its own path.
-    fn snapshot_path(&self, entry: &str) -> FolderPath {
+    pub(super) fn snapshot_path(&self, entry: &str) -> FolderPath {
         let path = match self.snapshot_backed_up_from() {
             Some(root) => {
                 let original = root.join(entry);

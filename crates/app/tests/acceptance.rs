@@ -51,6 +51,8 @@ mod secrets_steps;
 
 #[path = "steps/api_tokens.rs"]
 mod api_tokens_steps;
+#[path = "steps/download.rs"]
+mod download_steps;
 #[path = "steps/hooks.rs"]
 mod hooks_steps;
 #[path = "steps/interop.rs"]
@@ -113,6 +115,7 @@ struct Agent {
     recent_log: recent_log_steps::RecentLogWorld,
     maintainer: maintainer_steps::MaintainerWorld,
     full_disk_access: full_disk_access_steps::FullDiskAccessWorld,
+    download: download_steps::DownloadWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -156,6 +159,7 @@ impl Agent {
             locations: Default::default(),
             recovery: Default::default(),
             restore: Default::default(),
+            download: Default::default(),
             announcement: Default::default(),
             preview: Default::default(),
             notifications: Default::default(),

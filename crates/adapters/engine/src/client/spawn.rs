@@ -208,6 +208,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
         Job::Prune(job) | Job::PrunePlan(job) => job.repository.id.as_ref(),
         Job::Check(job) => job.repository.id.as_ref(),
         Job::Restore(job) | Job::RestorePlan(job) => job.repository.id.as_ref(),
+        Job::Dump(job) => job.repository.id.as_ref(),
     }
 }
 
@@ -268,6 +269,7 @@ fn access_of(job: &Job) -> Option<&RepositoryAccess> {
         Job::Check(job) => Some(&job.repository),
         Job::Browse(job) => Some(&job.repository),
         Job::Restore(job) | Job::RestorePlan(job) => Some(&job.repository),
+        Job::Dump(job) => Some(&job.repository),
     }
 }
 

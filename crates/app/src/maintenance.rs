@@ -1231,7 +1231,11 @@ impl RunMaintenance {
                     match event {
                         // The operation started before the engine did; its
                         // own `Started` is news from someone else's run.
-                        EngineEvent::Started { .. } => {}
+                        // A dump's header and pieces are a download's,
+                        // never a maintenance run's.
+                        EngineEvent::Started { .. }
+                        | EngineEvent::Dumping(_)
+                        | EngineEvent::Piece(_) => {}
                         EngineEvent::Progress(_) => {
                             let _ = operation.report_progress();
                         }

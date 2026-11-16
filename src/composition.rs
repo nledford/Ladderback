@@ -1397,10 +1397,12 @@ fn log_location(report: LocationReport) {
 
 /// Whether the job is an operation, which the history has a row for, so a
 /// page can show its progress and warnings there (§4.4). The reads (the look
-/// that names a repository, a listing, a stats read, a prune's plan) and the
-/// initialising of a repository answer their request and are written to no
-/// log (§9): a page told of their news would show it on no row, or on the row
-/// of the run that read, which keeps none of it (#308).
+/// that names a repository, a listing, a stats read, a prune's or a
+/// restore's plan) and the initialising of a repository answer their request
+/// and are written to no log (§9): a page told of their news would show it
+/// on no row, or on the row of the run that read, which keeps none of it
+/// (#308). A download has a row, but its use case writes it, not a run, and
+/// its news is the pieces its browser reads, never told to a page.
 fn is_operation(job: &Job) -> bool {
     match job {
         Job::Identify(_)
@@ -1410,7 +1412,8 @@ fn is_operation(job: &Job) -> bool {
         | Job::Browse(_)
         | Job::Stats(_)
         | Job::PrunePlan(_)
-        | Job::RestorePlan(_) => false,
+        | Job::RestorePlan(_)
+        | Job::Dump(_) => false,
         Job::Fake(_)
         | Job::Backup(_)
         | Job::Forget(_)
@@ -1448,7 +1451,13 @@ impl Publish {
             // that doesn't have it yet. The run announces both.
             // The choice of location is the run's record, which the
             // operation's row shows once the run writes it.
-            E::Started { .. } | E::Succeeded(_) | E::Failed(_) | E::Located(_) => None,
+            // A dump's header and pieces go to its download alone.
+            E::Started { .. }
+            | E::Succeeded(_)
+            | E::Failed(_)
+            | E::Located(_)
+            | E::Dumping(_)
+            | E::Piece(_) => None,
         }
     }
 }
@@ -2294,7 +2303,8 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         | EngineResult::Probed(_)
         | EngineResult::Snapshots(_)
         | EngineResult::Folder(_)
-        | EngineResult::Stats(_) => None,
+        | EngineResult::Stats(_)
+        | EngineResult::Dump(_) => None,
     }
 }
 
@@ -2311,6 +2321,7 @@ fn kind_text(kind: OperationKind) -> &'static str {
         OperationKind::Check => "check",
         OperationKind::Ls => "ls",
         OperationKind::Restore => "restore",
+        OperationKind::Download => "download",
     }
 }
 

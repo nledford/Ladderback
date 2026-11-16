@@ -153,6 +153,7 @@ pub(super) fn job_kind(job: Job) -> Result<JobKind, EngineError> {
         Job::Stats(access) => JobKind::Stats(repository_spec(access)),
         Job::Restore(job) => JobKind::Restore(restore_spec(job)),
         Job::RestorePlan(job) => JobKind::RestorePlan(restore_spec(job)),
+        Job::Dump(_) => todo!(),
         Job::Backup(job) => JobKind::Backup(BackupJobSpec {
             repo: repository_spec(job.repository),
             sources: job.sources,

@@ -10,8 +10,9 @@ use domain::planning::RepositoryConfig;
 use domain::{OperationId, RepositoryAlias};
 use futures::StreamExt;
 
+use crate::browse::FolderReads;
 use crate::ports::{
-    Engine, EngineError, EngineEvent, EngineResult, Job, RunningJob, SnapshotSummary,
+    Clock, Engine, EngineError, EngineEvent, EngineResult, Job, RunningJob, SnapshotSummary,
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 
@@ -28,11 +29,22 @@ pub enum SnapshotError {
     Resolve(ResolveError),
     Engine(EngineError),
     Failed(FailureReason),
+    /// No turn came free, or the listing didn't end, within the read
+    /// timeout.
+    TimedOut,
 }
 
 impl ListSnapshots {
     pub fn new(engine: Arc<dyn Engine>, resolve: ResolveRepository) -> Self {
         Self { engine, resolve }
+    }
+
+    /// A listing that takes its turn from `turns`, which every listing of
+    /// the daemon shares, waiting no longer than the read timeout by
+    /// `clock`.
+    pub fn with_turns(self, clock: Arc<dyn Clock>, turns: Arc<FolderReads>) -> Self {
+        let _ = (clock, turns);
+        todo!()
     }
 
     /// Lists the snapshots of the repository the configuration's entry
@@ -97,7 +109,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{ListSnapshots, SnapshotError};
-    use crate::fakes::{FakeSecrets, InMemoryConfigStore};
+    use crate::browse::FolderReads;
+    use crate::fakes::{FakeClock, FakeSecrets, InMemoryConfigStore};
     use crate::ports::{
         Engine, EngineError, EngineResult, Job, JobControl, RunningJob, SavedEntry, SnapshotSummary,
     };
@@ -323,5 +336,118 @@ mod tests {
                 detail: "no such file or directory".to_owned(),
             }))
         );
+    }
+
+    /// Answers every listing once `open` holds `true`, recording each job
+    /// as it starts.
+    struct Gated {
+        open: tokio::sync::watch::Receiver<bool>,
+        seen: Mutex<Vec<Job>>,
+    }
+
+    #[async_trait]
+    impl Engine for Gated {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(job);
+            let mut open = self.open.clone();
+            let answer = futures::stream::once(async move {
+                // A gate whose sender went opens too: the test is over.
+                let _ = open.wait_for(|open| *open).await;
+                EngineEvent::Succeeded(EngineResult::Snapshots(Vec::new()))
+            });
+            Ok(RunningJob {
+                events: Box::pin(answer),
+                control: Box::new(Stop),
+            })
+        }
+    }
+
+    impl Gated {
+        fn started(&self) -> usize {
+            self.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .len()
+        }
+    }
+
+    fn gated() -> (tokio::sync::watch::Sender<bool>, Arc<Gated>) {
+        let (gate, open) = tokio::sync::watch::channel(false);
+        let engine = Arc::new(Gated {
+            open,
+            seen: Mutex::new(Vec::new()),
+        });
+        (gate, engine)
+    }
+
+    fn in_turns(engine: Arc<Gated>, clock: Arc<FakeClock>) -> Arc<ListSnapshots> {
+        Arc::new(
+            ListSnapshots::new(engine, ResolveRepository::new(Arc::new(FakeSecrets::new())))
+                .with_turns(clock, Arc::new(FolderReads::default())),
+        )
+    }
+
+    fn spawn_listing(
+        listing: &Arc<ListSnapshots>,
+    ) -> tokio::task::JoinHandle<Result<Vec<SnapshotSummary>, SnapshotError>> {
+        let listing = Arc::clone(listing);
+        tokio::spawn(async move { listing.list(op(), &alias(), &entry(None)).await })
+    }
+
+    /// Lets the spawned listings run until they wait on something.
+    async fn settle() {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    /// #710: each listing is a worker that reads the repository's whole
+    /// index, so a burst of them is held to the limit.
+    #[tokio::test]
+    async fn at_most_two_listings_run_at_once_and_a_third_waits_its_turn() {
+        let (gate, engine) = gated();
+        let listing = in_turns(
+            engine.clone(),
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+        );
+        let listings = [
+            spawn_listing(&listing),
+            spawn_listing(&listing),
+            spawn_listing(&listing),
+        ];
+        settle().await;
+        assert_eq!(
+            engine.started(),
+            2,
+            "two workers list at once; the third waits for one of them to end"
+        );
+        gate.send_replace(true);
+        for listed in listings {
+            let listed = tokio::time::timeout(std::time::Duration::from_secs(5), listed)
+                .await
+                .unwrap_or_else(|_| panic!("each listing ends once the lists are answered"))
+                .unwrap_or_else(|e| panic!("the listing task ran: {e:?}"));
+            assert_eq!(listed, Ok(Vec::new()));
+        }
+        assert_eq!(engine.started(), 3, "the third listing took its turn");
+    }
+
+    #[tokio::test]
+    async fn a_listing_waiting_its_turn_is_given_up_when_the_read_timeout_ends() {
+        let (_gate, engine) = gated();
+        let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+        let listing = in_turns(engine.clone(), Arc::clone(&clock));
+        let _running = [spawn_listing(&listing), spawn_listing(&listing)];
+        settle().await;
+        let waiting = spawn_listing(&listing);
+        settle().await;
+        clock.advance(crate::maintenance::READ_TIMEOUT);
+        let listed = tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+            .await
+            .unwrap_or_else(|_| panic!("the waiting listing ends when the read timeout does"))
+            .unwrap_or_else(|e| panic!("the listing task ran: {e:?}"));
+        assert_eq!(listed, Err(SnapshotError::TimedOut));
+        assert_eq!(engine.started(), 2, "the given-up listing started no worker");
     }
 }

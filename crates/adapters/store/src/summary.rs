@@ -7,9 +7,9 @@
 //! `type` is an error.
 
 use app::ports::{
-    BackupSummary, CheckSummary, EngineResult, FolderAnswer, ForgetSummary, ProbeAnswer,
-    PrunePlanSummary, PruneSummary, RestorePlanSummary, RestoreSummary, RewriteSummary,
-    SnapshotSummary,
+    BackupSummary, CheckSummary, DumpAnswer, EngineResult, FolderAnswer, ForgetSummary,
+    ProbeAnswer, PrunePlanSummary, PruneSummary, RestorePlanSummary, RestoreSummary,
+    RewriteSummary, SnapshotSummary,
 };
 use domain::browse::FolderPage;
 use domain::maintenance::RepositoryStats;
@@ -109,6 +109,11 @@ pub(crate) enum Summary {
         files_unchanged: u64,
         files_kept: u64,
         bytes_to_write: u64,
+    },
+    /// What a download handed over: how many bytes, all of them when it
+    /// succeeded.
+    Dump {
+        bytes: u64,
     },
 }
 
@@ -233,6 +238,12 @@ impl From<&EngineResult> for Summary {
                 files_unchanged: summary.files_unchanged,
                 files_kept: summary.files_kept,
                 bytes_to_write: summary.bytes_to_write,
+            },
+            EngineResult::Dump(answer) => Self::Dump {
+                bytes: match answer {
+                    DumpAnswer::Done { bytes } => *bytes,
+                    DumpAnswer::SnapshotUnknown | DumpAnswer::EntryUnknown => 0,
+                },
             },
         }
     }
@@ -381,6 +392,8 @@ impl From<Summary> for EngineResult {
                 files_kept,
                 bytes_to_write,
             }),
+            // Only a download that handed every piece over keeps a result.
+            Summary::Dump { bytes } => Self::Dump(DumpAnswer::Done { bytes }),
         }
     }
 }

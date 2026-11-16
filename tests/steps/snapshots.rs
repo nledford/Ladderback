@@ -395,7 +395,7 @@ fn source_tree(source: &Path) {
 /// holds `source`, or, `at_own_path`, at the source's real path with its
 /// symbolic links resolved, so its original paths are inside the scratch
 /// folder, where a restore in place may write.
-async fn snapshot_of_source(agent: &mut Agent, at_own_path: bool) {
+pub(super) async fn snapshot_of_source(agent: &mut Agent, at_own_path: bool) {
     let cold = agent.scratch().join("repo");
     init(&cold).await;
     let source = agent.scratch().join("source");

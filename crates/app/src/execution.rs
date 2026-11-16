@@ -546,6 +546,8 @@ impl RunOperation {
                 run.operation.start_on(at, repository.as_ref())
             }
             EngineEvent::Progress(_) => run.operation.report_progress(),
+            // A dump is a download's read, never run as an operation.
+            EngineEvent::Dumping(_) | EngineEvent::Piece(_) => Ok(()),
             EngineEvent::Warning(warning) => run.operation.record_warning(match found {
                 Some(found) => found.explain(warning),
                 None => warning,

@@ -9,6 +9,8 @@ use crate::access::step_up::short_id;
 use crate::browse::FolderPath;
 use crate::planning::RestoreFolder;
 
+pub mod download;
+
 /// Where a restore writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Destination {
