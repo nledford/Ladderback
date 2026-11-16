@@ -187,6 +187,10 @@ exclude_re = [
     # below it: the two never share a bit, so `|` and `^` give the same byte.
     # A token that parses to other bytes (`&`) is caught.
     'crates/domain/src/access\.rs.*: replace \| with \^ in Token::parse$',
+    # A download ticket's byte is read the same way, a high hex digit shifted
+    # left four bits and a low one below it, so `|` and `^` give the same
+    # byte. A ticket that parses to other bytes (`&`) is caught.
+    'crates/domain/src/restore/download\.rs.*: replace \| with \^ in DownloadTicket::parse$',
     # An API token's ID gathers its first eight bytes by shifting what it has
     # eight bits left and joining the next byte below; its secret is read
     # back six bits a character the same way, and the last three characters

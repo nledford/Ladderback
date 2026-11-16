@@ -518,3 +518,28 @@ impl Drop for Handing {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A download's ask names what it asks for in debug output, and never
+    /// the step-up confirmation it carries (I4).
+    #[test]
+    fn an_ask_names_itself_in_debug_output_and_hides_its_confirmation() {
+        let ask = DownloadAsk {
+            alias: RepositoryAlias::parse("demo").unwrap_or_else(|e| panic!("an alias: {e:?}")),
+            snapshot: SnapshotId::parse(&"3f".repeat(32))
+                .unwrap_or_else(|e| panic!("a snapshot ID: {e:?}")),
+            entry: FolderPath::top(),
+            format: ArchiveFormat::Zip,
+            address: IpAddr::from([127, 0, 0, 1]),
+            confirmation: "canary-admin-password".to_owned(),
+        };
+        let shown = format!("{ask:?}");
+        assert!(shown.starts_with("DownloadAsk {"), "{shown}");
+        assert!(shown.contains(r#"confirmation: "[hidden]""#), "{shown}");
+        assert!(shown.contains("Zip"), "{shown}");
+        assert!(!shown.contains("canary-admin-password"), "{shown}");
+    }
+}

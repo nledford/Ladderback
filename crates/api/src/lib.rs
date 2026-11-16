@@ -2801,7 +2801,10 @@ mod tests {
         let started = DownloadStartedDto {
             ticket: "canary-ticket".to_owned(),
         };
-        assert!(!format!("{started:?}").contains("canary-ticket"));
+        assert_eq!(
+            format!("{started:?}"),
+            r#"DownloadStartedDto { ticket: "[hidden]" }"#
+        );
         assert_eq!(
             serde_json::to_string(&started).unwrap(),
             r#"{"ticket":"canary-ticket"}"#
