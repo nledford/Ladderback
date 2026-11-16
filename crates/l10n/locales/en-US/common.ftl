@@ -123,8 +123,8 @@ error-origin-not-allowed = { -brand-name } refused this request because it came 
 # `Content-Type: application/json` is a header, typed as it is: keep it a string literal.
 error-json-required = { -brand-name } refused this request because it was not sent as JSON. Send a request that changes anything with the header { "Content-Type: application/json" }.
 
-# Sign-in is on and the request carries no live session: it was never signed in, or its session ended (unused for 12 hours, 30 days old, signed out, or the admin password was set anew).
-error-sign-in-required = Sign in to { -brand-name } with the admin password to go on. A session ends after 12 hours unused, after 30 days, and when the admin password is set again.
+# Sign-in is on and the request carries no live session: it was never signed in, or its session ended (unused for 12 hours, 30 days old, signed out, or the admin password was set anew). A program, such as an MCP client, gets it too when it sends no API token.
+error-sign-in-required = Sign in to { -brand-name } with the admin password to go on. A program goes on with an { -api-token } instead, such as one { "ladderback mcp" } reads from the file { "--token-file" } names. A session ends after 12 hours unused, after 30 days, and when the admin password is set again.
 
 # The password given at sign-in is not the admin password.
 error-sign-in-failed = That is not the admin password. Check it and try again.
@@ -145,13 +145,13 @@ error-sign-in-unavailable = { -brand-name } could not check the admin password, 
     .with-detail = { -brand-name } could not check the admin password ({ $detail }), so nobody was signed in. Check the admin password file in the data folder, or set the password again with { "ladderback set-password" }.
 
 # A program's API token is unknown, revoked, of an admin password set since, or has a wrong secret. It counted as a failed sign-in.
-error-api-token-invalid = { -brand-name } doesn't know this { -api-token }: it may have been revoked, or the admin password set again. Create a new token in Settings and give it to the program.
+error-api-token-invalid = { -brand-name } doesn't know this { -api-token }: it may have been revoked, or the admin password set again. Create a new token in { -brand-name }'s Settings and give it to the program in place of this one; { "ladderback mcp" } reads it from the file { "--token-file" } names.
 
 # A good API token was sent to a route its scopes don't open.
 # $scope (text): what the route needs, one of { "read" }, { "run" }, { "preview" }, { "propose" } or { "session" }.
 error-api-token-scope = { $scope ->
-    [session] This { -api-token } can't do that: only a signed-in browser can. Sign in to { -brand-name } to do it.
-   *[other] This { -api-token } can't do that: it needs the { $scope } scope. Create a token with that scope in Settings.
+    [session] This { -api-token } can't do that: only a browser signed in to { -brand-name } can, never a program with a token.
+   *[other] This { -api-token } can't do that: it needs the { $scope } scope. Create a token with that scope in { -brand-name }'s Settings and give it to the program in place of this one.
   }
 
 # The token routes were asked for while no admin password is set.
@@ -300,7 +300,7 @@ error-body-too-large = { -brand-name } did not read this request, because its bo
 
 # The request names an operation the log has none of.
 # $operation (text): the operation's ID.
-error-operation-unknown = There is no operation { $operation }. Refresh the history page, or run a new operation.
+error-operation-unknown = There is no operation { $operation }. List the operations again to find the one you mean, or run a new one.
 
 # The request asked to cancel an operation that has already ended.
 # $operation (text): the operation's ID.
@@ -371,9 +371,9 @@ error-repository-read-timed-out = The repository did not answer in time, so what
 # $kind (text): the kind as it was sent.
 error-maintenance-kind-unknown = { -brand-name } does not run maintenance of kind { $kind }. Ask for forget, adopt, prune or check.
 
-# A history request's cursor is not an operation's ID.
+# A list's cursor (the history's, or an MCP tool's) names no item of the list: it was never one, or the item it named has gone.
 # $cursor (text): the cursor as it was sent.
-error-invalid-cursor = { -brand-name } could not continue the history from { $cursor }. Use the cursor the previous page gave.
+error-invalid-cursor = { -brand-name } could not continue the list from { $cursor }: no item of it has that cursor now. Ask for the list again from its start.
 
 # A call of an MCP tool gave an argument the tool does not take, left out one it needs, or gave one a value it does not take, so the tool did not run.
 # $field (text): the argument's name, as the tool's input schema or the call names it, such as plan or timeout.
