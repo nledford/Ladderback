@@ -8,9 +8,11 @@ Feature: The shared components in the gallery
   are never announced and are told at most every 30 seconds, and which shows
   no percentage while its size isn't known, a toast, the
   control that pauses live updates, a status badge for every state an
-  operation can be in, whose icon tells the state by its shape, and a
+  operation can be in, whose icon tells the state by its shape, a
   snapshot's tree, one stop for Tab, whose folders are read as they are
-  opened. Every demo state a
+  opened, and the shared vocabulary every component takes: its tones, each
+  named in words and drawn in a color of its own, its sizes and its
+  placements, which follow the page's direction. Every demo state a
   component can show (loading, empty, error, success, on and off) stays clear
   of accessibility violations, and each component's structure is pinned by an
   ARIA snapshot. The text of a control, such as a button's label, grows with
@@ -287,6 +289,7 @@ Feature: The shared components in the gallery
       | Review dialog |
       | Pause control |
       | Tree        |
+      | Shared vocabulary |
 
   Scenario Outline: Each component's structure is pinned by an ARIA snapshot
     When I open the component gallery
@@ -306,6 +309,7 @@ Feature: The shared components in the gallery
       | Review dialog |
       | Pause control |
       | Tree        |
+      | Shared vocabulary |
 
   Scenario: A review dialog opens on its dismiss button, keeps Tab inside and returns focus on Escape
     When I open the component gallery
@@ -411,3 +415,24 @@ Feature: The shared components in the gallery
     Given the reader sets the text size to 200 percent
     When I open the component gallery
     Then the icon of each badge of the "Status badge" demo is as tall as its text
+
+  Scenario: Each tone is named in words, and draws its text and its swatch in a color of its own, which a screen reader skips
+    When I open the component gallery
+    Then each of the 6 tones of the "Shared vocabulary" demo is named in words, its swatch drawn in its text's color and skipped by a screen reader
+    And the 5 tones of the "Shared vocabulary" demo other than Inherit each have a color of their own
+    And the tone "Inherit" of the "Shared vocabulary" demo takes the color of the text around it
+
+  Scenario: Under forced colors every tone draws its text and its swatch in the system's text color, so its words tell it apart
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then each of the 6 tones of the "Shared vocabulary" demo is named in words, its swatch drawn in its text's color and skipped by a screen reader
+    And the 6 tones of the "Shared vocabulary" demo all draw in the color of the text around them
+
+  Scenario Outline: Start, Center and End place a part at its line's start, middle and end, in the page's direction
+    When I open the component gallery asking for the locale "<locale>"
+    Then the placements of the vocabulary demo put each part where they say, in a page that runs <direction>
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
