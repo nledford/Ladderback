@@ -30,12 +30,19 @@ use rustic_backend::choose::{BackendChoice, SupportedBackend};
 use rustic_backend::util::location_to_type_and_path;
 use rustic_backend::{BackendOptions, RestBackend};
 use rustic_core::{
-    BytesList, CommandInput, ErrorKind, FileType, Id, ReadBackend, RepositoryBackends, RusticError,
-    RusticResult, WriteBackend,
+    BytesList, CommandInput, CommandInputErrorKind, ErrorKind, FileType, Id, ReadBackend,
+    RepositoryBackends, RusticError, RusticResult, WriteBackend,
 };
 
 /// What rustic runs when the options name no `rclone-command`.
 const DEFAULT_COMMAND: &str = "rclone serve restic --addr localhost:0";
+
+/// What a backend that couldn't be built says first, as rustic says it.
+const NOT_LOADED: &str = "Could not load the backend `{name}` at `{location}`. Please check the given backend and try again.";
+
+/// What an `rclone` that couldn't start says, without its command line.
+const NOT_STARTED: &str =
+    "Could not start rclone. Please check if rclone is installed and working correctly.";
 
 /// What the server writes before the address it serves on.
 const SERVING: &str = "Serving restic REST API on ";
@@ -201,7 +208,7 @@ impl Serving<'_> {
         };
         built.map_err(|error| {
             error
-                .prepend_guidance_line("Could not load the backend `{name}` at `{location}`. Please check the given backend and try again.")
+                .prepend_guidance_line(NOT_LOADED)
                 .attach_context("name", kind.to_string())
                 .attach_context("location", path.to_string())
         })
@@ -231,13 +238,7 @@ impl Serving<'_> {
         let mut rclone_command: CommandInput = rclone_command
             .map_or(DEFAULT_COMMAND, String::as_str)
             .parse()
-            .map_err(|error| {
-                RusticError::with_source(
-                    ErrorKind::InvalidInput,
-                    "Expected rclone command to be valid, but it was not. Please check the configuration file.",
-                    error,
-                )
-            })?;
+            .map_err(invalid_command)?;
         rclone_command.append_arg(path.to_owned());
         let user = self.credentials.user.expose();
         let password = self.credentials.password.expose();
@@ -247,17 +248,15 @@ impl Serving<'_> {
                 .env("RCLONE_USER", user)
                 .env("RCLONE_PASS", password);
         }
-        log::debug!("starting rclone via {rclone_command:?}");
+        // Neither this record nor the error below quotes the command line,
+        // as rustic's do: one can carry a credential the redactor doesn't
+        // know, such as a token typed into `rclone-command` (I4, #874).
+        log::debug!("starting rclone");
         let _ = command.args(rclone_command.args()).stderr(Stdio::piped());
         let mut server = Server {
             reader: None,
             child: spawn_gate::hold(|| command.spawn()).map_err(|error| {
-                RusticError::with_source(
-                    ErrorKind::ExternalCommand,
-                    "Experienced an error while running rclone: `{rclone_command}`. Please check if rclone is installed and working correctly.",
-                    error,
-                )
-                .attach_context("rclone_command", rclone_command.to_string())
+                RusticError::with_source(ErrorKind::ExternalCommand, NOT_STARTED, error)
             })?,
         };
         let output = BufReader::new(server.child.stderr.take().ok_or_else(|| {
@@ -431,6 +430,52 @@ fn version_of(first_line: &str) -> Option<(u64, u64, u64)> {
     });
     let version = (numbers.next()??, numbers.next()??, numbers.next()??);
     numbers.next().is_none().then_some(version)
+}
+
+/// The failure of an `rclone-command` that could not be split into
+/// arguments: why, never the line. rustic's error quotes the line, which
+/// can carry a credential the redactor doesn't know, such as a token typed
+/// into it (I4, #874).
+fn invalid_command(error: CommandInputErrorKind) -> Box<RusticError> {
+    const INVALID: &str =
+        "Expected rclone command to be valid, but it was not. Please check the configuration file.";
+    match error {
+        CommandInputErrorKind::SplittingArgumentsFailed { source, .. } => {
+            RusticError::with_source(ErrorKind::InvalidInput, INVALID, source)
+        }
+        // Splitting is the only failure of a parse; whatever rustic adds
+        // later may quote the line too.
+        _ => RusticError::new(ErrorKind::InvalidInput, INVALID),
+    }
+}
+
+/// `error` of rustic's own `rclone:` backend, which a worker builds, without
+/// the command line it quotes: in place of rustic's failure to start
+/// `rclone`, which quotes the line, the engine's own words and the system's
+/// reason; in place of rustic's failure to split the line, which quotes it
+/// in its cause, the reason alone. A line can carry a credential the
+/// redactor doesn't know, such as a token typed into `rclone-command` (I4,
+/// #874). Any other error is left as it is.
+pub(crate) fn without_command(error: Box<RusticError>) -> Box<RusticError> {
+    let cause = std::error::Error::source(&*error);
+    if error.context_value("rclone_command").is_some() {
+        let reason = cause.map(ToString::to_string).unwrap_or_default();
+        let started = RusticError::with_source(ErrorKind::ExternalCommand, NOT_STARTED, reason);
+        return match (error.context_value("name"), error.context_value("location")) {
+            (Some(name), Some(location)) => started
+                .prepend_guidance_line(NOT_LOADED)
+                .attach_context("name", name.to_owned())
+                .attach_context("location", location.to_owned()),
+            _ => started,
+        };
+    }
+    match cause.and_then(|cause| cause.downcast_ref::<CommandInputErrorKind>()) {
+        Some(CommandInputErrorKind::SplittingArgumentsFailed { source, .. }) => {
+            let reason = source.to_string();
+            error.attach_source(reason)
+        }
+        _ => error,
+    }
 }
 
 /// The failure of an `rclone version` that could not be run or read.
