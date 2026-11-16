@@ -548,11 +548,12 @@ impl Redactor {
     /// it where it holds an escape, is cut with a backslash in it or ends in
     /// a line-ending backslash: each byte of the text is compared at most
     /// twice with a byte of the needle in each pass, however long and
-    /// repetitive both are. For the start of the text, and of what TOML
+    /// repetitive both are. For each start of the text, and of what TOML
     /// read, one pass over as many of the last bytes of each needle as the
     /// start has, each compared at most twice, after one over the start
-    /// itself ([`head::Head`]). A needle and a valid text are UTF-8, so what
-    /// matches starts and ends between characters.
+    /// itself ([`head::Head`]); a text has a second start only where it
+    /// begins with white space TOML keeps. A needle and a valid text are
+    /// UTF-8, so what matches starts and ends between characters.
     fn mask_with<'a>(
         needles: impl Iterator<Item = &'a Needle> + Clone,
         everything: bool,
@@ -575,10 +576,22 @@ impl Redactor {
             .map(|needle| needle.text.len())
             .max()
             .unwrap_or_default();
-        // Where the white space the text begins with ends.
-        let at = text.len().saturating_sub(text.trim_start().len());
-        let start = head::Head::of(text, at, longest);
-        let toml_start = toml.as_ref().and_then(|toml| toml.head(at, longest));
+        // Where the white space the text begins with ends: as TOML drops it
+        // after a line-ending backslash (spaces, tabs and line breaks), and,
+        // where that differs, as Unicode has it. Other white space may begin
+        // the rest of a secret, or stand before it, and both are looked at.
+        // Neither holds a backslash, so it ends at the same place in what
+        // TOML read.
+        let toml_white = text
+            .len()
+            .saturating_sub(text.trim_start_matches([' ', '\t', '\r', '\n']).len());
+        let unicode_white = text.len().saturating_sub(text.trim_start().len());
+        let ats = [
+            Some(toml_white),
+            (unicode_white != toml_white).then_some(unicode_white),
+        ];
+        let starts = ats.map(|at| at.and_then(|at| head::Head::of(text, at, longest)));
+        let toml_starts = ats.map(|at| at.and_then(|at| toml.as_ref()?.head(at, longest)));
         let bytes = text.as_bytes();
         // The longest span, of a needle or of the cut, that ends at each byte:
         // at most a needle's length, which a `u32` holds, or the bytes it was
@@ -593,12 +606,14 @@ impl Redactor {
                     *span = (*span).max(matched);
                 }
             }
-            if let Some(tail) = start.as_ref().and_then(|start| start.tail(needle)) {
-                cover(&mut spans, tail.start, tail.end);
+            for start in starts.iter().flatten() {
+                if let Some(tail) = start.tail(needle) {
+                    cover(&mut spans, tail.start, tail.end);
+                }
             }
             if let Some(toml) = &toml {
                 toml.mask(needle, &mut spans);
-                if let Some(start) = &toml_start {
+                for start in toml_starts.iter().flatten() {
                     toml.mask_tail(start, needle, &mut spans);
                 }
             }
@@ -1351,6 +1366,29 @@ mod tests {
         // The end of a form of a secret, as `Debug` writes it.
         let bell = super::Redactor::new(&[SecretValue::new("canary\u{7}bell")]);
         assert_eq!(bell.redact("{7}bell failed"), "*** failed");
+    }
+
+    /// TOML drops only spaces, tabs and line breaks after a line-ending
+    /// backslash, so other white space (a no-break space, an ideographic
+    /// space) may begin the rest of a secret and is masked with it. Where
+    /// the text begins with such white space and a tail follows it, that
+    /// tail is masked too.
+    #[test]
+    fn white_space_toml_keeps_after_a_break_is_masked_with_the_rest_of_a_secret() {
+        for (secret, line, masked) in [
+            ("canary-bell\u{3000}xyz", "\u{3000}xyz\"\"\"", "***\"\"\""),
+            ("canary-bell\u{a0}wxyz", "\u{a0}wxyz\"\"\"", "***\"\"\""),
+            ("canary-bell\u{a0}wxyz", "  \u{a0}wxyz\"\"\"", "  ***\"\"\""),
+            (
+                "canary-bell demo",
+                "\u{3000}bell demo\"\"\"",
+                "\u{3000}***\"\"\"",
+            ),
+        ] {
+            let redactor = redactor(&[secret]);
+            assert_eq!(redactor.redact(line), masked, "{line:?}");
+            assert_eq!(redactor.redact_cut(line.as_bytes()), masked, "{line:?} cut");
+        }
     }
 
     /// A tail of 1 to 3 bytes stays: it is too short to tell from other
@@ -2873,6 +2911,25 @@ mod tests {
                 "{what}: {work} comparisons for {length} bytes and {needles} needles"
             );
         }
+    }
+
+    /// A text that begins with white space TOML keeps (an ideographic
+    /// space) has two starts, one where TOML's white space ends and one
+    /// where Unicode's does, each looked at once more per needle: at most
+    /// twice per byte of the text in each of three passes, and twice more
+    /// for each start.
+    #[test]
+    fn masking_a_text_with_two_starts_compares_each_byte_at_most_twice_per_needle_in_each_pass() {
+        let redactor = a_redactor_of_long_repetitive_needles();
+        let needles = redactor.needles.len();
+        let text = format!("\u{3000}{}", "a".repeat(MAX_SECRET_BYTES - 3));
+        let (masked, work) = compared(|| redactor.redact(&text));
+        assert_eq!(masked, "\u{3000}***");
+        let length = text.len();
+        assert!(
+            (length * needles..=6 * length * needles + 4 * length).contains(&work),
+            "{work} comparisons for {length} bytes and {needles} needles"
+        );
     }
 
     /// A text with a TOML escape in it is read a second time, as TOML reads
