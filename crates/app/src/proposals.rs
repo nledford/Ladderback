@@ -86,6 +86,16 @@ pub struct Made {
     pub warnings: Vec<ProposalWarning>,
 }
 
+/// A proposal applied: the configuration file holds its changes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Applied {
+    pub proposal: Proposal,
+    /// Why the store didn't record the apply, when it didn't: the file is
+    /// saved all the same, and the store shows the proposal being applied
+    /// until the daemon starts again ([`Proposals::recover`]).
+    pub unrecorded: Option<StoreError>,
+}
+
 /// A proposal as the "Pending changes" page shows it (decision 89, points
 /// 3, 4 and 6).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -333,7 +343,7 @@ impl Proposals {
         &self,
         id: &ProposalId,
         ask: ApprovalAsk,
-    ) -> Result<Proposal, ProposalError> {
+    ) -> Result<Applied, ProposalError> {
         self.step_up(id, &ask).await?;
         let _writes = self.ports.writes.lock().await;
         let mut proposal = self.get(&Proposer::NoToken, id).await?;
@@ -376,15 +386,17 @@ impl Proposals {
         {
             Ok(SavedOver::Saved { kept }) => {
                 self.ports.changed.tell();
-                self.ports
-                    .store
-                    .applied(id, kept.as_deref())
-                    .await
-                    .map_err(ProposalError::Store)?;
+                // The file holds the changes whatever the store records: the
+                // answer is that it is applied, with why the store shows
+                // otherwise until the daemon starts again.
+                let unrecorded = self.ports.store.applied(id, kept.as_deref()).await.err();
                 proposal.status = ProposalStatus::Applied;
                 proposal.applied_as = kept;
                 self.announce(id, proposal.status).await;
-                Ok(proposal)
+                Ok(Applied {
+                    proposal,
+                    unrecorded,
+                })
             }
             Ok(SavedOver::ChangedMeanwhile) => {
                 self.end_apply(id, ProposalStatus::Pending).await?;
@@ -395,6 +407,27 @@ impl Proposals {
                 Err(ProposalError::Config(Box::new(error)))
             }
         }
+    }
+
+    /// Ends as failed every proposal still being applied, as a daemon that
+    /// stopped mid-apply left it, announcing each (decision 89, point 2):
+    /// called once, as the daemon starts, before any apply. Answers the
+    /// proposals it ended.
+    pub async fn recover(&self) -> Result<Vec<ProposalId>, StoreError> {
+        let mut ended = Vec::new();
+        for kept in self.ports.store.all().await? {
+            if kept.status == ProposalStatus::Applying
+                && self
+                    .ports
+                    .store
+                    .change_status(&kept.id, ProposalStatus::Applying, ProposalStatus::Failed)
+                    .await?
+            {
+                self.announce(&kept.id, ProposalStatus::Failed).await;
+                ended.push(kept.id);
+            }
+        }
+        Ok(ended)
     }
 
     /// Rejects the pending proposal `id` for `reasons`, one per change.

@@ -101,8 +101,17 @@ fn key(byte: u8) -> RevisionKey {
 /// The proposals of `world` as the daemon started again holds them, under
 /// `revision_key`: the same store, codec and file.
 fn restarted(world: &World, revision_key: Result<RevisionKey, RandomUnavailable>) -> Proposals {
+    over(world, world.store.clone(), revision_key)
+}
+
+/// The proposals of `world` over `store`, under `revision_key`.
+fn over(
+    world: &World,
+    store: Arc<dyn ProposalStore>,
+    revision_key: Result<RevisionKey, RandomUnavailable>,
+) -> Proposals {
     Proposals::new(ProposalPorts {
-        store: world.store.clone(),
+        store,
         codec: world.codec.clone(),
         config: world.config.clone(),
         drafts: world.config.clone(),
@@ -426,7 +435,11 @@ async fn an_approval_applies_the_proposal_tells_the_scheduler_and_announces_each
         .unwrap();
     let ask = as_shown(&world, &made.id).await;
     let mut events = world.events.subscribe().await;
-    let applied = world.proposals.approve(&made.id, ask).await.unwrap();
+    let Applied {
+        proposal: applied,
+        unrecorded,
+    } = world.proposals.approve(&made.id, ask).await.unwrap();
+    assert_eq!(unrecorded, None);
     assert_eq!(applied.status, ProposalStatus::Applied);
     let kept_as = applied.applied_as.clone().unwrap();
     assert!(kept_as.contains(made.id.as_str()), "{kept_as}");
@@ -459,6 +472,135 @@ async fn an_approval_applies_the_proposal_tells_the_scheduler_and_announces_each
     );
 }
 
+/// The store of a world, except that it can't record an apply.
+struct UnrecordedApplies(Arc<InMemoryProposalStore>);
+
+#[async_trait::async_trait]
+impl ProposalStore for UnrecordedApplies {
+    async fn add(
+        &self,
+        proposal: &StoredProposal,
+        pending_at_most: usize,
+        ended_at_most: usize,
+    ) -> Result<Admission, StoreError> {
+        self.0.add(proposal, pending_at_most, ended_at_most).await
+    }
+
+    async fn get(&self, id: &ProposalId) -> Result<Option<StoredProposal>, StoreError> {
+        self.0.get(id).await
+    }
+
+    async fn all(&self) -> Result<Vec<StoredProposal>, StoreError> {
+        self.0.all().await
+    }
+
+    async fn change_status(
+        &self,
+        id: &ProposalId,
+        from: ProposalStatus,
+        to: ProposalStatus,
+    ) -> Result<bool, StoreError> {
+        self.0.change_status(id, from, to).await
+    }
+
+    async fn reject(
+        &self,
+        id: &ProposalId,
+        at: Timestamp,
+        reasons: &[domain::planning::RejectReason],
+    ) -> Result<bool, StoreError> {
+        self.0.reject(id, at, reasons).await
+    }
+
+    async fn approve(
+        &self,
+        id: &ProposalId,
+        at: Timestamp,
+        from: Option<IpAddr>,
+    ) -> Result<bool, StoreError> {
+        self.0.approve(id, at, from).await
+    }
+
+    async fn applied(&self, _: &ProposalId, _: Option<&str>) -> Result<bool, StoreError> {
+        Err(StoreError::Unavailable {
+            detail: "the disk is full".to_owned(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn an_apply_the_store_can_t_record_is_answered_applied_with_why() {
+    let world = world().await;
+    let made = propose(&world, ConfigChange::AddPlan(plan("home")))
+        .await
+        .unwrap();
+    let ask = as_shown(&world, &made.id).await;
+    let unrecorded = over(
+        &world,
+        Arc::new(UnrecordedApplies(world.store.clone())),
+        Ok(key(3)),
+    );
+    let applied = unrecorded.approve(&made.id, ask).await.unwrap();
+    assert_eq!(applied.proposal.status, ProposalStatus::Applied);
+    assert_eq!(
+        applied.unrecorded,
+        Some(StoreError::Unavailable {
+            detail: "the disk is full".to_owned(),
+        })
+    );
+    assert!(
+        world
+            .config
+            .load()
+            .await
+            .unwrap()
+            .plan(&plan("home").id)
+            .is_some(),
+        "the file is saved"
+    );
+    assert_eq!(
+        world.store.get(&made.id).await.unwrap().unwrap().status,
+        ProposalStatus::Applying,
+        "until the daemon starts again"
+    );
+}
+
+#[tokio::test]
+async fn a_proposal_a_stop_left_being_applied_ends_failed_and_announced() {
+    let world = world().await;
+    let left = propose(&world, ConfigChange::AddPlan(plan("home")))
+        .await
+        .unwrap();
+    let pending = propose(&world, ConfigChange::AddPlan(plan("photos")))
+        .await
+        .unwrap();
+    assert!(
+        world
+            .store
+            .approve(&left.id, world.clock.now(), Some(HOME))
+            .await
+            .unwrap()
+    );
+    let mut events = world.events.subscribe().await;
+    assert_eq!(world.proposals.recover().await, Ok(vec![left.id.clone()]));
+    assert_eq!(
+        world.store.get(&left.id).await.unwrap().unwrap().status,
+        ProposalStatus::Failed
+    );
+    assert_eq!(
+        world.store.get(&pending.id).await.unwrap().unwrap().status,
+        ProposalStatus::Pending
+    );
+    assert_eq!(
+        announced(&mut events).await,
+        UiEvent::ProposalChanged {
+            proposal: left.id.to_string(),
+            status: ProposalStatusDto::Failed,
+        }
+    );
+    assert_eq!(world.proposals.recover().await, Ok(Vec::new()));
+}
+
 #[tokio::test]
 async fn an_approval_not_confirmed_changes_nothing() {
     let world = world().await;
@@ -476,6 +618,38 @@ async fn an_approval_not_confirmed_changes_nothing() {
         ProposalStatus::Pending
     );
     assert!(world.config.load().await.unwrap().plans().is_empty());
+}
+
+#[tokio::test]
+async fn with_sign_in_on_an_approval_is_confirmed_by_the_admin_password_not_the_short_id() {
+    let world = world().await;
+    let access = Arc::new(crate::access::Access::new(
+        Arc::new(crate::fakes::InMemoryAdminPassword::with("demo-admin-pass")),
+        Arc::new(SeededRandom::new(7)),
+        world.clock.clone(),
+        Arc::new(crate::fakes::InMemoryApiTokenStore::new()),
+        Arc::new(crate::fakes::InMemorySessionStore::new()),
+    ));
+    let proposals = over(&world, world.store.clone(), Ok(key(3))).with_access(access);
+    let made = propose(&world, ConfigChange::AddPlan(plan("home")))
+        .await
+        .unwrap();
+    assert_eq!(
+        proposals
+            .approve(&made.id, as_shown(&world, &made.id).await)
+            .await,
+        Err(ProposalError::StepUpFailed)
+    );
+    assert!(world.config.load().await.unwrap().plans().is_empty());
+    // Past the wait a wrong password asks for.
+    world.clock.advance(SignedDuration::from_mins(1));
+    let mut ask = as_shown(&world, &made.id).await;
+    ask.confirmation = "demo-admin-pass".to_owned();
+    let applied = proposals.approve(&made.id, ask).await;
+    assert_eq!(
+        applied.map(|applied| applied.proposal.status),
+        Ok(ProposalStatus::Applied)
+    );
 }
 
 #[tokio::test]

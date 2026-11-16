@@ -77,7 +77,9 @@ pub(super) struct ProposalService {
     /// The configuration file, for the revision a proposal is drafted
     /// against.
     file: Arc<FileConfigStore>,
-    proposals: Proposals,
+    /// Shared with each approval's own task, which a browser that hangs up
+    /// doesn't stop.
+    proposals: Arc<Proposals>,
 }
 
 impl ProposalService {
@@ -92,7 +94,7 @@ impl ProposalService {
         };
         Self {
             file: Arc::clone(&parts.file),
-            proposals,
+            proposals: Arc::new(proposals),
         }
     }
 }
@@ -210,19 +212,39 @@ impl http_adapter::Proposals for ProposalService {
         ) else {
             return Err(ProposalsError::Changed);
         };
-        let approved = self
-            .proposals
-            .approve(
-                &named,
-                ApprovalAsk {
-                    shown: Shown { revision, diff },
-                    confirmation: approval.confirmation,
-                    address: approval.address,
-                },
-            )
+        let ask = ApprovalAsk {
+            shown: Shown { revision, diff },
+            confirmation: approval.confirmation,
+            address: approval.address,
+        };
+        // In a task of its own: a browser that hangs up drops this future,
+        // never an apply halfway (decision 89).
+        let proposals = Arc::clone(&self.proposals);
+        let approved = tokio::spawn(async move { proposals.approve(&named, ask).await })
             .await
+            .map_err(|ended| {
+                let how = if ended.is_panic() {
+                    "panicked"
+                } else {
+                    "was cancelled"
+                };
+                log::warn!("the approval of proposal {id} {how}");
+                ProposalsError::Unavailable {
+                    code: ErrorCode::ProposalsUnavailable,
+                    args: Vec::new(),
+                    detail: None,
+                }
+            })?
             .map_err(|error| refused(error, &id))?;
-        shown(approved)
+        if let Some(error) = &approved.unrecorded {
+            // Its code only: the store's own words are unchecked (I4).
+            log::warn!(
+                "proposal {id} is applied, but the store couldn't record it: {}; it shows as \
+                 failed once the daemon starts again",
+                error.code()
+            );
+        }
+        shown(approved.proposal)
     }
 
     async fn reject(
@@ -541,10 +563,15 @@ sources = ["/home/demo"]
     const ADMIN_PASSWORD: &str = "demo-admin-pass";
 
     fn service() -> (ProposalService, tempfile::TempDir, std::path::PathBuf) {
-        service_with(&SignIn::Off {
+        service_with(&signed_out())
+    }
+
+    /// Sign-in off.
+    fn signed_out() -> SignIn {
+        SignIn::Off {
             password: Arc::new(InMemoryAdminPassword::default()),
             sessions: Arc::new(InMemorySessionStore::new()),
-        })
+        }
     }
 
     /// Sign-in on, and the clock its waits run by.
@@ -563,6 +590,12 @@ sources = ["/home/demo"]
     }
 
     fn service_with(sign_in: &SignIn) -> (ProposalService, tempfile::TempDir, std::path::PathBuf) {
+        let (parts, scratch, file) = parts();
+        (ProposalService::new(&parts, sign_in), scratch, file)
+    }
+
+    /// Parts over a configuration file of `CONFIG` in a scratch folder.
+    fn parts() -> (ProposalParts, tempfile::TempDir, std::path::PathBuf) {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let file = scratch.path().join("config.toml");
         std::fs::write(&file, CONFIG).expect("the config file");
@@ -576,7 +609,7 @@ sources = ["/home/demo"]
             events: Arc::new(app::event_bus::BroadcastEventBus::new()),
             revision_key: revision_key(),
         };
-        (ProposalService::new(&parts, sign_in), scratch, file)
+        (parts, scratch, file)
     }
 
     /// Approves the proposal `id` as its review shows it, confirmed by
@@ -598,6 +631,7 @@ sources = ["/home/demo"]
                 },
             )
             .await
+            .map(|applied| applied.proposal)
     }
 
     #[tokio::test]
@@ -650,6 +684,53 @@ sources = ["/home/demo"]
             .await
             .expect("approved");
         assert_eq!(approved.status, ProposalStatus::Applied);
+        assert_ne!(std::fs::read_to_string(&file).expect("the file"), CONFIG);
+    }
+
+    #[tokio::test]
+    async fn a_browser_that_hangs_up_mid_approval_leaves_the_apply_to_finish() {
+        let (parts, _scratch, file) = parts();
+        let service = ProposalService::new(&parts, &signed_out());
+        let made = service
+            .propose(
+                Proposer::NoToken,
+                proposal(json!([{"kind": "add-plan", "plan": photos()}])),
+            )
+            .await
+            .expect("proposed");
+        let id = ProposalId::parse(&made.id).expect("an ID");
+        let review = service.review(made.id.clone()).await.expect("reviewed");
+        let approval = Approval {
+            revision: review.revision,
+            diff_hash: review.diff_hash,
+            address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+            confirmation: short_proposal_id(&id).to_owned(),
+        };
+        // Another write of the configuration holds its lock, so the
+        // approval waits for it; the browser hangs up meanwhile.
+        let writes = parts.writes.lock().await;
+        let hung_up = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            service.approve(made.id.clone(), approval),
+        )
+        .await;
+        assert!(hung_up.is_err(), "the approval waits for the lock");
+        drop(writes);
+        let mut status = ProposalStatus::Pending;
+        for _ in 0..500 {
+            status = parts
+                .store
+                .get(&id)
+                .await
+                .expect("the store reads")
+                .expect("the proposal is kept")
+                .status;
+            if status != ProposalStatus::Pending && status != ProposalStatus::Applying {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(status, ProposalStatus::Applied);
         assert_ne!(std::fs::read_to_string(&file).expect("the file"), CONFIG);
     }
 

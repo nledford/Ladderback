@@ -905,6 +905,23 @@ async fn state_over(
         events: Arc::clone(&bus),
         revision_key: proposals::revision_key(),
     };
+    // As with the operations: nothing has been approved yet, so a proposal
+    // the store still shows being applied was left by a process that
+    // stopped mid-apply. It ends as failed (decision 89). A store that
+    // can't be read or changed leaves it so, and the daemon starts all the
+    // same: no repository waits on a proposal.
+    match proposal_parts.proposals().recover().await {
+        Ok(ended) if !ended.is_empty() => log::warn!(
+            "ended {} proposal(s) the store still showed being applied: the daemon that applied them stopped before it recorded the end",
+            ended.len()
+        ),
+        Ok(_) => {}
+        // By its code alone (I4).
+        Err(error) => log::warn!(
+            "the proposals left being applied could not be ended ({})",
+            error.code()
+        ),
+    }
     let plans: Arc<dyn Plans> = Arc::new(plans::PlanService::new(
         Arc::clone(&config),
         app::plans::EditPlans::new(Arc::clone(&config), writes, changed)
@@ -5404,6 +5421,60 @@ mod tests {
                 reason: FailureReason::DaemonStopped
             }
         );
+    }
+
+    #[tokio::test]
+    async fn a_proposal_a_stop_left_being_applied_is_failed_once_the_daemon_starts() {
+        use app::ports::{ProposalStore, StoredProposal};
+        use domain::planning::{ConfigRevision, ProposalId, ProposalStatus, Proposer, Rationale};
+
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let (config, data) = own_folders(scratch.path());
+        let database = data.join("ladderback.db");
+        // The store an earlier run left behind: a proposal it was applying
+        // when it stopped.
+        let earlier = SqliteStore::open(&database).await.expect("the store opens");
+        let id = ProposalId::from_bytes(&std::array::from_fn(|_| 1));
+        let now = domain::Timestamp::now();
+        let proposal = StoredProposal {
+            id: id.clone(),
+            proposer: Proposer::NoToken,
+            base: ConfigRevision::of(b""),
+            changes: "[]".to_owned(),
+            rationale: Rationale::parse("Nightly backups.".to_owned()).expect("a rationale"),
+            status: ProposalStatus::Pending,
+            created_at: now,
+            expires_at: now + domain::SignedDuration::from_hours(48),
+            decided_at: None,
+            reasons: Vec::new(),
+            approved_from: None,
+            applied_as: None,
+        };
+        ProposalStore::add(&earlier, &proposal, 10, 10)
+            .await
+            .expect("the proposal is kept");
+        assert!(
+            ProposalStore::approve(&earlier, &id, now, None)
+                .await
+                .expect("the approval is kept"),
+            "the proposal is being applied"
+        );
+        earlier.close().await;
+
+        let daemon = daemon_at(Some(config), Some(data), None)
+            .await
+            .map_err(|refused| refused.message)
+            .expect("the daemon starts");
+        drop(daemon);
+
+        let store = SqliteStore::open(&database)
+            .await
+            .expect("the store opens again");
+        let kept = ProposalStore::get(&store, &id)
+            .await
+            .expect("the store reads")
+            .expect("the proposal is still kept");
+        assert_eq!(kept.status, ProposalStatus::Failed);
     }
 
     /// Leaves at `database` a log that shows `id` as a running backup and

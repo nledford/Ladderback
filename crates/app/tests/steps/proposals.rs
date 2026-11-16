@@ -465,7 +465,12 @@ async fn approve(agent: &mut Agent, confirmation: String) {
         confirmation,
         address: HOME,
     };
-    agent.proposals.approved = Some(proposals(agent).approve(&id, ask).await);
+    agent.proposals.approved = Some(
+        proposals(agent)
+            .approve(&id, ask)
+            .await
+            .map(|applied| applied.proposal),
+    );
 }
 
 #[when("the person approves the proposal as it was shown")]
