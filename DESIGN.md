@@ -205,7 +205,7 @@ Tables that change while they are read (operations, repositories) have fixed col
 
 ### Named Rules
 
-**The 320 Rule.** Every page fits 320 px wide with 200 % text without scrolling sideways. Long words break (`overflow-wrap: anywhere`); a path, address or ID moves to the next line whole before it breaks inside.
+**The 320 Rule.** Every page fits 320 px wide with 200 % text without scrolling sideways. Long words break (`overflow-wrap: anywhere`); a path, address or ID moves to the next line whole before it breaks inside. A data table wider than the page scrolls inside its own frame, never the page.
 
 **The Logical Rule.** Margins, padding, sizes and insets use logical properties (`inline-size`, `margin-block`, `inset-inline-start`), never left, right, width or height.
 
@@ -219,7 +219,7 @@ Flat. No element has a shadow. Depth is said with a Ledger Gray surface, a 1 px 
 
 ## Shapes
 
-Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, the pause banner and tooltips. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes.
+Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, the pause banner and tooltips. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
 
 ## Components
 
@@ -275,8 +275,10 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Tables
 
-- **Style:** full width, collapsed borders, cells aligned to the start and top, one Slate Note rule under each row, captions in Slate Note.
-- **Sorting:** a sortable header puts its sort button after its text, wrapping below it when there's no room.
+- **Style:** the shared table: full width, cells aligned to the start and top, one Slate Note rule under each row, captions in Slate Note, header text bold. No zebra stripes, no hover highlight, no header band.
+- **Columns:** each a fixed width in rem; the table is as wide as its frame or its columns added up, whichever is wider, so a column never moves as a cell changes. Numbers stand at the end in figures of one width.
+- **Sorting:** a sortable header puts a Ghost Small sort button after its text, its arrow showing the direction, wrapping below the text when there's no room.
+- **Narrow:** the table's frame takes keyboard focus at every width, and where its columns are wider than the page it scrolls sideways; each row's header stays pinned at the frame's start on the page's background, at most two fifths of the frame.
 
 ### Progress Bar
 
