@@ -290,11 +290,6 @@ impl Restores {
         finished
     }
 
-    /// The restore that runs on the agent, if one does.
-    pub fn running(&self) -> Option<OperationId> {
-        *lock(&self.running)
-    }
-
     /// The step-up confirmation of `ask`: the admin password, in the
     /// address's sign-in waits, with sign-in on; the snapshot's ID
     /// otherwise.
