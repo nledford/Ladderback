@@ -19,16 +19,18 @@ use api::{
     RestorePreviewRequestDto, RestoreStartedDto,
 };
 use l10n::{Localizer, msg};
+use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 
 use crate::announcer::Politeness;
+use crate::components::button::{Appearance, Content};
 use crate::components::tree::rules::{Selection, folder_url};
 use crate::components::{
-    Confirmation, FolderLoader, FolderPage, RadioGroup, ReviewDialog, StepUp, StepUpField, Tree,
-    Working, sentence_view,
+    Button, Confirmation, FolderLoader, FolderPage, RadioGroup, ReviewDialog, StepUp, StepUpField,
+    Tree, Working, sentence_view,
 };
 use crate::download;
 use crate::live::{reply, say};
@@ -37,6 +39,7 @@ use crate::restore::{self, Asks, Dialog};
 use crate::routes::{PageHeading, refused_sentence, short_id, text_with};
 use crate::session::Standing;
 use crate::text;
+use crate::variants::Tone;
 use crate::wording::Words;
 use crate::ws::{self, Got, Posted};
 
@@ -141,22 +144,28 @@ fn EntryPane(
             let download_label = text_with(&button_localizer, msg::UI_DOWNLOAD_BUTTON, &named);
             let restored = selection.clone();
             view! {
-                <p>
-                    <button
-                        type="button"
+                <p class="actions">
+                    <Button
+                        content=Content::IconAndText {
+                            glyph: LucideGlyph::RotateCcw.into(),
+                            label: restore_label.into(),
+                        }
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
                         id=RESTORE_BUTTON
-                        on:click=move |_| opened(restoring, restore_open, &restored)
-                    >
-                        {restore_label}
-                    </button>
-                    " "
-                    <button
-                        type="button"
+                        on_press=Callback::new(move |()| {
+                            opened(restoring, restore_open, &restored);
+                        })
+                    />
+                    <Button
+                        content=Content::Text(download_label.into())
+                        appearance=Appearance::Outlined
+                        tone=Tone::Secondary
                         id=DOWNLOAD_BUTTON
-                        on:click=move |_| opened(downloading, download_open, &selection)
-                    >
-                        {download_label}
-                    </button>
+                        on_press=Callback::new(move |()| {
+                            opened(downloading, download_open, &selection);
+                        })
+                    />
                 </p>
             }
             .into_any()
@@ -400,6 +409,7 @@ fn restore_dialog(
             dismiss_label=text(&localizer, msg::UI_REVIEW_CANCEL)
             confirm=Some(Confirmation {
                 label: text(&localizer, msg::UI_RESTORE_CONFIRM),
+                tone: Tone::Primary,
                 action: start,
             })
             returns_to=RESTORE_BUTTON.to_owned()
@@ -431,15 +441,13 @@ fn restore_dialog(
                     .then(|| {
                         view! {
                             <p>
-                                <button
-                                    type="button"
-                                    aria-disabled=move || {
-                                        (!state.with(Dialog::can_read_again)).then_some("true")
-                                    }
-                                    on:click=read_again
-                                >
-                                    {label}
-                                </button>
+                                <Button
+                                    content=Content::Text(label.into())
+                                    disabled=Signal::derive(move || {
+                                        !state.with(Dialog::can_read_again)
+                                    })
+                                    on_press=Callback::new(read_again)
+                                />
                             </p>
                         }
                     })
@@ -594,6 +602,7 @@ fn download_dialog(
             dismiss_label=text(&localizer, msg::UI_REVIEW_CANCEL)
             confirm=Some(Confirmation {
                 label: text(&localizer, msg::UI_DOWNLOAD_CONFIRM),
+                tone: Tone::Primary,
                 action: start,
             })
             returns_to=DOWNLOAD_BUTTON.to_owned()

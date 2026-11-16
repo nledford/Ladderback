@@ -11,12 +11,14 @@ use std::time::Duration;
 
 use api::{IanaZone, MsgArg, PlanDto, PlanSummaryDto, PlansDto, RepositoriesDto};
 use l10n::{Localizer, msg};
+use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::button::{self, Appearance, Content};
 use crate::components::{
-    Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
+    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
     focus_element, hand_focus_when_gone, recover_focus, sentence_view, text_field,
 };
 use crate::live::reply;
@@ -29,6 +31,7 @@ use crate::plans::{
 use crate::repositories::Sentence;
 use crate::routes::{PAGE_HEADING_ID, PageHeading, next_run_cell, refused_sentence, text_with};
 use crate::text;
+use crate::variants::{Size, Tone};
 use crate::ws::{self, Got, Phase, Posted};
 
 /// The text of `said` in the page's language.
@@ -282,9 +285,16 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
             (Phase::Ready, None, false) => view! { <p>{none.clone()}</p> }.into_any(),
         }}
         <p class="actions">
-            <button type="button" id=ADD_ID on:click=add>
-                {add_label}
-            </button>
+            <Button
+                content=Content::IconAndText {
+                    glyph: LucideGlyph::Plus.into(),
+                    label: add_label.into(),
+                }
+                appearance=Appearance::Filled
+                tone=Tone::Primary
+                id=ADD_ID
+                on_press=Callback::new(add)
+            />
         </p>
         {move || {
             not_opened.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
@@ -414,22 +424,27 @@ fn plan_row(
             }>{move || summary.with(|(_, shown, _)| shown.clone())}</td>
             <td>
                 <div class="actions">
-                    <button
-                        type="button"
+                    <Button
+                        content=Content::IconAndText {
+                            glyph: LucideGlyph::Pencil.into(),
+                            label: change_text.into(),
+                        }
+                        size=Size::Small
                         id=change_id(&id)
                         node_ref=change_button
-                        on:click=move |_| change.run(change_for.clone())
-                    >
-                        {change_text}
-                    </button>
-                    <button
-                        type="button"
+                        on_press=Callback::new(move |()| change.run(change_for.clone()))
+                    />
+                    <Button
+                        content=Content::IconAndText {
+                            glyph: LucideGlyph::Trash.into(),
+                            label: delete_text.into(),
+                        }
+                        tone=Tone::Error
+                        size=Size::Small
                         id=delete_id(&id)
                         node_ref=delete_button
-                        on:click=move |_| ask_delete.run(delete_for.clone())
-                    >
-                        {delete_text}
-                    </button>
+                        on_press=Callback::new(move |()| ask_delete.run(delete_for.clone()))
+                    />
                 </div>
             </td>
         </tr>
@@ -667,10 +682,17 @@ fn PlanEditor(
                 {repository}
                 {groups}
                 <p class="actions">
-                    <button type="submit">{save_label}</button>
-                    <button type="button" on:click=cancel>
-                        {cancel_label}
-                    </button>
+                    <Button
+                        content=Content::Text(save_label.into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        kind=button::Kind::Submit
+                        busy=busy
+                    />
+                    <Button
+                        content=Content::Text(cancel_label.into())
+                        on_press=Callback::new(cancel)
+                    />
                 </p>
             </form>
             {move || busy.get().then(|| view! { <p>{saving.clone()}</p> })}
@@ -698,6 +720,7 @@ fn DeleteDialog(
     let returns_to = delete_id(&id);
     let confirm = Confirmation {
         label: text(&localizer, msg::UI_PLAN_DELETE_CONFIRM),
+        tone: Tone::Error,
         action: Callback::new(move |()| delete.run(id.clone())),
     };
     let working = Working {

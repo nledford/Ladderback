@@ -12,13 +12,7 @@ use crate::variants::{Size, Tone};
 use rules::{Leading, Shape};
 
 // How a button is drawn and what it tells a screen reader, decided on the
-// host; `Button` is its glue. Only the gallery shows a button yet, and the
-// host tests use these decisions, so only a build of neither leaves them
-// unused.
-#[cfg_attr(
-    all(not(feature = "gallery"), not(test)),
-    expect(dead_code, reason = "only the gallery shows a button yet")
-)]
+// host; `Button` is its glue.
 pub(crate) mod rules;
 
 pub use rules::{Appearance, Kind};
@@ -73,6 +67,14 @@ impl Content {
 /// `pressed` makes it a toggle (`aria-pressed`), drawn bolder with an inset
 /// edge while pressed, so the state is never color alone.
 ///
+/// What the page needs of the element itself it passes as props, never as
+/// attributes spread over it: an `id` (a dialog's `returns_to`, a link from
+/// an error summary), a `node_ref` (focus handed on when the button goes, or
+/// a dialog's first stop), a `described_by` (the ids of what describes it,
+/// such as a pause banner) and a `fuller_name`, the `aria-label` of a
+/// button whose words its name only begins with (2.5.3), as a row's
+/// "Cancel" is named "Cancel demo-home".
+///
 /// What the caller owes WCAG 2.2 AA, since the button does none of it:
 ///
 /// - **One `Filled` `Primary` button per action row,** its main action.
@@ -81,6 +83,8 @@ impl Content {
 ///   ([`crate::live::reply`]).
 /// - **A label that says what the button does,** for an icon-only one too,
 ///   whose label is its only name.
+/// - **A fuller name that begins with the button's words,** so a reader who
+///   says what they see reaches it (2.5.3).
 /// - **Never a tone alone (1.4.1).** A tone tints the button; its words say
 ///   what it does.
 #[component]
@@ -94,6 +98,10 @@ pub fn Button(
     #[prop(optional, into)] disabled: Signal<bool>,
     #[prop(optional, into)] pressed: Option<Signal<bool>>,
     #[prop(optional, into)] on_press: Option<Callback<()>>,
+    #[prop(optional, into)] id: Option<String>,
+    #[prop(optional)] node_ref: NodeRef<leptos::html::Button>,
+    #[prop(optional, into)] described_by: Signal<Option<String>>,
+    #[prop(optional, into)] fuller_name: Option<Signal<String>>,
 ) -> impl IntoView {
     let (shape, glyph, label) = content.parts();
     let press = move |event: web_sys::MouseEvent| {
@@ -123,8 +131,11 @@ pub fn Button(
     view! {
         <button
             type=kind.attribute()
-            class=rules::button_class(appearance, tone, size, shape)
-            aria-label=move || shape.name(&label.get())
+            id=id
+            node_ref=node_ref
+            class=move || rules::button_class(appearance, tone, size, shape, busy.get())
+            aria-label=move || shape.name(&label.get(), fuller_name.map(|name| name.get()))
+            aria-describedby=move || described_by.get()
             aria-disabled=move || rules::unavailable(disabled.get(), busy.get())
             aria-pressed=move || rules::pressed(pressed.map(|pressed| pressed.get()))
             on:click=press

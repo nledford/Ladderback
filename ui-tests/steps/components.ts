@@ -1476,11 +1476,11 @@ Then("the buttons {string} and {string} keep the widths noted", async function (
 // keeps focus), its name unchanged, and a spinner as tall as its text inside
 // it, which a screen reader skips, so it hears the button's name alone.
 async function busyButton(world: BrowserWorld, name: string) {
-  const button = world.page.getByRole("button", { name, exact: true });
+  const button = world.page.getByRole("button", { name: namePattern(name) });
   await expect(button).toHaveCount(1);
   await expect(button).toHaveAttribute("aria-disabled", "true");
   await expect(button).not.toHaveAttribute("disabled");
-  await expect(button).toHaveAccessibleName(name);
+  await expect(button).toHaveAccessibleName(namePattern(name));
   await expect(button.getByRole("img")).toHaveCount(0);
   await expect(button.locator("svg")).toHaveCount(1);
   const parts = await button.evaluate((element) => {
@@ -1549,38 +1549,51 @@ Then("the button {string} is drawn bolder, with an inset edge", async function (
 // Forced colors (the reader's own palette): every button in the reader's
 // button colors, its label and edge `ButtonText` on `ButtonFace`, whatever
 // its appearance and tone, and an unavailable one's label and edge
-// `GrayText`. Each system color is read through a probe.
+// `GrayText`. A busy one (its spinner showing) is `aria-disabled` too, but
+// at work, not unavailable: it keeps `ButtonText`. A pressed one keeps it
+// too, a Ghost one's edge included. Each system color is read through a
+// probe.
+async function buttonColors(world: BrowserWorld, component: string) {
+  const section = demoSection(world.page, component);
+  await section.waitFor({ timeout: 5_000 });
+  const found = await section.evaluate((element) => {
+    const probe = document.createElement("span");
+    document.body.append(probe);
+    const system = (color: string) => {
+      probe.style.color = color;
+      return getComputedStyle(probe).color;
+    };
+    probe.style.backgroundColor = "ButtonFace";
+    const face = getComputedStyle(probe).backgroundColor;
+    const [text, gray] = [system("ButtonText"), system("GrayText")];
+    probe.remove();
+    return {
+      face,
+      text,
+      gray,
+      buttons: Array.from(element.querySelectorAll("button"), (button) => {
+        const style = getComputedStyle(button);
+        const busy = button.querySelector(".button-spinner") !== null;
+        return {
+          name: button.getAttribute("aria-label") || (button.textContent ?? "").trim(),
+          busy,
+          unavailable: button.getAttribute("aria-disabled") === "true" && !busy,
+          pressed: button.getAttribute("aria-pressed") === "true",
+          ghost: button.classList.contains("button-ghost"),
+          drawn: { label: style.color, fill: style.backgroundColor, edge: style.borderTopColor },
+        };
+      }),
+    };
+  });
+  assert.ok(found.buttons.length > 0, `the ${component} demo has no button`);
+  assert.notEqual(found.text, found.gray, "the reader's button text and unavailable text are one color");
+  return found;
+}
+
 Then(
   "every button of the {string} demo is drawn in the reader's button colors, an unavailable one in the color of unavailable text",
   async function (this: BrowserWorld, component: string) {
-    const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
-    const found = await section.evaluate((element) => {
-      const probe = document.createElement("span");
-      document.body.append(probe);
-      const system = (color: string) => {
-        probe.style.color = color;
-        return getComputedStyle(probe).color;
-      };
-      probe.style.backgroundColor = "ButtonFace";
-      const face = getComputedStyle(probe).backgroundColor;
-      const [text, gray] = [system("ButtonText"), system("GrayText")];
-      probe.remove();
-      return {
-        face,
-        text,
-        gray,
-        buttons: Array.from(element.querySelectorAll("button"), (button) => {
-          const style = getComputedStyle(button);
-          return {
-            name: button.getAttribute("aria-label") || (button.textContent ?? "").trim(),
-            unavailable: button.getAttribute("aria-disabled") === "true",
-            drawn: { label: style.color, fill: style.backgroundColor, edge: style.borderTopColor },
-          };
-        }),
-      };
-    });
-    assert.ok(found.buttons.length > 0, `the ${component} demo has no button`);
+    const found = await buttonColors(this, component);
     assert.ok(
       found.buttons.some((button) => button.unavailable),
       `the ${component} demo has no unavailable button`,
@@ -1813,6 +1826,37 @@ Then(
   },
 );
 
+Then(
+  "every busy button of the {string} demo is drawn in the reader's button colors, its label and edge in the button text, not the color of unavailable text",
+  async function (this: BrowserWorld, component: string) {
+    const found = await buttonColors(this, component);
+    const busy = found.buttons.filter((button) => button.busy);
+    const unavailable = found.buttons.filter((button) => button.unavailable);
+    assert.ok(busy.length > 0 && unavailable.length > 0, `the ${component} demo shows no busy button beside an unavailable one`);
+    for (const button of busy) {
+      assert.deepEqual(button.drawn, { label: found.text, fill: found.face, edge: found.text }, button.name);
+    }
+    for (const button of unavailable) {
+      assert.deepEqual(button.drawn, { label: found.gray, fill: found.face, edge: found.gray }, button.name);
+    }
+  },
+);
+
+Then(
+  "every pressed button of the {string} demo is drawn in the reader's button colors, a Ghost one's edge too",
+  async function (this: BrowserWorld, component: string) {
+    const found = await buttonColors(this, component);
+    const pressed = found.buttons.filter((button) => button.pressed);
+    assert.ok(
+      pressed.some((button) => button.ghost),
+      `the ${component} demo shows no pressed Ghost button`,
+    );
+    for (const button of pressed) {
+      assert.deepEqual(button.drawn, { label: found.text, fill: found.face, edge: found.text }, button.name);
+    }
+  },
+);
+
 // The pinned structure of each demo (roles and names, not styling), compared
 // with locator.ariaSnapshot(): toMatchAriaSnapshot() only works inside a
 // Playwright test, and these run under Cucumber. Regenerate a snapshot by
@@ -1976,7 +2020,7 @@ const SNAPSHOTS: Record<string, string> = {
   - img "Demo spinner in the Inherit tone"
 - text: Loading at the start of the line… Loading in the middle of the line… Loading at the end of the line…
 - paragraph:
-  - button "Saving the demo settings…" [disabled]`,
+  - button "Save the demo notes" [disabled]`,
   Icon: `- heading "Icon" [level=2]
 - paragraph: The next demo backup starts at 02:00 every night.
 - paragraph:

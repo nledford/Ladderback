@@ -12,7 +12,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
-use crate::components::{RadioGroup, sentence_view, write_clipboard};
+use crate::components::button::Content;
+use crate::components::{Button, RadioGroup, sentence_view, write_clipboard};
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -136,9 +137,10 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
             chosen=chosen
         />
         <p class="actions">
-            <button type="button" on:click=copy>
-                {text(&localizer, msg::UI_LOG_COPY)}
-            </button>
+            <Button
+                content=Content::Text(text(&localizer, msg::UI_LOG_COPY).into())
+                on_press=Callback::new(copy)
+            />
         </p>
         {move || {
             let listed = listed.get();

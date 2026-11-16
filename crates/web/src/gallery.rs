@@ -153,6 +153,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let hidden_files = RwSignal::new(false);
     let presses_localizer = Arc::clone(&localizer);
     let form_sent = t(msg::UI_GALLERY_BUTTON_SENT);
+    // The tooltip demo's icon-only button: its name, the tooltip's too.
+    let schedule = t(msg::UI_GALLERY_TOOLTIP_SCHEDULE);
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>
@@ -164,31 +166,32 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <section>
             <h2>{announcer_heading}</h2>
             <p>
-                <button type="button" on:click=move |_| say(Politeness::Polite, &backup_finished)>
-                    {polite_button}
-                </button>
+                <Button
+                    content=Content::Text(polite_button.into())
+                    on_press=Callback::new(move |()| say(Politeness::Polite, &backup_finished))
+                />
             </p>
             <p>
-                <button type="button" on:click=move |_| say(Politeness::Polite, &agent_online)>
-                    {polite_other_button}
-                </button>
+                <Button
+                    content=Content::Text(polite_other_button.into())
+                    on_press=Callback::new(move |()| say(Politeness::Polite, &agent_online))
+                />
             </p>
             <p>
-                <button type="button" on:click=move |_| say(Politeness::Assertive, &restore_failed)>
-                    {assertive_button}
-                </button>
+                <Button
+                    content=Content::Text(assertive_button.into())
+                    on_press=Callback::new(move |()| say(Politeness::Assertive, &restore_failed))
+                />
             </p>
             <p>
-                <button
-                    type="button"
-                    on:click=move |_| {
+                <Button
+                    content=Content::Text(open_modal_button.into())
+                    on_press=Callback::new(move |()| {
                         if let Some(dialog) = dialog.get() {
                             open_modal(&dialog, counted);
                         }
-                    }
-                >
-                    {open_modal_button}
-                </button>
+                    })
+                />
             </p>
             <dialog
                 node_ref=dialog
@@ -197,32 +200,30 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             >
                 <h2 id="gallery-modal-heading">{modal_heading}</h2>
                 <p>
-                    <button
-                        type="button"
-                        on:click=move |_| say(Politeness::Polite, &backup_finished_in_modal)
-                    >
-                        {modal_polite_button}
-                    </button>
+                    <Button
+                        content=Content::Text(modal_polite_button.into())
+                        on_press=Callback::new(move |()| {
+                            say(Politeness::Polite, &backup_finished_in_modal);
+                        })
+                    />
                 </p>
                 <p>
-                    <button
-                        type="button"
-                        on:click=move |_| say(Politeness::Assertive, &restore_failed_in_modal)
-                    >
-                        {modal_assertive_button}
-                    </button>
+                    <Button
+                        content=Content::Text(modal_assertive_button.into())
+                        on_press=Callback::new(move |()| {
+                            say(Politeness::Assertive, &restore_failed_in_modal);
+                        })
+                    />
                 </p>
                 <p>
-                    <button
-                        type="button"
-                        on:click=move |_| {
+                    <Button
+                        content=Content::Text(close_modal_button.into())
+                        on_press=Callback::new(move |()| {
                             if let Some(dialog) = dialog.get() {
                                 dialog.close();
                             }
-                        }
-                    >
-                        {close_modal_button}
-                    </button>
+                        })
+                    />
                 </p>
             </dialog>
         </section>
@@ -235,12 +236,12 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             >
                 <p>{dialog_body.clone()}</p>
                 <p>
-                    <button
-                        type="button"
-                        on:click=move |_| say(Politeness::Polite, &dialog_polite_text)
-                    >
-                        {dialog_polite_label.clone()}
-                    </button>
+                    <Button
+                        content=Content::Text(dialog_polite_label.clone().into())
+                        on_press=Callback::new(move |()| {
+                            say(Politeness::Polite, &dialog_polite_text);
+                        })
+                    />
                 </p>
             </ModalDialog>
         </section>
@@ -259,6 +260,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             />
         </section>
         <section>
+
             <h2>{t(msg::UI_GALLERY_CHECKBOX_HEADING)}</h2>
             // Its two states: off with a description, and on without one.
             <Checkbox
@@ -382,15 +384,13 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 reading=progress
             />
             <p>
-                <button
-                    type="button"
-                    on:click=move |_| {
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_ADVANCE_PROGRESS).into())
+                    on_press=Callback::new(move |()| {
                         progress
                             .update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
-                    }
-                >
-                    {t(msg::UI_GALLERY_ADVANCE_PROGRESS)}
-                </button>
+                    })
+                />
             </p>
             <Progress
                 localizer=Arc::clone(&localizer)
@@ -410,44 +410,41 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
             <Toast text=toast />
             <p>
-                <button type="button" on:click=move |_| show_toast(toast, settings_saved.clone())>
-                    {t(msg::UI_GALLERY_SAVE_SETTINGS)}
-                </button>
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_SAVE_SETTINGS).into())
+                    on_press=Callback::new(move |()| show_toast(toast, settings_saved.clone()))
+                />
             </p>
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_REVIEW_HEADING)}</h2>
             <p>
-                <button type="button" id="gallery-review" on:click=move |_| review_open.set(true)>
-                    {t(msg::UI_GALLERY_OPEN_REVIEW)}
-                </button>
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_OPEN_REVIEW).into())
+                    id="gallery-review"
+                    on_press=Callback::new(move |()| review_open.set(true))
+                />
             </p>
             <p>
-                <button
-                    type="button"
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_OPEN_EMPTY_REVIEW).into())
                     id="gallery-empty-review"
-                    on:click=move |_| empty_review_open.set(true)
-                >
-                    {t(msg::UI_GALLERY_OPEN_EMPTY_REVIEW)}
-                </button>
+                    on_press=Callback::new(move |()| empty_review_open.set(true))
+                />
             </p>
             <p>
-                <button
-                    type="button"
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_OPEN_SECRET_REVIEW).into())
                     id="gallery-secret-review"
-                    on:click=move |_| secret_review_open.set(true)
-                >
-                    {t(msg::UI_GALLERY_OPEN_SECRET_REVIEW)}
-                </button>
+                    on_press=Callback::new(move |()| secret_review_open.set(true))
+                />
             </p>
             <p>
-                <button
-                    type="button"
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_OPEN_HELD_REVIEW).into())
                     id="gallery-held-review"
-                    on:click=move |_| held_review_open.set(true)
-                >
-                    {t(msg::UI_GALLERY_OPEN_HELD_REVIEW)}
-                </button>
+                    on_press=Callback::new(move |()| held_review_open.set(true))
+                />
             </p>
             <ReviewDialog
                 open=review_open
@@ -455,6 +452,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 dismiss_label=t(msg::UI_REVIEW_CANCEL)
                 confirm=Some(Confirmation {
                     label: t(msg::UI_GALLERY_CONFIRM_DEMO_REVIEW),
+                    tone: Tone::Primary,
                     action: Callback::new(move |()| {
                         review_open.set(false);
                         reply(Politeness::Polite, &review_confirmed);
@@ -462,6 +460,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 })
                 also=Some(Confirmation {
                     label: t(msg::UI_GALLERY_ALSO_DEMO_REVIEW),
+                    tone: Tone::Error,
                     action: Callback::new(move |()| {
                         review_open.set(false);
                         reply(Politeness::Polite, &also_confirmed);
@@ -493,9 +492,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             >
                 <p id="gallery-secret-review-body">{secret_review_body}</p>
                 <p>
-                    <button type="button" node_ref=secret_copy>
-                        {copy_demo_secret}
-                    </button>
+                    <Button content=Content::Text(copy_demo_secret.into()) node_ref=secret_copy />
                 </p>
             </ReviewDialog>
             <ReviewDialog
@@ -504,6 +501,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 dismiss_label=t(msg::UI_REVIEW_CANCEL)
                 confirm=Some(Confirmation {
                     label: t(msg::UI_GALLERY_CONFIRM_HELD_REVIEW),
+                    tone: Tone::Primary,
                     action: Callback::new(move |()| held_review_open.set(false)),
                 })
                 returns_to="gallery-held-review".to_owned()
@@ -526,16 +524,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <section>
             <h2>{t(msg::UI_GALLERY_STEP_UP_HEADING)}</h2>
             <p>
-                <button
-                    type="button"
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_OPEN_STEP_UP).into())
                     id="gallery-step-up"
-                    on:click=move |_| {
+                    on_press=Callback::new(move |()| {
                         step_up_opening.update(|opening| *opening = opening.wrapping_add(1));
                         step_up_open.set(true);
-                    }
-                >
-                    {t(msg::UI_GALLERY_OPEN_STEP_UP)}
-                </button>
+                    })
+                />
             </p>
             <ReviewDialog
                 open=step_up_open
@@ -543,6 +539,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 dismiss_label=t(msg::UI_REVIEW_CLOSE)
                 confirm=Some(Confirmation {
                     label: t(msg::UI_GALLERY_CHECK_DEMO_STEP_UP),
+                    tone: Tone::Primary,
                     action: Callback::new(move |()| step_up_error.set(Some(step_up_wrong.clone()))),
                 })
                 returns_to="gallery-step-up".to_owned()
@@ -563,13 +560,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 }}
             </ReviewDialog>
             <p>
-                <button
-                    type="button"
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_OPEN_STEP_UP_ID).into())
                     id="gallery-step-up-id"
-                    on:click=move |_| step_up_id_open.set(true)
-                >
-                    {t(msg::UI_GALLERY_OPEN_STEP_UP_ID)}
-                </button>
+                    on_press=Callback::new(move |()| step_up_id_open.set(true))
+                />
             </p>
             <ReviewDialog
                 open=step_up_id_open
@@ -577,6 +572,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 dismiss_label=t(msg::UI_REVIEW_CLOSE)
                 confirm=Some(Confirmation {
                     label: t(msg::UI_GALLERY_CHECK_DEMO_STEP_UP_ID),
+                    tone: Tone::Primary,
                     action: Callback::new(move |()| {
                         step_up_id_error.set(Some(step_up_id_wrong.clone()));
                     }),
@@ -621,19 +617,17 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             <p>
                 // A run that finishes by itself: said at once, or
                 // counted while the demo is paused.
-                <button
-                    type="button"
-                    on:click=move |_| {
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_FINISH_DEMO_RUN).into())
+                    on_press=Callback::new(move |()| {
                         if demo_paused.get_untracked() {
                             demo_ends.update_value(|ends| ends.count("succeeded"));
                             demo_waiting.update(|waiting| *waiting = waiting.saturating_add(1));
                         } else {
                             say(Politeness::Polite, &demo_finished);
                         }
-                    }
-                >
-                    {t(msg::UI_GALLERY_FINISH_DEMO_RUN)}
-                </button>
+                    })
+                />
             </p>
         </section>
         <section>
@@ -701,12 +695,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 })
                 .collect_view()}
             // A button busy with what it started: unavailable but still
-            // reachable, named by the spinner's label, which inherits the
-            // button's text color.
+            // reachable, a spinner a screen reader skips before its label,
+            // which names it.
             <p>
-                <button type="button" aria-disabled="true">
-                    <Spinner tone=Tone::Inherit label=t(msg::UI_GALLERY_SPINNER_SAVING) />
-                </button>
+                <Button content=Content::Text(t(msg::UI_GALLERY_SPINNER_SAVE).into()) busy=true />
             </p>
         </section>
         <section>
@@ -771,16 +763,20 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             // is crossed out while it is off, so the shape shows the state
             // too. Pressing it changes nothing but the demo's own state.
             <p class="actions">
-                <button
-                    type="button"
-                    aria-label=t(msg::UI_GALLERY_ICON_NOTIFICATIONS)
-                    aria-pressed=move || if notifications.get() { "true" } else { "false" }
-                    on:click=move |_| notifications.update(|on| *on = !*on)
-                >
-                    <Icon glyph=Signal::derive(move || {
-                        if notifications.get() { LucideGlyph::Bell } else { LucideGlyph::BellOff }
-                    }) />
-                </button>
+                <Button
+                    content=Content::IconOnly {
+                        glyph: Signal::derive(move || {
+                            if notifications.get() {
+                                LucideGlyph::Bell
+                            } else {
+                                LucideGlyph::BellOff
+                            }
+                        }),
+                        label: t(msg::UI_GALLERY_ICON_NOTIFICATIONS).into(),
+                    }
+                    pressed=notifications
+                    on_press=Callback::new(move |()| notifications.update(|on| *on = !*on))
+                />
             </p>
         </section>
         <section>
@@ -993,19 +989,17 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 // A second check of a corrected field clears the
                 // error, rewiring the input's description; only the
                 // error's arrival is announced.
-                <button
-                    type="button"
-                    on:click=move |_| {
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_CHECK_REPOSITORY).into())
+                    on_press=Callback::new(move |()| {
                         if form_error.get_untracked().is_some() {
                             form_error.set(None);
                         } else {
                             form_error.set(Some(required_error.clone()));
                             reply(Politeness::Polite, &required_error);
                         }
-                    }
-                >
-                    {t(msg::UI_GALLERY_CHECK_REPOSITORY)}
-                </button>
+                    })
+                />
             </p>
             <TextField
                 id="form-field-lines"
@@ -1017,19 +1011,17 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 kind=text_field::Kind::Lines { rows: 3 }
             />
             <p>
-                <button
-                    type="button"
-                    on:click=move |_| {
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_CHECK_FOLDERS).into())
+                    on_press=Callback::new(move |()| {
                         if lines_error.get_untracked().is_some() {
                             lines_error.set(None);
                         } else {
                             lines_error.set(Some(folders_error.clone()));
                             reply(Politeness::Polite, &folders_error);
                         }
-                    }
-                >
-                    {t(msg::UI_GALLERY_CHECK_FOLDERS)}
-                </button>
+                    })
+                />
             </p>
             // Each kind, then each state, then a field and a button of the
             // same size in a row of actions, at every size. Last on the
@@ -1157,12 +1149,15 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 )}
             </p>
             // An icon-only control, named by the tooltip's one string: the
-            // button's label, which the tooltip shows a sighted reader.
+            // button's label, which the tooltip shows a sighted reader. The
+            // button names itself with the same string, as an icon-only
+            // Button must.
             <p>
-                <Tooltip tip=Tip::Names(t(msg::UI_GALLERY_TOOLTIP_SCHEDULE))>
-                    <button type="button">
-                        <Icon glyph=LucideGlyph::CalendarClock />
-                    </button>
+                <Tooltip tip=Tip::Names(schedule.clone())>
+                    <Button content=Content::IconOnly {
+                        glyph: LucideGlyph::CalendarClock.into(),
+                        label: schedule.into(),
+                    } />
                 </Tooltip>
             </p>
             // Each side, with room on it.
@@ -1229,7 +1224,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
 fn demo_tooltip(name: String, note: String, side: Side) -> impl IntoView {
     view! {
         <Tooltip tip=Tip::Describes(note) side=side>
-            <button type="button">{name}</button>
+            <Button content=Content::Text(name.into()) />
         </Tooltip>
     }
 }

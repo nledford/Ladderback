@@ -84,11 +84,12 @@ impl Shape {
         self != Self::IconOnly
     }
 
-    /// The button's `aria-label`: its label, only where it isn't written in
-    /// it, so a button's name is its visible words wherever it has them
-    /// (2.5.3).
-    pub fn name(self, label: &str) -> Option<String> {
-        (!self.shows_label()).then(|| label.to_owned())
+    /// The button's `aria-label`: the fuller name its page gives, which
+    /// begins with the words the button shows (2.5.3), as a row's action is
+    /// named with its row; otherwise its label, only where it isn't written
+    /// in it, so a button's name is its visible words wherever it has them.
+    pub fn name(self, label: &str, fuller: Option<String>) -> Option<String> {
+        fuller.or_else(|| (!self.shows_label()).then(|| label.to_owned()))
     }
 
     /// What stands before the label: a busy button's spinner, in its icon's
@@ -126,17 +127,27 @@ pub fn drawn(appearance: Appearance, tone: Tone) -> (Appearance, Tone) {
 }
 
 /// The classes of the button: its appearance and tone as drawn, its size,
-/// which `style.css` makes its height and padding, and, for an icon-only
-/// button, the class that makes it square.
-pub fn button_class(appearance: Appearance, tone: Tone, size: Size, shape: Shape) -> String {
+/// which `style.css` makes its height and padding, for an icon-only button
+/// the class that makes it square, and, while it is busy, the class that
+/// keeps its label in the reader's button text with forced colors: busy and
+/// unavailable are both `aria-disabled`, but only an unavailable button
+/// takes the color of unavailable text, as a busy one is at work.
+pub fn button_class(
+    appearance: Appearance,
+    tone: Tone,
+    size: Size,
+    shape: Shape,
+    busy: bool,
+) -> String {
     let (appearance, tone) = drawn(appearance, tone);
     let square = if shape == Shape::IconOnly {
         " button-icon-only"
     } else {
         ""
     };
+    let busy = if busy { " button-busy" } else { "" };
     format!(
-        "button {} {} {}{square}",
+        "button {} {} {}{square}{busy}",
         appearance.class(),
         tone.class(),
         size.class()
@@ -200,7 +211,8 @@ mod tests {
                 Appearance::Outlined,
                 Tone::Secondary,
                 Size::Medium,
-                Shape::Text
+                Shape::Text,
+                false
             ),
             "button button-outlined tone-secondary size-medium"
         );
@@ -209,12 +221,19 @@ mod tests {
                 Appearance::Filled,
                 Tone::Error,
                 Size::XLarge,
-                Shape::IconAndText
+                Shape::IconAndText,
+                false
             ),
             "button button-filled tone-error size-xlarge"
         );
         assert_eq!(
-            button_class(Appearance::Ghost, Tone::Inherit, Size::Small, Shape::Text),
+            button_class(
+                Appearance::Ghost,
+                Tone::Inherit,
+                Size::Small,
+                Shape::Text,
+                false
+            ),
             "button button-ghost tone-inherit size-small"
         );
     }
@@ -226,9 +245,34 @@ mod tests {
                 Appearance::Ghost,
                 Tone::Primary,
                 Size::Large,
-                Shape::IconOnly
+                Shape::IconOnly,
+                false
             ),
             "button button-ghost tone-primary size-large button-icon-only"
+        );
+    }
+
+    #[test]
+    fn a_busy_button_has_a_class_of_its_own_beside_the_others() {
+        assert_eq!(
+            button_class(
+                Appearance::Filled,
+                Tone::Primary,
+                Size::Medium,
+                Shape::Text,
+                true
+            ),
+            "button button-filled tone-primary size-medium button-busy"
+        );
+        assert_eq!(
+            button_class(
+                Appearance::Ghost,
+                Tone::Secondary,
+                Size::Small,
+                Shape::IconOnly,
+                true
+            ),
+            "button button-ghost tone-secondary size-small button-icon-only button-busy"
         );
     }
 
@@ -239,7 +283,13 @@ mod tests {
             (Appearance::Outlined, Tone::Inherit)
         );
         assert_eq!(
-            button_class(Appearance::Filled, Tone::Inherit, Size::Medium, Shape::Text),
+            button_class(
+                Appearance::Filled,
+                Tone::Inherit,
+                Size::Medium,
+                Shape::Text,
+                false
+            ),
             "button button-outlined tone-inherit size-medium"
         );
         for appearance in Appearance::ALL {
@@ -259,9 +309,25 @@ mod tests {
         assert!(Shape::Text.shows_label());
         assert!(Shape::IconAndText.shows_label());
         assert!(!Shape::IconOnly.shows_label());
-        assert_eq!(Shape::Text.name("Save the settings"), None);
-        assert_eq!(Shape::IconAndText.name("Save the settings"), None);
-        assert_eq!(Shape::IconOnly.name("Refresh").as_deref(), Some("Refresh"));
+        assert_eq!(Shape::Text.name("Save the settings", None), None);
+        assert_eq!(Shape::IconAndText.name("Save the settings", None), None);
+        assert_eq!(
+            Shape::IconOnly.name("Refresh", None).as_deref(),
+            Some("Refresh")
+        );
+    }
+
+    #[test]
+    fn a_fuller_name_the_page_gives_names_the_button_whatever_it_shows() {
+        for shape in [Shape::Text, Shape::IconAndText, Shape::IconOnly] {
+            assert_eq!(
+                shape
+                    .name("Cancel", Some("Cancel demo-home".to_owned()))
+                    .as_deref(),
+                Some("Cancel demo-home"),
+                "{shape:?}"
+            );
+        }
     }
 
     #[test]

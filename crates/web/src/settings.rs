@@ -25,6 +25,7 @@ use api::{
     ApiTokenDto, ApiTokenScopeDto, ApiTokensDto, IanaZone, MsgArg, RestartDto, RestartWhenDto,
 };
 use l10n::{Localizer, MessageId, msg};
+use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -34,9 +35,10 @@ use crate::api_tokens::{
     SCOPES, Said, TOKENS_PATH, TokenForm, created, created_body, error_of, field_of, problems_of,
     revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
 };
+use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working, copy_text,
-    hand_focus_when_gone, sentence_view, text_field,
+    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
+    copy_text, hand_focus_when_gone, sentence_view, text_field,
 };
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -47,6 +49,7 @@ use crate::restart::{
 use crate::routes::{PageHeading, instant, refused_sentence, text_with};
 use crate::session::{Standing, waiting_password};
 use crate::text;
+use crate::variants::{Size, Tone};
 use crate::ws::{self, Got, Phase, Posted};
 
 /// The text of `said` in the page's language.
@@ -446,14 +449,17 @@ fn token_row(
             </td>
             <td>{last_used}</td>
             <td>
-                <button
-                    type="button"
+                <Button
+                    content=Content::IconAndText {
+                        glyph: LucideGlyph::Trash.into(),
+                        label: label.into(),
+                    }
+                    tone=Tone::Error
+                    size=Size::Small
                     id=id
                     node_ref=button
-                    on:click=move |_| ask_revoke.run(token.clone())
-                >
-                    {label}
-                </button>
+                    on_press=Callback::new(move |()| ask_revoke.run(token.clone()))
+                />
             </td>
         </tr>
     }
@@ -564,9 +570,14 @@ fn CreateForm(
                     {checkboxes}
                 </fieldset>
                 <p class="actions">
-                    <button type="submit" id=CREATE_ID>
-                        {field_text(msg::UI_API_TOKEN_CREATE)}
-                    </button>
+                    <Button
+                        content=Content::Text(field_text(msg::UI_API_TOKEN_CREATE).into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        kind=Kind::Submit
+                        id=CREATE_ID
+                        busy=busy
+                    />
                 </p>
             </form>
             {move || busy.get().then(|| view! { <p>{creating.clone()}</p> })}
@@ -614,18 +625,16 @@ fn CreatedDialog(
                 token=true
             />
             <p class="actions">
-                <button
-                    type="button"
+                <Button
+                    content=Content::Text(text(&localizer, msg::UI_API_TOKEN_COPY).into())
                     node_ref=copy_button
-                    on:click=move |_| {
+                    on_press=Callback::new(move |()| {
                         let token = secret.get_untracked();
                         if !token.is_empty() {
                             copy_text(&token, said, copied.clone(), refused.clone());
                         }
-                    }
-                >
-                    {text(&localizer, msg::UI_API_TOKEN_COPY)}
-                </button>
+                    })
+                />
             </p>
             <p aria-live="polite" aria-atomic="true">
                 {move || said.get()}
@@ -651,6 +660,7 @@ fn RevokeDialog(
     let returns_to = revoke_id(&token.id);
     let confirm = Confirmation {
         label: text(&localizer, msg::UI_API_TOKEN_REVOKE_CONFIRM),
+        tone: Tone::Error,
         action: Callback::new(move |()| revoke.run(token.clone())),
     };
     let working = Working {
@@ -905,14 +915,14 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
                         view! {
                             <p>{text(localizer, msg::UI_RESTART_BODY)}</p>
                             <p>
-                                <button
-                                    type="button"
+                                <Button
+                                    content=Content::Text(
+                                        text(localizer, msg::UI_RESTART_BUTTON).into(),
+                                    )
                                     id=restart::BUTTON_ID
                                     node_ref=button
-                                    on:click=move |_| offer.run(())
-                                >
-                                    {text(localizer, msg::UI_RESTART_BUTTON)}
-                                </button>
+                                    on_press=Callback::new(move |()| offer.run(()))
+                                />
                             </p>
                         }
                             .into_any()
@@ -922,14 +932,14 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
                         hand_focus_when_gone(button, restart::HEADING_ID.to_owned());
                         view! {
                             <p>
-                                <button
-                                    type="button"
+                                <Button
+                                    content=Content::Text(
+                                        text(localizer, msg::UI_RESTART_CANCEL).into(),
+                                    )
                                     node_ref=button
-                                    aria-disabled=move || busy.get().then_some("true")
-                                    on:click=move |_| cancel.run(())
-                                >
-                                    {text(localizer, msg::UI_RESTART_CANCEL)}
-                                </button>
+                                    busy=busy
+                                    on_press=Callback::new(move |()| cancel.run(()))
+                                />
                             </p>
                         }
                             .into_any()
@@ -981,6 +991,7 @@ fn RestartDialog(
 ) -> impl IntoView {
     let confirm = Confirmation {
         label: say(&localizer, confirm_said(running)),
+        tone: Tone::Primary,
         action: Callback::new(move |()| ask.run(RestartWhenDto::Finished)),
     };
     let working = Working {
@@ -989,6 +1000,7 @@ fn RestartDialog(
     };
     let now = offers_now(running).then(|| Confirmation {
         label: text(&localizer, msg::UI_RESTART_NOW),
+        tone: Tone::Error,
         action: Callback::new(move |()| ask.run(RestartWhenDto::Now)),
     });
     view! {

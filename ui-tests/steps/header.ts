@@ -13,14 +13,24 @@ import type { BrowserWorld } from "../support/world.ts";
 // Layout rounds to fractions of a pixel; anything within this is one place.
 const ROUNDING_PX = 1;
 
-/** The top and bottom of an element's box, and the bottom of its words: two
- *  words in one font size whose bottoms meet stand on one baseline. */
+/** The top and bottom of an element's box, and the bottom of its words, its
+ *  text's own boxes: two words in one font size whose bottoms meet stand on
+ *  one baseline. Only the text is measured, not the boxes it sits in: a
+ *  button's label is a box as tall as its line, half its leading under the
+ *  words, which a link's text has none of. */
 async function extent(part: Locator): Promise<{ top: number; box: number; words: number }> {
   return part.evaluate((el) => {
-    const words = document.createRange();
-    words.selectNodeContents(el);
+    const texts = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let words = Number.NEGATIVE_INFINITY;
+    for (let text = texts.nextNode(); text; text = texts.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      for (const line of range.getClientRects()) {
+        words = Math.max(words, line.bottom);
+      }
+    }
     const box = el.getBoundingClientRect();
-    return { top: box.top, box: box.bottom, words: words.getBoundingClientRect().bottom };
+    return { top: box.top, box: box.bottom, words };
   });
 }
 

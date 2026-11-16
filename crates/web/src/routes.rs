@@ -10,6 +10,7 @@ use api::{
     RepositoryDto,
 };
 use l10n::{Localizer, MessageId, msg};
+use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::A;
@@ -18,9 +19,10 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
+use crate::components::button::{Appearance, Content, Kind};
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Checkbox, ErrorSummary, PauseUpdates, Progress, RadioGroup, StatusBadge, SummaryItem,
+    Button, Checkbox, ErrorSummary, PauseUpdates, Progress, RadioGroup, StatusBadge, SummaryItem,
     TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
     text_field,
 };
@@ -37,6 +39,7 @@ use crate::repositories::{
 };
 use crate::session::SignInOffNotice;
 use crate::sign_in::SignInOff;
+use crate::variants::{Size, Tone};
 use crate::visit::Visit;
 use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
@@ -497,15 +500,24 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                 msg::UI_START_PLAN,
                                 &[("plan", MsgArg::Text(plan.id.clone()))],
                             );
+                            let starting = RwSignal::new(false);
+                            // `starting` keeps the button busy while the daemon
+                            // answers the start; what the run then does, the
+                            // table shows.
                             view! {
                                 // Named with its plan, as a row's Cancel is: a
                                 // reader tabbing through the plans hears which
                                 // one each button runs (2.4.6, 4.1.2). When a
                                 // start gets no answer at all, the page's phase
                                 // says that its own way.
-                                <button
-                                    type="button"
-                                    on:click=move |_| {
+                                <Button
+                                    content=Content::IconAndText {
+                                        glyph: LucideGlyph::Play.into(),
+                                        label: label.into(),
+                                    }
+                                    tone=Tone::Primary
+                                    busy=starting
+                                    on_press=Callback::new(move |()| {
                                         let request = StartBackup {
                                             plan: plan.id.clone(),
                                         };
@@ -516,8 +528,11 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                         let still_waiting = still_waiting.clone();
                                         let error_localizer = Arc::clone(&error_localizer);
                                         let ops = ops;
+                                        starting.set(true);
                                         spawn_local(async move {
-                                            match ws::post(&url, &request).await {
+                                            let answer = ws::post(&url, &request).await;
+                                            starting.try_set(false);
+                                            match answer {
                                                 Some(Posted::Done(answer)) => {
                                                     reply(Politeness::Polite, &started);
                                                     if let Some(operation) = ws::started_operation(&answer)
@@ -543,10 +558,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                 None => {}
                                             }
                                         });
-                                    }
-                                >
-                                    {label}
-                                </button>
+                                    })
+                                />
                             }
                         })
                         .collect::<Vec<_>>()
@@ -588,9 +601,17 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                             // newest first, so the sort's own orders follow.
                                             <span class="sort-header">
                                                 {started_column.clone()}
-                                                <button
-                                                    type="button"
-                                                    on:click=move |_| {
+                                                <Button
+                                                    content=Content::IconAndText {
+                                                        glyph: Signal::derive(move || match sort.get() {
+                                                            SortOrder::OldestFirst => LucideGlyph::ArrowUp,
+                                                            _ => LucideGlyph::ArrowDown,
+                                                        }),
+                                                        label: sort_label.clone().into(),
+                                                    }
+                                                    appearance=Appearance::Ghost
+                                                    size=Size::Small
+                                                    on_press=Callback::new(move |()| {
                                                         let next = match sort.get_untracked() {
                                                             SortOrder::History | SortOrder::OldestFirst => {
                                                                 SortOrder::NewestFirst
@@ -605,10 +626,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                                 _ => &newest,
                                                             },
                                                         );
-                                                    }
-                                                >
-                                                    {sort_label.clone()}
-                                                </button>
+                                                    })
+                                                />
                                             </span>
                                         </th>
                                         <th scope="col">{result_column.clone()}</th>
@@ -832,15 +851,22 @@ fn row_view(
                             let operation = operation.clone();
                             let still_waiting = still_waiting.clone();
                             let error_localizer = Arc::clone(&error_localizer);
+                            let cancel_name = cancel_label.clone();
+                            let cancelling = RwSignal::new(false);
+                            // `cancelling` keeps the button busy while the
+                            // daemon answers the cancel; the run's end then
+                            // takes the button away.
                             view! {
                                 // A run that ends takes its Cancel button away;
                                 // a button that held focus hands it to the row's
                                 // header, which names the run (#438).
-                                <button
+                                <Button
+                                    content=Content::Text(cancel_shown.clone().into())
+                                    size=Size::Small
                                     node_ref=button
-                                    type="button"
-                                    aria-label=cancel_label.clone()
-                                    on:click=move |_| {
+                                    fuller_name=Signal::derive(move || cancel_name.clone())
+                                    busy=cancelling
+                                    on_press=Callback::new(move |()| {
                                         let error_localizer = Arc::clone(&error_localizer);
                                         let Connection { base, visit } = connection.clone();
                                         let still_waiting = still_waiting.clone();
@@ -851,8 +877,11 @@ fn row_view(
                                             .update_value(|cancelled| {
                                                 cancelled.insert(operation.clone());
                                             });
+                                        cancelling.set(true);
                                         spawn_local(async move {
-                                            match ws::post(&url, &Empty {}).await {
+                                            let answer = ws::post(&url, &Empty {}).await;
+                                            cancelling.try_set(false);
+                                            match answer {
                                                 Some(Posted::Done(_)) => {
                                                     if visit.during(ws::settle(&base, ops, &operation)).await
                                                         == Some(false)
@@ -885,10 +914,8 @@ fn row_view(
                                                 }
                                             }
                                         });
-                                    }
-                                >
-                                    {cancel_shown.clone()}
-                                </button>
+                                    })
+                                />
                             }
                         })
                 }}
@@ -1326,12 +1353,13 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
 
     let inputs = Inputs::new();
     let problems = Problems::new();
-    // What the last answer said, and whether a request is still on its way.
+    // What the last answer said, and which request is still on its way: its
+    // button shows it is busy, the form's others take no press meanwhile.
     let result = RwSignal::<Option<String>>::new(None);
-    let busy = RwSignal::new(false);
+    let running = RwSignal::<Option<Action>>::new(None);
     let submit_localizer = Arc::clone(&localizer);
     let submit = Callback::new(move |action: Action| {
-        if busy.get_untracked() {
+        if running.get_untracked().is_some() {
             return;
         }
         let form = inputs.read();
@@ -1342,7 +1370,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             problems.show(items, None);
             return;
         }
-        busy.set(true);
+        running.set(Some(action));
         reply(
             Politeness::Polite,
             &text(&submit_localizer, msg::UI_REPOSITORIES_WORKING),
@@ -1361,7 +1389,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             let Some(phase_now) = phase.try_get_untracked() else {
                 return;
             };
-            busy.set(false);
+            running.set(None);
             // An answer, of any kind, is a daemon that is there.
             if rereads_list(posted.is_some(), phase_now) {
                 load.run(());
@@ -1545,16 +1573,27 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                     checked=inputs.maintain_here
                 />
                 <p class="actions">
-                    <button type="submit">{test_label}</button>
-                    <button type="button" on:click=move |_| submit.run(Action::Connect)>
-                        {connect_label}
-                    </button>
-                    <button type="button" on:click=move |_| submit.run(Action::Create)>
-                        {create_label}
-                    </button>
+                    <Button
+                        content=Content::Text(test_label.into())
+                        kind=Kind::Submit
+                        busy=Signal::derive(move || running.get() == Some(Action::Test))
+                        disabled=Signal::derive(move || running.get().is_some())
+                    />
+                    <Button
+                        content=Content::Text(connect_label.into())
+                        busy=Signal::derive(move || running.get() == Some(Action::Connect))
+                        disabled=Signal::derive(move || running.get().is_some())
+                        on_press=Callback::new(move |()| submit.run(Action::Connect))
+                    />
+                    <Button
+                        content=Content::Text(create_label.into())
+                        busy=Signal::derive(move || running.get() == Some(Action::Create))
+                        disabled=Signal::derive(move || running.get().is_some())
+                        on_press=Callback::new(move |()| submit.run(Action::Create))
+                    />
                 </p>
             </form>
-            {move || busy.get().then(|| view! { <p>{working.clone()}</p> })}
+            {move || running.get().is_some().then(|| view! { <p>{working.clone()}</p> })}
             {move || result.get().map(|text| view! { <p>{text}</p> })}
         </section>
     }
@@ -1759,9 +1798,17 @@ fn test_in_row(
         });
     };
     view! {
-        <button type="button" class="whole-words" aria-label=label on:click=test>
-            {shown}
-        </button>
+        // The span keeps the label's word whole: the column beside the
+        // addresses has room for one (#482).
+        <span class="whole-words">
+            <Button
+                content=Content::Text(shown.into())
+                size=Size::Small
+                fuller_name=Signal::stored(label)
+                busy=busy
+                on_press=Callback::new(test)
+            />
+        </span>
         {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
     }
 }
@@ -1838,9 +1885,12 @@ fn create_in_row(
         });
     };
     view! {
-        <button type="button" on:click=create>
-            {label}
-        </button>
+        <Button
+            content=Content::Text(label.into())
+            size=Size::Small
+            busy=busy
+            on_press=Callback::new(create)
+        />
         {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
     }
 }

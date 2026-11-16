@@ -19,14 +19,18 @@ use api::{
     UnmanagedGroupDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
+use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsValue;
 use leptos_router::components::A;
 
 use crate::announcer::Politeness;
+use crate::components::button::Content;
 use crate::components::tree::rules::snapshot_href;
-use crate::components::{Confirmation, ReviewDialog, Working, recover_focus, sentence_view};
+use crate::components::{
+    Button, Confirmation, ReviewDialog, Working, recover_focus, sentence_view,
+};
 use crate::live::{reply, say};
 use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
@@ -35,6 +39,7 @@ use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with};
 use crate::stats::{self, StatsPanel};
 use crate::text;
+use crate::variants::Tone;
 use crate::wording::{self, Adoption, Words};
 use crate::ws::{self, Got, Posted};
 
@@ -572,15 +577,13 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                             &[("alias", MsgArg::Text(alias.clone()))],
                         );
                         view! {
-                            <button
-                                type="button"
-                                on:click=move |_| {
+                            <Button
+                                content=Content::Text(label.into())
+                                on_press=Callback::new(move |()| {
                                     chosen.set(Some((alias.clone(), maintained)));
                                     picks.update(|picks| *picks = picks.wrapping_add(1));
-                                }
-                            >
-                                {label}
-                            </button>
+                                })
+                            />
                         }
                     })
                     .collect_view()
@@ -642,42 +645,44 @@ fn Repository(
         page.maintained.get().then(|| {
             view! {
                 <p class="actions">
-                    <button
-                        type="button"
+                    <Button
+                        content=Content::IconAndText {
+                            glyph: LucideGlyph::Trash.into(),
+                            label: page.plain(msg::UI_MAINTENANCE_FORGET).into(),
+                        }
+                        tone=Tone::Error
                         id=FORGET_BUTTON
-                        on:click=move |_| {
+                        on_press=Callback::new(move |()| {
                             page.preview(
                                 maintenance::request(Kind::Forget),
                                 FORGET_BUTTON.to_owned(),
                             );
+                        })
+                    />
+                    <Button
+                        content=Content::IconAndText {
+                            glyph: LucideGlyph::Trash.into(),
+                            label: page.plain(msg::UI_MAINTENANCE_PRUNE).into(),
                         }
-                    >
-                        {page.plain(msg::UI_MAINTENANCE_FORGET)}
-                    </button>
-                    <button
-                        type="button"
+                        tone=Tone::Error
                         id=PRUNE_BUTTON
-                        on:click=move |_| {
+                        on_press=Callback::new(move |()| {
                             page.preview(
                                 maintenance::request(Kind::Prune),
                                 PRUNE_BUTTON.to_owned(),
                             );
-                        }
-                    >
-                        {page.plain(msg::UI_MAINTENANCE_PRUNE)}
-                    </button>
-                    <button
-                        type="button"
+                        })
+                    />
+                    <Button
+                        content=Content::Text(page.plain(msg::UI_MAINTENANCE_CHECK).into())
                         id=CHECK_BUTTON
-                        on:click=move |_| {
+                        on_press=Callback::new(move |()| {
                             page.preview(
                                 maintenance::request(Kind::Check),
                                 CHECK_BUTTON.to_owned(),
                             );
-                        }
-                    >
-                        {page.plain(msg::UI_MAINTENANCE_CHECK)}
-                    </button>
+                        })
+                    />
                 </p>
             }
         })
@@ -723,9 +728,11 @@ fn Repository(
             }}
             {buttons}
             <p class="actions">
-                <button type="button" id=MAINTAINER_BUTTON on:click=move |_| page.ask_switch()>
-                    {switch_label}
-                </button>
+                <Button
+                    content=Content::Text(Signal::derive(switch_label))
+                    id=MAINTAINER_BUTTON
+                    on_press=Callback::new(move |()| page.ask_switch())
+                />
             </p>
             {move || {
                 step.get()
@@ -749,9 +756,10 @@ fn Repository(
                         view! {
                             <p>{shown}</p>
                             <p>
-                                <button type="button" on:click=move |_| page.cancel()>
-                                    {cancel.clone()}
-                                </button>
+                                <Button
+                                    content=Content::Text(cancel.clone().into())
+                                    on_press=Callback::new(move |()| page.cancel())
+                                />
                             </p>
                         }
                     })
@@ -822,9 +830,11 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
                 stats::Shown::Nothing => ().into_any(),
             }}
             <p class="actions">
-                <button type="button" on:click=move |_| page.read_stats()>
-                    {read}
-                </button>
+                <Button
+                    content=Content::Text(read.into())
+                    busy=reading
+                    on_press=Callback::new(move |()| page.read_stats())
+                />
             </p>
             {move || reading.get().then(|| view! { <p>{reading_now.clone()}</p> })}
             {move || {
@@ -1083,13 +1093,11 @@ fn adoption_view(page: Page, id: String, adoption: Adoption) -> impl IntoView {
     let opener = id.clone();
     view! {
         <p>
-            <button
-                type="button"
+            <Button
+                content=Content::Text(label.into())
                 id=id
-                on:click=move |_| page.preview(request.clone(), opener.clone())
-            >
-                {label}
-            </button>
+                on_press=Callback::new(move |()| page.preview(request.clone(), opener.clone()))
+            />
         </p>
     }
 }
@@ -1101,6 +1109,7 @@ fn switch_view(page: Page, maintained: bool) -> impl IntoView {
     let switch = wording::switch(maintained, &page.alias.get_value());
     let confirm = Confirmation {
         label: page.words(&switch.confirm),
+        tone: Tone::Primary,
         action: Callback::new(move |()| page.switch_maintainer(maintained)),
     };
     let working = Working {
@@ -1140,6 +1149,7 @@ fn review_view(page: Page, reviewing: Reviewing) -> impl IntoView {
         let started = review.clone();
         Confirmation {
             label: page.words(&wording::confirmation(confirm)),
+            tone: wording::confirmation_tone(confirm),
             action: Callback::new(move |()| page.start(started.clone())),
         }
     });

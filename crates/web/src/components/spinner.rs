@@ -4,13 +4,7 @@ use crate::variants::{Placement, Size, Tone};
 use rules::LabelShown;
 
 // What a spinner looks like and how a screen reader meets it, decided on
-// the host; `Spinner` is its glue. Only the gallery shows a spinner yet, and
-// the host tests use these decisions, so only a build of neither leaves them
-// unused.
-#[cfg_attr(
-    all(not(feature = "gallery"), not(test)),
-    expect(dead_code, reason = "only the gallery shows a spinner yet")
-)]
+// the host; `Spinner` is its glue.
 pub(crate) mod rules;
 
 /// A spinner (§4.5): a drawing that turns while the page waits for something

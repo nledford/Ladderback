@@ -24,13 +24,14 @@ use crate::admin_password::{
     button, error_of, problems_of, said_once_set, steps,
 };
 use crate::announcer::Politeness;
-use crate::components::text_field::Kind;
-use crate::components::{ErrorSummary, SummaryItem, TextField};
+use crate::components::button::{Appearance, Content, Kind};
+use crate::components::{Button, ErrorSummary, SummaryItem, TextField, text_field};
 use crate::live::reply;
 use crate::routes::{refused_sentence, text_with};
 use crate::session::Standing;
 use crate::sign_in::PasswordChanged;
 use crate::text;
+use crate::variants::Tone;
 use crate::ws::{self, Posted};
 
 /// What a person has typed, one signal per field.
@@ -183,7 +184,7 @@ pub(super) fn AdminPassword(
                 description=field_text(msg::UI_ADMIN_PASSWORD_CURRENT_HINT)
                 error=problems.current
                 value=inputs.current
-                kind=Kind::Password
+                kind=text_field::Kind::Password
                 autocomplete="current-password"
                 required=true
             />
@@ -230,7 +231,7 @@ pub(super) fn AdminPassword(
                     description=new_hint
                     error=problems.new
                     value=inputs.new
-                    kind=Kind::Password
+                    kind=text_field::Kind::Password
                     autocomplete="new-password"
                     required=true
                 />
@@ -241,12 +242,18 @@ pub(super) fn AdminPassword(
                     description=field_text(msg::UI_ADMIN_PASSWORD_AGAIN_HINT)
                     error=problems.again
                     value=inputs.again
-                    kind=Kind::Password
+                    kind=text_field::Kind::Password
                     autocomplete="new-password"
                     required=true
                 />
                 <p class="actions">
-                    <button type="submit">{button_text}</button>
+                    <Button
+                        content=Content::Text(button_text.into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        kind=Kind::Submit
+                        busy=busy
+                    />
                 </p>
             </form>
             {move || busy.get().then(|| view! { <p>{saving.clone()}</p> })}

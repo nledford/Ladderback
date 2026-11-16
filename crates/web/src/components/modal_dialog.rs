@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
-use super::trap_focus;
+use super::button::Content;
+use super::{Button, trap_focus};
 use crate::live::{close_modal_when_gone, modal_gone, open_modal};
 
 /// A modal dialog (`<dialog>` + `showModal`): focus is trapped inside while it
@@ -22,16 +23,14 @@ pub fn ModalDialog(
     close_modal_when_gone(dialog, counted);
     let body = children();
     view! {
-        <button
-            type="button"
-            on:click=move |_| {
+        <Button
+            content=Content::Text(open_label.into())
+            on_press=Callback::new(move |()| {
                 if let Some(dialog) = dialog.get() {
                     open_modal(&dialog, counted);
                 }
-            }
-        >
-            {open_label}
-        </button>
+            })
+        />
         <dialog
             node_ref=dialog
             aria-label=label.clone()
@@ -40,16 +39,14 @@ pub fn ModalDialog(
         >
             <h3>{label.clone()}</h3>
             {body}
-            <button
-                type="button"
-                on:click=move |_| {
+            <Button
+                content=Content::Text(close_label.into())
+                on_press=Callback::new(move |()| {
                     if let Some(dialog) = dialog.get() {
                         dialog.close();
                     }
-                }
-            >
-                {close_label}
-            </button>
+                })
+            />
         </dialog>
     }
 }

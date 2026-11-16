@@ -236,14 +236,16 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Buttons
 
-- **The component:** `Button`, a native `<button>` drawn from the tokens (decision 113). Pages move onto it from the browser's own button (#780).
-- **Appearance:** Filled, a fill in its tone with its label in the page's background color, for an action row's one main action, in Primary; Outlined, an edge and a label in its tone, the default, for the others; Ghost, the label alone, for a row with many. Secondary (Slate Note) unless the page names another tone; a Filled button has no Inherit.
+- **The component:** `Button`, a native `<button>` drawn from the tokens (decision 113). Every action a page offers is one (#780); none is the browser's own button.
+- **Appearance:** Filled, a fill in its tone with its label in the page's background color, for an action row's one main action, in Primary; Outlined, an edge and a label in its tone, the default, for the others; Ghost, the label alone, for a row with many, a table header's sort control and the header's Sign out. Secondary (Slate Note) unless the page names another tone; a Filled button has no Inherit.
+- **Tone:** Error for an action that deletes or takes away (Delete, Revoke, Forget, Prune, Sign out everywhere, Restart now), Filled only as a dialog's confirm; Primary for a main action and a dialog's confirm that keeps things.
+- **Icon:** only where it says something the label doesn't: Plus to add, Pencil to change, Trash to delete or forget, Play to start, RotateCcw to restore, Pause and Play on the pause button, LogOut to sign out, an arrow for a sort's direction.
 - **Shape:** one small corner (`rounded.sm`), flat: no shadow, no gradient, no pill.
-- **Size:** its height, in `em`: Small 1.75em, Medium 2em (the default, 2rem at the page's text size), Large 2.5em, XLarge 3em, the inline padding growing with it from 0.5em to 1.25em. An icon or spinner inside is as tall as the text; an icon-only button is square.
+- **Size:** its height, in `em`: Small 1.75em, Medium 2em (the default, 2rem at the page's text size), Large 2.5em, XLarge 3em, the inline padding growing with it from 0.5em to 1.25em. An icon or spinner inside is as tall as the text; an icon-only button is square. A table's row actions are Small, the whole column alike.
 - **Hover:** a step darker, lighter in the dark scheme, each pair contrast-checked.
-- **Unavailable and busy:** stay focusable (`aria-disabled="true"`), at 60 % opacity with a not-allowed cursor. A busy button's spinner takes its icon's place, or stands before words that have none; a button that must not move gets an icon.
+- **Unavailable and busy:** stay focusable (`aria-disabled="true"`), at 60 % opacity with a not-allowed cursor. A busy button's spinner takes its icon's place, or stands before words that have none; a button that must not move gets an icon. A button is busy only while the request its press sent runs.
 - **Pressed (toggle):** bold text and an inset edge; the pause button adds a banner that says it in words.
-- **Forced colors:** the reader's `ButtonFace`, its label and edge `ButtonText`, an unavailable one `GrayText`.
+- **Forced colors:** the reader's `ButtonFace`, its label and edge `ButtonText`, a pressed Ghost one's edge too, an unavailable one `GrayText`; a busy one keeps `ButtonText`, as it is at work, not unavailable.
 - **Focus:** the global 3 px Ladder Blue ring, 2 px offset; `CanvasText` under forced colors.
 
 ### Status Badges
@@ -268,7 +270,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 - **Style:** a wrapping row of plain links in the Ladder Blue link color on the Ledger Gray header, 1rem apart.
 - **Current page:** bold, with `aria-current="page"`.
 - **Brand:** the product's mark before its name, as tall as the name's letters, hidden from screen readers; under forced colors it takes `CanvasText` and `Canvas`.
-- **Sign out:** a native button after the running version, outside the navigation's list, since it isn't a page. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
+- **Sign out:** a Ghost button with the LogOut icon after the running version, outside the navigation's list, since it isn't a page, its words on the links' baseline and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
 - A skip link is the first focusable element and appears at the top of the page on focus.
 
 ### Tables

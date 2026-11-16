@@ -15,6 +15,8 @@ The shared `Icon` component (§4.5, #778), which the status badges now draw with
 
 The shared text field's Show password button (§4.5, #782) draws an eye and a crossed-out eye, which turn on `accessibility`: 34 icons, 29 of them in no category already on, 296 in all. That category alone adds 7,982 B (0.2%) to the release `web` wasm built with `--no-default-features`, 3,587,011 B before and 3,594,993 B after, and 2,035 B (0.2%) to its brotli, 827,306 B before and 829,341 B after. Measured as above, at `4eacb452` with only the category added.
 
+The pages' buttons (§4.5, #780) turn on `arrows`, `multimedia` and `files` (713 icons in all) for their icons. The three categories alone add 127,262 B (3.5%) to the release `web` wasm built with `--no-default-features`, 3,667,922 B before and 3,795,184 B after, and 22,216 B (2.6%) to its brotli, 840,164 B before and 862,380 B after; with the pages moved onto `Button` it is 3,814,082 B, 146,160 B (4.0%) over the build before, and its brotli 867,611 B, 27,447 B (3.3%) over. Measured as above, at `e765acd8` (the categories turned on in a copy of it) and after.
+
 ### 8.2 Backend crates
 
 | Concern | Crate |

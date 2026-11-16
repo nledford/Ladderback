@@ -196,12 +196,20 @@ a {
    although `overflow-wrap: anywhere` breaks it, so on a narrow screen with
    larger text, right to left, the line stuck out and the page scrolled
    sideways (1.4.10): the group and the version may both be narrower than
-   that run. */
+   that run.
+
+   The version and Sign out stand on their last baseline, which for Sign out
+   is its words': a button's first baseline is its first part's, its icon's
+   foot, which stands lower in the button than its words' baseline, so on
+   the line's first baseline Sign out rose 2 px over the links and the
+   header's line grew. The group's own baseline, on which it stands beside
+   the links, is still the version's. */
 .site-account {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   align-items: baseline;
+  align-items: last baseline;
   gap: 0.25rem 1rem;
   margin-inline-start: auto;
   min-inline-size: 0;
@@ -214,15 +222,6 @@ a {
   color: var(--muted);
   min-inline-size: 0;
   text-align: end;
-}
-
-/* Sign out (`sign_in::SignOut`): the browser's own button, sized as the
-   action rows' buttons are: at least 2rem tall (2.5.8), so it grows with the
-   reader's text. While it waits for the daemon it looks unavailable
-   (`button[aria-disabled="true"]`). */
-.sign-out {
-  min-block-size: 2rem;
-  padding-inline: 0.75rem;
 }
 
 /* The available update, on a line of its own under the running version and
@@ -772,7 +771,11 @@ main:focus {
 
 /* Forced colors: the reader's button colors, every appearance edged so it
    still reads as a button; an unavailable one in the color of unavailable
-   text. Pressed keeps its weight and inset edge. */
+   text. A busy one (`.button-busy`), `aria-disabled` too, keeps the button
+   text: it is at work, not unavailable, and its spinner's arc takes the
+   text's color beside a GrayText track. Pressed keeps its weight and inset
+   edge, a Ghost one's edge in the button text too: its tone's edge outranks
+   the rule above, so it is named again here. */
 @media (forced-colors: active) {
   .button,
   .button-filled,
@@ -783,7 +786,11 @@ main:focus {
     color: ButtonText;
   }
 
-  .button[aria-disabled="true"] {
+  .button-ghost[aria-pressed="true"] {
+    border-color: ButtonText;
+  }
+
+  .button[aria-disabled="true"]:not(.button-busy) {
     border-color: GrayText;
     color: GrayText;
   }
@@ -1088,11 +1095,6 @@ fieldset.choices > p {
   gap: 0.5rem;
 }
 
-.actions button:not(.button) {
-  min-block-size: 2rem;
-  padding-inline: 0.75rem;
-}
-
 /* A button that cannot be used for now stays on the page, where a keyboard and
    a screen reader find it, and looks unavailable. */
 button[aria-disabled="true"] {
@@ -1111,16 +1113,6 @@ button[aria-disabled="true"] {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-block: 0.5rem;
-}
-
-.pause-updates button {
-  min-block-size: 2rem;
-  padding-inline: 0.75rem;
-}
-
-.pause-updates button[aria-pressed="true"] {
-  border-style: inset;
-  font-weight: 600;
 }
 
 .pause-banner {
@@ -1246,12 +1238,15 @@ table.operations .badge {
 }
 
 /* A button's label takes the page's text size (see the form controls rule),
-   so at 320 px with 200 % text one letter of it and the browser's own padding
-   (6 px a side) made the Cancel button a few pixels wider than its cell. Its
-   padding follows the screen's width the same way: the browser's 6 px on a
-   wide screen, less on a small one. */
-table.operations td button {
-  padding-inline: min(0.375rem, 1.25vw);
+   so at 320 px with 200 % text one letter of it and its padding made the
+   Cancel button a few pixels wider than its cell. Its padding follows the
+   screen's width the same way: 6 px a side on a wide screen, less on a
+   small one. The Started header's sort button has an icon before its label,
+   and the two side by side are wider than the column there (56 px): where
+   they don't fit, the icon stands above the label. */
+table.operations .button {
+  --control-padding: min(0.375rem, 1.25vw);
+  flex-wrap: wrap;
 }
 
 table.operations td ul {
@@ -1361,7 +1356,7 @@ td .placeable {
    takes 128 of the table's 256 px, no floor in ch can hold, and the table
    must still fit. */
 table.repositories th[scope="row"],
-table.repositories td button:not(.whole-words) {
+table.repositories td .button:not(.whole-words .button) {
   min-inline-size: min(12ch, 35vw - 2rem);
 }
 
@@ -1426,7 +1421,7 @@ table.repositories :is(th, td) {
 /* A label of one short word, such as a row's Test, breaks only between
    words, never inside one, so it takes one line beside the addresses; it
    needs no floor, and the column keeps the room it doesn't need (#482). */
-button.whole-words {
+.whole-words .button {
   overflow-wrap: normal;
 }
 

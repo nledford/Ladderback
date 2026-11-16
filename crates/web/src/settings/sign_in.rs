@@ -14,7 +14,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
-use crate::components::{Confirmation, RadioGroup, ReviewDialog, Working, sentence_view};
+use crate::components::button::{Appearance, Content, Kind};
+use crate::components::{Button, Confirmation, RadioGroup, ReviewDialog, Working, sentence_view};
 use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::refused_sentence;
@@ -24,6 +25,7 @@ use crate::sign_in_settings::{
     steps,
 };
 use crate::text;
+use crate::variants::Tone;
 use crate::ws::{self, Got, Phase, Posted};
 
 /// The `id` of the Sign out everywhere button, where focus returns from its
@@ -198,12 +200,15 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
                             chosen=chosen
                         />
                         <p class="actions">
-                            <button
-                                type="submit"
-                                aria-disabled=move || busy.get().then_some("true")
-                            >
-                                {text(&form_localizer, msg::UI_SESSION_LENGTH_SAVE)}
-                            </button>
+                            <Button
+                                content=Content::Text(
+                                    text(&form_localizer, msg::UI_SESSION_LENGTH_SAVE).into(),
+                                )
+                                appearance=Appearance::Filled
+                                tone=Tone::Primary
+                                kind=Kind::Submit
+                                busy=busy
+                            />
                         </p>
                     </form>
                 }
@@ -213,6 +218,7 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
     };
     let confirm = Confirmation {
         label: text(&localizer, msg::UI_SIGN_OUT_EVERYWHERE_CONFIRM),
+        tone: Tone::Error,
         action: sign_out_everywhere,
     };
     let working = Working {
@@ -226,16 +232,15 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
         <p role="alert">{move || save_error.get().map(sentence_view)}</p>
         <p>{text(&localizer, msg::UI_SIGN_OUT_EVERYWHERE_BODY)}</p>
         <p class="actions">
-            <button
-                type="button"
+            <Button
+                content=Content::Text(text(&localizer, msg::UI_SIGN_OUT_EVERYWHERE).into())
+                tone=Tone::Error
                 id=EVERYWHERE_ID
-                on:click=move |_| {
+                on_press=Callback::new(move |()| {
                     everywhere_error.set(None);
                     everywhere_open.set(true);
-                }
-            >
-                {text(&localizer, msg::UI_SIGN_OUT_EVERYWHERE)}
-            </button>
+                })
+            />
         </p>
         <ReviewDialog
             open=everywhere_open
