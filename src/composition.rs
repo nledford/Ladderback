@@ -77,12 +77,14 @@ use notify_adapter::HttpNotifier;
 use platform::SystemClock;
 use platform::admin_password::FileAdminPassword;
 use platform::data_dir_lock::{DataDirLock, LOCK_FILE, LockError};
+use platform::random::OsRandom;
 use platform::{agent_id, dirs};
 use releases_adapter::GitHubReleases;
 use secrets::SystemSecrets;
 use store::SqliteStore;
 use uuid::Uuid;
 
+mod downloads;
 mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
@@ -625,7 +627,7 @@ pub(crate) async fn daemon(
         SignInDecided::On(password) => {
             let access = Arc::new(app::access::Access::new(
                 password,
-                random,
+                Arc::clone(&random),
                 Arc::new(SystemClock),
                 Arc::<SqliteStore>::clone(&daemon.log.store),
                 Arc::<SqliteStore>::clone(&daemon.log.store),
@@ -640,6 +642,12 @@ pub(crate) async fn daemon(
         &daemon.background.runner,
         daemon.background.restore_folder.clone(),
         &daemon.state.sign_in,
+    ));
+    // So is a download's, its tickets drawn from the daemon's one source.
+    daemon.state.downloads = Arc::new(downloads::DownloadService::new(
+        &daemon.background.runner,
+        &daemon.state.sign_in,
+        random,
     ));
     daemon.state.exposure = exposure;
     daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
@@ -861,6 +869,11 @@ async fn state_over(
         restore_folder.clone(),
         &sign_in,
     ));
+    let downloads: Arc<dyn http_adapter::Downloads> = Arc::new(downloads::DownloadService::new(
+        &runner,
+        &sign_in,
+        Arc::new(OsRandom),
+    ));
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
@@ -926,6 +939,7 @@ async fn state_over(
             profiles,
             restores,
             proposals,
+            downloads,
             sign_in,
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),

@@ -352,6 +352,13 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
             "/api/v1/repositories/home/snapshots/abcd/restore/preview",
             None,
         ),
+        // A download needs step-up too, and its ticket is the browser's.
+        (
+            Method::POST,
+            "/api/v1/repositories/home/snapshots/abcd/download",
+            None,
+        ),
+        (Method::GET, "/api/v1/downloads/abcd", None),
         (Method::PUT, "/api/v1/repositories/home/maintainer", None),
         (Method::GET, "/api/v1/plans/home", None),
         (Method::PUT, "/api/v1/plans/home", None),
@@ -496,6 +503,15 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
             &auth,
             r#"{"path":""}"#,
         ),
+        post(
+            &format!(
+                "/api/v1/repositories/home/snapshots/{}/download",
+                "ab".repeat(32)
+            ),
+            &auth,
+            r#"{"path":"","format":"tar","confirmation":"abababab"}"#,
+        ),
+        get(&format!("/api/v1/downloads/{}", "ab".repeat(32)), &auth),
         post("/api/v1/plans", &auth, "{}"),
         get("/api/v1/plans/home", &auth),
         build(

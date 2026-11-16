@@ -13,6 +13,7 @@
 
 mod api_tokens;
 mod body_limit;
+mod downloads;
 mod full_disk_access;
 mod listener;
 mod maintenance;
@@ -49,6 +50,7 @@ use rust_embed::RustEmbed;
 use rust_embed as _;
 use serde::{Deserialize, Serialize};
 
+pub use downloads::{DownloadRefusal, DownloadStart, Downloads, Handover};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
@@ -94,6 +96,9 @@ pub struct AppState {
     /// How a request proposes configuration changes, and reads and
     /// withdraws proposals (decision 89).
     pub proposals: Arc<dyn Proposals>,
+    /// How a request confirms a download and fetches it by its ticket
+    /// (§10.4).
+    pub downloads: Arc<dyn Downloads>,
     /// Whether sign-in is on, and the sessions it has started (§10.1).
     pub sign_in: SignIn,
     /// Who can reach the daemon at the address it listens on, which the
@@ -589,6 +594,14 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/repositories/{alias}/snapshots/{snapshot}/restore/preview",
             axum::routing::post(restores::preview),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/snapshots/{snapshot}/download",
+            axum::routing::post(downloads::start),
+        )
+        .route(
+            "/api/v1/downloads/{ticket}",
+            axum::routing::get(downloads::fetch),
         )
         .route(
             "/api/v1/repositories/{alias}/groups",
@@ -1565,6 +1578,7 @@ mod tests {
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
             proposals: Arc::new(crate::request_checks::tests::NoProposals),
+            downloads: Arc::new(crate::request_checks::tests::NoDownloads),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -1611,6 +1625,7 @@ mod tests {
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
             proposals: Arc::new(crate::request_checks::tests::NoProposals),
+            downloads: Arc::new(crate::request_checks::tests::NoDownloads),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -3051,6 +3066,7 @@ mod tests {
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
             proposals: Arc::new(crate::request_checks::tests::NoProposals),
+            downloads: Arc::new(crate::request_checks::tests::NoDownloads),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
