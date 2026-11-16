@@ -1,4 +1,4 @@
-@e2e
+@e2e @needs-node
 Feature: Update the service from a checkout without interrupting an operation
   `just install-restart` (scripts/install-restart.ts) installs Ladderback
   from a checkout, waits until the daemon has no operation running or
