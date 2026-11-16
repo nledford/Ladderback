@@ -4,12 +4,20 @@
 //! `app`, and each refusal said as the routes answer it: at the change and
 //! its setting, never with a value.
 
-use api::{ErrorCode, MsgArg};
+use api::{ChangeProblem, ErrorCode, PlanProblem, ProposalChangeDto, ProposalStatusDto};
+use app::ports::{ConfigError, Problem};
 use app::proposals::{ProposalError, Proposals};
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
-use domain::planning::Proposer;
-use http_adapter::ProposalsError;
+use domain::PlanId;
+use domain::planning::{
+    ChangeRefused, ConfigChange, MAX_CHANGES, MAX_PENDING, MAX_RATIONALE_CHARS, Proposal,
+    ProposalId, ProposalRefused, ProposalStatus, Proposer, Rationale,
+};
+use http_adapter::{PlansError, ProposalsError};
+
+use super::config_unusable;
+use super::plans::{problem_of, violated};
 
 pub(super) struct ProposalService {
     /// The configuration file, for the revision a proposal is drafted
@@ -31,13 +39,46 @@ impl http_adapter::Proposals for ProposalService {
         asker: Proposer,
         proposal: api::NewProposalDto,
     ) -> Result<api::ProposalDto, ProposalsError> {
-        let _ = (asker, proposal, &self.file, &self.proposals);
-        todo!()
+        // The revision first: the use case checks the changes against the
+        // configuration it loads after, so the base is never a file newer
+        // than the one the changes were checked against.
+        let base = self.file.revision().await.map_err(unusable)?;
+        // The count before the changes are read, so a proposal of too many
+        // is refused as one, whatever a change beyond the limit holds.
+        if proposal.changes.len() > MAX_CHANGES {
+            return Err(refused_at(
+                ProposalRefused::TooManyChanges,
+                &proposal.changes,
+            ));
+        }
+        let changes = proposal
+            .changes
+            .iter()
+            .enumerate()
+            .map(|(index, change)| read(index, change))
+            .collect::<Result<Vec<_>, _>>()?;
+        let rationale = Rationale::parse(proposal.rationale)
+            .map_err(|refused| refused_at(refused, &proposal.changes))?;
+        let made = self
+            .proposals
+            .propose(asker, base, changes, rationale)
+            .await
+            .map_err(|error| match error {
+                ProposalError::Refused(refused) => refused_at(refused, &proposal.changes),
+                error => refused(error, ""),
+            })?;
+        shown(made)
     }
 
     async fn list(&self, asker: Proposer) -> Result<api::ProposalsDto, ProposalsError> {
-        let _ = asker;
-        todo!()
+        let listed = self
+            .proposals
+            .list(&asker)
+            .await
+            .map_err(|error| refused(error, ""))?;
+        Ok(api::ProposalsDto {
+            proposals: listed.into_iter().map(shown).collect::<Result<_, _>>()?,
+        })
     }
 
     async fn proposal(
@@ -45,8 +86,13 @@ impl http_adapter::Proposals for ProposalService {
         asker: Proposer,
         id: String,
     ) -> Result<api::ProposalDto, ProposalsError> {
-        let _ = (asker, id);
-        todo!()
+        let named = named(&id)?;
+        let found = self
+            .proposals
+            .get(&asker, &named)
+            .await
+            .map_err(|error| refused(error, &id))?;
+        shown(found)
     }
 
     async fn withdraw(
@@ -54,15 +100,206 @@ impl http_adapter::Proposals for ProposalService {
         asker: Proposer,
         id: String,
     ) -> Result<api::ProposalDto, ProposalsError> {
-        let _ = (asker, id);
-        todo!()
+        let named = named(&id)?;
+        let withdrawn = self
+            .proposals
+            .withdraw(&asker, &named)
+            .await
+            .map_err(|error| refused(error, &id))?;
+        shown(withdrawn)
     }
 }
 
-/// `error` as the routes answer it.
-fn refused(error: ProposalError) -> ProposalsError {
-    let _ = (error, ErrorCode::ProposalsUnavailable, MsgArg::Count(0));
-    todo!()
+/// The proposal `id` names: text that is no proposal's ID names none kept.
+fn named(id: &str) -> Result<ProposalId, ProposalsError> {
+    ProposalId::parse(id).ok_or_else(|| ProposalsError::Unknown {
+        proposal: id.to_owned(),
+    })
+}
+
+/// The change at `index`, from 0, its plan read as the loader reads one of
+/// the file's. A removal naming no plan's ID names none the configuration
+/// has.
+fn read(index: usize, change: &ProposalChangeDto) -> Result<ConfigChange, ProposalsError> {
+    let plan = |table: &api::PlanDto| {
+        config_adapter::read_plan(&table.0).map_err(|error| match error {
+            ConfigError::Invalid {
+                key: Some(field),
+                problem,
+                ..
+            } => match problem {
+                Problem::Violation(violation) => at_change(index, change, violated(violation)),
+                problem => invalid(index, field, ChangeProblem::Plan(problem_of(&problem))),
+            },
+            // A table the file's format can't hold, as one with a null in it.
+            ConfigError::Invalid { key: None, .. } => ProposalsError::InvalidBody,
+            error => unusable(error),
+        })
+    };
+    match change {
+        ProposalChangeDto::AddPlan { plan: table } => plan(table).map(ConfigChange::AddPlan),
+        ProposalChangeDto::ChangePlan { plan: table } => plan(table).map(ConfigChange::ChangePlan),
+        ProposalChangeDto::RemovePlan { plan } => PlanId::parse(plan)
+            .map(ConfigChange::RemovePlan)
+            .map_err(|_| invalid(index, "plan".to_owned(), ChangeProblem::UnknownPlan)),
+    }
+}
+
+/// The change at `index`, from 0, refused at `field`: the refusal counts
+/// changes from 1.
+fn invalid(index: usize, field: String, problem: ChangeProblem) -> ProposalsError {
+    ProposalsError::Invalid {
+        change: index.saturating_add(1),
+        field,
+        problem,
+    }
+}
+
+/// The setting of `change` that names its plan: a removal's `plan`, a
+/// plan's `id`.
+fn plan_field(change: Option<&ProposalChangeDto>) -> String {
+    match change {
+        Some(ProposalChangeDto::RemovePlan { .. }) => "plan",
+        _ => "id",
+    }
+    .to_owned()
+}
+
+/// A plan route's refusal of a plan, as the refusal of the change at
+/// `index` that holds it.
+fn at_change(index: usize, change: &ProposalChangeDto, refused: PlansError) -> ProposalsError {
+    match refused {
+        PlansError::Invalid { field, problem } => {
+            invalid(index, field, ChangeProblem::Plan(problem))
+        }
+        PlansError::Unknown { .. } => {
+            invalid(index, plan_field(Some(change)), ChangeProblem::UnknownPlan)
+        }
+        PlansError::InUse { .. } => invalid(index, plan_field(Some(change)), ChangeProblem::InUse),
+        PlansError::InvalidBody => ProposalsError::InvalidBody,
+        PlansError::Unavailable { code, args, detail } => {
+            ProposalsError::Unavailable { code, args, detail }
+        }
+    }
+}
+
+/// A submission check's refusal of a proposal of `changes`.
+fn refused_at(refused: ProposalRefused, changes: &[ProposalChangeDto]) -> ProposalsError {
+    match refused {
+        ProposalRefused::NoChanges => ProposalsError::Empty,
+        ProposalRefused::TooManyChanges => ProposalsError::TooLarge {
+            what: "changes",
+            limit: MAX_CHANGES,
+        },
+        ProposalRefused::RationaleTooLong => ProposalsError::TooLarge {
+            what: "rationale",
+            limit: MAX_RATIONALE_CHARS,
+        },
+        ProposalRefused::Change {
+            index,
+            refused: ChangeRefused::UnknownPlan(_),
+        } => invalid(
+            index,
+            plan_field(changes.get(index)),
+            ChangeProblem::UnknownPlan,
+        ),
+        ProposalRefused::Change {
+            index,
+            refused: ChangeRefused::Violation(violation),
+        } => match changes.get(index) {
+            Some(change) => at_change(index, change, violated(violation)),
+            // The use case checks only the changes it was given.
+            None => invalid(
+                index,
+                "id".to_owned(),
+                ChangeProblem::Plan(PlanProblem::Invalid),
+            ),
+        },
+        ProposalRefused::Hooks { index } => {
+            invalid(index, "hooks".to_owned(), ChangeProblem::Hooks)
+        }
+    }
+}
+
+/// `proposal` as the routes answer it: each plan as its table in the file's
+/// keys.
+fn shown(proposal: Proposal) -> Result<api::ProposalDto, ProposalsError> {
+    let changes = proposal
+        .changes
+        .iter()
+        .map(|change| {
+            Ok(match change {
+                ConfigChange::AddPlan(plan) => ProposalChangeDto::AddPlan {
+                    plan: config_adapter::plan_as(plan).map_err(unusable)?,
+                },
+                ConfigChange::ChangePlan(plan) => ProposalChangeDto::ChangePlan {
+                    plan: config_adapter::plan_as(plan).map_err(unusable)?,
+                },
+                ConfigChange::RemovePlan(id) => ProposalChangeDto::RemovePlan {
+                    plan: id.as_str().to_owned(),
+                },
+            })
+        })
+        .collect::<Result<_, ProposalsError>>()?;
+    Ok(api::ProposalDto {
+        id: proposal.id.as_str().to_owned(),
+        proposed_by: match proposal.proposer {
+            Proposer::Token { label, .. } => Some(label.as_str().to_owned()),
+            Proposer::NoToken => None,
+        },
+        status: status_dto(proposal.status),
+        created_at: proposal.created_at.to_string(),
+        expires_at: proposal.expires_at.to_string(),
+        changes,
+        rationale: proposal.rationale.as_str().to_owned(),
+    })
+}
+
+fn status_dto(status: ProposalStatus) -> ProposalStatusDto {
+    match status {
+        ProposalStatus::Pending => ProposalStatusDto::Pending,
+        ProposalStatus::Applying => ProposalStatusDto::Applying,
+        ProposalStatus::Applied => ProposalStatusDto::Applied,
+        ProposalStatus::Failed => ProposalStatusDto::Failed,
+        ProposalStatus::Rejected => ProposalStatusDto::Rejected,
+        ProposalStatus::Withdrawn => ProposalStatusDto::Withdrawn,
+        ProposalStatus::Expired => ProposalStatusDto::Expired,
+        ProposalStatus::Stale => ProposalStatusDto::Stale,
+    }
+}
+
+/// `error` as the routes answer it, `id` the proposal asked for. A store,
+/// codec or random failure is logged and answered without its detail,
+/// which names files of the data folder.
+fn refused(error: ProposalError, id: &str) -> ProposalsError {
+    let unavailable = |what: &str, detail: String| {
+        log::warn!("the proposals could not be read or kept: {what}: {detail}");
+        ProposalsError::Unavailable {
+            code: ErrorCode::ProposalsUnavailable,
+            args: Vec::new(),
+            detail: None,
+        }
+    };
+    match error {
+        ProposalError::Refused(refused) => refused_at(refused, &[]),
+        ProposalError::Full => ProposalsError::Limit { limit: MAX_PENDING },
+        ProposalError::Unknown => ProposalsError::Unknown {
+            proposal: id.to_owned(),
+        },
+        ProposalError::NotPending(status) => ProposalsError::NotPending { status },
+        ProposalError::Config(error) => unusable(*error),
+        ProposalError::Store(error) => unavailable("the store", error.to_string()),
+        ProposalError::Codec(error) => unavailable("a proposal's changes", error.0),
+        ProposalError::Random(error) => unavailable("random bytes", error.0),
+    }
+}
+
+/// A configuration that couldn't be read, as every route that reads the
+/// file says it (#347).
+fn unusable(error: ConfigError) -> ProposalsError {
+    config_unusable(error, |code: ErrorCode, args, detail| {
+        ProposalsError::Unavailable { code, args, detail }
+    })
 }
 
 #[cfg(test)]
