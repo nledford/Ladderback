@@ -445,6 +445,28 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # names the button.
 ui-gallery-spinner-saving = Saving the demo settings…
 
+# The heading of the gallery's icon demo (§4.5): one Lucide glyph, beside
+# words or inside a control.
+ui-gallery-icon-heading = Icon
+
+# The words of a line in the gallery's icon demo, which a clock icon
+# stands before as decoration.
+ui-gallery-icon-line = The next demo backup starts at 02:00 every night.
+
+# The names of the demo's icons that a label names, one for each size of
+# the shared vocabulary (Small, Medium, Large, Extra large): a screen reader
+# reads them as images. The size names match the vocabulary demo's.
+ui-gallery-icon-small = Demo icon at the Small size
+ui-gallery-icon-medium = Demo icon at the Medium size
+ui-gallery-icon-large = Demo icon at the Large size
+ui-gallery-icon-xlarge = Demo icon at the Extra large size
+
+# The name of a demo toggle button that shows only an icon (a bell, crossed
+# out while it is off): the button's own label, which a screen reader reads
+# as its name, pressed or not. Pressing it turns the demo's notifications
+# on or off, and nothing else.
+ui-gallery-icon-notifications = Demo notifications
+
 # The heading of the gallery's demo of the step-up field (§4.5): the field a
 # restore is confirmed with, in a review dialog.
 ui-gallery-step-up-heading = Step-up field

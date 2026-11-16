@@ -24,36 +24,39 @@ pub enum Meaning {
 impl Meaning {
     /// The drawing's `role`: an image only when it carries a label.
     pub fn role(&self) -> Option<&'static str> {
-        todo!()
+        matches!(self, Self::Labelled(_)).then_some("img")
     }
 
     /// The drawing's `aria-hidden`: hidden when it is decoration.
     pub fn hidden(&self) -> Option<&'static str> {
-        todo!()
+        matches!(self, Self::Decorative).then_some("true")
     }
 
     /// The drawing's accessible name (`aria-label`): its label, if it has one.
     pub fn name(&self) -> Option<&str> {
-        todo!()
+        match self {
+            Self::Decorative => None,
+            Self::Labelled(label) => Some(label),
+        }
     }
 }
 
 /// The tone an icon is drawn in when its caller names none: the color of
 /// the text around it, as an icon beside words or inside a control is.
 pub fn default_tone() -> Tone {
-    todo!()
+    Tone::Inherit
 }
 
 /// The size an icon is drawn at when its caller names none: as tall as the
 /// text (1em).
 pub fn default_size() -> Size {
-    todo!()
+    Size::Small
 }
 
 /// The classes of the icon's drawing: its tone, which colors the glyph, and
 /// its size, which `style.css`'s shared scale makes its length.
-pub fn icon_class(_tone: Tone, _size: Size) -> String {
-    todo!()
+pub fn icon_class(tone: Tone, size: Size) -> String {
+    format!("icon {} {}", tone.class(), size.class())
 }
 
 #[cfg(test)]

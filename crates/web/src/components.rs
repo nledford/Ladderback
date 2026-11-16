@@ -36,6 +36,7 @@ pub(crate) mod tree;
 pub use checkbox::Checkbox;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};
 pub use form_field::FormField;
+pub use icon::Icon;
 pub use modal_dialog::ModalDialog;
 pub(crate) use pause_updates::PauseUpdates;
 pub use progress::Progress;

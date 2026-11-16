@@ -20,7 +20,8 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tone {
     /// Ladder Blue (`--accent`), the one accent for action. The default: a
-    /// component draws in it unless its caller names another tone.
+    /// component draws in it unless its caller names another tone, or its
+    /// §4.5 row names a default of its own (the icon's is Inherit).
     #[default]
     Primary,
     /// Slate Note (`--muted`), neutral.
