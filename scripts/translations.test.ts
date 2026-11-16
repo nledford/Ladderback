@@ -55,6 +55,19 @@ test("spaces at the ends of lines and Windows line ends don't change a message",
   assert.deepEqual(entries("greeting = Hello  \r\n\r\n"), [{ id: "greeting", text: "greeting = Hello" }]);
 });
 
+test("a placeable's lines at the first column stay in the message", () => {
+  const ftl = "total = { NUMBER($n,\nminimumFractionDigits: 2) } of {\n-brand-name }\nnext = Next\n";
+  assert.deepEqual(entries(ftl), [
+    { id: "total", text: "total = { NUMBER($n,\nminimumFractionDigits: 2) } of {\n-brand-name }" },
+    { id: "next", text: "next = Next" },
+  ]);
+});
+
+test("a byte order mark at the start of a file is no part of it", () => {
+  assert.deepEqual(entries("\uFEFFgreeting = Hello\n"), [{ id: "greeting", text: "greeting = Hello" }]);
+  assert.deepEqual(parseSources(`\uFEFFgreeting ${HELLO}\n`, "de/sources.txt"), new Map([["greeting", HELLO]]));
+});
+
 test("a source's hash is the SHA-256 of the message's text", () => {
   assert.equal(sourceHash("greeting = Hello"), HELLO);
 });

@@ -62,10 +62,10 @@ export interface Listing {
 const SOURCE_TAG = "en-US";
 const SOURCES_FILE = "sources.txt";
 
-/** A line at the first column that begins an entry or a comment. Anything
- * else (indented, blank, or a select's `[`, `*[` or `}` and an attribute's
- * `.`, which Fluent allows there) belongs to the entry above it. */
-const ENTRY_START = /^[A-Za-z#-]/;
+/** A line that begins a message or a term. Only such a line, or a comment,
+ * ends the entry above it: any other line belongs to it, whether indented,
+ * blank, or at the first column, where Fluent allows a select's `[`, `*[` and
+ * `}`, an attribute's `.` and the inside of a placeable. */
 const MESSAGE = /^(-?[A-Za-z][A-Za-z0-9_-]*) *=/;
 const SOURCE_LINE = /^(-?[A-Za-z][A-Za-z0-9_-]*) ([0-9a-f]{64})$/;
 
@@ -87,15 +87,13 @@ export function entries(ftl: string): Entry[] {
     found.push({ id, text: lines.join("\n") });
     id = null;
   };
-  for (const raw of ftl.split(/\r?\n/)) {
+  for (const raw of ftl.replace(/^\uFEFF/, "").split(/\r?\n/)) {
     const line = raw.trimEnd();
-    if (ENTRY_START.test(line)) {
-      close();
-      const name = MESSAGE.exec(line)?.[1];
-      if (name !== undefined) {
-        id = name;
-        lines = [line];
-      }
+    const name = MESSAGE.exec(line)?.[1];
+    if (name !== undefined || line.startsWith("#")) close();
+    if (name !== undefined) {
+      id = name;
+      lines = [line];
     } else if (id !== null) {
       lines.push(line);
     }
