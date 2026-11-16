@@ -23,7 +23,7 @@ Feature: A scheduled run waits for the session's keyring service while the daemo
     And the keyring entry "ladderback/demo" was read 4 times
 
   Scenario: Only the keyring entry that couldn't be read is read again
-    Given the session's keyring service starts 45 seconds after the daemon
+    Given the session's keyring service starts 50 seconds after the daemon
     And the file "/home/demo/token" holds "demo-token"
     And the option "token" is "${file:/home/demo/token}"
     When the schedule starts a backup 30 seconds after the daemon started

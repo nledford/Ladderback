@@ -917,6 +917,10 @@ async fn schedule_starts_and_clock_set_back(agent: &mut Agent, seconds: i64) {
         .waits(agent.clock.clone(), agent.secrets.up_from())
         .resolve_saved_unattended(&demo_alias(), &agent.secrets.entry(), &waiting)
         .await;
+    assert!(
+        agent.clock.now() < agent.secrets.started(),
+        "the clock was never set back"
+    );
     agent.secrets.outcome = Some(outcome);
 }
 
@@ -939,12 +943,10 @@ async fn schedule_starts_and_daemon_stops(agent: &mut Agent, seconds: i64) {
     // A clock that moves only when told, so the wait is still going when the
     // daemon stops.
     let clock = Arc::new(FakeClock::new(agent.clock.now()));
-    let (stop, stopped) = futures::channel::oneshot::channel::<()>();
-    let stop = Mutex::new(Some(stop));
-    let waiting = move |_: &SourceName| {
-        if let Some(stop) = stop.lock().unwrap_or_else(PoisonError::into_inner).take() {
-            let _ = stop.send(());
-        }
+    let told = Arc::new(Mutex::new(false));
+    let waiting = {
+        let told = Arc::clone(&told);
+        move |_: &SourceName| *told.lock().unwrap_or_else(PoisonError::into_inner) = true
     };
     // This clock's monotonic time starts at zero, `seconds` after the
     // daemon started.
@@ -955,12 +957,25 @@ async fn schedule_starts_and_daemon_stops(agent: &mut Agent, seconds: i64) {
     let alias = demo_alias();
     let resolving = use_case.resolve_saved_unattended(&alias, &entry, &waiting);
     futures::pin_mut!(resolving);
+    // The run waits once it sleeps on the clock.
+    let asleep = async {
+        while clock.sleepers() == 0 {
+            tokio::task::yield_now().await;
+        }
+    };
+    futures::pin_mut!(asleep);
     // The daemon's stop drops the run's start, and the wait with it.
-    match futures::future::select(resolving, stopped).await {
+    match futures::future::select(resolving, asleep).await {
         futures::future::Either::Left((outcome, _)) => {
             panic!("the run's wait ended before the daemon stopped: {outcome:?}")
         }
-        futures::future::Either::Right(_) => agent.secrets.stopped_at = Some(clock.now()),
+        futures::future::Either::Right(_) => {
+            assert!(
+                *told.lock().unwrap_or_else(PoisonError::into_inner),
+                "the run waited without the daemon being told"
+            );
+            agent.secrets.stopped_at = Some(clock.now());
+        }
     }
 }
 

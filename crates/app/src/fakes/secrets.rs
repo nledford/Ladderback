@@ -35,6 +35,12 @@ pub enum Script {
 /// reports the limit it was given, which is a minute unless set otherwise.
 const FAKE_TIME_LIMIT_SECONDS: u64 = 60;
 
+/// How often a keyring entry may be read while the keyring can't be asked
+/// before the fake stops saying so: a run that holds for the keyring reads
+/// it 13 times at most (`KEYRING_WAIT` over `KEYRING_POLL`), so more is a
+/// run that spins.
+const FAKE_UNAVAILABLE_READS: usize = 1_000;
+
 /// A secret store in memory: an environment, files with permissions, a
 /// keyring and scripted commands, read through the same rules as the real
 /// resolver (`domain::secrets::{decode, file_warning}`). It remembers what it
@@ -264,6 +270,18 @@ impl SecretResolver for FakeSecrets {
                 };
                 let unavailable = keyring_unavailable(&state);
                 if let Some((detail, cause)) = unavailable {
+                    // A run that spins on a keyring it can't ask would hang
+                    // its test: past the cap, the read fails otherwise, so
+                    // the test ends and says so.
+                    let reads = state.reads.iter().filter(|read| *read == secret).count();
+                    if reads > FAKE_UNAVAILABLE_READS {
+                        return Err(SecretError {
+                            source,
+                            problem: Problem::Unreachable {
+                                detail: "read without end while it can't be asked".to_owned(),
+                            },
+                        });
+                    }
                     return Err(SecretError {
                         source,
                         problem: Problem::KeyringUnavailable {
@@ -356,4 +374,42 @@ fn exited(
         value: command_secret(source, stdout)?,
         warnings: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::secrets::KeyringEntry;
+
+    /// A keyring that can't be asked says so for as many reads as any hold
+    /// makes, then fails the read otherwise, so a run that spins ends its
+    /// test rather than hanging it.
+    #[tokio::test]
+    async fn a_keyring_read_without_end_stops_saying_it_cant_be_asked() {
+        let secrets = FakeSecrets::new();
+        secrets.remove_keyring_service();
+        let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+        let other = SecretRef::Keyring(KeyringEntry::parse("ladderback-demo/other").unwrap());
+        let _ = secrets.resolve(&other).await;
+        let secret = SecretRef::Keyring(entry);
+        for read in 1..=FAKE_UNAVAILABLE_READS {
+            assert!(
+                matches!(
+                    secrets.resolve(&secret).await,
+                    Err(SecretError {
+                        problem: Problem::KeyringUnavailable { .. },
+                        ..
+                    })
+                ),
+                "read {read}"
+            );
+        }
+        assert!(matches!(
+            secrets.resolve(&secret).await,
+            Err(SecretError {
+                problem: Problem::Unreachable { .. },
+                ..
+            })
+        ));
+    }
 }
