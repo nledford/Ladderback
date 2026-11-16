@@ -24,12 +24,15 @@ impl FakeChangeCodec {
 
 impl ChangeCodec for FakeChangeCodec {
     fn encode(&self, changes: &[ConfigChange]) -> Result<String, CodecError> {
-        let _ = (self.written(), changes);
-        todo!()
+        let mut written = self.written();
+        written.push(changes.to_vec());
+        Ok(format!("changes-{}", written.len().saturating_sub(1)))
     }
 
     fn decode(&self, text: &str) -> Result<Vec<ConfigChange>, CodecError> {
-        let _ = text;
-        todo!()
+        text.strip_prefix("changes-")
+            .and_then(|place| place.parse::<usize>().ok())
+            .and_then(|place| self.written().get(place).cloned())
+            .ok_or_else(|| CodecError("text the fake codec didn't write".to_owned()))
     }
 }
