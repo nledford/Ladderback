@@ -840,12 +840,23 @@ mod tests {
     /// `status` (`401 Unauthorized`, say) and an empty body. It serves until
     /// the test process ends.
     fn server_answering(status: &'static str) -> std::net::SocketAddr {
+        server_answering_by(move |_| status)
+    }
+
+    /// An HTTP server on a free local port that answers each request with
+    /// the status `status` gives for its request line (`GET /keys/ HTTP/1.1`)
+    /// and an empty body. It serves until the test process ends.
+    fn server_answering_by(
+        status: impl Fn(&str) -> &'static str + Send + 'static,
+    ) -> std::net::SocketAddr {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let mut reader = BufReader::new(&stream);
+                let mut request = String::new();
+                let _ = reader.read_line(&mut request);
                 let mut line = String::new();
                 let mut length = 0;
                 while reader.read_line(&mut line).is_ok_and(|read| read > 2) {
@@ -857,6 +868,7 @@ mod tests {
                     line.clear();
                 }
                 let _ = io::copy(&mut io::Read::take(&mut reader, length), &mut io::sink());
+                let status = status(&request);
                 let _ = (&stream).write_all(
                     format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
                         .as_bytes(),
@@ -900,6 +912,62 @@ mod tests {
             ..spec_at(&cold.to_string_lossy())
         };
         assert_eq!(failed_code(&spec), api::ErrorCode::CredentialsRefused);
+    }
+
+    /// A hot half on a REST server that answers the config's request and
+    /// refuses the listing of the keys: rustic's error holds the 401 itself,
+    /// and the halves' own listing names the hot half (#521).
+    #[test]
+    fn a_refusal_rustic_kept_of_a_hot_half_names_the_hot_half() {
+        let root = tempfile::tempdir().unwrap();
+        let cold = root.path().join("cold");
+        init(&cold);
+        let hot = server_answering_by(|request| {
+            if request.contains("/keys/") {
+                "401 Unauthorized"
+            } else {
+                "200 OK"
+            }
+        });
+        let spec = RepositorySpec {
+            repo_hot: Some(format!("rest:http://{hot}/")),
+            ..spec_at(&cold.to_string_lossy())
+        };
+        assert_matches!(
+            failure(&spec),
+            JobError::CredentialsRefused {
+                half: Some(RepositoryHalf::Hot),
+                ..
+            }
+        );
+    }
+
+    /// A refusal rustic kept that no half's listing repeats, as when the
+    /// server refuses only the first request, is still a refusal, naming no
+    /// half (#521).
+    #[test]
+    fn a_refusal_no_listing_repeats_names_no_half() {
+        let root = tempfile::tempdir().unwrap();
+        let cold = root.path().join("cold");
+        init(&cold);
+        let refused = std::sync::atomic::AtomicBool::new(false);
+        let hot = server_answering_by(move |request| {
+            if request.contains("/keys/")
+                && !refused.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                "401 Unauthorized"
+            } else {
+                "200 OK"
+            }
+        });
+        let spec = RepositorySpec {
+            repo_hot: Some(format!("rest:http://{hot}/")),
+            ..spec_at(&cold.to_string_lossy())
+        };
+        assert_matches!(
+            failure(&spec),
+            JobError::CredentialsRefused { half: None, .. }
+        );
     }
 
     /// A REST server that takes the credentials and holds no repository
