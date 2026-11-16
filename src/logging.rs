@@ -8,7 +8,15 @@
 //! While the daemon opens a repository itself (to evaluate retention), the
 //! records of rustic and the crates under it reach this log too, and every
 //! record is masked with that repository's secrets (`engine::Masked`, I4).
+//! The daemon keeps each line it writes in its recent log too (#618), as
+//! masked as the line it writes, since the recent log is fed from inside
+//! the masking.
 
+use std::sync::Arc;
+
+use app::ports::RecentLogStore;
+use domain::Timestamp;
+use domain::daemon_log::{LogLevel, LogLine};
 use env_logger::{Builder, Logger, Target, WriteStyle};
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
@@ -17,20 +25,23 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 const DEFAULT_LEVEL: LevelFilter = LevelFilter::Info;
 
 /// Makes the daemon log to stderr, once, in the style [`write_style`] gives
-/// for `plain`. Where a logger is set already, this one or another, that one
-/// stays, and nothing is changed or reported.
-pub(crate) fn install(plain: bool) {
+/// for `plain`, and keep each line it writes in `recent` when given. Where a
+/// logger is set already, this one or another, that one stays, and nothing
+/// is changed or reported.
+pub(crate) fn install(plain: bool, recent: Option<Arc<dyn RecentLogStore>>) {
     let rust_log = std::env::var("RUST_LOG").ok();
-    set(logger(
-        rust_log.as_deref(),
-        Target::Stderr,
-        write_style(plain),
-    ));
+    let logger = logger(rust_log.as_deref(), Target::Stderr, write_style(plain));
+    set(match recent {
+        Some(recent) => logger.recording(recent),
+        None => logger,
+    });
 }
 
 /// Makes `logger` the process's logger, once, at the level it filters at,
-/// its records masked while the daemon has a repository open itself. Where
-/// a logger is set already, that one stays.
+/// its records masked while the daemon has a repository open itself: the
+/// masking wraps the logger, so what it writes and what it keeps in its
+/// recent log are both masked (I4). Where a logger is set already, that one
+/// stays.
 fn set(logger: DaemonLog) {
     let level = logger.filter();
     if log::set_boxed_logger(Box::new(engine::Masked::new(logger))).is_ok() {
@@ -49,13 +60,25 @@ const MCP_SDK_MOST: Level = Level::Warn;
 /// SDK below [`MCP_SDK_MOST`]. The cap checks each record's target rather
 /// than adding a directive: env_logger lets the directive for the longest
 /// matching name decide, so one for a module of the SDK
-/// (`rmcp::service=debug`) would outrank one for the whole SDK.
-pub(crate) struct DaemonLog(Logger);
+/// (`rmcp::service=debug`) would outrank one for the whole SDK. Each line it
+/// writes it keeps in the recent log it records into, when it has one.
+pub(crate) struct DaemonLog {
+    log: Logger,
+    recent: Option<Arc<dyn RecentLogStore>>,
+}
 
 impl DaemonLog {
     /// The most verbose level any record can pass at.
     fn filter(&self) -> LevelFilter {
-        self.0.filter()
+        self.log.filter()
+    }
+
+    /// This logger, keeping each line it writes in `recent` too.
+    pub(crate) fn recording(self, recent: Arc<dyn RecentLogStore>) -> Self {
+        Self {
+            recent: Some(recent),
+            ..self
+        }
     }
 }
 
@@ -69,19 +92,39 @@ fn sdk_verbose(metadata: &Metadata<'_>) -> bool {
     of_sdk && metadata.level() > MCP_SDK_MOST
 }
 
+/// The recent log's level of a record's.
+fn log_level(level: Level) -> LogLevel {
+    match level {
+        Level::Error => LogLevel::Error,
+        Level::Warn => LogLevel::Warn,
+        Level::Info => LogLevel::Info,
+        Level::Debug => LogLevel::Debug,
+        Level::Trace => LogLevel::Trace,
+    }
+}
+
 impl Log for DaemonLog {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        !sdk_verbose(metadata) && self.0.enabled(metadata)
+        !sdk_verbose(metadata) && self.log.enabled(metadata)
     }
 
     fn log(&self, record: &Record<'_>) {
-        if !sdk_verbose(record.metadata()) {
-            self.0.log(record);
+        if sdk_verbose(record.metadata()) || !self.log.matches(record) {
+            return;
+        }
+        self.log.log(record);
+        if let Some(recent) = &self.recent {
+            recent.record(LogLine::new(
+                Timestamp::now(),
+                log_level(record.level()),
+                record.target(),
+                *record.args(),
+            ));
         }
     }
 
     fn flush(&self) {
-        self.0.flush();
+        self.log.flush();
     }
 }
 
@@ -99,13 +142,14 @@ pub(crate) fn logger(rust_log: Option<&str>, target: Target, style: WriteStyle) 
     if let Some(rust_log) = rust_log {
         builder.parse_filters(rust_log);
     }
-    DaemonLog(
-        builder
+    DaemonLog {
+        log: builder
             .target(target)
             .write_style(style)
             .format_timestamp_millis()
             .build(),
-    )
+        recent: None,
+    }
 }
 
 /// How the daemon's log is styled: with no colour at all when plain output

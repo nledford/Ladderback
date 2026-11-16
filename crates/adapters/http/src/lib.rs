@@ -100,6 +100,9 @@ pub struct AppState {
     /// The available update the release check found, which the session
     /// route tells with the build (decision 107).
     pub updates: Arc<app::updates::UpdateNotice>,
+    /// The newest lines of the daemon's own log, which the Log page reads
+    /// (#618).
+    pub recent_log: Arc<dyn app::ports::RecentLogStore>,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {
@@ -480,6 +483,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             "/api/v1/operations",
             axum::routing::get(list_operations).post(run_plan),
         )
+        .route("/api/v1/log", axum::routing::get(recent_log))
         .route("/api/v1/operations/{id}", axum::routing::get(get_operation))
         .route(
             "/api/v1/operations/{id}/cancel",
@@ -743,6 +747,12 @@ async fn list_operations(
                 .map_or_default(|cursor| vec![("cursor", api::MsgArg::Text(cursor))]),
         ),
     }
+}
+
+/// The recent log: the daemon log's newest lines, newest first (#618).
+async fn recent_log(State(state): State<AppState>) -> Response {
+    let answer = app::recent_log::answer(state.recent_log.as_ref());
+    (StatusCode::OK, axum::Json(answer)).into_response()
 }
 
 /// One operation's detail: what happened, with its warnings.
@@ -1478,6 +1488,7 @@ mod tests {
             build: crate::request_checks::tests::test_build(),
             restart: Restart::default(),
             updates: Arc::default(),
+            recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
         }
     }
 
@@ -1521,6 +1532,7 @@ mod tests {
             build: crate::request_checks::tests::test_build(),
             restart: Restart::default(),
             updates: Arc::default(),
+            recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -2899,6 +2911,7 @@ mod tests {
             build: crate::request_checks::tests::test_build(),
             restart: Restart::default(),
             updates: Arc::default(),
+            recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(
