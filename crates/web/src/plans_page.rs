@@ -16,8 +16,8 @@ use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::{
-    Checkbox, Confirmation, ErrorSummary, FormField, ReviewDialog, SummaryItem, Working,
-    focus_element, hand_focus_when_gone, recover_focus, sentence_view,
+    Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
+    focus_element, hand_focus_when_gone, recover_focus, sentence_view, text_field,
 };
 use crate::live::reply;
 use crate::plans::{
@@ -594,14 +594,28 @@ fn PlanEditor(
         let Some((value, error)) = inputs.input(field) else {
             return ().into_any();
         };
-        match field.kind() {
-            Kind::Flag => view! { <Checkbox id=field.id() label=label description=hint checked=inputs.git_ignore /> }
-            .into_any(),
-            Kind::Lines => view! { <FormField id=field.id() label=label description=hint error=error value=value lines=3 /> }
-            .into_any(),
-            Kind::Text | Kind::Count => view! { <FormField id=field.id() label=label description=hint error=error value=value /> }
-            .into_any(),
+        let takes = match field.kind() {
+            Kind::Flag => {
+                return view! { <Checkbox id=field.id() label=label description=hint checked=inputs.git_ignore /> }
+                    .into_any();
+            }
+            Kind::Lines => text_field::Kind::Lines { rows: 3 },
+            Kind::Count => text_field::Kind::Number,
+            Kind::Text => text_field::Kind::Line,
+        };
+        view! {
+            <TextField
+                id=field.id()
+                localizer=Arc::clone(&localizer)
+                label=label
+                description=hint
+                error=error
+                value=value
+                kind=takes
+                required=field.required()
+            />
         }
+        .into_any()
     };
     let group = |legend, fields: &[Field]| {
         view! {

@@ -3,7 +3,7 @@ use leptos::prelude::*;
 /// A checkbox: a native `<input type="checkbox">` with its visible label
 /// beside it, which is also its click target, and an optional description
 /// wired to it with `aria-describedby`, read after its name, as a
-/// [`FormField`](super::FormField)'s is. `checked` holds the choice, so the caller reads and
+/// [`TextField`](super::TextField)'s is. `checked` holds the choice, so the caller reads and
 /// resets it. Space turns it on and off, and the browser tells a screen
 /// reader its state, so nothing here announces it. One size and no color of
 /// its own: its meaning is in its words (1.4.1). Off and on only: no

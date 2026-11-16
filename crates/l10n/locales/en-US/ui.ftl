@@ -214,34 +214,33 @@ ui-gallery-demo-repo-harbor = harbor
 # A repository row of the data table demo.
 ui-gallery-demo-repo-moor = moor
 
-# The heading of the gallery's form field demo.
-ui-gallery-form-heading = Form field
+# The heading of the gallery's text field demo (§4.5): every kind, size and
+# state of the shared text field.
+ui-gallery-text-field-heading = Text field
 
-# The label of the demo form field.
+# The label of the demo text field whose error a button shows and clears.
 ui-gallery-repository-name = Repository name
 
-# The hint under the demo form field, describing its input.
+# The hint under that demo text field, describing its input.
 ui-gallery-repository-hint = The name of the repository to check.
 
-# The button that checks the demo form field.
+# The button that checks that demo text field.
 ui-gallery-check-repository = Check the repository name
 
-# The error the demo form field shows when its input is empty.
+# The error that demo text field shows when its input is empty.
 ui-gallery-repository-required = A repository name is required.
 
-# The heading of the gallery's multi-line form field demo.
-ui-gallery-lines-heading = Multi-line form field
-
-# The label of the demo multi-line form field, which takes one entry a line.
+# The label of the demo text field of many lines, which takes one entry a
+# line.
 ui-gallery-demo-folders = Demo folders
 
-# The hint under the demo multi-line form field, describing its input.
+# The hint under the demo text field of many lines, describing its input.
 ui-gallery-demo-folders-hint = One folder or file a line.
 
-# The button that checks the demo multi-line form field.
+# The button that checks the demo text field of many lines.
 ui-gallery-check-folders = Check the demo folders
 
-# The error the demo multi-line form field shows.
+# The error the demo text field of many lines shows.
 ui-gallery-folders-required = Enter at least one folder.
 
 # The heading of the gallery's checkbox demo.
@@ -580,6 +579,55 @@ ui-gallery-button-presses =
         [one] The demo buttons were pressed once.
        *[other] The demo buttons were pressed { $count } times.
     }
+
+# The demo password field, which a button beside it shows and hides, and
+# its hint.
+ui-gallery-text-field-password = Demo password
+ui-gallery-text-field-password-hint = A demo field: what is typed here goes nowhere.
+
+# The demo number field, which asks for the keyboard of digits, and its hint.
+ui-gallery-text-field-copies = Demo copies to keep
+ui-gallery-text-field-copies-hint = A whole number, such as { "7" }.
+
+# The demo text field with an icon (a clock) at its start, and its hint.
+ui-gallery-text-field-time = Demo backup time
+ui-gallery-text-field-time-hint = When the demo backup starts, such as { "02:00" }.
+
+# The demo text field that must be filled in, and its hint. Its label says
+# "(required)" after it (ui-text-field-required).
+ui-gallery-text-field-plan = Demo plan name
+ui-gallery-text-field-plan-hint = A demo field that must be filled in.
+
+# The demo text field shown with its error, its hint and the error.
+ui-gallery-text-field-host = Demo host
+ui-gallery-text-field-host-hint = The demo machine's host name.
+ui-gallery-text-field-host-error = Enter a host name, such as { "backup.example" }.
+
+# The demo read-only text field, holding a demo snapshot's short ID, and its
+# hint.
+ui-gallery-text-field-snapshot = Demo snapshot ID
+ui-gallery-text-field-snapshot-hint = The demo snapshot's short ID.
+
+# The demo disabled text field, holding a demo folder, and its hint.
+ui-gallery-text-field-location = Demo repository location
+ui-gallery-text-field-location-hint = Set when the demo repository was made.
+
+# The demo disabled password field, which has no button to show it, and
+# its hint.
+ui-gallery-text-field-keyring = Demo keyring password
+ui-gallery-text-field-keyring-hint = Kept in the demo keyring, and changed there.
+
+# The demo text fields at each size of the shared vocabulary (Small, Medium,
+# Large, Extra large), each beside a button of its size, which the next four
+# name. The size names match the vocabulary demo's.
+ui-gallery-text-field-small = Demo tag at the Small size
+ui-gallery-text-field-medium = Demo tag at the Medium size
+ui-gallery-text-field-large = Demo tag at the Large size
+ui-gallery-text-field-xlarge = Demo tag at the Extra large size
+ui-gallery-text-field-add-small = Add the demo tag at the Small size
+ui-gallery-text-field-add-medium = Add the demo tag at the Medium size
+ui-gallery-text-field-add-large = Add the demo tag at the Large size
+ui-gallery-text-field-add-xlarge = Add the demo tag at the Extra large size
 
 # The heading of the gallery's tooltip demo (§4.5): a short note beside a
 # control, shown on keyboard focus or a resting pointer.
@@ -1473,6 +1521,26 @@ ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 # Announced politely when the settle-poll after a start or a cancel ran out
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
+
+## The text field (§4.5): what it says of itself, the same on every page.
+
+# The marker after a required text field's label, which says it must be
+# filled in. A screen reader skips it: the field says it is required itself.
+# It begins with the space between it and the label, { " " }, which a
+# language that writes none there leaves out.
+ui-text-field-required = { " " }(required)
+
+# The name of the toggle button beside a password field, pressed while the
+# password is shown. It keeps this one name pressed or not.
+ui-text-field-show-password = Show password
+
+# Under a read-only text field's label: it can be read and copied, not
+# changed.
+ui-text-field-read-only = Read only: you can select and copy it, but not change it.
+
+# Under a disabled text field's label: it can't be used now. The field's
+# own hint says why, where there is a reason.
+ui-text-field-disabled = Unavailable: it can't be changed now.
 
 ## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
 ## admin password with sign-in on, the short ID of what it confirms with

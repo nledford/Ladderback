@@ -35,8 +35,8 @@ use crate::api_tokens::{
     revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
 };
 use crate::components::{
-    Checkbox, Confirmation, ErrorSummary, FormField, ReviewDialog, SummaryItem, Working, copy_text,
-    hand_focus_when_gone, sentence_view,
+    Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working, copy_text,
+    hand_focus_when_gone, sentence_view, text_field,
 };
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -209,12 +209,13 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
     // The new token's dialog: its label, and its whole text, held only
     // while the dialog is open.
     let created_label = RwSignal::new(String::new());
-    let secret = RwSignal::<Option<String>>::new(None);
+    // The new token's whole text, empty while no dialog shows one.
+    let secret = RwSignal::new(String::new());
     let secret_open = RwSignal::new(false);
     let copy_said = RwSignal::<Option<String>>::new(None);
     Effect::new(move |_| {
         if !secret_open.get() {
-            secret.set(None);
+            secret.set(String::new());
             copy_said.set(None);
         }
     });
@@ -251,7 +252,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                         problems.show(Vec::new());
                         inputs.clear();
                         created_label.set(made.token.label);
-                        secret.set(Some(made.secret));
+                        secret.set(made.secret);
                         secret_open.set(true);
                         load.run(());
                     }
@@ -527,12 +528,14 @@ fn CreateForm(
                     submit.run(());
                 }
             >
-                <FormField
+                <TextField
                     id=Field::Label.id()
+                    localizer=Arc::clone(&localizer)
                     label=field_text(msg::UI_API_TOKEN_LABEL_LABEL)
                     description=label_hint
                     error=problems.label
                     value=inputs.label
+                    required=true
                 />
                 <fieldset
                     class="choices"
@@ -582,7 +585,7 @@ fn CreatedDialog(
     localizer: Arc<Localizer>,
     open: RwSignal<bool>,
     label: RwSignal<String>,
-    secret: RwSignal<Option<String>>,
+    secret: RwSignal<String>,
     said: RwSignal<Option<String>>,
 ) -> impl IntoView {
     let copy_button = NodeRef::<leptos::html::Button>::new();
@@ -601,24 +604,22 @@ fn CreatedDialog(
             starts_on=copy_button
         >
             <p id=CREATED_BODY_ID>{move || say(&body_localizer, created_body(&label.get()))}</p>
-            <div class="field">
-                <label for=SECRET_ID>{text(&localizer, msg::UI_API_TOKEN_CREATED_FIELD)}</label>
-                <input
-                    id=SECRET_ID
-                    class="token"
-                    type="text"
-                    readonly
-                    autocomplete="off"
-                    spellcheck="false"
-                    prop:value=move || secret.get().unwrap_or_default()
-                />
-            </div>
+            <TextField
+                id=SECRET_ID
+                localizer=Arc::clone(&localizer)
+                label=text(&localizer, msg::UI_API_TOKEN_CREATED_FIELD)
+                value=secret
+                kind=text_field::Kind::Code
+                access=text_field::Access::ReadOnly
+                token=true
+            />
             <p class="actions">
                 <button
                     type="button"
                     node_ref=copy_button
                     on:click=move |_| {
-                        if let Some(token) = secret.get_untracked() {
+                        let token = secret.get_untracked();
+                        if !token.is_empty() {
                             copy_text(&token, said, copied.clone(), refused.clone());
                         }
                     }

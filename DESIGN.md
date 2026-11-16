@@ -27,6 +27,8 @@ colors:
   flag-amber-dark: "#fbbf24"
   red-ink: "#b91c1c"
   red-ink-dark: "#f87171"
+  field-edge: "#6b7280"
+  field-edge-dark: "#7b8594"
 typography:
   body:
     fontFamily: "system-ui, sans-serif"
@@ -94,10 +96,15 @@ components:
     height: "2em"
     padding: "0 0.75em"
   field-input:
+    # A text field at the default size, a Medium button's height; its edge
+    # is Field Edge, 1 px.
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.graphite-ink}"
     typography: "{typography.body}"
-    height: "2rem"
+    rounded: "{rounded.sm}"
+    height: "2em"
     width: "32rem"
-    padding: "0.25rem 0.5rem"
+    padding: "0 0.75em"
   site-header:
     backgroundColor: "{colors.ledger-gray}"
     padding: "0.75rem 1rem"
@@ -149,7 +156,8 @@ A white page (dark: near-black), graphite text, one blue, three status hues and 
 - **Paper** (`--bg`): the page.
 - **Graphite Ink** (`--fg`): all body text and headings.
 - **Slate Note** (`--muted`): secondary text (captions, notes, the running version) and the rule under each table row and around the pause banner.
-- **Ledger Gray** (`--surface`): the site header, toasts, the pause banner and a progress bar's empty track.
+- **Ledger Gray** (`--surface`): the site header, toasts, the pause banner, a progress bar's empty track and an unavailable text field.
+- **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 
 ### Status
 
@@ -245,9 +253,15 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Inputs / Fields
 
-- **Style:** native inputs, full line width up to 32rem, at least 2rem tall, label above in Label weight.
+- **The component:** `TextField`, a native `<input>`, or `<textarea>` for many lines, drawn from the tokens (decision 113); every page's field uses it.
+- **Style:** a 1 px Field Edge, the small corner (`rounded.sm`), flat on the page's background, no shadow; full line width up to 32rem (40rem in Mono for a token); label above in Label weight, its description under it.
+- **Size:** a button's height (Small 1.75em, Medium 2em, the default, Large 2.5em, XLarge 3em) and inline padding, read from the one size rule both share, so a field and a button of one size stand level in a row of actions.
+- **Required:** "(required)" after the label, in words.
+- **Read only and unavailable:** told in words by a note under the description; read only has a dashed edge and stays focusable, unavailable takes Ledger Gray with Slate Note text.
+- **Icon:** optional, decorative, inside the edge at the inline start.
+- **Forced colors:** the reader's `Field` and `FieldText`, an unavailable field `GrayText`; invalid keeps its 2 px edge and read only its dashes.
 - **Checkbox:** before its label, never under 24 px square, growing with the text; its description sits under the label.
-- **Error:** the message beside its field in error red and semibold; on submit, an error summary boxed in a 2 px error-red border, with its own heading, takes focus.
+- **Error:** the message above its field in error red and semibold, the field's edge 2 px in Red Ink; on submit, an error summary boxed in a 2 px error-red border, with its own heading, takes focus.
 
 ### Navigation
 

@@ -13,6 +13,8 @@ Icons: Lucide's, from `lepticons-data`, which holds each icon's shapes without a
 
 The shared `Icon` component (§4.5, #778), which the status badges now draw with, turns on no category. The release `web` wasm built with `--no-default-features` grows 2,266 B (0.06%), 3,527,913 B before and 3,530,179 B after, and its brotli shrinks 2,211 B (0.3%), 818,918 B before and 816,707 B after; the gallery that shows every icon size and tone isn't in that build. Measured as above, at `690f5f70` and after.
 
+The shared text field's Show password button (§4.5, #782) draws an eye and a crossed-out eye, which turn on `accessibility`: 34 icons, 29 of them in no category already on, 296 in all. That category alone adds 7,982 B (0.2%) to the release `web` wasm built with `--no-default-features`, 3,587,011 B before and 3,594,993 B after, and 2,035 B (0.2%) to its brotli, 827,306 B before and 829,341 B after. Measured as above, at `4eacb452` with only the category added.
+
 ### 8.2 Backend crates
 
 | Concern | Crate |

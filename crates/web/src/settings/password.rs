@@ -24,7 +24,8 @@ use crate::admin_password::{
     button, error_of, problems_of, said_once_set, steps,
 };
 use crate::announcer::Politeness;
-use crate::components::{ErrorSummary, FormField, SummaryItem};
+use crate::components::text_field::Kind;
+use crate::components::{ErrorSummary, SummaryItem, TextField};
 use crate::live::reply;
 use crate::routes::{refused_sentence, text_with};
 use crate::session::Standing;
@@ -175,14 +176,16 @@ pub(super) fn AdminPassword(
     let field_text = |id| text(&localizer, id);
     let current = on.then(|| {
         view! {
-            <FormField
+            <TextField
                 id=Field::Current.id()
+                localizer=Arc::clone(&localizer)
                 label=field_text(msg::UI_ADMIN_PASSWORD_CURRENT_LABEL)
                 description=field_text(msg::UI_ADMIN_PASSWORD_CURRENT_HINT)
                 error=problems.current
                 value=inputs.current
-                kind="password"
+                kind=Kind::Password
                 autocomplete="current-password"
+                required=true
             />
         }
     });
@@ -220,23 +223,27 @@ pub(super) fn AdminPassword(
                 }
             >
                 {current}
-                <FormField
+                <TextField
                     id=Field::New.id()
+                    localizer=Arc::clone(&localizer)
                     label=field_text(msg::UI_ADMIN_PASSWORD_NEW_LABEL)
                     description=new_hint
                     error=problems.new
                     value=inputs.new
-                    kind="password"
+                    kind=Kind::Password
                     autocomplete="new-password"
+                    required=true
                 />
-                <FormField
+                <TextField
                     id=Field::Again.id()
+                    localizer=Arc::clone(&localizer)
                     label=field_text(msg::UI_ADMIN_PASSWORD_AGAIN_LABEL)
                     description=field_text(msg::UI_ADMIN_PASSWORD_AGAIN_HINT)
                     error=problems.again
                     value=inputs.again
-                    kind="password"
+                    kind=Kind::Password
                     autocomplete="new-password"
+                    required=true
                 />
                 <p class="actions">
                     <button type="submit">{button_text}</button>
