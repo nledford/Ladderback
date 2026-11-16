@@ -97,8 +97,21 @@ Feature: Downloading files from a snapshot
     And sign-in is off
     When the person confirms a download of "home/docs/notes.md" of the snapshot, confirming with "3f2a1b4c"
     And 61 seconds pass before the browser fetches it
+    And the agent gives up the downloads whose minute ran out
     Then the hand-over is refused because the download is unknown
     And the engine's download job was stopped
+    And the history shows the download, started by hand, as cancelled
+
+  # The browser's request can end at any moment, as when the person closes
+  # the tab, so giving up a download whose minute ran out is the agent's
+  # work, never the request's: none is left running in the history.
+  Scenario: A browser that hangs up after a download's minute leaves it in the history as cancelled
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And sign-in is off
+    When the person confirms a download of "home/docs/notes.md" of the snapshot, confirming with "3f2a1b4c"
+    And 61 seconds pass before the browser fetches it and hangs up while the history is written
+    And the agent gives up the downloads whose minute ran out
+    Then the engine's download job was stopped
     And the history shows the download, started by hand, as cancelled
 
   Scenario: A reader that goes away midway stops the download
