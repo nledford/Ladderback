@@ -21,6 +21,9 @@
   --badge-error-bg: #fee2e2;
   --badge-success-fg: #052e16;
   --badge-success-bg: #dcfce7;
+  --success: #15803d;
+  --warning: #b45309;
+  --error: #b91c1c;
   color-scheme: light dark;
 }
 
@@ -40,6 +43,9 @@
     --badge-error-bg: #691717;
     --badge-success-fg: #dcfce7;
     --badge-success-bg: #052e16;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --error: #f87171;
   }
 }
 
@@ -282,6 +288,139 @@ main:focus {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/*
+ * The shared vocabulary (§4.5; `variants.rs`): every shared component takes
+ * a tone, a size and a placement, each a class here.
+ *
+ * A tone's class sets `--tone`, which the component draws with
+ * (`var(--tone)`). Inherit is `currentColor`, which resolves where the
+ * component uses it: the color of the text around it. Under forced colors
+ * every other tone is the reader's text color (the status tokens below, and
+ * Primary and Secondary here), so the words a tone always comes with tell
+ * them apart.
+ *
+ * A size has no length here: each component maps `size-small`,
+ * `size-medium`, `size-large` and `size-xlarge` to `em` values of its own,
+ * beside its styles, so it grows with the reader's text.
+ *
+ * A placement puts the component in its line in logical terms: Inline keeps
+ * it in the line of text, as wide as what it holds; Start, Center and End
+ * give it a line of its own and put what it holds at the line's start,
+ * middle or end, in the page's direction. The class goes on the line, an
+ * element of the component's own around its part, never on the part's root:
+ * it sets the line's `display`, which a root's own `display` (a badge's
+ * inline-flex) would override, and a boxed root (a button) would stretch
+ * across the line.
+ */
+.tone-primary {
+  --tone: var(--accent);
+}
+
+.tone-secondary {
+  --tone: var(--muted);
+}
+
+.tone-success {
+  --tone: var(--success);
+}
+
+.tone-warning {
+  --tone: var(--warning);
+}
+
+.tone-error {
+  --tone: var(--error);
+}
+
+.tone-inherit {
+  --tone: currentColor;
+}
+
+@media (forced-colors: active) {
+  :root {
+    --success: CanvasText;
+    --warning: CanvasText;
+    --error: CanvasText;
+  }
+
+  .tone-primary,
+  .tone-secondary {
+    --tone: CanvasText;
+  }
+}
+
+.placement-inline {
+  display: inline-flex;
+}
+
+.placement-start,
+.placement-center,
+.placement-end {
+  display: flex;
+}
+
+.placement-start {
+  justify-content: start;
+}
+
+.placement-center {
+  justify-content: center;
+}
+
+.placement-end {
+  justify-content: end;
+}
+
+/* The gallery's vocabulary demo (`gallery.rs`): each tone's name and its
+   swatch drawn in the tone, a swatch at each size, and a part at each
+   placement inside a framed line, so where it sits shows. The swatch maps
+   the sizes to lengths of its own: 1em, 1.5em, 2em and 3em. */
+.vocabulary-demo {
+  list-style: none;
+  margin-block: 0 1rem;
+  padding: 0;
+}
+
+.vocabulary-demo > li {
+  align-items: center;
+  gap: 0.5em;
+  padding-block: 0.25rem;
+}
+
+.vocabulary-tone,
+.vocabulary-size {
+  display: flex;
+}
+
+.vocabulary-tone {
+  color: var(--tone);
+}
+
+.vocabulary-placements {
+  border: 1px solid var(--muted);
+}
+
+.vocabulary-swatch {
+  flex: none;
+  inline-size: 1em;
+  block-size: 1em;
+}
+
+.vocabulary-swatch.size-medium {
+  inline-size: 1.5em;
+  block-size: 1.5em;
+}
+
+.vocabulary-swatch.size-large {
+  inline-size: 2em;
+  block-size: 2em;
+}
+
+.vocabulary-swatch.size-xlarge {
+  inline-size: 3em;
+  block-size: 3em;
 }
 
 /*

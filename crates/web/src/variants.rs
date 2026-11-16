@@ -49,7 +49,14 @@ impl Tone {
 
     /// The class of `style.css` that sets `--tone` to this tone's color.
     pub fn class(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Primary => "tone-primary",
+            Self::Secondary => "tone-secondary",
+            Self::Success => "tone-success",
+            Self::Warning => "tone-warning",
+            Self::Error => "tone-error",
+            Self::Inherit => "tone-inherit",
+        }
     }
 }
 
@@ -72,7 +79,12 @@ impl Size {
 
     /// The class of `style.css` a component maps to its own length.
     pub fn class(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Small => "size-small",
+            Self::Medium => "size-medium",
+            Self::Large => "size-large",
+            Self::XLarge => "size-xlarge",
+        }
     }
 }
 
@@ -104,7 +116,12 @@ impl Placement {
     /// it holds, which on a root with a `display` and a box of its own (a
     /// badge, a button) would be overridden or would stretch the box.
     pub fn class(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Inline => "placement-inline",
+            Self::Start => "placement-start",
+            Self::Center => "placement-center",
+            Self::End => "placement-end",
+        }
     }
 }
 

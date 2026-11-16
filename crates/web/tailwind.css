@@ -27,4 +27,7 @@
   --color-badge-error-bg: var(--badge-error-bg);
   --color-badge-success-fg: var(--badge-success-fg);
   --color-badge-success-bg: var(--badge-success-bg);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
 }
