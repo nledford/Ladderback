@@ -22,12 +22,19 @@ impl RecentLogRing {
 }
 
 impl RecentLogStore for RecentLogRing {
-    fn record(&self, _line: LogLine) {
-        let _held = self.log.lock().unwrap_or_else(PoisonError::into_inner);
-        todo!()
+    fn record(&self, line: LogLine) {
+        self.log
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(line);
     }
 
     fn newest_first(&self) -> Vec<LogLine> {
-        todo!()
+        self.log
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .newest_first()
+            .cloned()
+            .collect()
     }
 }

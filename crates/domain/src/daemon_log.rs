@@ -56,13 +56,18 @@ impl LogLine {
     /// The line written at `at`, at `level`, by `source`, saying `message`.
     /// The message is written out only up to its cap, so a record of any
     /// length costs no more than the cap to keep.
-    pub fn new(
-        _at: Timestamp,
-        _level: LogLevel,
-        _source: &str,
-        _message: fmt::Arguments<'_>,
-    ) -> Self {
-        todo!()
+    pub fn new(at: Timestamp, level: LogLevel, source: &str, message: fmt::Arguments<'_>) -> Self {
+        let mut capped_source = Capped::new(MAX_SOURCE_BYTES);
+        // An error here is only the writer saying it is full.
+        let _ = fmt::Write::write_str(&mut capped_source, source);
+        let mut capped_message = Capped::new(MAX_MESSAGE_BYTES);
+        let _ = fmt::write(&mut capped_message, message);
+        Self {
+            at,
+            level,
+            source: capped_source.text,
+            message: capped_message.text,
+        }
     }
 
     pub fn at(&self) -> Timestamp {
@@ -83,7 +88,47 @@ impl LogLine {
 
     /// The bytes the line counts for against [`MAX_BYTES`].
     pub fn weight(&self) -> usize {
-        todo!()
+        self.source.len().saturating_add(self.message.len())
+    }
+}
+
+/// A text written up to `cap` bytes. What goes past the cap is dropped, and
+/// the text is cut at a character's boundary to end in [`CUT`] within the
+/// cap. Once full, it refuses every write, which stops a formatting early.
+struct Capped {
+    text: String,
+    cap: usize,
+    full: bool,
+}
+
+impl Capped {
+    fn new(cap: usize) -> Self {
+        Self {
+            text: String::new(),
+            cap,
+            full: false,
+        }
+    }
+}
+
+impl fmt::Write for Capped {
+    fn write_str(&mut self, piece: &str) -> fmt::Result {
+        if self.full {
+            return Err(fmt::Error);
+        }
+        if self.text.len().saturating_add(piece.len()) <= self.cap {
+            self.text.push_str(piece);
+            return Ok(());
+        }
+        let end = piece.floor_char_boundary(self.cap.saturating_sub(self.text.len()));
+        self.text.push_str(piece.get(..end).unwrap_or_default());
+        let keep = self
+            .text
+            .floor_char_boundary(self.cap.saturating_sub(CUT.len()));
+        self.text.truncate(keep);
+        self.text.push_str(CUT);
+        self.full = true;
+        Err(fmt::Error)
     }
 }
 
@@ -105,18 +150,25 @@ impl RecentLog {
     /// Keeps `line` as the newest, then lets go of the oldest lines until
     /// the rest are within both caps. A line is never over [`MAX_BYTES`] on
     /// its own, so the newest is always kept.
-    pub fn push(&mut self, _line: LogLine) {
-        todo!()
+    pub fn push(&mut self, line: LogLine) {
+        self.bytes = self.bytes.saturating_add(line.weight());
+        self.lines.push_back(line);
+        while self.lines.len() > MAX_LINES || self.bytes > MAX_BYTES {
+            let Some(oldest) = self.lines.pop_front() else {
+                break;
+            };
+            self.bytes = self.bytes.saturating_sub(oldest.weight());
+        }
     }
 
     /// The lines kept, newest first.
     pub fn newest_first(&self) -> std::iter::Rev<std::collections::vec_deque::Iter<'_, LogLine>> {
-        todo!()
+        self.lines.iter().rev()
     }
 
     /// How many lines are kept.
     pub fn len(&self) -> usize {
-        todo!()
+        self.lines.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -125,7 +177,7 @@ impl RecentLog {
 
     /// The bytes of text kept: the lines' weights, added up.
     pub fn bytes(&self) -> usize {
-        todo!()
+        self.bytes
     }
 }
 
