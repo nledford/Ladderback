@@ -17,6 +17,7 @@ mod local_paths;
 mod location;
 mod names;
 mod plan;
+mod proposal;
 mod repository;
 mod retention;
 mod rule;
@@ -40,6 +41,11 @@ pub use location::{
 };
 pub use names::{GlobFile, Hostname, Locale, RestoreFolder, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
+pub use proposal::{
+    ConfigChange, ConfigRevision, MAX_CHANGES, MAX_ENDED, MAX_PENDING, MAX_RATIONALE_CHARS,
+    PROPOSAL_ID_CHARS, PROPOSAL_LIFETIME, Proposal, ProposalId, ProposalRefused, ProposalStatus,
+    Proposer, Rationale,
+};
 pub use repository::{
     GroupBy, Maintenance, RepositoryConfig, RepositorySettings, check_location, check_option_value,
     check_options, masked_options,

@@ -1041,3 +1041,37 @@ async fn an_api_token_this_version_did_not_write_is_reported() {
         }
     }
 }
+
+/// A proposal whose revision this version couldn't have written is
+/// reported, naming the proposal and the column, never read as the
+/// revision of some other configuration (decision 89).
+#[tokio::test]
+async fn a_proposal_this_version_did_not_write_is_reported() {
+    let short = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85";
+    let upper = "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855";
+    for (name, base) in [
+        ("a short revision", short),
+        ("an upper-case revision", upper),
+    ] {
+        let scratch = Scratch::new();
+        let store = scratch.open().await;
+        let mut raw = scratch.raw().await;
+        sqlx::query(
+            "INSERT INTO proposals \
+             (id, base, changes, rationale, status, created_at, expires_at) \
+             VALUES ('abcdefghijkl', ?, '[]', '', 'pending', 1800000000000, 1800172800000)",
+        )
+        .bind(base)
+        .execute(&mut raw)
+        .await
+        .expect("the raw proposal is inserted");
+        let id = domain::planning::ProposalId::parse("abcdefghijkl").expect("an ID");
+        for report in [
+            corrupt(app::ports::ProposalStore::get(&store, &id).await, name),
+            corrupt(app::ports::ProposalStore::all(&store).await, name),
+        ] {
+            assert!(report.contains("abcdefghijkl"), "{name}: {report}");
+            assert!(report.contains("base"), "{name}: {report}");
+        }
+    }
+}

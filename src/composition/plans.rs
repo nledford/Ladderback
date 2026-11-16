@@ -108,7 +108,7 @@ fn shown(plan: &Plan) -> Result<api::PlanDto, PlansError> {
 }
 
 /// What is wrong with a plan's setting, as the refusal names it.
-fn problem_of(problem: &Problem) -> PlanProblem {
+pub(super) fn problem_of(problem: &Problem) -> PlanProblem {
     match problem {
         Problem::MissingKey => PlanProblem::Missing,
         Problem::UnknownKey => PlanProblem::UnknownKey,
@@ -130,7 +130,7 @@ fn refused(error: EditError) -> PlansError {
 
 /// A rule of the whole configuration the change would break, at the plan's
 /// setting that breaks it.
-fn violated(violation: Violation) -> PlansError {
+pub(super) fn violated(violation: Violation) -> PlansError {
     let at = |field: &str, problem| PlansError::Invalid {
         field: field.to_owned(),
         problem,

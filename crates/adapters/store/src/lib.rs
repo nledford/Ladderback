@@ -15,6 +15,7 @@ mod api_tokens;
 mod codec;
 mod error_args;
 mod locations;
+mod proposals;
 mod report;
 mod row;
 mod sessions;

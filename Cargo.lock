@@ -904,6 +904,7 @@ dependencies = [
  "proptest",
  "rustic_core",
  "serde",
+ "serde_json",
  "shell-words",
  "tempfile",
  "tokio",

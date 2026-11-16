@@ -142,6 +142,34 @@ async fn in_memory_api_token_store_meets_the_api_token_store_contract() {
     contract::api_token_store::run(&InMemoryApiTokens::default()).await;
 }
 
+/// The in-memory proposal store: a new one for each `empty`, and the same
+/// one again for `reopened`, as the real store's file outlives its handle.
+#[derive(Default)]
+struct InMemoryProposals(Mutex<Option<Arc<app::fakes::InMemoryProposalStore>>>);
+
+#[async_trait]
+impl contract::proposal_store::ProposalHarness for InMemoryProposals {
+    async fn empty(&self) -> Arc<dyn app::ports::ProposalStore> {
+        let store = Arc::new(app::fakes::InMemoryProposalStore::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&store));
+        store
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::ProposalStore> {
+        self.0.lock().unwrap().clone().expect("a store was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_proposal_store_meets_the_proposal_store_contract() {
+    contract::proposal_store::run(&InMemoryProposals::default()).await;
+}
+
+#[test]
+fn fake_change_codec_meets_the_change_codec_contract() {
+    contract::change_codec::run(&app::fakes::FakeChangeCodec::new());
+}
+
 /// The in-memory session store: a new one for each `empty`, and the same one
 /// again for `reopened`, as the real store's file outlives its handle.
 #[derive(Default)]

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use app::ports::{Clock, ConfigError, ConfigStore, NotInPlace, Problem, RecordError};
 use async_trait::async_trait;
-use domain::planning::{AgentConfig, NotRecorded, RepositoryConfig};
+use domain::planning::{AgentConfig, ConfigRevision, NotRecorded, RepositoryConfig};
 use domain::{RepositoryAlias, RepositoryId};
 
 use crate::edit::saved;
@@ -41,6 +41,14 @@ impl FileConfigStore {
     pub fn with_schemas(mut self, schemas: Schemas) -> Self {
         self.schemas = schemas;
         self
+    }
+
+    /// The file as it is now, by its [`ConfigRevision`]: what a proposal
+    /// was drafted against (decision 89). No file is the revision of no
+    /// text.
+    pub async fn revision(&self) -> Result<ConfigRevision, ConfigError> {
+        let bytes = self.exclusively(|job| job.current_bytes()).await?;
+        Ok(ConfigRevision::of(&bytes.unwrap_or_default()))
     }
 
     /// Runs `work` on a thread for blocking calls, behind the gate.

@@ -192,6 +192,31 @@ pub enum ErrorCode {
     /// configuration file would no longer load. The argument `plan` names
     /// the plan, and `rule` the rule.
     PlanInUse,
+    /// A proposal holds no configuration change (decision 89).
+    ProposalEmpty,
+    /// A proposal's change is not one the configuration takes, so nothing
+    /// was kept (decision 89). The argument `change` is the change's place
+    /// in the proposal, from 1; `field` is the setting at fault, as its key
+    /// in the plan's table; `problem` what is wrong with it: a plan
+    /// problem's wire name, `unknown-plan` or `in-use`. None holds a value
+    /// of the change.
+    ProposalInvalid,
+    /// A proposal is larger than a proposal may be. The argument `what`
+    /// says what is over: `changes` or `rationale`; `limit` is how many
+    /// changes, or characters of rationale, it may hold.
+    ProposalTooLarge,
+    /// The proposer has as many proposals pending as it may, `limit`; one
+    /// must end before it proposes again.
+    ProposalLimit,
+    /// No proposal by that ID is kept that the asker may see. The argument
+    /// `proposal` names it.
+    ProposalUnknown,
+    /// The proposal is not pending, so it can't be withdrawn. The argument
+    /// `status` is its status's wire name.
+    ProposalNotPending,
+    /// The proposals couldn't be read or kept, or a proposal's ID couldn't
+    /// be drawn; the daemon's log says why (decision 89).
+    ProposalsUnavailable,
     /// The configuration holds no repository by that name. The argument
     /// `alias` names it.
     RepositoryUnknown,
@@ -1047,6 +1072,51 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
+            Self::ProposalEmpty => &[],
+            Self::ProposalInvalid => &[
+                ArgSpec {
+                    name: "change",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "problem",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
+            Self::ProposalTooLarge => &[
+                ArgSpec {
+                    name: "what",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "limit",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+            ],
+            Self::ProposalLimit => &[ArgSpec {
+                name: "limit",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
+            Self::ProposalUnknown => &[ArgSpec {
+                name: "proposal",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProposalNotPending => &[ArgSpec {
+                name: "status",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::RepositoryUnknown => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
@@ -1206,6 +1276,7 @@ impl ErrorCode {
             | Self::RestartPending
             | Self::ApiTokenNoScope
             | Self::ApiTokensUnavailable
+            | Self::ProposalsUnavailable
             | Self::CurrentPasswordWrong
             | Self::AdminPasswordUnavailable
             | Self::SessionsUnavailable
@@ -2204,6 +2275,7 @@ mod tests {
             ErrorCode::RestartPending,
             ErrorCode::ApiTokenNoScope,
             ErrorCode::ApiTokensUnavailable,
+            ErrorCode::ProposalsUnavailable,
             ErrorCode::CurrentPasswordWrong,
             ErrorCode::AdminPasswordUnavailable,
             ErrorCode::SessionsUnavailable,
@@ -2641,6 +2713,22 @@ mod tests {
             serde_json::to_string(&ErrorCode::InvalidArguments).unwrap(),
             r#""invalid-arguments""#
         );
+    }
+
+    // The `proposal-invalid` message selects on these names, and an agent
+    // reads them: a plan's problem goes as the plan routes name it, the
+    // others each as its own, as the catalog's arms spell them.
+    #[test]
+    fn each_change_problem_is_named_on_the_wire() {
+        for (problem, wire) in [
+            (ChangeProblem::Plan(PlanProblem::Missing), "missing"),
+            (ChangeProblem::Plan(PlanProblem::NoSources), "no-sources"),
+            (ChangeProblem::UnknownPlan, "unknown-plan"),
+            (ChangeProblem::InUse, "in-use"),
+            (ChangeProblem::Hooks, "hooks"),
+        ] {
+            assert_eq!(problem.as_str(), wire, "{problem:?}");
+        }
     }
 }
 
@@ -3667,6 +3755,96 @@ impl PlanProblem {
             Self::NoSources => "no-sources",
         }
     }
+}
+
+/// What is wrong with a proposal's change a [`ErrorCode::ProposalInvalid`]
+/// names, sent as its `problem` argument by its wire name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChangeProblem {
+    /// The change's plan isn't one the configuration file would load.
+    Plan(PlanProblem),
+    /// The change names a plan the configuration doesn't have.
+    UnknownPlan,
+    /// The change removes a plan a notification rule names.
+    InUse,
+    /// The change gives a plan hooks: a new plan any, a changed plan others
+    /// than it has. Hooks come with approval (decision 89).
+    Hooks,
+}
+
+impl ChangeProblem {
+    /// The name the `problem` argument carries, which the message selects
+    /// on.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Plan(problem) => problem.as_str(),
+            Self::UnknownPlan => "unknown-plan",
+            Self::InUse => "in-use",
+            Self::Hooks => "hooks",
+        }
+    }
+}
+
+/// One configuration change of a proposal (decision 89), by its `kind`. A
+/// plan travels as its table in the configuration file's keys, as the plan
+/// routes take it ([`PlanDto`]); a removal names the plan by its ID.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ProposalChangeDto {
+    /// Adds the plan after the configuration's last one.
+    AddPlan { plan: PlanDto },
+    /// Puts the plan in place of the plan with its ID.
+    ChangePlan { plan: PlanDto },
+    /// Removes the plan with this ID; its snapshots stay.
+    RemovePlan { plan: String },
+}
+
+/// `POST /api/v1/proposals`: the changes proposed, in the order they apply,
+/// and why, in the proposer's own words.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct NewProposalDto {
+    pub changes: Vec<ProposalChangeDto>,
+    #[serde(default)]
+    pub rationale: String,
+}
+
+/// Where a proposal is in its life (decision 89).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProposalStatusDto {
+    Pending,
+    Applying,
+    Applied,
+    Failed,
+    Rejected,
+    Withdrawn,
+    Expired,
+    Stale,
+}
+
+/// One proposal as the proposal routes answer it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProposalDto {
+    pub id: String,
+    /// The label of the API token that proposed it, as it was then; `null`
+    /// for a client with no token.
+    #[serde(default)]
+    pub proposed_by: Option<String>,
+    pub status: ProposalStatusDto,
+    pub created_at: String,
+    /// 48 hours after `created-at`.
+    pub expires_at: String,
+    pub changes: Vec<ProposalChangeDto>,
+    pub rationale: String,
+}
+
+/// `GET /api/v1/proposals`: the proposals the asker may see, newest first.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProposalsDto {
+    pub proposals: Vec<ProposalDto>,
 }
 
 /// What is wrong with an argument an [`ErrorCode::InvalidArguments`] names,
