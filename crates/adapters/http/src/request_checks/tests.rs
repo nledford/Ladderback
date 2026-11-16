@@ -52,6 +52,7 @@ pub(crate) fn test_state() -> AppState {
         restart: crate::Restart::default(),
         updates: Arc::default(),
         recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+        full_disk_access: crate::FullDiskAccessRoute::default(),
     }
 }
 

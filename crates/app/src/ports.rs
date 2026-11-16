@@ -7,6 +7,7 @@ mod clock;
 mod config_store;
 mod engine;
 mod event_bus;
+mod full_disk_access;
 mod hooks;
 mod keyring;
 mod notifier;
@@ -42,6 +43,7 @@ pub use engine::{
     SnapshotSummary,
 };
 pub use event_bus::{EVENT_BUFFER, EventBus};
+pub use full_disk_access::FullDiskAccessProbe;
 pub use hooks::{
     HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,
     HookStatus, MAX_HOOK_OUTPUT_BYTES,

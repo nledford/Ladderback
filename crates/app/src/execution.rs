@@ -13,6 +13,7 @@ use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
 use crate::announce::{announce_end, announce_start};
+use crate::full_disk_access::FullDiskAccessCheck;
 use crate::log_write::save_within_bound;
 use crate::ports::{
     Clock, Engine, EngineEvent, EngineResult, EventBus, HookContext, HookOutcome, HookPhase,
@@ -161,6 +162,15 @@ impl RunOperation {
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
         self
+    }
+
+    /// Runs `check`'s Full Disk Access probe before each backup, and records
+    /// each warning as what it found explains it (§16, decision NN): a
+    /// source item the system refused while the grant was missing gets the
+    /// grant's own warning.
+    pub fn with_full_disk_access(self, check: Arc<FullDiskAccessCheck>) -> Self {
+        let _ = check;
+        todo!()
     }
 
     /// Runs `job`, started by `trigger`. When `cancel` completes, the

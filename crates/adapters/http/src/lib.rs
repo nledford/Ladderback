@@ -13,6 +13,7 @@
 
 mod api_tokens;
 mod body_limit;
+mod full_disk_access;
 mod listener;
 mod maintenance;
 mod plans;
@@ -48,6 +49,7 @@ use rust_embed::RustEmbed;
 use rust_embed as _;
 use serde::{Deserialize, Serialize};
 
+pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use plans::{Plans, PlansError};
@@ -108,6 +110,9 @@ pub struct AppState {
     /// The newest lines of the daemon's own log, which the Log page reads
     /// (#618).
     pub recent_log: Arc<dyn app::ports::RecentLogStore>,
+    /// What the Full Disk Access probe found, and what opens System
+    /// Settings' pane for it: neither off macOS (§16, decision NN).
+    pub full_disk_access: FullDiskAccessRoute,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {
@@ -496,6 +501,18 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::get(list_operations).post(run_plan),
         )
         .route("/api/v1/log", axum::routing::get(recent_log))
+        .route(
+            full_disk_access::FULL_DISK_ACCESS_PATH,
+            axum::routing::get(full_disk_access::read),
+        )
+        .route(
+            full_disk_access::CHECK_PATH,
+            axum::routing::post(full_disk_access::check),
+        )
+        .route(
+            full_disk_access::SETTINGS_PATH,
+            axum::routing::post(full_disk_access::open_settings),
+        )
         .route("/api/v1/operations/{id}", axum::routing::get(get_operation))
         .route(
             "/api/v1/operations/{id}/cancel",
@@ -1554,6 +1571,7 @@ mod tests {
             restart: Restart::default(),
             updates: Arc::default(),
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+            full_disk_access: FullDiskAccessRoute::default(),
         }
     }
 
@@ -1599,6 +1617,7 @@ mod tests {
             restart: Restart::default(),
             updates: Arc::default(),
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+            full_disk_access: FullDiskAccessRoute::default(),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -3038,6 +3057,7 @@ mod tests {
             restart: Restart::default(),
             updates: Arc::default(),
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+            full_disk_access: FullDiskAccessRoute::default(),
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(

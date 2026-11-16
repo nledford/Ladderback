@@ -233,6 +233,7 @@ pub(crate) fn kind_named(code: &str) -> WarningKind {
         "source-unreadable" => WarningKind::SourceUnreadable,
         "check-warning" => WarningKind::CheckWarning,
         "hook-warning" => WarningKind::Hook,
+        "full-disk-access-missing" => WarningKind::FullDiskAccessMissing,
         other => panic!("no warning kind is named {other}"),
     }
 }

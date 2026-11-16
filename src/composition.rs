@@ -927,6 +927,8 @@ async fn state_over(
             updates: notice,
             // An empty one: the daemon's own puts the one its log feeds here.
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+            // Off macOS, and until the daemon puts its probe here.
+            full_disk_access: http_adapter::FullDiskAccessRoute::default(),
         },
         background,
         stopping,
@@ -2283,6 +2285,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
         WarningKind::LocationSkipped => WarningCode::LocationSkipped,
         WarningKind::SecretFileReadable => WarningCode::SecretFileReadable,
+        WarningKind::FullDiskAccessMissing => todo!(),
         WarningKind::Other => WarningCode::Unknown,
     }
 }

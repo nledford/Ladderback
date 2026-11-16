@@ -41,6 +41,9 @@
 # Ladderback's own log lines since the daemon started, the newest of them, which the Log page shows.
 -recent-log = recent log
 
+# macOS's grant that opens a program's way into Mail, Messages, Safari and other programs' data. Use the name System Settings shows for it in this language.
+-full-disk-access = Full Disk Access
+
 ## Sizes and durations. The program splits the value and picks the form; the
 ## catalog arranges the parts, so word order stays with the translator.
 
@@ -385,6 +388,12 @@ error-restore-hub-not-allowed = This agent doesn't take restores from the hub, s
 # set restore-folder, so nothing ran.
 error-restore-folder-unset = This agent has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the agent's configuration file to a folder for restores, then try again.
 
+# A browser asked the agent to open System Settings at the Full Disk Access pane, and the browser isn't on the agent's own Mac, so nothing opened.
+error-full-disk-access-not-local = { -brand-name } opens System Settings only for a browser on the Mac it runs on, so nothing opened. On that Mac, open System Settings, choose Privacy & Security, then { -full-disk-access }, and turn it on for { -brand-name }.
+
+# The agent was asked to open System Settings at the Full Disk Access pane, and couldn't: it isn't on macOS, or macOS refused.
+error-full-disk-access-settings-unopened = { -brand-name } could not open System Settings. Open it yourself, choose Privacy & Security, then { -full-disk-access }, and turn it on for { -brand-name }.
+
 # This agent doesn't maintain the repository: its entry doesn't ask this
 # agent to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The
@@ -438,6 +447,11 @@ error-invalid-arguments = { $problem ->
 # $detail (text): rustic's message about why it could not be read. It is shown as it came.
 warning-source-unreadable = { -brand-name } could not read this item, so it was left out of the snapshot. Check that the user { -brand-name } runs as can read it, or exclude it from the plan.
     .with-detail = { -brand-name } could not read this item, so it was left out of the snapshot ({ $detail }). Check that the user { -brand-name } runs as can read it, or exclude it from the plan.
+
+# On macOS, a file or folder the backup could not read because Ladderback hasn't been granted Full Disk Access.
+# $detail (text): rustic's message about why it could not be read. It is shown as it came.
+warning-full-disk-access-missing = { -brand-name } could not read this item because macOS hasn't given it { -full-disk-access }, so it was left out of the snapshot. Turn on { -full-disk-access } for { -brand-name } in System Settings, under Privacy & Security; the start page shows how.
+    .with-detail = { -brand-name } could not read this item because macOS hasn't given it { -full-disk-access } ({ $detail }), so it was left out of the snapshot. Turn on { -full-disk-access } for { -brand-name } in System Settings, under Privacy & Security; the start page shows how.
 
 # A secret was read from a file other users of this machine can read.
 # $path (text): the file's path.

@@ -442,6 +442,15 @@ pub enum ErrorCode {
     /// folder to make it in: no home folder, and `[agent] restore-folder`
     /// unset (§10.4). Nothing ran.
     RestoreFolderUnset,
+    /// System Settings' Full Disk Access pane was asked to open from a
+    /// browser that isn't on the agent's own Mac: the daemon opens it only
+    /// for a request from its own machine, by a loopback address and a
+    /// loopback `Host` (§16, decision NN). Nothing opened; the page shows
+    /// the steps instead.
+    FullDiskAccessNotLocal,
+    /// System Settings' Full Disk Access pane couldn't be opened: the agent
+    /// isn't on macOS, or macOS refused to open it (§16, decision NN).
+    FullDiskAccessSettingsUnopened,
     #[serde(other)]
     Unknown,
 }
@@ -588,6 +597,11 @@ pub enum WarningCode {
     /// attach a debugger to it or read its memory. It goes on. Logged, never
     /// sent; the detail is the operating system's own words.
     DebuggerAttachAllowed,
+    /// On macOS, a source item the system refused during a backup whose
+    /// Full Disk Access probe found the grant missing (§16, decision NN):
+    /// the grant explains why the item was left out. The detail is the
+    /// engine's own message, as for `source-unreadable`.
+    FullDiskAccessMissing,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -1329,6 +1343,8 @@ impl ErrorCode {
             | Self::RestoreInPlaceNotHere
             | Self::RestoreHubNotAllowed
             | Self::RestoreFolderUnset
+            | Self::FullDiskAccessNotLocal
+            | Self::FullDiskAccessSettingsUnopened
             | Self::Unknown => &[],
         }
     }
@@ -1607,6 +1623,7 @@ impl WarningCode {
             | Self::ProfileRetentionEmpty
             | Self::CoreDumpsOn
             | Self::DebuggerAttachAllowed
+            | Self::FullDiskAccessMissing
             | Self::Unknown => &[],
         }
     }
@@ -2704,6 +2721,14 @@ mod tests {
                 r#""restore-hub-not-allowed""#,
             ),
             (ErrorCode::RestoreFolderUnset, r#""restore-folder-unset""#),
+            (
+                ErrorCode::FullDiskAccessNotLocal,
+                r#""full-disk-access-not-local""#,
+            ),
+            (
+                ErrorCode::FullDiskAccessSettingsUnopened,
+                r#""full-disk-access-settings-unopened""#,
+            ),
         ] {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);
             assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
@@ -4301,6 +4326,29 @@ pub struct RestartRequestDto {
 pub enum RestartWhenDto {
     Finished,
     Now,
+}
+
+/// What `GET /api/v1/full-disk-access` answers, and `POST …/check` once the
+/// probe has run again (§16, decision NN): what the agent's Full Disk Access
+/// probe found last, and whether this browser may ask the agent to open
+/// System Settings' Full Disk Access pane, which it may only from the
+/// agent's own Mac.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FullDiskAccessDto {
+    pub state: FullDiskAccessStateDto,
+    pub opens_settings: bool,
+}
+
+/// What the Full Disk Access probe found: `not-applicable` where the agent
+/// isn't on macOS, which has no such grant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FullDiskAccessStateDto {
+    Granted,
+    Missing,
+    Unknown,
+    NotApplicable,
 }
 
 /// The build a program came from (§3.1, decision 90): its version, the

@@ -11,14 +11,15 @@ use app::contract::clock::ClockHarness;
 use app::contract::hooks::HooksHarness;
 use app::contract::secrets::SecretsHarness;
 use app::fakes::{
-    FakeClock, FakeHookRunner, FakeSecrets, InMemoryEventBus, InMemoryOperationStore, Script,
-    SimulatedEngine,
+    FakeClock, FakeFullDiskAccessProbe, FakeHookRunner, FakeSecrets, InMemoryEventBus,
+    InMemoryOperationStore, Script, SimulatedEngine,
 };
 use app::fakes::{InMemoryConfigStore, InMemoryScheduleStore, SeededRandom};
 use app::ports::{
     Clock, Engine, EventBus, HookOutcome, HookOutput, HookStatus, ScheduleStore, SecretResolver,
 };
 use async_trait::async_trait;
+use domain::execution::full_disk_access::FullDiskAccess;
 use domain::secrets::{CommandLine, KeyringEntry};
 use domain::{SignedDuration, Timestamp};
 
@@ -117,6 +118,42 @@ impl contract::release_feed::ReleaseFeedHarness for ScriptedFeeds {
 #[tokio::test]
 async fn scripted_release_feed_meets_the_release_feed_contract() {
     contract::release_feed::run(&ScriptedFeeds).await;
+}
+
+/// The fake probe, told what each folder of the contract would answer.
+struct FakeProbes;
+
+impl contract::full_disk_access::FullDiskAccessHarness for FakeProbes {
+    fn folder_lists(&self) -> Arc<dyn app::ports::FullDiskAccessProbe> {
+        Arc::new(FakeFullDiskAccessProbe::new(FullDiskAccess::Granted))
+    }
+
+    fn folder_missing(&self) -> Arc<dyn app::ports::FullDiskAccessProbe> {
+        Arc::new(FakeFullDiskAccessProbe::new(FullDiskAccess::Unknown))
+    }
+
+    fn not_a_folder(&self) -> Arc<dyn app::ports::FullDiskAccessProbe> {
+        Arc::new(FakeFullDiskAccessProbe::new(FullDiskAccess::Unknown))
+    }
+}
+
+#[tokio::test]
+async fn fake_full_disk_access_probe_meets_the_full_disk_access_contract() {
+    contract::full_disk_access::run(&FakeProbes).await;
+    contract::full_disk_access::a_folder_its_permissions_refuse_is_unknown(
+        &FakeFullDiskAccessProbe::new(FullDiskAccess::Unknown),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn the_fake_probe_finds_what_it_was_told_last_and_counts_each_probe() {
+    use app::ports::FullDiskAccessProbe;
+    let probe = FakeFullDiskAccessProbe::new(FullDiskAccess::Missing);
+    assert_eq!(probe.probe().await, FullDiskAccess::Missing);
+    probe.set(FullDiskAccess::Granted);
+    assert_eq!(probe.probe().await, FullDiskAccess::Granted);
+    assert_eq!(probe.asked(), 2);
 }
 
 /// The in-memory token store: a new one for each `empty`, and the same one
