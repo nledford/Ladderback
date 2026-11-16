@@ -220,10 +220,12 @@ pub(crate) fn bus_or_service_missing(name: &str) -> bool {
     )
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-struct Unavailable;
+/// The store where there is none. Tests build it on every OS, so what it
+/// answers is checked on the hosts that run them.
+#[cfg(any(test, not(any(target_os = "macos", target_os = "linux"))))]
+pub(crate) struct Unavailable;
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(any(test, not(any(target_os = "macos", target_os = "linux"))))]
 impl KeyringStore for Unavailable {
     fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
         Err(no_os_keyring())
@@ -238,7 +240,7 @@ impl KeyringStore for Unavailable {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(any(test, not(any(target_os = "macos", target_os = "linux"))))]
 fn no_os_keyring() -> Failure {
     Failure::Unreachable("this platform has no OS keyring".to_owned())
 }

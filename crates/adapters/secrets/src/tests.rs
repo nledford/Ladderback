@@ -1382,6 +1382,21 @@ fn the_os_keyring_is_used_only_when_it_is_asked_for() {
     assert!(os_keyring_enabled(Some(OsStr::new("1"))));
 }
 
+/// Where there is no OS keyring, every call is refused as a store that can't
+/// be reached: nothing is read, kept or deleted, where the `keyring` crate's
+/// in-memory mock would keep the secret.
+#[test]
+fn a_platform_without_an_os_keyring_reads_keeps_and_deletes_nothing() {
+    use crate::keyring_store::Unavailable;
+    let refused = || Failure::Unreachable("this platform has no OS keyring".to_owned());
+    assert_eq!(Unavailable.get("ladderback-demo", "nas"), Err(refused()));
+    assert_eq!(
+        Unavailable.set("ladderback-demo", "nas", "hunter2"),
+        Err(refused())
+    );
+    assert_eq!(Unavailable.delete("ladderback-demo", "nas"), Err(refused()));
+}
+
 /// What the OS store's errors become. A value that is not text comes back
 /// with its bytes, which are a secret: they are dropped (I4). A keychain that
 /// refuses is one that can't be reached.
