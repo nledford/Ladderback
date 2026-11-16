@@ -137,6 +137,39 @@ Feature: Keep a translation current
       de: 2 of 2 messages current
       """
 
+  Scenario: Accepting every translation takes only those not reviewed yet, never a stale one
+    Given the English catalog holds:
+      """
+      greeting = Hello there
+      farewell = Goodbye
+          .title = Leave
+      welcome = Welcome
+      """
+    And the German catalog holds:
+      """
+      greeting = Hallo zusammen
+      farewell = Auf Wiedersehen
+          .title = Verlassen
+      welcome = Willkommen
+      """
+    When the owner accepts every German translation not reviewed yet
+    Then the command exits with status 0
+    And the owner is told:
+      """
+      de: accepted welcome
+      de: left out 1 stale message (greeting): name its ID to accept it after review
+      """
+    When the owner lists the translations
+    Then the translations listed are:
+      """
+      de: 2 of 3 messages current
+        stale: greeting
+          translated from:
+            greeting = Hello
+          now:
+            greeting = Hello there
+      """
+
   Scenario: A message English doesn't have can't be accepted
     When the owner accepts the German translation of "welcome"
     Then the command exits with status 1

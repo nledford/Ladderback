@@ -24,7 +24,9 @@
 //   node scripts/translations.ts accept <tag> (<id>... | --all) [--locales <dir>]
 //
 // `list` exits 0 whatever it finds; `accept` writes the lines of the
-// messages named (`--all`: every translated message that isn't current),
+// messages named (`--all`: every translated message not reviewed yet, never
+// a stale one, which is accepted only by naming it; it says how many it left
+// out),
 // skips a term that is the language's own, and refuses, exiting 1, a message
 // en-US lacks or the language doesn't translate. Both exit 1 on a catalog
 // folder or sources.txt they can't read. `accept` also drops the lines of
@@ -180,8 +182,19 @@ export function renderListing(
   return `${lines.join("\n")}\n`;
 }
 
+/** What `accept --all` says of the stale messages `ids` it left out:
+ * nothing when it left none. */
+export function leftOut(tag: string, ids: readonly string[]): string | null {
+  if (ids.length === 0) return null;
+  const named = ids.join(", ");
+  if (ids.length === 1) return `${tag}: left out 1 stale message (${named}): name its ID to accept it after review`;
+  return `${tag}: left out ${ids.length} stale messages (${named}): name their IDs to accept them after review`;
+}
+
 /** The sources after accepting `ids` (`"all"`: every translated message
- * that isn't current) in the language `tag`, or why they can't be. A term of
+ * not reviewed yet, with no line in the sources) in the language `tag`, or
+ * why they can't be. `"all"` never takes a stale message: one is accepted
+ * only by naming it, and `staleLeftOut` lists those it left out. A term of
  * the language's own is skipped: it has no English to record. The lines of
  * messages en-US or the language no longer has are removed. */
 export function accepting(
@@ -190,12 +203,12 @@ export function accepting(
   translated: ReadonlySet<string>,
   sources: ReadonlyMap<string, string>,
   ids: readonly string[] | "all",
-): { sources: Map<string, string>; accepted: string[]; removed: string[] } | string {
+): { sources: Map<string, string>; accepted: string[]; removed: string[]; staleLeftOut: string[] } | string {
   const hashes = new Map(english.map((entry) => [entry.id, sourceHash(entry.text)]));
-  const chosen =
-    ids === "all"
-      ? english.map((entry) => entry.id).filter((id) => translated.has(id) && sources.get(id) !== hashes.get(id))
-      : ids;
+  const translatedIds = english.map((entry) => entry.id).filter((id) => translated.has(id));
+  const chosen = ids === "all" ? translatedIds.filter((id) => !sources.has(id)) : ids;
+  const staleLeftOut =
+    ids === "all" ? translatedIds.filter((id) => sources.has(id) && sources.get(id) !== hashes.get(id)) : [];
   const next = new Map(sources);
   const accepted: string[] = [];
   for (const id of chosen) {
@@ -208,7 +221,7 @@ export function accepting(
   }
   const removed = [...next.keys()].filter((id) => !hashes.has(id) || !translated.has(id)).sort();
   for (const id of removed) next.delete(id);
-  return { sources: next, accepted, removed };
+  return { sources: next, accepted, removed, staleLeftOut };
 }
 
 function git(dir: string, args: string[]): string | null {
@@ -317,6 +330,8 @@ function main(argv: string[]): number {
     writeFileSync(path.join(catalog.dir, SOURCES_FILE), renderSources(result.sources));
     for (const id of result.accepted) console.log(`${tag}: accepted ${id}`);
     for (const id of result.removed) console.log(`${tag}: removed ${id}`);
+    const left = leftOut(tag, result.staleLeftOut);
+    if (left !== null) console.log(left);
     return 0;
   }
   throw new Error("usage: translations.ts (list [<tag>...] | accept <tag> (<id>... | --all)) [--locales <dir>]");

@@ -118,7 +118,8 @@ translations *tags:
     node scripts/translations.ts list "$@"
 
 # After a review, record the en-US text the messages `ids` of `tag` were
-# translated from (`--all`: every translated message that isn't current), in
+# translated from (`--all`: every translated message not reviewed yet, never
+# a stale one, which is accepted only by its ID), in
 # crates/l10n/locales/<tag>/sources.txt, so `just translations` finds them
 # current until that English changes.
 [doc('Record the English of translated messages accepted after review.')]

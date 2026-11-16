@@ -179,6 +179,11 @@ async fn accepts(agent: &mut Agent, id: String) {
     accept(agent, &[&id]).await;
 }
 
+#[when("the owner accepts every German translation not reviewed yet")]
+async fn accepts_all(agent: &mut Agent) {
+    accept(agent, &["--all"]).await;
+}
+
 #[when("the owner lists the translations")]
 async fn lists(agent: &mut Agent) {
     run_script(agent, &["list"]).await;
