@@ -25,7 +25,8 @@ use std::time::Duration;
 use app::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
 use async_trait::async_trait;
 use domain::secrets::{
-    FileRead, KeyringEntry, Problem, SecretError, SecretRef, SecretValue, SourceName, decode,
+    FileRead, KeyringCause, KeyringEntry, Problem, SecretError, SecretRef, SecretValue, SourceName,
+    decode,
 };
 use zeroize::Zeroizing;
 
@@ -188,7 +189,14 @@ impl SystemSecrets {
             }
             Err(Failure::NotUnicode) => Err(fail(Problem::NotUnicode)),
             Err(Failure::Unreachable(detail)) => Err(fail(Problem::Unreachable { detail })),
-            Err(Failure::NoService(detail)) => Err(fail(Problem::KeyringUnavailable { detail })),
+            Err(Failure::NoService(detail)) => Err(fail(Problem::KeyringUnavailable {
+                detail,
+                cause: KeyringCause::NoService,
+            })),
+            Err(Failure::Refused(detail)) => {
+                let _ = detail;
+                todo!()
+            }
         }
     }
 
@@ -294,7 +302,9 @@ impl Keyring for SystemSecrets {
 /// Why the store refused to write or delete an entry.
 fn refused(failure: Failure) -> KeyringError {
     match failure {
-        Failure::NoService(detail) => KeyringError::Unavailable { detail },
+        Failure::NoService(detail) | Failure::Refused(detail) => {
+            KeyringError::Unavailable { detail }
+        }
         Failure::Unreachable(detail) => KeyringError::Unwritable { detail },
         // An entry that holds what isn't text holds another secret.
         Failure::NotUnicode => KeyringError::Taken,

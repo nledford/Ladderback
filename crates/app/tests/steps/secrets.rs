@@ -5,19 +5,20 @@ use std::assert_matches;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use app::execution::RunOperation;
-use app::fakes::{FakeSecrets, Script};
+use app::fakes::{FakeClock, FakeSecrets, Script};
+use app::ports::Clock;
 use app::retry::{RunEnd, RunOutcome};
 use app::secrets::ResolvedRepository;
-use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
+use app::secrets::{Cause, Field, KeyringWait, ResolveError, ResolveRepository};
 use cucumber::{given, then, when};
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{FailureReason, OperationStatus, Target, Trigger};
-use domain::planning::RepositorySettings;
+use domain::planning::{GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings};
 use domain::secrets::{
-    CommandLine, FileRead, KeyringEntry, MAX_MASKED_BYTES, MAX_SECRET_BYTES, Problem, Redactor,
-    SecretError, SecretRef, SecretValue, SecretWarning, SourceName, TemplateError,
+    CommandLine, FileRead, KeyringCause, KeyringEntry, MAX_MASKED_BYTES, MAX_SECRET_BYTES, Problem,
+    Redactor, SecretError, SecretRef, SecretValue, SecretWarning, SourceName, TemplateError,
 };
-use domain::{OperationId, PlanId, Uuid};
+use domain::{OperationId, PlanId, RepositoryAlias, SignedDuration, Timestamp, Uuid};
 
 use super::Agent;
 
@@ -28,6 +29,12 @@ pub struct SecretsWorld {
     settings: RepositorySettings,
     outcome: Option<Result<ResolvedRepository, ResolveError>>,
     told: Arc<Mutex<Vec<SecretWarning>>>,
+    /// When the daemon started, by the world's clock.
+    started: Option<Timestamp>,
+    /// Each keyring entry the daemon was told to log that a run waits for.
+    waited: Arc<Mutex<Vec<SourceName>>>,
+    /// When the wait of a run whose daemon stopped meanwhile ended.
+    stopped_at: Option<Timestamp>,
 }
 
 impl Default for SecretsWorld {
@@ -44,6 +51,9 @@ impl Default for SecretsWorld {
             },
             outcome: None,
             told: Arc::default(),
+            started: None,
+            waited: Arc::default(),
+            stopped_at: None,
         }
     }
 }
@@ -802,4 +812,178 @@ fn ends_as_a_failed_scheduled_run(agent: &mut Agent, plan: String) {
             outcome: RunOutcome::Failed,
         })
     );
+}
+
+// A scheduled run that waits for the session's keyring service while the
+// daemon starts (§5).
+
+impl SecretsWorld {
+    fn started(&self) -> Timestamp {
+        self.started.expect("the daemon started")
+    }
+
+    fn after_start(&self, seconds: i64) -> Timestamp {
+        self.started() + SignedDuration::from_secs(seconds)
+    }
+
+    /// The repository the settings make, as the configuration holds it.
+    fn entry(&self) -> RepositoryConfig {
+        RepositoryConfig {
+            settings: self.settings.clone(),
+            locations: Default::default(),
+            id: None,
+            maintenance: Maintenance::Local,
+            group_by: GroupBy::default(),
+            hooks: Hooks::default(),
+        }
+    }
+
+    fn waits(&self, clock: Arc<dyn Clock>) -> ResolveRepository {
+        ResolveRepository::new(self.store.clone())
+            .waiting_for_keyring(KeyringWait::new(clock, self.started()))
+    }
+
+    fn waited(&self) -> Vec<SourceName> {
+        self.waited
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn keyring_cause(&self) -> KeyringCause {
+        match &self.unresolved().problem {
+            Problem::KeyringUnavailable { cause, .. } => *cause,
+            other => panic!("the keyring was expected to be unavailable, not {other:?}"),
+        }
+    }
+}
+
+fn demo_alias() -> RepositoryAlias {
+    RepositoryAlias::parse("demo").expect("an alias")
+}
+
+#[given("the daemon started a moment ago")]
+fn daemon_started(agent: &mut Agent) {
+    agent.secrets.started = Some(agent.clock.now());
+}
+
+#[given(expr = "the session's keyring service starts {int} seconds after the daemon")]
+fn keyring_service_starts(agent: &mut Agent, seconds: i64) {
+    let at = agent.secrets.after_start(seconds);
+    agent
+        .secrets
+        .store
+        .start_keyring_service_at(agent.clock.clone(), at);
+}
+
+#[when(expr = "the schedule starts a backup {int} seconds after the daemon started")]
+async fn schedule_starts_after_start(agent: &mut Agent, seconds: i64) {
+    agent.clock.advance(SignedDuration::from_secs(seconds));
+    let waited = Arc::clone(&agent.secrets.waited);
+    let waiting = move |source: &SourceName| {
+        waited
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(source.clone());
+    };
+    let outcome = agent
+        .secrets
+        .waits(agent.clock.clone())
+        .resolve_saved_unattended(&demo_alias(), &agent.secrets.entry(), &waiting)
+        .await;
+    agent.secrets.outcome = Some(outcome);
+}
+
+#[when(
+    expr = "the schedule starts a backup {int} seconds after the daemon started and the daemon stops once the run waits"
+)]
+async fn schedule_starts_and_daemon_stops(agent: &mut Agent, seconds: i64) {
+    agent.clock.advance(SignedDuration::from_secs(seconds));
+    // A clock that moves only when told, so the wait is still going when the
+    // daemon stops.
+    let clock = Arc::new(FakeClock::new(agent.clock.now()));
+    let (stop, stopped) = futures::channel::oneshot::channel::<()>();
+    let stop = Mutex::new(Some(stop));
+    let waiting = move |_: &SourceName| {
+        if let Some(stop) = stop.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            let _ = stop.send(());
+        }
+    };
+    let use_case = agent.secrets.waits(clock.clone());
+    let entry = agent.secrets.entry();
+    let alias = demo_alias();
+    let resolving = use_case.resolve_saved_unattended(&alias, &entry, &waiting);
+    futures::pin_mut!(resolving);
+    // The daemon's stop drops the run's start, and the wait with it.
+    match futures::future::select(resolving, stopped).await {
+        futures::future::Either::Left((outcome, _)) => {
+            panic!("the run's wait ended before the daemon stopped: {outcome:?}")
+        }
+        futures::future::Either::Right(_) => agent.secrets.stopped_at = Some(clock.now()),
+    }
+}
+
+#[then(expr = "the run's secrets are resolved {int} seconds after the daemon started")]
+fn resolved_after_start(agent: &mut Agent, seconds: i64) {
+    assert_eq!(
+        agent.secrets.resolved().access.password.expose(),
+        "CANARY-keyring-password"
+    );
+    assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
+}
+
+#[then(
+    expr = "the run fails {int} seconds after the daemon started because there is no keyring service to ask"
+)]
+fn fails_with_no_service(agent: &mut Agent, seconds: i64) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::NoService);
+    assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
+}
+
+#[then(expr = "the run fails {int} seconds after the daemon started because the keyring refused")]
+fn fails_refused(agent: &mut Agent, seconds: i64) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Refused);
+    assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
+}
+
+#[then(expr = "the wait ended {int} seconds after the daemon started, and the run never started")]
+fn wait_ended_after_start(agent: &mut Agent, seconds: i64) {
+    assert_eq!(
+        agent.secrets.stopped_at,
+        Some(agent.secrets.after_start(seconds))
+    );
+    assert!(agent.secrets.outcome.is_none());
+}
+
+#[then(expr = "the keyring entry {string} was read {int} time(s)")]
+fn keyring_read_times(agent: &mut Agent, entry: String, times: usize) {
+    let entry = KeyringEntry::parse(&entry).expect("the scenario's entry is valid");
+    assert_eq!(
+        agent.secrets.store.read_count(&SecretRef::Keyring(entry)),
+        times
+    );
+}
+
+#[then(expr = "the file {string} was read once")]
+fn file_read_once(agent: &mut Agent, path: String) {
+    let file = SecretRef::File {
+        path,
+        read: FileRead::Whole,
+    };
+    assert_eq!(agent.secrets.store.read_count(&file), 1);
+}
+
+#[then(expr = "the daemon logged once that the run waits for the keyring entry {string}")]
+fn logged_waiting_for(agent: &mut Agent, entry: String) {
+    assert_eq!(agent.secrets.waited(), vec![SourceName::Keyring { entry }]);
+}
+
+#[then(expr = "what the daemon logged of the wait holds no {string}")]
+fn logged_wait_holds_no(agent: &mut Agent, secret: String) {
+    assert_hides(&format!("{:?}", agent.secrets.waited()), &secret);
+}
+
+#[then("the daemon never logged that the run waits")]
+fn never_logged_waiting(agent: &mut Agent) {
+    assert_eq!(agent.secrets.waited(), Vec::new());
 }

@@ -3616,6 +3616,19 @@ fn log_secret_warning(warning: &SecretWarning) {
     }
 }
 
+/// The daemon's resolution of secrets, through `secrets`: each warning it
+/// gives is said in the log, and a run nobody waits on holds for the
+/// session's keyring service while the daemon, which started at `started`
+/// by `clock`, starts (§5, decision NN).
+fn daemon_resolve(
+    secrets: Arc<dyn app::ports::SecretResolver>,
+    clock: Arc<dyn Clock>,
+    started: domain::Timestamp,
+) -> ResolveRepository {
+    let _ = (secrets, clock, started);
+    todo!()
+}
+
 /// A secret that couldn't be resolved, as the typed refusal of its cause
 /// ([`ResolveError::refusal`]). What a platform or a command said is masked
 /// of every secret of the repository first (I4), read again through
@@ -11898,6 +11911,7 @@ mod repository_service_tests {
             },
             Problem::KeyringUnavailable {
                 detail: "DBus error: no bus canary-inline".to_owned(),
+                cause: domain::secrets::KeyringCause::NoService,
             },
         );
         let refusal = secret_refusal(&error, &settings, &SystemSecrets::default()).await;
@@ -12402,6 +12416,67 @@ mod repository_service_tests {
             line.contains(&format!("its password, from {UNSET}")),
             "{line}"
         );
+    }
+
+    /// A run the schedule starts while the daemon starts, before the
+    /// session's keyring service is up, waits for it and runs with the
+    /// password the keyring holds. The daemon says so once in its log,
+    /// naming the run, the plan and the keyring entry, never the password
+    /// (§5, I4).
+    #[tokio::test]
+    async fn a_scheduled_run_while_the_daemon_starts_waits_for_the_keyring_service_and_logs_it_once()
+     {
+        capture();
+        const PASSWORD: &str = "canary-keyring-password";
+        let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+        let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+        let clock = Arc::new(app::fakes::FakeClock::auto_advancing(started));
+        let secrets = Arc::new(FakeSecrets::new());
+        secrets.set_keyring_entry(&entry, PASSWORD);
+        secrets.start_keyring_service_at(
+            clock.clone(),
+            started + domain::SignedDuration::from_secs(25),
+        );
+        let settings = domain::planning::RepositorySettings {
+            repository: "/srv/demo-repo".to_owned(),
+            repo_hot: None,
+            password: SecretRef::Keyring(entry),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        };
+        let (mut runner, heard, scripted, plan) = refused_runner(
+            settings,
+            Arc::new(app::fakes::InMemoryOperationStore::new()),
+            Arc::new(BroadcastEventBus::new()),
+        )
+        .await;
+        runner.resolve = Arc::new(daemon_resolve(secrets, clock, started));
+
+        let place = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+            .await
+            .expect("the schedule hears how the run ended")
+            .expect("a run ended");
+        let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let [Job::Backup(backup)] = seen.as_slice() else {
+            panic!("the run's backup reached the engine: {seen:?}");
+        };
+        assert_eq!(backup.repository.password.expose(), PASSWORD);
+        let waits: Vec<String> = captured_log::infos()
+            .into_iter()
+            .filter(|line| line.contains("keyring service"))
+            .collect();
+        let [line] = waits.as_slice() else {
+            panic!("the wait is logged once: {waits:?}");
+        };
+        assert!(line.contains("the scheduled run of plan home"), "{line}");
+        assert!(line.contains("ladderback/demo"), "{line}");
+        assert!(!line.contains(PASSWORD), "{line}");
     }
 
     /// A runner for the plan `home` on the repository `demo`, whose password

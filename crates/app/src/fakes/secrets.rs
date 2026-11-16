@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
+use domain::Timestamp;
 use domain::secrets::{
-    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, Stdout,
+    CommandLine, KeyringCause, KeyringEntry, Problem, SecretError, SecretRef, SourceName, Stdout,
     command_failure, command_secret, decode, file_warning,
 };
 
-use crate::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
+use crate::ports::{Clock, Kept, Keyring, KeyringError, Resolved, SecretResolver};
 
 /// What the fake does when told to run a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +52,9 @@ struct State {
     keyring: BTreeMap<String, String>,
     /// No keyring service to ask: every keyring read fails.
     no_keyring_service: bool,
+    /// The session's keyring service starts when this clock reaches this
+    /// time: until then there is none to ask, as with `no_keyring_service`.
+    service_starts: Option<(Arc<dyn Clock>, Timestamp)>,
     /// The keyring is locked: every keyring read fails, entry or not.
     keyring_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
@@ -133,6 +137,13 @@ impl FakeSecrets {
     /// `KeyringUnavailable`, never as missing.
     pub fn lock_keyring(&self) {
         self.lock().keyring_locked = true;
+    }
+
+    /// A session whose keyring service starts when `clock` reaches `at`, as
+    /// one that starts after the daemon at login: until then every keyring
+    /// entry fails as `KeyringUnavailable` with no service to ask.
+    pub fn start_keyring_service_at(&self, clock: Arc<dyn Clock>, at: Timestamp) {
+        self.lock().service_starts = Some((clock, at));
     }
 
     /// What running `command` does. A command with no script can't be started.
@@ -252,11 +263,12 @@ impl SecretResolver for FakeSecrets {
                     entry: entry.to_string(),
                 };
                 let unavailable = keyring_unavailable(&state);
-                if let Some(detail) = unavailable {
+                if let Some((detail, cause)) = unavailable {
                     return Err(SecretError {
                         source,
                         problem: Problem::KeyringUnavailable {
                             detail: detail.to_owned(),
+                            cause,
                         },
                     });
                 }
@@ -307,7 +319,7 @@ impl Keyring for FakeSecrets {
 /// it: what keeping or removing an entry is refused with there.
 fn unavailable(state: &State) -> Result<(), KeyringError> {
     match keyring_unavailable(state) {
-        Some(detail) => Err(KeyringError::Unavailable {
+        Some((detail, _)) => Err(KeyringError::Unavailable {
             detail: detail.to_owned(),
         }),
         None => Ok(()),
@@ -315,11 +327,15 @@ fn unavailable(state: &State) -> Result<(), KeyringError> {
 }
 
 /// Why the keyring can't be asked, in the platform's words, if it can't.
-fn keyring_unavailable(state: &State) -> Option<&'static str> {
-    if state.no_keyring_service {
-        Some("no session bus")
+fn keyring_unavailable(state: &State) -> Option<(&'static str, KeyringCause)> {
+    let not_started = state
+        .service_starts
+        .as_ref()
+        .is_some_and(|(clock, at)| clock.now() < *at);
+    if state.no_keyring_service || not_started {
+        Some(("no session bus", KeyringCause::NoService))
     } else if state.keyring_locked {
-        Some("the keyring is locked")
+        Some(("the keyring is locked", KeyringCause::Refused))
     } else {
         None
     }

@@ -16,7 +16,31 @@ use domain::secrets::{
     too_many_rclone_credentials,
 };
 
-use crate::ports::{RepositoryAccess, SavedEntry, SecretResolver};
+use crate::conditions::NETWORK_WAIT;
+use crate::ports::{Clock, RepositoryAccess, SavedEntry, SecretResolver};
+
+/// How long after the daemon starts a run nobody waits on holds for the
+/// session's keyring service: the network wait's bound (§5, decision NN).
+pub const KEYRING_WAIT: domain::SignedDuration = NETWORK_WAIT;
+
+/// How often a held run reads again the keyring entry it couldn't read.
+pub const KEYRING_POLL: domain::SignedDuration = domain::SignedDuration::from_secs(10);
+
+/// When the daemon started, read through its clock: a run nobody waits on
+/// holds for the session's keyring service only until the daemon has been
+/// up for [`KEYRING_WAIT`], the window in which the daemon can outrun the
+/// service at login (§5, decision NN).
+#[derive(Clone)]
+pub struct KeyringWait {
+    clock: Arc<dyn Clock>,
+    started: domain::Timestamp,
+}
+
+impl KeyringWait {
+    pub fn new(clock: Arc<dyn Clock>, started: domain::Timestamp) -> Self {
+        Self { clock, started }
+    }
+}
 
 /// A repository with every reference resolved, ready to hand to the engine.
 /// `access` masks its own secrets, so this one's `Debug` form is derived.
@@ -134,7 +158,7 @@ impl ResolveError {
                     },
                     // The platform's words about the service, never about a
                     // secret it gave: none was read. Masked all the same.
-                    Problem::KeyringUnavailable { detail } => {
+                    Problem::KeyringUnavailable { detail, .. } => {
                         SettingRefusal::SecretKeyringUnavailable {
                             source,
                             detail: said(detail),
@@ -230,7 +254,14 @@ fn template_error_place(error: &TemplateError) -> Option<usize> {
 pub struct ResolveRepository {
     resolver: Arc<dyn SecretResolver>,
     told: Option<SecretWarnings>,
+    /// The daemon's start, for runs nobody waits on; none, no run waits.
+    wait: Option<KeyringWait>,
 }
+
+/// Told, once, that a run nobody waits on holds for the session's keyring
+/// service to read the entry `source` names: the keyring's entry, never a
+/// secret (I4).
+pub type KeyringWaiting<'a> = &'a (dyn Fn(&SourceName) + Send + Sync);
 
 /// Told each warning that reading a set of secrets gave, once the set is
 /// read, with its path masked of those secrets (I4): the daemon says it in
@@ -242,6 +273,17 @@ impl ResolveRepository {
         Self {
             resolver,
             told: None,
+            wait: None,
+        }
+    }
+
+    /// Lets a run nobody waits on hold for the session's keyring service
+    /// while the daemon starts, by `wait` ([`Self::resolve_saved_unattended`]).
+    #[must_use]
+    pub fn waiting_for_keyring(self, wait: KeyringWait) -> Self {
+        Self {
+            wait: Some(wait),
+            ..self
         }
     }
 
@@ -373,6 +415,24 @@ impl ResolveRepository {
             entry: entry.clone(),
         });
         Ok(resolved)
+    }
+
+    /// As [`Self::resolve_saved`], for a run nobody waits on: one the
+    /// schedule started. When the keyring that holds the password has no
+    /// service to ask and the daemon has been up for less than
+    /// [`KEYRING_WAIT`], the run holds, reading that entry again every
+    /// [`KEYRING_POLL`] until the service answers or the bound comes, and
+    /// `waiting` is told once. Nothing else is read again; a keyring that is
+    /// locked or whose prompt was dismissed fails at once. Dropping the
+    /// future ends the wait.
+    pub async fn resolve_saved_unattended(
+        &self,
+        alias: &RepositoryAlias,
+        entry: &RepositoryConfig,
+        waiting: KeyringWaiting<'_>,
+    ) -> Result<ResolvedRepository, ResolveError> {
+        let _ = (alias, entry, waiting);
+        todo!()
     }
 }
 
@@ -790,6 +850,7 @@ mod tests {
                 keyring("ladderback/demo"),
                 Problem::KeyringUnavailable {
                     detail: "no Secret Service runs".to_owned(),
+                    cause: domain::secrets::KeyringCause::NoService,
                 },
                 R::SecretKeyringUnavailable {
                     source: "ladderback/demo".to_owned(),

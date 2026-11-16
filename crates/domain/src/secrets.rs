@@ -29,8 +29,8 @@ pub use inline::{
 use options::is_rclone_secret_option;
 pub use options::{is_command_option, is_secret_option};
 pub use outcome::{
-    MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, Stdout, command_failure, command_secret,
-    decode, file_warning,
+    KeyringCause, MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, Stdout, command_failure,
+    command_secret, decode, file_warning,
 };
 pub use proxy::{PROXY_URL_VARIABLES, proxy_credentials, proxy_credentials_by_variable};
 pub use source::{FileRead, KeyringEntry, NotAKeyringEntry, SecretRef, SourceName, first_line};

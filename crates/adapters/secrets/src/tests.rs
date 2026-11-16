@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use app::contract::secrets::SecretsHarness;
 use app::ports::{Keyring, KeyringError, Resolved, SecretResolver};
 use domain::secrets::{
-    CommandLine, FileRead, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError, SecretRef,
-    SecretValue, SecretWarning, SourceName,
+    CommandLine, FileRead, KeyringCause, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError,
+    SecretRef, SecretValue, SecretWarning, SourceName,
 };
 use nix::sys::signal::Signal;
 use nix::unistd::Pid;
@@ -83,6 +83,14 @@ impl SecretsHarness for RealHarness {
 
     fn keyring(&self) -> Arc<dyn app::ports::Keyring> {
         Arc::new(self.system())
+    }
+
+    fn without_keyring_service(&self) -> Arc<dyn SecretResolver> {
+        Arc::new(self.system().with_keyring(Arc::new(NoService)))
+    }
+
+    fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
+        Arc::new(self.system().with_keyring(Arc::new(Refusing)))
     }
 
     fn set_env(&self, name: &str, value: &str) {
@@ -1141,6 +1149,29 @@ impl KeyringStore for NoService {
     }
 }
 
+/// A Secret Service whose unlock prompt the person dismissed.
+struct Refusing;
+
+impl KeyringStore for Refusing {
+    fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
+        Err(Failure::Refused(
+            "Secret Service: prompt dismissed".to_owned(),
+        ))
+    }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        Err(Failure::Refused(
+            "Secret Service: prompt dismissed".to_owned(),
+        ))
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        Err(Failure::Refused(
+            "Secret Service: prompt dismissed".to_owned(),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn a_keyring_with_no_service_to_ask_says_so_and_why() {
     let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
@@ -1155,7 +1186,8 @@ async fn a_keyring_with_no_service_to_ask_says_so_and_why() {
                 entry: "ladderback-demo/nas".to_owned()
             },
             problem: Problem::KeyringUnavailable {
-                detail: "no session bus".to_owned()
+                detail: "no session bus".to_owned(),
+                cause: KeyringCause::NoService,
             },
         })
     );
@@ -1449,7 +1481,7 @@ fn a_secret_service_that_finds_no_entry_in_a_locked_keyring_is_no_keyring_servic
         failure(keyring::Error::NoEntry, OsStore::SecretService, || {
             Lock::Locked(said.to_owned())
         }),
-        Failure::NoService(said.to_owned())
+        Failure::Refused(said.to_owned())
     );
     assert_eq!(
         failure(keyring::Error::NoEntry, OsStore::SecretService, || {
@@ -1471,13 +1503,12 @@ fn a_secret_service_that_finds_no_entry_in_a_locked_keyring_is_no_keyring_servic
 
 /// The Secret Service's failures to answer at all, as the `keyring` crate
 /// reports them on Linux, with the `dbus-secret-service` error it boxes: no
-/// session bus or no daemon on it (a D-Bus error, `PlatformFailure`), and a
-/// locked or missing collection or a dismissed unlock prompt
-/// (`NoStorageAccess`). Each is a store that isn't there to ask, in the
-/// platform's words, whatever the machine running the test has.
+/// session bus or no daemon on it (a D-Bus error, `PlatformFailure`, or a
+/// provider that isn't there). Each is a store that isn't there to ask, in
+/// the platform's words, whatever the machine running the test has.
 #[cfg(target_os = "linux")]
 #[test]
-fn a_secret_service_that_cannot_be_asked_is_no_keyring_service() {
+fn a_secret_service_that_is_not_on_the_bus_is_no_keyring_service() {
     use crate::keyring_store::{OsStore, failure};
     use dbus_secret_service::Error;
     let bus = |name: &str, message: &str| Error::Dbus(dbus::Error::new_custom(name, message));
@@ -1494,11 +1525,33 @@ fn a_secret_service_that_cannot_be_asked_is_no_keyring_service() {
             "org.freedesktop.DBus.Error.ServiceUnknown",
             "The name org.freedesktop.secrets was not provided by any .service files",
         ))),
+        keyring::Error::PlatformFailure(Box::new(Error::Unavailable)),
+    ];
+    for error in cases {
+        let said = error.to_string();
+        assert_eq!(
+            failure(error, OsStore::SecretService, never_asked),
+            Failure::NoService(said)
+        );
+    }
+}
+
+/// A Secret Service that answered and refused, as the `keyring` crate
+/// reports it on Linux: its collection locked (its D-Bus error, or the
+/// `dbus-secret-service` error), missing, or its unlock prompt dismissed.
+/// Each is refused in the platform's words, never a service that isn't there:
+/// asking again would ask the person again.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_secret_service_that_is_locked_or_whose_prompt_was_dismissed_refused() {
+    use crate::keyring_store::{OsStore, failure};
+    use dbus_secret_service::Error;
+    let bus = |name: &str, message: &str| Error::Dbus(dbus::Error::new_custom(name, message));
+    let cases = [
         keyring::Error::PlatformFailure(Box::new(bus(
             "org.freedesktop.Secret.Error.IsLocked",
             "Cannot get secret of a locked object",
         ))),
-        keyring::Error::PlatformFailure(Box::new(Error::Unavailable)),
         keyring::Error::NoStorageAccess(Box::new(Error::Locked)),
         keyring::Error::NoStorageAccess(Box::new(Error::NoResult)),
         keyring::Error::NoStorageAccess(Box::new(Error::Prompt)),
@@ -1507,7 +1560,7 @@ fn a_secret_service_that_cannot_be_asked_is_no_keyring_service() {
         let said = error.to_string();
         assert_eq!(
             failure(error, OsStore::SecretService, never_asked),
-            Failure::NoService(said)
+            Failure::Refused(said)
         );
     }
 }
@@ -1577,23 +1630,30 @@ fn a_secret_service_that_refuses_an_entry_is_unreachable() {
     }
 }
 
-/// The D-Bus errors that say there is no bus or no Secret Service on it, or
-/// that its collection is locked, by name, and those of a call the service
-/// took and failed.
+/// The D-Bus errors that say there is no bus or no Secret Service on it, and
+/// the one that says its collection is locked, by name, and those of a call
+/// the service took and failed.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn a_bus_error_names_a_missing_bus_or_service() {
-    use crate::keyring_store::bus_or_service_missing;
+fn a_bus_error_names_a_missing_service_or_a_locked_keyring() {
+    use crate::keyring_store::bus_error_cause;
     for missing in [
         "org.freedesktop.DBus.Error.NoServer",
         "org.freedesktop.DBus.Error.FileNotFound",
         "org.freedesktop.DBus.Error.NotSupported",
         "org.freedesktop.DBus.Error.ServiceUnknown",
         "org.freedesktop.DBus.Error.NameHasNoOwner",
-        "org.freedesktop.Secret.Error.IsLocked",
     ] {
-        assert!(bus_or_service_missing(missing), "{missing}");
+        assert_eq!(
+            bus_error_cause(missing),
+            Some(KeyringCause::NoService),
+            "{missing}"
+        );
     }
+    assert_eq!(
+        bus_error_cause("org.freedesktop.Secret.Error.IsLocked"),
+        Some(KeyringCause::Refused)
+    );
     for answered in [
         "org.freedesktop.DBus.Error.NoReply",
         "org.freedesktop.DBus.Error.TimedOut",
@@ -1606,7 +1666,7 @@ fn a_bus_error_names_a_missing_bus_or_service() {
         "ServiceUnknown",
         "org.example.Error.ServiceUnknown",
     ] {
-        assert!(!bus_or_service_missing(answered), "{answered}");
+        assert_eq!(bus_error_cause(answered), None, "{answered}");
     }
 }
 
