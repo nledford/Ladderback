@@ -137,7 +137,9 @@ impl Location {
         self.repo_hot.as_deref().map(|hot| self.masked(hot))
     }
 
-    fn masked(&self, text: &str) -> String {
+    /// Masks every secret this location holds as text: the passwords in its
+    /// URLs and what its options hold.
+    pub fn redactor(&self) -> Redactor {
         let none = SecretValue::new("");
         Redactor::for_repository(RepositorySecrets {
             repository: &self.repository,
@@ -148,7 +150,10 @@ impl Location {
             options_cold: &self.options_cold,
             resolved: &[],
         })
-        .redact(text)
+    }
+
+    fn masked(&self, text: &str) -> String {
+        self.redactor().redact(text)
     }
 }
 
