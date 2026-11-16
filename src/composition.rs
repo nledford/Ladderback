@@ -752,6 +752,9 @@ async fn state_over(
     log: &OperationLog,
     conditions: RunConditions,
 ) -> Result<(AppState, Background, engine::Workers), Refused> {
+    // When the daemon started, as far as a run that waits for the session's
+    // keyring service counts it (§5, decision 116).
+    let started = SystemClock.now();
     let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
     let schedules: Arc<dyn ScheduleStore> = Arc::<SqliteStore>::clone(&log.store);
     // The bus and the notification rules come first, so that recovery can
@@ -807,10 +810,11 @@ async fn state_over(
     // connection, a creation, the record of an opened repository's ID and a
     // plan's change (§6.1, decisions 57 and 96).
     let writes = Arc::new(ConfigWrites::default());
-    let resolve = Arc::new(
-        ResolveRepository::new(Arc::new(SystemSecrets::default()))
-            .telling(Arc::new(log_secret_warning)),
-    );
+    let resolve = Arc::new(daemon_resolve(
+        Arc::new(SystemSecrets::default()),
+        Arc::new(SystemClock),
+        started,
+    ));
     // The choice of a location comes first (decision 80): a job opens the
     // location it chose, and the record of an opened repository's ID
     // (decision 81) sees that job, never a probe.
@@ -1524,11 +1528,14 @@ struct PlanRunner {
 impl PlanRunner {
     /// The backup job of plan `id`, the hooks around it and what reading its
     /// secrets told, as `config` stands now: a rewrite between runs is
-    /// picked up.
+    /// picked up. A run `trigger` started with nobody waiting on it holds
+    /// for the session's keyring service while the daemon starts, and the
+    /// log says so once (§5).
     async fn backup_of(
         &self,
         config: &domain::planning::AgentConfig,
         id: &PlanId,
+        trigger: &Trigger,
     ) -> Result<BuiltBackup, Unbuilt> {
         let plan = config
             .plan(id)
@@ -1542,11 +1549,19 @@ impl PlanRunner {
         // none (§6.1, decision 57). A secret that can't be resolved is
         // refused with its own code, masked of every secret of the
         // repository, as the repository routes refuse it (I4, #309).
-        let resolved = match self
-            .resolve
-            .resolve_saved(&plan.repository, repository)
-            .await
-        {
+        let resolving = if trigger.is_unattended() {
+            let waiting = |source: &domain::secrets::SourceName| {
+                log_keyring_wait(trigger, id, source);
+            };
+            self.resolve
+                .resolve_saved_unattended(&plan.repository, repository, &waiting)
+                .await
+        } else {
+            self.resolve
+                .resolve_saved(&plan.repository, repository)
+                .await
+        };
+        let resolved = match resolving {
             Ok(resolved) => resolved,
             Err(error) => {
                 let redactor =
@@ -1643,7 +1658,7 @@ impl PlanRunner {
             job,
             setup,
             warnings,
-        } = self.backup_of(&config, id).await?;
+        } = self.backup_of(&config, id, &trigger).await?;
         let place = place.unwrap_or_else(|| self.queue.push(id, config.agent().concurrency));
         // A UUIDv7: the log orders by ID, so the newest run is the highest.
         let operation = OperationId::from_uuid(Uuid::now_v7());
@@ -1834,7 +1849,7 @@ impl PlanRuns for PlanRunner {
         let built = match operation.target().plan.clone() {
             Some(plan) => match self.config.load().await {
                 Ok(config) => self
-                    .backup_of(&config, &plan)
+                    .backup_of(&config, &plan, operation.trigger())
                     .await
                     .map(|built| (built, plan, config.agent().concurrency)),
                 Err(error) => Err(Unbuilt::Refused(config_unusable(
@@ -3619,14 +3634,35 @@ fn log_secret_warning(warning: &SecretWarning) {
 /// The daemon's resolution of secrets, through `secrets`: each warning it
 /// gives is said in the log, and a run nobody waits on holds for the
 /// session's keyring service while the daemon, which started at `started`
-/// by `clock`, starts (§5, decision NN).
+/// by `clock`, starts (§5, decision 116).
 fn daemon_resolve(
     secrets: Arc<dyn app::ports::SecretResolver>,
     clock: Arc<dyn Clock>,
     started: domain::Timestamp,
 ) -> ResolveRepository {
-    let _ = (secrets, clock, started);
-    todo!()
+    ResolveRepository::new(secrets)
+        .telling(Arc::new(log_secret_warning))
+        .waiting_for_keyring(app::secrets::KeyringWait::new(clock, started))
+}
+
+/// Says once that the run `trigger` started of plan `plan` waits for the
+/// session's keyring service to read the entry `source` names: the entry,
+/// never a secret (I4).
+fn log_keyring_wait(trigger: &Trigger, plan: &PlanId, source: &domain::secrets::SourceName) {
+    use domain::secrets::SourceName;
+    let name = match source {
+        SourceName::Keyring { entry } => entry,
+        SourceName::Command { program } => program,
+        SourceName::File { path } => path,
+        SourceName::Env { name } => name,
+    };
+    log::info!(
+        "{} of plan {} waits for the session's keyring service to read {name}, \
+         until it answers or the daemon has been up for {:#}",
+        run_named(trigger),
+        plan.as_str(),
+        app::secrets::KEYRING_WAIT
+    );
 }
 
 /// A secret that couldn't be resolved, as the typed refusal of its cause
@@ -12427,12 +12463,79 @@ mod repository_service_tests {
     async fn a_scheduled_run_while_the_daemon_starts_waits_for_the_keyring_service_and_logs_it_once()
      {
         capture();
-        const PASSWORD: &str = "canary-keyring-password";
+        let (runner, heard, scripted, plan) = keyring_runner().await;
+
+        let place = runner
+            .queue
+            .push(&plan, domain::planning::Concurrency::default());
+        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+            .await
+            .expect("the schedule hears how the run ended")
+            .expect("a run ended");
+        let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let [Job::Backup(backup)] = seen.as_slice() else {
+            panic!("the run's backup reached the engine: {seen:?}");
+        };
+        assert_eq!(backup.repository.password.expose(), KEYRING_PASSWORD);
+        let waits: Vec<String> = captured_log::infos()
+            .into_iter()
+            .filter(|line| line.contains("keyring service"))
+            .collect();
+        let [line] = waits.as_slice() else {
+            panic!("the wait is logged once: {waits:?}");
+        };
+        assert!(line.contains("the scheduled run of plan home"), "{line}");
+        assert!(line.contains("ladderback/demo"), "{line}");
+        assert!(!line.contains(KEYRING_PASSWORD), "{line}");
+    }
+
+    /// A run a person starts while the daemon starts is answered at once
+    /// when the session's keyring service isn't up yet: it never waits, and
+    /// the log says nothing of a wait.
+    #[tokio::test]
+    async fn a_run_by_hand_while_the_daemon_starts_never_waits_for_the_keyring_service() {
+        capture();
+        let (runner, _heard, scripted, plan) = keyring_runner().await;
+
+        let refused = Operations::start_backup(&runner, plan.as_str().to_owned(), Trigger::Manual)
+            .await
+            .expect_err("a run by hand with no keyring service to ask is refused");
+
+        assert_matches!(
+            refused,
+            StartError::SecretRefused(SecretRefusal {
+                code: ErrorCode::SecretKeyringUnavailable,
+                ..
+            })
+        );
+        assert_eq!(jobs(&scripted), 0);
+        let waits: Vec<String> = captured_log::infos()
+            .into_iter()
+            .filter(|line| line.contains("keyring service"))
+            .collect();
+        assert_eq!(waits, Vec::<String>::new());
+    }
+
+    /// The password the keyring holds for the repository `demo`.
+    const KEYRING_PASSWORD: &str = "canary-keyring-password";
+
+    /// A runner for the plan `home` on the repository `demo`, as the daemon
+    /// builds it, a moment after it started: the repository's password is
+    /// in a keyring whose session's service starts 25 s after the daemon,
+    /// on a clock that jumps to the end of each wait.
+    async fn keyring_runner() -> (
+        PlanRunner,
+        app::retry::RunEnds,
+        Arc<Scripted>,
+        domain::PlanId,
+    ) {
         let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
         let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
         let clock = Arc::new(app::fakes::FakeClock::auto_advancing(started));
         let secrets = Arc::new(FakeSecrets::new());
-        secrets.set_keyring_entry(&entry, PASSWORD);
+        secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
         secrets.start_keyring_service_at(
             clock.clone(),
             started + domain::SignedDuration::from_secs(25),
@@ -12452,31 +12555,7 @@ mod repository_service_tests {
         )
         .await;
         runner.resolve = Arc::new(daemon_resolve(secrets, clock, started));
-
-        let place = runner
-            .queue
-            .push(&plan, domain::planning::Concurrency::default());
-        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
-
-        tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
-            .await
-            .expect("the schedule hears how the run ended")
-            .expect("a run ended");
-        let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
-        let [Job::Backup(backup)] = seen.as_slice() else {
-            panic!("the run's backup reached the engine: {seen:?}");
-        };
-        assert_eq!(backup.repository.password.expose(), PASSWORD);
-        let waits: Vec<String> = captured_log::infos()
-            .into_iter()
-            .filter(|line| line.contains("keyring service"))
-            .collect();
-        let [line] = waits.as_slice() else {
-            panic!("the wait is logged once: {waits:?}");
-        };
-        assert!(line.contains("the scheduled run of plan home"), "{line}");
-        assert!(line.contains("ladderback/demo"), "{line}");
-        assert!(!line.contains(PASSWORD), "{line}");
+        (runner, heard, scripted, plan)
     }
 
     /// A runner for the plan `home` on the repository `demo`, whose password
