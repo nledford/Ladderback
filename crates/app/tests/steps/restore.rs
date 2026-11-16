@@ -27,6 +27,7 @@ use domain::execution::{FailureReason, OperationKind, OperationStatus, Trigger};
 use domain::notifications::{EventKind, Outcome};
 use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
+    RestoreFolder,
 };
 use domain::restore::{Destination, RestoreOrigin, RestoreRefused};
 use domain::secrets::{SecretRef, SecretValue};
@@ -58,6 +59,10 @@ pub struct RestoreWorld {
     /// The admin password, with sign-in on.
     password: Option<String>,
     allow_hub_restore: bool,
+    /// The `restore-folder` the agent's configuration sets.
+    restore_folder: Option<RestoreFolder>,
+    /// The agent has no home folder, so no default restore folder.
+    no_home: bool,
     run: RestoreRun,
     /// What the scripted dry run counts.
     plan: RestorePlanSummary,
@@ -218,6 +223,7 @@ impl RestoreWorld {
         let config = AgentConfig::new(
             AgentSettings {
                 allow_hub_restore: self.allow_hub_restore,
+                restore_folder: self.restore_folder.clone(),
                 ..AgentSettings::default()
             },
             Hooks::default(),
@@ -248,7 +254,8 @@ impl RestoreWorld {
             ResolveRepository::new(Arc::new(FakeSecrets::default())),
             RunOperation::new(engine, clock.clone(), self.log.clone()),
             RestoreSetup {
-                default_folder: RESTORE_FOLDER.to_owned(),
+                default_folder: (!self.no_home)
+                    .then(|| RestoreFolder::parse(RESTORE_FOLDER).expect("an absolute folder")),
                 zone: TimeZone::UTC,
             },
         );
@@ -395,13 +402,14 @@ fn allows_hub_restores(agent: &mut Agent) {
 }
 
 #[given(expr = "the agent's configuration sets its restore-folder to {string}")]
-fn sets_restore_folder(_agent: &mut Agent, folder: String) {
-    todo!("set the agent's restore-folder to {folder}")
+fn sets_restore_folder(agent: &mut Agent, folder: String) {
+    agent.restore.restore_folder = Some(RestoreFolder::parse(&folder).expect("an absolute folder"));
 }
 
 #[given("the agent has no home folder and its configuration sets no restore-folder")]
-fn no_restore_folder(_agent: &mut Agent) {
-    todo!("an agent with no folder to restore into")
+fn no_restore_folder(agent: &mut Agent) {
+    agent.restore.no_home = true;
+    agent.restore.restore_folder = None;
 }
 
 #[given(expr = "the engine restores in {int} steps of 1 minute each")]
@@ -696,8 +704,15 @@ fn refused_in_place_from_hub(agent: &mut Agent) {
 }
 
 #[then("the restore is refused because the agent has no folder to restore into")]
-fn refused_no_restore_folder(_agent: &mut Agent) {
-    todo!("refuse a restore with no folder to restore into")
+fn refused_no_restore_folder(agent: &mut Agent) {
+    assert!(
+        matches!(
+            agent.restore.refusal(),
+            RestoreError::Refused(RestoreRefused::NoRestoreFolder)
+        ),
+        "{:?}",
+        agent.restore.refusal()
+    );
 }
 
 #[then("the engine was asked for nothing")]

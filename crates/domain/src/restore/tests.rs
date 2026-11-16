@@ -18,19 +18,30 @@ fn admit(
     RestoreRequest::admit(policy, snapshot(), entry(), destination, origin)
 }
 
-const HUB_ALLOWED: RestorePolicy = RestorePolicy {
-    allow_hub_restore: true,
-};
+fn folder() -> RestoreFolder {
+    RestoreFolder::parse("/home/demo/ladderback-restore").expect("a restore folder")
+}
+
+/// An agent with a restore folder that doesn't allow hub restores.
+fn local_only() -> RestorePolicy {
+    RestorePolicy {
+        allow_hub_restore: false,
+        folder: Some(folder()),
+    }
+}
+
+fn hub_allowed() -> RestorePolicy {
+    RestorePolicy {
+        allow_hub_restore: true,
+        folder: Some(folder()),
+    }
+}
 
 #[test]
 fn the_agents_own_ui_restores_into_a_new_folder_or_in_place() {
     for destination in [Destination::NewFolder, Destination::InPlace] {
-        let request = admit(
-            RestorePolicy::default(),
-            destination,
-            RestoreOrigin::LocalUi,
-        )
-        .expect("the agent's own UI may restore");
+        let request = admit(local_only(), destination, RestoreOrigin::LocalUi)
+            .expect("the agent's own UI may restore");
         assert_eq!(request.destination(), destination);
         assert_eq!(request.origin(), RestoreOrigin::LocalUi);
         assert_eq!(request.snapshot(), &snapshot());
@@ -39,17 +50,39 @@ fn the_agents_own_ui_restores_into_a_new_folder_or_in_place() {
 }
 
 #[test]
+fn a_restore_into_a_new_folder_goes_under_the_restore_folder_and_one_in_place_under_none() {
+    let new = admit(local_only(), Destination::NewFolder, RestoreOrigin::LocalUi).unwrap();
+    assert_eq!(new.folder(), Some(&folder()));
+    let in_place = admit(local_only(), Destination::InPlace, RestoreOrigin::LocalUi).unwrap();
+    assert_eq!(in_place.folder(), None);
+}
+
+#[test]
+fn without_a_restore_folder_only_a_restore_in_place_is_taken() {
+    let none = RestorePolicy {
+        allow_hub_restore: true,
+        folder: None,
+    };
+    for origin in [RestoreOrigin::LocalUi, RestoreOrigin::Hub] {
+        assert_eq!(
+            admit(none.clone(), Destination::NewFolder, origin),
+            Err(RestoreRefused::NoRestoreFolder),
+            "{origin:?}"
+        );
+    }
+    let in_place = admit(none, Destination::InPlace, RestoreOrigin::LocalUi)
+        .expect("a restore in place needs no restore folder");
+    assert_eq!(in_place.folder(), None);
+}
+
+#[test]
 fn the_hub_never_restores_in_place_even_where_hub_restores_are_allowed() {
     assert_eq!(
-        admit(HUB_ALLOWED, Destination::InPlace, RestoreOrigin::Hub),
+        admit(hub_allowed(), Destination::InPlace, RestoreOrigin::Hub),
         Err(RestoreRefused::InPlaceFromHub)
     );
     assert_eq!(
-        admit(
-            RestorePolicy::default(),
-            Destination::InPlace,
-            RestoreOrigin::Hub
-        ),
+        admit(local_only(), Destination::InPlace, RestoreOrigin::Hub),
         Err(RestoreRefused::InPlaceFromHub)
     );
 }
@@ -57,14 +90,10 @@ fn the_hub_never_restores_in_place_even_where_hub_restores_are_allowed() {
 #[test]
 fn the_hub_restores_into_a_new_folder_only_where_the_agent_allows_it() {
     assert_eq!(
-        admit(
-            RestorePolicy::default(),
-            Destination::NewFolder,
-            RestoreOrigin::Hub
-        ),
+        admit(local_only(), Destination::NewFolder, RestoreOrigin::Hub),
         Err(RestoreRefused::HubNotAllowed)
     );
-    let request = admit(HUB_ALLOWED, Destination::NewFolder, RestoreOrigin::Hub)
+    let request = admit(hub_allowed(), Destination::NewFolder, RestoreOrigin::Hub)
         .expect("an agent that allows hub restores takes one into a new folder");
     assert_eq!(request.origin(), RestoreOrigin::Hub);
 }

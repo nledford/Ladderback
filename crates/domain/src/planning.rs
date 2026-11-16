@@ -38,7 +38,7 @@ pub use location::{
     ExposedCredentials, LOCATION_PROBE_SECONDS, Location, LocationWarning, Locations,
     MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, MixedLinkNote, RuleNote, check_location_count,
 };
-pub use names::{GlobFile, Hostname, Locale, Source};
+pub use names::{GlobFile, Hostname, Locale, RestoreFolder, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
 pub use repository::{
     GroupBy, Maintenance, RepositoryConfig, RepositorySettings, check_location, check_option_value,
@@ -63,6 +63,8 @@ pub enum ValueKind {
     /// by an absolute path: its location, or a file an option names.
     LocalPath,
     Locale,
+    /// The agent's `restore-folder`: not an absolute path.
+    RestoreFolder,
     Concurrency,
     Nice,
     Cron,

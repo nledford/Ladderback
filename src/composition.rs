@@ -53,7 +53,8 @@ use domain::execution::plan_tags::PlanTags;
 use domain::execution::{OperationKind, OperationStatus, Target, Trigger, WarningKind};
 use domain::planning::{
     InterfaceKind, Link, Location, LocationRule, Maintenance, MixedLinkNote, NameFilter,
-    NotRecorded, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RuleNote,
+    NotRecorded, Plan, RepositoryConfig, RepositoryField, RepositorySettings, RestoreFolder,
+    RuleNote,
 };
 use domain::secrets::{
     FileRead, KeyringEntry, MaskedSecrets, Part, Redactor, RepositorySecrets, SecretRef,
@@ -314,8 +315,8 @@ impl RunConditions {
 pub(crate) struct Background {
     runner: Arc<PlanRunner>,
     /// Where a restore makes its new folder when `[agent] restore-folder`
-    /// is unset (§10.4).
-    restore_folder: String,
+    /// is unset (§10.4): none on a machine without a home folder.
+    restore_folder: Option<RestoreFolder>,
     /// The queued operations recovery found, oldest first.
     queued: Vec<OperationRecord>,
     config: Arc<dyn ConfigStore>,
@@ -831,13 +832,15 @@ async fn state_over(
         // kept in the operation log's database (§16, decision 104).
         readings: Arc::<SqliteStore>::clone(&log.store),
     });
-    // `~/ladderback-restore`, or in the data folder on a machine with no
-    // home folder (§10.4).
-    let restore_folder = std::env::home_dir()
-        .unwrap_or_else(|| data_dir.to_path_buf())
-        .join("ladderback-restore")
-        .to_string_lossy()
-        .into_owned();
+    // `~/ladderback-restore`. With no home folder, or one that isn't
+    // UTF-8, there is none: a restore to a new folder then needs
+    // `[agent] restore-folder`, and never lands beside the database and
+    // the secrets in the data folder (§10.4).
+    let restore_folder = std::env::home_dir().and_then(|home| {
+        home.join("ladderback-restore")
+            .to_str()
+            .and_then(|folder| RestoreFolder::parse(folder).ok())
+    });
     let restores: Arc<dyn http_adapter::Restores> = Arc::new(restores::RestoreService::new(
         &runner,
         restore_folder.clone(),

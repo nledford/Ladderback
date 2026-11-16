@@ -53,6 +53,7 @@ table! {
         allow_hub_restore: bool,
         locale: String,
         check_for_updates: bool,
+        restore_folder: String,
     }
 }
 

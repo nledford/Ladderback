@@ -298,6 +298,10 @@ fn agent(settings: &AgentSettings) -> Option<AgentTable> {
             .as_ref()
             .map(|locale| locale.as_str().to_owned()),
         check_for_updates: (settings.update_check == UpdateCheck::Off).then_some(false),
+        restore_folder: settings
+            .restore_folder
+            .as_ref()
+            .map(|folder| folder.as_str().to_owned()),
     })
 }
 

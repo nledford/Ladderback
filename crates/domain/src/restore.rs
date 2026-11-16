@@ -7,6 +7,7 @@ use jiff::civil::DateTime;
 use crate::SnapshotId;
 use crate::access::step_up::short_id;
 use crate::browse::FolderPath;
+use crate::planning::RestoreFolder;
 
 /// Where a restore writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,10 +29,14 @@ pub enum RestoreOrigin {
 }
 
 /// The agent's settings that decide which restores it takes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RestorePolicy {
     /// The agent's `allow-hub-restore`.
     pub allow_hub_restore: bool,
+    /// The folder a restore into a new folder is made under: the agent's
+    /// `restore-folder`, else `ladderback-restore` in the home folder; none
+    /// on a machine with no home folder whose agent sets none.
+    pub folder: Option<RestoreFolder>,
 }
 
 /// Why a restore was refused before anything ran.
@@ -41,6 +46,9 @@ pub enum RestoreRefused {
     InPlaceFromHub,
     /// The agent doesn't set `allow-hub-restore`.
     HubNotAllowed,
+    /// A restore into a new folder, with no folder to make it under: the
+    /// machine has no home folder and the agent sets no `restore-folder`.
+    NoRestoreFolder,
 }
 
 /// One restore a person asked for (the Restore aggregate's root): one entry
@@ -52,6 +60,8 @@ pub struct RestoreRequest {
     entry: FolderPath,
     destination: Destination,
     origin: RestoreOrigin,
+    /// Where a restore into a new folder makes its folder; none in place.
+    folder: Option<RestoreFolder>,
 }
 
 impl RestoreRequest {
@@ -72,11 +82,16 @@ impl RestoreRequest {
                 return Err(RestoreRefused::HubNotAllowed);
             }
         }
+        let folder = match destination {
+            Destination::NewFolder => Some(policy.folder.ok_or(RestoreRefused::NoRestoreFolder)?),
+            Destination::InPlace => None,
+        };
         Ok(Self {
             snapshot,
             entry,
             destination,
             origin,
+            folder,
         })
     }
 
@@ -95,6 +110,12 @@ impl RestoreRequest {
 
     pub fn origin(&self) -> RestoreOrigin {
         self.origin
+    }
+
+    /// The folder a restore into a new folder makes its own folder under,
+    /// named by [`restore_folder_name`]; none for a restore in place.
+    pub fn folder(&self) -> Option<&RestoreFolder> {
+        self.folder.as_ref()
     }
 }
 

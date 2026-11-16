@@ -13,7 +13,7 @@ use domain::access::step_up::confirms_snapshot;
 use domain::browse::FolderPath;
 use domain::execution::Trigger;
 use domain::execution::deadline::backup_budget;
-use domain::planning::{AgentConfig, RepositoryConfig};
+use domain::planning::{AgentConfig, RepositoryConfig, RestoreFolder};
 use domain::restore::{
     Destination, RestoreOrigin, RestorePolicy, RestoreRefused, RestoreRequest, restore_folder_name,
 };
@@ -32,9 +32,10 @@ use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
 /// What a restore needs that the configuration doesn't say.
 #[derive(Clone, Debug)]
 pub struct RestoreSetup {
-    /// The restore folder when `[agent] restore-folder` is unset: an
-    /// absolute path.
-    pub default_folder: String,
+    /// The restore folder when `[agent] restore-folder` is unset:
+    /// `ladderback-restore` in the home folder, none on a machine without
+    /// one, where a restore into a new folder is refused.
+    pub default_folder: Option<RestoreFolder>,
     /// The machine's time zone, in which a new folder's name gives the time.
     pub zone: TimeZone,
 }
@@ -188,7 +189,7 @@ impl Restores {
         origin: RestoreOrigin,
     ) -> Result<RestorePlanSummary, RestoreError> {
         let config = self.config.load().await.map_err(config_error)?;
-        let request = admit(&config, snapshot, entry, Destination::InPlace, origin)?;
+        let request = self.admit(&config, snapshot, entry, Destination::InPlace, origin)?;
         let repository = repository(&config, alias)?;
         let ResolvedRepository { access, .. } = self.resolved(alias, repository).await?;
         let job = Job::RestorePlan(RestoreJob {
@@ -217,7 +218,7 @@ impl Restores {
     ) -> Result<PreparedRestore, RestoreError> {
         self.step_up(&ask).await?;
         let config = self.config.load().await.map_err(config_error)?;
-        let request = admit(
+        let request = self.admit(
             &config,
             ask.snapshot,
             ask.entry,
@@ -227,19 +228,19 @@ impl Restores {
         let slot = self.take_slot(op)?;
         let repository = repository(&config, &ask.alias)?;
         let ResolvedRepository { access, warnings } = self.resolved(&ask.alias, repository).await?;
-        let target = match request.destination() {
-            Destination::NewFolder => {
+        let target = match request.folder() {
+            Some(parent) => {
                 let host = self.host_of(op, access.clone(), request.snapshot()).await?;
                 let at = self
                     .clock
                     .now()
                     .to_zoned(self.setup.zone.clone())
                     .datetime();
-                let mut folder = PathBuf::from(&self.setup.default_folder);
+                let mut folder = PathBuf::from(parent.as_str());
                 folder.push(restore_folder_name(&host, request.snapshot(), at));
                 RestoreTarget::NewFolder(folder.to_string_lossy().into_owned())
             }
-            Destination::InPlace => RestoreTarget::InPlace,
+            None => RestoreTarget::InPlace,
         };
         let job = Job::Restore(RestoreJob {
             repository: access,
@@ -357,21 +358,29 @@ impl Restores {
             .map(|listed| listed.hostname)
             .ok_or(RestoreError::SnapshotUnknown)
     }
-}
 
-/// The request, if the agent's configured rules take it.
-fn admit(
-    config: &AgentConfig,
-    snapshot: SnapshotId,
-    entry: FolderPath,
-    destination: Destination,
-    origin: RestoreOrigin,
-) -> Result<RestoreRequest, RestoreError> {
-    let policy = RestorePolicy {
-        allow_hub_restore: config.agent().allow_hub_restore,
-    };
-    RestoreRequest::admit(policy, snapshot, entry, destination, origin)
-        .map_err(RestoreError::Refused)
+    /// The request, if the agent's configured rules take it: one into a
+    /// new folder goes under the agent's `restore-folder`, else the default
+    /// folder.
+    fn admit(
+        &self,
+        config: &AgentConfig,
+        snapshot: SnapshotId,
+        entry: FolderPath,
+        destination: Destination,
+        origin: RestoreOrigin,
+    ) -> Result<RestoreRequest, RestoreError> {
+        let agent = config.agent();
+        let policy = RestorePolicy {
+            allow_hub_restore: agent.allow_hub_restore,
+            folder: agent
+                .restore_folder
+                .clone()
+                .or_else(|| self.setup.default_folder.clone()),
+        };
+        RestoreRequest::admit(policy, snapshot, entry, destination, origin)
+            .map_err(RestoreError::Refused)
+    }
 }
 
 fn repository<'a>(

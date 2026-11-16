@@ -11,8 +11,8 @@ use cucumber::{given, then, when};
 use domain::planning::{
     AgentConfig, AgentSettings, Concurrency, CronExpression, GlobFile, GroupBy, HookEntry, Hooks,
     Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure,
-    Overlap, Plan, RepositoryConfig, RepositorySettings, RetryPolicy, Schedule, Source, ValueKind,
-    Violation, parse_duration,
+    Overlap, Plan, RepositoryConfig, RepositorySettings, RestoreFolder, RetryPolicy, Schedule,
+    Source, ValueKind, Violation, parse_duration,
 };
 use domain::secrets::SecretRef;
 use domain::{InvalidId, PlanId, RepositoryAlias, SignedDuration};
@@ -64,6 +64,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::GlobFile => "glob-file",
             ValueKind::LocalPath => "local-path",
             ValueKind::Locale => "locale",
+            ValueKind::RestoreFolder => "restore-folder",
             ValueKind::Concurrency => "concurrency",
             ValueKind::Nice => "nice",
             ValueKind::Cron => "cron",
@@ -209,7 +210,7 @@ fn read(kind: &str, text: &str) -> Result<Option<HookEntry>, Refusal> {
         "source" => value(Source::parse(text)),
         "glob-file" => value(GlobFile::parse(text)),
         "locale" => value(Locale::parse(text)),
-        "restore-folder" => todo!("read [agent] restore-folder {text}"),
+        "restore-folder" => value(RestoreFolder::parse(text)),
         "repository-alias" => RepositoryAlias::parse(text)
             .map(|_| None)
             .map_err(Refusal::from),

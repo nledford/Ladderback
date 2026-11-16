@@ -12,6 +12,7 @@ use app::ports::ConfigStore;
 use app::restore::{RestoreAsk, RestoreError, RestoreSetup, Restores};
 use async_trait::async_trait;
 use domain::browse::FolderPath;
+use domain::planning::RestoreFolder;
 use domain::restore::{RestoreOrigin, RestoreRefused};
 use domain::{OperationId, RepositoryAlias, SnapshotId};
 use http_adapter::{MaintenanceRefusal, RestoreRefusal, RestoreStart};
@@ -29,12 +30,12 @@ pub(super) struct RestoreService {
 }
 
 impl RestoreService {
-    /// Restores over `runner`'s parts into `default_folder`, confirmed by
-    /// `access` with sign-in on and by the snapshot's short ID without it.
-    /// A restore runs no hooks.
+    /// Restores over `runner`'s parts into `[agent] restore-folder`, else
+    /// `default_folder`, confirmed by `access` with sign-in on and by the
+    /// snapshot's short ID without it. A restore runs no hooks.
     pub(super) fn new(
         runner: &PlanRunner,
-        default_folder: String,
+        default_folder: Option<RestoreFolder>,
         access: Option<Arc<Access>>,
     ) -> Self {
         let clock = Arc::new(SystemClock);
@@ -84,6 +85,9 @@ async fn refusal(
         }
         RestoreError::Refused(RestoreRefused::InPlaceFromHub) => {
             return RestoreRefusal::InPlaceNotHere;
+        }
+        RestoreError::Refused(RestoreRefused::NoRestoreFolder) => {
+            return RestoreRefusal::NoRestoreFolder;
         }
         RestoreError::Refused(RestoreRefused::HubNotAllowed) => {
             return RestoreRefusal::HubNotAllowed;

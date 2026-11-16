@@ -76,7 +76,10 @@ impl Agent {
             ResolveRepository::new(Arc::new(SystemSecrets::new())),
             RunOperation::new(self.engine.clone(), clock, store),
             RestoreSetup {
-                default_folder: text(&self.restore_folder()).to_owned(),
+                default_folder: Some(
+                    domain::planning::RestoreFolder::parse(text(&self.restore_folder()))
+                        .expect("the scratch folder is absolute"),
+                ),
                 zone: TimeZone::UTC,
             },
         )
