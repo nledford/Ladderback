@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
-use app::browse::{BrowseError, BrowseSnapshot, FolderReads};
+use app::browse::{BrowseError, BrowseSnapshot};
 use app::event_bus::BroadcastEventBus;
 use app::execution::{Finished, RunOperation};
 use app::full_disk_access::{FullDiskAccessCheck, StartNote};
@@ -36,6 +36,7 @@ use app::ports::{
 use app::ports::{Keyring, KeyringError};
 use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
+use app::reads::ReadTurns;
 use app::recovery::RecoverOperations;
 use app::repositories::{
     ChangeMaintainer, ConfigWrites, ConnectRepository, CreateOffers, InitRepository,
@@ -2687,7 +2688,7 @@ struct ConfigCatalog {
     sources: Arc<dyn NormalizeSources>,
     /// The turns to read a folder of a snapshot, which every browse shares
     /// (decision 102).
-    reads: Arc<FolderReads>,
+    reads: Arc<ReadTurns>,
 }
 
 #[async_trait]

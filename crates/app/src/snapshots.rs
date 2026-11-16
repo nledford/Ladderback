@@ -10,10 +10,10 @@ use domain::planning::RepositoryConfig;
 use domain::{OperationId, RepositoryAlias};
 use futures::StreamExt;
 
-use crate::browse::FolderReads;
 use crate::ports::{
     Clock, Engine, EngineError, EngineEvent, EngineResult, Job, RunningJob, SnapshotSummary,
 };
+use crate::reads::ReadTurns;
 use crate::secrets::{ResolveError, ResolveRepository};
 
 /// Lists a repository's snapshots. Saves nothing: the list is fetched live
@@ -42,7 +42,7 @@ impl ListSnapshots {
     /// A listing that takes its turn from `turns`, which every listing of
     /// the daemon shares, waiting no longer than the read timeout by
     /// `clock`.
-    pub fn with_turns(self, clock: Arc<dyn Clock>, turns: Arc<FolderReads>) -> Self {
+    pub fn with_turns(self, clock: Arc<dyn Clock>, turns: Arc<ReadTurns>) -> Self {
         let _ = (clock, turns);
         todo!()
     }
@@ -109,7 +109,6 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{ListSnapshots, SnapshotError};
-    use crate::browse::FolderReads;
     use crate::fakes::{FakeClock, FakeSecrets, InMemoryConfigStore};
     use crate::ports::{
         Engine, EngineError, EngineResult, Job, JobControl, RunningJob, SavedEntry, SnapshotSummary,
@@ -386,7 +385,7 @@ mod tests {
     fn in_turns(engine: Arc<Gated>, clock: Arc<FakeClock>) -> Arc<ListSnapshots> {
         Arc::new(
             ListSnapshots::new(engine, ResolveRepository::new(Arc::new(FakeSecrets::new())))
-                .with_turns(clock, Arc::new(FolderReads::default())),
+                .with_turns(clock, Arc::default()),
         )
     }
 
@@ -448,6 +447,10 @@ mod tests {
             .unwrap_or_else(|_| panic!("the waiting listing ends when the read timeout does"))
             .unwrap_or_else(|e| panic!("the listing task ran: {e:?}"));
         assert_eq!(listed, Err(SnapshotError::TimedOut));
-        assert_eq!(engine.started(), 2, "the given-up listing started no worker");
+        assert_eq!(
+            engine.started(),
+            2,
+            "the given-up listing started no worker"
+        );
     }
 }

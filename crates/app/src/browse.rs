@@ -11,40 +11,18 @@ use domain::browse::{FolderPage, FolderPath};
 use domain::execution::FailureReason;
 use domain::planning::RepositoryConfig;
 use domain::{OperationId, RepositoryAlias, SnapshotId};
-use futures::future::select_all;
-use futures::lock::{Mutex, MutexGuard};
 
 use crate::maintenance::{MaintenanceError, run_read, within_read_timeout};
 use crate::ports::{BrowseJob, Clock, Engine, EngineResult, FolderAnswer, Job};
+use crate::reads::ReadTurns;
 use crate::secrets::{ResolveError, ResolveRepository};
-
-/// How many folders are read at once, by all the daemon's browses together.
-pub const FOLDER_READS: usize = 2;
-
-/// The turns to read a folder, shared by every browse of the daemon. Each
-/// read is a worker that may hold a folder's whole tree, hundreds of MiB for
-/// a large one (decision 102), so at most [`FOLDER_READS`] run at once and
-/// the rest wait their turn, within the read timeout.
-#[derive(Default)]
-pub struct FolderReads {
-    turns: [Mutex<()>; FOLDER_READS],
-}
-
-impl FolderReads {
-    /// Waits for a turn, held until the guard is dropped.
-    async fn turn(&self) -> MutexGuard<'_, ()> {
-        // `turns` is never empty, which is all `select_all` asks.
-        let (turn, ..) = select_all(self.turns.iter().map(Mutex::lock)).await;
-        turn
-    }
-}
 
 /// Reads a page of a snapshot's folder.
 pub struct BrowseSnapshot {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
     resolve: ResolveRepository,
-    reads: Arc<FolderReads>,
+    reads: Arc<ReadTurns>,
 }
 
 /// Why a folder couldn't be read. A typed code, never a sentence (§8.4).
@@ -64,12 +42,13 @@ pub enum BrowseError {
 
 impl BrowseSnapshot {
     /// A browse that takes its turns from `reads`, which every browse of
-    /// the daemon shares.
+    /// the daemon shares: each read is a worker that may hold a folder's
+    /// whole tree, hundreds of MiB for a large one (decision 102).
     pub fn new(
         engine: Arc<dyn Engine>,
         clock: Arc<dyn Clock>,
         resolve: ResolveRepository,
-        reads: Arc<FolderReads>,
+        reads: Arc<ReadTurns>,
     ) -> Self {
         Self {
             engine,
@@ -145,7 +124,7 @@ mod tests {
     use tokio::sync::watch;
     use tokio::task::JoinHandle;
 
-    use super::{BrowseError, BrowseSnapshot, FolderReads};
+    use super::{BrowseError, BrowseSnapshot};
     use crate::fakes::{FakeClock, FakeSecrets};
     use crate::maintenance::{MaintenanceError, READ_TIMEOUT};
     use crate::ports::{
@@ -245,7 +224,7 @@ mod tests {
             engine,
             clock,
             ResolveRepository::new(Arc::new(FakeSecrets::new())),
-            Arc::new(FolderReads::default()),
+            Arc::default(),
         )
     }
 
