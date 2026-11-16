@@ -348,7 +348,7 @@ Ed25519 identities, TLS (pinned or CA), and single-use short-lived pairing token
 
 ### 10.4 Restores
 
-This section decides what confirms a restore, and where a restore may write.
+This section decides what confirms a restore or a download, where a restore may write, and how a download reaches the browser that asked.
 
 Restores are the most dangerous action because they can overwrite files.
 - **Step-up confirmation** before any restore or download started from a web UI, whether local or on the hub. With auth enabled, re-enter your password; this is required even with a valid session, so an unattended open tab isn't enough. Password managers and paste work (A5). With auth disabled or in proxy-header mode there is no password to re-enter, so the user types or pastes the snapshot's short ID instead. That only guards against misclicks, not against someone at the keyboard.
@@ -358,6 +358,8 @@ Restores are the most dangerous action because they can overwrite files.
 - **Restoring in place** (original paths) is offered only in the agent's own UI. Its confirmation dialog states how many files would be added, overwritten or left as they are, using a dry-run `prepare_restore` plan first, and how many files the snapshot doesn't hold would stay: a restore never deletes a file.
 - **A restore runs no hooks:** neither the agent's hooks nor a plan's run for it (decided by the maintainer, 2026-11-15).
 - Every restore is recorded in the op log with who started it and from where (local UI or hub).
+- **A download** hands one entry of a snapshot to the browser that asked, a file as itself and a folder or the snapshot's top as one tar or zip archive, its entries stored, not compressed (§16, decision 113). It is confirmed by the same step-up, through `POST /api/v1/repositories/{alias}/snapshots/{snapshot}/download`, which answers 201 with a ticket: 32 random bytes, never logged or shown. The browser fetches `GET /api/v1/downloads/{ticket}` once, within a minute, and the body streams a piece of at most 64 KiB at a time; a ticket nobody fetches is given up within 10 s of its minute. Both routes are for a session only, never an API token.
+- **Downloads take turns.** At most two run at once, each a worker holding the repository's index for as long as the browser reads; a third is `downloads-busy` (409), never queued. A download takes no I7 slot, runs no hooks and isn't queued, but is recorded in the op log as a restore is (kind `download`, triggered by hand), with no entry path. While a restart waits, a new one is `restart-pending` (503, as a restore is), and the stop cuts a streaming download short. An agent that can't draw a ticket's random bytes refuses with `downloads-unavailable` (503).
 
 ### 10.5 MCP server
 

@@ -181,6 +181,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [111](decisions/111-the-recent-log.md) | The recent log in the web UI |
 | [112](decisions/112-no-repository-config-and-the-half-a-server-refused.md) | How no repository config, the half a server refused and a listing's failure are told |
 | [113](decisions/113-shared-button.md) | A button drawn from the tokens, not the browser's own |
+| [113](decisions/113-download.md) | How an entry of a snapshot is downloaded from the web UI |
 | [115](decisions/115-detecting-full-disk-access.md) | Detecting a missing Full Disk Access grant |
 
 ## 17. Open questions

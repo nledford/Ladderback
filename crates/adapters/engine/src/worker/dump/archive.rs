@@ -1,7 +1,7 @@
 //! A folder of a snapshot, or its top, written as one archive as it is read:
 //! each entry's header, then its contents straight from the repository,
 //! never a whole file in memory. A tar archive as `tar` writes one; a zip
-//! archive streamed, its entries stored rather than deflated (decision NN).
+//! archive streamed, its entries stored rather than deflated (decision 113).
 //! Folders, files and links go in, each with its permissions and its time;
 //! devices, pipes and sockets have no contents and are left out.
 

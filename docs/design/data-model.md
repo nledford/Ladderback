@@ -5,7 +5,7 @@
 CREATE TABLE operations (           -- also the job queue (status = 'queued')
   id TEXT PRIMARY KEY,            -- UUIDv7 (time-ordered)
   agent_id TEXT NOT NULL,         -- 'local' on agents; registry id on hub
-  kind TEXT NOT NULL,             -- backup|forget|prune|check|restore|stats|...
+  kind TEXT NOT NULL,             -- backup|forget|prune|check|restore|download|stats|...
   plan_id TEXT, repo_uuid TEXT,   -- repo_uuid = rustic repository ID
   repo_alias TEXT,                -- maintenance ops: the repository's alias when the run started (decision 52)
   location_no INTEGER,            -- the position, from 1, of the location the run used; NULL for a repository of one location (decision 80)
@@ -193,6 +193,8 @@ Later tables, columns and indexes arrive as migrations of the features that need
 Its `offset` is the offset of the clock that took it, as RFC 3339 writes one (`-06:00`, seconds only when it has some), read from the snapshot file; a daemon older than the field leaves it out, and the daemon refuses a worker's listing with an offset no clock has (beyond ±25:59:59) (§16, decision 56). A snapshot that had more, or text cut short, says so in `paths_truncated` and `tags_truncated`; a listing of any length reaches the daemon as a series of worker events (§4.1, decision 32).
 
 Reading a page of a snapshot's folder (`Job::Browse`, decision 102) is a read in the same way: no I7 slot, no row, and it waits for one of the daemon's few turns to read a folder ([§4.1](components.md#41-worker-process-the-engine-boundary)).
+
+A download (`Job::Dump`, §10.4, decision 113) reads the repository too and takes no I7 slot, but it is a row, as a restore is, because it hands a snapshot's contents out of the agent: kind `download`, trigger `manual`, written once the worker has found the entry (running), and again when it ends. It succeeds with the bytes it handed over (`Summary::Dump`), fails when a piece couldn't be read, and is cancelled when the browser went away or never fetched it within its minute. Like a restore's, its row never names the entry's path.
 
 - `OperationStore::try_start(&Operation)` stores an operation that has just started running, as `save` does, and decides in the same atomic step. The result is `Start::Started`, or `Start::Refused { running }` naming the holder, with nothing stored. The operation that holds a repository may start again. Of any number of starts racing for one repository, through any number of handles, exactly one wins. An operation that isn't running is `StoreError::Unavailable`. SQLite takes the write lock (`BEGIN IMMEDIATE`) before it looks for a holder, so no other handle can start one between the look and the write; a holder whose ID can't be read is `StoreError::Corrupt` and the start fails closed.
 - `save` stays unconditional about everything but the index: a `save` that would make a second running maintenance operation fails with `StoreError::Unavailable` and changes nothing (SQLite reports the index's violation, the in-memory store checks the same rule). It is a backstop, not the way to start one.
