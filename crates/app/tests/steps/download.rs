@@ -4,26 +4,27 @@
 //! restore scenarios' (`restore.rs`), whose steps set them up.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use app::access::Access;
 use app::download::{Download, DownloadAsk, DownloadError, Downloads};
 use app::fakes::{
-    FakeClock, FakeSecrets, InMemoryAdminPassword, InMemoryApiTokenStore, InMemorySessionStore,
-    SeededRandom,
+    FakeClock, FakeSecrets, InMemoryAdminPassword, InMemoryApiTokenStore, InMemoryOperationStore,
+    InMemorySessionStore, SeededRandom,
 };
 use app::ports::{
-    Clock, DumpAnswer, DumpHeader, DumpJob, Engine, EngineError, EngineEvent, EngineResult, Job,
-    JobControl, RunningJob,
+    Clock, DumpAnswer, DumpHeader, DumpJob, Engine, EngineError, EngineEvent, EngineResult,
+    HistoryPage, HistoryQuery, Job, JobControl, OperationDetail, OperationStore, Recovered,
+    RunningJob, Start, StoreError,
 };
 use app::secrets::ResolveRepository;
 use async_trait::async_trait;
 use cucumber::{then, when};
 use domain::browse::{DisplayName, FolderPath};
-use domain::execution::{FailureReason, OperationKind, OperationStatus, Trigger};
+use domain::execution::{FailureReason, Operation, OperationKind, OperationStatus, Trigger};
 use domain::restore::download::{ArchiveFormat, DownloadShape, DownloadTicket};
-use domain::{OperationId, SignedDuration, SnapshotId, Uuid};
+use domain::{OperationId, PlanId, RepositoryId, SignedDuration, SnapshotId, Uuid};
 use futures::{FutureExt, StreamExt, stream};
 use tokio::task::JoinHandle;
 
@@ -56,6 +57,56 @@ pub struct DownloadWorld {
     runs: u128,
     /// The writes of how each fetched download ended, run beside it.
     recording: Vec<JoinHandle<()>>,
+    /// While set, the operation log answers no write: one is under way.
+    log_held: Arc<AtomicBool>,
+}
+
+/// The scenario's operation log, which can be held mid-write, as a log on
+/// a busy disk is.
+struct SlowLog {
+    inner: Arc<InMemoryOperationStore>,
+    held: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl OperationStore for SlowLog {
+    async fn save(
+        &self,
+        operation: &Operation,
+        result: Option<&EngineResult>,
+    ) -> Result<(), StoreError> {
+        if self.held.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        self.inner.save(operation, result).await
+    }
+
+    async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError> {
+        self.inner.try_start(operation).await
+    }
+
+    async fn running_maintenance(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        self.inner.running_maintenance(repository).await
+    }
+
+    async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
+        self.inner.get(id).await
+    }
+
+    async fn list(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
+        self.inner.list(query).await
+    }
+
+    async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError> {
+        self.inner.ever_succeeded(plan).await
+    }
+
+    async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {
+        self.inner.recover(reason).await
+    }
 }
 
 /// Counts a job stopped, by its control or by dropping its events before
@@ -235,7 +286,10 @@ impl Agent {
             self.restore.config().await,
             ResolveRepository::new(Arc::new(FakeSecrets::default())),
             Arc::new(SeededRandom::new(7)),
-            self.restore.log.clone(),
+            Arc::new(SlowLog {
+                inner: self.restore.log.clone(),
+                held: self.download.log_held.clone(),
+            }),
         );
         if let Some(password) = &self.restore.password {
             downloads = downloads.with_access(Arc::new(Access::new(
@@ -293,7 +347,7 @@ impl Agent {
     async fn fetch_download(&mut self, index: usize) {
         let downloads = self.downloads().await;
         let ticket = self.ticket(index);
-        let mut fetched = downloads.fetch(&ticket).await;
+        let mut fetched = downloads.fetch(&ticket);
         if let Ok(download) = fetched.as_mut() {
             let recorded = std::mem::replace(&mut download.recorded, async {}.boxed());
             self.download.recording.push(tokio::spawn(recorded));
@@ -460,6 +514,28 @@ async fn seconds_pass(agent: &mut Agent, seconds: i64) {
     agent.clock.advance(SignedDuration::from_secs(seconds));
     let last = agent.download.confirmed.len() - 1;
     agent.fetch_download(last).await;
+}
+
+#[when(
+    expr = "{int} seconds pass before the browser fetches it and hangs up while the history is written"
+)]
+async fn hangs_up_while_written(agent: &mut Agent, seconds: i64) {
+    let downloads = agent.downloads().await;
+    let ticket = agent.ticket(agent.download.confirmed.len() - 1);
+    agent.clock.advance(SignedDuration::from_secs(seconds));
+    // The browser's request runs while the log is busy, then hangs up.
+    // Fetching waits for nothing (#846); were it to wait again, poll it
+    // once here (`now_or_never`) and drop it, never `.await` it: the held
+    // log never answers.
+    agent.download.log_held.store(true, Ordering::SeqCst);
+    let fetched = downloads.fetch(&ticket);
+    agent.download.log_held.store(false, Ordering::SeqCst);
+    agent.download.fetched = Some(fetched);
+}
+
+#[when("the agent gives up the downloads whose minute ran out")]
+async fn gives_up_expired(agent: &mut Agent) {
+    agent.downloads().await.give_up_expired().await;
 }
 
 #[when(
