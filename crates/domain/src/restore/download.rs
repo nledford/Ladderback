@@ -339,8 +339,9 @@ mod tests {
     }
 
     #[test]
-    fn a_ticket_never_shows_itself() {
+    fn a_ticket_names_itself_in_debug_output_and_never_shows_its_bytes() {
         let shown = format!("{:?}", ticket(0xab));
+        assert_eq!(shown, "DownloadTicket([hidden])");
         assert!(!shown.contains("ab"), "{shown}");
     }
 
@@ -382,5 +383,15 @@ mod tests {
             pending.hold(ticket(0xff), at(61), 0xff).is_ok(),
             "the expired ones made room"
         );
+    }
+
+    /// A piece is 64 KiB (§10.4), so its base64 text, about 87 KiB, stays far
+    /// under the 1 MiB a worker's message may hold (decision 32).
+    #[test]
+    fn a_piece_is_64_kib_and_its_text_fits_one_message() {
+        assert_eq!(PIECE_BYTES, 64 * 1024);
+        let text_bytes = PIECE_BYTES.div_ceil(3) * 4;
+        assert_eq!(text_bytes, 87_384);
+        assert!(text_bytes < 1024 * 1024);
     }
 }
