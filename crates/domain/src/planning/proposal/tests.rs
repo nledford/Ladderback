@@ -342,6 +342,15 @@ fn an_id_is_twelve_characters_of_base32_from_the_first_sixty_bits() {
 }
 
 #[test]
+fn an_id_shows_as_its_characters_where_a_path_or_message_names_it() {
+    let id = ProposalId::parse("bcdefghij234").expect("an ID");
+    assert_eq!(
+        format!("/api/v1/proposals/{id}"),
+        "/api/v1/proposals/bcdefghij234"
+    );
+}
+
+#[test]
 fn an_id_of_another_length_or_alphabet_is_none() {
     assert_eq!(ProposalId::parse("aaaaaaaaaaa"), None);
     assert_eq!(ProposalId::parse("aaaaaaaaaaaaa"), None);

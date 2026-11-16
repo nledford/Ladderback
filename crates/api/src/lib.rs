@@ -2714,6 +2714,22 @@ mod tests {
             r#""invalid-arguments""#
         );
     }
+
+    // The `proposal-invalid` message selects on these names, and an agent
+    // reads them: a plan's problem goes as the plan routes name it, the
+    // others each as its own, as the catalog's arms spell them.
+    #[test]
+    fn each_change_problem_is_named_on_the_wire() {
+        for (problem, wire) in [
+            (ChangeProblem::Plan(PlanProblem::Missing), "missing"),
+            (ChangeProblem::Plan(PlanProblem::NoSources), "no-sources"),
+            (ChangeProblem::UnknownPlan, "unknown-plan"),
+            (ChangeProblem::InUse, "in-use"),
+            (ChangeProblem::Hooks, "hooks"),
+        ] {
+            assert_eq!(problem.as_str(), wire, "{problem:?}");
+        }
+    }
 }
 
 /// How many paths one listed snapshot may carry. An input-derived size,
