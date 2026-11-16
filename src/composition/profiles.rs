@@ -78,13 +78,17 @@ impl Profiles for ProfileService {
     async fn export(
         &self,
         plan: String,
-        _commands: api::ProfileCommands,
+        commands: api::ProfileCommands,
     ) -> Result<api::ProfileExportDto, ProfilesError> {
         // A name that is not a plan ID is not a plan of the configuration.
         let Ok(id) = PlanId::parse(&plan) else {
             return Err(ProfilesError::PlanUnknown { plan });
         };
-        match self.export.export(&id, ExportCommands::Written).await {
+        let commands = match commands {
+            api::ProfileCommands::Written => ExportCommands::Written,
+            api::ProfileCommands::LeftOut => ExportCommands::LeftOut,
+        };
+        match self.export.export(&id, commands).await {
             Ok(exported) => Ok(api::ProfileExportDto {
                 text: exported.text,
                 notices: exported

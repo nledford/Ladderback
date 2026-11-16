@@ -23,10 +23,12 @@
 //! prunes would run outside Ladderback's own maintenance), and every secret.
 //! A password is written as the command or the file that reads it, and an
 //! option that is a reference or a secret is left out with the variable that
-//! rustic reads it from.
+//! rustic reads it from. An export asked to leave the commands out
+//! ([`ExportCommands::LeftOut`]) writes no `password-command` and no hook,
+//! and names each one it left out.
 
 use crate::KeyringCommand;
-use app::ports::{ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
+use app::ports::{ExportCommands, ExportRefusal, PlanExport, ProfileNotice, RenderedProfile};
 use domain::planning::{
     GlobFile, HookEntry, Hooks, KeepCount, KeepWithin, OnFailure, RepositorySettings,
 };
@@ -37,8 +39,8 @@ use domain::secrets::{
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// The profile of `export`, and the options it left out. A keyring password
-/// is read with `keyring`, looked for in `path`.
+/// The profile of `export`, and what it left out. A keyring password is read
+/// with `keyring`, looked for in `path`.
 pub(crate) fn render(
     export: &PlanExport,
     keyring: KeyringCommand,
@@ -57,9 +59,24 @@ pub(crate) fn render(
         "# A rustic profile for the Ladderback plan {}, written by Ladderback.\n",
         plan.id.as_str()
     ));
-    hooks(&mut out, "global.hooks", &export.agent_hooks);
+    // One list, in the order the text would have had what each notes.
+    let mut notices = Vec::new();
+    let commands = export.commands;
+    hooks(
+        &mut out,
+        "global.hooks",
+        &export.agent_hooks,
+        commands,
+        &mut notices,
+    );
 
-    let (repository, mut notices) = repository(&export.repository.settings, keyring, path)?;
+    let repository = repository(
+        &export.repository.settings,
+        keyring,
+        path,
+        commands,
+        &mut notices,
+    )?;
     if plan.retention.is_empty() {
         notices.push(ProfileNotice::RetentionEmpty);
     }
@@ -74,7 +91,9 @@ pub(crate) fn render(
     if let Some(hot) = &repository.hot {
         out.string("repo-hot", hot);
     }
-    out.string(repository.password.0, &repository.password.1);
+    if let Some((key, value)) = &repository.password {
+        out.string(key, value);
+    }
     for (header, options) in repository.options {
         if !options.is_empty() {
             out.section(&format!("repository.{header}"));
@@ -83,7 +102,13 @@ pub(crate) fn render(
             }
         }
     }
-    hooks(&mut out, "repository.hooks", &export.repository.hooks);
+    hooks(
+        &mut out,
+        "repository.hooks",
+        &export.repository.hooks,
+        commands,
+        &mut notices,
+    );
 
     out.array_section("backup.snapshots");
     out.string("name", plan.id.as_str());
@@ -121,7 +146,13 @@ pub(crate) fn render(
     out.list_if_any("exclude-if-present", &filter.exclude_if_present);
     out.list_if_any("exclude-if-xattr", &filter.exclude_if_xattr);
     out.flag("one-file-system", filter.one_file_system);
-    hooks(&mut out, "backup.snapshots.hooks", &plan.hooks);
+    hooks(
+        &mut out,
+        "backup.snapshots.hooks",
+        &plan.hooks,
+        commands,
+        &mut notices,
+    );
 
     out.section("forget");
     out.string("group-by", "");
@@ -180,8 +211,9 @@ pub(crate) fn render(
 struct Repository {
     location: String,
     hot: Option<String>,
-    /// The key and the value that say how to read the password.
-    password: (&'static str, String),
+    /// The key and the value that say how to read the password, when a
+    /// command that reads it wasn't left out.
+    password: Option<(&'static str, String)>,
     /// `options`, `options-hot` and `options-cold`: the table's name, and
     /// the options of it that are text.
     options: Vec<(&'static str, BTreeMap<String, String>)>,
@@ -217,32 +249,30 @@ fn repository(
     settings: &RepositorySettings,
     keyring: KeyringCommand,
     path: &[PathBuf],
-) -> Result<(Repository, Vec<ProfileNotice>), ExportRefusal> {
-    let mut notices = Vec::new();
+    commands: ExportCommands,
+    notices: &mut Vec<ProfileNotice>,
+) -> Result<Repository, ExportRefusal> {
     let location = plain("repository", &settings.repository)?;
     let hot = settings
         .repo_hot
         .as_deref()
         .map(|hot| plain("repo-hot", hot))
         .transpose()?;
-    let password = password(&settings.password, keyring, path, &mut notices)?;
+    let password = password(&settings.password, keyring, path, commands, notices)?;
     let mut options = Vec::new();
     for (table, values) in [
         (&OPTIONS, &settings.options),
         (&OPTIONS_HOT, &settings.options_hot),
         (&OPTIONS_COLD, &settings.options_cold),
     ] {
-        options.push((table.key, text_options(table, values, &mut notices)?));
+        options.push((table.key, text_options(table, values, notices)?));
     }
-    Ok((
-        Repository {
-            location,
-            hot,
-            password,
-            options,
-        },
-        notices,
-    ))
+    Ok(Repository {
+        location,
+        hot,
+        password,
+        options,
+    })
 }
 
 /// What a value of the repository says, when it says only text and no
@@ -327,22 +357,29 @@ fn variable(table: &OptionTable, name: &str) -> Result<String, ExportRefusal> {
 }
 
 /// The key and the value that make rustic read the password the way
-/// Ladderback does. A password written in the config is never repeated. A
+/// Ladderback does, or `None` when the command that reads it is left out (a
+/// notice says so). A password written in the config is never repeated. A
 /// keyring password is read with `keyring`, and a notice says so when none
 /// of the folders of `path` holds it.
 fn password(
     secret: &SecretRef,
     keyring: KeyringCommand,
     path: &[PathBuf],
+    commands: ExportCommands,
     notices: &mut Vec<ProfileNotice>,
-) -> Result<(&'static str, String), ExportRefusal> {
-    Ok(match secret {
-        SecretRef::File { path, .. } => ("password-file", path.clone()),
-        SecretRef::Command(command) => (
-            "password-command",
-            command_line(command.program(), command.args()),
-        ),
-        SecretRef::Env(name) => ("password-command", command_line("printenv", [name])),
+) -> Result<Option<(&'static str, String)>, ExportRefusal> {
+    let command = match secret {
+        SecretRef::File { path, .. } => return Ok(Some(("password-file", path.clone()))),
+        SecretRef::Inline(_) => return Err(ExportRefusal::InlineSecret),
+        // Each of the others is read by a command.
+        _ if commands == ExportCommands::LeftOut => {
+            notices.push(ProfileNotice::CommandLeftOut {
+                key: "repository.password-command".to_owned(),
+            });
+            return Ok(None);
+        }
+        SecretRef::Command(command) => command_line(command.program(), command.args()),
+        SecretRef::Env(name) => command_line("printenv", [name]),
         SecretRef::Keyring(entry) => {
             let program = keyring.program();
             if !path.iter().any(|folder| runnable(&folder.join(program))) {
@@ -350,10 +387,10 @@ fn password(
                     program: program.to_owned(),
                 });
             }
-            ("password-command", keyring_command(entry, keyring))
+            keyring_command(entry, keyring)
         }
-        SecretRef::Inline(_) => return Err(ExportRefusal::InlineSecret),
-    })
+    };
+    Ok(Some(("password-command", command)))
 }
 
 /// Whether `file` is a file that can be run: what a shell, and rustic,
@@ -431,17 +468,36 @@ fn hook(entry: &HookEntry) -> String {
     )
 }
 
-fn hooks(out: &mut Out, header: &str, hooks: &Hooks) {
-    if hooks.is_empty() {
-        return;
-    }
-    out.section(header);
-    for (name, entries) in [
+/// The table `header` of `hooks`, or, when the commands are left out, a
+/// notice for each of its keys that has a hook and no table.
+fn hooks(
+    out: &mut Out,
+    header: &str,
+    hooks: &Hooks,
+    commands: ExportCommands,
+    notices: &mut Vec<ProfileNotice>,
+) {
+    let lists = [
         ("run-before", &hooks.run_before),
         ("run-after", &hooks.run_after),
         ("run-failed", &hooks.run_failed),
         ("run-finally", &hooks.run_finally),
-    ] {
+    ];
+    if commands == ExportCommands::LeftOut {
+        for (name, entries) in lists {
+            if !entries.is_empty() {
+                notices.push(ProfileNotice::CommandLeftOut {
+                    key: format!("{header}.{name}"),
+                });
+            }
+        }
+        return;
+    }
+    if hooks.is_empty() {
+        return;
+    }
+    out.section(header);
+    for (name, entries) in lists {
         if !entries.is_empty() {
             let items: Vec<_> = entries.iter().map(hook).collect();
             out.raw(name, &format!("[{}]", items.join(", ")));

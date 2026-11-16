@@ -322,7 +322,7 @@ impl ExportProfile {
     pub async fn export(
         &self,
         plan: &PlanId,
-        _commands: ExportCommands,
+        commands: ExportCommands,
     ) -> Result<ExportedProfile, ExportError> {
         let config = self.config.load().await.map_err(ExportError::Config)?;
         let found = config
@@ -351,7 +351,7 @@ impl ExportProfile {
                 agent_hooks: config.hooks().clone(),
                 agent: config.agent().clone(),
                 tags: PlanTags::new(found.id.clone(), self.agent),
-                commands: ExportCommands::Written,
+                commands,
             })
             .map_err(ExportError::Render)?;
         Ok(ExportedProfile {

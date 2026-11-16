@@ -594,6 +594,11 @@ pub enum WarningCode {
     /// argument `program` is the program: `secret-tool`, or `security` on
     /// macOS.
     ProfileKeyringCommandMissing,
+    /// An export left out a command the profile would run, as it was asked
+    /// to: one for an AI agent or an API token has none (#856). The argument
+    /// `key` is its path in the profile: `repository.password-command`, or a
+    /// hook's list, as `global.hooks.run-before`.
+    ProfileCommandLeftOut,
     /// A notification of an event wasn't delivered to its channel (§11). It
     /// is not tried again. The arguments: `event`, the event's name
     /// (`backup.failed`); `rule` and `channel`, their names in the
@@ -1606,6 +1611,11 @@ impl WarningCode {
             ],
             Self::ProfileKeyringCommandMissing => &[ArgSpec {
                 name: "program",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::ProfileCommandLeftOut => &[ArgSpec {
+                name: "key",
                 kind: ArgKind::Text,
                 optional: false,
             }],

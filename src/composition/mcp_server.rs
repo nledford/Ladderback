@@ -568,7 +568,7 @@ impl ::mcp::Backend for InProcess {
 
     async fn export_profile(&self, plan: String) -> Result<api::ProfileExportDto, api::ErrorDto> {
         self.profiles
-            .export(plan, api::ProfileCommands::Written)
+            .export(plan, api::ProfileCommands::LeftOut)
             .await
             .map_err(http_adapter::ProfilesError::error)
     }

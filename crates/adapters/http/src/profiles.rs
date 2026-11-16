@@ -113,18 +113,23 @@ pub(crate) async fn preview(
     }
 }
 
-/// The plan the path names as a profile, its commands left out when the
-/// query asks it to.
+/// The plan the path names as a profile. A request that carries an API
+/// token gets it with its commands left out, whatever it asks: a token is a
+/// program's, perhaps an AI agent's, and a command a person wrote may carry
+/// a token of their own (#856). Any other request (a session, or any with
+/// sign-in off) gets them left out when the query asks it to.
 pub(crate) async fn export(
     State(state): State<AppState>,
     Path(plan): Path<String>,
-    Query(_query): Query<api::ProfileExportQuery>,
+    token: Option<axum::Extension<crate::api_tokens::TokenOf>>,
+    Query(query): Query<api::ProfileExportQuery>,
 ) -> Response {
-    match state
-        .profiles
-        .export(plan, api::ProfileCommands::Written)
-        .await
-    {
+    let commands = if token.is_some() {
+        api::ProfileCommands::LeftOut
+    } else {
+        query.commands
+    };
+    match state.profiles.export(plan, commands).await {
         Ok(exported) => (StatusCode::OK, Json(exported)).into_response(),
         Err(error) => error.into_response(),
     }

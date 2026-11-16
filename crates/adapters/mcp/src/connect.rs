@@ -560,7 +560,14 @@ impl Backend for Connect {
                 None,
             ));
         };
-        self.get("api/v1/plans", &[segment, "profile"], &[]).await
+        // With sign-in off the daemon can't tell this server from a browser,
+        // so it is asked to leave the commands out (#856).
+        self.get(
+            "api/v1/plans",
+            &[segment, "profile"],
+            &[("commands", "left-out")],
+        )
+        .await
     }
 }
 
