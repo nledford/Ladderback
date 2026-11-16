@@ -289,7 +289,14 @@ impl ExposedCredentials {
                 .split_once(':')
                 .map_or(service, |(scheme, _)| scheme);
             if scheme.eq_ignore_ascii_case("ftp") {
-                return credential().then_some(Self::PlainFtp);
+                // opendal's FTP service encrypts the connection unless its
+                // endpoint is written `ftp://`: `ftps://` and an endpoint
+                // with no scheme use TLS, and with no endpoint it opens
+                // nothing (`FtpBuilder::build` in `opendal-service-ftp`).
+                let plain = option_is(options, "endpoint", |value| {
+                    starts_with_ignore_case(value, "ftp://")
+                });
+                return (plain && credential()).then_some(Self::PlainFtp);
             }
             let plain = ["endpoint", "url"].into_iter().any(|name| {
                 option_is(options, name, |value| {
