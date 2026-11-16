@@ -345,9 +345,15 @@ main:focus {
     --error: CanvasText;
   }
 
+  /* The text's own color, which a forced-colors mode makes `CanvasText`:
+     a WebKit that only reports the media query keeps the author's text
+     color, and a tone must still match the words around it. */
   .tone-primary,
-  .tone-secondary {
-    --tone: CanvasText;
+  .tone-secondary,
+  .tone-success,
+  .tone-warning,
+  .tone-error {
+    --tone: currentColor;
   }
 }
 
