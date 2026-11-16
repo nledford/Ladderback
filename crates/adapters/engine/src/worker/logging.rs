@@ -44,7 +44,11 @@ impl Log for EventLogger {
         // `Events::report`.
         self.events.report(&WorkerEvent::Log {
             level,
-            message: format!("{}: {}", record.target(), record.args()),
+            message: format!(
+                "{}: {}",
+                record.target(),
+                without_post_command(record.target(), record.args().to_string())
+            ),
         });
     }
 
@@ -57,6 +61,57 @@ pub(crate) fn install(events: Events) -> Result<(), SetLoggerError> {
     log::set_boxed_logger(Box::new(EventLogger::new(events)))?;
     log::set_max_level(MAX_LEVEL);
     Ok(())
+}
+
+/// The target of rustic's local backend, which runs a repository's
+/// `post-create-command` after it writes a file and its
+/// `post-delete-command` after it deletes one.
+const LOCAL_BACKEND: &str = "rustic_backend::local";
+
+/// `message`, a record of `target`, as the worker passes it on. When a post
+/// command fails, rustic's local backend warns with its whole line
+/// (`post-create: Error: …`), which can carry a credential the redactor
+/// doesn't know, such as a token typed into it (I4, #882). The warning says
+/// instead which option failed and why: the status it exited with, the
+/// system's reason it couldn't start, or why its line couldn't be split into
+/// words. A warning of a shape not known here says only which option failed.
+fn without_post_command(target: &str, message: String) -> String {
+    if target != LOCAL_BACKEND {
+        return message;
+    }
+    let (option, warning) = if let Some(warning) = message.strip_prefix("post-create: ") {
+        ("post-create-command", warning)
+    } else if let Some(warning) = message.strip_prefix("post-delete: ") {
+        ("post-delete-command", warning)
+    } else {
+        return message;
+    };
+    match post_command_failure(warning) {
+        Some(why) => format!("{option} {why}"),
+        None => format!(
+            "{option} failed; rustic's warning is left out, as it may quote the command line"
+        ),
+    }
+}
+
+/// Why a post command failed, from rustic's warning of it. The warning
+/// quotes the line before the reason, so the reason is what follows the
+/// last of its markers, whatever the line holds.
+fn post_command_failure(warning: &str) -> Option<String> {
+    if warning.starts_with("Error: Command was not successful: `") {
+        let (_, status) = warning.rsplit_once("` failed with status `")?;
+        let (status, _) = status.split_once('`')?;
+        Some(format!("ended with {status}"))
+    } else if warning.starts_with("Error: Failed to execute `") {
+        let (_, reason) = warning.rsplit_once(": caused by: ")?;
+        Some(format!("could not be started: {reason}"))
+    } else if warning.starts_with("Error: Failed to parse command input: `") {
+        let (_, reason) = warning.rsplit_once(" : (source: ")?;
+        let reason = reason.strip_suffix(')')?;
+        Some(format!("could not be split into words: {reason}"))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -238,5 +293,19 @@ mod tests {
         );
         assert!(!message.contains("CANARY-new"), "{message}");
         assert!(message.contains("post-delete-command"), "{message}");
+    }
+
+    /// Only the local backend's warnings of a post command are rewritten.
+    #[test]
+    fn other_records_pass_as_they_are() {
+        for (target, message) in [
+            (
+                "rustic_backend::local",
+                "Option demo is not supported! Ignoring it.",
+            ),
+            ("rustic_core::repository", "post-create: Error: demo"),
+        ] {
+            assert_eq!(bridged(target, message), format!("{target}: {message}"));
+        }
     }
 }
