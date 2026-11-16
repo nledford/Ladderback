@@ -6,8 +6,9 @@ import type { Locator, Page } from "playwright";
 import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
-// More Tab presses than any page has stops: the gallery's, the longest, and
-// the skip link and the navigation's five links before it.
+// More Tab presses than any one stretch of a page has stops. A long page,
+// such as the gallery, is crossed in stretches: a scenario first stops at a
+// named control partway down, then presses on from there.
 const MAX_TABS = 40;
 
 // A polite message waits up to two seconds for company, and its text is set a

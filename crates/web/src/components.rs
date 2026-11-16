@@ -17,6 +17,7 @@ use leptos::wasm_bindgen::{JsCast, JsValue};
 use crate::focus::{FocusWrap, focus_wrap};
 use crate::repositories::{Run, Sentence, address_parts, runs};
 
+pub(crate) mod button;
 mod checkbox;
 mod error_summary;
 mod form_field;
