@@ -348,7 +348,7 @@ mod tests {
             &fake_job(),
             proxy_credentials(&[(
                 OsString::from("HTTPS_PROXY"),
-                OsString::from("http://demo:CANARY-proxy@proxy.demo:3128"),
+                OsString::from("http://demo:CANARY-proxy-pw@proxy.demo:3128"),
             )]),
         );
         let cut = "proxy said http://demo:CANARY-pr…";
@@ -501,16 +501,16 @@ mod tests {
             item: None,
             during: "connecting".to_owned(),
             code: WarningCode::Unknown,
-            detail: "proxy asked for CANARY-proxy".to_owned(),
+            detail: "proxy asked for CANARY-proxy-pw".to_owned(),
         };
         let failure = failed_saying(
             ErrorCode::OperationFailed,
-            "refused by http://demo:CANARY-proxy@proxy.demo:3128",
+            "refused by http://demo:CANARY-proxy-pw@proxy.demo:3128",
         );
         let events = answered(
             fake_job(),
             behind_a_proxy(),
-            "proxy echo: http://demo:CANARY-proxy@proxy.demo:3128",
+            "proxy echo: http://demo:CANARY-proxy-pw@proxy.demo:3128",
             &[line_of(&warning), line_of(&failure)],
         )
         .await;
@@ -540,12 +540,12 @@ mod tests {
         capture_the_worker_log();
         let failure = failed_saying(
             ErrorCode::OperationFailed,
-            "hunter2-demo then CANARY-proxy then CANARY-resolved",
+            "hunter2-demo then CANARY-proxy-pw then CANARY-resolved",
         );
         let events = answered(
             identify("hunter2-demo", &["CANARY-resolved"]),
             behind_a_proxy(),
-            "both: hunter2-demo CANARY-proxy CANARY-resolved",
+            "both: hunter2-demo CANARY-proxy-pw CANARY-resolved",
             &[line_of(&failure)],
         )
         .await;

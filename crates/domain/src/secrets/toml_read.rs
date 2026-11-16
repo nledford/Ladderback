@@ -14,7 +14,7 @@
 //! not, an escape TOML 1.0 lacks (`\e`, `\x`) or not. That masks more than a
 //! secret, never less (I4).
 
-use super::{Needle, advance};
+use super::{Needle, advance, cover, head::Head, place};
 
 /// What a backslash and what follows it stand for, as TOML reads them.
 enum Escape {
@@ -148,11 +148,6 @@ pub(super) struct TomlRead<'a> {
     cut: Option<Cut>,
 }
 
-/// A place in a text of at most `u32::MAX` bytes.
-fn place(at: usize) -> u32 {
-    u32::try_from(at).unwrap_or(u32::MAX)
-}
-
 impl<'a> TomlRead<'a> {
     /// `text`, cut after its first `cut` bytes when that is given, as TOML
     /// reads it; `None` when no escape in it stands for anything else, which
@@ -278,6 +273,24 @@ impl<'a> TomlRead<'a> {
         }
     }
 
+    /// What was read from `at` on, where the white space the text begins
+    /// with ends: white space as written is read as itself, so it ends at
+    /// the same place in what was read, and white space written as an
+    /// escape (`\x20`) is part of what follows it. The rest of a secret a
+    /// line-ending backslash broke may be written with escapes ([`Head`]).
+    pub(super) fn head(&self, at: usize, longest: usize) -> Option<Head<'_>> {
+        Head::of(&self.read, at, longest)
+    }
+
+    /// Marks in `spans` the start of the text, from where `head`, the start
+    /// of what was read, is the end of `needle`, as the bytes of the text it
+    /// was read from.
+    pub(super) fn mask_tail(&self, head: &Head<'_>, needle: &Needle, spans: &mut [u32]) {
+        if let Some(tail) = head.tail(needle) {
+            self.cover_read(spans, tail.start, tail.end);
+        }
+    }
+
     /// Marks the bytes of the text that bytes `start` to `end` of what was
     /// read were read from.
     fn cover_read(&self, spans: &mut [u32], start: usize, end: usize) {
@@ -286,12 +299,5 @@ impl<'a> TomlRead<'a> {
         if let (Some(&from), Some(&to)) = (from, to) {
             cover(spans, from as usize, to as usize);
         }
-    }
-}
-
-/// Marks bytes `from` to `to` of the text as one span in `spans`.
-fn cover(spans: &mut [u32], from: usize, to: usize) {
-    if let Some(span) = to.checked_sub(1).and_then(|last| spans.get_mut(last)) {
-        *span = (*span).max(place(to.saturating_sub(from)));
     }
 }

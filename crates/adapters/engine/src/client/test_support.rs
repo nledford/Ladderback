@@ -219,7 +219,7 @@ pub(super) fn behind_a_proxy() -> Option<Vec<(OsString, OsString)>> {
         ),
         (
             OsString::from("HTTPS_PROXY"),
-            OsString::from("http://demo:CANARY-proxy@proxy.demo:3128"),
+            OsString::from("http://demo:CANARY-proxy-pw@proxy.demo:3128"),
         ),
     ])
 }

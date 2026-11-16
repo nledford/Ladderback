@@ -382,7 +382,7 @@ mod tests {
     #[tokio::test]
     async fn a_stderr_line_a_kill_cut_short_leaves_nothing_of_a_secret() {
         capture_the_worker_log();
-        let script = "cat >/dev/null; printf 'killed mid-line: CANARY-kil' >&2; kill -KILL $$";
+        let script = "cat >/dev/null; printf 'stopped mid-line: CANARY-kil' >&2; kill -KILL $$";
         let engine = WorkerEngine::new("sh", ["-c", script]);
         let job = identify("hunter2-demo", &["CANARY-killed"]);
         let op = OperationId::from_uuid(Uuid::from_u128(1));
@@ -394,11 +394,11 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
         let line = logged_soon(log::Level::Warn, |text| {
-            text.starts_with("killed mid-line:")
+            text.starts_with("stopped mid-line:")
         })
         .await
         .expect("the cut stderr line never reached the log");
-        assert_eq!(line, "killed mid-line: ***…");
+        assert_eq!(line, "stopped mid-line: ***…");
     }
 
     /// More than a pipe holds, written between two events: a stderr that

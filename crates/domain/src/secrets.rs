@@ -7,6 +7,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod command;
 mod go_print;
+mod head;
 mod inline;
 mod options;
 mod outcome;
@@ -260,11 +261,14 @@ fn option_secrets(name: &str, value: &str) -> Vec<SecretValue> {
 /// `@`, `#`, `?`, `/` or `:`; see `url_needles`), with [`REDACTED`]; and what
 /// else of it shows in text on its own (see `partial_needles`); and as a
 /// TOML file writes it, found in the text as TOML reads its escapes (see
-/// `toml_read`). Secrets that overlap or touch are replaced as one span.
-/// Masking a text compares each of its bytes at most twice per needle,
-/// whatever the needles and the text are, and four times where the text
-/// holds a TOML escape, is cut with a backslash in it or ends in a
-/// line-ending backslash.
+/// `toml_read`); and the start of a text, after its white space, where it
+/// is the last 4 bytes or more of a needle, as written or as TOML reads it:
+/// the rest of a secret a line-ending backslash broke (see `head`). Secrets
+/// that overlap or touch are replaced as one span. Masking a text compares
+/// each of its bytes at most twice per needle in each pass: the text and
+/// its start, and the same again as TOML reads it where it holds a TOML
+/// escape, is cut with a backslash in it or ends in a line-ending
+/// backslash.
 ///
 /// Masking a masked text again is not always idempotent: when a secret holds
 /// `*`, the character of [`REDACTED`], a mask and the text beside it can make
@@ -306,20 +310,43 @@ impl Needle {
     /// `None` for a text longer than `u32::MAX` bytes, whose borders a `u32`
     /// couldn't hold.
     fn new(text: String) -> Option<Self> {
-        let bytes = text.as_bytes();
-        u32::try_from(bytes.len()).ok()?;
-        let mut borders = Vec::with_capacity(bytes.len());
-        if let Some((_, rest)) = bytes.split_first() {
-            // The first byte has no start shorter than itself.
-            borders.push(0);
-            let mut matched = 0;
-            for &byte in rest {
-                matched = advance(bytes, &borders, matched, byte);
-                borders.push(matched);
-            }
-        }
+        let mut borders = Vec::new();
+        fill_borders(text.as_bytes(), &mut borders)?;
         Some(Self { text, borders })
     }
+}
+
+/// Fills `borders` with the borders of `bytes`, as a [`Needle`] keeps them;
+/// `None` when it is longer than `u32::MAX` bytes, whose borders a `u32`
+/// couldn't hold. Filled in place rather than returned, so no mutant of
+/// it can hand a search a border as long as what it is the border of,
+/// which the search would never leave.
+fn fill_borders(bytes: &[u8], borders: &mut Vec<u32>) -> Option<()> {
+    u32::try_from(bytes.len()).ok()?;
+    borders.reserve_exact(bytes.len());
+    if let Some((_, rest)) = bytes.split_first() {
+        // The first byte has no start shorter than itself.
+        borders.push(0);
+        let mut matched = 0;
+        for &byte in rest {
+            matched = advance(bytes, borders, matched, byte);
+            borders.push(matched);
+        }
+    }
+    Some(())
+}
+
+/// Marks bytes `from` to `to` of a text as one span in `spans`, the longest
+/// span that ends at each byte of it (see `Redactor::mask_with`).
+fn cover(spans: &mut [u32], from: usize, to: usize) {
+    if let Some(span) = to.checked_sub(1).and_then(|last| spans.get_mut(last)) {
+        *span = (*span).max(place(to.saturating_sub(from)));
+    }
+}
+
+/// A place in a text of at most `u32::MAX` bytes.
+fn place(at: usize) -> u32 {
+    u32::try_from(at).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -501,28 +528,33 @@ impl Redactor {
             whole |= redactor.whole;
             needles.extend(&redactor.needles);
         }
-        Self::mask_with(needles, whole, text, None)
+        Self::mask_with(needles.iter().copied(), whole, text, None)
     }
 
     /// `text` masked with this redactor's needles ([`Redactor::mask_with`]).
     fn mask(&self, text: &str, cut: Option<usize>) -> String {
-        Self::mask_with(&self.needles, self.whole, text, cut)
+        Self::mask_with(self.needles.iter(), self.whole, text, cut)
     }
 
     /// `text` with every one of `needles` in it replaced, or the whole of it
     /// where `everything` says so and it isn't empty. When `cut` is given, the
     /// text was cut after its first `cut` bytes, and the end of those from
     /// where it is the start of a needle on (the earliest start of a secret
-    /// the cut could have gone through) is part of the same spans.
+    /// the cut could have gone through) is part of the same spans. The start
+    /// of the text, after its white space, is part of them too where it is
+    /// the end of a needle, [`head::MIN_TAIL_BYTES`] or more of it.
     ///
     /// One pass over the text per needle, and one over the text as TOML reads
     /// it where it holds an escape, is cut with a backslash in it or ends in
     /// a line-ending backslash: each byte of the text is compared at most
     /// twice with a byte of the needle in each pass, however long and
-    /// repetitive both are. A needle and a valid text are UTF-8, so what
+    /// repetitive both are. For the start of the text, and of what TOML
+    /// read, one pass over as many of the last bytes of each needle as the
+    /// start has, each compared at most twice, after one over the start
+    /// itself ([`head::Head`]). A needle and a valid text are UTF-8, so what
     /// matches starts and ends between characters.
     fn mask_with<'a>(
-        needles: impl IntoIterator<Item = &'a Needle>,
+        needles: impl Iterator<Item = &'a Needle> + Clone,
         everything: bool,
         text: &str,
         cut: Option<usize>,
@@ -537,6 +569,16 @@ impl Redactor {
             return REDACTED.to_owned();
         }
         let toml = toml_read::TomlRead::of(text, cut);
+        // What is longer than every needle can't be the end of one.
+        let longest = needles
+            .clone()
+            .map(|needle| needle.text.len())
+            .max()
+            .unwrap_or_default();
+        // Where the white space the text begins with ends.
+        let at = text.len().saturating_sub(text.trim_start().len());
+        let start = head::Head::of(text, at, longest);
+        let toml_start = toml.as_ref().and_then(|toml| toml.head(at, longest));
         let bytes = text.as_bytes();
         // The longest span, of a needle or of the cut, that ends at each byte:
         // at most a needle's length, which a `u32` holds, or the bytes it was
@@ -551,8 +593,14 @@ impl Redactor {
                     *span = (*span).max(matched);
                 }
             }
+            if let Some(tail) = start.as_ref().and_then(|start| start.tail(needle)) {
+                cover(&mut spans, tail.start, tail.end);
+            }
             if let Some(toml) = &toml {
                 toml.mask(needle, &mut spans);
+                if let Some(start) = &toml_start {
+                    toml.mask_tail(start, needle, &mut spans);
+                }
             }
         }
         // From the end: a byte is covered when a span that ends at it or
@@ -1473,11 +1521,11 @@ mod tests {
     #[test]
     fn a_text_whose_backslashes_stand_for_nothing_is_not_read_again() {
         let redactor = redactor(&["canary\u{7}bell"]);
-        let needles = redactor.needles.len();
         let text = r"done \q \u00 \x";
         let (masked, work) = compared(|| redactor.redact(text));
         assert_eq!(masked, text);
-        assert_eq!(work, text.len() * needles);
+        let without = r"done /q /u00 /x";
+        assert_eq!(work, compared(|| redactor.redact(without)).1);
     }
 
     /// A secret Go prints as it is, `'` and a combining character included,
@@ -1850,7 +1898,9 @@ mod tests {
         let redactor = redactor(&[&secret.join("/")]);
         assert_eq!(redactor.redact(&piece(0)), "***");
         assert_eq!(redactor.redact(&piece(63)), "***");
-        assert_eq!(redactor.redact(&piece(64)), piece(64));
+        // Not at the start of a text, where it would be the end of the secret.
+        let later = format!("x {}", piece(64));
+        assert_eq!(redactor.redact(&later), later);
     }
 
     /// A piece that is the same in every rewrite of a secret takes one place
@@ -2782,14 +2832,20 @@ mod tests {
     /// Masking compares each byte of the text at least once and at most
     /// twice per needle, however long and repetitive a secret and the text
     /// are: the work grows with the length of the text, never with the
-    /// length of a needle (#236). A count, not a time, so it can't flake.
+    /// length of a needle (#236). Looking for the end of a needle at the
+    /// start of the text compares as many of the needle's last bytes as the
+    /// text has, each at most twice, after the start of the text itself
+    /// (#861): at most twice per byte of the text in each pass, the text
+    /// and its start, and twice more. A count, not a time, so it can't
+    /// flake. A text much shorter than the needles costs as little.
     #[test]
-    fn masking_a_text_compares_each_byte_at_most_twice_per_needle() {
+    fn masking_a_text_compares_each_byte_at_most_twice_per_needle_in_each_pass() {
         let cap = MAX_SECRET_BYTES;
         let redactor = a_redactor_of_long_repetitive_needles();
         let needles = redactor.needles.len();
         let text = "a".repeat(cap);
         let clipped = format!("{text}…");
+        let short = "a".repeat(64);
         for (what, length, (masked, work), expected) in [
             ("whole", cap, compared(|| redactor.redact(&text)), "***"),
             (
@@ -2804,10 +2860,16 @@ mod tests {
                 compared(|| redactor.redact_clipped(&clipped, "…")),
                 "***…",
             ),
+            (
+                "short",
+                short.len(),
+                compared(|| redactor.redact(&short)),
+                "***",
+            ),
         ] {
             assert_eq!(masked, expected, "{what}");
             assert!(
-                (length * needles..=2 * length * needles).contains(&work),
+                (length * needles..=4 * length * needles + 2 * length).contains(&work),
                 "{what}: {work} comparisons for {length} bytes and {needles} needles"
             );
         }
@@ -2815,15 +2877,19 @@ mod tests {
 
     /// A text with a TOML escape in it is read a second time, as TOML reads
     /// it, and what is read is no longer than the text: each byte of the
-    /// text is compared at most four times per needle (#839). The most is
-    /// where the escape is one byte shorter as read than as written, so
-    /// the text is read again nearly whole.
+    /// text is compared at most twice per needle in each of four passes,
+    /// the text, what was read and the start of each (#839, #861), and
+    /// twice more for each start. The most is where the escape is one byte
+    /// shorter as read than as written, so the text is read again nearly
+    /// whole.
     #[test]
-    fn masking_a_text_with_a_toml_escape_compares_each_byte_at_most_four_times_per_needle() {
+    fn masking_a_text_with_a_toml_escape_compares_each_byte_at_most_twice_per_needle_in_each_pass()
+    {
         let redactor = a_redactor_of_long_repetitive_needles();
         let needles = redactor.needles.len();
         let text = format!(r"{}\t", "a".repeat(MAX_SECRET_BYTES - 2));
         let clipped = format!("{text}…");
+        let short = format!(r"{}\t", "a".repeat(62));
         for (what, length, (masked, work), expected) in [
             (
                 "whole",
@@ -2843,10 +2909,16 @@ mod tests {
                 compared(|| redactor.redact_clipped(&clipped, "…")),
                 r"***\t…",
             ),
+            (
+                "short",
+                short.len(),
+                compared(|| redactor.redact(&short)),
+                r"***\t",
+            ),
         ] {
             assert_eq!(masked, expected, "{what}");
             assert!(
-                ((2 * length - 1) * needles..=4 * length * needles).contains(&work),
+                ((2 * length - 1) * needles..=8 * length * needles + 4 * length).contains(&work),
                 "{what}: {work} comparisons for {length} bytes and {needles} needles"
             );
         }

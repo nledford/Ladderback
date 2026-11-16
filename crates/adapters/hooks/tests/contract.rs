@@ -25,7 +25,7 @@ struct ProcessHooksHarness {
 
 /// The proxy URL the harness adds to the environment its runner's hooks are
 /// scrubbed from.
-const PROXY: &str = "http://demo:hunter3-proxy@proxy.demo:3128";
+const PROXY: &str = "http://demo:hunter3-proxy-pw@proxy.demo:3128";
 
 impl ProcessHooksHarness {
     fn new() -> Self {
@@ -122,11 +122,11 @@ impl HooksHarness for ProcessHooksHarness {
     }
 
     fn secret(&self) -> String {
-        "hunter2-demo".to_owned()
+        "hunter2-pw".to_owned()
     }
 
     fn proxy_password(&self) -> String {
-        "hunter3-proxy".to_owned()
+        "hunter3-proxy-pw".to_owned()
     }
 
     fn leaked_env_var(&self) -> String {
