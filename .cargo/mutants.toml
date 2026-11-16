@@ -71,6 +71,13 @@
 # dialog are `plans.rs`'s, mutated on the host; the `@ui` scenarios of
 # `features/ui/plans.feature` run the glue in Chromium.
 #
+# `crates/web/src/daemon_log_page.rs` is the DOM glue of the Log page (§4.4,
+# #618): it reads the recent log, holds the choice of levels, draws the table
+# and copies the lines listed. Which lines a choice lists, the words of a
+# choice and of a level and the text a copy puts on the clipboard are
+# `daemon_log.rs`'s, mutated on the host; the `@ui` scenarios of
+# `features/ui/daemon_log.feature` run the glue in Chromium.
+#
 # `crates/web/src/settings/sign_in.rs` is the DOM glue of Settings' signing
 # in section (security §10.1, decision 70): it reads Stay signed in for,
 # holds the choice in a signal, sends the save when its button is pressed,
@@ -134,6 +141,7 @@ exclude_globs = [
     "crates/web/src/sign_in.rs",
     "crates/web/src/settings.rs",
     "crates/web/src/plans_page.rs",
+    "crates/web/src/daemon_log_page.rs",
     "crates/web/src/settings/password.rs",
     "crates/web/src/settings/sign_in.rs",
 ]

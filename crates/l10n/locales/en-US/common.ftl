@@ -38,6 +38,9 @@
     [other] API tokens
 }
 
+# Ladderback's own log lines since the daemon started, the newest of them, which the Log page shows.
+-recent-log = recent log
+
 ## Sizes and durations. The program splits the value and picks the form; the
 ## catalog arranges the parts, so word order stays with the translator.
 

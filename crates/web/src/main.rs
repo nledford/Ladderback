@@ -36,6 +36,11 @@ mod badge;
     expect(dead_code, reason = "only the gallery uses the shared components yet")
 )]
 mod components;
+// What the Log page lists and copies, decided on the host;
+// `daemon_log_page.rs` is its glue.
+mod daemon_log;
+// The Log page's DOM glue; `daemon_log.rs` decides for it.
+mod daemon_log_page;
 // The focus-wrap decision is host-testable; components.rs (the DOM glue
 // around it) runs in a browser via the gallery's @ui scenarios.
 mod focus;
@@ -147,6 +152,7 @@ mod toast;
 )]
 mod variants;
 
+use daemon_log_page::DaemonLog;
 use plans_page::Plans;
 use routes::{NotFound, Operations, Repositories, Start};
 use session::{SignInOffNotice, Standing, Title};
@@ -199,6 +205,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let snapshots = Arc::clone(&localizer);
     let snapshot = Arc::clone(&localizer);
     let repositories = Arc::clone(&localizer);
+    let log = Arc::clone(&localizer);
     let settings = Arc::clone(&localizer);
     view! {
         <Arrival localizer=localizer />
@@ -226,6 +233,10 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
                 view=move || view! { <Repositories localizer=Arc::clone(&repositories) /> }
             />
             <Route
+                path=path!("/log")
+                view=move || view! { <DaemonLog localizer=Arc::clone(&log) /> }
+            />
+            <Route
                 path=path!("/settings")
                 view=move || view! { <Settings localizer=Arc::clone(&settings) /> }
             />
@@ -236,12 +247,13 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
 /// The pages' links, shown wherever the pages are.
 #[component]
 fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
-    let (label, operations, plans, snapshots, repositories, settings) = (
+    let (label, operations, plans, snapshots, repositories, log, settings) = (
         text(&localizer, msg::UI_NAV_LABEL),
         text(&localizer, msg::UI_NAV_OPERATIONS),
         text(&localizer, msg::UI_NAV_PLANS),
         text(&localizer, msg::UI_NAV_SNAPSHOTS),
         text(&localizer, msg::UI_NAV_REPOSITORIES),
+        text(&localizer, msg::UI_NAV_LOG),
         text(&localizer, msg::UI_NAV_SETTINGS),
     );
     view! {
@@ -258,6 +270,9 @@ fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
                 </li>
                 <li>
                     <A href="/repositories">{repositories}</A>
+                </li>
+                <li>
+                    <A href="/log">{log}</A>
                 </li>
                 <li>
                     <A href="/settings">{settings}</A>
@@ -354,8 +369,10 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // again: a request refused while it is open leaves it as it is.
     let asking = Memo::new(move |_| ended.get());
     // What the daemon runs, and the update it found, once it has told the
-    // page (decision 90, decision 107).
+    // page (decision 90, decision 107); the Log page heads a bug report with
+    // the build.
     let told = RwSignal::new(None::<session::Told>);
+    provide_context(told);
     provide_context(standing);
     provide_context(notice);
     provide_context(sign_in::PasswordChanged(RwSignal::new(false)));

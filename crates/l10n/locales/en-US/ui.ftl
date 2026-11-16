@@ -1488,6 +1488,9 @@ ui-nav-snapshots = Snapshots
 # The navigation's link to the repositories page.
 ui-nav-repositories = Repositories
 
+# The navigation's link to the Log page.
+ui-nav-log = Log
+
 # The navigation's link to the Settings page.
 ui-nav-settings = Settings
 
@@ -1783,6 +1786,72 @@ ui-sign-out = Sign out
 
 # Shown beside Sign out, or in the warning, when the daemon did not answer the request, so the session is as it was.
 ui-session-unreachable = The daemon that serves this page did not answer, so nothing changed. Try again in a moment.
+
+## The Log page (§4.4): the recent log, Ladderback's own log lines since the
+## daemon started, newest first, secrets masked.
+
+# The Log page's title, as the browser's tab and history show it.
+ui-log-title = Log – { -brand-name }
+
+# The Log page's heading: its one main heading, which also names the table of lines.
+ui-log-heading = Log
+
+# Under the heading: what the page lists.
+ui-log-body = The { -recent-log }: { -brand-name }'s own log since the daemon started, newest first, with secrets masked. Only the newest lines are kept.
+
+# The legend of the choice of which lines the table lists.
+ui-log-levels = Show
+
+# The choice that lists every line.
+ui-log-levels-all = All levels
+
+# The choice that lists the warnings and the errors.
+ui-log-levels-warnings = Warnings and errors
+
+# The choice that lists only the errors.
+ui-log-levels-errors = Errors only
+
+# The button that copies the lines the table lists, with the running version first, for a bug report.
+ui-log-copy = Copy for a bug report
+
+# Said once the lines are on the clipboard.
+ui-log-copied = Copied the lines shown.
+
+# Said when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
+ui-log-copy-failed = The browser would not let the page copy the lines. Select them in the table and copy them yourself.
+
+# The header of the column that says when a line was written, in UTC as the log writes it.
+ui-log-at = Time (UTC)
+
+# The header of the column that says how much a line matters.
+ui-log-level = Level
+
+# The header of the column that names the part of the program that wrote a line.
+ui-log-source = Source
+
+# The header of the column that holds what a line says.
+ui-log-message = Message
+
+# A line's level: an error.
+ui-log-level-error = Error
+
+# A line's level: a warning.
+ui-log-level-warn = Warning
+
+# A line's level: information.
+ui-log-level-info = Info
+
+# A line's level: detail for debugging.
+ui-log-level-debug = Debug
+
+# A line's level: the finest detail.
+ui-log-level-trace = Trace
+
+# In the table's place when the daemon has logged nothing yet.
+ui-log-none = The daemon has logged nothing yet.
+
+# In the table's place when no line is at the levels chosen.
+ui-log-none-shown = No line of the { -recent-log } is at these levels.
 
 ## The Settings page (§4.4): the API tokens, which let a program other than a
 ## browser use Ladderback while sign-in is on (§10.1).
