@@ -688,7 +688,7 @@ pub(crate) fn folder_url(base: &str, alias: &str, snapshot: &str, path: &str, fr
 }
 
 /// `text` with every byte but an unreserved one (RFC 3986) percent-encoded.
-fn encoded(text: &str) -> String {
+pub(crate) fn encoded(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
