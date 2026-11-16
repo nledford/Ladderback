@@ -265,9 +265,19 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 - **Checkbox:** before its label, never under 24 px square, growing with the text; its description sits under the label.
 - **Error:** the message above its field in error red and semibold, the field's edge 2 px in Red Ink; on submit, an error summary boxed in a 2 px error-red border, with its own heading, takes focus.
 
+### Links
+
+- **The component:** `Link`, a native `<a>` to a page of the app or to another site; pages move onto it in #886.
+- **Style:** Ladder Blue (`--accent`), always underlined, the underline a token's thickness, drawn below the descenders, thicker under the pointer. No hover-only underline, no visited color, no link drawn as a button.
+- **Tone:** Primary, the default, or Inherit, the color of the text around it, for a link inside a status sentence; still underlined. No status tones and no size: a link is the text around it.
+- **Current page:** bold, with `aria-current="page"`, from where the reader is.
+- **Another site:** opens where the reader is, never a new tab of its own; "(goes to another site)" after its words for a screen reader, and the ExternalLink icon after its words.
+- **Forced colors:** `LinkText`, the underline kept.
+- **Focus:** the global 3 px ring.
+
 ### Navigation
 
-- **Style:** a wrapping row of plain links in the Ladder Blue link color on the Ledger Gray header, 1rem apart.
+- **Style:** a wrapping row of plain links in the Ladder Blue link color on the Ledger Gray header, 1rem apart; underlined once they move onto `Link` (#886).
 - **Current page:** bold, with `aria-current="page"`.
 - **Brand:** the product's mark before its name, as tall as the name's letters, hidden from screen readers; under forced colors it takes `CanvasText` and `Canvas`.
 - **Sign out:** a Ghost button with the LogOut icon after the running version, outside the navigation's list, since it isn't a page, its words on the links' baseline and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.

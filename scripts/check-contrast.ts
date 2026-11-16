@@ -15,6 +15,8 @@ import { readFile } from "node:fs/promises";
 // a surface, so each tone's token is paired with both: Primary is the link
 // pairs, Secondary the muted text, Inherit the text around it. A tooltip is
 // the page's colors swapped: the page's background on its text color.
+// A link (§4.5) is always underlined, so it has no 3:1 pair against the text
+// around it: its color never tells it apart alone.
 const PAIRS = [
   { name: "text on surface", fg: "--fg", bg: "--surface", min: 4.5 },
   { name: "muted text on surface", fg: "--muted", bg: "--surface", min: 4.5 },
