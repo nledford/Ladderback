@@ -98,6 +98,14 @@ impl FakeClock {
         state.wake_due();
     }
 
+    /// The wall clock is set back by `by`, as time sync or a person can set
+    /// it: monotonic time doesn't move, and no sleeper wakes.
+    pub fn set_back(&self, by: SignedDuration) {
+        let mut state = self.lock();
+        let by = by.max(SignedDuration::ZERO);
+        state.now = state.now.saturating_sub(by).unwrap_or(state.now);
+    }
+
     /// How many sleepers are waiting for time to move; one whose sleep was
     /// dropped waits for nothing. A test driving a manual clock waits for
     /// one before each [`advance`](Self::advance): moving time before the

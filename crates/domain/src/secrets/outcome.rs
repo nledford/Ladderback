@@ -49,8 +49,8 @@ pub enum Problem {
     /// that can be asked for it: on Linux no Secret Service runs, there is no
     /// session bus to reach one by (a server, a system service), or the
     /// service says its keyring is locked. What the platform said is the
-    /// detail.
-    KeyringUnavailable { detail: String },
+    /// detail, and `cause` which of these it is.
+    KeyringUnavailable { detail: String, cause: KeyringCause },
     /// A secret has to be text, and this isn't valid UTF-8.
     NotUnicode,
     /// More than [`MAX_SECRET_BYTES`](super::MAX_SECRET_BYTES), the cap on
@@ -66,6 +66,18 @@ pub enum Problem {
     /// stdout open when the pipe grace ran out, so that line may have gone
     /// on. Never read as the secret.
     OutputCut,
+}
+
+/// Why a keyring couldn't be asked for an entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyringCause {
+    /// Nothing answers for the keyring: no Secret Service owns its name on
+    /// the session bus, or there is no session bus. At login the daemon can
+    /// start before the session's service does, so this one can pass.
+    NoService,
+    /// The service answered and said no: its keyring is locked, or the
+    /// person dismissed its unlock prompt. Asking again would ask them again.
+    Refused,
 }
 
 /// The most bytes of what a failed command wrote that an error keeps.

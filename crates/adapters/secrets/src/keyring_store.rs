@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use domain::secrets::KeyringCause;
+
 /// Why a store gave no secret.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Failure {
@@ -11,10 +14,13 @@ pub(crate) enum Failure {
     NotUnicode,
     /// The store can't be reached or refused: the platform's own words.
     Unreachable(String),
-    /// There is no store to ask: on Linux no Secret Service runs, there is no
-    /// session bus to reach one by, or the service says its keyring is locked
-    /// or its unlock prompt was dismissed. The platform's own words.
+    /// There is no store to ask: on Linux no Secret Service owns its name on
+    /// the session bus, or there is no session bus to reach one by. The
+    /// platform's own words.
     NoService(String),
+    /// The Secret Service answered and refused: it says its keyring is
+    /// locked, or its unlock prompt was dismissed. The platform's own words.
+    Refused(String),
     /// The Secret Service found no entry but couldn't say whether its
     /// keyring is locked, where an entry goes unseen: the entry may be
     /// there. The platform's words for why it couldn't say.
@@ -148,21 +154,23 @@ pub(crate) fn failure(
     // and a locked or missing collection as `NoStorageAccess`, but its
     // `PlatformFailure` also carries a failed decryption or an answer it
     // couldn't parse: only the error it boxed tells them apart.
-    let no_service = matches!(store, OsStore::SecretService)
-        && match &error {
-            keyring::Error::PlatformFailure(source) | keyring::Error::NoStorageAccess(source) => {
-                cfg_select! {
-                    target_os = "linux" => { secret_service_absent(source.as_ref()) }
-                    // The Secret Service is Linux's alone: no error from
-                    // elsewhere says it is missing.
-                    _ => {
-                        let _ = source;
-                        false
-                    }
+    let unavailable = match (store, &error) {
+        (
+            OsStore::SecretService,
+            keyring::Error::PlatformFailure(source) | keyring::Error::NoStorageAccess(source),
+        ) => {
+            cfg_select! {
+                target_os = "linux" => { secret_service_unavailable(source.as_ref()) }
+                // The Secret Service is Linux's alone: no error from
+                // elsewhere says it is missing.
+                _ => {
+                    let _ = source;
+                    None
                 }
             }
-            _ => false,
-        };
+        }
+        _ => None,
+    };
     match error {
         // oo7 finds no items in a locked collection, so `keyring` says there
         // is no entry where the entry may well be (#483): the service, asked
@@ -171,7 +179,7 @@ pub(crate) fn failure(
         keyring::Error::NoEntry => match store {
             OsStore::SecretService => match locked() {
                 Lock::Unlocked => Failure::NoEntry,
-                Lock::Locked(said) => Failure::NoService(said),
+                Lock::Locked(said) => Failure::Refused(said),
                 Lock::Unknown(why) => Failure::Unconfirmed(why),
             },
             OsStore::Keychain => Failure::NoEntry,
@@ -181,43 +189,50 @@ pub(crate) fn failure(
             zeroize::Zeroize::zeroize(&mut bytes);
             Failure::NotUnicode
         }
-        error if no_service => Failure::NoService(error.to_string()),
-        other => Failure::Unreachable(other.to_string()),
+        error => match unavailable {
+            Some(KeyringCause::NoService) => Failure::NoService(error.to_string()),
+            Some(KeyringCause::Refused) => Failure::Refused(error.to_string()),
+            None => Failure::Unreachable(error.to_string()),
+        },
     }
 }
 
-/// Whether the error `keyring` boxed for a Secret Service failure says there
-/// is no service to ask: no session bus, no daemon on it, or a collection
-/// that is locked, missing or whose unlock prompt was dismissed. Anything
-/// else, or an error of another type, is a read that failed.
+/// What the error `keyring` boxed for a Secret Service failure says of the
+/// service: none to ask (no session bus, no daemon on it, a provider that
+/// isn't there), or one that refused (a locked or missing collection, a
+/// dismissed unlock prompt). Anything else, or an error of another type, is
+/// a read that failed: `None`.
 #[cfg(target_os = "linux")]
-fn secret_service_absent(source: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
+fn secret_service_unavailable(
+    source: &(dyn std::error::Error + Send + Sync + 'static),
+) -> Option<KeyringCause> {
     use dbus_secret_service::Error;
     match source.downcast_ref::<Error>() {
-        Some(Error::Locked | Error::NoResult | Error::Prompt | Error::Unavailable) => true,
-        Some(Error::Dbus(error)) => error.name().is_some_and(bus_or_service_missing),
-        _ => false,
+        Some(Error::Unavailable) => Some(KeyringCause::NoService),
+        Some(Error::Locked | Error::NoResult | Error::Prompt) => Some(KeyringCause::Refused),
+        Some(Error::Dbus(error)) => error.name().and_then(bus_error_cause),
+        _ => None,
     }
 }
 
-/// Whether a D-Bus error, by its name, says there is no Secret Service to
-/// ask: no session bus to connect to (`NoServer`, `FileNotFound`, or
-/// `NotSupported` from libdbus's autolaunch without a display), no daemon
-/// owning the service's name (`ServiceUnknown`, `NameHasNoOwner`), or the
-/// service's own word that its collection is locked (`IsLocked`). A call the
-/// service took and failed (no reply, access denied, an object gone) is not
-/// one. Only Linux reads D-Bus errors; the tests run it everywhere.
+/// What a D-Bus error, by its name, says of the Secret Service: none to ask
+/// when there is no session bus to connect to (`NoServer`, `FileNotFound`,
+/// or `NotSupported` from libdbus's autolaunch without a display) or no
+/// daemon owns the service's name (`ServiceUnknown`, `NameHasNoOwner`); one
+/// that refused when it says its collection is locked (`IsLocked`). A call
+/// the service took and failed (no reply, access denied, an object gone) is
+/// neither. Only Linux reads D-Bus errors; the tests run it everywhere.
 #[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
-pub(crate) fn bus_or_service_missing(name: &str) -> bool {
-    matches!(
-        name,
+pub(crate) fn bus_error_cause(name: &str) -> Option<KeyringCause> {
+    match name {
         "org.freedesktop.DBus.Error.NoServer"
-            | "org.freedesktop.DBus.Error.FileNotFound"
-            | "org.freedesktop.DBus.Error.NotSupported"
-            | "org.freedesktop.DBus.Error.ServiceUnknown"
-            | "org.freedesktop.DBus.Error.NameHasNoOwner"
-            | "org.freedesktop.Secret.Error.IsLocked"
-    )
+        | "org.freedesktop.DBus.Error.FileNotFound"
+        | "org.freedesktop.DBus.Error.NotSupported"
+        | "org.freedesktop.DBus.Error.ServiceUnknown"
+        | "org.freedesktop.DBus.Error.NameHasNoOwner" => Some(KeyringCause::NoService),
+        "org.freedesktop.Secret.Error.IsLocked" => Some(KeyringCause::Refused),
+        _ => None,
+    }
 }
 
 /// The store where there is none. Tests build it on every OS, so what it

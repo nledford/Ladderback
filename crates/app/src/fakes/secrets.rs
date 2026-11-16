@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_trait::async_trait;
+use domain::Timestamp;
 use domain::secrets::{
-    CommandLine, KeyringEntry, Problem, SecretError, SecretRef, SourceName, Stdout,
+    CommandLine, KeyringCause, KeyringEntry, Problem, SecretError, SecretRef, SourceName, Stdout,
     command_failure, command_secret, decode, file_warning,
 };
 
-use crate::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
+use crate::ports::{Clock, Kept, Keyring, KeyringError, Resolved, SecretResolver};
 
 /// What the fake does when told to run a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +35,12 @@ pub enum Script {
 /// reports the limit it was given, which is a minute unless set otherwise.
 const FAKE_TIME_LIMIT_SECONDS: u64 = 60;
 
+/// How often a keyring entry may be read while the keyring can't be asked
+/// before the fake stops saying so: a run that holds for the keyring reads
+/// it 13 times at most (`KEYRING_WAIT` over `KEYRING_POLL`), so more is a
+/// run that spins.
+const FAKE_UNAVAILABLE_READS: usize = 1_000;
+
 /// A secret store in memory: an environment, files with permissions, a
 /// keyring and scripted commands, read through the same rules as the real
 /// resolver (`domain::secrets::{decode, file_warning}`). It remembers what it
@@ -51,6 +58,9 @@ struct State {
     keyring: BTreeMap<String, String>,
     /// No keyring service to ask: every keyring read fails.
     no_keyring_service: bool,
+    /// The session's keyring service starts when this clock reaches this
+    /// time: until then there is none to ask, as with `no_keyring_service`.
+    service_starts: Option<(Arc<dyn Clock>, Timestamp)>,
     /// The keyring is locked: every keyring read fails, entry or not.
     keyring_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
@@ -133,6 +143,13 @@ impl FakeSecrets {
     /// `KeyringUnavailable`, never as missing.
     pub fn lock_keyring(&self) {
         self.lock().keyring_locked = true;
+    }
+
+    /// A session whose keyring service starts when `clock` reaches `at`, as
+    /// one that starts after the daemon at login: until then every keyring
+    /// entry fails as `KeyringUnavailable` with no service to ask.
+    pub fn start_keyring_service_at(&self, clock: Arc<dyn Clock>, at: Timestamp) {
+        self.lock().service_starts = Some((clock, at));
     }
 
     /// What running `command` does. A command with no script can't be started.
@@ -252,11 +269,24 @@ impl SecretResolver for FakeSecrets {
                     entry: entry.to_string(),
                 };
                 let unavailable = keyring_unavailable(&state);
-                if let Some(detail) = unavailable {
+                if let Some((detail, cause)) = unavailable {
+                    // A run that spins on a keyring it can't ask would hang
+                    // its test: past the cap, the read fails otherwise, so
+                    // the test ends and says so.
+                    let reads = state.reads.iter().filter(|read| *read == secret).count();
+                    if reads > FAKE_UNAVAILABLE_READS {
+                        return Err(SecretError {
+                            source,
+                            problem: Problem::Unreachable {
+                                detail: "read without end while it can't be asked".to_owned(),
+                            },
+                        });
+                    }
                     return Err(SecretError {
                         source,
                         problem: Problem::KeyringUnavailable {
                             detail: detail.to_owned(),
+                            cause,
                         },
                     });
                 }
@@ -307,7 +337,7 @@ impl Keyring for FakeSecrets {
 /// it: what keeping or removing an entry is refused with there.
 fn unavailable(state: &State) -> Result<(), KeyringError> {
     match keyring_unavailable(state) {
-        Some(detail) => Err(KeyringError::Unavailable {
+        Some((detail, _)) => Err(KeyringError::Unavailable {
             detail: detail.to_owned(),
         }),
         None => Ok(()),
@@ -315,11 +345,15 @@ fn unavailable(state: &State) -> Result<(), KeyringError> {
 }
 
 /// Why the keyring can't be asked, in the platform's words, if it can't.
-fn keyring_unavailable(state: &State) -> Option<&'static str> {
-    if state.no_keyring_service {
-        Some("no session bus")
+fn keyring_unavailable(state: &State) -> Option<(&'static str, KeyringCause)> {
+    let not_started = state
+        .service_starts
+        .as_ref()
+        .is_some_and(|(clock, at)| clock.now() < *at);
+    if state.no_keyring_service || not_started {
+        Some(("no session bus", KeyringCause::NoService))
     } else if state.keyring_locked {
-        Some("the keyring is locked")
+        Some(("the keyring is locked", KeyringCause::Refused))
     } else {
         None
     }
@@ -340,4 +374,42 @@ fn exited(
         value: command_secret(source, stdout)?,
         warnings: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::secrets::KeyringEntry;
+
+    /// A keyring that can't be asked says so for as many reads as any hold
+    /// makes, then fails the read otherwise, so a run that spins ends its
+    /// test rather than hanging it.
+    #[tokio::test]
+    async fn a_keyring_read_without_end_stops_saying_it_cant_be_asked() {
+        let secrets = FakeSecrets::new();
+        secrets.remove_keyring_service();
+        let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+        let other = SecretRef::Keyring(KeyringEntry::parse("ladderback-demo/other").unwrap());
+        let _ = secrets.resolve(&other).await;
+        let secret = SecretRef::Keyring(entry);
+        for read in 1..=FAKE_UNAVAILABLE_READS {
+            assert!(
+                matches!(
+                    secrets.resolve(&secret).await,
+                    Err(SecretError {
+                        problem: Problem::KeyringUnavailable { .. },
+                        ..
+                    })
+                ),
+                "read {read}"
+            );
+        }
+        assert!(matches!(
+            secrets.resolve(&secret).await,
+            Err(SecretError {
+                problem: Problem::Unreachable { .. },
+                ..
+            })
+        ));
+    }
 }

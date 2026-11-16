@@ -31,6 +31,8 @@ const FINDS_NOTHING: &str =
     "tests::secret_service::a_locked_keyring_that_finds_nothing_is_no_keyring_service";
 const KEEPS: &str =
     "tests::secret_service::a_secret_set_in_the_keyring_reads_back_until_it_is_deleted";
+const NO_SERVICE: &str =
+    "tests::secret_service::a_session_bus_with_no_secret_service_on_it_is_no_keyring_service";
 
 /// Where the stand-in keeps its one collection, which the alias `default`
 /// names.
@@ -51,7 +53,7 @@ fn a_locked_keyring_that_finds_nothing_is_no_keyring_service() {
             let said =
                 keyring::Error::NoStorageAccess(Box::new(dbus_secret_service::Error::Locked))
                     .to_string();
-            assert_eq!(read, Err(Failure::NoService(said)));
+            assert_eq!(read, Err(Failure::Refused(said)));
         } else if state == Keyring::Silent.name() {
             assert!(
                 matches!(&read, Err(Failure::Unconfirmed(why)) if why.contains("the stand-in has no such method")),
@@ -112,6 +114,23 @@ fn a_secret_set_in_the_keyring_reads_back_until_it_is_deleted() {
     assert_eq!(held.lock().unwrap().items.len(), 0);
     run_in_copy(KEEPS, &bus.address, "gone");
     service.stop();
+}
+
+/// A session bus that no Secret Service is on yet, as at login before the
+/// session's keyring starts: the read fails as no keyring service to ask,
+/// which a run the schedule starts then waits out (§5), never as a keyring
+/// that refused, which no run waits for.
+#[test]
+fn a_session_bus_with_no_secret_service_on_it_is_no_keyring_service() {
+    if std::env::var_os(IN_COPY).is_some() {
+        let read = os_store().get("ladderback-demo", "nas");
+        assert!(matches!(&read, Err(Failure::NoService(_))), "{read:?}");
+        return;
+    }
+    let Some(bus) = PrivateBus::start() else {
+        testkit::skip!("no dbus-daemon to run a private bus with");
+    };
+    run_in_copy(NO_SERVICE, &bus.address, "no service");
 }
 
 /// The stand-in's keyring.

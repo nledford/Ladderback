@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use domain::secrets::{
-    CommandLine, FileRead, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError, SecretRef,
-    SecretValue, SecretWarning, SourceName,
+    CommandLine, FileRead, KeyringCause, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError,
+    SecretRef, SecretValue, SecretWarning, SourceName,
 };
 
 use crate::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
@@ -19,6 +19,14 @@ pub trait SecretsHarness: Send + Sync {
     /// Where passwords are kept: the keyring the resolver reads, so an entry
     /// kept here is one the resolver gives.
     fn keyring(&self) -> Arc<dyn Keyring>;
+
+    /// A resolver whose keyring has no service to ask: nothing owns the
+    /// Secret Service's name on the session bus.
+    fn without_keyring_service(&self) -> Arc<dyn SecretResolver>;
+
+    /// A resolver whose keyring service answers and refuses: its keyring is
+    /// locked, or its unlock prompt was dismissed.
+    fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver>;
 
     /// Sets a variable of the environment the resolver reads.
     fn set_env(&self, name: &str, value: &str);
@@ -101,6 +109,7 @@ async fn keyrings(harness: &dyn SecretsHarness) {
     a_kept_password_is_read_from_its_entry_and_kept_once(harness).await;
     an_entry_that_holds_another_secret_is_never_overwritten(harness).await;
     a_removed_entry_is_missing(harness).await;
+    a_keyring_with_no_service_is_told_apart_from_one_that_refuses(harness).await;
 }
 
 async fn resolve(
@@ -500,6 +509,31 @@ async fn an_entry_that_is_not_there_is_missing(harness: &dyn SecretsHarness) {
         Err(SecretError::missing(SourceName::Keyring {
             entry: entry.to_string()
         }))
+    );
+}
+
+/// A keyring with no service to ask and one whose service refuses are both
+/// unavailable, by the entry, and told apart by their cause: only the first
+/// can pass by itself, as when the daemon outruns the service at login.
+async fn a_keyring_with_no_service_is_told_apart_from_one_that_refuses(
+    harness: &dyn SecretsHarness,
+) {
+    let entry = harness.unused_keyring_entry("nas");
+    let secret = SecretRef::Keyring(entry.clone());
+    let cause = |result: Result<Resolved, SecretError>| match result {
+        Err(SecretError {
+            source: SourceName::Keyring { entry: named },
+            problem: Problem::KeyringUnavailable { cause, .. },
+        }) if named == entry.to_string() => Some(cause),
+        _ => None,
+    };
+    assert_eq!(
+        cause(harness.without_keyring_service().resolve(&secret).await),
+        Some(KeyringCause::NoService)
+    );
+    assert_eq!(
+        cause(harness.with_refusing_keyring().resolve(&secret).await),
+        Some(KeyringCause::Refused)
     );
 }
 

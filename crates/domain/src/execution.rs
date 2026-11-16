@@ -414,6 +414,15 @@ pub enum Trigger {
     },
 }
 
+impl Trigger {
+    /// Whether nobody is waiting on the run's answer: the schedule started
+    /// it, late after a wake or as a retry. Only such a run waits for the
+    /// session's keyring service while the daemon starts (§5).
+    pub fn is_unattended(&self) -> bool {
+        matches!(self, Self::Schedule | Self::CatchUp | Self::Retry)
+    }
+}
+
 /// What an operation works on, as far as its job says: a backup names its
 /// plan, and a job that opens a known repository names it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,6 +759,22 @@ mod tests {
             Target::default(),
             t(0),
         )
+    }
+
+    /// Only a run the schedule started is unattended: one a person, a hub,
+    /// a tool or a program asked for has someone waiting on its answer.
+    #[test]
+    fn only_a_run_the_schedule_started_is_unattended() {
+        for trigger in [Trigger::Schedule, Trigger::CatchUp, Trigger::Retry] {
+            assert!(trigger.is_unattended(), "{trigger:?}");
+        }
+        let token = Trigger::ApiToken {
+            id: crate::access::api_token::ApiTokenId::from_bytes(&[7; crate::access::TOKEN_BYTES]),
+            label: crate::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
+        };
+        for trigger in [Trigger::Manual, Trigger::Hub, Trigger::Mcp, token] {
+            assert!(!trigger.is_unattended(), "{trigger:?}");
+        }
     }
 
     fn running() -> Operation {

@@ -306,6 +306,18 @@ impl SecretsHarness for FakeSecretsHarness {
         self.secrets.clone()
     }
 
+    fn without_keyring_service(&self) -> Arc<dyn SecretResolver> {
+        let secrets = FakeSecrets::new();
+        secrets.remove_keyring_service();
+        Arc::new(secrets)
+    }
+
+    fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
+        let secrets = FakeSecrets::new();
+        secrets.lock_keyring();
+        Arc::new(secrets)
+    }
+
     fn set_env(&self, name: &str, value: &str) {
         self.secrets.set_env(name, value);
     }
