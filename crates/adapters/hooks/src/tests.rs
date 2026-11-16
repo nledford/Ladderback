@@ -928,6 +928,22 @@ fn output_is_masked_where_it_ends_like_a_secret_begins_whoever_cut_it() {
     }
 }
 
+/// Output that quotes a TOML file shows a secret written there with TOML's
+/// escapes (`\u0007`, `\e`): it is masked whole, and from where the secret
+/// begins when the output ends inside an escape (I4, #839).
+#[test]
+fn output_that_quotes_a_toml_file_is_masked_where_it_escapes_a_secret() {
+    let redactor =
+        domain::secrets::Redactor::new(&[domain::secrets::SecretValue::new("CANARY\u{7}bell")]);
+    let captured = crate::Captured::default();
+    for truncated in [false, true] {
+        let masked = captured.stream(b"password = \"CANARY\\u0007bell\"\n", truncated, &redactor);
+        assert_eq!(masked.text, "password = \"***\"\n");
+        let masked = captured.stream(b"password = \"CANARY\\u00", truncated, &redactor);
+        assert_eq!(masked.text, "password = \"***");
+    }
+}
+
 /// The secret one write was carrying when the read of a pipe stopped. A
 /// write larger than the pipe takes at once reaches the reader in parts, and
 /// the kernel picks where: the hooks below write the start of the secret and

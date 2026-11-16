@@ -360,6 +360,72 @@ fn secrets_and_a_text_apart() -> impl Strategy<Value = (Vec<String>, String)> {
         })
 }
 
+/// The characters of a secret a TOML file holds: those of [`SECRET_CHARS`],
+/// and control characters and one beyond the BMP, which TOML escapes.
+const TOML_CHARS: &[char] = &[
+    '\u{0}',
+    '\u{7}',
+    '\u{8}',
+    '\u{c}',
+    '\u{1b}',
+    '\u{1f}',
+    '\u{7f}',
+    '\u{1f600}',
+];
+
+/// A secret of the characters of [`SECRET_CHARS`] and [`TOML_CHARS`], and,
+/// for each of its characters, how a TOML basic string writes it
+/// ([`toml_written`]) and whether a line-ending backslash comes before it.
+fn toml_secret() -> impl Strategy<Value = (String, Vec<(u8, bool)>)> {
+    let chars: Vec<char> = SECRET_CHARS.iter().chain(TOML_CHARS).copied().collect();
+    prop::collection::vec(select(chars), 1..=16).prop_flat_map(|chars| {
+        let count = chars.len();
+        (
+            Just(String::from_iter(chars)),
+            prop::collection::vec((any::<u8>(), any::<bool>()), count),
+        )
+    })
+}
+
+/// `secret` as the body of a multi-line basic string writes it, each of
+/// its characters as `ways` says: as it is where a basic string may hold
+/// it, as a short escape (`\b`, `\e`), as `\xHH`, `\uHHHH` in either case
+/// or `\UHHHHHHHH`; and with a backslash that ends a line, and white space
+/// and line breaks (LF or CRLF) after it, before a character that isn't
+/// white space as written, which TOML would drop with the break.
+fn toml_written(secret: &str, ways: &[(u8, bool)]) -> String {
+    let mut written = String::new();
+    for (at, (c, &(way, broken))) in secret.chars().zip(ways).enumerate() {
+        let code = u32::from(c);
+        let short = match c {
+            '\u{8}' => Some(r"\b"),
+            '\t' => Some(r"\t"),
+            '\n' => Some(r"\n"),
+            '\u{c}' => Some(r"\f"),
+            '\r' => Some(r"\r"),
+            '\u{1b}' => Some(r"\e"),
+            '"' => Some(r#"\""#),
+            '\\' => Some(r"\\"),
+            _ => None,
+        };
+        let as_is = !matches!(c, '"' | '\\') && (c == '\t' || !c.is_control());
+        let form = match (way % 6, short) {
+            (0, _) if as_is => c.to_string(),
+            (1, Some(short)) => short.to_owned(),
+            (2, _) if code <= 0xff => format!(r"\x{code:02x}"),
+            (3, _) if code <= 0xffff => format!(r"\u{code:04X}"),
+            (4, _) if code <= 0xffff => format!(r"\u{code:04x}"),
+            _ => format!(r"\U{code:08X}"),
+        };
+        if broken && at > 0 && !form.starts_with([' ', '\t']) {
+            let breaks = ["\\  \n\n\t ", "\\\r\n\r\n ", "\\ \n\r\n"];
+            written.push_str(breaks.get(usize::from(way / 6) % breaks.len()).unwrap());
+        }
+        written.push_str(&form);
+    }
+    written
+}
+
 proptest! {
     #![proptest_config(crate::properties::config())]
 
@@ -395,5 +461,31 @@ proptest! {
         (secrets, text) in secrets_and_a_text_apart()
     ) {
         prop_assert_eq!(redactor(&secrets).redact(&text), text);
+    }
+
+    /// A secret written as a TOML file may write it is masked whole, and a
+    /// text cut anywhere inside it is masked from where the secret begins:
+    /// nothing of it shows (#839).
+    #[test]
+    fn a_secret_written_as_toml_writes_it_is_masked_whole_cut_or_not(
+        (secret, ways) in toml_secret()
+    ) {
+        let redactor = redactor(std::slice::from_ref(&secret));
+        let written = toml_written(&secret, &ways);
+        prop_assert_eq!(redactor.redact(&format!("x{written}x")), "x***x", "{:?}", written);
+        let text = format!("x{written}");
+        // A text masked a line at a time ends a line at the first break.
+        let first_line = text.lines().next().unwrap();
+        prop_assert_eq!(redactor.redact(first_line), "x***", "{:?}", first_line);
+        for cut in 2..=text.len() {
+            let masked = redactor.redact_cut(text.as_bytes().get(..cut).unwrap());
+            prop_assert!(
+                masked == "x***" || masked == "x",
+                "{:?} cut after {} bytes masks to {:?}",
+                text,
+                cut,
+                masked
+            );
+        }
     }
 }
