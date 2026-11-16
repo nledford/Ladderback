@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 
 import { Given, Then, When } from "@cucumber/cucumber";
+import type { Request } from "playwright";
 
 import { journey, namePattern } from "../support/keyboard.ts";
 import { type BrowserWorld, evaluateAll } from "../support/world.ts";
@@ -21,6 +22,10 @@ const SAVE_PATIENCE_MS = 10_000;
 // page has stops before the table.
 const MAX_TABS = 30;
 
+// The reads of the plans list each world's daemon holds, as the page's
+// requests, so a step can wait until the page has the answers.
+const heldReads = new WeakMap<BrowserWorld, Request[]>();
+
 // The page reads the plans list when it opens, and again once a plan is
 // saved; the step holds every read after the first, so the reader can leave
 // the page before a saved plan's list comes back.
@@ -28,13 +33,18 @@ Given(
   "the daemon answers each read of the plans list after the first {int} seconds late",
   async function (this: BrowserWorld, seconds: number) {
     let reads = 0;
+    const held: Request[] = [];
+    heldReads.set(this, held);
     this.contextRoutes.push(async (context) => {
       await context.route(
         (url) => url.pathname === "/api/v1/plans",
         async (route) => {
           if (route.request().method() === "GET") {
             reads += 1;
-            if (reads > 1) await new Promise((done) => setTimeout(done, seconds * 1_000));
+            if (reads > 1) {
+              held.push(route.request());
+              await new Promise((done) => setTimeout(done, seconds * 1_000));
+            }
           }
           await route.continue();
         },
@@ -42,6 +52,25 @@ Given(
     });
   },
 );
+
+// Once the page has each held read's whole answer, and has done what it does
+// with it: a saved plan's page closes the form on the answer, then moves focus
+// a timer later, so the step lets the page's queued timers and a frame run.
+When("the daemon has answered the held reads of the plans list", async function (this: BrowserWorld) {
+  const held = heldReads.get(this) ?? [];
+  assert.ok(held.length > 0, "the daemon held no read of the plans list");
+  for (const request of held) {
+    const response = await request.response();
+    assert.ok(response, `the read of the plans list at ${request.url()} got no answer`);
+    await response.finished();
+  }
+  await this.page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        setTimeout(() => setTimeout(() => requestAnimationFrame(() => done()), 0), 0);
+      }),
+  );
+});
 
 When("I select all the text and type {string}", async function (this: BrowserWorld, text: string) {
   const keys = journey(this.page);

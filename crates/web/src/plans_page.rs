@@ -17,7 +17,7 @@ use leptos::task::spawn_local;
 use crate::announcer::Politeness;
 use crate::components::{
     Checkbox, Confirmation, ErrorSummary, FormField, ReviewDialog, SummaryItem, Working,
-    focus_element, hand_focus_when_gone, sentence_view,
+    focus_element, hand_focus_when_gone, recover_focus, sentence_view,
 };
 use crate::live::reply;
 use crate::plans::{
@@ -123,7 +123,7 @@ impl List {
 
 /// The plan form that is open: the plan it changes (`None` for a new one),
 /// the plan as it came, and the button that opened it, where focus returns
-/// once it is saved or closed.
+/// once it is closed, or saved while focus fell to the page with it.
 #[derive(Clone)]
 struct Open {
     id: Option<String>,
@@ -490,9 +490,11 @@ impl Inputs {
 /// each setting of a plan in four groups (the Name only for a new plan,
 /// whose ID it is), the error summary that takes focus when the daemon
 /// refuses the plan, and the buttons that save it and close it. Once saved,
-/// the form closes, the list is read again and focus returns to the button
-/// that opened the form; the row of a plan on a schedule then shows its next
-/// run as soon as the scheduler has planned one.
+/// the list is read again and the form closes, unless the reader has opened
+/// another plan's form in its place; focus that fell to the page with it
+/// returns to the button that opened it, and focus the reader moved out of
+/// it meanwhile stays (A1). The row of a plan on a schedule then shows its
+/// next run as soon as the scheduler has planned one.
 #[component]
 fn PlanEditor(
     localizer: Arc<Localizer>,
@@ -552,14 +554,17 @@ fn PlanEditor(
                         &say(&localizer, saved(&saved_as, &base, &sent)),
                     );
                     list.read(&localizer).await;
-                    // The reader may have left the page while it was read.
-                    if close.try_run(()).is_none() {
-                        return;
+                    // The form is gone when the reader has left the page, or
+                    // opened another plan's form in its place, which stays
+                    // open, while the list was read.
+                    if busy.try_get_untracked().is_some() && close.try_run(()).is_some() {
+                        // Once the form has left the page and the list shows
+                        // the plan, whose Change button may be new. Focus
+                        // that was in the form fell to the page with it;
+                        // focus the reader moved elsewhere meanwhile stays.
+                        gloo_timers::future::sleep(Duration::ZERO).await;
+                        recover_focus(&opener);
                     }
-                    // Once the form has left the page and the list shows
-                    // the plan, whose Change button may be new.
-                    gloo_timers::future::sleep(Duration::ZERO).await;
-                    focus_element(&opener);
                     list.await_next_run(saved_as).await;
                 }
                 Some(Posted::Refused(code, args, detail)) => {
