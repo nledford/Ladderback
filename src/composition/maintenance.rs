@@ -1138,7 +1138,7 @@ mod tests {
     #[tokio::test]
     async fn a_configuration_that_cannot_be_used_is_told_as_a_save_of_it_is() {
         for (error, code, args, detail) in
-            super::super::repository_service_tests::unusable_configurations()
+            super::super::tests::service_support::unusable_configurations()
         {
             assert_eq!(
                 refusal(
