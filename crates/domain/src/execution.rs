@@ -768,7 +768,11 @@ mod tests {
         for trigger in [Trigger::Schedule, Trigger::CatchUp, Trigger::Retry] {
             assert!(trigger.is_unattended(), "{trigger:?}");
         }
-        for trigger in [Trigger::Manual, Trigger::Hub, Trigger::Mcp] {
+        let token = Trigger::ApiToken {
+            id: crate::access::api_token::ApiTokenId::from_bytes(&[7; crate::access::TOKEN_BYTES]),
+            label: crate::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
+        };
+        for trigger in [Trigger::Manual, Trigger::Hub, Trigger::Mcp, token] {
             assert!(!trigger.is_unattended(), "{trigger:?}");
         }
     }
