@@ -216,9 +216,10 @@ wasm-bindgen = "0.2.130"
 wasm-bindgen-test = "0.3.80"
 # The browser APIs `web` reads the page's language from, declares it with, and
 # writes the live regions, focus and the events WebSocket through (§4.4),
-# aborts a read of the daemon that hangs with, and reads the session route
-# without the session's cookie with.
-web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "BinaryType", "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "RequestCredentials", "ScrollIntoViewOptions", "ScrollLogicalPosition", "UrlSearchParams", "WebSocket", "Window"] }
+# aborts a read of the daemon that hangs with, reads the session route
+# without the session's cookie with, and measures and places a tooltip beside
+# its control with (the pointer's kind, boxes and computed styles).
+web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "BinaryType", "Clipboard", "CloseEvent", "CssStyleDeclaration", "Document", "DomRect", "Element", "ErrorEvent", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "PointerEvent", "RequestCredentials", "ScrollIntoViewOptions", "ScrollLogicalPosition", "UrlSearchParams", "WebSocket", "Window"] }
 # Wipes a resolved secret's bytes, the admin password and an API token's
 # secret when they are dropped (security §10.2); already in the tree through
 # `rustls` and `keyring`. `derive` writes the wipe and the drop that runs it,

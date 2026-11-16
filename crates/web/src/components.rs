@@ -50,6 +50,7 @@ pub use spinner::Spinner;
 pub use status_badge::StatusBadge;
 pub use step_up_field::{StepUp, StepUpField};
 pub(crate) use toast::{Toast, show_toast};
+pub use tooltip::{Tip, Tooltip};
 pub(crate) use tree::{FolderLoader, FolderPage, Tree};
 
 /// Wraps Tab focus from the dialog's last focusable back to its first (and

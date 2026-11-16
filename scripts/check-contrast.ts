@@ -13,7 +13,8 @@ import { readFile } from "node:fs/promises";
 // pair each badge's text token with its background token. The tones of the
 // shared vocabulary (variants.rs) draw text and strokes on the page and on
 // a surface, so each tone's token is paired with both: Primary is the link
-// pairs, Secondary the muted text, Inherit the text around it.
+// pairs, Secondary the muted text, Inherit the text around it. A tooltip is
+// the page's colors swapped: the page's background on its text color.
 const PAIRS = [
   { name: "text on surface", fg: "--fg", bg: "--surface", min: 4.5 },
   { name: "muted text on surface", fg: "--muted", bg: "--surface", min: 4.5 },
@@ -35,6 +36,7 @@ const PAIRS = [
   { name: "error tone on page", fg: "--error", bg: "--bg", min: 4.5 },
   { name: "error tone on surface", fg: "--error", bg: "--surface", min: 4.5 },
   ...buttonPairs(),
+  { name: "tooltip text", fg: "--bg", bg: "--fg", min: 4.5 },
 ];
 
 // A button (components §4.5) in each tone but Inherit, whose colors are the

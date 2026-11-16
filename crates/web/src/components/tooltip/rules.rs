@@ -33,32 +33,36 @@ pub enum Tip {
 impl Tip {
     /// The words the tooltip shows.
     pub fn text(&self) -> &str {
-        todo!()
+        match self {
+            Self::Describes(text) | Self::Names(text) => text,
+        }
     }
 
     /// The tooltip's `role`: a description is a tooltip; a name has none,
     /// since a screen reader never meets it.
     pub fn role(&self) -> Option<&'static str> {
-        todo!()
+        matches!(self, Self::Describes(_)).then_some("tooltip")
     }
 
     /// The tooltip's `aria-hidden`: hidden when it shows the control's name,
     /// which the control itself carries.
     pub fn hidden(&self) -> Option<&'static str> {
-        todo!()
+        matches!(self, Self::Names(_)).then_some("true")
     }
 
     /// The control's `aria-describedby`: the tooltip's `id`, for a
     /// description.
     pub fn described_by<'a>(&self, id: &'a str) -> Option<&'a str> {
-        let _ = id;
-        todo!()
+        matches!(self, Self::Describes(_)).then_some(id)
     }
 
     /// The control's `aria-label`: the name the tooltip shows, for an
     /// icon-only control.
     pub fn label(&self) -> Option<&str> {
-        todo!()
+        match self {
+            Self::Names(name) => Some(name),
+            Self::Describes(_) => None,
+        }
     }
 }
 
@@ -81,14 +85,16 @@ pub const EDGE_EM: f64 = 0.5;
 /// touches what it presses, so a touch shows a tooltip only as the focus it
 /// gives does.
 pub fn hovers(pointer_type: &str) -> bool {
-    let _ = pointer_type;
-    todo!()
+    pointer_type != "touch"
 }
 
 /// The page's direction, from the computed `direction` of a control.
 pub fn direction_of(computed: &str) -> Direction {
-    let _ = computed;
-    todo!()
+    if computed == "rtl" {
+        Direction::Rtl
+    } else {
+        Direction::Ltr
+    }
 }
 
 /// What happens to a tooltip: its control gains or loses keyboard focus,
@@ -137,13 +143,69 @@ pub struct Shown {
 impl Shown {
     /// Whether the tooltip shows now.
     pub fn open(&self) -> bool {
-        todo!()
+        self.open
     }
 
     /// Takes in `event` and says what becomes of the tooltip's wait.
     pub fn on(&mut self, event: Event) -> Wait {
-        let _ = event;
-        todo!()
+        match event {
+            Event::Focus => {
+                self.focused = true;
+                self.dismissed = false;
+                self.open = true;
+                Wait::CallOff
+            }
+            Event::Blur => {
+                self.focused = false;
+                if self.hovered {
+                    // The pointer keeps it, or still waits to show it.
+                    return Wait::Keep;
+                }
+                self.open = false;
+                self.dismissed = false;
+                Wait::CallOff
+            }
+            Event::PointerIn => {
+                self.hovered = true;
+                if self.open || self.dismissed {
+                    // Back across the gap within the grace, or dismissed.
+                    Wait::CallOff
+                } else {
+                    Wait::Start(HOVER_DELAY_MS, Event::ShowDue)
+                }
+            }
+            Event::PointerOut => {
+                self.hovered = false;
+                if self.focused {
+                    Wait::CallOff
+                } else if self.open {
+                    Wait::Start(GRACE_MS, Event::HideDue)
+                } else {
+                    self.dismissed = false;
+                    Wait::CallOff
+                }
+            }
+            Event::Escape => {
+                if !(self.open || self.hovered) {
+                    return Wait::Keep;
+                }
+                self.open = false;
+                self.dismissed = self.focused || self.hovered;
+                Wait::CallOff
+            }
+            Event::ShowDue => {
+                if self.hovered && !self.dismissed {
+                    self.open = true;
+                }
+                Wait::Keep
+            }
+            Event::HideDue => {
+                if !self.hovered && !self.focused {
+                    self.open = false;
+                }
+                Wait::Keep
+            }
+        }
     }
 }
 
@@ -182,19 +244,95 @@ pub struct Spot {
 /// opposite one, then the two of the other axis (the end before the start,
 /// where reading goes on; above before below, the vocabulary's default).
 pub fn sides_to_try(wanted: Side) -> [Side; 4] {
-    let _ = wanted;
-    todo!()
+    let [first, second] = match wanted {
+        Side::Above | Side::Below => [Side::End, Side::Start],
+        Side::Start | Side::End => [Side::Above, Side::Below],
+    };
+    [wanted, wanted.opposite(), first, second]
 }
 
 /// Where a tooltip `width` by `height` stands beside `anchor`, its control:
 /// on the first side [`sides_to_try`] gives where it fits whole, inside the
-/// viewport with `room.edge` to spare; where none does, on the side with
-/// the most room. Along its side it is centered on the control and moved
+/// viewport with `room.edge` to spare; where none does, on the side it
+/// overflows least. Along its side it is centered on the control and moved
 /// inside the viewport; across, it is moved only away from the control, so
 /// it never covers it (2.4.11) and stays inside the viewport where it can.
 pub fn place(anchor: Rect, width: f64, height: f64, room: Room, wanted: Side) -> Spot {
-    let _ = (anchor, width, height, room, wanted);
-    todo!()
+    let sides = sides_to_try(wanted);
+    let spare_on = |side| spare(anchor, width, height, room, edge(side, room.direction));
+    let side = sides
+        .into_iter()
+        .find(|&side| spare_on(side) >= 0.0)
+        .unwrap_or_else(|| {
+            // The earlier side keeps a tie.
+            sides.into_iter().fold(wanted, |best, side| {
+                if spare_on(side) > spare_on(best) {
+                    side
+                } else {
+                    best
+                }
+            })
+        });
+    let (left, top) = match edge(side, room.direction) {
+        Edge::Top => (
+            along(anchor.left, anchor.width, width, room.width, room.edge),
+            (anchor.top - room.gap - height).min(room.height - room.edge - height),
+        ),
+        Edge::Bottom => (
+            along(anchor.left, anchor.width, width, room.width, room.edge),
+            (anchor.top + anchor.height + room.gap).max(room.edge),
+        ),
+        Edge::Left => (
+            (anchor.left - room.gap - width).min(room.width - room.edge - width),
+            along(anchor.top, anchor.height, height, room.height, room.edge),
+        ),
+        Edge::Right => (
+            (anchor.left + anchor.width + room.gap).max(room.edge),
+            along(anchor.top, anchor.height, height, room.height, room.edge),
+        ),
+    };
+    Spot { side, left, top }
+}
+
+/// A side of the viewport's box, where a logical [`Side`] lands.
+#[derive(Clone, Copy)]
+enum Edge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+fn edge(side: Side, direction: Direction) -> Edge {
+    match (side, direction) {
+        (Side::Above, _) => Edge::Top,
+        (Side::Below, _) => Edge::Bottom,
+        (Side::Start, Direction::Ltr) | (Side::End, Direction::Rtl) => Edge::Left,
+        (Side::Start, Direction::Rtl) | (Side::End, Direction::Ltr) => Edge::Right,
+    }
+}
+
+/// The room a tooltip would have to spare on `edge` of its control, past
+/// the gap and the viewport's edge: below zero where it doesn't fit.
+fn spare(anchor: Rect, width: f64, height: f64, room: Room, edge: Edge) -> f64 {
+    let kept = room.gap + room.edge;
+    match edge {
+        Edge::Top => anchor.top - kept - height,
+        Edge::Bottom => room.height - (anchor.top + anchor.height) - kept - height,
+        Edge::Left => anchor.left - kept - width,
+        Edge::Right => room.width - (anchor.left + anchor.width) - kept - width,
+    }
+}
+
+/// Where a tooltip `size` long starts along its control's side: centered on
+/// the control (from `start`, `length` long), then moved inside the
+/// viewport (`total` long, less `edge` at each end). One longer than the
+/// viewport starts at its first edge: the bounds are applied in turn, not
+/// with `clamp`, which panics when they cross.
+fn along(start: f64, length: f64, size: f64, total: f64, edge: f64) -> f64 {
+    (start + length / 2.0 - size / 2.0)
+        .min(total - edge - size)
+        .max(edge)
 }
 
 #[cfg(test)]

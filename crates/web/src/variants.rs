@@ -159,7 +159,12 @@ impl Side {
 
     /// The side across the control from this one.
     pub fn opposite(self) -> Self {
-        todo!()
+        match self {
+            Self::Above => Self::Below,
+            Self::Below => Self::Above,
+            Self::Start => Self::End,
+            Self::End => Self::Start,
+        }
     }
 }
 
