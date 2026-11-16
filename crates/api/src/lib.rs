@@ -246,8 +246,10 @@ pub enum ErrorCode {
     /// A request's body is larger than the most its route class takes
     /// (§10.1), so the route never ran. The argument `limit` is that most.
     BodyTooLarge,
-    /// Another maintenance operation already runs on the repository (I7):
-    /// nothing ran. The argument `operation` names the one that holds it.
+    /// A maintenance operation is running on this agent, so nothing was done:
+    /// one on the repository, for a maintenance run (I7), or possibly one on
+    /// another repository, for turning maintenance off (I1). The argument
+    /// `operation` names it.
     MaintenanceBusy,
     /// This agent doesn't maintain the repository: its entry doesn't ask for
     /// `local` (I1, §7.3), so nothing was asked of it. The argument `alias`

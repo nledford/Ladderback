@@ -7,11 +7,11 @@
 
 use std::sync::Arc;
 
-use domain::maintenance::Ownership;
-use domain::planning::Maintenance;
+use domain::maintenance::{Ownership, OwnershipChange};
+use domain::planning::{AgentConfig, Maintenance};
 use domain::{OperationId, RepositoryAlias};
 
-use crate::ports::{ConfigError, ConfigStore, OperationStore, StoreError};
+use crate::ports::{ConfigError, ConfigStore, OperationStore, Problem, StoreError};
 use crate::repositories::ConfigWrites;
 
 /// Changes whether this agent maintains a saved repository, writing only its
@@ -66,15 +66,50 @@ impl ChangeMaintainer {
         alias: &RepositoryAlias,
         maintain_here: bool,
     ) -> Result<Maintenance, MaintainerError> {
-        let _ = (
-            &self.config,
-            &self.operations,
-            &self.writes,
-            alias,
-            maintain_here,
-        );
-        let _ = Ownership::owned_here;
-        todo!()
+        let _writing = self.writes.lock().await;
+        let loaded = self.config.load().await.map_err(MaintainerError::Config)?;
+        let entry = loaded
+            .repository(alias)
+            .ok_or_else(|| MaintainerError::Unknown(alias.clone()))?;
+        let request = match Ownership::change(entry.maintenance, maintain_here) {
+            OwnershipChange::Unchanged => return Ok(entry.maintenance),
+            OwnershipChange::TakeOver => Maintenance::Local,
+            OwnershipChange::GiveUp => {
+                // An entry that records no ID can't tell its maintenance
+                // apart from another repository's: any running here keeps it.
+                let running = self
+                    .operations
+                    .running_maintenance(entry.id.as_ref())
+                    .await
+                    .map_err(MaintainerError::Log)?;
+                Ownership::give_up(running).map_err(|running| MaintainerError::Busy { running })?
+            }
+        };
+        let mut repositories = loaded.repositories().clone();
+        if let Some(entry) = repositories.get_mut(alias) {
+            entry.maintenance = request;
+        }
+        let changed = AgentConfig::new(
+            loaded.agent().clone(),
+            loaded.hooks().clone(),
+            repositories,
+            loaded.plans().to_vec(),
+        )
+        .and_then(|config| config.with_notifications(loaded.notifications().clone()))
+        .map_err(|violation| {
+            MaintainerError::Config(ConfigError::Invalid {
+                file: String::new(),
+                key: None,
+                at: None,
+                problem: Problem::Violation(violation),
+                detail: String::new(),
+            })
+        })?;
+        self.config
+            .save(&changed)
+            .await
+            .map_err(MaintainerError::Config)?;
+        Ok(request)
     }
 }
 
