@@ -119,12 +119,22 @@ fn entry<S: IndexedTree>(
     root: TreeId,
     names: &[String],
 ) -> Result<(Node, Vec<OsString>), JobError> {
+    find_entry(repository, root, names)?
+        .ok_or_else(|| JobError::failed(format!("the snapshot holds no entry {}", names.join("/"))))
+}
+
+/// [`entry`], or `None` when the snapshot holds no entry at `names`.
+pub(super) fn find_entry<S: IndexedTree>(
+    repository: &Repository<S>,
+    root: TreeId,
+    names: &[String],
+) -> Result<Option<(Node, Vec<OsString>)>, JobError> {
     let mut node = Node::new_node(OsStr::new(""), NodeType::Dir, Metadata::default());
     node.subtree = Some(root);
     let mut written = Vec::new();
     for name in names {
         let Some(subtree) = node.subtree.filter(|_| node.is_dir()) else {
-            return Err(entry_unknown(names));
+            return Ok(None);
         };
         let Some(found) = repository
             .get_tree(&subtree)?
@@ -132,16 +142,12 @@ fn entry<S: IndexedTree>(
             .into_iter()
             .find(|node| node.name == *name)
         else {
-            return Err(entry_unknown(names));
+            return Ok(None);
         };
         written.push(found.name().into_owned());
         node = found;
     }
-    Ok((node, written))
-}
-
-fn entry_unknown(names: &[String]) -> JobError {
-    JobError::failed(format!("the snapshot holds no entry {}", names.join("/")))
+    Ok(Some((node, written)))
 }
 
 /// The entry's original path: `/` joined with its names. rustic takes a

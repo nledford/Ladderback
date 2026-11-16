@@ -128,6 +128,10 @@ pub enum JobKind {
     /// What a [`Restore`](Self::Restore) would do, worked out and not done:
     /// rustic's dry run, which writes nothing. A read, never an operation.
     RestorePlan(RestoreJobSpec),
+    /// Hands one entry of a snapshot over for a download (§10.4): a file as
+    /// itself, a folder as one archive, in pieces on the event stream. A
+    /// read that writes nothing, with a backup's deadline.
+    Dump(DumpJobSpec),
 }
 
 /// A repository and what it takes to open it.
@@ -303,6 +307,30 @@ pub enum RestoreTargetSpec {
     InPlace,
 }
 
+/// One entry of a snapshot to hand over for a download (§10.4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DumpJobSpec {
+    pub repo: RepositorySpec,
+    pub snapshot: SnapshotId,
+    /// The names that lead from the snapshot's top to the entry, each as
+    /// rustic records it (its escaped form); none for the top, which hands
+    /// over the whole snapshot.
+    pub entry: Vec<String>,
+    /// The archive a folder is handed over as; a file goes as itself.
+    pub archive: ArchiveSpec,
+    /// Counted from the start of the index read; once it passes, the worker
+    /// stops (I3), however far the browser has read.
+    pub deadline_budget: SignedDuration,
+}
+
+/// The archive a folder is handed over as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveSpec {
+    Tar,
+    Zip,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FakeJobSpec {
     pub steps: u32,
@@ -384,6 +412,23 @@ pub enum WorkerEvent {
     Snapshots {
         snapshots: Vec<SnapshotResult>,
     },
+    /// What a dump found at its entry, before its first piece: a file of
+    /// this size, or a folder written as an archive. `name` is the entry's
+    /// name as a person reads it, none for the snapshot's top; `host` is the
+    /// host the snapshot records. Each is cut to
+    /// [`MAX_LISTED_TEXT_BYTES`].
+    Dumping {
+        found: DumpFound,
+        name: Option<String>,
+        host: String,
+    },
+    /// The next piece of a dump, at most
+    /// [`domain::restore::download::PIECE_BYTES`] before it is written as
+    /// base64: 64 KiB is 87 KiB of text, well under [`MAX_MESSAGE_BYTES`].
+    /// The entry's own bytes, never text to mask.
+    Piece {
+        bytes: String,
+    },
     Result(OpResult),
     Failed {
         code: ErrorCode,
@@ -447,6 +492,32 @@ pub enum OpResult {
     Restore(RestoreResult),
     /// What a [`JobKind::RestorePlan`] found.
     RestorePlan(RestorePlanResult),
+    /// How a [`JobKind::Dump`] ended.
+    Dump(DumpResult),
+}
+
+/// What a dump found at its entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "snake_case")]
+pub enum DumpFound {
+    /// A file, handed over as itself: this many bytes.
+    File { size: u64 },
+    /// A folder, or the snapshot's top, handed over as this archive.
+    Archive { archive: ArchiveSpec },
+}
+
+/// How a dump ended: every piece sent, or that the snapshot or the entry
+/// isn't there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "found", rename_all = "snake_case")]
+pub enum DumpResult {
+    /// Every piece was sent: this many bytes in all.
+    Done {
+        bytes: u64,
+    },
+    SnapshotUnknown,
+    /// No entry at that path, or one that is neither a file nor a folder.
+    EntryUnknown,
 }
 
 /// What a browse found: one page of the folder, or that the snapshot or the

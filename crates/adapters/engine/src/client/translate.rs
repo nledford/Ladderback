@@ -3,17 +3,19 @@
 
 use api::{ErrorCode, WarningCode};
 use app::ports::{
-    BackupSummary, CheckSummary, EngineEvent, EngineResult, FolderAnswer, ForgetSummary,
-    ProbeAnswer, ProgressEvent, ProgressKind as AppProgressKind, PrunePlanSummary, PruneSummary,
-    RestorePlanSummary, RestoreSummary, RewriteSummary,
+    BackupSummary, CheckSummary, DumpAnswer, DumpHeader, EngineEvent, EngineResult, FolderAnswer,
+    ForgetSummary, ProbeAnswer, ProgressEvent, ProgressKind as AppProgressKind, PrunePlanSummary,
+    PruneSummary, RestorePlanSummary, RestoreSummary, RewriteSummary,
 };
-use domain::browse::{Entry, EntryName, FolderPage, PAGE_ENTRIES};
+use domain::browse::{DisplayName, Entry, EntryName, FolderPage, PAGE_ENTRIES};
 use domain::execution::{FailureReason, RepositoryHalf, Warning, WarningKind};
 use domain::maintenance::RepositoryStats;
+use domain::restore::download::{ArchiveFormat, DownloadShape};
 use domain::secrets::Redactor;
 
 use crate::job::{
-    FolderResult, Level, OpResult, ProbeResult, ProgressKind, TRUNCATED, WorkerEvent,
+    ArchiveSpec, DumpFound, DumpResult, FolderResult, Level, OpResult, ProbeResult, ProgressKind,
+    TRUNCATED, WorkerEvent,
 };
 use crate::step::step_of;
 
@@ -202,11 +204,29 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 files_kept: r.files_kept,
                 bytes_to_write: r.bytes_to_write,
             }),
+            OpResult::Dump(r) => EngineResult::Dump(match r {
+                DumpResult::Done { bytes } => DumpAnswer::Done { bytes },
+                DumpResult::SnapshotUnknown => DumpAnswer::SnapshotUnknown,
+                DumpResult::EntryUnknown => DumpAnswer::EntryUnknown,
+            }),
             // The listing's end, which `Listing` turns into the list before
             // an event reaches here.
             OpResult::Snapshots { .. } => return None,
         }),
         WorkerEvent::Snapshots { .. } => return None,
+        WorkerEvent::Dumping { found, name, host } => EngineEvent::Dumping(DumpHeader {
+            shape: match found {
+                DumpFound::File { size } => DownloadShape::File { size },
+                DumpFound::Archive { archive } => DownloadShape::Archive(match archive {
+                    ArchiveSpec::Tar => ArchiveFormat::Tar,
+                    ArchiveSpec::Zip => ArchiveFormat::Zip,
+                }),
+            },
+            name: name.map(|name| DisplayName::new(&name)),
+            host,
+        }),
+        // `Reading` decodes a piece's bytes before an event reaches here.
+        WorkerEvent::Piece { .. } => return None,
         WorkerEvent::Failed { code, args, detail } => {
             let detail = redactor.redact_clipped(&detail.unwrap_or_default(), TRUNCATED);
             EngineEvent::Failed(match code {

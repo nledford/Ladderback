@@ -194,6 +194,9 @@ signal-hook = "0.4.6"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
 # Compares a session's tokens in constant time (security §10.1, decision 70).
 subtle = "2.6.1"
+# The engine writes a downloaded folder as a tar archive (§10.4), as it is
+# read, never whole in memory; without `xattr`, which only reading needs.
+tar = { version = "0.4.46", default-features = false }
 tempfile = "3.27.0"
 tokio = "1.54.1"
 # The e2e scenarios speak the events WebSocket with this client; no TLS: the
@@ -224,6 +227,9 @@ web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "
 # `rustls` and `keyring`. `derive` writes the wipe and the drop that runs it,
 # so the drop does what the tests run.
 zeroize = { version = "1.9.1", features = ["derive"] }
+# The engine writes a downloaded folder as a zip archive (§10.4), streamed and
+# stored, not deflated: no compression crate (decision NN).
+zip = { version = "9.6.0", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
