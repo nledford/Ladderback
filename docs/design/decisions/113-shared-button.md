@@ -16,3 +16,13 @@
 
 - **From Flowbite, the reference:** gradients, colored shadows, pills, social and brand buttons, its "Dark" color, and links drawn as buttons (the Link component's, #781).
 - **A button group** (#783), which a later change builds around `Button`.
+
+## Amended: the text field (2026-11-16, #782)
+
+**A text field is the shared `TextField` component, drawn from the tokens in the same way: a native `<input>`, or `<textarea>` for many lines, in a 1 px edge of its own token (`--field-edge`, checked at 3:1 on the page and a surface), with the button's small corner and the button's heights per size, so a field and a button line up in a row of actions. It replaces `FormField`, and every page's field moves onto it in the same change. DESIGN.md's rule that inputs keep the browser's look gives way to it** (decided by the maintainer on #782, part of #776).
+
+- **The same reasons.** The browser's own field differs by engine and scheme, and its edge isn't a token the contrast gate can check (1.4.11). Underneath it stays the native element, so typing, selection, autofill, the caret and the reader's assistive technology are the browser's.
+- **Unavailable is `disabled`, unlike a button.** A disabled field leaves the Tab order as HTML makes it, and a disabled password has no Show password button, which would stay in it; a field whose value must still be reached is read only (`readonly`, a dashed edge), which stays focusable. Each says its state in words.
+- **Required in words, and once.** "(required)" after the label, hidden from a screen reader, which hears `aria-required` instead, so the field's name stays its label. Never the `required` attribute: the forms check their own fields.
+- **A number isn't filtered.** `inputmode="numeric"` text, never `type="number"`; what isn't a number is refused when the form is checked, with its error above the field, rather than keys that do nothing.
+- **Left out from Flowbite:** shadows, a success state, floating labels, helper text in color alone and placeholders. Search is #843's.
