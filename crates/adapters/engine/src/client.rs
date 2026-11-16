@@ -25,7 +25,7 @@ mod spawn;
 mod stderr;
 mod stop;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 mod translate;
 
 /// How long the events of a job whose worker has exited may go on arriving.

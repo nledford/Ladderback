@@ -134,4 +134,109 @@ mod tests {
         record_of(&logger, Level::Info, "rustic_core", "hello");
         assert_eq!(gave_up.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
+
+    /// The message the bridge sends for one warning of `target`.
+    fn bridged(target: &str, message: &str) -> String {
+        let (events, capture) = capture();
+        let logger = EventLogger::new(events);
+        record_of(&logger, Level::Warn, target, message);
+        match capture.parsed().as_slice() {
+            [WorkerEvent::Log { message, .. }] => message.clone(),
+            other => panic!("not one log event: {other:?}"),
+        }
+    }
+
+    /// rustic's local backend warns, quoting the whole command line, when a
+    /// `post-create-command` or `post-delete-command` can't start, can't be
+    /// split into words, or exits with an error. The bridge passes the
+    /// warning on with the option's name and the reason, without the line,
+    /// which can carry a credential the redactor doesn't know (I4, #882).
+    /// A line that holds rustic's own markers keeps its text out too. The
+    /// warnings are rustic's own at the pinned revision, so a version that
+    /// changes them fails here: one that stops quoting the line fails the
+    /// first assertion, and the rewrite can go.
+    #[test]
+    fn rustic_s_post_command_warnings_lose_the_command_line_and_keep_the_reason() {
+        use rustic_backend::LocalBackend;
+        use rustic_core::{FileType, Id, WriteBackend};
+
+        crate::client::test_support::capture_the_worker_log();
+        let scratch = tempfile::tempdir().unwrap();
+        let missing = scratch.path().join("no-such-hook");
+        for (option, line, canary, reason) in [
+            (
+                "post-create-command",
+                format!("{} --token=CANARY-start", missing.display()),
+                "CANARY-start",
+                "os error",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh -c 'exit 3' hook --token=CANARY-status".to_owned(),
+                "CANARY-status",
+                "exit status: 3",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh --token=CANARY-split 'unclosed".to_owned(),
+                "CANARY-split",
+                "missing closing quote",
+            ),
+            (
+                "post-delete-command",
+                "/bin/sh -c 'exit 4' hook --token=CANARY-delete".to_owned(),
+                "CANARY-delete",
+                "exit status: 4",
+            ),
+            (
+                "post-create-command",
+                format!("{} ': caused by: CANARY-marked-start'", missing.display()),
+                "CANARY-marked-start",
+                "os error",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh -c 'exit 5' hook '` failed with status `CANARY-marked-status'".to_owned(),
+                "CANARY-marked-status",
+                "exit status: 5",
+            ),
+            (
+                "post-create-command",
+                "/bin/sh ' : (source: CANARY-marked-split)' 'unclosed".to_owned(),
+                "CANARY-marked-split",
+                "missing closing quote",
+            ),
+        ] {
+            let folder = scratch.path().join(canary);
+            let backend = LocalBackend::new(
+                folder.to_str().unwrap(),
+                [(option.to_owned(), line.clone())],
+            )
+            .unwrap();
+            let id = Id::random();
+            backend
+                .write_bytes(FileType::Snapshot, &id, false, b"demo".to_vec().into())
+                .unwrap();
+            backend.remove(FileType::Snapshot, &id, false).unwrap();
+            let Some(warning) = crate::client::test_support::local_backend_warning(canary) else {
+                panic!("rustic no longer quotes {line:?} in a warning");
+            };
+            let message = bridged("rustic_backend::local", &warning);
+            assert!(!message.contains(canary), "the line stays: {message}");
+            assert!(message.contains(option), "{message}");
+            assert!(message.contains(reason), "the reason is lost: {message}");
+        }
+    }
+
+    /// A warning of a post command in a shape the bridge doesn't know may
+    /// quote the line anywhere: only the option's name goes on.
+    #[test]
+    fn a_post_command_warning_of_an_unknown_shape_loses_its_text() {
+        let message = bridged(
+            "rustic_backend::local",
+            "post-delete: Error: something new about `notify --token=CANARY-new`",
+        );
+        assert!(!message.contains("CANARY-new"), "{message}");
+        assert!(message.contains("post-delete-command"), "{message}");
+    }
 }

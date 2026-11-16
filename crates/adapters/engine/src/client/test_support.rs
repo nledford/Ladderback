@@ -113,17 +113,29 @@ fn is_zombie(_pid: i32) -> bool {
 /// What the capturing logger was given for `ladderback::worker`.
 static WORKER_LOG: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
 
+/// What the capturing logger was given for rustic's local backend, which
+/// warns when a `post-create-command` or `post-delete-command` fails.
+static LOCAL_BACKEND_LOG: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
+
+const LOCAL_BACKEND: &str = "rustic_backend::local";
+
+/// The one logger of the crate's tests: a process has one, and the tests
+/// of every module share a process under `cargo test`.
 struct CapturingLogger;
 
 impl log::Log for CapturingLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.target() == "ladderback::worker"
+        matches!(metadata.target(), "ladderback::worker" | LOCAL_BACKEND)
     }
 
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
-            WORKER_LOG
-                .lock()
+            let log = if record.target() == LOCAL_BACKEND {
+                &LOCAL_BACKEND_LOG
+            } else {
+                &WORKER_LOG
+            };
+            log.lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push((record.level(), record.args().to_string()));
         }
@@ -132,12 +144,23 @@ impl log::Log for CapturingLogger {
     fn flush(&self) {}
 }
 
-pub(super) fn capture_the_worker_log() {
+pub(crate) fn capture_the_worker_log() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let _ = log::set_logger(&CapturingLogger);
         log::set_max_level(log::LevelFilter::Debug);
     });
+}
+
+/// The warning of rustic's local backend that holds `text`, once
+/// [`capture_the_worker_log`] has been called.
+pub(crate) fn local_backend_warning(text: &str) -> Option<String> {
+    LOCAL_BACKEND_LOG
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(level, logged)| *level == log::Level::Warn && logged.contains(text))
+        .map(|(_, logged)| logged.clone())
 }
 
 /// The first record of `level` that `wanted` accepts, looked for five

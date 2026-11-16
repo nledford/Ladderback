@@ -73,6 +73,28 @@ Feature: A worker and its backend never show a secret
       And the failure shows "missing closing quote"
       And nothing the engine reported or logged shows "CANARY-typed-token"
 
+  Rule: What is typed into a post-create command is never quoted
+    rustic runs a local repository's `post-create-command` after it writes
+    a file, and its `post-delete-command` after it deletes one. When one
+    fails, rustic warns with the whole command line, which can carry a
+    credential the redactor doesn't know, such as a token typed into it. The
+    warning names the option and says why, without the line, and the
+    operation goes on.
+
+    Scenario Outline: A post-create command that <fails> is not quoted in the log
+      Given a folder for a new repository
+      And the repository's option "post-create-command" is "<command>"
+      When the repository is initialized
+      Then the operation ends as succeeded
+      And the engine logged a warning saying "post-create-command" and "<reason>"
+      And nothing the engine reported or logged shows "CANARY-hook-token"
+
+      Examples:
+        | fails         | command                                            | reason                |
+        | can't start   | {scratch}/no-such-hook --token=CANARY-hook-token   | os error              |
+        | exits with 3  | /bin/sh -c 'exit 3' hook --token=CANARY-hook-token | exit status: 3        |
+        | can't be read | /bin/sh --token=CANARY-hook-token 'unclosed        | missing closing quote |
+
   Rule: A worker starts from a scrubbed environment
 
     Scenario: A worker isn't given the variable a secret came from
