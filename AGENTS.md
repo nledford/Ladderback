@@ -138,7 +138,9 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 
 If you think a check is wrong, name it, say why, and stop for the maintainer.
 
-**Prove "done" with the recipe's output.** Before saying a change is done, fixed or green, run the recipe that proves it (`just verify`, or the narrower recipe for what changed) and quote its result. For CI, quote the run on the pull request's current head commit. A subagent's report, a handoff file or an earlier summary is a claim, not evidence: run the recipe again. A test in the skip list at the end of `just test` didn't pass; say it was skipped and why.
+**Prove "done" with the recipe's output.** Before saying a change is done, fixed or green, run the recipe that proves it and quote its result. A subagent's report, a handoff file or an earlier summary is a claim, not evidence: run the recipe again. A test in the skip list at the end of `just test` didn't pass; say it was skipped and why.
+
+**Local checks, then CI.** Before pushing, run what is quick and what CI can't show: `just fmt`, `just lint`, `just architecture`, the tests and scenarios the change touches (`cargo nextest run --workspace <filter>`, `--name` for scenarios, `just test-ui --name` for UI work) and `just red-first`. Leave the full runs to CI, which repeats them on clean runners: `just test`, `just test-release`, `just mutants` and the whole `@ui` suite. On a machine several agents share, a full local run costs everyone minutes and its load makes timed steps fail. A pull request is done when its required checks pass on its current head commit: quote that run. Run a full suite locally only to reproduce a CI failure, or when the change needs evidence CI can't give (Linux behaviour on a Mac: a container run).
 
 ## Independent adversarial review
 
