@@ -31,6 +31,8 @@ pub struct SecretsWorld {
     told: Arc<Mutex<Vec<SecretWarning>>>,
     /// When the daemon started, by the world's clock.
     started: Option<Timestamp>,
+    /// When the daemon started, by the world's clock's monotonic time.
+    up_from: Option<SignedDuration>,
     /// Each keyring entry the daemon was told to log that a run waits for.
     waited: Arc<Mutex<Vec<SourceName>>>,
     /// When the wait of a run whose daemon stopped meanwhile ended.
@@ -52,6 +54,7 @@ impl Default for SecretsWorld {
             outcome: None,
             told: Arc::default(),
             started: None,
+            up_from: None,
             waited: Arc::default(),
             stopped_at: None,
         }
@@ -838,9 +841,16 @@ impl SecretsWorld {
         }
     }
 
-    fn waits(&self, clock: Arc<dyn Clock>) -> ResolveRepository {
+    /// The daemon's start in the world's monotonic time.
+    fn up_from(&self) -> SignedDuration {
+        self.up_from.expect("the daemon started")
+    }
+
+    /// A resolution that waits for the keyring by `clock`, on which the
+    /// daemon started at the monotonic time `up_from`.
+    fn waits(&self, clock: Arc<dyn Clock>, up_from: SignedDuration) -> ResolveRepository {
         ResolveRepository::new(self.store.clone())
-            .waiting_for_keyring(KeyringWait::new(clock, self.started()))
+            .waiting_for_keyring(KeyringWait::new(clock, up_from))
     }
 
     fn waited(&self) -> Vec<SourceName> {
@@ -865,6 +875,7 @@ fn demo_alias() -> RepositoryAlias {
 #[given("the daemon started a moment ago")]
 fn daemon_started(agent: &mut Agent) {
     agent.secrets.started = Some(agent.clock.now());
+    agent.secrets.up_from = Some(agent.clock.monotonic());
 }
 
 #[given(expr = "the session's keyring service starts {int} seconds after the daemon")]
@@ -888,7 +899,22 @@ async fn schedule_starts_after_start(agent: &mut Agent, seconds: i64) {
     };
     let outcome = agent
         .secrets
-        .waits(agent.clock.clone())
+        .waits(agent.clock.clone(), agent.secrets.up_from())
+        .resolve_saved_unattended(&demo_alias(), &agent.secrets.entry(), &waiting)
+        .await;
+    agent.secrets.outcome = Some(outcome);
+}
+
+#[when(
+    expr = "the schedule starts a backup {int} seconds after the daemon started, and the clock is set back an hour once the run waits"
+)]
+async fn schedule_starts_and_clock_set_back(agent: &mut Agent, seconds: i64) {
+    agent.clock.advance(SignedDuration::from_secs(seconds));
+    let clock = agent.clock.clone();
+    let waiting = move |_: &SourceName| clock.set_back(SignedDuration::from_hours(1));
+    let outcome = agent
+        .secrets
+        .waits(agent.clock.clone(), agent.secrets.up_from())
         .resolve_saved_unattended(&demo_alias(), &agent.secrets.entry(), &waiting)
         .await;
     agent.secrets.outcome = Some(outcome);
@@ -899,7 +925,7 @@ async fn person_tests_after_start(agent: &mut Agent, seconds: i64) {
     agent.clock.advance(SignedDuration::from_secs(seconds));
     let outcome = agent
         .secrets
-        .waits(agent.clock.clone())
+        .waits(agent.clock.clone(), agent.secrets.up_from())
         .resolve_saved(&demo_alias(), &agent.secrets.entry())
         .await;
     agent.secrets.outcome = Some(outcome);
@@ -920,7 +946,11 @@ async fn schedule_starts_and_daemon_stops(agent: &mut Agent, seconds: i64) {
             let _ = stop.send(());
         }
     };
-    let use_case = agent.secrets.waits(clock.clone());
+    // This clock's monotonic time starts at zero, `seconds` after the
+    // daemon started.
+    let use_case = agent
+        .secrets
+        .waits(clock.clone(), -SignedDuration::from_secs(seconds));
     let entry = agent.secrets.entry();
     let alias = demo_alias();
     let resolving = use_case.resolve_saved_unattended(&alias, &entry, &waiting);
@@ -949,6 +979,18 @@ fn resolved_after_start(agent: &mut Agent, seconds: i64) {
 fn fails_with_no_service(agent: &mut Agent, seconds: i64) {
     assert_eq!(agent.secrets.keyring_cause(), KeyringCause::NoService);
     assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
+}
+
+#[then(
+    expr = "the run fails once the daemon has been up {int} seconds, because there is no keyring service to ask"
+)]
+fn fails_with_no_service_after_uptime(agent: &mut Agent, seconds: i64) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::NoService);
+    let up_from = agent.secrets.up_from();
+    assert_eq!(
+        agent.clock.monotonic().saturating_sub(up_from),
+        SignedDuration::from_secs(seconds)
+    );
 }
 
 #[then(expr = "the run fails {int} seconds after the daemon started because the keyring refused")]

@@ -752,9 +752,9 @@ async fn state_over(
     log: &OperationLog,
     conditions: RunConditions,
 ) -> Result<(AppState, Background, engine::Workers), Refused> {
-    // When the daemon started, as far as a run that waits for the session's
-    // keyring service counts it (§5, decision 116).
-    let started = SystemClock.now();
+    // When the daemon started, in monotonic time, as far as a run that waits
+    // for the session's keyring service counts it (§5, decision 116).
+    let started = SystemClock.monotonic();
     let store: Arc<dyn OperationStore> = Arc::<SqliteStore>::clone(&log.store);
     let schedules: Arc<dyn ScheduleStore> = Arc::<SqliteStore>::clone(&log.store);
     // The bus and the notification rules come first, so that recovery can
@@ -3633,12 +3633,12 @@ fn log_secret_warning(warning: &SecretWarning) {
 
 /// The daemon's resolution of secrets, through `secrets`: each warning it
 /// gives is said in the log, and a run nobody waits on holds for the
-/// session's keyring service while the daemon, which started at `started`
-/// by `clock`, starts (§5, decision 116).
+/// session's keyring service while the daemon, which started at the
+/// monotonic time `started` by `clock`, starts (§5, decision 116).
 fn daemon_resolve(
     secrets: Arc<dyn app::ports::SecretResolver>,
     clock: Arc<dyn Clock>,
-    started: domain::Timestamp,
+    started: domain::SignedDuration,
 ) -> ResolveRepository {
     ResolveRepository::new(secrets)
         .telling(Arc::new(log_secret_warning))
@@ -12554,7 +12554,8 @@ mod repository_service_tests {
             Arc::new(BroadcastEventBus::new()),
         )
         .await;
-        runner.resolve = Arc::new(daemon_resolve(secrets, clock, started));
+        // The fake clock's monotonic time is zero at `started`.
+        runner.resolve = Arc::new(daemon_resolve(secrets, clock, domain::SignedDuration::ZERO));
         (runner, heard, scripted, plan)
     }
 

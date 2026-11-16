@@ -13,8 +13,7 @@ use domain::secrets::{
     KeyringCause, MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part,
     Problem, Redactor, Reference, RepositorySecrets, SecretError, SecretRef, SecretValue,
     SecretWarning, SourceName, Template, TemplateError, TooMuchToMask, has_reference,
-    is_command_option,
-    too_many_rclone_credentials,
+    is_command_option, too_many_rclone_credentials,
 };
 
 use crate::conditions::NETWORK_WAIT;
@@ -27,18 +26,20 @@ pub const KEYRING_WAIT: domain::SignedDuration = NETWORK_WAIT;
 /// How often a held run reads again the keyring entry it couldn't read.
 pub const KEYRING_POLL: domain::SignedDuration = domain::SignedDuration::from_secs(10);
 
-/// When the daemon started, read through its clock: a run nobody waits on
-/// holds for the session's keyring service only until the daemon has been
-/// up for [`KEYRING_WAIT`], the window in which the daemon can outrun the
-/// service at login (§5, decision 116).
+/// When the daemon started, in its clock's monotonic time: a run nobody
+/// waits on holds for the session's keyring service only until the daemon
+/// has been up for [`KEYRING_WAIT`], the window in which the daemon can
+/// outrun the service at login (§5, decision 116). Like the network wait,
+/// it counts monotonic time, so a clock set back can't stretch it.
 #[derive(Clone)]
 pub struct KeyringWait {
     clock: Arc<dyn Clock>,
-    started: domain::Timestamp,
+    started: domain::SignedDuration,
 }
 
 impl KeyringWait {
-    pub fn new(clock: Arc<dyn Clock>, started: domain::Timestamp) -> Self {
+    /// `started` is `clock.monotonic()` when the daemon started.
+    pub fn new(clock: Arc<dyn Clock>, started: domain::SignedDuration) -> Self {
         Self { clock, started }
     }
 }
@@ -469,8 +470,8 @@ impl KeyringWait {
     /// How much of [`KEYRING_WAIT`] since the daemon started is left now;
     /// `None` once it has passed.
     fn left(&self) -> Option<domain::SignedDuration> {
-        let end = self.started.saturating_add(KEYRING_WAIT).ok()?;
-        let left = end.duration_since(self.clock.now());
+        let up = self.clock.monotonic().saturating_sub(self.started);
+        let left = KEYRING_WAIT.saturating_sub(up);
         left.is_positive().then_some(left)
     }
 }

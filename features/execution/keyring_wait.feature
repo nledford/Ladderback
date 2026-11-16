@@ -64,6 +64,12 @@ Feature: A scheduled run waits for the session's keyring service while the daemo
     Then the run fails 120 seconds after the daemon started because there is no keyring service to ask
     And the keyring entry "ladderback/demo" was read 10 times
 
+  Scenario: A clock set back while a run waits doesn't make the wait longer
+    Given the machine has no keyring service
+    When the schedule starts a backup 35 seconds after the daemon started, and the clock is set back an hour once the run waits
+    Then the run fails once the daemon has been up 120 seconds, because there is no keyring service to ask
+    And the keyring entry "ladderback/demo" was read 10 times
+
   Scenario: A daemon stopped while a run waits for the keyring service ends the wait
     Given the machine has no keyring service
     When the schedule starts a backup 30 seconds after the daemon started and the daemon stops once the run waits
