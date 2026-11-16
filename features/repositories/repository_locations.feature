@@ -424,7 +424,29 @@ Feature: A repository reached at several locations
         | rest:http://lan.example.lan/r  | a credential option                      | plain-http            |
         | rest:https://lan.example.lan/r | the option http-insecure-tls set to true | unchecked-certificate |
         | opendal:s3                     | an http endpoint and a credential option | plain-endpoint        |
-        | opendal:ftp                    | a credential option                      | plain-ftp             |
+        | opendal:ftp                    | an ftp endpoint and a credential option  | plain-ftp             |
+
+    # rustic reads http-cacert for an rclone location only on its own link to
+    # rclone on this computer, never on rclone's link to the address, so the
+    # warning names the cause that points to rclone's own setting instead.
+    Scenario: An rclone location over plain HTTP is warned about as rclone's own address
+      Given the location "lan" is "rclone::webdav,url='http://dav.example.lan':backups" with a user and a password in its connection string
+      When the repositories are listed
+      Then the repository "nas" carries the warning "location-plain-http-credentials" for the location 1 with the cause "plain-rclone"
+      And the warning names neither the address nor a credential
+
+    # opendal's FTP service encrypts the connection unless its endpoint is
+    # written ftp://: an ftps:// endpoint and one with no scheme both use TLS.
+    Scenario Outline: An FTP location whose endpoint encrypts the connection isn't warned about
+      Given the location "lan" is "opendal:ftp" with a credential option
+      And the location "lan" sets "endpoint" to "<endpoint>" in its "options"
+      When the repositories are listed
+      Then the repository "nas" carries no warning about its locations
+
+      Examples:
+        | endpoint               |
+        | ftps://ftp.example.lan |
+        | ftp.example.lan:21     |
 
     # A rule says where the machine seems to be, not that the network is the
     # person's own: a travel router gives a wired link, and anyone can name a

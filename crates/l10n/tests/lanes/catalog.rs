@@ -232,10 +232,11 @@ fn a_duration_reads_in_the_parts_the_catalog_arranges() {
     }
 }
 
-const EXPOSING_CAUSES: [&str; 4] = [
+const EXPOSING_CAUSES: [&str; 5] = [
     "plain-http",
     "unchecked-certificate",
     "plain-endpoint",
+    "plain-rclone",
     "plain-ftp",
 ];
 
@@ -304,6 +305,34 @@ fn a_repository_of_one_location_is_told_about_itself_and_no_location() {
             "{}: {shown}",
             id.as_str()
         );
+    }
+}
+
+/// rustic reads `http-cacert` for an rclone location only on its own link
+/// to `rclone serve restic` on this computer, never on rclone's link to the
+/// address, so the warning points to rclone's own setting there (#472).
+#[test]
+fn an_rclone_location_is_pointed_to_rclone_s_own_certificate_setting() {
+    let localizer = english();
+    for locations in ["one", "several"] {
+        for rule in ["network", "none"] {
+            let shown = localizer.message(
+                msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
+                &[
+                    ("position", MsgArg::Text("2".to_owned())),
+                    ("cause", MsgArg::Text("plain-rclone".to_owned())),
+                    ("rule", MsgArg::Text(rule.to_owned())),
+                    ("locations", MsgArg::Text(locations.to_owned())),
+                ],
+            );
+            assert!(shown.problems().is_empty(), "{locations} {rule}: {shown}");
+            let text = shown.text();
+            assert!(
+                text.contains("override.ca_cert"),
+                "{locations} {rule}: {text}"
+            );
+            assert!(!text.contains("http-cacert"), "{locations} {rule}: {text}");
+        }
     }
 }
 

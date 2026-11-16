@@ -695,21 +695,24 @@ warning-location-skipped = { $outcome ->
 
 # A location of a repository sends its credentials where whoever answers at its address can read them, so an impostor on the network could take them.
 # $position (text): the location's place in the list, from 1.
-# $cause (text): why: plain-http, unchecked-certificate, plain-endpoint or plain-ftp.
+# $cause (text): why: plain-http, unchecked-certificate, plain-endpoint, plain-rclone (an rclone connection string's url) or plain-ftp.
 # $rule (text): network when the location has a rule about the network the machine is on, which a network made to look like the intended one passes too; none when it has no rule and is tried on every network.
 # $locations (text): one for a repository of one location, which the page lists without locations, so the text speaks of the repository and not of $position; several otherwise.
 # `http-cacert` is an option of the configuration, typed as it is: keep it a string literal.
+# `url` and `override.ca_cert` are settings of an rclone connection string, typed as they are: keep them string literals. rclone is a program's name: keep it as it is.
 warning-location-plain-http-credentials = { $locations ->
     [one] { $rule ->
         [network] { $cause ->
             [unchecked-certificate] This repository accepts any certificate, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate: HTTPS that checks the certificate stops an impostor before the credentials are sent.
             [plain-endpoint] This repository sends its credentials to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-rclone] This repository sends its credentials through rclone to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS in the connection string's { "url" }, which checks the server before the credentials are sent, with { "override.ca_cert" } beside it for a private certificate authority's certificate.
             [plain-ftp] This repository sends its credentials over FTP without encryption, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use a backend over HTTPS instead, which checks the server before the credentials are sent.
            *[other] This repository sends its credentials over plain HTTP, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
         }
        *[none] { $cause ->
             [unchecked-certificate] This repository accepts any certificate, so on any network the machine is on, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate.
             [plain-endpoint] This repository sends its credentials to an address without HTTPS, so on any network the machine is on, whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-rclone] This repository sends its credentials through rclone to an address without HTTPS, so on any network the machine is on, whoever answers there can read them. Use HTTPS in the connection string's { "url" }, with { "override.ca_cert" } beside it for a private certificate authority's certificate.
             [plain-ftp] This repository sends its credentials over FTP without encryption, so on any network the machine is on, whoever answers at its address can read them.
            *[other] This repository sends its credentials over plain HTTP, so on any network the machine is on, whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
         }
@@ -718,12 +721,14 @@ warning-location-plain-http-credentials = { $locations ->
         [network] { $cause ->
             [unchecked-certificate] Location { $position } accepts any certificate, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate: HTTPS that checks the certificate stops an impostor before the credentials are sent.
             [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-rclone] Location { $position } sends its credentials through rclone to an address without HTTPS, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers there can read them. Use HTTPS in the connection string's { "url" }, which checks the server before the credentials are sent, with { "override.ca_cert" } beside it for a private certificate authority's certificate.
             [plain-ftp] Location { $position } sends its credentials over FTP without encryption, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use a backend over HTTPS instead, which checks the server before the credentials are sent.
            *[other] Location { $position } sends its credentials over plain HTTP, and its rule can't tell the network it is meant for from one made to look like it, so on any network that passes the rule, whoever answers at its address can read them. Use HTTPS, which checks the server before the credentials are sent, with { "http-cacert" } for a private certificate authority's certificate.
         }
        *[none] { $cause ->
             [unchecked-certificate] Location { $position } accepts any certificate, so whoever answers at its address can read its credentials. Check the certificate instead, with { "http-cacert" } for a private certificate authority's certificate.
             [plain-endpoint] Location { $position } sends its credentials to an address without HTTPS, so whoever answers there can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
+            [plain-rclone] Location { $position } sends its credentials through rclone to an address without HTTPS, so whoever answers there can read them. Use HTTPS in the connection string's { "url" }, with { "override.ca_cert" } beside it for a private certificate authority's certificate.
             [plain-ftp] Location { $position } sends its credentials over FTP without encryption, so whoever answers at its address can read them.
            *[other] Location { $position } sends its credentials over plain HTTP, so whoever answers at its address can read them. Use HTTPS, with { "http-cacert" } for a private certificate authority's certificate.
         }

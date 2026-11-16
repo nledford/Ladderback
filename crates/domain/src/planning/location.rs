@@ -230,10 +230,15 @@ pub enum ExposedCredentials {
     /// An `https` REST location with `http-insecure-tls` true: any
     /// certificate is accepted, so an impostor reads the credentials.
     UncheckedCertificate,
-    /// An OpenDAL location whose `endpoint` or `url` is `http://`, or an
-    /// rclone connection string whose `url` is, that carries a credential.
+    /// An OpenDAL location whose `endpoint` or `url` is `http://`, that
+    /// carries a credential.
     PlainEndpoint,
-    /// `opendal:ftp` with a credential.
+    /// An rclone connection string whose `url` is `http://`, that carries a
+    /// credential. Its own cause, as its advice is rclone's: rustic reads
+    /// `http-cacert` only for its link to `rclone serve restic` on this
+    /// computer, never for rclone's link to the address (#472).
+    PlainRclone,
+    /// `opendal:ftp` with a credential, over an endpoint written `ftp://`.
     PlainFtp,
 }
 
@@ -244,6 +249,7 @@ impl ExposedCredentials {
             Self::PlainHttp => "plain-http",
             Self::UncheckedCertificate => "unchecked-certificate",
             Self::PlainEndpoint => "plain-endpoint",
+            Self::PlainRclone => "plain-rclone",
             Self::PlainFtp => "plain-ftp",
         }
     }
@@ -283,7 +289,14 @@ impl ExposedCredentials {
                 .split_once(':')
                 .map_or(service, |(scheme, _)| scheme);
             if scheme.eq_ignore_ascii_case("ftp") {
-                return credential().then_some(Self::PlainFtp);
+                // opendal's FTP service encrypts the connection unless its
+                // endpoint is written `ftp://`: `ftps://` and an endpoint
+                // with no scheme use TLS, and with no endpoint it opens
+                // nothing (`FtpBuilder::build` in `opendal-service-ftp`).
+                let plain = option_is(options, "endpoint", |value| {
+                    starts_with_ignore_case(value, "ftp://")
+                });
+                return (plain && credential()).then_some(Self::PlainFtp);
             }
             let plain = ["endpoint", "url"].into_iter().any(|name| {
                 option_is(options, name, |value| {
@@ -298,7 +311,7 @@ impl ExposedCredentials {
                 .to_ascii_lowercase()
                 .replace(['"', '\''], "")
                 .contains("url=http://");
-            return (plain && credential()).then_some(Self::PlainEndpoint);
+            return (plain && credential()).then_some(Self::PlainRclone);
         }
         None
     }
@@ -691,18 +704,64 @@ mod tests {
             ),
             None
         );
-        assert_eq!(
-            of("opendal:ftp", &[("password", "pw")]),
-            Some(ExposedCredentials::PlainFtp)
-        );
         assert_eq!(of("opendal:ftp", &[]), None);
+    }
+
+    /// opendal's FTP service encrypts the connection unless its endpoint is
+    /// written `ftp://`: an `ftps://` endpoint and one with no scheme use
+    /// TLS, and with no endpoint it opens nothing (`FtpBuilder::build` in
+    /// `opendal-service-ftp`) (#471).
+    #[test]
+    fn an_ftp_location_is_exposed_only_over_an_ftp_endpoint() {
+        let of = |endpoint: Option<&str>| {
+            let mut options = vec![("password", "pw")];
+            options.extend(endpoint.map(|endpoint| ("endpoint", endpoint)));
+            ExposedCredentials::of_location(&location("opendal:ftp", &options))
+        };
+        for endpoint in ["ftp://ftp.lan", "FTP://ftp.lan:2121", " ftp://ftp.lan/"] {
+            assert_eq!(
+                of(Some(endpoint)),
+                Some(ExposedCredentials::PlainFtp),
+                "{endpoint}"
+            );
+        }
+        for endpoint in [
+            None,
+            Some("ftps://ftp.lan"),
+            Some("FTPS://ftp.lan:990"),
+            Some("ftp.lan:21"),
+            Some("ftp.lan"),
+            // A reference leaves the scheme unknown: checked once resolved.
+            Some("${FTP_ENDPOINT}"),
+        ] {
+            assert_eq!(of(endpoint), None, "{endpoint:?}");
+        }
         assert_eq!(
-            of(
-                r#"rclone::webdav,url="http://dav.lan",user=me,pass=pw:r"#,
-                &[]
-            ),
-            Some(ExposedCredentials::PlainEndpoint)
+            ExposedCredentials::of_location(&location(
+                "opendal:ftp",
+                &[("endpoint", "ftp://ftp.lan")]
+            )),
+            None,
+            "no credential"
         );
+    }
+
+    /// rustic's rclone backend reads `http-cacert` only for its own link to
+    /// `rclone serve restic` on this computer, never for rclone's link to
+    /// the address, so an rclone location is its own cause (#472).
+    #[test]
+    fn an_rclone_location_over_plain_http_is_its_own_cause() {
+        let of = |address| ExposedCredentials::of_location(&location(address, &[]));
+        for address in [
+            r#"rclone::webdav,url="http://dav.lan",user=me,pass=pw:r"#,
+            "rclone::webdav,url='HTTP://dav.lan',user=me,pass=pw:r",
+        ] {
+            assert_eq!(
+                of(address),
+                Some(ExposedCredentials::PlainRclone),
+                "{address}"
+            );
+        }
     }
 
     #[test]
@@ -1153,6 +1212,7 @@ mod tests {
                 "unchecked-certificate",
             ),
             (ExposedCredentials::PlainEndpoint, "plain-endpoint"),
+            (ExposedCredentials::PlainRclone, "plain-rclone"),
             (ExposedCredentials::PlainFtp, "plain-ftp"),
         ] {
             assert_eq!(cause.code(), code);
