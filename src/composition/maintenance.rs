@@ -484,7 +484,7 @@ async fn told<T>(
 /// routes tell it, by the code of its cause, with what a command or the
 /// platform said masked of every secret of `repository`'s settings (I4): those
 /// are read from the configuration as it stands now.
-async fn refusal(
+pub(super) async fn refusal(
     config: &dyn ConfigStore,
     repository: &RepositoryAlias,
     error: MaintenanceError,

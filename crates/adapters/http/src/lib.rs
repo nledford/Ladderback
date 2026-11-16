@@ -21,6 +21,7 @@ mod repositories;
 mod request_checks;
 mod response_headers;
 mod restart;
+mod restores;
 mod sign_in;
 
 use std::borrow::Cow;
@@ -56,6 +57,7 @@ pub use request_checks::{
     validate_host_name,
 };
 pub use restart::{Restart, RestartAsker, Work, asked_by};
+pub use restores::{RestoreRefusal, RestoreStart, Restores};
 pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 
 use api::UiEvent;
@@ -83,6 +85,8 @@ pub struct AppState {
     pub plans: Arc<dyn Plans>,
     /// How a request previews a profile's import and exports a plan as one.
     pub profiles: Arc<dyn Profiles>,
+    /// How a request previews and starts a restore (§10.4).
+    pub restores: Arc<dyn Restores>,
     /// Whether sign-in is on, and the sessions it has started (§10.1).
     pub sign_in: SignIn,
     /// Who can reach the daemon at the address it listens on, which the
@@ -531,6 +535,15 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/repositories/{alias}/snapshots/{snapshot}/folder",
             axum::routing::get(read_folder),
+        )
+        // For a session only: no API token scope opens either (§10.5).
+        .route(
+            "/api/v1/repositories/{alias}/snapshots/{snapshot}/restore",
+            axum::routing::post(restores::start),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/snapshots/{snapshot}/restore/preview",
+            axum::routing::post(restores::preview),
         )
         .route(
             "/api/v1/repositories/{alias}/groups",
@@ -1459,6 +1472,7 @@ mod tests {
             repositories: Arc::new(Repos::default()),
             plans: Arc::new(crate::request_checks::tests::NoPlans),
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
+            restores: Arc::new(crate::request_checks::tests::NoRestores),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -1501,6 +1515,7 @@ mod tests {
             repositories: Arc::new(Repos::default()),
             plans: Arc::new(crate::request_checks::tests::NoPlans),
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
+            restores: Arc::new(crate::request_checks::tests::NoRestores),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -2878,6 +2893,7 @@ mod tests {
             repositories: repos.clone(),
             plans: Arc::new(crate::request_checks::tests::NoPlans),
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
+            restores: Arc::new(crate::request_checks::tests::NoRestores),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),

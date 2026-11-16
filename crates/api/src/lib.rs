@@ -2585,6 +2585,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_restore_request_travels_in_kebab_case_and_its_debug_hides_the_confirmation() {
+        let request: RestoreRequestDto = serde_json::from_str(
+            r#"{"path":"home/docs","destination":"in-place","confirmation":"canary-admin-password"}"#,
+        )
+        .unwrap();
+        assert_eq!(request.destination, RestoreDestinationDto::InPlace);
+        let shown = format!("{request:?}");
+        assert!(!shown.contains("canary-admin-password"), "{shown}");
+        assert!(shown.contains("home/docs"), "{shown}");
+        assert!(
+            serde_json::from_str::<RestoreRequestDto>(
+                r#"{"path":"","destination":"new-folder","confirmation":"x","extra":1}"#
+            )
+            .is_err()
+        );
+    }
+
     // The `plan-invalid` message and the Plans page select on these names,
     // so each is its own, as the catalog's arms spell it.
     #[test]
@@ -4710,6 +4728,68 @@ pub struct MaintenanceRequestDto {
     /// when what it would select is not what the preview showed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection: Option<String>,
+}
+
+/// Where a restore writes (§10.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestoreDestinationDto {
+    /// A folder made for this restore under the agent's restore folder.
+    NewFolder,
+    /// Over the original paths: adds and overwrites, never deletes.
+    InPlace,
+}
+
+/// `POST /api/v1/repositories/{alias}/snapshots/{snapshot}/restore/preview`:
+/// the entry whose restore in place a dry run is to tell.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RestorePreviewRequestDto {
+    /// The entry's path in the snapshot, its names joined by `/`; empty for
+    /// the snapshot's top.
+    pub path: String,
+}
+
+/// What restoring an entry in place would do, from a dry run that wrote
+/// nothing (§10.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RestorePreviewDto {
+    /// Files it would add, where nothing is.
+    pub added: u64,
+    /// Files it would overwrite, which differ from the snapshot's.
+    pub overwritten: u64,
+    /// Files already as the snapshot holds them.
+    pub unchanged: u64,
+    /// Entries the original holds and the snapshot doesn't: they stay. A
+    /// folder of them counts once.
+    pub kept: u64,
+    /// Bytes it would write.
+    pub bytes: u64,
+}
+
+/// `POST /api/v1/repositories/{alias}/snapshots/{snapshot}/restore`: the
+/// entry to restore, where to, and the step-up confirmation: the admin
+/// password with sign-in on, the snapshot's short ID otherwise. The
+/// confirmation is never logged or shown (I4): its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RestoreRequestDto {
+    /// The entry's path in the snapshot, as [`RestorePreviewRequestDto`]
+    /// gives it.
+    pub path: String,
+    pub destination: RestoreDestinationDto,
+    pub confirmation: String,
+}
+
+impl std::fmt::Debug for RestoreRequestDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RestoreRequestDto")
+            .field("path", &self.path)
+            .field("destination", &self.destination)
+            .field("confirmation", &"[hidden]")
+            .finish()
+    }
 }
 
 /// One recorded warning of an operation's detail: its typed code and the

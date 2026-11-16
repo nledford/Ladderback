@@ -44,6 +44,7 @@ pub(crate) fn test_state() -> AppState {
         repositories: Arc::new(NoRepositories),
         plans: Arc::new(NoPlans),
         profiles: Arc::new(NoProfiles),
+        restores: Arc::new(NoRestores),
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
@@ -143,6 +144,29 @@ impl crate::Profiles for NoProfiles {
 
     async fn export(&self, _plan: String) -> Result<api::ProfileExportDto, crate::ProfilesError> {
         Err(crate::ProfilesError::InvalidBody)
+    }
+}
+
+/// Takes no restore: the checks never reach a route.
+pub(crate) struct NoRestores;
+
+#[async_trait]
+impl crate::Restores for NoRestores {
+    async fn preview(
+        &self,
+        _alias: String,
+        _snapshot: domain::SnapshotId,
+        _entry: domain::browse::FolderPath,
+    ) -> Result<api::RestorePreviewDto, crate::RestoreRefusal> {
+        Err(crate::RestoreRefusal::SnapshotUnknown)
+    }
+
+    async fn start(
+        &self,
+        _alias: String,
+        _start: crate::RestoreStart,
+    ) -> Result<String, crate::RestoreRefusal> {
+        Err(crate::RestoreRefusal::SnapshotUnknown)
     }
 }
 

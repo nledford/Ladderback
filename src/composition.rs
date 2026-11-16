@@ -83,6 +83,7 @@ mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
 mod profiles;
+mod restores;
 mod runs;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
@@ -312,6 +313,9 @@ impl RunConditions {
 /// beside them the release check, when there is a feed to ask.
 pub(crate) struct Background {
     runner: Arc<PlanRunner>,
+    /// Where a restore makes its new folder when `[agent] restore-folder`
+    /// is unset (§10.4).
+    restore_folder: String,
     /// The queued operations recovery found, oldest first.
     queued: Vec<OperationRecord>,
     config: Arc<dyn ConfigStore>,
@@ -619,6 +623,13 @@ pub(crate) async fn daemon(
                 Arc::<SqliteStore>::clone(&daemon.log.store),
             ));
             restore_sessions(&access).await;
+            // With sign-in on, a restore's step-up asks for the admin
+            // password, in the sign-in waits (§10.4).
+            daemon.state.restores = Arc::new(restores::RestoreService::new(
+                &daemon.background.runner,
+                daemon.background.restore_folder.clone(),
+                Some(Arc::clone(&access)),
+            ));
             SignIn::On(access)
         }
     };
@@ -820,6 +831,18 @@ async fn state_over(
         // kept in the operation log's database (§16, decision 104).
         readings: Arc::<SqliteStore>::clone(&log.store),
     });
+    // `~/ladderback-restore`, or in the data folder on a machine with no
+    // home folder (§10.4).
+    let restore_folder = std::env::home_dir()
+        .unwrap_or_else(|| data_dir.to_path_buf())
+        .join("ladderback-restore")
+        .to_string_lossy()
+        .into_owned();
+    let restores: Arc<dyn http_adapter::Restores> = Arc::new(restores::RestoreService::new(
+        &runner,
+        restore_folder.clone(),
+        None,
+    ));
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
         Arc::new(SystemClock),
@@ -853,6 +876,7 @@ async fn state_over(
     let notice = Arc::new(UpdateNotice::new());
     let background = Background {
         runner,
+        restore_folder,
         queued: recovered.queued,
         config,
         schedules,
@@ -871,6 +895,7 @@ async fn state_over(
             repositories,
             plans,
             profiles,
+            restores,
             sign_in: SignIn::Off {
                 password: Arc::new(FileAdminPassword::in_data_dir(data_dir)),
                 sessions: Arc::<SqliteStore>::clone(&log.store),

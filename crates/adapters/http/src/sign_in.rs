@@ -562,7 +562,7 @@ fn set_refused(refusal: SetPasswordRefused) -> Response {
 }
 
 /// `429 sign-in-wait`, with the seconds left in its `Retry-After`.
-fn wait_refused(seconds: u64) -> Response {
+pub(crate) fn wait_refused(seconds: u64) -> Response {
     let mut response = refused_with(
         StatusCode::TOO_MANY_REQUESTS,
         ErrorCode::SignInWait,
