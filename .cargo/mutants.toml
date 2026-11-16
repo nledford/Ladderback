@@ -223,6 +223,17 @@ exclude_re = [
     # `FolderPath::top` is `Self::default()`, the path that names no folder:
     # the mutant that returns `Default::default()` is the same code.
     'crates/domain/src/browse\.rs.*: replace FolderPath::top -> Self with Default::default\(\)$',
+    # A proposal's diff walks the table of longest common runs. The walk
+    # takes this branch only where `old[i] != new[j]`, the same test the
+    # table was filled by, so there `common[i][j]` is
+    # `max(common[i + 1][j], common[i][j + 1])`; and `i`, `j` are inside
+    # `old` and `new`, so that cell was written. The mutant's `j * 1` asks
+    # whether `x = common[i + 1][j]` is at least `max(x, y)`, with
+    # `y = common[i][j + 1]`, which holds exactly when `x >= y`: the
+    # original's question, so the same branch every time. The other mutants
+    # of the walk are not excluded and are caught. Named by line, so a moved
+    # line brings the mutant back to judge.
+    'crates/app/src/proposals/diff\.rs:174:65: replace \+ with \* in middle$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
