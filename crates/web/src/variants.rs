@@ -6,8 +6,9 @@
 //!
 //! - a tone's class sets one custom property, `--tone`, which the component
 //!   draws with (`var(--tone)`);
-//! - a size's class carries no length: each component maps it to `em` values
-//!   of its own in `style.css`, so it grows with the reader's text;
+//! - a size's class sets one custom property, `--size`, its length on the
+//!   scale every component shares, in `em`, so it grows with the reader's
+//!   text;
 //! - a placement's class goes on the line around a component's part and
 //!   places the part in it, in logical terms, so it follows the page's
 //!   direction.
@@ -60,10 +61,12 @@ impl Tone {
     }
 }
 
-/// How large a component is drawn. Each component maps the four sizes to
-/// `em` values of its own, written beside its styles and in its §4.5 row,
-/// since a small spinner and a small button share no length. For the same
-/// reason there is no default size: a component picks its own.
+/// How large a component is drawn, on one scale every component shares:
+/// each size's class sets `--size` in `style.css` (Small 1em, Medium 1.5em,
+/// Large 2em, XLarge 3em), which the component draws its length with, so a
+/// spinner and an icon of one size line up. A component that needs other
+/// lengths may deviate, saying why in its §4.5 row. There is no default
+/// size: a component picks its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Size {
     Small,
@@ -77,7 +80,7 @@ impl Size {
     #[cfg(test)]
     pub const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::XLarge];
 
-    /// The class of `style.css` a component maps to its own length.
+    /// The class of `style.css` that sets `--size` to this size's length.
     pub fn class(self) -> &'static str {
         match self {
             Self::Small => "size-small",

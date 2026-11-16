@@ -301,9 +301,12 @@ main:focus {
  * Primary and Secondary here), so the words a tone always comes with tell
  * them apart.
  *
- * A size has no length here: each component maps `size-small`,
- * `size-medium`, `size-large` and `size-xlarge` to `em` values of its own,
- * beside its styles, so it grows with the reader's text.
+ * A size's class sets `--size`, its length on the one scale every
+ * component shares, in `em` so it grows with the reader's text: Small 1em,
+ * Medium 1.5em, Large 2em, XLarge 3em. A component draws its length with
+ * `var(--size)`, so a spinner and an icon of one size line up; one that
+ * needs other lengths sets them beside its styles, saying why in its §4.5
+ * row.
  *
  * A placement puts the component in its line in logical terms: Inline keeps
  * it in the line of text, as wide as what it holds; Start, Center and End
@@ -336,6 +339,22 @@ main:focus {
 
 .tone-inherit {
   --tone: currentColor;
+}
+
+.size-small {
+  --size: 1em;
+}
+
+.size-medium {
+  --size: 1.5em;
+}
+
+.size-large {
+  --size: 2em;
+}
+
+.size-xlarge {
+  --size: 3em;
 }
 
 @media (forced-colors: active) {
@@ -381,8 +400,8 @@ main:focus {
 
 /* The gallery's vocabulary demo (`gallery.rs`): each tone's name and its
    swatch drawn in the tone, a swatch at each size, and a part at each
-   placement inside a framed line, so where it sits shows. The swatch maps
-   the sizes to lengths of its own: 1em, 1.5em, 2em and 3em. */
+   placement inside a framed line, so where it sits shows. A swatch without
+   a size is 1em. */
 .vocabulary-demo {
   list-style: none;
   margin-block: 0 1rem;
@@ -410,23 +429,8 @@ main:focus {
 
 .vocabulary-swatch {
   flex: none;
-  inline-size: 1em;
-  block-size: 1em;
-}
-
-.vocabulary-swatch.size-medium {
-  inline-size: 1.5em;
-  block-size: 1.5em;
-}
-
-.vocabulary-swatch.size-large {
-  inline-size: 2em;
-  block-size: 2em;
-}
-
-.vocabulary-swatch.size-xlarge {
-  inline-size: 3em;
-  block-size: 3em;
+  inline-size: var(--size, 1em);
+  block-size: var(--size, 1em);
 }
 
 /*
@@ -520,27 +524,12 @@ main:focus {
   margin-inline-end: 0.5em;
 }
 
-/* Its size: the drawing's length in `em` (`--spinner-size`), so it grows
-   with the reader's text (1.4.4). */
-.spinner.size-small {
-  --spinner-size: 1em;
-}
-
-.spinner.size-medium {
-  --spinner-size: 1.5em;
-}
-
-.spinner.size-large {
-  --spinner-size: 2em;
-}
-
-.spinner.size-xlarge {
-  --spinner-size: 3em;
-}
-
+/* Its size: the drawing's length on the shared scale (`--size`, set by its
+   size's class on the spinner), so it grows with the reader's text
+   (1.4.4). */
 .spinner > .spinner-graphic {
-  inline-size: var(--spinner-size);
-  block-size: var(--spinner-size);
+  inline-size: var(--size);
+  block-size: var(--size);
 }
 
 /* On a line of its own, a long label wraps beside the drawing, not under
@@ -554,11 +543,11 @@ main:focus {
 
 :is(.placement-start, .placement-center, .placement-end) > .spinner > .spinner-graphic {
   flex: none;
-  margin-block-start: max(0px, (1lh - var(--spinner-size)) / 2);
+  margin-block-start: max(0px, (1lh - var(--size)) / 2);
 }
 
 :is(.placement-start, .placement-center, .placement-end) > .spinner > .spinner-label {
-  margin-block-start: max(0px, (var(--spinner-size) - 1lh) / 2);
+  margin-block-start: max(0px, (var(--size) - 1lh) / 2);
 }
 
 /* The arc turns once in 0.9 s, steadily. The reduced-motion rule above takes
