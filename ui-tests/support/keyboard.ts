@@ -289,7 +289,7 @@ function cssRgba({ r, g, b, a }: Color): string {
 }
 
 /** Blends CSS colors, nearest layer first, over an opaque white canvas. */
-function composite(layers: string[]): Rgb {
+export function composite(layers: string[]): Rgb {
   let out: Rgb = { r: 255, g: 255, b: 255 };
   for (const text of [...layers].reverse()) {
     const c = parseColor(text);
@@ -310,7 +310,7 @@ function luminance({ r, g, b }: Rgb): number {
   return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
 }
 
-function contrastRatio(a: Rgb, b: Rgb): number {
+export function contrastRatio(a: Rgb, b: Rgb): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
   return (hi + 0.05) / (lo + 0.05);
 }

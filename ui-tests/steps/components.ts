@@ -20,7 +20,7 @@ import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 /** The gallery section of a component, found by its heading, not by a test id. */
-function demoSection(page: Page, component: string): Locator {
+export function demoSection(page: Page, component: string): Locator {
   return page.locator("section", {
     has: page.getByRole("heading", { level: 2, name: component, exact: true }),
   });
@@ -396,7 +396,7 @@ function vocabularyItems(page: Page, component: string, list: string): Locator {
 }
 
 /** The `count` items a locator finds, each its own locator, found as `expect` finds them. */
-async function eachOf(items: Locator, count: number): Promise<Locator[]> {
+export async function eachOf(items: Locator, count: number): Promise<Locator[]> {
   await expect(items).toHaveCount(count);
   return items.all();
 }
@@ -2422,4 +2422,10 @@ const SNAPSHOTS: Record<string, string> = {
   - button "Open the demo step-up"
 - paragraph:
   - button "Open the demo short-ID step-up"`,
+  // The skeletons are hidden from a screen reader, so only the busy
+  // region's words and the control that brings its content are here.
+  Skeleton: `- heading "Skeleton" [level=2]
+- paragraph: Loading the demo plan…
+- paragraph:
+  - button "Show the demo plan"`,
 };

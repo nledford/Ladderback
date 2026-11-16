@@ -27,6 +27,7 @@ mod pause_updates;
 mod progress;
 mod radio_group;
 mod review_dialog;
+pub(crate) mod skeleton;
 pub(crate) mod spinner;
 pub(crate) mod status_badge;
 mod step_up_field;
