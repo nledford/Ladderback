@@ -211,7 +211,7 @@ Flat. No element has a shadow. Depth is said with a Ledger Gray surface, a 1 px 
 
 ## Shapes
 
-Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts and the pause banner. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes.
+Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, the pause banner and tooltips. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes.
 
 ## Components
 
@@ -219,11 +219,12 @@ Every component is plain and exact: a control is the browser's own element, size
 
 ### Shared Vocabulary
 
-Every shared component takes the same three choices, defined once in `crates/web/src/variants.rs`, each a class of `style.css`, as it is built or reworked; the gallery's "Shared vocabulary" demo shows them all. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
+Every shared component takes the same choices, defined once in `crates/web/src/variants.rs`, as it is built or reworked. A tone, a size and a placement are each a class of `style.css`, which the gallery's "Shared vocabulary" demo shows; a side is where the page places a part, which the "Tooltip" demo shows. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
 
 - **Tone:** Primary (Ladder Blue, the default, unless a component names its own, as the icon and the button do), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
 - **Size:** Small, Medium, Large and XLarge, one scale every component shares, in `em`, so a size grows with the reader's text: Small 1em, Medium 1.5em, Large 2em, XLarge 3em. A size's class sets `--size`, which the component draws its length with, so a spinner and an icon of one size line up. A component that needs other lengths may deviate, saying why with it. The vocabulary has no default size: each component picks its own.
 - **Placement:** Inline (the default: in the line of text, as wide as what it holds), then Start, Center and End, each on a line of its own at its start, middle or end, in the page's direction. The class goes on the line, an element of the component's own around its part, never on the part's own box, which it would stretch.
+- **Side:** for a part that floats beside a control (a tooltip, later a popover): Above (the default), Below, Start and End, the last two in the page's direction. Without room on its side the part flips to the opposite one, then to the other axis. Not a placement, which aligns a part in its own line.
 
 ### Buttons
 
@@ -282,6 +283,15 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 - **Size:** the shared sizes, Small (1em, as tall as the text, the default) up to XLarge (3em), centered on the text in a line of it.
 - **Tone:** any of the shared tones, Inherit (the text's color) by default, so it reads as part of its words and their contrast covers it. A tone never says a meaning alone: the glyph's shape or the words do too. Under forced colors it is the text's own color, as every tone is.
 - **Icon-only button:** named on the button, the icon inside it decoration. A toggle keeps its one name and says pressed in its glyph's shape (the gallery's bell, crossed out while off), since it has no words to turn bold.
+
+### Tooltips
+
+- **Use:** a short note beside one control, a sentence or two that adds to its name: what pressing it does, or an icon-only control's name. Never the only place a control's name lives, never something the reader needs to finish the task (a tooltip is found only by focusing or pointing at its control), and never a link or a button inside (that is a popover's).
+- **Look:** the page's colors swapped: the fill is Graphite Ink (`--fg`), the words Paper (`--bg`), in light and dark. The small corner (`--radius-small`), flat, no shadow, no arrow. Under forced colors it is the system's page colors, edged in a 1px line of its text color, so it stands apart from what it lies over.
+- **Size:** its words a step smaller than its control's (0.875em), so it grows with the reader's text; it wraps at about 20 of its em, or the window's width less a margin, no word cut. Its height has no limit, so its text stays short enough to fit a small window at 200 % text.
+- **Side:** the shared sides, Above (the default), Below, Start and End, which follow the page's direction. Without room on its side it flips to the opposite one, then to the other axis, and stays inside the window, never over its control.
+- **Showing:** keyboard focus shows it at once; a resting pointer after 300 ms, and it stays while the pointer is on the control or on it. Escape hides it, focus and pointer staying put. It fades in and out over 100 ms, at once under reduced motion. A mouse press's focus on a button doesn't show it (the resting pointer already did) and a finger shows nothing there: no tap opens one. A text field's note shows on a press, as any focus on a field is the keyboard's kind.
+- **No tone and no size:** it is a note, not a status, and its size follows its control's text.
 
 ### Dialogs
 

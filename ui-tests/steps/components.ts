@@ -1746,6 +1746,23 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - button "Send the demo form"
 - paragraph: The demo buttons haven't been pressed yet.`,
+  Tooltip: `- heading "Tooltip" [level=2]
+- paragraph:
+  - button "Prune the demo repository"
+- paragraph:
+  - button "Demo schedule"
+- paragraph:
+  - button "Demo note above"
+  - button "Demo note below"
+  - button "Demo note at the start"
+  - button "Demo note at the end"
+- paragraph:
+  - button "Demo note at the start, right to left"
+  - button "Demo note at the end, right to left"
+- paragraph:
+  - button "Demo long note"
+- paragraph:
+  - button "Demo note at the foot of the page"`,
   "Step-up field": `- heading "Step-up field" [level=2]
 - paragraph:
   - button "Open the demo step-up"

@@ -200,7 +200,7 @@ Add `wasm-bindgen-test` to the package's dev-dependencies (`wasm-bindgen-test.wo
 1. The component in a file of its own, `crates/web/src/components/<component>.rs`, re-exported from `components.rs`, with any decision it makes in a child module, `components/<component>/rules.rs`, tested on the host. It is built from native elements first (§4.5), takes its tone, size and placement from the shared vocabulary (`crates/web/src/variants.rs`), its sizes drawn at the shared scale's lengths (`--size`), and has its row in §4.5's table naming any tone it leaves out, its default tone where it isn't `Primary`, and any size it draws at other lengths, with the reason.
 2. Its entry in the gallery (`crates/web/src/gallery.rs`), with every state it can show.
 3. A row in both Scenario Outlines of `features/ui/components.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.ts`.
-4. Contract scenarios for its behaviour in the same file, with steps that find it by role and name and drive it by keyboard alone.
+4. Contract scenarios for its behaviour in the same file, with steps that find it by role and name and drive it by keyboard alone. The one exception is a pointer's own behaviour, such as a tooltip's hover (1.4.13): its steps move the pointer through `ui-tests/support/pointer.ts`, which the maintainer approved and which never presses.
 
 #### 13.7.6 A workspace crate
 

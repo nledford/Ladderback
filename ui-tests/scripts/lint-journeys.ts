@@ -1,5 +1,10 @@
 // Fails if a step file uses a pointer action. Journeys must work by
-// keyboard alone (A1), so they may only use support/keyboard.ts.
+// keyboard alone (A1), so they may only use support/keyboard.ts. The one
+// exception is support/pointer.ts, which the maintainer approved for the
+// tooltip's hover contract (WCAG 1.4.13 is pointer behaviour): it only moves
+// the pointer and never presses, and every control is still reached and
+// pressed by keyboard alone. Steps call its moves by name; a new pointer
+// action there needs the maintainer's word too, and never a press.
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";

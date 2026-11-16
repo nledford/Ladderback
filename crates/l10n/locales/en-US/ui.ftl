@@ -581,6 +581,47 @@ ui-gallery-button-presses =
        *[other] The demo buttons were pressed { $count } times.
     }
 
+# The heading of the gallery's tooltip demo (§4.5): a short note beside a
+# control, shown on keyboard focus or a resting pointer.
+ui-gallery-tooltip-heading = Tooltip
+
+# A demo button and the tooltip that describes it, which a screen reader
+# reads after the button's name. Pressing it changes nothing.
+ui-gallery-tooltip-prune = Prune the demo repository
+ui-gallery-tooltip-prune-note = Frees the space no snapshot uses any longer. A demo: pressing it changes nothing.
+
+# The name of a demo button that shows only an icon (a calendar with a
+# clock): its own label, which its tooltip shows too, from this one string.
+ui-gallery-tooltip-schedule = Demo schedule
+
+# Demo buttons whose tooltips ask to stand on one side of them: above,
+# below, at the start of their line and at its end, where the line's start
+# is the left in English and the right in a right-to-left language. Their
+# notes are short, so each has room on its side.
+ui-gallery-tooltip-above = Demo note above
+ui-gallery-tooltip-above-note = Above its button.
+ui-gallery-tooltip-below = Demo note below
+ui-gallery-tooltip-below-note = Below its button.
+ui-gallery-tooltip-start = Demo note at the start
+ui-gallery-tooltip-start-note = At its start.
+ui-gallery-tooltip-end = Demo note at the end
+ui-gallery-tooltip-end-note = At its end.
+
+# The same two buttons in a line set right to left, where the start is the
+# right.
+ui-gallery-tooltip-start-rtl = Demo note at the start, right to left
+ui-gallery-tooltip-end-rtl = Demo note at the end, right to left
+
+# A demo button whose tooltip is long, to show it wrapping onto lines of its
+# own, never cut.
+ui-gallery-tooltip-long = Demo long note
+ui-gallery-tooltip-long-note = A longer note, for a control that needs a little more said: it wraps onto lines of its own at about twenty of its letters' widths, or at the window's width on a small screen, and none of its words is ever cut.
+
+# The last button of the gallery, at the foot of the page, whose tooltip asks
+# to stand below it and has no room there.
+ui-gallery-tooltip-foot = Demo note at the foot of the page
+ui-gallery-tooltip-foot-note = Asked to stand below its button, with no room there, it stands above.
+
 # The heading of the gallery's demo of the step-up field (§4.5): the field a
 # restore is confirmed with, in a review dialog.
 ui-gallery-step-up-heading = Step-up field
