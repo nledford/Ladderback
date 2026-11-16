@@ -84,4 +84,26 @@ After an update, run `ladderback install-service` again: it replaces the service
 
 ## macOS: Full Disk Access
 
-On macOS, grant the installed `ladderback` Full Disk Access by hand, in System Settings → Privacy & Security, and again after each update: a build from source loses the grant when it is rebuilt ([technical design §12](../design/operations.md#12-packaging-and-deployment), [decision 71](../design/decisions/71-signing-macos-builds-without-a-developer-id.md)). A reinstall from source can also make macOS ask again for access to the keychain, to Photos and to Full Disk Access; [technical design §12](../design/operations.md#12-packaging-and-deployment) says why, and what a prompt you decline or leave unanswered costs.
+On macOS, grant the installed `ladderback` Full Disk Access by hand, in System Settings → Privacy & Security, and again after each update: a build from source signed ad hoc loses the grant when it is rebuilt ([technical design §12](../design/operations.md#12-packaging-and-deployment), [decision 71](../design/decisions/71-signing-macos-builds-without-a-developer-id.md)). [Signing your build](#signing-your-build) should keep it, which is still being confirmed. A reinstall from source can also make macOS ask again for access to the keychain, to Photos and to Full Disk Access; [technical design §12](../design/operations.md#12-packaging-and-deployment) says why, and what a prompt you decline or leave unanswered costs.
+
+### Signing your build
+
+A build from source carries the linker's ad-hoc signature, which changes with every build, so macOS sees each update as a new program: it drops the Full Disk Access grant and asks again for Photos and the keychain. Signed with a certificate from your own keychain under one fixed identifier, every build has the same signature to macOS, so its Full Disk Access and Photos grants should carry over to the next update. That they do on the current macOS, and whether the keychain's "Always Allow" does too, is still being checked ([#281](https://github.com/nledford/Ladderback/issues/281)). No Apple Developer account is needed.
+
+Make the certificate once:
+
+1. In Keychain Access, choose Keychain Access → Certificate Assistant → Create a Certificate. Give it a name, such as `Ladderback Code Signing`, set Identity Type to Self Signed Root and Certificate Type to Code Signing, and create it. It goes into your login keychain.
+2. Open the new certificate, expand Trust, and set Code Signing to Always Trust.
+3. Check that macOS lists it as valid: `security find-identity -v -p codesigning` names it.
+
+Then name it in `LADDERBACK_SIGN_IDENTITY` for every install, by `just install` or `just install-restart` in a checkout:
+
+```sh
+LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" just install-restart
+```
+
+The install script passes the variable on to the `just install` it runs, `curl -fsSL … | LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" bash`, but it builds the newest release, and releases up to 0.3.1 sign nothing: there the variable takes effect from the first release that has this.
+
+`just install` checks the name before it builds, and installs nothing when `security` lists no valid certificate of exactly that name, or lists more than one: then name one by the SHA-1 hash it shows, or, when it is one certificate kept in two keychains, delete a copy. After installing, it signs the binary with the certificate under the identifier `io.github.nledford.ladderback` and checks the signature. Only the name passes through; the key stays in your keychain.
+
+The first signing asks whether `codesign` may use the key: choose Always Allow, and later installs don't ask. Over SSH, or with the keychain locked, nobody can answer, so the signing fails. By then the new binary is installed, still with its ad-hoc signature (or, when the signature fails its check, with that signature); the command says which, and `just install-restart` doesn't restart the service, which keeps running the program it started with until it restarts. To sign the installed binary without building again, run `node scripts/install-signing.ts sign` in the checkout with the variable and the arguments you gave `just install`. The first signed build is still new to macOS, so grant it Full Disk Access once more.

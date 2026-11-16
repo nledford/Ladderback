@@ -81,6 +81,8 @@ bash install.sh
 
 To build from source on Linux too, pass `--from-source`: `curl -fsSL … | bash -s -- --from-source`, or `bash install.sh --from-source`. A build asks before it installs any tool. The [install guide](docs/guide/install.md) says what the script checks and installs, how to download a release or build one by hand, how to update, how to run Ladderback as a service and what macOS asks for.
 
+On macOS, a build from source is signed ad hoc, so after each update macOS asks again for Full Disk Access and Photos. A build from a checkout can instead be signed with a self-signed code-signing certificate from your own keychain, named in `LADDERBACK_SIGN_IDENTITY`, so that the grants should carry over; the install guide says [how to make one](docs/guide/install.md#signing-your-build), and [#281](https://github.com/nledford/Ladderback/issues/281) is still confirming that they do on the current macOS.
+
 ## Quick start
 
 ```sh
