@@ -1,8 +1,10 @@
-# Decision 108: One vocabulary of tones, sizes and placements
+# Decision 108: One vocabulary of tones, sizes, placements and sides
 
 **Every shared component takes its color, size and placement from one vocabulary, `crates/web/src/variants.rs`, as it is built or reworked: the tones Primary, Secondary, Success, Warning, Error and Inherit; the sizes Small, Medium, Large and XLarge; the placements Inline, Start, Center and End. Success, Warning and Error draw in three status hues of their own, beside the one accent for action, and never carry a meaning alone** (recorded 2026-11-15, §4.5; decided by the maintainer on #798, part of #776).
 
 **Amended 2026-11-16 (the maintainer, #778):** a component may choose its own default tone and says so in its §4.5 row: the icon draws in Inherit, the color of the text around it, unless its caller names a tone; Primary stays the default of the vocabulary and of the spinner. The sizes now have one shared scale, Small 1em, Medium 1.5em, Large 2em and XLarge 3em: each size's class sets `--size`, which a component draws its length with, so a spinner and an icon of one size line up. A component that needs other lengths may deviate, with its reason in its §4.5 row. Where "Why" and "Left out" below say each component maps the sizes to lengths of its own, this replaces it; there is still no default size in the vocabulary.
+
+**Amended 2026-11-16 (the maintainer, #785):** the vocabulary gains `Side`, where a part that floats beside a control stands (the tooltip first, later the popover, #784): Above (the default), Below, Start and End, the last two in the page's direction. A part with no room on its side flips to the opposite one, then to the other axis, and stays inside the viewport. It is not a Placement, which aligns a part in its own line, and it has no class: the page measures the control and places the part with one host-tested rule (`components/tooltip/rules.rs`). The tooltip takes a side and no tone or size: a note, not a status, its text following its control's.
 
 ## Why
 

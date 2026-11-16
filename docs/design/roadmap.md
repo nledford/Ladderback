@@ -175,7 +175,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [105](decisions/105-clippy-lints.md) | Clippy lints for complexity, nesting and indexing |
 | [106](decisions/106-the-crate-graph-checked.md) | Which workspace crates and foreign models each crate may depend on |
 | [107](decisions/107-the-update-notice.md) | The update notice |
-| [108](decisions/108-component-vocabulary.md) | One vocabulary of tones, sizes and placements |
+| [108](decisions/108-component-vocabulary.md) | One vocabulary of tones, sizes, placements and sides |
 | [109](decisions/109-restore.md) | How a restore is started from the web UI |
 | [110](decisions/110-repository-keyring.md) | Keeping a typed repository password in the system keyring |
 | [111](decisions/111-the-recent-log.md) | The recent log in the web UI |
