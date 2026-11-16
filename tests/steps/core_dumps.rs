@@ -1,6 +1,7 @@
 //! Steps for `features/secrets/core_dumps.feature`: the core-dump limit and
-//! the dumpable flag of the real daemon and of a real worker, read from
-//! `/proc` as another process of the same user sees them.
+//! the dumpable flag of the real daemon, of a real worker, of a real MCP
+//! server and of a real one-shot command, read from `/proc` as another
+//! process of the same user sees them.
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -11,7 +12,7 @@ use domain::{OperationId, Uuid};
 use engine::job::{FakeEndSpec, FakeJobSpec, JobKind, JobSpec, WorkerEvent};
 use testkit::children::Owned;
 
-use super::{Agent, LADDERBACK, blocking};
+use super::{Agent, LADDERBACK, blocking, mcp_call_steps, mcp_steps};
 
 /// The worker the scenario started, and the events it writes, kept open so
 /// that it isn't stopped by a broken pipe.
@@ -97,6 +98,16 @@ fn worker_core_limit(agent: &mut Agent) {
     core_limit_is_0(worker(agent));
 }
 
+#[then("the MCP server's core-dump limit is 0")]
+fn mcp_server_core_limit(agent: &mut Agent) {
+    core_limit_is_0(mcp_steps::pid(agent));
+}
+
+#[then("the one-shot command's core-dump limit is 0")]
+fn one_shot_core_limit(agent: &mut Agent) {
+    core_limit_is_0(mcp_call_steps::script_pid(agent));
+}
+
 #[then("other processes can't read the daemon's memory")]
 fn daemon_memory(agent: &mut Agent) {
     memory_unreadable(daemon(agent));
@@ -105,6 +116,16 @@ fn daemon_memory(agent: &mut Agent) {
 #[then("other processes can't read the worker's memory")]
 fn worker_memory(agent: &mut Agent) {
     memory_unreadable(worker(agent));
+}
+
+#[then("other processes can't read the MCP server's memory")]
+fn mcp_server_memory(agent: &mut Agent) {
+    memory_unreadable(mcp_steps::pid(agent));
+}
+
+#[then("other processes can't read the one-shot command's memory")]
+fn one_shot_memory(agent: &mut Agent) {
+    memory_unreadable(mcp_call_steps::script_pid(agent));
 }
 
 /// Both the soft and the hard limit are 0, so nothing the process starts can

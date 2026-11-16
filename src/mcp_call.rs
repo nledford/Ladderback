@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use api::MsgArg;
-use l10n::{Localizer, MessageId, PosixEnv, msg};
+use l10n::{Localizer, MessageId, msg};
 
-use crate::{McpMode, Session, logging, output, say, text};
+use crate::{McpMode, Session, output, say, text};
 
 /// The longest line of a script read, in bytes: the longest message the
 /// server reads from a client.
@@ -75,10 +75,11 @@ enum Calls {
     },
 }
 
-/// Runs `ladderback mcp call`.
+/// Runs `ladderback mcp call`. Its session resolves secrets or reads a
+/// token as the server's does, so it starts protected the same way, before
+/// it reads the script or its calls.
 pub(crate) fn call(args: CallArgs, plain: bool) -> ExitCode {
-    logging::install(plain);
-    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    let localizer = crate::start_protected(plain);
     crate::finish(&localizer, run(&localizer, args))
 }
 

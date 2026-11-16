@@ -289,6 +289,17 @@ async fn ask_within(agent: &mut Agent, method: &'static str, params: Value, limi
     agent.mcp.answer = Some(answer);
 }
 
+/// The process ID of the MCP server the scenario started.
+pub fn pid(agent: &Agent) -> u32 {
+    agent
+        .mcp
+        .session
+        .as_ref()
+        .expect("an MCP server was started")
+        .child
+        .id()
+}
+
 fn answer(agent: &Agent) -> &Value {
     agent.mcp.answer.as_ref().expect("a request was answered")
 }

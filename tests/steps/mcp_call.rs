@@ -253,6 +253,17 @@ async fn script_calls_with_the_run(agent: &mut Agent, tool: String) {
     script_calls(agent, call, OPERATION_WAIT + ANSWER).await;
 }
 
+/// The process ID of the one-shot command running the scenario's script.
+pub fn script_pid(agent: &Agent) -> u32 {
+    agent
+        .mcp_call
+        .script
+        .as_ref()
+        .expect("a script was started")
+        .child
+        .id()
+}
+
 #[when("the script ends")]
 async fn script_ends(agent: &mut Agent) {
     let script = agent.mcp_call.script.take().expect("a script was started");
