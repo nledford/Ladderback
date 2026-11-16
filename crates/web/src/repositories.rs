@@ -143,7 +143,7 @@ impl Form {
             alias: self.alias().to_owned(),
             settings: self.settings(),
             maintain_here: self.maintain_here,
-            keep_in_keyring: false,
+            keep_in_keyring: self.keeps_in_keyring(),
         }
     }
 
@@ -155,8 +155,15 @@ impl Form {
                 .filter(|name| !name.is_empty())
                 .map(str::to_owned),
             settings: self.settings(),
-            keep_in_keyring: false,
+            keep_in_keyring: self.keeps_in_keyring(),
         }
+    }
+
+    /// Whether the request asks to keep the typed password in the system
+    /// keyring: only for a repository saved under a name, whose entry the
+    /// name gives (§10.2).
+    fn keeps_in_keyring(&self) -> bool {
+        self.keep_in_keyring && !self.alias().is_empty()
     }
 }
 
@@ -204,8 +211,12 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
     match code {
         ErrorCode::RepositoryAliasTaken | ErrorCode::RepositoryAliasInvalid => Some(Field::Name),
         // The repository answered, and the password typed opened none of
-        // its keys (#481).
-        ErrorCode::PasswordNotAccepted => Some(Field::Password),
+        // its keys (#481); or the password typed couldn't be kept in the
+        // keyring the person chose (§10.2).
+        ErrorCode::PasswordNotAccepted
+        | ErrorCode::KeyringUnavailable
+        | ErrorCode::KeyringUnwritable
+        | ErrorCode::KeyringEntryTaken => Some(Field::Password),
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
         | ErrorCode::SecretKeyringUnavailable

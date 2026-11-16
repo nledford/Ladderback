@@ -20,8 +20,8 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, StatusBadge, SummaryItem,
-    address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
+    Checkbox, ErrorSummary, FormField, PauseUpdates, Progress, RadioGroup, StatusBadge,
+    SummaryItem, address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
 };
 use crate::live::{reply, say};
 use crate::operations::{self, Name, Said};
@@ -1148,8 +1148,9 @@ struct Inputs {
     hot_storage: RwSignal<String>,
     password: RwSignal<String>,
     maintain_here: RwSignal<bool>,
-    /// Whether the person chose the system keyring for the typed password.
-    keep_in_keyring: RwSignal<bool>,
+    /// The choice of the radio group "Where to keep the password": the
+    /// configuration file or the system keyring.
+    keep_password: RwSignal<&'static str>,
 }
 
 impl Inputs {
@@ -1160,7 +1161,7 @@ impl Inputs {
             hot_storage: RwSignal::new(String::new()),
             password: RwSignal::new(String::new()),
             maintain_here: RwSignal::new(false),
-            keep_in_keyring: RwSignal::new(false),
+            keep_password: RwSignal::new(KEEP_IN_CONFIGURATION),
         }
     }
 
@@ -1180,7 +1181,7 @@ impl Inputs {
             hot_storage: self.hot_storage.get_untracked(),
             password: self.password.get_untracked(),
             maintain_here: self.maintain_here.get_untracked(),
-            keep_in_keyring: self.keep_in_keyring.get_untracked(),
+            keep_in_keyring: self.keep_password.get_untracked() == KEEP_IN_KEYRING,
         }
     }
 
@@ -1189,8 +1190,14 @@ impl Inputs {
             self.of(field).set(String::new());
         }
         self.maintain_here.set(false);
+        self.keep_password.set(KEEP_IN_CONFIGURATION);
     }
 }
+
+/// The radio group "Where to keep the password", and the values of its choices.
+const KEEP_PASSWORD_GROUP: &str = "keep-password";
+const KEEP_IN_CONFIGURATION: &str = "configuration";
+const KEEP_IN_KEYRING: &str = "keyring";
 
 /// The form's fields in the order the page shows them.
 const FIELDS: [Field; 4] = [
@@ -1507,6 +1514,19 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                     error=problems.password
                     value=inputs.password
                     kind="password"
+                />
+                <RadioGroup
+                    name=KEEP_PASSWORD_GROUP
+                    legend=field_text(msg::UI_REPOSITORIES_KEEP_PASSWORD_LEGEND)
+                    description=field_text(msg::UI_REPOSITORIES_KEEP_PASSWORD_HINT)
+                    options=vec![
+                        (
+                            KEEP_IN_CONFIGURATION,
+                            field_text(msg::UI_REPOSITORIES_KEEP_PASSWORD_CONFIGURATION),
+                        ),
+                        (KEEP_IN_KEYRING, field_text(msg::UI_REPOSITORIES_KEEP_PASSWORD_KEYRING)),
+                    ]
+                    chosen=inputs.keep_password
                 />
                 <Checkbox
                     id="repository-maintain-here"
@@ -2029,10 +2049,10 @@ mod tests {
         );
         inputs.maintain_here.set(true);
         assert!(
-            !inputs.keep_in_keyring.get_untracked(),
+            inputs.keep_password.get_untracked() == KEEP_IN_CONFIGURATION,
             "the configuration file is chosen first"
         );
-        inputs.keep_in_keyring.set(true);
+        inputs.keep_password.set(KEEP_IN_KEYRING);
         // `Form` has no `Debug`, so that nothing can print a password: compare.
         assert!(
             inputs.read()
@@ -2065,9 +2085,10 @@ mod tests {
     #[test]
     fn clearing_the_form_chooses_the_configuration_file_again() {
         let inputs = Inputs::new();
-        inputs.keep_in_keyring.set(true);
+        inputs.keep_password.set(KEEP_IN_KEYRING);
         inputs.clear();
-        assert!(!inputs.keep_in_keyring.get_untracked());
+        assert!(inputs.keep_password.get_untracked() == KEEP_IN_CONFIGURATION);
+        assert!(!inputs.read().keep_in_keyring);
     }
 
     #[test]

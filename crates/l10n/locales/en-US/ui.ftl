@@ -1567,8 +1567,20 @@ ui-repositories-hot-hint = The fast half of a repository kept in two places. Lea
 # The label of the password field.
 ui-repositories-password-label = Password
 
-# The hint under the password field. It says where the typed password goes: the configuration file, and the history of it that { -brand-name } keeps.
-ui-repositories-password-hint = { -brand-name } keeps it in its configuration file, and in the copies it keeps of that file's earlier versions. It never shows it again.
+# The hint under the password field. It says where the typed password goes: where the choice under the field says, and, in the configuration file, also in the history of it that { -brand-name } keeps.
+ui-repositories-password-hint = { -brand-name } keeps it where you choose below. In the configuration file, it is also in the copies { -brand-name } keeps of that file's earlier versions. It never shows it again.
+
+# The legend of the choice, under the password field, of where the typed password is kept.
+ui-repositories-keep-password-legend = Where to keep the password
+
+# The hint under that legend. The entry's name is typed text: keep "ladderback/" as it is.
+ui-repositories-keep-password-hint = The keyring entry is named { "ladderback/" } followed by the repository's name. If this computer has no keyring, keep the password in the configuration file.
+
+# The choice that keeps the typed password in the configuration file, chosen first.
+ui-repositories-keep-password-configuration = In the configuration file
+
+# The choice that keeps the typed password in the system keyring: the macOS keychain, or the Secret Service on Linux.
+ui-repositories-keep-password-keyring = In the system keyring
 
 # The label of the checkbox that asks this agent to maintain a repository it connects: run its forget, prune and check. Off unless the person turns it on.
 ui-repositories-maintain-label = Maintain this repository from this agent
