@@ -2,6 +2,8 @@
 
 **A status badge draws its state's own Lucide icon before its label, its shapes from `lepticons-data` with the default features off and only the categories the icons are in. The icon is decoration: hidden from assistive technology, out of the tab order, in the text's color. It never moves, the running one either** (recorded 2026-11-15, §4.5, §8.1; decided by the maintainer on #384).
 
+**Amended 2026-11-16 (the maintainer, #778):** the badge draws its icon with the shared `Icon` component (§4.5): decoration, in the Inherit tone, at the Small size. The `<svg>` root around the glyph's shapes is now `Icon`'s, not the badge's own; what the badge shows and what a screen reader meets are unchanged, and what "The `<svg>` root" below says of the root, its `1em` fallback and the wasm tests holds for `Icon`.
+
 ## Why
 
 - **Never color alone (A2).** Components §4.5 asks a status badge for an icon with a shape of its own per state, besides its text and color, so a reader who can't tell the colors apart scans a table of badges without reading each label.

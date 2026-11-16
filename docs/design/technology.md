@@ -11,6 +11,8 @@ UI kit: plain Leptos with Tailwind (with the `trunk` Tailwind hook) for styling,
 
 Icons: Lucide's, from `lepticons-data`, which holds each icon's shapes without a renderer, with the default features off and only the categories the icons in use are in (§16, decision 103). Every icon of an enabled category is compiled in, used or not, so a new icon from another category turns that category on in the workspace `Cargo.toml` and is measured as below. *Size:* the status badges' seven icons (`notifications`, `time`, `cursors`, `shapes` and `math`, 267 icons) add 80,224 B (2.7%) to the release `web` wasm built with `--no-default-features`, 3,013,400 B before and 3,093,624 B after, and 17,110 B (2.4%) to its brotli, 711,271 B before and 728,381 B after. Measured on macOS arm64 at `7c4ac062` and after with `(cd crates/web && trunk build --release --no-default-features --dist <dir>)` and `brotli -q 11`.
 
+The shared `Icon` component (§4.5, #778), which the status badges now draw with, turns on no category. The release `web` wasm built with `--no-default-features` grows 2,266 B (0.06%), 3,527,913 B before and 3,530,179 B after, and its brotli shrinks 2,211 B (0.3%), 818,918 B before and 816,707 B after; the gallery that shows every icon size and tone isn't in that build. Measured as above, at `690f5f70` and after.
+
 ### 8.2 Backend crates
 
 | Concern | Crate |
