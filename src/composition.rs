@@ -624,16 +624,16 @@ pub(crate) async fn daemon(
                 Arc::<SqliteStore>::clone(&daemon.log.store),
             ));
             restore_sessions(&access).await;
-            // With sign-in on, a restore's step-up asks for the admin
-            // password, in the sign-in waits (§10.4).
-            daemon.state.restores = Arc::new(restores::RestoreService::new(
-                &daemon.background.runner,
-                daemon.background.restore_folder.clone(),
-                Some(Arc::clone(&access)),
-            ));
             SignIn::On(access)
         }
     };
+    // A restore's step-up follows the sign-in just decided, its one source:
+    // the admin password, in the sign-in waits, with sign-in on (§10.4).
+    daemon.state.restores = Arc::new(restores::RestoreService::new(
+        &daemon.background.runner,
+        daemon.background.restore_folder.clone(),
+        &daemon.state.sign_in,
+    ));
     daemon.state.exposure = exposure;
     daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
     Ok(daemon)
@@ -841,10 +841,14 @@ async fn state_over(
             .to_str()
             .and_then(|folder| RestoreFolder::parse(folder).ok())
     });
+    let sign_in = SignIn::Off {
+        password: Arc::new(FileAdminPassword::in_data_dir(data_dir)),
+        sessions: Arc::<SqliteStore>::clone(&log.store),
+    };
     let restores: Arc<dyn http_adapter::Restores> = Arc::new(restores::RestoreService::new(
         &runner,
         restore_folder.clone(),
-        None,
+        &sign_in,
     ));
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
@@ -899,10 +903,7 @@ async fn state_over(
             plans,
             profiles,
             restores,
-            sign_in: SignIn::Off {
-                password: Arc::new(FileAdminPassword::in_data_dir(data_dir)),
-                sessions: Arc::<SqliteStore>::clone(&log.store),
-            },
+            sign_in,
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
             restart: http_adapter::Restart::default(),

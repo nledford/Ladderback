@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use api::ErrorCode;
-use app::access::Access;
 use app::execution::RunOperation;
 use app::maintenance::MaintenanceError;
 use app::ports::ConfigStore;
@@ -15,7 +14,7 @@ use domain::browse::FolderPath;
 use domain::planning::RestoreFolder;
 use domain::restore::{RestoreOrigin, RestoreRefused};
 use domain::{OperationId, RepositoryAlias, SnapshotId};
-use http_adapter::{MaintenanceRefusal, RestoreRefusal, RestoreStart};
+use http_adapter::{MaintenanceRefusal, RestoreRefusal, RestoreStart, SignIn};
 use platform::SystemClock;
 use uuid::Uuid;
 
@@ -31,12 +30,13 @@ pub(super) struct RestoreService {
 
 impl RestoreService {
     /// Restores over `runner`'s parts into `[agent] restore-folder`, else
-    /// `default_folder`, confirmed by `access` with sign-in on and by the
-    /// snapshot's short ID without it. A restore runs no hooks.
+    /// `default_folder`, confirmed as `sign_in` says: by the admin password
+    /// with sign-in on, by the snapshot's short ID with it off. A restore
+    /// runs no hooks.
     pub(super) fn new(
         runner: &PlanRunner,
         default_folder: Option<RestoreFolder>,
-        access: Option<Arc<Access>>,
+        sign_in: &SignIn,
     ) -> Self {
         let clock = Arc::new(SystemClock);
         let restores = Restores::new(
@@ -51,9 +51,9 @@ impl RestoreService {
                 zone: domain::TimeZone::system(),
             },
         );
-        let restores = match access {
-            Some(access) => restores.with_access(access),
-            None => restores,
+        let restores = match sign_in {
+            SignIn::On(access) => restores.with_access(Arc::clone(access)),
+            SignIn::Off { .. } => restores,
         };
         Self {
             restores: Arc::new(restores),

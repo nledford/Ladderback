@@ -84,6 +84,16 @@ Feature: Restoring files from a snapshot
     When the person restores "home/docs" of the snapshot, confirming with " 3F2A1B4C "
     Then the restore ends as succeeded
 
+  @e2e
+  Scenario: With sign-in on, the snapshot's short ID doesn't confirm a restore
+    Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
+    And the admin has signed in over HTTP with "demo-admin-pass"
+    And a "POST" request for "/api/v1/repositories/demo/snapshots/3f2a1b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708/restore" with the session cookie and its CSRF token
+    And the request has the header "Content-Type: application/json"
+    And the request has the body "{\"path\":\"home/docs\",\"destination\":\"new-folder\",\"confirmation\":\"3f2a1b4c\"}"
+    When the request is sent
+    Then the route answers with status 403 and the error code "step-up-failed"
+
   Scenario: A restore in place asked for through the hub is refused
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
     Given sign-in is off
