@@ -104,6 +104,16 @@ pub fn ReviewDialog(
             return;
         };
         if wanted {
+            // The browser queues a dialog's `close` event rather than raising
+            // it as the dialog closes, and Chromium has been seen to raise it
+            // after the reader's next key press: a dialog closed with Escape
+            // and opened again at once still waits for it. That closing is
+            // over, so it is counted gone now, and its event, come late, finds
+            // the dialog open and is left alone, or it would close the dialog
+            // under the reader.
+            if !dialog.open() {
+                modal_gone(counted);
+            }
             open_modal(&dialog, counted);
             // The browser puts focus on the first control it finds; the
             // dismiss button is the one a review means to start on, unless
@@ -153,6 +163,9 @@ pub fn ReviewDialog(
     let confirm = confirm.map(choice.clone());
     let also = also.map(choice);
     view! {
+        // A `close` event that finds the dialog open is late, for a closing
+        // the dialog was opened again since (see above): that closing was
+        // already counted gone, so the event is left alone.
         <dialog
             node_ref=dialog
             aria-labelledby=title_id.clone()
@@ -163,6 +176,9 @@ pub fn ReviewDialog(
                 }
             }
             on:close=move |_| {
+                if dialog.get_untracked().is_some_and(|dialog| dialog.open()) {
+                    return;
+                }
                 modal_gone(counted);
                 open.try_set(false);
                 return_focus(&returns_to, fallback.as_deref());
