@@ -421,7 +421,8 @@ async fn main() {
                 );
                 return false;
             }
-            if !node_runs_typescript && operation_steps::tagged(feature, rule, scenario, "needs-node")
+            if !node_runs_typescript
+                && operation_steps::tagged(feature, rule, scenario, "needs-node")
             {
                 testkit::record_skip(
                     module_path!(),

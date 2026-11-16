@@ -19,11 +19,10 @@ use unic_langid::LanguageIdentifier;
 
 #[path = "src/constants.rs"]
 mod constants;
+#[path = "src/offered.rs"]
+mod offered;
 
 const SOURCE_TAG: &str = "en-US";
-
-/// The list of the languages a release offers, beside this file.
-const OFFERED_FILE: &str = "offered-locales.txt";
 
 type Result<T, E = Box<dyn Error>> = std::result::Result<T, E>;
 
@@ -45,15 +44,16 @@ fn main() -> Result<()> {
     let out = PathBuf::from(std::env::var("OUT_DIR")?);
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=src/constants.rs");
+    println!("cargo::rerun-if-changed=src/offered.rs");
     println!("cargo::rerun-if-changed=locales");
-    println!("cargo::rerun-if-changed={OFFERED_FILE}");
+    println!("cargo::rerun-if-changed={}", offered::FILE);
 
     let locales = read_locales(&manifest.join("locales"))?;
     let source = locales
         .iter()
         .find(|locale| locale.tag == SOURCE_TAG)
         .ok_or("locales/en-US is missing: it is the source locale")?;
-    let offered = read_offered(&manifest.join(OFFERED_FILE), &locales)?;
+    let offered = read_offered(&manifest.join(offered::FILE), &locales)?;
     fs::write(out.join("catalog.rs"), catalog_table(&locales, &offered)?)?;
     fs::write(out.join("msg.rs"), message_constants(source)?)?;
     Ok(())
@@ -122,35 +122,13 @@ fn check_syntax(tag: &str, name: &str, text: &str) -> Result<()> {
     Err(report.into())
 }
 
-/// The tags `offered-locales.txt` lists, one a line; a blank line and one
-/// that starts with `#` say nothing. Fails on a tag with no catalog, a tag
-/// listed twice, and a list without `en-US`, which every chain of locales
-/// ends in.
+/// The tags `offered-locales.txt` lists (`offered::listed`), each with a
+/// catalog.
 fn read_offered(path: &Path, locales: &[Locale]) -> Result<Vec<String>> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let mut tags: Vec<String> = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let tag = line.trim();
-        if tag.is_empty() || tag.starts_with('#') {
-            continue;
-        }
-        let number = index + 1;
-        if !locales.iter().any(|locale| locale.tag == tag) {
-            return Err(format!(
-                "{OFFERED_FILE} line {number}: {tag:?} has no catalog: no folder locales/{tag}"
-            )
-            .into());
-        }
-        if tags.iter().any(|listed| listed == tag) {
-            return Err(format!("{OFFERED_FILE} line {number}: {tag} is listed twice").into());
-        }
-        tags.push(tag.to_owned());
-    }
-    if !tags.iter().any(|tag| tag == SOURCE_TAG) {
-        return Err(format!("{OFFERED_FILE} must list {SOURCE_TAG}, the source locale").into());
-    }
-    Ok(tags)
+    let catalogs: Vec<&str> = locales.iter().map(|locale| locale.tag.as_str()).collect();
+    Ok(offered::listed(&text, &catalogs)?)
 }
 
 /// The table of embedded catalogs, `catalog::CATALOGS`, and the tags a

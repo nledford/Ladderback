@@ -52,6 +52,8 @@ mod id;
 mod locale;
 mod localizer;
 pub mod msg;
+#[cfg(test)]
+mod offered;
 mod pseudo;
 
 #[cfg(all(feature = "browser-intl", target_arch = "wasm32"))]

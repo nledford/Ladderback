@@ -61,8 +61,11 @@ pub(crate) fn node_runs_typescript() -> bool {
     };
     let dir = tempfile::tempdir().expect("a folder for the probe");
     let probe = dir.path().join("probe.ts");
-    fs::write(&probe, "const status: number = 0;\nprocess.exitCode = status;\n")
-        .expect("the probe");
+    fs::write(
+        &probe,
+        "const status: number = 0;\nprocess.exitCode = status;\n",
+    )
+    .expect("the probe");
     let mut command = Command::new(node);
     command
         .arg(&probe)
