@@ -27,8 +27,10 @@ impl Activation {
     /// `Automatic` the tab arrived at, as a press on it would select; with
     /// `Manual`, none, since only a press selects.
     pub fn selection_on_arrival(self, selected: usize, arrived: usize) -> Option<usize> {
-        let _ = (self, selected, arrived);
-        todo!()
+        match self {
+            Self::Automatic => selection_on_press(selected, arrived),
+            Self::Manual => None,
+        }
     }
 }
 
@@ -37,8 +39,7 @@ impl Activation {
 /// already selected, so a caller following the selection (`Tabs`'s
 /// `selected`) hears of each change once and of nothing else.
 pub fn selection_on_press(selected: usize, pressed: usize) -> Option<usize> {
-    let _ = (selected, pressed);
-    todo!()
+    (pressed != selected).then_some(pressed)
 }
 
 /// What a panel holds, as its caller says, which decides whether the panel
@@ -68,7 +69,10 @@ impl TabsName {
     /// The list's `aria-label` and `aria-labelledby`: one of them, never
     /// both.
     pub fn attributes(&self) -> (Option<String>, Option<String>) {
-        todo!()
+        match self {
+            Self::Label(label) => (Some(label.clone()), None),
+            Self::LabelledBy(id) => (None, Some(id.clone())),
+        }
     }
 }
 
@@ -81,42 +85,49 @@ impl TabsName {
 /// goes to the next tab; both wrap, from the last tab to the first and back.
 /// Home and End go to the first and the last.
 pub fn arrival(at: usize, last: usize, key: &str, direction: Direction) -> Option<usize> {
-    let _ = (at, last, key, direction);
-    todo!()
+    let (next, previous) = match direction {
+        Direction::Ltr => ("ArrowRight", "ArrowLeft"),
+        Direction::Rtl => ("ArrowLeft", "ArrowRight"),
+    };
+    match key {
+        "Home" => Some(0),
+        "End" => Some(last),
+        _ if key == next => Some(if at >= last { 0 } else { at.saturating_add(1) }),
+        _ if key == previous => Some(at.checked_sub(1).unwrap_or(last)),
+        _ => None,
+    }
 }
 
 /// A tab's `tabindex`: the selected tab is the list's one Tab stop, and the
 /// arrow keys reach the others.
 pub fn tab_stop(selected: bool) -> &'static str {
-    let _ = selected;
-    todo!()
+    if selected { "0" } else { "-1" }
 }
 
 /// A tab's `aria-selected`, on every tab of the list.
 pub fn aria_selected(selected: bool) -> &'static str {
-    let _ = selected;
-    todo!()
+    if selected { "true" } else { "false" }
 }
 
 /// A panel's `tabindex`: `0` for a panel nothing in which takes focus, none
 /// for one whose controls do.
 pub fn panel_stop(holds: Holds) -> Option<&'static str> {
-    let _ = holds;
-    todo!()
+    match holds {
+        Holds::Text => Some("0"),
+        Holds::Controls => None,
+    }
 }
 
 /// The `id` of the tab at `index` of the list whose ids start with `prefix`,
 /// which its panel's `aria-labelledby` names.
 pub fn tab_id(prefix: &str, index: usize) -> String {
-    let _ = (prefix, index);
-    todo!()
+    format!("{prefix}-tab-{index}")
 }
 
 /// The `id` of the panel of the tab at `index`, which the tab's
 /// `aria-controls` names.
 pub fn panel_id(prefix: &str, index: usize) -> String {
-    let _ = (prefix, index);
-    todo!()
+    format!("{prefix}-panel-{index}")
 }
 
 #[cfg(test)]
