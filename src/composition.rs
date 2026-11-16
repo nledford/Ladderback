@@ -2753,6 +2753,15 @@ impl Catalog for ConfigCatalog {
                 return Err(refused(too_much_to_mask(field, limit)));
             }
             Err(error) => {
+                if let SnapshotError::Failed(reason) = &error
+                    && let Some(told) = told_failure(reason)
+                {
+                    log::warn!(
+                        "the snapshots of {} could not be listed: {told:?}",
+                        alias.as_str()
+                    );
+                    return Err(told);
+                }
                 let said = failure_redactor(&repository.settings, &SystemSecrets::default())
                     .await
                     .redact(&format!("{error:?}"));
@@ -2845,6 +2854,15 @@ impl Catalog for ConfigCatalog {
                 FailureReason::SecretsTooLargeToMask { field, limit },
             ))) => return Err(refused(too_much_to_mask(field, limit))),
             Err(error) => {
+                if let BrowseError::Read(MaintenanceError::Failed(reason)) = &error
+                    && let Some(told) = told_failure(reason)
+                {
+                    log::warn!(
+                        "a folder of a snapshot of {} could not be read: {told:?}",
+                        alias.as_str()
+                    );
+                    return Err(FolderError::Repository(told));
+                }
                 let said = failure_redactor(&repository.settings, &SystemSecrets::default())
                     .await
                     .redact(&format!("{error:?}"));
@@ -2865,6 +2883,44 @@ impl Catalog for ConfigCatalog {
             total: page.total,
             next: page.next,
         })
+    }
+}
+
+/// A listing or a folder read the engine ran and failed, told by the code of
+/// its failure as a read for maintenance tells it (#637): a wrong password is
+/// `password-not-accepted`, no repository at the location 404. `None` for a
+/// failure in the engine's own words or an engine that can't run, which the
+/// caller tells as `engine-unavailable`, its words only in the log.
+fn told_failure(reason: &FailureReason) -> Option<SnapshotsError> {
+    use http_adapter::MaintenanceRefusal as M;
+    match maintenance::failed(reason.clone()) {
+        M::Unavailable {
+            code: ErrorCode::EngineUnavailable,
+            ..
+        }
+        | M::OperationFailed { .. } => None,
+        M::Unavailable { code, args, detail } => {
+            Some(SnapshotsError::Unavailable { code, args, detail })
+        }
+        M::SecretRefused(refusal) => Some(SnapshotsError::SecretRefused(refusal)),
+        M::RepositoryNotFound => Some(SnapshotsError::RepositoryNotFound),
+        M::RepositoryConfigNotFound { detail } => {
+            Some(SnapshotsError::RepositoryConfigNotFound { detail })
+        }
+        // `failed` gives none of these: they refuse a request before
+        // anything runs, or time a read the listing times itself. Each is
+        // named, so a refusal added later is decided here and is never told
+        // as `engine-unavailable` unnoticed.
+        M::UnknownRepository
+        | M::NotOwner
+        | M::UnknownPlan { .. }
+        | M::Busy { .. }
+        | M::KeepsNothing { .. }
+        | M::AdoptionNoMatch
+        | M::AdoptionAmbiguous { .. }
+        | M::InvalidBody
+        | M::SelectionChanged
+        | M::TimedOut => None,
     }
 }
 

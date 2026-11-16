@@ -873,12 +873,8 @@ async fn list_snapshots(
             vec![("alias", api::MsgArg::Text(alias))],
         ),
         Err(SnapshotsError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
-        Err(
-            error @ (SnapshotsError::RepositoryNotFound
-            | SnapshotsError::RepositoryConfigNotFound { .. }),
-        ) => {
-            todo!("{error:?}")
-        }
+        Err(SnapshotsError::RepositoryNotFound) => no_repository(None),
+        Err(SnapshotsError::RepositoryConfigNotFound { detail }) => no_repository(Some(detail)),
         Err(SnapshotsError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
@@ -933,14 +929,26 @@ async fn read_folder(
         Err(FolderError::Repository(SnapshotsError::SecretRefused(secret))) => {
             repositories::secret_refusal(&secret)
         }
-        Err(FolderError::Repository(
-            error @ (SnapshotsError::RepositoryNotFound
-            | SnapshotsError::RepositoryConfigNotFound { .. }),
-        )) => todo!("{error:?}"),
+        Err(FolderError::Repository(SnapshotsError::RepositoryNotFound)) => no_repository(None),
+        Err(FolderError::Repository(SnapshotsError::RepositoryConfigNotFound { detail })) => {
+            no_repository(Some(detail))
+        }
         Err(FolderError::Repository(SnapshotsError::Unavailable { code, args, detail })) => {
             unavailable(code, args, detail)
         }
     }
+}
+
+/// No repository at the repository's location, a configuration to correct
+/// rather than a daemon that is unavailable: 404, as `repository-not-found`
+/// for an empty folder, or as `repository-config-not-found` with the
+/// engine's masked words, `detail`, when no config file was found (#525).
+fn no_repository(detail: Option<String>) -> Response {
+    let code = match detail {
+        None => api::ErrorCode::RepositoryNotFound,
+        Some(_) => api::ErrorCode::RepositoryConfigNotFound,
+    };
+    refused_detailed(StatusCode::NOT_FOUND, code, Vec::new(), detail)
 }
 
 /// The refusal of a snapshot the repository doesn't hold, naming it as the

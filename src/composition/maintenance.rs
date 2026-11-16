@@ -549,8 +549,8 @@ async fn secret_refused(
 
 /// A read of the repository that ran and failed: the engine's own words for a
 /// failure it reports, a typed code for the rest. The engine redacts what it
-/// says.
-fn failed(reason: FailureReason) -> MaintenanceRefusal {
+/// says. A listing and a folder read tell their failures by it too (#637).
+pub(super) fn failed(reason: FailureReason) -> MaintenanceRefusal {
     use FailureReason as F;
     match reason {
         F::EngineFailed { detail } => MaintenanceRefusal::OperationFailed { detail },
