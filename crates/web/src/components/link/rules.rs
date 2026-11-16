@@ -23,14 +23,19 @@ pub enum Destination {
 /// Why text isn't a destination.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotADestination {
-    /// A route is a path of this site: it starts with one `/`, never two
-    /// (`//host` is another site), never a backslash after it (which
-    /// browsers read as a second `/`), and holds no space or control
-    /// character.
+    /// A route is a path of this site, written as the browser keeps it, so
+    /// the router's location matches it and never leaves the site: it starts
+    /// with one `/`, and its path holds no empty segment (`//host` is another
+    /// site), no `.` or `..` segment, plain or percent-encoded (which the
+    /// browser folds, `/.//host` into `//host`), and no backslash, plain or
+    /// `%5C` (which the browser reads as a `/`, and the router decodes). It
+    /// is printable ASCII without `"`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|`
+    /// or `}`, and its query and fragment have no `'`: the browser would
+    /// percent-encode each, so a caller encodes them.
     NotAPath,
     /// An outside address is an `http` or `https` address with a host, and
-    /// holds no space or control character: `javascript:` and `data:` are
-    /// never one.
+    /// holds no space, control character or backslash: `javascript:` and
+    /// `data:` are never one.
     NotAWebAddress,
 }
 
@@ -59,21 +64,71 @@ pub struct Route {
 impl Route {
     /// Parses a path of this site.
     pub fn parse(href: &str, matching: Matching) -> Result<Self, NotADestination> {
-        let _ = (href, matching);
-        todo!()
+        if of_this_site(href) {
+            Ok(Self {
+                href: href.to_owned(),
+                matching,
+            })
+        } else {
+            Err(NotADestination::NotAPath)
+        }
     }
 
     /// The link's `href`, as it was parsed.
     pub fn href(&self) -> &str {
-        todo!()
+        &self.href
     }
 
     /// Whether the reader is on this route's page, from the router's
     /// location: its path and its query (`?` before it or not).
     pub fn is_current(&self, path: &str, query: &str) -> bool {
-        let _ = (path, query);
-        todo!()
+        let (own_path, own_query) = parts(&self.href);
+        let (own_path, path) = (trimmed(own_path), trimmed(path));
+        match self.matching {
+            Matching::Exact => {
+                own_path == path && own_query == query.strip_prefix('?').unwrap_or(query)
+            }
+            Matching::Section => path
+                .strip_prefix(own_path)
+                .is_some_and(|below| below.is_empty() || below.starts_with('/')),
+        }
     }
+}
+
+/// Whether text holds no space and no control character.
+fn plain(text: &str) -> bool {
+    !text.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// Whether `href` is a path of this site the browser keeps as it is written
+/// ([`NotADestination::NotAPath`]).
+fn of_this_site(href: &str) -> bool {
+    let (path, rest) = href.split_at(href.find(['?', '#']).unwrap_or(href.len()));
+    let Some(path) = path.strip_prefix('/') else {
+        return false;
+    };
+    let kept = href
+        .chars()
+        .all(|c| c.is_ascii_graphic() && !"\"<>\\^`{|}".contains(c));
+    let last = path.split('/').count() - 1;
+    let segments_kept = path.split('/').enumerate().all(|(at, segment)| {
+        let empty_inside = segment.is_empty() && at < last;
+        let dots = segment.to_ascii_lowercase().replace("%2e", ".");
+        !empty_inside && dots != "." && dots != ".." && !dots.contains("%5c")
+    });
+    kept && segments_kept && !rest.contains('\'')
+}
+
+/// A route's path and its query (empty without one), its fragment dropped.
+fn parts(href: &str) -> (&str, &str) {
+    let href = href.split_once('#').map_or(href, |(before, _)| before);
+    href.split_once('?').unwrap_or((href, ""))
+}
+
+/// A path without the slashes it ends in: `/operations/` is `/operations`,
+/// and `/` is empty, which every path starts with.
+fn trimmed(path: &str) -> &str {
+    path.trim_end_matches('/')
 }
 
 /// An address on another site.
@@ -83,36 +138,62 @@ pub struct Outside(String);
 impl Outside {
     /// Parses an `http` or `https` address with a host.
     pub fn parse(address: &str) -> Result<Self, NotADestination> {
-        let _ = address;
-        todo!()
+        let rest = ["https://", "http://"].into_iter().find_map(|scheme| {
+            address
+                .get(..scheme.len())
+                .filter(|start| start.eq_ignore_ascii_case(scheme))
+                .and_then(|_| address.get(scheme.len()..))
+        });
+        let has_host = rest.is_some_and(|rest| {
+            rest.split(['/', '?', '#'])
+                .next()
+                .map(|authority| {
+                    authority
+                        .rsplit_once('@')
+                        .map_or(authority, |(_, host)| host)
+                })
+                .is_some_and(|host| !host.is_empty() && !host.starts_with(':'))
+        });
+        if has_host && plain(address) && !address.contains('\\') {
+            Ok(Self(address.to_owned()))
+        } else {
+            Err(NotADestination::NotAWebAddress)
+        }
     }
 
     /// The link's `href`, as it was parsed.
     pub fn href(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
 impl Destination {
-    /// The link's `rel`: an outside link tells the site it opens nothing of
-    /// the page it came from (`noreferrer`, which implies `noopener`); a
-    /// route has none.
+    /// The link's `rel`: an outside link is never routed, even an address
+    /// that turns out to be the app's own (`external`, which the router
+    /// leaves to the browser), and tells the site it opens nothing of the
+    /// page it came from (`noreferrer`, which implies `noopener`); a route
+    /// has none.
     pub fn rel(&self) -> Option<&'static str> {
-        todo!()
+        match self {
+            Self::Route(_) => None,
+            Self::Outside(_) => Some("external noreferrer"),
+        }
     }
 
     /// The link's `aria-current`: `page` on a route the reader is on, from
     /// the router's location, so it can't drift from it; an outside link is
     /// never the current page.
     pub fn current(&self, path: &str, query: &str) -> Option<&'static str> {
-        let _ = (path, query);
-        todo!()
+        match self {
+            Self::Route(route) => route.is_current(path, query).then_some("page"),
+            Self::Outside(_) => None,
+        }
     }
 
     /// Whether the link says it leaves the app: words for a screen reader
-    /// after its own, and an icon after them.
+    /// after its own, and an icon after its own words too.
     pub fn leaves(&self) -> bool {
-        todo!()
+        matches!(self, Self::Outside(_))
     }
 }
 
@@ -132,15 +213,17 @@ pub enum LinkTone {
 impl LinkTone {
     /// The shared vocabulary's tone it is.
     pub fn tone(self) -> Tone {
-        todo!()
+        match self {
+            Self::Primary => Tone::Primary,
+            Self::Inherit => Tone::Inherit,
+        }
     }
 }
 
 /// The classes of the link: the link's own, which underlines it, and its
 /// tone's.
 pub fn link_class(tone: LinkTone) -> String {
-    let _ = tone;
-    todo!()
+    format!("link {}", tone.tone().class())
 }
 
 #[cfg(test)]
