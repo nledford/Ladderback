@@ -247,11 +247,18 @@ fn make(localizer: &Localizer, session: &Session, calls: Calls) -> io::Result<bo
     }
 }
 
-/// Makes `call` in `session` and prints its line: whether it worked.
+/// Makes `call` in `session` and prints its line: whether it worked. A
+/// refusal's sentence, in the catalog's words, is said on stderr too, after
+/// the line ([`output::write_json`] flushes it), so the agent or person
+/// reading learns what to do next; the line stays as it is, for scripts
+/// (§4.6).
 fn made(session: &Session, call: ::mcp::Call, out: &mut impl Write) -> io::Result<bool> {
     let tool = call.tool();
     let answer = session.call(call);
     output::write_json(out, &answer.outcome(tool))?;
+    if let ::mcp::Answer::Refused(error) = &answer {
+        output::to_stderr(&format!("ladderback: {}\n", session.server.sentence(error)))?;
+    }
     Ok(answer.is_ok())
 }
 

@@ -34,7 +34,7 @@ use l10n::Localizer;
 use rmcp::handler::server::tool::{schema_for_input, schema_for_output};
 use rmcp::model::{
     CallToolRequestMethod, CallToolRequestParams, CallToolResponse, CallToolResult, ConstString,
-    CustomRequest, CustomResult, Implementation, JsonObject, ListToolsResult,
+    ContentBlock, CustomRequest, CustomResult, Implementation, JsonObject, ListToolsResult,
     PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, ServerCapabilities,
     ServerConfig, Tool, ToolAnnotations,
 };
@@ -366,8 +366,35 @@ impl Server {
     /// The sentence the catalog says `error` in, in the server's locale,
     /// with the code's own arguments and detail: what an AI agent, or the
     /// person it relays the refusal to, reads to know what to do next.
-    pub fn sentence(&self, _error: &ErrorDto) -> String {
-        todo!()
+    pub fn sentence(&self, error: &ErrorDto) -> String {
+        let args: Vec<(&str, api::MsgArg)> = error
+            .args
+            .iter()
+            .map(|(name, arg)| (name.as_str(), arg.clone()))
+            .collect();
+        self.localizer
+            .error(error.code, &args, error.detail.as_deref())
+            .into_text()
+    }
+
+    /// What `tools/call` answers: a result as `structuredContent`, mirrored
+    /// as JSON text. A refusal is marked as an error and has two text
+    /// contents: its `{code, args}` as JSON, for a client to branch on, then
+    /// its [`Server::sentence`]. It has no `structuredContent`: clients check
+    /// `structuredContent` against the tool's output schema, error or not,
+    /// and a refusal isn't the shape it declares (§4.6).
+    fn result(&self, answer: Answer) -> CallToolResult {
+        let content = match answer {
+            Answer::Done(value) => return CallToolResult::structured(value),
+            Answer::Refused(error) => vec![
+                ContentBlock::text(
+                    serde_json::to_string(&error).unwrap_or_else(|error| error.to_string()),
+                ),
+                ContentBlock::text(self.sentence(&error)),
+            ],
+            Answer::Unwritten(why) => vec![ContentBlock::text(why)],
+        };
+        CallToolResult::error(content)
     }
 
     /// Serves one session: reads requests from `input` and writes answers to
@@ -654,24 +681,6 @@ fn structured(value: &impl Serialize) -> Answer {
     }
 }
 
-impl From<Answer> for CallToolResult {
-    /// What `tools/call` answers: a result as `structuredContent`, mirrored
-    /// as JSON text. A refusal is its `{code, args}` as JSON text, marked as
-    /// an error, with no `structuredContent`: clients check
-    /// `structuredContent` against the tool's output schema, error or not,
-    /// and a refusal isn't the shape it declares (§4.6).
-    fn from(answer: Answer) -> Self {
-        let text = match answer {
-            Answer::Done(value) => return Self::structured(value),
-            Answer::Refused(error) => {
-                serde_json::to_string(&error).unwrap_or_else(|error| error.to_string())
-            }
-            Answer::Unwritten(why) => why,
-        };
-        Self::error(vec![rmcp::model::ContentBlock::text(text)])
-    }
-}
-
 /// The input schema of a tool that takes no arguments.
 fn no_arguments() -> Arc<JsonObject> {
     let mut schema = JsonObject::new();
@@ -929,7 +938,7 @@ impl ServerHandler for Server {
             ));
         };
         let answer = self.dispatch(tool, request.arguments, Some(&context)).await;
-        Ok(CallToolResult::from(answer).into())
+        Ok(self.result(answer).into())
     }
 
     /// A request the SDK couldn't read as any it knows. A `tools/call` among
