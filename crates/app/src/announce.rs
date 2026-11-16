@@ -209,7 +209,16 @@ pub fn refused(
             with(from(source), ("seconds", MsgArg::Count(*seconds))),
             None,
         ),
-        R::SecretKeyringTimedOut { .. } | R::SecretFileTimedOut { .. } => todo!(),
+        R::SecretKeyringTimedOut { source, seconds } => (
+            ErrorCode::SecretKeyringTimedOut,
+            with(from(source), ("seconds", MsgArg::Count(*seconds))),
+            None,
+        ),
+        R::SecretFileTimedOut { source, seconds } => (
+            ErrorCode::SecretFileTimedOut,
+            with(from(source), ("seconds", MsgArg::Count(*seconds))),
+            None,
+        ),
         R::SecretCommandOutputOpen { source } => {
             (ErrorCode::SecretCommandOutputOpen, from(source), None)
         }

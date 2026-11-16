@@ -273,8 +273,15 @@ fn refusal_args(refusal: &SettingRefusal) -> Vec<(&'static str, MsgArg)> {
         R::SecretCommandTimedOut {
             source: from,
             seconds,
+        }
+        | R::SecretKeyringTimedOut {
+            source: from,
+            seconds,
+        }
+        | R::SecretFileTimedOut {
+            source: from,
+            seconds,
         } => vec![source(from), ("seconds", MsgArg::Count(*seconds))],
-        R::SecretKeyringTimedOut { .. } | R::SecretFileTimedOut { .. } => todo!(),
         R::SecretExpansionTooLong { limit } => vec![("limit", MsgArg::Bytes(*limit))],
         R::TemplateInvalid { at } => at
             .map(|at| ("at", MsgArg::Text(at.to_string())))
@@ -402,6 +409,14 @@ fn refused(
             detail: said,
         },
         "secret-command-timed-out" => R::SecretCommandTimedOut {
+            source: source()?,
+            seconds: count(args, "seconds")?,
+        },
+        "secret-keyring-timed-out" => R::SecretKeyringTimedOut {
+            source: source()?,
+            seconds: count(args, "seconds")?,
+        },
+        "secret-file-timed-out" => R::SecretFileTimedOut {
             source: source()?,
             seconds: count(args, "seconds")?,
         },

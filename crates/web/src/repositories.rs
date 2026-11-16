@@ -225,6 +225,8 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         | ErrorCode::SecretCommandFailed
         | ErrorCode::SecretCommandOutputOpen
         | ErrorCode::SecretCommandTimedOut
+        | ErrorCode::SecretKeyringTimedOut
+        | ErrorCode::SecretFileTimedOut
         | ErrorCode::SecretInProcessArguments
         | ErrorCode::SecretExpansionTooLong
         | ErrorCode::SecretsTooLargeToMask

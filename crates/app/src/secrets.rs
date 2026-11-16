@@ -175,12 +175,23 @@ impl ResolveError {
                         source,
                         detail: said(detail),
                     },
+                    // A source that waited out the limit keeps its kind and
+                    // the seconds, so the words can name the likely cause: a
+                    // keychain prompt nobody answered, or a mount that hung
+                    // (#891). The environment is read without waiting.
                     Problem::TimedOut { seconds } => match secret.source {
                         SourceName::Command { .. } => SettingRefusal::SecretCommandTimedOut {
                             source,
                             seconds: *seconds,
                         },
-                        SourceName::Keyring { .. } | SourceName::File { .. } => todo!(),
+                        SourceName::Keyring { .. } => SettingRefusal::SecretKeyringTimedOut {
+                            source,
+                            seconds: *seconds,
+                        },
+                        SourceName::File { .. } => SettingRefusal::SecretFileTimedOut {
+                            source,
+                            seconds: *seconds,
+                        },
                         SourceName::Env { .. } => SettingRefusal::SecretUnreadable {
                             source,
                             detail: None,
