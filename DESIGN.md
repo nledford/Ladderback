@@ -202,8 +202,8 @@ Every component is plain and exact: a control looks like what the browser makes 
 
 Every shared component takes the same three choices, defined once in `crates/web/src/variants.rs`, each a class of `style.css`, as it is built or reworked; the gallery's "Shared vocabulary" demo shows them all. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
 
-- **Tone:** Primary (Ladder Blue, the default), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
-- **Size:** Small, Medium, Large and XLarge. Each component maps them to `em` lengths of its own, listed with it, so a size grows with the reader's text. There is no default size.
+- **Tone:** Primary (Ladder Blue, the default, unless a component names its own, as the icon does), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
+- **Size:** Small, Medium, Large and XLarge, one scale every component shares, in `em`, so a size grows with the reader's text: Small 1em, Medium 1.5em, Large 2em, XLarge 3em. A size's class sets `--size`, which the component draws its length with, so a spinner and an icon of one size line up. A component that needs other lengths may deviate, saying why with it. The vocabulary has no default size: each component picks its own.
 - **Placement:** Inline (the default: in the line of text, as wide as what it holds), then Start, Center and End, each on a line of its own at its start, middle or end, in the page's direction. The class goes on the line, an element of the component's own around its part, never on the part's own box, which it would stretch.
 
 ### Buttons
@@ -251,6 +251,14 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 - **Label:** always one, saying what the page waits for. Beside the spinner by default, where the drawing is hidden from a screen reader; where there's no room, the drawing is an image named by it.
 - **Placement:** the shared placements, on the spinner's line: Inline (the default), in its line of text, the label on the line's baseline and the drawing centered on the text; Start, Center or End, on a line of its own, which follow the page's direction, a long label wrapping beside the drawing, never under it, the drawing at its first line.
 - **The page's duties:** the spinner is no live region, so a wait the reader caused, and its end, are said through the announcer (4.1.3); the region it stands for is `aria-busy` until it is filled; a busy button takes `aria-disabled`, not `disabled`, so it keeps focus, and ignores presses until the work ends.
+
+### Icon
+
+- **Use:** one Lucide glyph beside words that say what it shows, or inside a control its own label names. Decoration by default, hidden from a screen reader; given a label, an image named by it, for an icon that says something no words beside it say.
+- **Shape:** Lucide's outline, round ends and joins, 2 units of stroke on its 24-unit grid, never filled. Never mirrored right to left: a glyph that points along the reading direction is the page's to pick.
+- **Size:** the shared sizes, Small (1em, as tall as the text, the default) up to XLarge (3em), centered on the text in a line of it.
+- **Tone:** any of the shared tones, Inherit (the text's color) by default, so it reads as part of its words and their contrast covers it. A tone never says a meaning alone: the glyph's shape or the words do too. Under forced colors it is the text's own color, as every tone is.
+- **Icon-only button:** named on the button, the icon inside it decoration. A toggle keeps its one name and says pressed in its glyph's shape (the gallery's bell, crossed out while off), since it has no words to turn bold.
 
 ### Dialogs
 
