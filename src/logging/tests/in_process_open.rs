@@ -187,9 +187,7 @@ async fn open_logged(filter: Option<&str>, credential: &str) -> (String, String)
         );
     }
     // The line that says where the server serves is taken as its address,
-    // not logged as its output, as rustic's backend leaves it (at `debug`,
-    // the stand-in's command, logged as the command rclone starts with,
-    // quotes it).
+    // not logged as its output, as rustic's backend leaves it.
     assert!(
         !log.contains("rclone output: Serving restic REST API"),
         "the serving line was logged: {log}"
@@ -216,16 +214,56 @@ async fn an_open_by_the_daemon_never_logs_a_credential_of_an_rclone_location() {
     assert!(!kept.contains(CANARY), "the recent log leaks: {kept}");
 }
 
-/// At `debug`, the engine logs the command it starts rclone with, as rustic does, as `{:?}`
-/// prints it, the location last, so a credential's `"` shows as `\"`: the
-/// credential is masked in that form too.
+/// At `debug`, a credential with a `"` is masked in every record of the
+/// open, in a `{:?}` form that shows the quote as `\"` too.
 #[tokio::test]
 async fn at_debug_an_open_by_the_daemon_never_logs_a_credential_its_debug_form_escapes() {
     let (log, kept) = open_logged(Some("debug"), "CANARY-rclone\"quoted-key").await;
     assert!(
-        log.contains("starting rclone via"),
-        "the record that quotes rclone's command was written: {log}"
+        log.contains("starting rclone"),
+        "the open's debug records were written: {log}"
     );
     assert!(!log.contains("CANARY"), "the daemon's log leaks: {log}");
     assert!(!kept.contains("CANARY"), "the recent log leaks: {kept}");
+}
+
+/// At `debug`, the engine says it starts rclone without quoting the command
+/// line, which can carry a credential the redactor doesn't know, as a token
+/// typed into `rclone-command` (I4, #874); nor does anything the failed start
+/// logs.
+#[tokio::test]
+async fn at_debug_an_rclone_command_s_text_is_never_logged() {
+    let canary = "CANARY-typed-token";
+    let scratch = tempfile::tempdir().unwrap();
+    let pipe = Pipe::default();
+    set(logger(
+        Some("debug"),
+        Target::Pipe(Box::new(pipe.clone())),
+        WriteStyle::Never,
+    ));
+    let stand_in = format!(
+        "{} serve restic --token={canary}",
+        scratch.path().join("no-such-rclone").display()
+    );
+    let access = RepositoryAccess {
+        repository: "rclone:demo-remote:repo".to_owned(),
+        repo_hot: None,
+        password: SecretValue::new(PASSWORD),
+        id: None,
+        entry: None,
+        options: [("rclone-command".to_owned(), stand_in)].into(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
+        secrets: Vec::new(),
+    };
+    let removed = RusticRetention
+        .removes(&access, &RetentionPolicy::default(), &[])
+        .await;
+    let log = pipe.text();
+    assert!(removed.is_err(), "rclone can't start: {log}");
+    assert!(
+        log.contains("starting rclone"),
+        "the record that says rclone starts was written: {log}"
+    );
+    assert!(!log.contains(canary), "the daemon's log leaks: {log}");
 }

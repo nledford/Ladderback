@@ -158,6 +158,13 @@ fn nowhere(agent: &mut Agent) {
     agent.secrets.repository = folder.display().to_string();
 }
 
+/// An `rclone:` repository, which the engine reaches through the rclone its
+/// `rclone-command` option starts.
+#[given("an rclone repository")]
+fn rclone(agent: &mut Agent) {
+    agent.secrets.repository = "rclone:demo-remote:repo".to_owned();
+}
+
 #[given(expr = "the repository's option {string} is {string}")]
 fn option_is(agent: &mut Agent, name: String, value: String) {
     let value = in_scratch(agent, &value);

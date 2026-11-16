@@ -41,7 +41,8 @@ pub(crate) fn new_repository(
         Some(hot) => backend_options.repo_hot(hot.clone()),
         None => backend_options,
     }
-    .to_backends()?;
+    .to_backends()
+    .map_err(crate::rclone::without_command)?;
     let backends = refusing_snapshots_once_cancelled(&backends, ctx.cancel());
     let options = RepositoryOptions::default();
     let options = match cache_dir(ctx)? {
