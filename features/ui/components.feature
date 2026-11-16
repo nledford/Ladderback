@@ -403,6 +403,21 @@ Feature: The shared components in the gallery
     When I press Escape
     Then focus is on the button "Open a demo secret"
 
+  Scenario: A held review dialog says why beside its confirm button, and pressing it only says so
+    When I open the component gallery
+    And I press Tab until focus is on the button "Open a held demo review"
+    And I press Enter
+    Then focus is on the button "Cancel"
+    When I press Tab until focus is on the button "Confirm the held demo review"
+    Then the dialog "Demo review on hold" has its button "Confirm the held demo review" unavailable
+    And the button "Confirm the held demo review" is described by "The demo review waits for something that never comes."
+    When I press Enter
+    Then the dialog "Demo review on hold" politely says "The demo review waits for something that never comes."
+    And the dialog "Demo review on hold" stays open
+    And focus is on the button "Confirm the held demo review"
+    When I press Escape
+    Then focus is on the button "Open a held demo review"
+
   Scenario Outline: An open review dialog has no accessibility violations
     When I open the component gallery
     And I press Tab until focus is on the button "<opener>"
@@ -415,6 +430,7 @@ Feature: The shared components in the gallery
       | Open a demo review        | Demo review to confirm         |
       | Open an empty demo review | Demo review with nothing to do |
       | Open a demo secret        | Demo secret shown once         |
+      | Open a held demo review   | Demo review on hold            |
 
   Scenario Outline: A button's label grows with the reader's text size
     Given the reader sets the text size to 200 percent

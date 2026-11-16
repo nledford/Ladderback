@@ -33,6 +33,36 @@ Then("focus is on the button {string}", async function (this: BrowserWorld, name
   );
 });
 
+// A review says in its own polite region what the page's announcer can't
+// while the modal is open (§4.5). The region has no role of its own (a second
+// `status` would hide the page's one), so it is found as the live region
+// holding the text.
+Then("the dialog {string} politely says {string}", async function (this: BrowserWorld, name: string, text: string) {
+  const dialog = journey(this.page).byRole("dialog", { name: namePattern(name) });
+  await expect
+    .poll(
+      () =>
+        dialog.evaluate((el, said) => {
+          const marks = /[\u2066-\u2069]/g;
+          return [...el.querySelectorAll('[aria-live="polite"]')].some((region) =>
+            (region.textContent ?? "").replace(marks, "").includes(said),
+          );
+        }, text),
+      { message: `the dialog "${name}" never said "${text}" in its polite region`, timeout: 5_000 },
+    )
+    .toBe(true);
+});
+
+// The counterpart of a button held with `aria-disabled`: it can be pressed.
+Then("the dialog {string} has its button {string} available", async function (this: BrowserWorld, name: string, button: string) {
+  const found = journey(this.page)
+    .byRole("dialog", { name: namePattern(name) })
+    .getByRole("button", { name: namePattern(button) });
+  await expect(found).toHaveCount(1);
+  await expect(found).not.toHaveAttribute("aria-disabled", "true");
+  await expect(found).toHaveAccessibleDescription("");
+});
+
 // A toggle button tells a screen reader its state with aria-pressed (WAI-ARIA
 // button pattern), and its name stays the same whichever state it is in.
 Then("the button {string} is pressed", async function (this: BrowserWorld, name: string) {
@@ -1143,7 +1173,9 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - button "Open an empty demo review"
 - paragraph:
-  - button "Open a demo secret"`,
+  - button "Open a demo secret"
+- paragraph:
+  - button "Open a held demo review"`,
   "Pause control": `- heading "Pause control" [level=2]
 - button "Pause the demo updates"
 - paragraph:

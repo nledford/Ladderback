@@ -3,6 +3,8 @@
 // (§4.5): keyboard only, role-and-name locators, as everywhere in steps/.
 
 import assert from "node:assert/strict";
+import { rename } from "node:fs/promises";
+import path from "node:path";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
@@ -125,4 +127,23 @@ Then("the field {string} holds what was pasted", async function (this: BrowserWo
   const text = pasted.get(this);
   assert.ok(text !== undefined, "no step pasted anything");
   await expect(journey(this.page).byRole("textbox", { name: namePattern(name) })).toHaveValue(text);
+});
+
+// The scratch repository moved aside, so a dry run can't read it, and back,
+// so the next one can.
+function repositoryFolder(world: BrowserWorld, moved: boolean): string {
+  assert.ok(world.ownServer, "this scenario's daemon was never started");
+  return path.join(world.ownServer.scratch, moved ? "repo-moved-away" : "repo");
+}
+
+When("the repository is moved away", async function (this: BrowserWorld) {
+  await rename(repositoryFolder(this, false), repositoryFolder(this, true));
+});
+
+When("the repository is put back", async function (this: BrowserWorld) {
+  await rename(repositoryFolder(this, true), repositoryFolder(this, false));
+});
+
+Then("the dialog {string} alerts nothing", async function (this: BrowserWorld, name: string) {
+  await expect(dialogOf(this, name).getByRole("alert")).toHaveCount(0);
 });

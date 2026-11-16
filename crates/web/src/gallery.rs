@@ -97,6 +97,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let empty_review_body = t(msg::UI_GALLERY_DEMO_EMPTY_REVIEW_BODY);
     let secret_review_body = t(msg::UI_GALLERY_DEMO_SECRET_REVIEW_BODY);
     let copy_demo_secret = t(msg::UI_GALLERY_COPY_DEMO_SECRET);
+    // The fourth is held: it says why it can't be confirmed, and never is.
+    let held_review_open = RwSignal::new(false);
+    let held_review_body = t(msg::UI_GALLERY_DEMO_HELD_REVIEW_BODY);
+    let held_review_reason = t(msg::UI_GALLERY_DEMO_HELD_REVIEW_REASON);
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
@@ -469,6 +473,15 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     {t(msg::UI_GALLERY_OPEN_SECRET_REVIEW)}
                 </button>
             </p>
+            <p>
+                <button
+                    type="button"
+                    id="gallery-held-review"
+                    on:click=move |_| held_review_open.set(true)
+                >
+                    {t(msg::UI_GALLERY_OPEN_HELD_REVIEW)}
+                </button>
+            </p>
             <ReviewDialog
                 open=review_open
                 title=t(msg::UI_GALLERY_DEMO_REVIEW)
@@ -517,6 +530,20 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                         {copy_demo_secret}
                     </button>
                 </p>
+            </ReviewDialog>
+            <ReviewDialog
+                open=held_review_open
+                title=t(msg::UI_GALLERY_DEMO_HELD_REVIEW)
+                dismiss_label=t(msg::UI_REVIEW_CANCEL)
+                confirm=Some(Confirmation {
+                    label: t(msg::UI_GALLERY_CONFIRM_HELD_REVIEW),
+                    action: Callback::new(move |()| held_review_open.set(false)),
+                })
+                returns_to="gallery-held-review".to_owned()
+                described_by="gallery-held-review-body".to_owned()
+                held=Signal::stored(Some(held_review_reason))
+            >
+                <p id="gallery-held-review-body">{held_review_body}</p>
             </ReviewDialog>
         </section>
         <section>

@@ -198,6 +198,33 @@ Feature: Restoring files from a snapshot
     And the page has no accessibility violations
 
   @ui
+  Scenario: A restore over the original files is held, and says why, until its dry run is read again
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    When I open the newest snapshot of the plan "home"
+    And I press Tab until focus is on a tree item
+    And I press ArrowRight until focus is on the tree item "demo-1.txt"
+    And I press Tab until focus is on the button "Restore demo-1.txt"
+    And I press Enter
+    And the repository is moved away
+    And I press Tab until focus is on the radio "Into a new folder"
+    And I press the down arrow until focus is on the radio "Over the original files"
+    And I press Tab until focus is on the button "Restore"
+    Then the dialog "Restore demo-1.txt" has its button "Restore" unavailable
+    And the button "Restore" is described by "The dry run couldn't be read, so nothing is restored over the original files. Read it again, or restore into a new folder."
+    When I press Enter
+    Then the dialog "Restore demo-1.txt" politely says "The dry run couldn't be read, so nothing is restored over the original files."
+    And the dialog "Restore demo-1.txt" stays open
+    When the repository is put back
+    And I press Shift+Tab until focus is on the button "Read the dry run again"
+    And I press Enter
+    Then the dialog "Restore demo-1.txt" comes to say "0 files added, 0 overwritten, 1 left as it is."
+    And the dialog "Restore demo-1.txt" alerts nothing
+    And the dialog "Restore demo-1.txt" has its button "Restore" available
+    And focus is on the button "Read the dry run again"
+    And the page has no accessibility violations
+
+  @ui
   Scenario: A wrong confirmation is said inside the dialog, which stays open
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times

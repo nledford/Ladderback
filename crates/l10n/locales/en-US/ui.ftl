@@ -345,6 +345,21 @@ ui-gallery-demo-secret-review-body = This demo secret is shown only once.
 # The button inside that review demo that focus starts on. The demo shows only where focus starts: pressing it does nothing.
 ui-gallery-copy-demo-secret = Copy the demo secret
 
+# The button that opens the review demo that is held: it can't be confirmed yet, and says why.
+ui-gallery-open-held-review = Open a held demo review
+
+# The accessible name and heading of the held review demo.
+ui-gallery-demo-held-review = Demo review on hold
+
+# What the held review demo says first.
+ui-gallery-demo-held-review-body = This demo review can't be confirmed yet. Nothing runs.
+
+# The held review demo's confirm button, which says why it is held when pressed.
+ui-gallery-confirm-held-review = Confirm the held demo review
+
+# Why the held review demo can't be confirmed, shown beside its confirm button and said when it is pressed.
+ui-gallery-demo-held-review-reason = The demo review waits for something that never comes.
+
 # The heading of the pause control's demo.
 ui-gallery-pause-heading = Pause control
 
@@ -1308,6 +1323,15 @@ ui-restore-preview =
         [one] { $unchanged } left as it is
        *[other] { $unchanged } left as they are
     }. Files the { -snapshot } doesn't hold stay.
+
+# Beside the restore dialog's confirm button, while restoring over the original files waits for its dry run; also said when that button is pressed then.
+ui-restore-held-reading = Restoring over the original files waits until the dry run says what it would change.
+
+# Beside the restore dialog's confirm button, after the dry run of a restore over the original files couldn't be read; also said when that button is pressed then.
+ui-restore-held-unread = The dry run couldn't be read, so nothing is restored over the original files. Read it again, or restore into a new folder.
+
+# The button in the restore dialog that asks for the dry run again, after it couldn't be read.
+ui-restore-read-again = Read the dry run again
 
 # The label of the step-up field with sign-in off: the snapshot's short ID.
 ui-restore-snapshot-id = Snapshot ID

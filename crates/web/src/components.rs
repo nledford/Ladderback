@@ -196,6 +196,12 @@ pub struct Working {
 /// anything and Escape does not close the dialog, so a review that is being
 /// confirmed is never dismissed from under the request it sent.
 ///
+/// While `held` says why the run can't be confirmed yet, such as a dry run
+/// still reading, the buttons that go ahead stay where a keyboard and a
+/// screen reader find them, `aria-disabled` and described by that reason,
+/// shown beside them; pressing one does nothing but say the reason in the
+/// dialog's polite region. Dismissing still works.
+///
 /// `starts_on` is a button in `children` focus starts on instead of the
 /// dismiss button, for a dialog whose dismissal loses something, such as a
 /// secret shown once, which a stray Enter would then throw away.
@@ -209,6 +215,7 @@ pub fn ReviewDialog(
     returns_to: String,
     described_by: String,
     #[prop(optional)] working: Option<Working>,
+    #[prop(optional)] held: Option<Signal<Option<String>>>,
     #[prop(optional)] fallback: Option<String>,
     #[prop(optional)] starts_on: Option<NodeRef<leptos::html::Button>>,
     children: Children,
@@ -224,6 +231,17 @@ pub fn ReviewDialog(
         None => (Signal::stored(false), String::new()),
     };
     let title_id = format!("{returns_to}-title");
+    let held_id = format!("{returns_to}-held");
+    let held = held.unwrap_or_else(|| Signal::stored(None));
+    // Whether a button that goes ahead was pressed while held, so the polite
+    // region says why; cleared first on each press, so a second press is said
+    // again.
+    let pressed_held = RwSignal::new(false);
+    Effect::new(move |_| {
+        if held.with(Option::is_none) {
+            pressed_held.set(false);
+        }
+    });
     let (opener, opener_fallback) = (returns_to.clone(), fallback.clone());
     Effect::new(move |_| {
         let wanted = open.get();
@@ -246,22 +264,38 @@ pub fn ReviewDialog(
         }
     });
     let body = children();
-    let choice = move |Confirmation { label, action }| {
-        view! {
-            <button
-                type="button"
-                aria-disabled=move || busy.get().then_some("true")
-                on:click=move |_| {
-                    if !busy.get_untracked() {
-                        action.run(());
+    let choice = {
+        let held_id = held_id.clone();
+        move |Confirmation { label, action }| {
+            let held_id = held_id.clone();
+            view! {
+                <button
+                    type="button"
+                    aria-disabled=move || {
+                        (busy.get() || held.with(Option::is_some)).then_some("true")
                     }
-                }
-            >
-                {label}
-            </button>
+                    aria-describedby=move || { held.with(Option::is_some).then(|| held_id.clone()) }
+                    on:click=move |_| {
+                        if busy.get_untracked() {
+                            return;
+                        }
+                        if held.with_untracked(Option::is_some) {
+                            pressed_held.set(false);
+                            spawn_local(async move {
+                                tick().await;
+                                pressed_held.try_set(true);
+                            });
+                        } else {
+                            action.run(());
+                        }
+                    }
+                >
+                    {label}
+                </button>
+            }
         }
     };
-    let confirm = confirm.map(choice);
+    let confirm = confirm.map(choice.clone());
     let also = also.map(choice);
     view! {
         <dialog
@@ -282,8 +316,24 @@ pub fn ReviewDialog(
         >
             <h3 id=title_id.clone()>{title}</h3>
             {body}
+            {move || {
+                held.get()
+                    .map(|reason| {
+                        view! {
+                            <p id=held_id.clone() class="text-muted">
+                                {reason}
+                            </p>
+                        }
+                    })
+            }}
             <p aria-live="polite" aria-atomic="true">
-                {move || busy.get().then(|| status.clone())}
+                {move || {
+                    if busy.get() {
+                        Some(status.clone())
+                    } else {
+                        held.get().filter(|_| pressed_held.get())
+                    }
+                }}
             </p>
             <p class="actions">
                 <button

@@ -12,7 +12,9 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use api::{FolderDto, MsgArg, RestoreDestinationDto, RestorePreviewDto};
+use api::{
+    FolderDto, MsgArg, RestoreDestinationDto, RestorePreviewDto, RestorePreviewRequestDto,
+};
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
@@ -218,22 +220,13 @@ fn restore_dialog(
     };
     let alive = move || state.try_get_untracked().is_some();
     let unreachable = Sentence::new(&text(&localizer, msg::UI_UNREACHABLE_BODY), None);
-    // Choosing in place asks for its dry run.
+    // A dry run asked for, by choosing in place or reading it again, clears
+    // what the last one alerted.
     let preview_url = format!("{base}{}", restore::preview_path(&alias, &snapshot));
     let preview_localizer = Arc::clone(&localizer);
     let preview_unreachable = unreachable.clone();
-    Effect::new(move |_| {
-        let destination = if chosen.get() == IN_PLACE {
-            RestoreDestinationDto::InPlace
-        } else {
-            RestoreDestinationDto::NewFolder
-        };
-        let Some(request) = state
-            .try_update(|dialog| dialog.choose(destination))
-            .flatten()
-        else {
-            return;
-        };
+    let ask_preview = Callback::new(move |request: RestorePreviewRequestDto| {
+        alert.set(None);
         let url = preview_url.clone();
         let localizer = Arc::clone(&preview_localizer);
         let unreachable = preview_unreachable.clone();
@@ -266,6 +259,37 @@ fn restore_dialog(
             };
             state.update(|dialog| dialog.previewed(found));
         });
+    });
+    Effect::new(move |_| {
+        let destination = if chosen.get() == IN_PLACE {
+            RestoreDestinationDto::InPlace
+        } else {
+            RestoreDestinationDto::NewFolder
+        };
+        if let Some(request) = state
+            .try_update(|dialog| dialog.choose(destination))
+            .flatten()
+        {
+            ask_preview.run(request);
+        }
+    });
+    let read_again = move |_| {
+        if let Some(request) = state.try_update(Dialog::read_again).flatten() {
+            ask_preview.run(request);
+        }
+    };
+    let read_again_label = text(&localizer, msg::UI_RESTORE_READ_AGAIN);
+    // A memo, so the button is drawn again only when in place is chosen or
+    // left, never while the dry run it asks for changes, which would take
+    // focus off it.
+    let in_place = Memo::new(move |_| {
+        state.with(|dialog| dialog.destination == RestoreDestinationDto::InPlace)
+    });
+    let held_words = words.clone();
+    let held = Signal::derive(move || {
+        state
+            .with(Dialog::held)
+            .map(|reason| held_words(&reason))
     });
     let preview_words = words.clone();
     let preview = move || {
@@ -345,6 +369,7 @@ fn restore_dialog(
                 active: Signal::derive(move || state.with(|dialog| dialog.starting)),
                 status: text(&localizer, msg::UI_RESTORE_STARTING),
             }
+            held=held
         >
             <p id="restore-summary">{summary}</p>
             <RadioGroup
@@ -360,6 +385,26 @@ fn restore_dialog(
             <p aria-live="polite" aria-atomic="true">
                 {preview}
             </p>
+            {move || {
+                let label = read_again_label.clone();
+                in_place
+                    .get()
+                    .then(|| {
+                        view! {
+                            <p>
+                                <button
+                                    type="button"
+                                    aria-disabled=move || {
+                                        (!state.with(Dialog::can_read_again)).then_some("true")
+                                    }
+                                    on:click=read_again
+                                >
+                                    {label}
+                                </button>
+                            </p>
+                        }
+                    })
+            }}
             {move || {
                 alert
                     .get()

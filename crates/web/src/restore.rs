@@ -142,14 +142,10 @@ impl Dialog {
     }
 
     /// The request confirming sends, once it can be sent: never while a
-    /// start is out, and in place only once its dry run said what it would
-    /// change. The start is then out until [`Dialog::answered`].
+    /// start is out, nor while [`Dialog::held`]. The start is then out until
+    /// [`Dialog::answered`].
     pub(crate) fn confirm(&mut self, confirmation: String) -> Option<RestoreRequestDto> {
-        let ready = match self.destination {
-            RestoreDestinationDto::NewFolder => true,
-            RestoreDestinationDto::InPlace => matches!(self.preview, Preview::Read(_)),
-        };
-        if self.starting || !ready {
+        if self.starting || self.held().is_some() {
             return None;
         }
         self.starting = true;
@@ -157,6 +153,43 @@ impl Dialog {
             path: self.path.clone(),
             destination: self.destination,
             confirmation,
+        })
+    }
+
+    /// Why the dialog can't be confirmed yet, said beside its confirm button:
+    /// in place, while its dry run reads or after it couldn't be read. `None`
+    /// once it can be.
+    pub(crate) fn held(&self) -> Option<Words> {
+        let id = match (self.destination, self.preview) {
+            (RestoreDestinationDto::InPlace, Preview::Unasked | Preview::Reading) => {
+                msg::UI_RESTORE_HELD_READING
+            }
+            (RestoreDestinationDto::InPlace, Preview::Failed) => msg::UI_RESTORE_HELD_UNREAD,
+            (RestoreDestinationDto::InPlace, Preview::Read(_))
+            | (RestoreDestinationDto::NewFolder, _) => return None,
+        };
+        Some(Words {
+            id,
+            args: Vec::new(),
+        })
+    }
+
+    /// Whether the dry run can be read again: in place, once it answered,
+    /// whether it was read or not. The dialog offers it in place throughout,
+    /// held while the dry run reads, so focus never loses the button.
+    pub(crate) fn can_read_again(&self) -> bool {
+        self.destination == RestoreDestinationDto::InPlace
+            && matches!(self.preview, Preview::Read(_) | Preview::Failed)
+    }
+
+    /// Reads the dry run again, when it can be: the request returned is to be
+    /// sent, and a restore in place is held until it answers.
+    pub(crate) fn read_again(&mut self) -> Option<RestorePreviewRequestDto> {
+        self.can_read_again().then(|| {
+            self.preview = Preview::Reading;
+            RestorePreviewRequestDto {
+                path: self.path.clone(),
+            }
         })
     }
 
@@ -345,6 +378,64 @@ mod tests {
                 .map(|request| request.destination),
             Some(RestoreDestinationDto::InPlace)
         );
+    }
+
+    #[test]
+    fn a_restore_in_place_is_held_with_its_reason_until_its_dry_run_is_read() {
+        let mut dialog = Dialog::new("docs".to_owned());
+        assert_eq!(dialog.held(), None, "into a new folder");
+        dialog.choose(RestoreDestinationDto::InPlace);
+        assert_eq!(
+            dialog.held(),
+            Some(Words {
+                id: msg::UI_RESTORE_HELD_READING,
+                args: Vec::new()
+            }),
+            "reading"
+        );
+        dialog.previewed(None);
+        assert_eq!(
+            dialog.held(),
+            Some(Words {
+                id: msg::UI_RESTORE_HELD_UNREAD,
+                args: Vec::new()
+            }),
+            "failed"
+        );
+        dialog.choose(RestoreDestinationDto::NewFolder);
+        assert_eq!(dialog.held(), None, "back to a new folder");
+        dialog.choose(RestoreDestinationDto::InPlace);
+        dialog.previewed(Some(found(1, 2, 3)));
+        assert_eq!(dialog.held(), None, "read");
+    }
+
+    #[test]
+    fn a_dry_run_that_answered_is_read_again_on_request_in_place() {
+        let mut dialog = Dialog::new("docs".to_owned());
+        assert!(!dialog.can_read_again(), "unasked");
+        assert_eq!(dialog.read_again(), None, "unasked");
+        dialog.choose(RestoreDestinationDto::InPlace);
+        assert!(!dialog.can_read_again(), "reading");
+        assert_eq!(dialog.read_again(), None, "reading");
+        dialog.previewed(None);
+        dialog.choose(RestoreDestinationDto::NewFolder);
+        assert!(!dialog.can_read_again(), "failed, into a new folder");
+        assert_eq!(dialog.read_again(), None, "failed, into a new folder");
+        dialog.destination = RestoreDestinationDto::InPlace;
+        assert!(dialog.can_read_again(), "failed, in place");
+        assert_eq!(
+            dialog.read_again(),
+            Some(RestorePreviewRequestDto {
+                path: "docs".to_owned()
+            })
+        );
+        assert_eq!(dialog.preview, Preview::Reading);
+        assert!(dialog.held().is_some(), "held while it reads again");
+        dialog.previewed(Some(found(1, 2, 3)));
+        assert!(dialog.can_read_again(), "read");
+        assert!(dialog.read_again().is_some(), "read");
+        assert_eq!(dialog.preview, Preview::Reading);
+        assert!(dialog.confirm("x".to_owned()).is_none(), "reading again");
     }
 
     #[test]
