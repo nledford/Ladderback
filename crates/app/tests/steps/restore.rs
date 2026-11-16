@@ -23,6 +23,7 @@ use app::secrets::ResolveRepository;
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::browse::FolderPath;
+use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::{FailureReason, OperationKind, OperationStatus, Trigger};
 use domain::notifications::{EventKind, Outcome};
 use domain::planning::{
@@ -58,6 +59,8 @@ pub struct RestoreWorld {
     pub(crate) snapshot: Option<(SnapshotId, String)>,
     /// The admin password, with sign-in on.
     pub(crate) password: Option<String>,
+    /// The repository's own password, when a scenario names one.
+    repository_password: Option<String>,
     allow_hub_restore: bool,
     /// The `restore-folder` the agent's configuration sets.
     restore_folder: Option<RestoreFolder>,
@@ -210,7 +213,11 @@ impl RestoreWorld {
                 settings: RepositorySettings {
                     repository: "/srv/demo/repo".to_owned(),
                     repo_hot: None,
-                    password: SecretRef::Inline(SecretValue::new("demo-password")),
+                    password: SecretRef::Inline(SecretValue::new(
+                        self.repository_password
+                            .as_deref()
+                            .unwrap_or("demo-password"),
+                    )),
                     options: Default::default(),
                     options_hot: Default::default(),
                     options_cold: Default::default(),
@@ -382,6 +389,12 @@ fn sign_in_on(agent: &mut Agent, password: String) {
 #[given("sign-in is off")]
 fn sign_in_off(agent: &mut Agent) {
     agent.restore.password = None;
+}
+
+#[given(expr = "the repository {string} has the password {string}")]
+fn repository_password(agent: &mut Agent, repository: String, password: String) {
+    assert_eq!(repository, alias().as_str(), "the scenario's repository");
+    agent.restore.repository_password = Some(password);
 }
 
 /// The snapshot holds 6 files under the entry: what the original holds as
@@ -642,6 +655,18 @@ async fn history_shows_end(agent: &mut Agent) {
     };
     assert_eq!(record.kind, OperationKind::Restore);
     assert_eq!(&record.status, agent.restore.status());
+}
+
+#[then(expr = "the history names the entry {string}")]
+async fn history_names_entry(agent: &mut Agent, entry: String) {
+    let history = agent.restore.history().await;
+    let [record] = history.as_slice() else {
+        panic!("one operation in {history:?}");
+    };
+    assert_eq!(
+        record.entry.as_ref().map(LoggedEntry::as_str),
+        Some(entry.as_str())
+    );
 }
 
 #[then("the history shows no operation")]

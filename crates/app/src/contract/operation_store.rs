@@ -1,6 +1,7 @@
 mod recovery;
 mod serialization;
 
+use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
     FailureReason, LifecycleError, MAX_STORED_WARNINGS, Operation, OperationKind, OperationStatus,
@@ -32,6 +33,7 @@ pub async fn run(store: &dyn OperationStore) {
     every_kind_and_trigger_reads_back(store, &fx).await;
     every_result_reads_back(store, &fx).await;
     a_maintenance_operation_keeps_the_alias_it_ran_under(store, &fx).await;
+    an_operation_keeps_the_entry_it_read(store, &fx).await;
     an_operation_keeps_the_locations_its_choice_saw(store, &fx).await;
     warnings_read_back_whole_and_in_order(store).await;
     a_later_save_replaces_the_warnings_too(store).await;
@@ -616,6 +618,52 @@ async fn a_maintenance_operation_keeps_the_alias_it_ran_under(
     save(store, &backup, None).await;
     let found = read(store, id(0xb9)).await.map(|found| found.record);
     assert_eq!(found.map(|record| record.repository_alias), Some(None));
+}
+
+/// A restore or a download names the entry of a snapshot it read, as the
+/// log was given it, already masked (#847); every other operation names none.
+async fn an_operation_keeps_the_entry_it_read(store: &dyn OperationStore, fx: &Fixtures) {
+    let entries = [
+        (0xd0, OperationKind::Restore, "/home/docs"),
+        (0xd1, OperationKind::Download, "/"),
+        (0xd2, OperationKind::Restore, "…home/ünïcode ␊ [U+202E]/***"),
+    ];
+    for (n, kind, text) in entries {
+        let target = Target {
+            plan: None,
+            repository: Some(fx.repository.clone()),
+        };
+        let op = Operation::queue(id(n), kind, Trigger::Manual, target, at(0))
+            .with_entry(LoggedEntry::kept(text.to_owned()));
+        save(store, &op, None).await;
+        let found = read(store, id(n)).await.map(|found| found.record);
+        assert_eq!(
+            found
+                .as_ref()
+                .and_then(|record| record.entry.as_ref())
+                .map(LoggedEntry::as_str),
+            Some(text),
+            "the log names the entry as the run did"
+        );
+        // A queued one a restart ends is saved again from its record: it
+        // keeps naming its entry.
+        assert_eq!(
+            found
+                .as_ref()
+                .and_then(OperationRecord::queued_operation)
+                .as_ref()
+                .and_then(Operation::entry)
+                .map(LoggedEntry::as_str),
+            Some(text),
+            "the operation a queued record hands back names its entry"
+        );
+        assert_eq!(found, Some(OperationRecord::of(&op, None)));
+    }
+
+    let backup = queued(0xd3, Some(&fx.home));
+    save(store, &backup, None).await;
+    let found = read(store, id(0xd3)).await.map(|found| found.record);
+    assert_eq!(found.map(|record| record.entry), Some(None));
 }
 
 /// The choice of a repository reached at several locations is kept with the

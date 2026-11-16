@@ -630,6 +630,34 @@ mod tests {
         );
     }
 
+    /// A restore's or a download's row names the entry it read first, as
+    /// the log kept it, before what it wrote, whatever became of the run
+    /// (#847).
+    #[test]
+    fn a_restore_names_the_entry_it_read_before_what_it_wrote() {
+        let entry = said(msg::UI_RESULT_ENTRY, &[("entry", text("/home/docs"))]);
+        let done = OperationResultDto::Restore {
+            files: 7,
+            bytes: 2_048,
+            duration_ms: 2_000,
+        };
+        let restored =
+            summary("restore", "", Some("demo"), Some(done)).with_entry("/home/docs".to_owned());
+        let facts = result(&restored);
+        assert_eq!(facts.len(), 4, "{facts:?}");
+        assert_eq!(facts.first(), Some(&entry));
+        assert_eq!(
+            english(&entry),
+            "Entry /home/docs",
+            "the words the Operations page shows"
+        );
+
+        let mut failed =
+            summary("download", "", Some("demo"), None).with_entry("/home/docs".to_owned());
+        "failed".clone_into(&mut failed.status);
+        assert_eq!(result(&failed), [entry]);
+    }
+
     #[test]
     fn a_run_without_a_result_shows_none() {
         assert_eq!(result(&summary("check", "", Some("demo"), None)), []);

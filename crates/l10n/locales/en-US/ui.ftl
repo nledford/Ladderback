@@ -1084,6 +1084,11 @@ ui-result-took = Took { $duration }
 # $address (text): the location's address, with any credentials in it masked. It is shown as it came.
 ui-result-used-location = Used location { $position } of { $count }: { $address }
 
+# One fact of a restore or a download: the entry of the snapshot it read, as
+# its path from the snapshot's top.
+# $entry (text): that path, such as /home/docs, with any secret in it masked; a long one keeps its end after "…". It is shown as it came.
+ui-result-entry = Entry { $entry }
+
 # The button in the operations header that re-sorts the rows.
 ui-sort-by-started = Sort by started
 

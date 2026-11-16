@@ -137,6 +137,7 @@ fn demoted(n: u128, kind: OperationKind) -> OperationRecord {
         result: None,
         repository_alias: None,
         locations: None,
+        entry: None,
     }
 }
 
@@ -611,4 +612,25 @@ async fn a_database_at_version_13_keeps_its_proposals_with_nothing_decided() {
     assert_eq!(kept.applied_as, None);
     let mut raw = scratch.raw().await;
     assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
+}
+
+/// A restore an earlier build logged names no entry: the column the
+/// upgrade adds is NULL for it, and the row reads back (#847).
+#[tokio::test]
+async fn a_database_at_version_14_keeps_its_restores_naming_no_entry() {
+    let scratch = Scratch::new();
+    let mut old = database_at_version(&scratch, 14).await;
+    legacy(&mut old, 0x70, "restore", "failed", Some(REPOSITORY_HEX)).await;
+    old.close().await.expect("the old database is closed");
+
+    let store = scratch.open().await;
+    let restore = store
+        .get(id(0x70))
+        .await
+        .expect("reading works")
+        .expect("the restore is in the log");
+    assert_eq!(restore.record.kind, OperationKind::Restore);
+    assert_eq!(restore.record.entry, None);
+    let mut raw = scratch.raw().await;
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(15, true)));
 }

@@ -3844,6 +3844,14 @@ impl OperationSummaryDto {
         Self { locations, ..self }
     }
 
+    /// The same summary, naming the entry of a snapshot a restore or a
+    /// download read, as the log kept it (#847).
+    #[must_use]
+    pub fn with_entry(self, entry: String) -> Self {
+        let _ = (self, entry);
+        todo!("#847: name the entry a restore or a download read")
+    }
+
     /// The location the run used, and how many the repository had then,
     /// when it had several.
     pub fn used_location(&self) -> Option<(&LocationTriedDto, usize)> {

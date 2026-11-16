@@ -11,7 +11,9 @@ Feature: Restoring files from a snapshot
   first: the admin password with sign-in on, the snapshot's short ID
   otherwise. A restore runs as an operation, one at a time on an agent, with
   the deadline a backup of its repository has; it can be cancelled, and is
-  recorded in the history and announced as other operations are.
+  recorded in the history and announced as other operations are. The
+  history names the entry it read, by its path from the snapshot's top, with
+  any secret of the repository in it masked.
 
   # The untagged scenarios run the restore use case with a scripted engine
   # and a fake clock; the agent's restore folder is
@@ -27,6 +29,19 @@ Feature: Restoring files from a snapshot
     And the started restore names its new folder "/home/demo/ladderback-restore/laptop-3f2a1b4c-20270115-080000"
     And the restore ends as succeeded
     And the history shows the restore, started by hand
+
+  Scenario: The history names the entry a restore read by its path from the snapshot's top
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And sign-in is off
+    When the person restores "home/docs" of the snapshot, confirming with "3f2a1b4c"
+    Then the history names the entry "/home/docs"
+
+  Scenario: An entry whose path holds the repository's password is named with the password masked
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And the repository "demo" has the password "canary-pass"
+    And sign-in is off
+    When the person restores "home/canary-pass/notes.md" of the snapshot, confirming with "3f2a1b4c"
+    Then the history names the entry "/home/***/notes.md"
 
   Scenario: A snapshot host that isn't a safe folder name is made one
     Given a snapshot "3f2a1b4c" of the host "../evil/host" in the repository "demo"
@@ -193,6 +208,24 @@ Feature: Restoring files from a snapshot
     Then the dialog "Restore demo-1.txt" is closed
     And the polite region comes to contain "Restore of demo-1.txt finished. Its files are in "
     And the polite region names the new folder in the agent's restore folder, holding "demo-1.txt"
+    And the page has no accessibility violations
+
+  @ui
+  Scenario: A restored file is named in its row on the Operations page
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    When I open the newest snapshot of the plan "home"
+    And I press Tab until focus is on a tree item
+    And I press ArrowRight until focus is on the tree item "demo-1.txt"
+    And I press Tab until focus is on the button "Restore demo-1.txt"
+    And I press Enter
+    And I press Tab until focus is on the textbox "Snapshot ID"
+    And I type the newest snapshot's short ID of the plan "home"
+    And I press Tab until focus is on the button "Restore"
+    And I press Enter
+    Then the polite region comes to contain "Restore of demo-1.txt finished."
+    When I open the address "/operations"
+    Then the row "Operation" of the table "Operations" lists "demo-1.txt" in its "Result" column
     And the page has no accessibility violations
 
   @ui

@@ -63,6 +63,7 @@ fn logged(
         result,
         repository_alias: alias.map(|alias| RepositoryAlias::parse(alias).expect("an alias")),
         locations: None,
+        entry: None,
     }
 }
 
@@ -89,6 +90,24 @@ fn a_maintenance_row_names_its_repository_by_the_alias_it_ran_under() {
     // A row logged before the alias was kept names none.
     let old = logged(OperationKind::Check, None, None);
     assert_eq!(summary(&old).expect("a row").repository, None);
+}
+
+/// A restore's or a download's row names the entry it read, as the log
+/// kept it; one logged before the entry was kept names none, and its
+/// JSON has no `entry` (#847).
+#[test]
+fn a_restores_row_names_the_entry_it_read() {
+    let mut restore = logged(OperationKind::Restore, None, None);
+    restore.entry = Some(domain::execution::logged_entry::LoggedEntry::kept(
+        "/home/***/notes.md".to_owned(),
+    ));
+    let wire = serde_json::to_value(summary(&restore).expect("a row the page can show"))
+        .expect("a summary is JSON");
+    assert_eq!(wire["entry"], "/home/***/notes.md");
+
+    let old = logged(OperationKind::Restore, None, None);
+    let wire = serde_json::to_value(summary(&old).expect("a row")).expect("a summary is JSON");
+    assert_eq!(wire.get("entry"), None);
 }
 
 /// The page names an operation's warnings by their codes, each once,
