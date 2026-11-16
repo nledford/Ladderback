@@ -25,8 +25,12 @@ const HUB_ALLOWED: RestorePolicy = RestorePolicy {
 #[test]
 fn the_agents_own_ui_restores_into_a_new_folder_or_in_place() {
     for destination in [Destination::NewFolder, Destination::InPlace] {
-        let request = admit(RestorePolicy::default(), destination, RestoreOrigin::LocalUi)
-            .expect("the agent's own UI may restore");
+        let request = admit(
+            RestorePolicy::default(),
+            destination,
+            RestoreOrigin::LocalUi,
+        )
+        .expect("the agent's own UI may restore");
         assert_eq!(request.destination(), destination);
         assert_eq!(request.origin(), RestoreOrigin::LocalUi);
         assert_eq!(request.snapshot(), &snapshot());

@@ -2,14 +2,16 @@
 
 use api::WarningCode;
 use app::ports::{
-    EngineError, FakeEnd, FakeJob, ForgetJob, Job, MAX_JOB_IDS, RepositoryAccess, RewriteJob,
+    EngineError, FakeEnd, FakeJob, ForgetJob, Job, MAX_JOB_IDS, RepositoryAccess, RestoreJob,
+    RestoreTarget, RewriteJob,
 };
 use domain::execution::WarningKind;
 use domain::planning::{GlobFile, SourceFilter};
 
 use crate::job::{
     BackupJobSpec, BrowseJobSpec, CheckJobSpec, FakeEndSpec, FakeJobSpec, FakeWarning,
-    ForgetJobSpec, JobKind, PruneJobSpec, RepositorySpec, RewriteJobSpec, SourceFilterSpec,
+    ForgetJobSpec, JobKind, PruneJobSpec, RepositorySpec, RestoreJobSpec, RestoreTargetSpec,
+    RewriteJobSpec, SourceFilterSpec,
 };
 
 fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
@@ -50,6 +52,26 @@ fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
         exclude_if_present,
         exclude_if_xattr,
         one_file_system,
+    }
+}
+
+/// A restore as the worker takes it: the entry by its keys, as a browse
+/// names its folder.
+fn restore_spec(job: RestoreJob) -> RestoreJobSpec {
+    RestoreJobSpec {
+        repo: repository_spec(job.repository),
+        snapshot: job.snapshot,
+        entry: job
+            .entry
+            .names()
+            .iter()
+            .map(|name| name.as_str().to_owned())
+            .collect(),
+        target: match job.target {
+            RestoreTarget::NewFolder(path) => RestoreTargetSpec::NewFolder { path },
+            RestoreTarget::InPlace => RestoreTargetSpec::InPlace,
+        },
+        deadline_budget: job.deadline_budget,
     }
 }
 
@@ -128,7 +150,8 @@ pub(super) fn job_kind(job: Job) -> Result<JobKind, EngineError> {
             from: job.from,
         }),
         Job::Stats(access) => JobKind::Stats(repository_spec(access)),
-        Job::Restore(_) | Job::RestorePlan(_) => todo!("the restore worker's job spec"),
+        Job::Restore(job) => JobKind::Restore(restore_spec(job)),
+        Job::RestorePlan(job) => JobKind::RestorePlan(restore_spec(job)),
         Job::Backup(job) => JobKind::Backup(BackupJobSpec {
             repo: repository_spec(job.repository),
             sources: job.sources,

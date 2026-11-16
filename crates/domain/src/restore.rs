@@ -5,6 +5,7 @@
 use jiff::civil::DateTime;
 
 use crate::SnapshotId;
+use crate::access::step_up::short_id;
 use crate::browse::FolderPath;
 
 /// Where a restore writes.
@@ -57,13 +58,26 @@ impl RestoreRequest {
     /// The request for `entry` of `snapshot` into `destination`, asked for
     /// from `origin`, if `policy` takes it.
     pub fn admit(
-        _policy: RestorePolicy,
-        _snapshot: SnapshotId,
-        _entry: FolderPath,
-        _destination: Destination,
-        _origin: RestoreOrigin,
+        policy: RestorePolicy,
+        snapshot: SnapshotId,
+        entry: FolderPath,
+        destination: Destination,
+        origin: RestoreOrigin,
     ) -> Result<Self, RestoreRefused> {
-        todo!("RestoreRequest::admit")
+        if origin == RestoreOrigin::Hub {
+            if destination == Destination::InPlace {
+                return Err(RestoreRefused::InPlaceFromHub);
+            }
+            if !policy.allow_hub_restore {
+                return Err(RestoreRefused::HubNotAllowed);
+            }
+        }
+        Ok(Self {
+            snapshot,
+            entry,
+            destination,
+            origin,
+        })
     }
 
     pub fn snapshot(&self) -> &SnapshotId {
@@ -84,12 +98,37 @@ impl RestoreRequest {
     }
 }
 
+/// The most characters of the host a new folder's name keeps.
+const MAX_HOST_CHARS: usize = 64;
+
 /// The name of the folder a restore into a new folder makes:
 /// `<host>-<short ID>-<YYYYMMDD-HHMMSS>`, the time on the agent's clock in
 /// its own time zone. The host is text the repository holds, so it is made a
 /// safe name of one folder: never empty, `.` or `..`, no separator.
-pub fn restore_folder_name(_host: &str, _snapshot: &SnapshotId, _at: DateTime) -> String {
-    todo!("restore_folder_name")
+pub fn restore_folder_name(host: &str, snapshot: &SnapshotId, at: DateTime) -> String {
+    // Leading dots would hide the folder, or make it `.` or `..`; any other
+    // character but a letter, a digit, `.`, `-` and `_` (a separator, a
+    // space, a control or a direction override) becomes `_`.
+    let mut safe: String = host
+        .trim_start_matches('.')
+        .chars()
+        .take(MAX_HOST_CHARS)
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if safe.is_empty() {
+        safe.push_str("host");
+    }
+    format!(
+        "{safe}-{}-{}",
+        short_id(snapshot),
+        at.strftime("%Y%m%d-%H%M%S")
+    )
 }
 
 #[cfg(test)]

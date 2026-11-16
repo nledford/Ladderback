@@ -129,7 +129,7 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             None,
         ),
         F::DeadlinePassed => ErrorDto::new(ErrorCode::DeadlinePassed, [], None),
-        F::RestoreTargetUnwritable => todo!("ErrorCode::RestoreTargetUnwritable, §13.7"),
+        F::RestoreTargetUnwritable => ErrorDto::new(ErrorCode::RestoreTargetUnwritable, [], None),
         F::EngineStartTimedOut => ErrorDto::new(ErrorCode::EngineStartTimedOut, [], None),
         F::EngineExitTimedOut => ErrorDto::new(ErrorCode::EngineExitTimedOut, [], None),
         F::RepositoryExists => ErrorDto::new(ErrorCode::RepositoryExists, [], None),
@@ -432,6 +432,11 @@ mod tests {
                 vec![text("Succeed")],
             ),
             (F::DeadlinePassed, C::DeadlinePassed, vec![]),
+            (
+                F::RestoreTargetUnwritable,
+                C::RestoreTargetUnwritable,
+                vec![],
+            ),
             (F::EngineStartTimedOut, C::EngineStartTimedOut, vec![]),
             (F::EngineExitTimedOut, C::EngineExitTimedOut, vec![]),
             (F::RepositoryExists, C::RepositoryExists, vec![]),
@@ -538,6 +543,10 @@ mod tests {
             (
                 F::DeadlinePassed,
                 ErrorDto::new(C::DeadlinePassed, [], None),
+            ),
+            (
+                F::RestoreTargetUnwritable,
+                ErrorDto::new(C::RestoreTargetUnwritable, [], None),
             ),
             (
                 F::EngineStartTimedOut,

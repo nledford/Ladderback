@@ -268,9 +268,16 @@ fn restore_folder_empty(agent: &mut Agent) {
     assert!(held.is_empty(), "the restore wrote {held:?}");
 }
 
-#[then(regex = r"^the preview says (\d+) files? would be added, (\d+) overwritten and (\d+) left as they are$")]
+#[then(
+    regex = r"^the preview says (\d+) files? would be added, (\d+) overwritten and (\d+) left as they are$"
+)]
 fn preview_counts(agent: &mut Agent, added: u64, overwritten: u64, unchanged: u64) {
-    let preview = match agent.restore.preview.as_ref().expect("a preview was asked for") {
+    let preview = match agent
+        .restore
+        .preview
+        .as_ref()
+        .expect("a preview was asked for")
+    {
         Ok(preview) => preview,
         Err(error) => panic!("the preview failed: {error:?}"),
     };

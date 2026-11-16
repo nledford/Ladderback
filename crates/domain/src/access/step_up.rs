@@ -21,21 +21,28 @@ impl StepUpMethod {
     /// The method while sign-in by the admin password is on, or not. Only
     /// that sign-in has a password to enter again: with sign-in off, or
     /// behind a proxy that signs people in by a header, the short ID.
-    pub fn of(_password_sign_in: bool) -> Self {
-        todo!("StepUpMethod::of")
+    pub fn of(password_sign_in: bool) -> Self {
+        if password_sign_in {
+            Self::Password
+        } else {
+            Self::ShortId
+        }
     }
 }
 
 /// Whether `typed` confirms `snapshot`: its short ID or its whole ID, in
 /// either case, with the spaces around it dropped, as a paste brings them.
-pub fn confirms_snapshot(_typed: &str, _snapshot: &SnapshotId) -> bool {
-    todo!("confirms_snapshot")
+pub fn confirms_snapshot(typed: &str, snapshot: &SnapshotId) -> bool {
+    let typed = typed.trim();
+    typed.eq_ignore_ascii_case(short_id(snapshot)) || typed.eq_ignore_ascii_case(snapshot.as_str())
 }
 
 /// The snapshot's short ID.
 pub fn short_id(snapshot: &SnapshotId) -> &str {
-    let _ = snapshot;
-    todo!("short_id")
+    snapshot
+        .as_str()
+        .get(..SHORT_ID_LEN)
+        .unwrap_or(snapshot.as_str())
 }
 
 #[cfg(test)]

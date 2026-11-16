@@ -419,10 +419,23 @@ impl Access {
     /// session is started or used.
     pub async fn step_up(
         &self,
-        _address: IpAddr,
-        _attempt: &Password,
+        address: IpAddr,
+        attempt: &Password,
     ) -> Result<StepUpConfirmed, StepUpRefused> {
-        todo!("Access::step_up")
+        let client = Client::of(address);
+        match self.check(client, attempt).await {
+            Ok(_) => {
+                self.lock().waits.succeeded(client);
+                Ok(StepUpConfirmed)
+            }
+            Err(SignInRefused::WrongPassword) => Err(StepUpRefused::WrongPassword),
+            Err(SignInRefused::Wait { seconds }) => Err(StepUpRefused::Wait { seconds }),
+            Err(SignInRefused::Unavailable(text)) => Err(StepUpRefused::Unavailable(text)),
+            // A check never writes to the store.
+            Err(SignInRefused::Store(error)) => {
+                Err(StepUpRefused::Unavailable(format!("{error:?}")))
+            }
+        }
     }
 
     /// The session of `token`, if it is live, used once more by asking,

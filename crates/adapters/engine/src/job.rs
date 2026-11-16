@@ -121,6 +121,13 @@ pub enum JobKind {
     /// Reads the repository's stats: the snapshots, then every index file.
     /// A read, never an operation.
     Stats(RepositorySpec),
+    /// Restores one entry of a snapshot (§10.4). It adds and overwrites, and
+    /// never deletes a file the snapshot doesn't hold. An operation, with a
+    /// backup's deadline.
+    Restore(RestoreJobSpec),
+    /// What a [`Restore`](Self::Restore) would do, worked out and not done:
+    /// rustic's dry run, which writes nothing. A read, never an operation.
+    RestorePlan(RestoreJobSpec),
 }
 
 /// A repository and what it takes to open it.
@@ -269,6 +276,33 @@ pub struct BrowseJobSpec {
     pub from: u64,
 }
 
+/// One entry of a snapshot to restore, and where (§10.4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreJobSpec {
+    pub repo: RepositorySpec,
+    pub snapshot: SnapshotId,
+    /// The names that lead from the snapshot's top to the entry, each as
+    /// rustic records it (its escaped form); none for the top, which
+    /// restores the whole snapshot.
+    pub entry: Vec<String>,
+    pub target: RestoreTargetSpec,
+    /// Counted from the start of the index read; once it passes, the worker
+    /// stops (I3). A dry run has none.
+    pub deadline_budget: SignedDuration,
+}
+
+/// Where a restore writes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "to", rename_all = "snake_case")]
+pub enum RestoreTargetSpec {
+    /// The folder at this absolute path, which the worker makes, with the
+    /// folders above it, and refuses when it is there already; the entry is
+    /// restored into it.
+    NewFolder { path: String },
+    /// The entry's original path: `/` joined with its names.
+    InPlace,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FakeJobSpec {
     pub steps: u32,
@@ -409,6 +443,10 @@ pub enum OpResult {
     Folder(FolderResult),
     /// What a [`JobKind::Stats`] read.
     Stats(StatsResult),
+    /// What a [`JobKind::Restore`] wrote.
+    Restore(RestoreResult),
+    /// What a [`JobKind::RestorePlan`] found.
+    RestorePlan(RestorePlanResult),
 }
 
 /// What a browse found: one page of the folder, or that the snapshot or the
@@ -541,6 +579,35 @@ pub struct StatsResult {
     pub total_size: u64,
     pub stored_size: u64,
     pub raw_size: u64,
+}
+
+/// What a [`JobKind::Restore`] did, counted as rustic counts it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreResult {
+    /// Files written, new or overwritten.
+    pub files_restored: u64,
+    /// Files already as the snapshot holds them, left as they were.
+    pub files_unchanged: u64,
+    /// Folders made.
+    pub folders_restored: u64,
+    /// Bytes written.
+    pub bytes_restored: u64,
+}
+
+/// What a [`JobKind::RestorePlan`] found, from rustic's dry run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestorePlanResult {
+    /// Files it would add, where nothing is.
+    pub files_added: u64,
+    /// Files it would overwrite, which differ from the snapshot's.
+    pub files_overwritten: u64,
+    /// Files already as the snapshot holds them.
+    pub files_unchanged: u64,
+    /// Entries the destination holds and the snapshot doesn't, which stay:
+    /// a folder of them counts once, as rustic counts it.
+    pub files_kept: u64,
+    /// Bytes it would write.
+    pub bytes_to_write: u64,
 }
 
 /// A secret travels as the plain string it is: the protocol is the one place

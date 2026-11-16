@@ -2175,7 +2175,11 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
             rewritten: u64::try_from(rewrite.created.len()).unwrap_or(0),
             duration_ms,
         }),
-        EngineResult::Restore(_) => todo!("the restore's result on the wire"),
+        EngineResult::Restore(restore) => Some(api::OperationResultDto::Restore {
+            files: restore.files_restored,
+            bytes: restore.bytes_restored,
+            duration_ms,
+        }),
         // Reads: a result no operation row holds, so the page shows none.
         EngineResult::Fake { .. }
         | EngineResult::Repository { .. }
@@ -3397,7 +3401,9 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
             None,
         ),
         F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
-        F::RestoreTargetUnwritable => todo!("ErrorCode::RestoreTargetUnwritable, §13.7"),
+        F::RestoreTargetUnwritable => {
+            unavailable(ErrorCode::RestoreTargetUnwritable, Vec::new(), None)
+        }
         F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
         F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
         // Only a backup's before-hook stops a job this way: a repository job

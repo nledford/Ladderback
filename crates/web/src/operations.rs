@@ -219,6 +219,19 @@ fn produced(result: &OperationResultDto) -> Vec<Words> {
             ));
             duration_ms
         }
+        OperationResultDto::Restore {
+            files,
+            bytes,
+            duration_ms,
+        } => {
+            facts.push(fact(
+                msg::UI_RESULT_RESTORED,
+                "files",
+                MsgArg::Count(*files),
+            ));
+            facts.push(fact(msg::UI_RESULT_WRITTEN, "bytes", MsgArg::Bytes(*bytes)));
+            duration_ms
+        }
     };
     facts.push(fact(
         msg::UI_RESULT_TOOK,
@@ -594,6 +607,27 @@ mod tests {
             let run = summary(kind, "", Some("demo"), Some(done));
             assert_eq!(result(&run), [fact, took.clone()], "{kind}");
         }
+    }
+
+    #[test]
+    fn a_restore_counts_the_files_and_bytes_it_wrote() {
+        let done = OperationResultDto::Restore {
+            files: 7,
+            bytes: 2_048,
+            duration_ms: 2_000,
+        };
+        let run = summary("restore", "", Some("demo"), Some(done));
+        assert_eq!(
+            result(&run),
+            [
+                said(msg::UI_RESULT_RESTORED, &[("files", MsgArg::Count(7))]),
+                said(msg::UI_RESULT_WRITTEN, &[("bytes", MsgArg::Bytes(2_048))]),
+                said(
+                    msg::UI_RESULT_TOOK,
+                    &[("duration", MsgArg::DurationMs(2_000))]
+                ),
+            ]
+        );
     }
 
     #[test]

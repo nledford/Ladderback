@@ -370,6 +370,23 @@ pub enum ErrorCode {
     /// detail when it recorded many long warnings, which then names the
     /// `operation` (§4.6).
     DaemonAnswerTooLarge,
+    /// The step-up confirmation a restore asks for (§10.4) was not right:
+    /// the admin password with sign-in on, the snapshot's short ID with it
+    /// off. A wrong password counted as a failed sign-in. Nothing ran.
+    StepUpFailed,
+    /// A restore couldn't write where it was to write: the restore folder,
+    /// or a path it restores in place, refused it (§10.4). What it wrote
+    /// before stays.
+    RestoreTargetUnwritable,
+    /// A restore runs on the agent already, and an agent runs one at a time
+    /// (§10.4): nothing ran. The argument `operation` names the one running.
+    RestoreRunning,
+    /// A restore in place was asked for from elsewhere than the agent's own
+    /// web UI, the one place it is offered (§10.4): nothing ran.
+    RestoreInPlaceNotHere,
+    /// A restore was asked for through the hub, and the agent doesn't set
+    /// `allow-hub-restore` (§10.4): nothing ran.
+    RestoreHubNotAllowed,
     #[serde(other)]
     Unknown,
 }
@@ -1063,7 +1080,7 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
-            Self::MaintenanceBusy => &[ArgSpec {
+            Self::MaintenanceBusy | Self::RestoreRunning => &[ArgSpec {
                 name: "operation",
                 kind: ArgKind::Text,
                 optional: false,
@@ -1193,6 +1210,10 @@ impl ErrorCode {
             | Self::InlineSecret
             | Self::ConfigFolderUnknown
             | Self::RuntimeUnavailable
+            | Self::StepUpFailed
+            | Self::RestoreTargetUnwritable
+            | Self::RestoreInPlaceNotHere
+            | Self::RestoreHubNotAllowed
             | Self::Unknown => &[],
         }
     }
@@ -2531,6 +2552,36 @@ mod tests {
         ] {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);
             assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
+        }
+    }
+
+    #[test]
+    fn the_codes_of_a_restore_are_named_on_the_wire_and_only_a_running_one_names_its_operation() {
+        for (code, wire) in [
+            (ErrorCode::StepUpFailed, r#""step-up-failed""#),
+            (
+                ErrorCode::RestoreTargetUnwritable,
+                r#""restore-target-unwritable""#,
+            ),
+            (ErrorCode::RestoreRunning, r#""restore-running""#),
+            (
+                ErrorCode::RestoreInPlaceNotHere,
+                r#""restore-in-place-not-here""#,
+            ),
+            (
+                ErrorCode::RestoreHubNotAllowed,
+                r#""restore-hub-not-allowed""#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+            assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);
+            let args: Vec<&str> = code.args().iter().map(|arg| arg.name).collect();
+            let named: &[&str] = if code == ErrorCode::RestoreRunning {
+                &["operation"]
+            } else {
+                &[]
+            };
+            assert_eq!(args, named, "{code:?}");
         }
     }
 
@@ -4728,6 +4779,13 @@ pub enum OperationResultDto {
     /// What an adoption produced: the snapshots rewritten.
     Adopt {
         rewritten: u64,
+        duration_ms: u64,
+    },
+    /// What a restore wrote: the files written, new or overwritten, and
+    /// their bytes.
+    Restore {
+        files: u64,
+        bytes: u64,
         duration_ms: u64,
     },
 }

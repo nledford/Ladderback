@@ -636,6 +636,19 @@ ui-result-removed =
        *[other] { $removed } snapshots removed
     }
 
+# One fact of a finished restore's result: the files it wrote, new or
+# overwritten.
+# $files (count): how many.
+ui-result-restored =
+    { $files ->
+        [one] { $files } file restored
+       *[other] { $files } files restored
+    }
+
+# One fact of a finished restore's result: the bytes it wrote.
+# $bytes (bytes): how much, as a size such as 1 MiB.
+ui-result-written = { $bytes } written
+
 # One fact of a finished adoption's result: the snapshots it rewrote into
 # the plan.
 # $rewritten (count): how many.

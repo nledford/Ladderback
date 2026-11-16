@@ -570,7 +570,9 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
             None,
         ),
         F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
-        F::RestoreTargetUnwritable => todo!("ErrorCode::RestoreTargetUnwritable, §13.7"),
+        F::RestoreTargetUnwritable => {
+            unavailable(ErrorCode::RestoreTargetUnwritable, Vec::new(), None)
+        }
         F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
         F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
         // A read of the repository runs no hooks and creates nothing: these

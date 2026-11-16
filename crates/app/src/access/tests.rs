@@ -245,6 +245,37 @@ fn each_address_that_failed_is_remembered_on_its_own() {
 }
 
 #[test]
+fn a_right_step_up_password_starts_the_addresss_waits_over_and_a_wrong_one_counts() {
+    let clock = clock();
+    let access = access(&clock);
+    let wrong = password("not-the-password");
+    let step_up = |attempt: &Password| access.step_up(HOME, attempt).now_or_never().unwrap();
+    assert_eq!(step_up(&wrong), Err(StepUpRefused::WrongPassword));
+    assert_eq!(access.remembered_addresses(), 1);
+    assert_eq!(
+        step_up(&password("demo-admin-pass")),
+        Err(StepUpRefused::Wait { seconds: 1 })
+    );
+    clock.advance(SignedDuration::from_secs(1));
+    assert_eq!(step_up(&password("demo-admin-pass")), Ok(StepUpConfirmed));
+    assert_eq!(access.remembered_addresses(), 0);
+    access
+        .sign_in(HOME, &wrong, false, false)
+        .now_or_never()
+        .unwrap()
+        .unwrap_err();
+    clock.advance(SignedDuration::from_millis(1));
+    assert_eq!(
+        access
+            .sign_in(HOME, &wrong, false, false)
+            .now_or_never()
+            .unwrap()
+            .unwrap_err(),
+        SignInRefused::Wait { seconds: 1 }
+    );
+}
+
+#[test]
 fn signing_out_ends_the_session_it_names() {
     let clock = clock();
     let access = access(&clock);

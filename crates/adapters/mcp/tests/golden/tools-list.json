@@ -400,6 +400,36 @@
                 "duration-ms"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "restore",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
+                "duration-ms"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -1652,6 +1682,36 @@
                 "duration-ms"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "restore",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
+                "duration-ms"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -2099,6 +2159,36 @@
               "required": [
                 "type",
                 "rewritten",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "restore",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
                 "duration-ms"
               ],
               "type": "object"
@@ -2621,6 +2711,36 @@
               "required": [
                 "type",
                 "rewritten",
+                "duration-ms"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "duration-ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "files": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "restore",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "files",
+                "bytes",
                 "duration-ms"
               ],
               "type": "object"

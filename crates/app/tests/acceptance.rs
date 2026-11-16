@@ -59,12 +59,12 @@ mod plans_steps;
 mod recovery_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
+#[path = "steps/restore.rs"]
+mod restore_steps;
 #[path = "steps/schedule.rs"]
 mod schedule_steps;
 #[path = "steps/scheduler.rs"]
 mod scheduler_steps;
-#[path = "steps/restore.rs"]
-mod restore_steps;
 #[path = "steps/sign_in.rs"]
 mod sign_in_steps;
 #[path = "steps/stats.rs"]

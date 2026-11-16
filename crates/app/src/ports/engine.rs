@@ -631,7 +631,8 @@ pub struct RestorePlanSummary {
     pub files_overwritten: u64,
     /// Files already as the snapshot holds them.
     pub files_unchanged: u64,
-    /// Files the destination holds and the snapshot doesn't: they stay.
+    /// Entries the destination holds and the snapshot doesn't: they stay. A
+    /// folder of them counts once, as rustic counts it.
     pub files_kept: u64,
     /// Bytes it would write.
     pub bytes_to_write: u64,

@@ -5,17 +5,29 @@
 //! time on the agent, and runs no hooks, as a manual maintenance run doesn't.
 
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use domain::access::Password;
+use domain::access::step_up::confirms_snapshot;
 use domain::browse::FolderPath;
-use domain::restore::{Destination, RestoreOrigin, RestoreRefused};
+use domain::execution::Trigger;
+use domain::execution::deadline::backup_budget;
+use domain::planning::{AgentConfig, RepositoryConfig};
+use domain::restore::{
+    Destination, RestoreOrigin, RestorePolicy, RestoreRefused, RestoreRequest, restore_folder_name,
+};
+use domain::secrets::SecretWarning;
 use domain::{OperationId, RepositoryAlias, SnapshotId, TimeZone};
 
-use crate::access::Access;
+use crate::access::{Access, StepUpRefused};
 use crate::execution::{Finished, Queued, RunOperation};
-use crate::maintenance::MaintenanceError;
-use crate::ports::{Clock, ConfigError, ConfigStore, Engine, RestorePlanSummary};
-use crate::secrets::{ResolveError, ResolveRepository};
+use crate::maintenance::{MaintenanceError, run_read};
+use crate::ports::{
+    Clock, ConfigError, ConfigStore, Engine, EngineResult, Job, RepositoryAccess, RestoreJob,
+    RestorePlanSummary, RestoreTarget,
+};
+use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
 
 /// What a restore needs that the configuration doesn't say.
 #[derive(Clone, Debug)]
@@ -64,11 +76,15 @@ pub enum RestoreError {
     /// The repository holds no snapshot by that ID.
     SnapshotUnknown,
     /// The configuration couldn't be read.
-    Config(ConfigError),
+    Config(Box<ConfigError>),
     /// The repository's secrets couldn't be resolved.
     Resolve(ResolveError),
     /// Reading the repository failed, or wasn't answered in time.
     Read(MaintenanceError),
+}
+
+fn config_error(error: ConfigError) -> RestoreError {
+    RestoreError::Config(Box::new(error))
 }
 
 /// A restore that has been confirmed, recorded as queued and holds the
@@ -77,7 +93,7 @@ pub enum RestoreError {
 pub struct PreparedRestore {
     queued: Queued,
     operation: OperationId,
-    _slot: Slot,
+    slot: Slot,
 }
 
 impl PreparedRestore {
@@ -87,9 +103,20 @@ impl PreparedRestore {
     }
 }
 
-/// The agent's one restore slot, held by the restore that runs.
+/// The agent's one restore slot, held by the restore that runs: given up
+/// when it is dropped.
 struct Slot {
     running: Arc<Mutex<Option<OperationId>>>,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        *lock(&self.running) = None;
+    }
+}
+
+fn lock(running: &Mutex<Option<OperationId>>) -> MutexGuard<'_, Option<OperationId>> {
+    running.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Restores entries of snapshots.
@@ -139,13 +166,30 @@ impl Restores {
     /// run that writes nothing: a read, never recorded as an operation.
     pub async fn preview_in_place(
         &self,
-        _op: OperationId,
-        _alias: &RepositoryAlias,
-        _snapshot: SnapshotId,
-        _entry: FolderPath,
-        _origin: RestoreOrigin,
+        op: OperationId,
+        alias: &RepositoryAlias,
+        snapshot: SnapshotId,
+        entry: FolderPath,
+        origin: RestoreOrigin,
     ) -> Result<RestorePlanSummary, RestoreError> {
-        todo!("Restores::preview_in_place")
+        let config = self.config.load().await.map_err(config_error)?;
+        let request = admit(&config, snapshot, entry, Destination::InPlace, origin)?;
+        let repository = repository(&config, alias)?;
+        let ResolvedRepository { access, .. } = self.resolved(alias, repository).await?;
+        let job = Job::RestorePlan(RestoreJob {
+            repository: access,
+            snapshot: request.snapshot().clone(),
+            entry: request.entry().clone(),
+            target: RestoreTarget::InPlace,
+            deadline_budget: backup_budget(None, None),
+        });
+        match run_read(self.engine.as_ref(), self.clock.as_ref(), op, job).await {
+            Ok(EngineResult::RestorePlan(plan)) => Ok(plan),
+            Ok(_) => Err(RestoreError::Read(MaintenanceError::Failed(
+                domain::execution::FailureReason::EngineExited { exit_code: None },
+            ))),
+            Err(error) => Err(RestoreError::Read(error)),
+        }
     }
 
     /// Confirms `ask` by step-up, admits it by the agent's rules, takes the
@@ -153,24 +197,174 @@ impl Restores {
     /// recorded and the engine isn't asked when any of them refuses.
     pub async fn start(
         &self,
-        _op: OperationId,
-        _ask: RestoreAsk,
+        op: OperationId,
+        ask: RestoreAsk,
     ) -> Result<PreparedRestore, RestoreError> {
-        todo!("Restores::start")
+        self.step_up(&ask).await?;
+        let config = self.config.load().await.map_err(config_error)?;
+        let request = admit(
+            &config,
+            ask.snapshot,
+            ask.entry,
+            ask.destination,
+            ask.origin,
+        )?;
+        let slot = self.take_slot(op)?;
+        let repository = repository(&config, &ask.alias)?;
+        let ResolvedRepository { access, warnings } = self.resolved(&ask.alias, repository).await?;
+        let target = match request.destination() {
+            Destination::NewFolder => {
+                let host = self.host_of(op, access.clone(), request.snapshot()).await?;
+                let at = self
+                    .clock
+                    .now()
+                    .to_zoned(self.setup.zone.clone())
+                    .datetime();
+                let mut folder = PathBuf::from(&self.setup.default_folder);
+                folder.push(restore_folder_name(&host, request.snapshot(), at));
+                RestoreTarget::NewFolder(folder.to_string_lossy().into_owned())
+            }
+            Destination::InPlace => RestoreTarget::InPlace,
+        };
+        let job = Job::Restore(RestoreJob {
+            repository: access,
+            snapshot: request.snapshot().clone(),
+            entry: request.entry().clone(),
+            target,
+            deadline_budget: backup_budget(None, None),
+        });
+        let trigger = match request.origin() {
+            RestoreOrigin::LocalUi => Trigger::Manual,
+            RestoreOrigin::Hub => Trigger::Hub,
+        };
+        let queued = self
+            .run
+            .queue(op, trigger, job)
+            .await
+            .with_warnings(warnings.iter().map(SecretWarning::warning).collect());
+        Ok(PreparedRestore {
+            queued,
+            operation: op,
+            slot,
+        })
     }
 
     /// Runs `prepared` until it ends, or `cancel` completes and it is
     /// cancelled; the slot is free again once it has ended.
     pub async fn run(
         &self,
-        _prepared: PreparedRestore,
-        _cancel: impl Future<Output = ()> + Send,
+        prepared: PreparedRestore,
+        cancel: impl Future<Output = ()> + Send,
     ) -> Finished {
-        todo!("Restores::run")
+        let PreparedRestore { queued, slot, .. } = prepared;
+        let finished = self.run.run_queued(queued, cancel).await;
+        drop(slot);
+        finished
     }
 
     /// The restore that runs on the agent, if one does.
     pub fn running(&self) -> Option<OperationId> {
-        todo!("Restores::running")
+        *lock(&self.running)
     }
+
+    /// The step-up confirmation of `ask`: the admin password, in the
+    /// address's sign-in waits, with sign-in on; the snapshot's ID
+    /// otherwise.
+    async fn step_up(&self, ask: &RestoreAsk) -> Result<(), RestoreError> {
+        let Some(access) = &self.access else {
+            return if confirms_snapshot(&ask.confirmation, &ask.snapshot) {
+                Ok(())
+            } else {
+                Err(RestoreError::StepUpFailed)
+            };
+        };
+        // Nothing typed, or more than any password, is no attempt at it.
+        let attempt =
+            Password::parse(ask.confirmation.clone()).map_err(|_| RestoreError::StepUpFailed)?;
+        access
+            .step_up(ask.address, &attempt)
+            .await
+            .map(|_| ())
+            .map_err(|refused| match refused {
+                StepUpRefused::WrongPassword => RestoreError::StepUpFailed,
+                StepUpRefused::Wait { seconds } => RestoreError::StepUpWait { seconds },
+                StepUpRefused::Unavailable(text) => RestoreError::StepUpUnavailable(text),
+            })
+    }
+
+    /// The agent's restore slot, for `op`, unless a restore holds it.
+    fn take_slot(&self, op: OperationId) -> Result<Slot, RestoreError> {
+        let mut running = lock(&self.running);
+        if let Some(other) = *running {
+            return Err(RestoreError::AlreadyRunning(other));
+        }
+        *running = Some(op);
+        Ok(Slot {
+            running: self.running.clone(),
+        })
+    }
+
+    async fn resolved(
+        &self,
+        alias: &RepositoryAlias,
+        repository: &RepositoryConfig,
+    ) -> Result<ResolvedRepository, RestoreError> {
+        self.resolve
+            .resolve_saved(alias, repository)
+            .await
+            .map_err(RestoreError::Resolve)
+    }
+
+    /// The host `snapshot` records, read from the repository's listing,
+    /// never from the request: it names the new folder.
+    async fn host_of(
+        &self,
+        op: OperationId,
+        access: RepositoryAccess,
+        snapshot: &SnapshotId,
+    ) -> Result<String, RestoreError> {
+        let listed = run_read(
+            self.engine.as_ref(),
+            self.clock.as_ref(),
+            op,
+            Job::Ls(access),
+        )
+        .await
+        .map_err(RestoreError::Read)?;
+        let EngineResult::Snapshots(snapshots) = listed else {
+            return Err(RestoreError::Read(MaintenanceError::Failed(
+                domain::execution::FailureReason::EngineExited { exit_code: None },
+            )));
+        };
+        snapshots
+            .into_iter()
+            .find(|listed| &listed.id == snapshot)
+            .map(|listed| listed.hostname)
+            .ok_or(RestoreError::SnapshotUnknown)
+    }
+}
+
+/// The request, if the agent's configured rules take it.
+fn admit(
+    config: &AgentConfig,
+    snapshot: SnapshotId,
+    entry: FolderPath,
+    destination: Destination,
+    origin: RestoreOrigin,
+) -> Result<RestoreRequest, RestoreError> {
+    let policy = RestorePolicy {
+        allow_hub_restore: config.agent().allow_hub_restore,
+    };
+    RestoreRequest::admit(policy, snapshot, entry, destination, origin)
+        .map_err(RestoreError::Refused)
+}
+
+fn repository<'a>(
+    config: &'a AgentConfig,
+    alias: &RepositoryAlias,
+) -> Result<&'a RepositoryConfig, RestoreError> {
+    config
+        .repositories()
+        .get(alias)
+        .ok_or(RestoreError::UnknownRepository)
 }

@@ -171,6 +171,7 @@ fn a_backup_tells_each_ending_and_maintenance_only_its_failure() {
         (OperationKind::Forget, Failed, Some(EventKind::ForgetFailed)),
         (OperationKind::Prune, Failed, Some(EventKind::PruneFailed)),
         (OperationKind::Check, Failed, Some(EventKind::CheckFailed)),
+
         (OperationKind::Forget, Succeeded, None),
         (OperationKind::Prune, SucceededWithWarnings, None),
         (OperationKind::Check, Succeeded, None),

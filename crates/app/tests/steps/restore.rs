@@ -30,9 +30,7 @@ use domain::planning::{
 };
 use domain::restore::{Destination, RestoreOrigin, RestoreRefused};
 use domain::secrets::{SecretRef, SecretValue};
-use domain::{
-    OperationId, RepositoryAlias, SignedDuration, SnapshotId, TimeZone, Timestamp, Uuid,
-};
+use domain::{OperationId, RepositoryAlias, SignedDuration, SnapshotId, TimeZone, Timestamp, Uuid};
 use futures::{StreamExt, stream};
 
 use super::Agent;
@@ -159,9 +157,9 @@ impl Engine for Scripted {
                     })
                     .collect(),
             ))),
-            Job::RestorePlan(_) => answer(EngineEvent::Succeeded(EngineResult::RestorePlan(
-                self.plan,
-            ))),
+            Job::RestorePlan(_) => {
+                answer(EngineEvent::Succeeded(EngineResult::RestorePlan(self.plan)))
+            }
             Job::Restore(RestoreJob {
                 deadline_budget, ..
             }) => match self.run {
@@ -171,9 +169,9 @@ impl Engine for Scripted {
                         ..RestoreSummary::default()
                     }),
                 )),
-                RestoreRun::Unwritable => self.started_then(EngineEvent::Failed(
-                    FailureReason::RestoreTargetUnwritable,
-                )),
+                RestoreRun::Unwritable => {
+                    self.started_then(EngineEvent::Failed(FailureReason::RestoreTargetUnwritable))
+                }
                 RestoreRun::Steps { steps, step } => {
                     SimulatedEngine::new(self.clock.clone())
                         .run(
@@ -483,10 +481,9 @@ async fn restores_in_place(agent: &mut Agent, entry: String, confirmation: Strin
 
 #[when(expr = "the hub asks for {string} of the snapshot to be restored in place")]
 async fn hub_restores_in_place(agent: &mut Agent, entry: String) {
-    let short = domain::access::step_up::short_id(
-        &agent.restore.snapshot.clone().expect("a snapshot").0,
-    )
-    .to_owned();
+    let short =
+        domain::access::step_up::short_id(&agent.restore.snapshot.clone().expect("a snapshot").0)
+            .to_owned();
     let ask = agent
         .restore
         .ask(&entry, Destination::InPlace, RestoreOrigin::Hub, &short);
@@ -499,7 +496,12 @@ async fn hub_restores_in_place(agent: &mut Agent, entry: String) {
 #[when(
     expr = "the person restores {string} of the snapshot, confirming with {string}, and cancels it after {int} minutes"
 )]
-async fn restores_and_cancels(agent: &mut Agent, entry: String, confirmation: String, minutes: u32) {
+async fn restores_and_cancels(
+    agent: &mut Agent,
+    entry: String,
+    confirmation: String,
+    minutes: u32,
+) {
     let clock = Arc::new(FakeClock::new(agent.clock.now()));
     let ask = agent.restore.ask(
         &entry,
@@ -509,7 +511,11 @@ async fn restores_and_cancels(agent: &mut Agent, entry: String, confirmation: St
     );
     agent.restore.start(clock.clone(), ask).await;
     let prepared = agent.restore.pending.take().expect("the restore started");
-    let restores = agent.restore.restores.clone().expect("the use case was made");
+    let restores = agent
+        .restore
+        .restores
+        .clone()
+        .expect("the use case was made");
     let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
     let running = tokio::spawn(async move {
         restores
@@ -614,9 +620,16 @@ async fn history_shows_none(agent: &mut Agent) {
     assert!(history.is_empty(), "{history:?}");
 }
 
-#[then(regex = r"^the preview says (\d+) files? would be added, (\d+) overwritten and (\d+) left as they are$")]
+#[then(
+    regex = r"^the preview says (\d+) files? would be added, (\d+) overwritten and (\d+) left as they are$"
+)]
 fn preview_counts(agent: &mut Agent, added: u64, overwritten: u64, unchanged: u64) {
-    let preview = match agent.restore.preview.as_ref().expect("a preview was asked for") {
+    let preview = match agent
+        .restore
+        .preview
+        .as_ref()
+        .expect("a preview was asked for")
+    {
         Ok(preview) => preview,
         Err(error) => panic!("the preview failed: {error:?}"),
     };
@@ -632,7 +645,12 @@ fn preview_counts(agent: &mut Agent, added: u64, overwritten: u64, unchanged: u6
 
 #[then(expr = "the preview says the {int} files the snapshot doesn't hold would stay")]
 fn preview_kept(agent: &mut Agent, kept: u64) {
-    let preview = match agent.restore.preview.as_ref().expect("a preview was asked for") {
+    let preview = match agent
+        .restore
+        .preview
+        .as_ref()
+        .expect("a preview was asked for")
+    {
         Ok(preview) => preview,
         Err(error) => panic!("the preview failed: {error:?}"),
     };
@@ -706,7 +724,13 @@ fn told_as(agent: &mut Agent, event: String) {
     let kind = EventKind::parse(&event).expect("an event's name");
     assert_eq!(
         EventKind::ended(
-            agent.restore.finished.as_ref().expect("a restore ran").operation.kind(),
+            agent
+                .restore
+                .finished
+                .as_ref()
+                .expect("a restore ran")
+                .operation
+                .kind(),
             Outcome::Failed
         ),
         Some(kind)
