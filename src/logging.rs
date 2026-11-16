@@ -173,6 +173,9 @@ mod tests {
     use env_logger::{Target, WriteStyle};
     use log::{Level, Log, Record};
 
+    use app::ports::RecentLogStore;
+    use app::recent_log::RecentLogRing;
+
     use super::{DaemonLog, logger, write_style};
 
     const LEVELS: [Level; 5] = [
@@ -233,17 +236,35 @@ mod tests {
     }
 
     /// The levels, among a record each for `target`, that a logger set up for
-    /// `rust_log` writes.
+    /// `rust_log` writes. The recent log keeps exactly those records, in that
+    /// order: none the log drops, such as the MCP SDK's under `warn` (I4).
     fn written(rust_log: Option<&str>, target: &str) -> Vec<Level> {
         let (logger, pipe) = piped(rust_log);
+        let recent = Arc::new(RecentLogRing::new());
+        let logger = logger.recording(Arc::clone(&recent) as Arc<dyn RecentLogStore>);
         for level in LEVELS {
             log_to(&logger, level, target, &format!("a {level} record"));
         }
         let text = pipe.text();
-        LEVELS
+        let levels: Vec<Level> = LEVELS
             .into_iter()
             .filter(|level| text.contains(&format!("a {level} record")))
-            .collect()
+            .collect();
+        let kept: Vec<String> = recent
+            .newest_first()
+            .iter()
+            .rev()
+            .map(|line| line.message().to_owned())
+            .collect();
+        let logged: Vec<String> = levels
+            .iter()
+            .map(|level| format!("a {level} record"))
+            .collect();
+        assert_eq!(
+            kept, logged,
+            "the recent log keeps what the log writes, {rust_log:?}, {target}"
+        );
+        levels
     }
 
     const NORMAL: [Level; 3] = [Level::Error, Level::Warn, Level::Info];
