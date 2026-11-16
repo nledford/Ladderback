@@ -731,23 +731,36 @@ pub(crate) fn copy_text(
     copied: String,
     refused: String,
 ) {
+    said.set(None);
+    write_clipboard(copied_text, move |done| {
+        said.try_set(Some(if done {
+            copied.clone()
+        } else {
+            refused.clone()
+        }));
+    });
+}
+
+/// Writes `text` to the clipboard, then calls `then` once with whether it is
+/// there, for a button that says so in a region of its own choosing. A page
+/// not served over HTTPS or from this computer has no clipboard, and a
+/// browser may refuse it: then `then` hears `false`, at once when there is no
+/// clipboard, otherwise once the browser has answered.
+pub(crate) fn write_clipboard(text: &str, then: impl Fn(bool) + 'static) {
     let clipboard = web_sys::window()
         .and_then(|window| {
             js_sys::Reflect::get(window.navigator().as_ref(), &"clipboard".into()).ok()
         })
         .and_then(|clipboard| clipboard.dyn_into::<web_sys::Clipboard>().ok());
     let Some(clipboard) = clipboard else {
-        said.set(Some(refused));
+        then(false);
         return;
     };
-    said.set(None);
-    let done = Closure::once(move |_: JsValue| {
-        said.try_set(Some(copied));
-    });
-    let failed = Closure::once(move |_: JsValue| {
-        said.try_set(Some(refused));
-    });
-    let _ = clipboard.write_text(copied_text).then2(&done, &failed);
+    let then = Rc::new(then);
+    let on_done = Rc::clone(&then);
+    let done = Closure::once(move |_: JsValue| on_done(true));
+    let failed = Closure::once(move |_: JsValue| then(false));
+    let _ = clipboard.write_text(text).then2(&done, &failed);
     // The promise calls one of them once, after this returns; each is a few
     // bytes, left to the page rather than dropped before it is called.
     done.forget();
