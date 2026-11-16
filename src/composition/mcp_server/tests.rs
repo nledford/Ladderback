@@ -918,7 +918,9 @@ fn refused(answer: &serde_json::Value) -> bool {
 
 /// The configuration of the canary test, over `scratch`: `demo`'s password
 /// in a file, `vault`'s from a command that prints it and fails, `cold`'s in
-/// the configuration itself, each a plan's.
+/// the configuration itself, each a plan's; and `remote`, reached at two
+/// locations, with a password in each URL and options written inline, one
+/// under a credential's name and one under another name.
 fn canary_config(scratch: &std::path::Path) -> String {
     let file = scratch.join("password");
     std::fs::write(&file, format!("{CANARY}-file\n")).expect("the password file");
@@ -933,6 +935,13 @@ fn canary_config(scratch: &std::path::Path) -> String {
         [repositories.vault]\nrepository = \"/srv/backups/vault\"\nmaintenance = \"local\"\n\
         password-command = \"/bin/sh -c 'cat {held}; cat {held} >&2; exit 3'\"\n\n\
         [repositories.cold]\nrepository = \"/srv/backups/cold\"\npassword = \"{CANARY}-inline\"\n\n\
+        [repositories.remote]\nrepository = \"rest:https://demo:{CANARY}-url@nas.example/remote\"\n\
+        repository-id = \"0707070707070707070707070707070707070707070707070707070707070707\"\n\
+        password-env = \"LADDERBACK_DEMO_PASSWORD\"\n\
+        options = {{ secret_access_key = \"{CANARY}-option\", region = \"{CANARY}-region\" }}\n\n\
+        [[repositories.remote.locations]]\n\
+        repository = \"rest:https://demo:{CANARY}-second@backup.example/remote\"\n\
+        options = {{ secret_access_key = \"{CANARY}-second-option\" }}\n\n\
         [[plans]]\nid = \"home\"\nrepository = \"demo\"\nsources = [\"{source}\"]\n\n\
         [[plans]]\nid = \"work\"\nrepository = \"vault\"\nsources = [\"{source}\"]\n\n\
         [[plans]]\nid = \"cold\"\nrepository = \"cold\"\nsources = [\"{source}\"]\n"
@@ -1120,6 +1129,18 @@ async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
     assert!(in_process.1.progress() > 0, "{:?}", in_process.1.transcript);
     assert!(connect.1.progress() > 0, "{:?}", connect.1.transcript);
     assert_eq!(unknown_token.1.progress(), 0);
+    // `remote`'s second location was listed, so the URLs and options
+    // checked above were told masked, not left out.
+    for (backend, session) in [in_process, connect] {
+        assert!(
+            session
+                .transcript
+                .iter()
+                .any(|line| line.contains("backup.example")),
+            "{backend}: {:?}",
+            session.transcript
+        );
+    }
 }
 
 /// What `answer` names as the operation it is about: the one it tells, the
