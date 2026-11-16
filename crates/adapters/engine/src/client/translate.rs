@@ -346,6 +346,11 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProposalLimit
                 | ErrorCode::ProposalUnknown
                 | ErrorCode::ProposalNotPending
+                | ErrorCode::ProposalChanged
+                | ErrorCode::ProposalNeedsForgetPreview
+                | ErrorCode::ProposalRate
+                | ErrorCode::ProposalAfterRejection
+                | ErrorCode::ProposalReasons
                 | ErrorCode::ProposalsUnavailable
                 | ErrorCode::RepositoryUnknown
                 | ErrorCode::SnapshotUnknown

@@ -1,15 +1,21 @@
 //! The `ProposalStore` contract (§9 `proposals`; decision 89): the
 //! proposals, pending and ended, kept between the daemon's starts.
 
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::Timestamp;
 use domain::access::TOKEN_BYTES;
 use domain::access::api_token::{ApiTokenId, ApiTokenLabel};
-use domain::planning::{ConfigRevision, ProposalId, ProposalStatus, Proposer, Rationale};
+use domain::planning::{
+    ConfigRevision, ProposalId, ProposalStatus, Proposer, Rationale, RejectReason, TooSoon,
+};
 
-use crate::ports::{Added, ProposalStore, StoredProposal};
+use crate::ports::{Admission, ProposalStore, StoredProposal};
+
+/// What an add over a proposer's last place answers.
+const FULL: Admission = Admission::Refused(TooSoon::Pending);
 
 /// Opens a proposal store: a new, empty one, or the one before opened
 /// again on the same place.
@@ -34,6 +40,11 @@ pub async fn run(harness: &dyn ProposalHarness) {
     proposals_outlive_the_daemon(harness).await;
     racing_status_changes_make_one_change(harness).await;
     racing_adds_take_the_last_place_once(harness).await;
+    a_rejection_keeps_its_time_and_reasons_and_is_made_once(harness).await;
+    an_approval_starts_the_apply_once_and_records_when_and_from_where(harness).await;
+    racing_approvals_start_one_apply(harness).await;
+    a_proposer_makes_thirty_an_hour(harness).await;
+    a_proposer_waits_after_its_proposal_was_rejected(harness).await;
 }
 
 fn at(seconds: i64) -> Timestamp {
@@ -66,13 +77,17 @@ fn proposal(seed: u8, proposer: Proposer, seconds: i64) -> StoredProposal {
         status: ProposalStatus::Pending,
         created_at: at(seconds),
         expires_at: at(seconds + 48 * 3600),
+        decided_at: None,
+        reasons: Vec::new(),
+        approved_from: None,
+        applied_as: None,
     }
 }
 
 async fn add(store: &dyn ProposalStore, proposal: &StoredProposal) {
     let added = store.add(proposal, 20, 200).await;
     assert!(
-        matches!(added, Ok(Added::Kept)),
+        matches!(added, Ok(Admission::Kept)),
         "the store keeps the proposal: {added:?}"
     );
 }
@@ -146,10 +161,10 @@ async fn a_proposer_has_no_more_than_the_limit_pending(harness: &dyn ProposalHar
     let store = harness.empty().await;
     let kept = [proposal(1, first.clone(), 0), proposal(2, first.clone(), 1)];
     for one in &kept {
-        assert_eq!(store.add(one, 2, 200).await, Ok(Added::Kept));
+        assert_eq!(store.add(one, 2, 200).await, Ok(Admission::Kept));
     }
     let one_more = proposal(3, first.clone(), 2);
-    assert_eq!(store.add(&one_more, 2, 200).await, Ok(Added::Full));
+    assert_eq!(store.add(&one_more, 2, 200).await, Ok(FULL));
     assert_eq!(get(store.as_ref(), &one_more.id).await, None);
 
     // Another token, and the clients with none, have places of their own.
@@ -159,10 +174,10 @@ async fn a_proposer_has_no_more_than_the_limit_pending(harness: &dyn ProposalHar
         proposal(6, Proposer::NoToken, 5),
     ];
     for one in &others {
-        assert_eq!(store.add(one, 2, 200).await, Ok(Added::Kept));
+        assert_eq!(store.add(one, 2, 200).await, Ok(Admission::Kept));
     }
     let seventh = proposal(7, Proposer::NoToken, 6);
-    assert_eq!(store.add(&seventh, 2, 200).await, Ok(Added::Full));
+    assert_eq!(store.add(&seventh, 2, 200).await, Ok(FULL));
 
     // An ended proposal frees its place.
     let [withdrawn, _] = &kept;
@@ -175,7 +190,7 @@ async fn a_proposer_has_no_more_than_the_limit_pending(harness: &dyn ProposalHar
         )
         .await
     );
-    assert_eq!(store.add(&one_more, 2, 200).await, Ok(Added::Kept));
+    assert_eq!(store.add(&one_more, 2, 200).await, Ok(Admission::Kept));
 }
 
 /// A pending proposal holds its proposer's place until its expiry, though
@@ -187,13 +202,13 @@ async fn a_proposal_past_its_expiry_holds_no_place(harness: &dyn ProposalHarness
     };
     let store = harness.empty().await;
     let first = proposal(1, proposer.clone(), 0);
-    assert_eq!(store.add(&first, 1, 200).await, Ok(Added::Kept));
+    assert_eq!(store.add(&first, 1, 200).await, Ok(Admission::Kept));
 
     let a_second_before = proposal(2, proposer.clone(), 48 * 3600 - 1);
-    assert_eq!(store.add(&a_second_before, 1, 200).await, Ok(Added::Full));
+    assert_eq!(store.add(&a_second_before, 1, 200).await, Ok(FULL));
 
     let at_its_expiry = proposal(3, proposer, 48 * 3600);
-    assert_eq!(store.add(&at_its_expiry, 1, 200).await, Ok(Added::Kept));
+    assert_eq!(store.add(&at_its_expiry, 1, 200).await, Ok(Admission::Kept));
     // The store changes no status on its own: the first is still kept as
     // pending, for a read to find it expired.
     let kept = get(store.as_ref(), &first.id).await;
@@ -206,7 +221,7 @@ async fn the_oldest_ended_proposals_beyond_the_limit_are_forgotten(harness: &dyn
         .map(|seed| proposal(seed, Proposer::NoToken, i64::from(seed)))
         .collect();
     for one in &made {
-        assert_eq!(store.add(one, 20, 2).await, Ok(Added::Kept));
+        assert_eq!(store.add(one, 20, 2).await, Ok(Admission::Kept));
     }
     // Pending ones are never forgotten.
     assert_eq!(all(store.as_ref()).await.len(), 4);
@@ -222,7 +237,7 @@ async fn the_oldest_ended_proposals_beyond_the_limit_are_forgotten(harness: &dyn
         );
     }
     let fifth = proposal(5, Proposer::NoToken, 5);
-    assert_eq!(store.add(&fifth, 20, 2).await, Ok(Added::Kept));
+    assert_eq!(store.add(&fifth, 20, 2).await, Ok(Admission::Kept));
     let ids = ids(store.as_ref()).await;
     let expected: Vec<_> = std::iter::once(&fifth)
         .chain(made.iter().rev().take(3))
@@ -345,10 +360,122 @@ async fn racing_adds_take_the_last_place_once(harness: &dyn ProposalHarness) {
     assert_eq!(
         added
             .iter()
-            .filter(|added| matches!(added, Ok(Added::Kept)))
+            .filter(|added| matches!(added, Ok(Admission::Kept)))
             .count(),
         1,
         "exactly one is kept: {added:?}"
     );
     assert_eq!(all(store.as_ref()).await.len(), 1);
+}
+
+async fn a_rejection_keeps_its_time_and_reasons_and_is_made_once(harness: &dyn ProposalHarness) {
+    let store = harness.empty().await;
+    let one = proposal(1, Proposer::NoToken, 0);
+    add(store.as_ref(), &one).await;
+    let reasons = [
+        RejectReason::parse("Back up weekly instead".to_owned()),
+        RejectReason::parse(String::new()),
+    ];
+    let reasons: Vec<RejectReason> = reasons.into_iter().flatten().collect();
+    let when = Timestamp::constant(1_800_000_060, 123_456_789);
+    assert_eq!(store.reject(&one.id, when, &reasons).await, Ok(true));
+    assert_eq!(store.reject(&one.id, when, &[]).await, Ok(false));
+    let mut rejected = one.clone();
+    rejected.status = ProposalStatus::Rejected;
+    rejected.decided_at = Some(Timestamp::constant(1_800_000_060, 123_000_000));
+    rejected.reasons = reasons;
+    assert_eq!(get(store.as_ref(), &one.id).await, Some(rejected.clone()));
+    drop(store);
+    let again = harness.reopened().await;
+    assert_eq!(get(again.as_ref(), &one.id).await, Some(rejected));
+}
+
+async fn an_approval_starts_the_apply_once_and_records_when_and_from_where(
+    harness: &dyn ProposalHarness,
+) {
+    let store = harness.empty().await;
+    let one = proposal(1, Proposer::NoToken, 0);
+    add(store.as_ref(), &one).await;
+    let from = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
+    assert_eq!(store.applied(&one.id, Some("kept")).await, Ok(false));
+    assert_eq!(store.approve(&one.id, at(60), from).await, Ok(true));
+    assert_eq!(store.approve(&one.id, at(61), None).await, Ok(false));
+    assert_eq!(
+        store.reject(&one.id, at(62), &[]).await,
+        Ok(false),
+        "an apply started is no longer rejected"
+    );
+    let applied_as = "000003-20270115T080000.000Z-proposal-demo.toml";
+    assert_eq!(store.applied(&one.id, Some(applied_as)).await, Ok(true));
+    let mut applied = one.clone();
+    applied.status = ProposalStatus::Applied;
+    applied.decided_at = Some(at(60));
+    applied.approved_from = from;
+    applied.applied_as = Some(applied_as.to_owned());
+    assert_eq!(get(store.as_ref(), &one.id).await, Some(applied.clone()));
+    drop(store);
+    let again = harness.reopened().await;
+    assert_eq!(get(again.as_ref(), &one.id).await, Some(applied));
+}
+
+async fn racing_approvals_start_one_apply(harness: &dyn ProposalHarness) {
+    let store = harness.empty().await;
+    let one = proposal(1, Proposer::NoToken, 0);
+    add(store.as_ref(), &one).await;
+    let tries = (0..8).map(|n| {
+        let store = Arc::clone(&store);
+        let id = one.id.clone();
+        async move {
+            if n % 2 == 0 {
+                store.approve(&id, at(60), None).await
+            } else {
+                store.reject(&id, at(60), &[]).await
+            }
+        }
+    });
+    let made = futures::future::join_all(tries).await;
+    assert_eq!(
+        made.iter().filter(|made| matches!(made, Ok(true))).count(),
+        1,
+        "exactly one decision is made: {made:?}"
+    );
+}
+
+async fn a_proposer_makes_thirty_an_hour(harness: &dyn ProposalHarness) {
+    let (Some(first), Some(second)) = (token(1), token(2)) else {
+        return;
+    };
+    let store = harness.empty().await;
+    for seed in 1..=30 {
+        let one = proposal(seed, first.clone(), i64::from(seed));
+        assert_eq!(store.add(&one, 100, 200).await, Ok(Admission::Kept));
+    }
+    let one_more = proposal(31, first.clone(), 3600);
+    assert_eq!(
+        store.add(&one_more, 100, 200).await,
+        Ok(Admission::Refused(TooSoon::Hourly { until: at(3601) }))
+    );
+    let other = proposal(32, second, 3600);
+    assert_eq!(store.add(&other, 100, 200).await, Ok(Admission::Kept));
+    let later = proposal(31, first, 3601);
+    assert_eq!(store.add(&later, 100, 200).await, Ok(Admission::Kept));
+}
+
+async fn a_proposer_waits_after_its_proposal_was_rejected(harness: &dyn ProposalHarness) {
+    let Some(proposer) = token(1) else {
+        return;
+    };
+    let store = harness.empty().await;
+    let one = proposal(1, proposer.clone(), 0);
+    add(store.as_ref(), &one).await;
+    assert_eq!(store.reject(&one.id, at(60), &[]).await, Ok(true));
+    let soon = proposal(2, proposer.clone(), 359);
+    assert_eq!(
+        store.add(&soon, 20, 200).await,
+        Ok(Admission::Refused(TooSoon::AfterRejection {
+            until: at(360)
+        }))
+    );
+    let later = proposal(2, proposer, 360);
+    assert_eq!(store.add(&later, 20, 200).await, Ok(Admission::Kept));
 }

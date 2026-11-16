@@ -1,17 +1,27 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
-use domain::planning::{AgentConfig, RepositoryConfig};
+use domain::planning::{AgentConfig, ConfigRevision, ProposalId, RepositoryConfig};
 use domain::{RepositoryAlias, RepositoryId};
 
-use crate::ports::{ConfigError, ConfigStore, RecordError};
+use crate::ports::{ConfigDraft, ConfigDrafts, ConfigError, ConfigStore, RecordError, SavedOver};
 
 /// A configuration that lives in memory, for use-case tests and acceptance
 /// scenarios. It keeps what the real store keeps, and nothing else: it never
 /// fails, because a file is the only part of the real store that can.
+///
+/// As [`ConfigDrafts`] it writes the configuration as its debug text after a
+/// comment a person can edit ([`edit_comment`](Self::edit_comment)), which
+/// changes the file's revision and nothing in the configuration.
 #[derive(Default)]
 pub struct InMemoryConfigStore {
     saved: Mutex<Option<AgentConfig>>,
+    comment: Mutex<String>,
+    /// A comment a person writes just before the next [`ConfigDrafts::save_over`]
+    /// writes.
+    edit_before_save: Mutex<Option<String>>,
+    /// The history's versions, oldest first.
+    history: Mutex<Vec<String>>,
 }
 
 impl InMemoryConfigStore {
@@ -23,6 +33,41 @@ impl InMemoryConfigStore {
     // can't leave it half-written.
     fn saved(&self) -> MutexGuard<'_, Option<AgentConfig>> {
         self.saved.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn comment(&self) -> MutexGuard<'_, String> {
+        self.comment.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A person edits the file's comment, by hand.
+    pub fn edit_comment(&self, text: &str) {
+        text.clone_into(&mut self.comment());
+    }
+
+    /// The file's comment as it is.
+    pub fn current_comment(&self) -> String {
+        self.comment().clone()
+    }
+
+    /// A person edits the file's comment to `text` just before the next
+    /// [`ConfigDrafts::save_over`] writes.
+    pub fn edit_comment_before_next_save(&self, text: &str) {
+        *self
+            .edit_before_save
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(text.to_owned());
+    }
+
+    /// The history's versions, oldest first.
+    pub fn history(&self) -> Vec<String> {
+        self.history
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn text(&self, config: &AgentConfig) -> String {
+        format!("# {}\n{config:#?}\n", self.comment())
     }
 }
 
@@ -51,5 +96,23 @@ impl ConfigStore for InMemoryConfigStore {
             .map_err(RecordError::NotRecorded)?;
         *saved = Some(recorded);
         Ok(())
+    }
+}
+
+#[async_trait]
+impl ConfigDrafts for InMemoryConfigStore {
+    async fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ConfigError> {
+        let _ = config;
+        todo!()
+    }
+
+    async fn save_over(
+        &self,
+        base: &ConfigRevision,
+        config: &AgentConfig,
+        proposal: &ProposalId,
+    ) -> Result<SavedOver, ConfigError> {
+        let _ = (base, config, proposal);
+        todo!()
     }
 }

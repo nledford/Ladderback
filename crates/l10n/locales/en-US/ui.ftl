@@ -1808,6 +1808,9 @@ ui-nav-operations = Operations
 # The navigation's link to the Plans page.
 ui-nav-plans = Plans
 
+# The navigation's link to the "Pending changes" page, where a person approves or rejects the configuration changes an AI agent proposed.
+ui-nav-proposals = Pending changes
+
 # The navigation's link to the snapshots page.
 ui-nav-snapshots = Snapshots
 
@@ -2505,6 +2508,154 @@ ui-api-token-copied = Copied.
 
 # Said in the dialog when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
 ui-api-token-copy-failed = The browser would not let the page copy it. Select the token in the field and copy it yourself.
+
+## The "Pending changes" page (decision 89): the proposals an AI agent made
+## through the API, each approved or rejected as a whole by a person.
+
+# The "Pending changes" page's title, as the browser's tab and history show it.
+ui-proposals-title = Pending changes – { -brand-name }
+
+# The "Pending changes" page's heading: its one main heading, which also names the list of proposals.
+ui-proposals-heading = Pending changes
+
+# What the "Pending changes" page is for, under its heading.
+ui-proposals-body = An AI agent, or another program with an API token, can propose changes to the configuration. Nothing changes until you approve a proposal as a whole here. Reject one to tell the AI agent why, change by change.
+
+# Said under the heading while sign-in is off, as decision 89 requires: nothing then tells a person's browser from a program's request.
+ui-proposals-sign-in-off = Sign-in is off, so approving here is a convenience, not a safety boundary: a program that can reach { -brand-name } could approve its own proposal. To make approval yours alone, turn sign-in on with { "ladderback set-password" } and start { -brand-name } again.
+
+# Said in the list's place when no proposal is pending.
+ui-proposals-none = No proposal is pending.
+
+# The button that opens a pending proposal an API token made.
+# $proposal (text): the proposal's ID.
+# $proposer (text): the label of the API token that proposed it.
+ui-proposals-review = Review proposal { $proposal } from { $proposer }
+
+# The button that opens a pending proposal made with no API token, as with sign-in off.
+# $proposal (text): the proposal's ID.
+ui-proposals-review-no-token = Review proposal { $proposal }, made without an API token
+
+# The heading of the proposal opened on the page.
+# $proposal (text): the proposal's ID.
+ui-proposal-heading = Proposal { $proposal }
+
+# The heading of what the proposal's changes do, which Ladderback writes, never the AI agent.
+ui-proposal-summary-heading = What it changes
+
+# A line of the summary: the proposal adds a plan.
+# $plan (text): the plan's ID.
+ui-proposal-adds-plan = Adds the plan { $plan }.
+
+# A line of the summary: the proposal changes a plan, followed by a list of the settings it changes.
+# $plan (text): the plan's ID.
+ui-proposal-changes-plan = Changes these settings of the plan { $plan }:
+
+# A line of the summary: the proposal removes a plan. Its snapshots stay in the repository.
+# $plan (text): the plan's ID.
+ui-proposal-removes-plan = Removes the plan { $plan }. Its { -snapshot(form: "other") } stay in the { -repository }.
+
+# A setting a changed plan's summary line lists: the repository it backs up to.
+ui-proposal-setting-repository = its { -repository }
+
+# A setting a changed plan's summary line lists: the host its snapshots are recorded as taken on.
+ui-proposal-setting-host = its host
+
+# A setting a changed plan's summary line lists: the label its snapshots get.
+ui-proposal-setting-label = its label
+
+# A setting a changed plan's summary line lists: the folders it backs up.
+ui-proposal-setting-sources = the folders it backs up
+
+# A setting a changed plan's summary line lists: the tags its snapshots get.
+ui-proposal-setting-tags = its tags
+
+# A setting a changed plan's summary line lists: when it runs.
+ui-proposal-setting-schedule = its schedule
+
+# A setting a changed plan's summary line lists: what happens when a run is due while one is going.
+ui-proposal-setting-overlap = what happens when runs overlap
+
+# A setting a changed plan's summary line lists: how a failed run is tried again.
+ui-proposal-setting-retry = how a failed run is tried again
+
+# A setting a changed plan's summary line lists: what it leaves out of a backup.
+ui-proposal-setting-filter = what it leaves out
+
+# A setting a changed plan's summary line lists: which snapshots it keeps.
+ui-proposal-setting-retention = which { -snapshot(form: "other") } it keeps
+
+# The heading of the AI agent's own rationale, shown apart from the summary, as its words, not Ladderback's.
+ui-proposal-rationale-heading = The AI agent's words
+
+# Said in the rationale's place when the AI agent gave none.
+ui-proposal-rationale-none = The AI agent gave no reason.
+
+# Said when the configuration file has changed since the proposal was made, by a comment edit for example; the diff is rebuilt against the file as it is now.
+ui-proposal-changed-since = The configuration file has changed since this proposal was made. The changes below are worked out again against the file as it is now.
+
+# How often a person rejected the proposals of whoever made this one.
+# $count (count): how many of its kept proposals were rejected.
+ui-proposal-rejected-before = { $count ->
+    [0] None of this proposer's proposals was rejected before.
+    [one] One of this proposer's proposals was rejected before.
+   *[other] { $count } of this proposer's proposals were rejected before.
+}
+
+# The heading of the exact changes to the configuration file, with each secret it holds shown as ***.
+ui-proposal-diff-heading = Changes to the configuration file
+
+# Said in the place of Approve for a proposal that could delete snapshots: approving such a proposal comes with the forget preview, a later version.
+ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. Approving changes that can delete { -snapshot(form: "other") } comes with the forget preview, which shows which ones would go, so for now you can only reject it.
+
+# The heading of the part of the page that approves the proposal.
+ui-proposal-approve-heading = Approve
+
+# The label of the step-up field with sign-in off: the proposal's short ID confirms the approval.
+ui-proposal-id = Proposal ID
+
+# The step-up field's hint with sign-in off, before the short ID shown to copy.
+ui-proposal-id-hint = Type or paste this proposal's short ID to confirm:
+
+# The button that approves the proposal as the page shows it.
+ui-proposal-approve = Approve the proposal
+
+# Said beside Approve while the approval is applied.
+ui-proposal-approving = Applying the proposal…
+
+# The step-up field's error with sign-in off, when what was typed is not the proposal's short ID. Nothing was applied.
+# $length (count): how many characters the short ID has.
+ui-proposal-wrong-id = That is not this proposal's ID, so nothing was applied. Type or paste the { $length } characters shown above.
+
+# The step-up field's error with sign-in on, when what was typed is not the admin password. Nothing was applied.
+ui-proposal-wrong-password = That is not the admin password, so nothing was applied. Type it again, or fill it in from your password manager.
+
+# Announced once the proposal is applied.
+# $proposal (text): the proposal's ID.
+ui-proposal-applied = Proposal { $proposal } is applied, and the configuration file is saved.
+
+# The heading of the part of the page that rejects the proposal.
+ui-proposal-reject-heading = Reject
+
+# What rejecting does, under its heading.
+ui-proposal-reject-body = Give a reason for each change you want done another way. The AI agent reads them and can propose again.
+
+# The field for the reason a change is rejected.
+# $change (count): the change's place in the proposal, from 1.
+ui-proposal-reason = Reason for change { $change } (optional)
+
+# The hint under each reason field: what the AI agent does with it.
+ui-proposal-reason-hint = What should this change do differently? Leave it blank if the change is fine as it is.
+
+# The button that rejects the proposal with the reasons typed.
+ui-proposal-reject = Reject the proposal
+
+# Said beside Reject while the rejection is sent.
+ui-proposal-rejecting = Rejecting the proposal…
+
+# Announced once the proposal is rejected.
+# $proposal (text): the proposal's ID.
+ui-proposal-rejected = Proposal { $proposal } is rejected. The AI agent can read your reasons.
 
 ## The Plans page (§4.4): the plans of the configuration file, created,
 ## changed and deleted in a form whose every change is written to the file.

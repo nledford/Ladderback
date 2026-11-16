@@ -139,11 +139,13 @@ impl OperationsState {
                     row.progress = None;
                 }
             }
-            // The fleet's comings and goings, and a retry planned, are no
-            // row of this table: the retry is one once it is queued.
+            // The fleet's comings and goings, a retry planned and a
+            // proposal's status are no row of this table: the retry is one
+            // once it is queued.
             UiEvent::AgentOnline { .. }
             | UiEvent::AgentOffline { .. }
-            | UiEvent::BackupRetrying { .. } => {}
+            | UiEvent::BackupRetrying { .. }
+            | UiEvent::ProposalChanged { .. } => {}
         }
     }
 

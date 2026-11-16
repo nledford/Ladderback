@@ -4,6 +4,8 @@
 //! `app`, and each refusal said as the routes answer it: at the change and
 //! its setting, never with a value.
 
+use std::sync::Arc;
+
 use api::{ChangeProblem, ErrorCode, PlanProblem, ProposalChangeDto, ProposalStatusDto};
 use app::ports::{ConfigError, Problem};
 use app::proposals::{ProposalError, Proposals};
@@ -22,12 +24,12 @@ use super::plans::{problem_of, violated};
 pub(super) struct ProposalService {
     /// The configuration file, for the revision a proposal is drafted
     /// against.
-    file: FileConfigStore,
+    file: Arc<FileConfigStore>,
     proposals: Proposals,
 }
 
 impl ProposalService {
-    pub(super) fn new(file: FileConfigStore, proposals: Proposals) -> Self {
+    pub(super) fn new(file: Arc<FileConfigStore>, proposals: Proposals) -> Self {
         Self { file, proposals }
     }
 }
@@ -67,7 +69,7 @@ impl http_adapter::Proposals for ProposalService {
                 ProposalError::Refused(refused) => refused_at(refused, &proposal.changes),
                 error => refused(error, ""),
             })?;
-        shown(made)
+        shown(made.proposal)
     }
 
     async fn list(&self, asker: Proposer) -> Result<api::ProposalsDto, ProposalsError> {
@@ -252,6 +254,14 @@ fn shown(proposal: Proposal) -> Result<api::ProposalDto, ProposalsError> {
         expires_at: proposal.expires_at.to_string(),
         changes,
         rationale: proposal.rationale.as_str().to_owned(),
+        decided_at: proposal.decided_at.map(|at| at.to_string()),
+        reasons: proposal
+            .rejection
+            .reasons()
+            .iter()
+            .map(|reason| reason.as_str().to_owned())
+            .collect(),
+        warnings: Vec::new(),
     })
 }
 
@@ -291,6 +301,13 @@ fn refused(error: ProposalError, id: &str) -> ProposalsError {
         ProposalError::Store(error) => unavailable("the store", error.to_string()),
         ProposalError::Codec(error) => unavailable("a proposal's changes", error.0),
         ProposalError::Random(error) => unavailable("random bytes", error.0),
+        ProposalError::TooSoon(_)
+        | ProposalError::Rejection(_)
+        | ProposalError::Changed
+        | ProposalError::NeedsForgetPreview
+        | ProposalError::StepUpFailed
+        | ProposalError::StepUpWait { .. }
+        | ProposalError::StepUpUnavailable(_) => todo!(),
     }
 }
 
@@ -331,19 +348,20 @@ sources = ["/home/demo"]
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let file = scratch.path().join("config.toml");
         std::fs::write(&file, CONFIG).expect("the config file");
-        let config: Arc<dyn ConfigStore> =
-            Arc::new(FileConfigStore::new(file.clone(), Arc::new(SystemClock)));
-        let proposals = Proposals::new(
-            Arc::new(app::fakes::InMemoryProposalStore::new()),
-            Arc::new(config_adapter::JsonChangeCodec),
+        let file_store = Arc::new(FileConfigStore::new(file.clone(), Arc::new(SystemClock)));
+        let config: Arc<dyn ConfigStore> = file_store.clone();
+        let proposals = Proposals::new(app::proposals::ProposalPorts {
+            store: Arc::new(app::fakes::InMemoryProposalStore::new()),
+            codec: Arc::new(config_adapter::JsonChangeCodec),
             config,
-            Arc::new(SystemClock),
-            Arc::new(OsRandom),
-        );
-        let service = ProposalService::new(
-            FileConfigStore::new(file.clone(), Arc::new(SystemClock)),
-            proposals,
-        );
+            drafts: file_store.clone(),
+            writes: Arc::default(),
+            changed: app::schedule::config_changes().0,
+            events: Arc::new(app::event_bus::BroadcastEventBus::new()),
+            clock: Arc::new(SystemClock),
+            random: Arc::new(OsRandom),
+        });
+        let service = ProposalService::new(file_store, proposals);
         (service, scratch, file)
     }
 

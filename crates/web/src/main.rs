@@ -86,6 +86,9 @@ mod pause;
 mod plans;
 // The Plans page's DOM glue; `plans.rs` decides for it.
 mod plans_page;
+// What the "Pending changes" page shows, sends and says, decided on the
+// host; `proposals_page.rs` is its glue.
+mod proposals;
 // What the restart section of Settings offers, says and waits for, decided
 // on the host; `settings.rs` is its glue.
 mod restart;

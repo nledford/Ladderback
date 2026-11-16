@@ -1,9 +1,12 @@
 //! The proposals (technical design §9 `proposals`; decision 89): the
 //! `ProposalStore` port on the store's own file.
 
-use app::ports::{Added, ProposalStore, StoreError, StoredProposal};
+use std::net::IpAddr;
+
+use app::ports::{Admission, ProposalStore, StoreError, StoredProposal};
 use async_trait::async_trait;
-use domain::planning::{ProposalId, ProposalStatus, Proposer};
+use domain::Timestamp;
+use domain::planning::{ProposalId, ProposalStatus, Proposer, RejectReason};
 use sqlx::Connection;
 
 use crate::{SqliteStore, row, sql, unavailable};
@@ -24,7 +27,7 @@ impl ProposalStore for SqliteStore {
         proposal: &StoredProposal,
         pending_at_most: usize,
         ended_at_most: usize,
-    ) -> Result<Added, StoreError> {
+    ) -> Result<Admission, StoreError> {
         let (token_id, token_label) = match &proposal.proposer {
             Proposer::Token { id, label } => (Some(id.as_str()), Some(label.as_str())),
             Proposer::NoToken => (None, None),
@@ -43,7 +46,7 @@ impl ProposalStore for SqliteStore {
             .map_err(unavailable)?;
         if pending >= as_count(pending_at_most) {
             tx.rollback().await.map_err(unavailable)?;
-            return Ok(Added::Full);
+            return Ok(Admission::Refused(domain::planning::TooSoon::Pending));
         }
         sqlx::query(sql::INSERT_PROPOSAL)
             .bind(proposal.id.as_str())
@@ -64,7 +67,7 @@ impl ProposalStore for SqliteStore {
             .await
             .map_err(unavailable)?;
         tx.commit().await.map_err(unavailable)?;
-        Ok(Added::Kept)
+        Ok(Admission::Kept)
     }
 
     async fn get(&self, id: &ProposalId) -> Result<Option<StoredProposal>, StoreError> {
@@ -103,5 +106,30 @@ impl ProposalStore for SqliteStore {
             .await
             .map_err(unavailable)?;
         Ok(done.rows_affected() > 0)
+    }
+
+    async fn reject(
+        &self,
+        id: &ProposalId,
+        at: Timestamp,
+        reasons: &[RejectReason],
+    ) -> Result<bool, StoreError> {
+        let _ = (id, at, reasons);
+        todo!()
+    }
+
+    async fn approve(
+        &self,
+        id: &ProposalId,
+        at: Timestamp,
+        from: Option<IpAddr>,
+    ) -> Result<bool, StoreError> {
+        let _ = (id, at, from);
+        todo!()
+    }
+
+    async fn applied(&self, id: &ProposalId, applied_as: Option<&str>) -> Result<bool, StoreError> {
+        let _ = (id, applied_as);
+        todo!()
     }
 }

@@ -4,6 +4,7 @@ mod admin_password;
 mod api_token_store;
 mod change_codec;
 mod clock;
+mod config_drafts;
 mod config_store;
 mod engine;
 mod event_bus;
@@ -30,6 +31,7 @@ pub use admin_password::{AdminPassword, AdminPasswordError};
 pub use api_token_store::{Added, ApiTokenStore};
 pub use change_codec::{ChangeCodec, CodecError};
 pub use clock::Clock;
+pub use config_drafts::{ConfigDraft, ConfigDrafts, SavedOver};
 pub use config_store::{
     CadenceProblem, ConfigError, ConfigStore, NotInPlace, PasswordProblem, Position, Problem,
     RecordError,
@@ -61,7 +63,7 @@ pub use profiles::{
     ExportCommands, ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice,
     ProfileProblem, ProfileReader, ProfileWriter, RenderedProfile,
 };
-pub use proposal_store::{ProposalStore, StoredProposal};
+pub use proposal_store::{Admission, ProposalStore, StoredProposal};
 pub use random::{Random, RandomUnavailable};
 pub use recent_log::RecentLogStore;
 pub use releases::{RELEASE_TIMEOUT, ReleaseFeed, ReleaseFeedError};

@@ -312,16 +312,38 @@ error-proposal-limit = { $limit } proposals are pending already, so this one was
 # $proposal (text): the proposal's ID.
 error-proposal-unknown = There is no proposal { $proposal }. Choose a proposal from the list of proposals.
 
-# A proposal that is not pending was asked to be withdrawn.
+# A proposal that is not pending was asked to be withdrawn, approved or rejected.
 # $status (text): the proposal's status, one of { "applying" }, { "applied" }, { "failed" }, { "rejected" }, { "withdrawn" }, { "expired" } or { "stale" }.
 error-proposal-not-pending = { $status ->
-    [applying] The proposal is being applied, so it was not withdrawn.
-    [applied] The proposal has been applied, so it was not withdrawn.
-    [failed] The proposal failed to apply, so it was not withdrawn.
-    [rejected] The proposal was rejected, so it was not withdrawn.
-    [withdrawn] The proposal was withdrawn already.
-    [expired] The proposal has expired, so it was not withdrawn.
-   *[other] The proposal has gone stale, as a change of it no longer applies, so it was not withdrawn.
+    [applying] The proposal is being applied, so nothing more was done to it.
+    [applied] The proposal has been applied, so nothing more was done to it.
+    [failed] The proposal failed to apply, so nothing more was done to it.
+    [rejected] The proposal was rejected, so nothing more was done to it.
+    [withdrawn] The proposal was withdrawn, so nothing more was done to it.
+    [expired] The proposal has expired, so nothing more was done to it.
+   *[other] The proposal has gone stale, as a change of it no longer applies, so nothing more was done to it.
+  }
+
+# The configuration file changed since the page showed the proposal, so nothing was applied.
+error-proposal-changed = The configuration file changed since this proposal was shown, so nothing was applied. Review the proposal again, then approve it if it still looks right.
+
+# The proposal holds a change that could delete snapshots, which can be approved only once the forget preview shows which.
+error-proposal-needs-forget-preview = This proposal holds a change that could delete snapshots, so it was not approved. Approving such a change comes with the forget preview, which shows which snapshots it would delete; until then, reject the proposal and ask for one without that change.
+
+# The proposer made as many proposals in the last hour as it may.
+# $seconds (count): how long until it may propose again.
+error-proposal-rate = This proposer made as many proposals in the last hour as it may, so this one was not kept. Propose again in { $seconds } seconds.
+
+# A person rejected one of the proposer's proposals a short while ago.
+# $seconds (count): how long until it may propose again.
+error-proposal-after-rejection = A person rejected one of this proposer's proposals a moment ago, so this one was not kept. Read the reasons given, then propose again in { $seconds } seconds.
+
+# A rejection's reasons don't fit its proposal.
+# $problem (text): { "count" } when the number of reasons isn't the number of changes, { "too-long" } when one reason is too long.
+# $change (count): with { "count" }, how many changes the proposal has; with { "too-long" }, the change whose reason is too long, from 1.
+error-proposal-reasons = { $problem ->
+    [count] Give one reason for each of the proposal's { $change } changes, even an empty one, then reject it again.
+   *[other] The reason for change { $change } is longer than 1000 characters. Shorten it, then reject the proposal again.
   }
 
 # The proposals could not be read or kept; the daemon's log says why.

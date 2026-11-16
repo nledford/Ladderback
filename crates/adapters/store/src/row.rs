@@ -568,5 +568,9 @@ pub(crate) fn proposal(row: &SqliteRow) -> Result<StoredProposal, StoreError> {
         status,
         created_at: reader.required_time("created_at")?,
         expires_at: reader.required_time("expires_at")?,
+        decided_at: None,
+        reasons: Vec::new(),
+        approved_from: None,
+        applied_as: None,
     })
 }

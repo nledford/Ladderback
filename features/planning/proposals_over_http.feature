@@ -37,3 +37,13 @@ Feature: Proposals made over HTTP
     When the API token proposes adding the plan "nightly" into the repository "elsewhere"
     Then the route answers with status 422 and the error code "proposal-invalid"
     And the refusal names change 1 and its setting "repository"
+
+  Scenario: A token can't approve a proposal, even with the admin password, and the admin's session can
+    Given the admin has created an API token over HTTP with the scopes "propose" and the label "assistant"
+    And the API token has proposed adding the plan "nightly" over "/home/demo"
+    When the API token approves its proposal, confirming it with "demo-admin-pass"
+    Then the route answers with status 403 and the error code "api-token-scope"
+    And the refusal names the scope "session"
+    And the daemon's config file still holds only the repository "demo"
+    When the admin approves the proposal over HTTP, confirming it with "demo-admin-pass"
+    Then the daemon's config file has the plan "nightly"

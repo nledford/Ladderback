@@ -43,6 +43,11 @@ Feature: Proposing a backup setup for a person to confirm
     When a person creates the plan "home" scheduled "0 3 * * *"
     Then the proposal is stale
 
+  Scenario: Saving a plan brings each pending proposal up to date at once
+    Given an AI agent has proposed adding the plan "home"
+    When a person creates the plan "home" scheduled "0 3 * * *"
+    Then the proposal is stale and announced as stale, before anyone reads it
+
   Scenario: A change elsewhere in the configuration leaves a proposal pending
     Given an AI agent has proposed adding the plan "home"
     When a person creates the plan "photos" scheduled "0 3 * * *"

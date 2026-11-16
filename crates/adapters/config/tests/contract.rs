@@ -40,3 +40,34 @@ async fn a_revision_names_the_files_text() {
     scratch.write("schema = 1\n\n");
     assert_ne!(store.revision().await.expect("a revision"), first);
 }
+
+/// The file store as both ports over a scratch folder of its own; a hand
+/// edit appends a comment to the file.
+#[derive(Default)]
+struct FileDrafts(std::sync::Mutex<Option<Scratch>>);
+
+#[async_trait::async_trait]
+impl contract::config_drafts::DraftsHarness for FileDrafts {
+    async fn empty(
+        &self,
+    ) -> (
+        std::sync::Arc<dyn app::ports::ConfigStore>,
+        std::sync::Arc<dyn app::ports::ConfigDrafts>,
+    ) {
+        let scratch = Scratch::new();
+        let store = std::sync::Arc::new(scratch.store());
+        *self.0.lock().unwrap() = Some(scratch);
+        (store.clone(), store)
+    }
+
+    async fn edit_by_hand(&self) {
+        let scratch = self.0.lock().unwrap();
+        let scratch = scratch.as_ref().expect("a store was opened");
+        scratch.write(&format!("{}# edited by hand\n", scratch.read()));
+    }
+}
+
+#[tokio::test]
+async fn the_file_store_meets_the_config_drafts_contract() {
+    contract::config_drafts::run(&FileDrafts::default()).await;
+}

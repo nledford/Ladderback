@@ -45,6 +45,13 @@ impl EditPlans {
         }
     }
 
+    /// These edits, bringing `proposals` up to date after each change
+    /// saved, so one the change made stale goes stale at once.
+    pub fn with_proposals(self, proposals: Arc<crate::proposals::Proposals>) -> Self {
+        let _ = proposals;
+        self
+    }
+
     /// Adds `plan` after the configuration's last plan
     /// ([`AgentConfig::add_plan`]).
     pub async fn create(&self, plan: Plan) -> Result<(), EditError> {

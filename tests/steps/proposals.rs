@@ -1,13 +1,14 @@
 //! Steps for `features/planning/proposals_over_http.feature`: an API token
 //! the admin created proposes configuration changes through the real
 //! daemon's proposal routes, and the steps read back the config file the
-//! proposal must leave as it was (decision 89).
+//! proposal must leave as it was until the admin's session approves it
+//! (decision 89).
 
 use cucumber::{given, then, when};
 use domain::{SignedDuration, Timestamp};
 
 use super::request_checks_steps::{self as web, Request, Response};
-use super::{Agent, blocking, sign_in_steps};
+use super::{Agent, api_tokens_steps, blocking, sign_in_steps};
 
 /// The config file as the scenario wrote it, and the proposal it made.
 #[derive(Debug, Default)]
@@ -109,6 +110,68 @@ async fn withdraws(agent: &mut Agent) {
         .expect("a proposal was made");
     let path = format!("/api/v1/proposals/{id}/withdraw");
     with_the_token(agent, "POST", path, String::new()).await;
+}
+
+/// The ID of the proposal the API token made.
+fn the_proposal(agent: &Agent) -> String {
+    agent
+        .proposals
+        .proposal
+        .clone()
+        .expect("a proposal was made")
+}
+
+/// The token can't read the review, a session's only, so it sends the
+/// revision and the diff's hash a review would have answered as made up:
+/// the refusal comes before either is read.
+#[when(expr = "the API token approves its proposal, confirming it with {string}")]
+async fn token_approves(agent: &mut Agent, confirmation: String) {
+    let path = format!("/api/v1/proposals/{}/approve", the_proposal(agent));
+    let body = serde_json::json!({
+        "revision": "0".repeat(64),
+        "diff-hash": "0".repeat(64),
+        "confirmation": confirmation,
+    });
+    with_the_token(agent, "POST", path, body.to_string()).await;
+}
+
+/// The admin opens the proposal's review in the session, then approves what
+/// it showed.
+#[when(expr = "the admin approves the proposal over HTTP, confirming it with {string}")]
+async fn admin_approves(agent: &mut Agent, confirmation: String) {
+    let path = format!("/api/v1/proposals/{}", the_proposal(agent));
+    let review =
+        api_tokens_steps::in_session(agent, "GET", &format!("{path}/review"), String::new());
+    let reviewed = api_tokens_steps::exchange(agent, review).await;
+    assert_eq!(reviewed.status, 200, "body {:?}", reviewed.body);
+    let shown = answer(&reviewed);
+    let body = serde_json::json!({
+        "revision": shown["revision"],
+        "diff-hash": shown["diff-hash"],
+        "confirmation": confirmation,
+    });
+    let approve =
+        api_tokens_steps::in_session(agent, "POST", &format!("{path}/approve"), body.to_string());
+    let approved = api_tokens_steps::exchange(agent, approve).await;
+    assert_eq!(approved.status, 200, "body {:?}", approved.body);
+    assert_eq!(answer(&approved)["status"], "applied", "{}", approved.body);
+}
+
+#[then(expr = "the daemon's config file has the plan {string}")]
+fn has_the_plan(agent: &mut Agent, id: String) {
+    let text = std::fs::read_to_string(config_file(agent)).expect("the config file");
+    let file: toml::Table = text.parse().expect("the config file is TOML");
+    let plans: Vec<&str> = file
+        .get("plans")
+        .and_then(toml::Value::as_array)
+        .map(|plans| {
+            plans
+                .iter()
+                .filter_map(|plan| plan.get("id").and_then(toml::Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(plans, [id.as_str()], "{text}");
 }
 
 #[then(

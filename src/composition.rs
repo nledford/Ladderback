@@ -885,19 +885,28 @@ async fn state_over(
         Arc::clone(&writes),
     ));
     let (changed, changes) = app::schedule::config_changes();
+    let config_file_store = Arc::new(FileConfigStore::new(
+        config_file.clone(),
+        Arc::new(SystemClock),
+    ));
+    let proposal_ports = app::proposals::ProposalPorts {
+        store: Arc::<SqliteStore>::clone(&log.store),
+        codec: Arc::new(config_adapter::JsonChangeCodec),
+        config: Arc::clone(&config),
+        drafts: Arc::<FileConfigStore>::clone(&config_file_store),
+        writes: Arc::clone(&writes),
+        changed: changed.another(),
+        events: Arc::clone(&bus),
+        clock: Arc::new(SystemClock),
+        random: Arc::new(platform::random::OsRandom),
+    };
     let plans: Arc<dyn Plans> = Arc::new(plans::PlanService::new(
         Arc::clone(&config),
         app::plans::EditPlans::new(Arc::clone(&config), writes, changed),
     ));
     let proposals: Arc<dyn http_adapter::Proposals> = Arc::new(proposals::ProposalService::new(
-        FileConfigStore::new(config_file.clone(), Arc::new(SystemClock)),
-        app::proposals::Proposals::new(
-            Arc::<SqliteStore>::clone(&log.store),
-            Arc::new(config_adapter::JsonChangeCodec),
-            Arc::clone(&config),
-            Arc::new(SystemClock),
-            Arc::new(platform::random::OsRandom),
-        ),
+        config_file_store,
+        app::proposals::Proposals::new(proposal_ports),
     ));
     let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService::new(
         Arc::clone(&config),

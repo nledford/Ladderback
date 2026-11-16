@@ -22,7 +22,7 @@ import { type BrowserWorld, evaluateAll, fixtureRepo, startServer } from "../sup
 
 // The scratch repositories' password: the one the `demo-repo` fixture was
 // initialized with. Not a real secret.
-const PASSWORD = "demo-password";
+export const PASSWORD = "demo-password";
 
 // A real backup takes real time, and the steps that wait for one are patient:
 // enough for a big scratch source to finish, in a debug build.

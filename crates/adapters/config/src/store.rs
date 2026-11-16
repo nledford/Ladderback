@@ -3,9 +3,12 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use app::ports::{Clock, ConfigError, ConfigStore, NotInPlace, Problem, RecordError};
+use app::ports::{
+    Clock, ConfigDraft, ConfigDrafts, ConfigError, ConfigStore, NotInPlace, Problem, RecordError,
+    SavedOver,
+};
 use async_trait::async_trait;
-use domain::planning::{AgentConfig, ConfigRevision, NotRecorded, RepositoryConfig};
+use domain::planning::{AgentConfig, ConfigRevision, NotRecorded, ProposalId, RepositoryConfig};
 use domain::{RepositoryAlias, RepositoryId};
 
 use crate::edit::saved;
@@ -222,6 +225,24 @@ impl ConfigStore for FileConfigStore {
         self.exclusively(move |job| Ok(job.record_id(&alias, &read, &id, || {})))
             .await
             .map_err(RecordError::Store)?
+    }
+}
+
+#[async_trait]
+impl ConfigDrafts for FileConfigStore {
+    async fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ConfigError> {
+        let _ = config;
+        todo!()
+    }
+
+    async fn save_over(
+        &self,
+        base: &ConfigRevision,
+        config: &AgentConfig,
+        proposal: &ProposalId,
+    ) -> Result<SavedOver, ConfigError> {
+        let _ = (base, config, proposal);
+        todo!()
     }
 }
 

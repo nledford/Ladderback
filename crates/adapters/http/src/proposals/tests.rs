@@ -66,6 +66,9 @@ fn proposal() -> api::ProposalDto {
             plan: "home".to_owned(),
         }],
         rationale: String::new(),
+        decided_at: None,
+        reasons: Vec::new(),
+        warnings: Vec::new(),
     }
 }
 

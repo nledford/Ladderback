@@ -404,7 +404,7 @@ fn cloud_plans(cloud: RepositoryAlias) -> Option<[Plan; 3]> {
 
 /// One repository and one plan, with nothing else set: no part of it
 /// matches anything in [`rich`] except an alias.
-fn minimal() -> Option<AgentConfig> {
+pub(super) fn minimal() -> Option<AgentConfig> {
     let nas = alias("nas")?;
     let repository = RepositoryConfig {
         locations: Default::default(),

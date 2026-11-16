@@ -50,7 +50,7 @@ const MOST_TURNS: u32 = 100_000;
 pub struct RecordingEvents(Mutex<Vec<UiEvent>>);
 
 impl RecordingEvents {
-    fn published(&self) -> Vec<UiEvent> {
+    pub(super) fn published(&self) -> Vec<UiEvent> {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
