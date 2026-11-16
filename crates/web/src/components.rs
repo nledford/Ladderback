@@ -21,6 +21,7 @@ pub(crate) mod button;
 mod checkbox;
 mod error_summary;
 pub(crate) mod icon;
+pub(crate) mod link;
 mod modal_dialog;
 mod pause_updates;
 mod progress;

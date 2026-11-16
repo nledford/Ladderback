@@ -13,7 +13,8 @@ import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
 import { journey, namePattern } from "../support/keyboard.ts";
-import type { BrowserWorld } from "../support/world.ts";
+import { pointer } from "../support/pointer.ts";
+import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -1844,6 +1845,200 @@ Then(
   },
 );
 
+// A link (technical design §4.5): a page of the app is a route change, the
+// page the reader is on is marked and bold, a link to another site says so
+// in its name and with an icon a screen reader skips, and every link is
+// underlined, in Ladder Blue or the color of the text around it, and in the
+// system's link color under forced colors. Each link is read alone with
+// `evaluate`, never with `evaluateAll` (issue #774).
+
+// The links of the gallery's "Link" demo.
+const LINK_DEMO_LINKS = 6;
+
+function linkNamed(page: Page, name: string): Locator {
+  return page.getByRole("link", { name: namePattern(name) });
+}
+
+type Marked = { ladderbackMark?: string };
+
+When("the page carries a mark that a reload would lose", async function (this: BrowserWorld) {
+  await this.page.evaluate(() => {
+    (window as unknown as Marked).ladderbackMark = "kept";
+  });
+});
+
+Then("the page still carries its mark", async function (this: BrowserWorld) {
+  const mark = await this.page.evaluate(() => (window as unknown as Marked).ladderbackMark);
+  assert.equal(mark, "kept", "the page was loaded again: the link was not a route change");
+});
+
+Then("the link {string} is the current page, drawn bold", async function (this: BrowserWorld, name: string) {
+  const link = linkNamed(this.page, name);
+  await expect(link).toHaveAttribute("aria-current", "page");
+  const weight = await link.evaluate((el) => Number(getComputedStyle(el).fontWeight));
+  assert.ok(weight >= 700, `the link "${name}" is drawn at weight ${weight}, not bold`);
+});
+
+Then(
+  "the link {string} is not the current page, drawn in the weight of the text around it",
+  async function (this: BrowserWorld, name: string) {
+    const link = linkNamed(this.page, name);
+    await expect(link).not.toHaveAttribute("aria-current");
+    const weights = await link.evaluate((el) => ({
+      own: getComputedStyle(el).fontWeight,
+      around: getComputedStyle(el.parentElement ?? el).fontWeight,
+    }));
+    assert.equal(weights.own, weights.around, `the link "${name}" is drawn at another weight than its text`);
+  },
+);
+
+// The link's words come first, then its one icon, at the inline end of the
+// words' last line in the line's direction, hidden from a screen reader;
+// what the name adds after the words is in a box no sighted reader sees.
+Then(
+  "the link {string} shows the words {string}, then an icon a screen reader skips",
+  async function (this: BrowserWorld, name: string, words: string) {
+    const link = linkNamed(this.page, name);
+    const found = await link.evaluate((el) => {
+      const icons = el.querySelectorAll("svg");
+      const icon = icons.item(0);
+      if (icons.length !== 1 || icon === null) return { icons: icons.length };
+      const range = document.createRange();
+      range.setStart(el, 0);
+      range.setEndBefore(icon);
+      const last = [...range.getClientRects()].filter((rect) => rect.width > 0).at(-1);
+      const box = icon.getBoundingClientRect();
+      const rtl = getComputedStyle(el).direction === "rtl";
+      const note = icon.nextElementSibling;
+      return {
+        icons: 1,
+        words: range.toString().trim(),
+        hidden: icon.getAttribute("aria-hidden"),
+        after: last !== undefined && (rtl ? box.right <= last.left + 1 : box.left >= last.right - 1),
+        noteUnseen: note !== null && getComputedStyle(note).clipPath === "inset(50%)" && note.nextSibling === null,
+      };
+    });
+    assert.equal(found.icons, 1, `the link "${name}" has ${found.icons} icons`);
+    assert.equal(found.words, words, `the words the link "${name}" shows`);
+    assert.equal(found.hidden, "true", `the icon of the link "${name}" is not hidden from a screen reader`);
+    assert.ok(found.after, `the icon of the link "${name}" doesn't stand after its words in the line's direction`);
+    assert.ok(found.noteUnseen, `the rest of the link "${name}"'s name is not in a box no sighted reader sees`);
+  },
+);
+
+// An outside address is never routed, even one that turns out to be the
+// app's own: `external` keeps the router off it.
+Then(
+  "the link {string} is marked external, sends no referrer and opens where the reader is",
+  async function (this: BrowserWorld, name: string) {
+    const found = await linkNamed(this.page, name).evaluate((el) => ({
+      rel: (el.getAttribute("rel") ?? "").split(/\s+/),
+      target: el.getAttribute("target"),
+    }));
+    assert.ok(found.rel.includes("external"), `the link "${name}" has rel ${JSON.stringify(found.rel)}`);
+    assert.ok(found.rel.includes("noreferrer"), `the link "${name}" has rel ${JSON.stringify(found.rel)}`);
+    assert.equal(found.target, null, `the link "${name}" opens in ${found.target}`);
+  },
+);
+
+// A link's underline thickness, as the page draws it now.
+function underlineOf(link: Locator): Promise<number> {
+  return link.evaluate((el) => Number.parseFloat(getComputedStyle(el).textDecorationThickness));
+}
+
+/** A link's underline before the pointer came to rest on it, per page. */
+const underlineAtRest = new WeakMap<Page, number>();
+
+// The link may sit below the window's edge, where a pointer can't reach; the
+// page scrolls it into view first, as a reader would, and its underline is
+// read before the pointer arrives.
+When("I rest the pointer on the link {string}", async function (this: BrowserWorld, name: string) {
+  const link = linkNamed(this.page, name);
+  await link.scrollIntoViewIfNeeded();
+  underlineAtRest.set(this.page, await underlineOf(link));
+  await pointer(this.page).restOn(link);
+});
+
+Then("the underline of the link {string} is thicker than at rest", async function (this: BrowserWorld, name: string) {
+  const atRest = underlineAtRest.get(this.page);
+  assert.ok(atRest !== undefined, "the pointer never came to rest on a link");
+  await expect.poll(() => underlineOf(linkNamed(this.page, name))).toBeGreaterThan(atRest);
+});
+
+// Underlined at rest, its line at least a pixel thick and far enough under
+// the baseline (a fifth of the text's size) to clear the letters' descenders,
+// which ink skipping keeps it off as well.
+Then("every link of the {string} demo is underlined below its letters", async function (this: BrowserWorld, component: string) {
+  const links = demoSection(this.page, component).getByRole("link");
+  for (const link of await eachOf(links, LINK_DEMO_LINKS)) {
+    const drawn = await link.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        name: (el.textContent ?? "").trim(),
+        line: style.textDecorationLine,
+        thickness: Number.parseFloat(style.textDecorationThickness),
+        offset: Number.parseFloat(style.textUnderlineOffset) / Number.parseFloat(style.fontSize),
+        skip: style.textDecorationSkipInk,
+      };
+    });
+    assert.ok(drawn.line.includes("underline"), `the link "${drawn.name}" is not underlined: ${drawn.line}`);
+    assert.ok(drawn.thickness >= 1, `the link "${drawn.name}"'s underline is ${drawn.thickness}px thick`);
+    assert.ok(drawn.offset >= 0.2, `the link "${drawn.name}"'s underline is ${drawn.offset}em under its baseline`);
+    assert.notEqual(drawn.skip, "none", `the link "${drawn.name}"'s underline crosses its letters`);
+  }
+});
+
+Then(
+  "each link of the {string} demo is drawn in its tone:",
+  async function (this: BrowserWorld, component: string, table: DataTable) {
+    const rows = table.hashes() as { link: string; color: string }[];
+    const section = demoSection(this.page, component);
+    await eachOf(section.getByRole("link"), rows.length);
+    for (const { link: name, color } of rows) {
+      const drawn = await section.getByRole("link", { name: namePattern(name) }).evaluate((el, token) => {
+        let want = getComputedStyle(el.parentElement ?? el).color;
+        if (token.startsWith("--")) {
+          const probe = document.createElement("span");
+          probe.style.color = `var(${token})`;
+          document.body.append(probe);
+          want = getComputedStyle(probe).color;
+          probe.remove();
+        }
+        const style = getComputedStyle(el);
+        return { want, text: style.color, underline: style.textDecorationColor };
+      }, color);
+      assert.equal(drawn.text, drawn.want, `the link "${name}" is not drawn in ${color}`);
+      assert.equal(drawn.underline, drawn.want, `the link "${name}"'s underline is not drawn in ${color}`);
+    }
+  },
+);
+
+Then("every link of the {string} demo is drawn in the system's link color", async function (this: BrowserWorld, component: string) {
+  const links = demoSection(this.page, component).getByRole("link");
+  for (const link of await eachOf(links, LINK_DEMO_LINKS)) {
+    const drawn = await link.evaluate((el) => {
+      const probe = document.createElement("span");
+      probe.style.forcedColorAdjust = "none";
+      probe.style.color = "LinkText";
+      document.body.append(probe);
+      const want = getComputedStyle(probe).color;
+      probe.remove();
+      const style = getComputedStyle(el);
+      return { name: (el.textContent ?? "").trim(), want, text: style.color, underline: style.textDecorationColor };
+    });
+    assert.equal(drawn.text, drawn.want, `the link "${drawn.name}" is not drawn in LinkText`);
+    assert.equal(drawn.underline, drawn.want, `the link "${drawn.name}"'s underline is not drawn in LinkText`);
+  }
+});
+
+Then("the link {string} wraps onto more than one line", async function (this: BrowserWorld, name: string) {
+  const lines = await linkNamed(this.page, name).evaluate((el) => {
+    const tops = [...el.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top));
+    return new Set(tops).size;
+  });
+  assert.ok(lines > 1, `the link "${name}" stands on ${lines} line`);
+});
+
 // The pinned structure of each demo (roles and names, not styling), compared
 // with locator.ariaSnapshot(): toMatchAriaSnapshot() only works inside a
 // Playwright test, and these run under Cucumber. Regenerate a snapshot by
@@ -2196,6 +2391,32 @@ const SNAPSHOTS: Record<string, string> = {
   - button "Demo long note"
 - paragraph:
   - button "Demo note at the foot of the page"`,
+  // A link inside a sentence stands between the isolation marks (U+2068,
+  // U+2069) the catalog puts around its words, which stay in the text
+  // beside it.
+  Link: `- heading "Link" [level=2]
+- paragraph:
+  - link "Demo link to the start page":
+    - /url: /
+- paragraph:
+  - link "Demo link to this page":
+    - /url: /_gallery
+- paragraph:
+  - link "Demo rustic documentation (goes to another site)":
+    - /url: https://rustic.cli.rs/
+- paragraph:
+  - text: Read \u2068
+  - link "the demo plan format":
+    - /url: /plans
+  - text: \u2069 before you write a demo plan.
+- paragraph:
+  - text: "The demo check failed: \u2068"
+  - link "the demo log":
+    - /url: /log
+  - text: \u2069 says why.
+- paragraph:
+  - link "Demo rustic documentation, right to left (goes to another site)":
+    - /url: https://rustic.cli.rs/`,
   "Step-up field": `- heading "Step-up field" [level=2]
 - paragraph:
   - button "Open the demo step-up"
