@@ -507,9 +507,10 @@ impl Inputs {
 /// refuses the plan, and the buttons that save it and close it. Once saved,
 /// the list is read again and the form closes, unless the reader has opened
 /// another plan's form in its place; focus that fell to the page with it
-/// returns to the button that opened it, and focus the reader moved out of
-/// it meanwhile stays (A1). The row of a plan on a schedule then shows its
-/// next run as soon as the scheduler has planned one.
+/// returns to the button that opened it, or to the page's heading when a
+/// list that couldn't be read again took that button away, and focus the
+/// reader moved out of it meanwhile stays (A1). The row of a plan on a
+/// schedule then shows its next run as soon as the scheduler has planned one.
 #[component]
 fn PlanEditor(
     localizer: Arc<Localizer>,
@@ -577,8 +578,11 @@ fn PlanEditor(
                         // the plan, whose Change button may be new. Focus
                         // that was in the form fell to the page with it;
                         // focus the reader moved elsewhere meanwhile stays.
+                        // A list that couldn't be read again took the
+                        // opener with it, so focus goes to the heading.
                         gloo_timers::future::sleep(Duration::ZERO).await;
                         recover_focus(&opener);
+                        recover_focus(PAGE_HEADING_ID);
                     }
                     list.await_next_run(saved_as).await;
                 }
@@ -600,7 +604,10 @@ fn PlanEditor(
     };
     let cancel = move |_| {
         close.run(());
-        focus_element(&cancel_opener);
+        // The opener went with a list that couldn't be read again.
+        if !focus_element(&cancel_opener) {
+            focus_element(PAGE_HEADING_ID);
+        }
     };
 
     let field_view = |field: Field| {

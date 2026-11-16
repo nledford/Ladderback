@@ -66,7 +66,8 @@
 # decision 96): it sends the list, plan, save and delete requests, holds the
 # form's signals and the summary, opens and closes the form and the delete
 # dialog, reads the list again while a saved plan waits for its next run,
-# and moves focus back to the button that opened the form. What each field
+# and moves focus back to the button that opened the form, or to the page's
+# heading when that button is gone. What each field
 # shows, the plan a form sends, the plan a new form starts from, which field
 # a refusal is about and in whose words, which ID a save's answer names,
 # whether a saved plan still waits for its next run and how often and how

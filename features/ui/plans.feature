@@ -3,10 +3,12 @@ Feature: Plans page
   The Plans page lists the plans in the configuration file and creates,
   changes and deletes them, with the keyboard alone (A1, A2): its form has a
   field for each setting of a plan, its sources and filters, its
-  repository, its schedule, its retention and its hooks. A save returns
-  focus to the button that opened the form, unless the reader has moved it
-  out of the form while the plan was saved, and leaves open a form they
-  opened meanwhile for another plan (A1). A refusal moves
+  repository, its schedule, its retention and its hooks. A save, or closing
+  the form without saving, returns focus to the button that opened the
+  form, or to the page's heading when the list can't be read again and that
+  button is gone, unless the reader
+  has moved it out of the form while the plan was saved, and leaves open a
+  form they opened meanwhile for another plan (A1). A refusal moves
   focus to an error summary that names each problem and links to its field
   (A4, components.md §4.5). Deleting a plan asks first, and says what
   becomes of its snapshots: they stay in the repository, and since forget
