@@ -184,7 +184,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 To be answered by experiments in M1a to M3 rather than by decision:
 
 1. Does a SIGKILL during an S3, B2 or SFTP upload leave a partial object under a final pack name? The kill test (§4.1) must cover one OpenDAL backend.
-2. Does a Full Disk Access grant on the launchd-started daemon carry over to the worker child process, or does the worker need its own grant?
+2. Does a Full Disk Access grant on the launchd-started daemon carry over to the worker child process, or does the worker need its own grant? **Answered** on macOS 27.3 (#281): it carries over, and the worker needs none ([§12](operations.md#12-packaging-and-deployment)).
 3. How long does prune take on a large repo? That sets `prune_margin` (§7.3).
 
 To be decided in M4, when hub and agents first talk:
