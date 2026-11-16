@@ -79,7 +79,7 @@ enum Calls {
 /// token as the server's does, so it starts protected the same way, before
 /// it reads the script or its calls.
 pub(crate) fn call(args: CallArgs, plain: bool) -> ExitCode {
-    let localizer = crate::start_protected(plain);
+    let localizer = crate::start_protected(plain, None);
     crate::finish(&localizer, run(&localizer, args))
 }
 

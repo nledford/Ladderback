@@ -261,7 +261,7 @@ impl McpMode {
 }
 
 fn serve_mcp(mode: McpMode, plain: bool) -> ExitCode {
-    let localizer = start_protected(plain);
+    let localizer = start_protected(plain, None);
     finish(&localizer, run_mcp(&localizer, mode))
 }
 
@@ -269,10 +269,14 @@ fn serve_mcp(mode: McpMode, plain: bool) -> ExitCode {
 /// server or a one-shot command: first, before any secret is resolved or a
 /// token read, its core dumps and debugger attach turned off (decision 98),
 /// then its log and the reader's language, and a warning for each
-/// protection it couldn't set.
-pub(crate) fn start_protected(plain: bool) -> Localizer {
+/// protection it couldn't set. The daemon's log keeps its lines in `recent`
+/// too, when given (#618).
+pub(crate) fn start_protected(
+    plain: bool,
+    recent: Option<Arc<dyn app::ports::RecentLogStore>>,
+) -> Localizer {
     let unprotected = platform::dumps::refuse();
-    logging::install(plain);
+    logging::install(plain, recent);
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     for unprotected in &unprotected {
         log::warn!("{}", dumps::daemon_line(&localizer, unprotected));
@@ -409,11 +413,20 @@ fn serve(
     service_managed: bool,
     plain: bool,
 ) -> ExitCode {
-    let localizer = start_protected(plain);
+    // Before the log, so that it holds the start and every line after it.
+    let recent_log: Arc<dyn app::ports::RecentLogStore> =
+        Arc::new(app::recent_log::RecentLogRing::new());
+    let localizer = start_protected(plain, Some(Arc::clone(&recent_log)));
     log::info!("{} starting", *build_info::NAMED);
     finish(
         &localizer,
-        run_daemon(&localizer, listen, allowed_hosts, service_managed),
+        run_daemon(
+            &localizer,
+            listen,
+            allowed_hosts,
+            service_managed,
+            recent_log,
+        ),
     )
 }
 
@@ -428,6 +441,7 @@ fn run_daemon(
     listen: SocketAddr,
     allowed_hosts: Vec<String>,
     service_managed: bool,
+    recent_log: Arc<dyn app::ports::RecentLogStore>,
 ) -> io::Result<ExitCode> {
     // Checked here, not by the argument parser, so that the refusal is said
     // in the catalog's words and the person's language (§8.4). Exit status 2
@@ -512,6 +526,7 @@ fn run_daemon(
         Arc::clone(&random),
         exposure,
         service_managed,
+        recent_log,
     )) {
         Ok(daemon) => daemon,
         Err(refused) => {

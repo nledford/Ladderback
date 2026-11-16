@@ -279,6 +279,10 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
     use Scope::{Preview, Read, Run};
     for (method, path, scope) in [
         (Method::GET, "/api/v1/events", Some(Read)),
+        // The recent log, read as Operations is read (#618).
+        (Method::GET, "/api/v1/log", Some(Read)),
+        (Method::HEAD, "/api/v1/log", Some(Read)),
+        (Method::DELETE, "/api/v1/log", None),
         (Method::GET, "/api/v1/operations", Some(Read)),
         (Method::HEAD, "/api/v1/operations", Some(Read)),
         (Method::GET, "/api/v1/operations/018f", Some(Read)),

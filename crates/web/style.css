@@ -889,6 +889,52 @@ table.operations td ul {
   list-style-position: inside;
 }
 
+/* The table of the Log page has fixed shares of the width, as the table of
+   operations has, so a long message breaks inside its own column rather than
+   widening the table past a small screen (1.4.10). Message, the column with
+   the most to say, takes the largest share. Above 48rem of room the time,
+   the level and the source take what they need in rem, and Message the
+   rest. A message keeps the line breaks the log wrote. The space around the
+   text follows the screen's width, as in the table of operations, so a letter
+   of the largest text fits each column at 320 px. */
+table.log {
+  table-layout: fixed;
+}
+
+table.log thead th:nth-child(1) {
+  inline-size: 27%;
+}
+
+table.log thead th:nth-child(2) {
+  inline-size: 18%;
+}
+
+table.log thead th:nth-child(3) {
+  inline-size: 22%;
+}
+
+@container (min-width: 48rem) {
+  table.log thead th:nth-child(1) {
+    inline-size: 14rem;
+  }
+
+  table.log thead th:nth-child(2) {
+    inline-size: 6rem;
+  }
+
+  table.log thead th:nth-child(3) {
+    inline-size: 12rem;
+  }
+}
+
+table.log :is(th, td) {
+  padding-inline: min(0.5rem, 1.25vw);
+}
+
+table.log td.message {
+  white-space: pre-wrap;
+}
+
 /* A sortable column's header: its text, then its sort button, apart by a gap
    on the same line when there is room, and the button on a line of its own
    below the text when there isn't. Inline, the two touched, and the button

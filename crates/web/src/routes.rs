@@ -1887,6 +1887,8 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_REPOSITORIES_TITLE
     } else if path == "/snapshots" {
         msg::UI_SNAPSHOTS_TITLE
+    } else if path == "/log" {
+        msg::UI_LOG_TITLE
     } else if path == "/settings" {
         msg::UI_SETTINGS_TITLE
     } else if is_snapshot_page(path) {
@@ -1928,6 +1930,11 @@ mod tests {
     #[test]
     fn the_settings_page_is_titled_with_the_product_name() {
         assert_eq!(title_of("/settings"), "Settings – Ladderback");
+    }
+
+    #[test]
+    fn the_log_page_is_titled_with_the_product_name() {
+        assert_eq!(title_of("/log"), "Log – Ladderback");
     }
 
     #[test]

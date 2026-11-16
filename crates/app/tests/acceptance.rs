@@ -55,6 +55,8 @@ mod interop_steps;
 mod notifications_steps;
 #[path = "steps/plans.rs"]
 mod plans_steps;
+#[path = "steps/recent_log.rs"]
+mod recent_log_steps;
 #[path = "steps/recovery.rs"]
 mod recovery_steps;
 #[path = "steps/repositories.rs"]
@@ -101,6 +103,7 @@ struct Agent {
     stats: stats_steps::StatsWorld,
     updates: updates_steps::UpdatesWorld,
     restore: restore_steps::RestoreWorld,
+    recent_log: recent_log_steps::RecentLogWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -150,6 +153,7 @@ impl Agent {
             plans: Default::default(),
             stats: Default::default(),
             updates: Default::default(),
+            recent_log: Default::default(),
         }
     }
 

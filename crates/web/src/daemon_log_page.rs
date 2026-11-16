@@ -1,0 +1,185 @@
+//! The Log page's DOM glue (technical design §4.4, #618): it reads the recent
+//! log once as the page opens, holds the choice of levels, lists the lines
+//! the choice keeps and copies them for a bug report, saying through the
+//! announcer whether they are on the clipboard. `daemon_log.rs` decides for
+//! it.
+
+use std::sync::Arc;
+
+use api::{LogLineDto, RecentLogDto};
+use l10n::{Localizer, msg};
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+use crate::announcer::Politeness;
+use crate::components::{RadioGroup, sentence_view, write_clipboard};
+use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
+use crate::live::reply;
+use crate::repositories::Sentence;
+use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence};
+use crate::session::Told;
+use crate::text;
+use crate::ws::{self, Got, Phase};
+
+/// The Log page at `/log`: the recent log, newest line first, with the
+/// choice of levels and the button that copies the lines listed. A read the
+/// daemon refuses is said in the lines' place as an alert, as the daemon said
+/// it; one that reaches no daemon is said as on every page.
+#[component]
+pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
+    let phase = RwSignal::new(Phase::Loading);
+    let lines = RwSignal::new(Vec::<LogLineDto>::new());
+    let refused = RwSignal::<Option<Sentence>>::new(None);
+    let url = format!("{}{LOG_PATH}", ws::origin());
+    let load_localizer = Arc::clone(&localizer);
+    spawn_local(async move {
+        let read = ws::get::<RecentLogDto>(&url).await;
+        // The reader may have left the page before the answer came.
+        if phase.try_get_untracked().is_none() {
+            return;
+        }
+        match read {
+            Some(Got::Read(read)) => {
+                lines.set(read.lines);
+                phase.set(Phase::Ready);
+            }
+            Some(Got::Refused(code, args, detail)) => {
+                refused.set(Some(refused_sentence(
+                    &load_localizer,
+                    code,
+                    &args,
+                    detail.as_deref(),
+                )));
+                phase.set(Phase::Ready);
+            }
+            None => phase.set(Phase::Unreachable),
+        }
+    });
+
+    let heading = text(&localizer, msg::UI_LOG_HEADING);
+    let unreachable_heading = text(&localizer, msg::UI_UNREACHABLE_HEADING);
+    let body = text(&localizer, msg::UI_LOG_BODY);
+    let loading = text(&localizer, msg::UI_LOADING);
+    let unreachable = text(&localizer, msg::UI_UNREACHABLE_BODY);
+    let none = text(&localizer, msg::UI_LOG_NONE);
+    let lines_localizer = Arc::clone(&localizer);
+    view! {
+        <PageHeading>
+            {move || {
+                if phase.get() == Phase::Unreachable {
+                    unreachable_heading.clone()
+                } else {
+                    heading.clone()
+                }
+            }}
+        </PageHeading>
+        <p>{body}</p>
+        {move || match phase.get() {
+            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
+            Phase::Ready => {
+                match refused.get() {
+                    Some(sentence) => {
+                        view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+                    }
+                    None if lines.with(Vec::is_empty) => view! { <p>{none.clone()}</p> }.into_any(),
+                    None => {
+                        view! { <Lines localizer=Arc::clone(&lines_localizer) lines=lines /> }
+                            .into_any()
+                    }
+                }
+            }
+        }}
+    }
+}
+
+/// The choice of levels, the button that copies, and the table of the lines
+/// the choice keeps. Only the table follows the choice, so focus stays on
+/// the radio button the reader moved to.
+#[component]
+fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl IntoView {
+    let chosen = RwSignal::new(Levels::All.value());
+    let listed = Memo::new(move |_| lines.with(|lines| shown(lines, Levels::of(chosen.get()))));
+    // The build the daemon told the page it runs (decision 90), for the
+    // report's first line.
+    let told = use_context::<RwSignal<Option<Told>>>();
+    let copied = text(&localizer, msg::UI_LOG_COPIED);
+    let refused = text(&localizer, msg::UI_LOG_COPY_FAILED);
+    let copy = move |_| {
+        let build = told
+            .and_then(|told| told.get_untracked())
+            .map(|told| told.build);
+        let report = listed.with_untracked(|listed| bug_report(build.as_ref(), listed));
+        let (copied, refused) = (copied.clone(), refused.clone());
+        write_clipboard(&report, move |done| {
+            reply(Politeness::Polite, if done { &copied } else { &refused });
+        });
+    };
+    let options = Levels::ALL
+        .into_iter()
+        .map(|levels| (levels.value(), text(&localizer, levels.label())))
+        .collect();
+    let none_shown = text(&localizer, msg::UI_LOG_NONE_SHOWN);
+    let headers = [
+        msg::UI_LOG_AT,
+        msg::UI_LOG_LEVEL,
+        msg::UI_LOG_SOURCE,
+        msg::UI_LOG_MESSAGE,
+    ]
+    .map(|id| text(&localizer, id));
+    let rows_localizer = Arc::clone(&localizer);
+    view! {
+        <RadioGroup
+            name="log-levels"
+            legend=text(&localizer, msg::UI_LOG_LEVELS)
+            options=options
+            chosen=chosen
+        />
+        <p class="actions">
+            <button type="button" on:click=copy>
+                {text(&localizer, msg::UI_LOG_COPY)}
+            </button>
+        </p>
+        {move || {
+            let listed = listed.get();
+            if listed.is_empty() {
+                return view! { <p>{none_shown.clone()}</p> }.into_any();
+            }
+            let rows = listed
+                .into_iter()
+                .map(|line| {
+                    let level = text(&rows_localizer, level_name(line.level));
+                    let at = line.at.clone();
+                    view! {
+                        <tr>
+                            <td>
+                                <time datetime=at>{line.at}</time>
+                            </td>
+                            <td>{level}</td>
+                            <td lang="en">{line.source}</td>
+                            <td class="message" lang="en">
+                                {line.message}
+                            </td>
+                        </tr>
+                    }
+                })
+                .collect_view();
+            view! {
+                <div class="table-frame">
+                    <table class="log" aria-labelledby=PAGE_HEADING_ID>
+                        <thead>
+                            <tr>
+                                {headers
+                                    .clone()
+                                    .map(|header| view! { <th scope="col">{header}</th> })
+                                    .to_vec()}
+                            </tr>
+                        </thead>
+                        <tbody>{rows}</tbody>
+                    </table>
+                </div>
+            }
+                .into_any()
+        }}
+    }
+}

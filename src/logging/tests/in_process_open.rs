@@ -6,8 +6,10 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use app::ports::{RepositoryAccess, Retention};
+use app::ports::{RecentLogStore, RepositoryAccess, Retention};
+use app::recent_log::RecentLogRing;
 use domain::planning::{KeepCount, RetentionPolicy};
 use domain::secrets::SecretValue;
 use engine::RusticRetention;
@@ -117,18 +119,21 @@ fn listing(folder: &Path) -> String {
 /// on to the end, and once the engine has stopped the server, the stand-in says
 /// it again while the engine drops the backends. Every record of it reaches the
 /// daemon's own logger,
-/// whose text this returns once the open succeeded.
-async fn open_logged(filter: Option<&str>, credential: &str) -> String {
+/// whose text this returns once the open succeeded, with the text of the
+/// recent log the logger kept, a line to each line.
+async fn open_logged(filter: Option<&str>, credential: &str) -> (String, String) {
     let scratch = tempfile::tempdir().unwrap();
     let root = scratch.path().join("repo");
     init(&root);
     let address = rest_server(root);
     let pipe = Pipe::default();
+    let recent = Arc::new(RecentLogRing::new());
     set(logger(
         filter,
         Target::Pipe(Box::new(pipe.clone())),
         WriteStyle::Never,
-    ));
+    )
+    .recording(recent.clone()));
     // The engine appends what follows `rclone:` as the last argument, as rustic
     // does; `exec` makes the shell the server the engine stops when it is done. A child of it
     // holds rclone's stderr, and once the server is stopped (the write end
@@ -189,15 +194,26 @@ async fn open_logged(filter: Option<&str>, credential: &str) -> String {
         !log.contains("rclone output: Serving restic REST API"),
         "the serving line was logged: {log}"
     );
-    log
+    let kept: Vec<String> = recent
+        .newest_first()
+        .iter()
+        .map(|line| format!("{} {}", line.source(), line.message()))
+        .collect();
+    let kept = kept.join("\n");
+    assert!(
+        kept.contains("rclone was asked to serve"),
+        "the open's records reached the recent log: {kept}"
+    );
+    (log, kept)
 }
 
 /// At the daemon's default level, none of the open's records shows the
-/// credential.
+/// credential, in the log or in the recent log the log keeps (#618).
 #[tokio::test]
 async fn an_open_by_the_daemon_never_logs_a_credential_of_an_rclone_location() {
-    let log = open_logged(None, CANARY).await;
+    let (log, kept) = open_logged(None, CANARY).await;
     assert!(!log.contains(CANARY), "the daemon's log leaks: {log}");
+    assert!(!kept.contains(CANARY), "the recent log leaks: {kept}");
 }
 
 /// At `debug`, the engine logs the command it starts rclone with, as rustic does, as `{:?}`
@@ -205,10 +221,11 @@ async fn an_open_by_the_daemon_never_logs_a_credential_of_an_rclone_location() {
 /// credential is masked in that form too.
 #[tokio::test]
 async fn at_debug_an_open_by_the_daemon_never_logs_a_credential_its_debug_form_escapes() {
-    let log = open_logged(Some("debug"), "CANARY-rclone\"quoted-key").await;
+    let (log, kept) = open_logged(Some("debug"), "CANARY-rclone\"quoted-key").await;
     assert!(
         log.contains("starting rclone via"),
         "the record that quotes rclone's command was written: {log}"
     );
     assert!(!log.contains("CANARY"), "the daemon's log leaks: {log}");
+    assert!(!kept.contains("CANARY"), "the recent log leaks: {kept}");
 }

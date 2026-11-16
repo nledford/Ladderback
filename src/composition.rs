@@ -601,8 +601,11 @@ pub(crate) async fn daemon(
     random: Arc<dyn Random>,
     exposure: http_adapter::Exposure,
     service_managed: bool,
+    recent_log: Arc<dyn app::ports::RecentLogStore>,
 ) -> Result<Daemon, Refused> {
     let mut daemon = daemon_at(dirs::config_dir(), dirs::data_dir(), dirs::cache_dir()).await?;
+    // The one the daemon's log feeds, masked as the log is (I4, #618).
+    daemon.state.recent_log = recent_log;
     daemon.state.restart = http_adapter::Restart::new(
         service_managed,
         Arc::new(runs::Work {
@@ -908,6 +911,8 @@ async fn state_over(
             build: crate::build_info::running(),
             restart: http_adapter::Restart::default(),
             updates: notice,
+            // An empty one: the daemon's own puts the one its log feeds here.
+            recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
         },
         background,
         stopping,

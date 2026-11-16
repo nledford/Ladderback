@@ -50,6 +50,7 @@ pub(crate) fn test_state() -> AppState {
         build: test_build(),
         restart: crate::Restart::default(),
         updates: Arc::default(),
+        recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
     }
 }
 

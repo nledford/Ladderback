@@ -4092,6 +4092,43 @@ impl BuildDto {
     }
 }
 
+/// The recent log (§3.1, #618): the newest lines of the daemon log, newest
+/// first, as `GET /api/v1/log` answers it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct RecentLogDto {
+    pub lines: Vec<LogLineDto>,
+}
+
+/// One line of the daemon log, as the log wrote it, its secrets masked (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct LogLineDto {
+    /// When it was written: RFC 3339 in UTC, to the millisecond
+    /// (`2026-11-15T09:00:01.250Z`), as the log writes it.
+    pub at: String,
+    pub level: LogLevelDto,
+    /// The part of Ladderback, or the crate, that wrote it
+    /// (`ladderback::scheduler`).
+    pub source: String,
+    pub message: String,
+}
+
+/// How much a line of the daemon log matters, most severe first, so that
+/// `Error < Warn`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum LogLevelDto {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
 /// Where a request stands with sign-in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
