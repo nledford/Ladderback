@@ -121,6 +121,13 @@ impl OperationStore for FaultyLog {
     async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, StoreError> {
         self.inner.ever_succeeded(plan).await
     }
+
+    async fn running_maintenance(
+        &self,
+        repository: Option<&domain::RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        self.inner.running_maintenance(repository).await
+    }
 }
 
 /// The page a scenario listens with, and the fault it gives the log.

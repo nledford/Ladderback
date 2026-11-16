@@ -104,6 +104,14 @@ impl crate::Repositories for NoRepositories {
     ) -> Result<api::LocationsTestDto, crate::RepositoriesError> {
         Err(crate::RepositoriesError::InvalidBody)
     }
+
+    async fn change_maintainer(
+        &self,
+        _alias: String,
+        _request: api::MaintainerDto,
+    ) -> Result<(), crate::RepositoriesError> {
+        Err(crate::RepositoriesError::InvalidBody)
+    }
 }
 
 /// Does nothing: the checks never reach a route.

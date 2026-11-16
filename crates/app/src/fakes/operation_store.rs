@@ -86,6 +86,14 @@ impl OperationStore for InMemoryOperationStore {
         Ok(Start::Started)
     }
 
+    async fn running_maintenance(
+        &self,
+        repository: Option<&domain::RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        let _ = repository;
+        todo!()
+    }
+
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
         Ok(self.stored().get(&id).cloned())
     }

@@ -27,6 +27,7 @@ pub(super) async fn run(store: &dyn OperationStore) {
     a_running_maintenance_operation_stops_holding_its_repository(store).await;
     recovery_frees_only_what_maintenance_held(store).await;
     nothing_unfinished_ends_succeeded(store).await;
+    the_maintenance_running_on_a_repository_is_the_one_found(store).await;
 }
 
 fn daemon_stopped() -> OperationStatus {
@@ -425,6 +426,70 @@ async fn a_running_maintenance_operation_stops_holding_its_repository(store: &dy
         // Leave nothing unfinished for the cases that follow.
         assert_eq!(recover(store).await, Some(1));
     }
+}
+
+/// What the store answers for the maintenance running on `repository`, or
+/// on any when it is `None`. A store that can't answer fails the suite.
+async fn running_on(
+    store: &dyn OperationStore,
+    repository: Option<&RepositoryId>,
+) -> Option<OperationId> {
+    let found = store.running_maintenance(repository).await;
+    assert!(
+        found.is_ok(),
+        "the running maintenance couldn't be read: {found:?}"
+    );
+    found.ok().flatten()
+}
+
+async fn the_maintenance_running_on_a_repository_is_the_one_found(store: &dyn OperationStore) {
+    let (Some(nas), Some(laptop)) = (numbered(0x70), numbered(0x71)) else {
+        return;
+    };
+    assert_eq!(
+        running_on(store, None).await,
+        None,
+        "a log with nothing running holds no repository"
+    );
+    let backup = started(on(0x7a00, Backup, Some(&nas)));
+    start_running(store, &backup).await;
+    assert_eq!(
+        running_on(store, Some(&nas)).await,
+        None,
+        "a backup holds no repository"
+    );
+    assert_eq!(running_on(store, None).await, None, "nor any repository");
+
+    for (number, kind) in (1_u128..).zip([Prune, Check, Forget, Adopt]) {
+        let holder = started(on(0x7a00 + number, kind, Some(&nas)));
+        start_running(store, &holder).await;
+        assert_eq!(
+            running_on(store, Some(&nas)).await,
+            Some(holder.id()),
+            "a running {kind:?} is found on its repository"
+        );
+        assert_eq!(
+            running_on(store, None).await,
+            Some(holder.id()),
+            "and asking about every repository finds it"
+        );
+        assert_eq!(
+            running_on(store, Some(&laptop)).await,
+            None,
+            "another repository is held by nothing"
+        );
+        let mut ended = holder;
+        applied(ended.succeed(at(90)));
+        save(store, &ended, None).await;
+        assert_eq!(
+            running_on(store, Some(&nas)).await,
+            None,
+            "an ended {kind:?} holds its repository no longer"
+        );
+    }
+
+    // Leave nothing unfinished for the cases that follow.
+    assert_eq!(recover(store).await, Some(1), "only the backup still runs");
 }
 
 async fn recovery_frees_only_what_maintenance_held(store: &dyn OperationStore) {

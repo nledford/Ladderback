@@ -279,6 +279,7 @@ async fn forget(agent: &mut Agent) {
         resolve,
         Arc::new(engine::RusticRetention),
         Arc::new(config),
+        Arc::default(),
         agent.agent_id,
         platform::hostname(),
         Arc::new(engine::RusticSources),

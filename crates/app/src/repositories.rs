@@ -5,9 +5,11 @@
 //! the job it was resolved for.
 
 mod create_offers;
+mod maintainer;
 mod record_opened;
 
 pub use create_offers::CreateOffers;
+pub use maintainer::{ChangeMaintainer, MaintainerError};
 pub use record_opened::{ConfigWrites, RecordOpened, Recording};
 
 use std::sync::Arc;

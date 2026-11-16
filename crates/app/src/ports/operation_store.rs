@@ -90,6 +90,16 @@ pub trait OperationStore: Send + Sync {
     /// ([`RunMaintenance::start`](crate::maintenance::RunMaintenance::start)).
     async fn try_start(&self, operation: &Operation) -> Result<Start, StoreError>;
 
+    /// The maintenance operation running on `repository` that holds its I7
+    /// slot, the one [`try_start`](Self::try_start) would refuse a second
+    /// one for, or `None` when none is running. `None` for `repository`, one
+    /// whose ID isn't known yet, asks about every repository: its ID may be
+    /// the one a running operation names.
+    async fn running_maintenance(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError>;
+
     /// The operation with its warnings, or `None` when no such operation was saved.
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError>;
 

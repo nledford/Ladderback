@@ -210,6 +210,13 @@ impl OperationStore for Broken {
     async fn ever_succeeded(&self, _: &domain::PlanId) -> Result<bool, StoreError> {
         Err(self.0.clone())
     }
+
+    async fn running_maintenance(
+        &self,
+        _: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        Err(self.0.clone())
+    }
 }
 
 #[tokio::test]

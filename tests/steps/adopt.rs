@@ -181,6 +181,7 @@ async fn adopt(agent: &mut Agent, plan: String) {
         resolve,
         Arc::new(engine::RusticRetention),
         Arc::new(config),
+        Arc::default(),
         agent.agent_id,
         platform::hostname(),
         Arc::new(engine::RusticSources),

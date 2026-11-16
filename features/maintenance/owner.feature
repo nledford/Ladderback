@@ -6,6 +6,9 @@ Feature: Only the maintenance owner forgets, prunes, checks and adopts
   a check and an adoption of any other repository, and the preview of each,
   are refused before the engine is asked anything, and nothing is written
   to the operation log. Its history is a read, and is listed all the same.
+  A run reads again that this agent maintains the repository as it starts,
+  so one assessed before maintenance from this agent was turned off never
+  runs.
 
   Scenario Outline: <asked> of a repository whose maintenance is "<maintenance>" is refused
     Given a plan "home" keeping the last 1 snapshot
@@ -49,3 +52,13 @@ Feature: Only the maintenance owner forgets, prunes, checks and adopts
       | maintenance |
       | none        |
       | hub         |
+
+  Scenario: A forget assessed before maintenance from this agent was turned off never runs
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    When the owner assesses a forget of the repository
+    And maintenance of the repository from this agent is turned off
+    And the assessed forget starts
+    Then it is refused because this agent does not maintain the repository
+    And the engine was never asked to remove anything
+    And the operation log holds no operation

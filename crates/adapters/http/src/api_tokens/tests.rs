@@ -349,6 +349,7 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
             "/api/v1/repositories/home/snapshots/abcd/restore/preview",
             None,
         ),
+        (Method::PUT, "/api/v1/repositories/home/maintainer", None),
         (Method::GET, "/api/v1/plans/home", None),
         (Method::PUT, "/api/v1/plans/home", None),
         (Method::DELETE, "/api/v1/plans/home", None),

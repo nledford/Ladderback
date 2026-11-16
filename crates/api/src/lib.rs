@@ -4119,6 +4119,17 @@ pub struct ConnectRepositoryDto {
     pub maintain_here: bool,
 }
 
+/// `PUT /api/v1/repositories/{alias}/maintainer`: turn maintenance of a
+/// saved repository from this agent on (`maintain-here: true`, its entry
+/// then asks for `local`) or off (`none`), §7.3. Answers 204; turning it off
+/// while a forget, prune, check or adoption of it runs here is refused with
+/// `maintenance-busy` (I1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MaintainerDto {
+    pub maintain_here: bool,
+}
+
 /// `POST /api/v1/repositories/_init`: create a repository where there is
 /// none, and save it under `alias` when one is given.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

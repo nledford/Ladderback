@@ -989,6 +989,7 @@ async fn forget_previewed(agent: &mut Agent, repository: String) {
         ResolveRepository::new(world.secrets.clone()),
         Arc::new(RecordingRetention(Arc::clone(&world.retention))),
         store,
+        Arc::default(),
         agent_id(),
         "demo-machine".to_owned(),
         Arc::new(AsWritten),

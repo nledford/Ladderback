@@ -444,6 +444,14 @@ impl OperationStore for SqliteStore {
         start_in_transaction(&mut conn, operation, &encoded).await
     }
 
+    async fn running_maintenance(
+        &self,
+        repository: Option<&domain::RepositoryId>,
+    ) -> Result<Option<domain::OperationId>, StoreError> {
+        let _ = repository;
+        todo!()
+    }
+
     async fn get(&self, id: OperationId) -> Result<Option<OperationDetail>, StoreError> {
         let id = id.as_uuid().to_string();
         let _call = self.call().await;

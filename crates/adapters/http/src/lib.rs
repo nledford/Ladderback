@@ -583,6 +583,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::post(maintenance::preview),
         )
         .route(
+            "/api/v1/repositories/{alias}/maintainer",
+            axum::routing::put(repositories::change_maintainer),
+        )
+        .route(
             restart::RESTART_PATH,
             axum::routing::get(restart::read)
                 .post(restart::ask)
@@ -2899,11 +2903,29 @@ mod tests {
                 }),
             }
         }
+
+        async fn change_maintainer(
+            &self,
+            alias: String,
+            request: api::MaintainerDto,
+        ) -> Result<(), RepositoriesError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            match (alias.as_str(), request.maintain_here) {
+                ("missing", _) => Err(RepositoriesError::Unknown { alias }),
+                ("busy", _) => Err(RepositoriesError::MaintenanceBusy {
+                    operation: BUSY_OPERATION.to_owned(),
+                }),
+                ("demo", true) | ("stopped", false) => Ok(()),
+                _ => Err(RepositoriesError::InvalidBody),
+            }
+        }
     }
 
     const TEST: &str = "/api/v1/repositories/_test";
     const CONNECT: &str = "/api/v1/repositories";
     const INIT: &str = "/api/v1/repositories/_init";
+    /// The maintenance operation the fake says runs on the repository `busy`.
+    const BUSY_OPERATION: &str = "018f0000-0000-7000-8000-0000000000cc";
 
     /// A request body for `repository`, typed with a password.
     fn settings_json(repository: &str) -> serde_json::Value {
@@ -2916,6 +2938,11 @@ mod tests {
     /// Posts `body` to `path` against a fake that counts what reaches it:
     /// the answer, and how many requests the fake took.
     async fn post_counted(path: &str, body: String) -> (Response, usize) {
+        send_counted(Method::POST, path, body).await
+    }
+
+    /// As [`post_counted`], with the request's `method`.
+    async fn send_counted(method: Method, path: &str, body: String) -> (Response, usize) {
         let repos = Arc::new(Repos::default());
         let state = AppState {
             events: Arc::new(InMemoryEventBus::new()),
@@ -2936,7 +2963,7 @@ mod tests {
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(
                 Request::builder()
-                    .method(Method::POST)
+                    .method(method)
                     .uri(path)
                     .header(header::HOST, "localhost:9898")
                     .header(header::CONTENT_TYPE, "application/json")
@@ -2949,6 +2976,46 @@ mod tests {
             response,
             repos.calls.load(std::sync::atomic::Ordering::SeqCst),
         )
+    }
+
+    #[tokio::test]
+    async fn turning_maintenance_of_a_saved_repository_on_or_off_answers_204_or_a_typed_refusal() {
+        use serde_json::json;
+        let route = |alias: &str| format!("/api/v1/repositories/{alias}/maintainer");
+        for (alias, on) in [("demo", true), ("stopped", false)] {
+            let request = json!({"maintain-here": on}).to_string();
+            let (response, calls) = send_counted(Method::PUT, &route(alias), request).await;
+            assert_eq!(calls, 1, "{alias}");
+            assert_eq!(response.status(), StatusCode::NO_CONTENT, "{alias}");
+            assert_eq!(body(response).await, "", "{alias}");
+        }
+        let text = |value: &str| json!({"type": "text", "value": value});
+        for (alias, status, expected) in [
+            (
+                "missing",
+                404,
+                json!({"code": "repository-unknown", "args": {"alias": text("missing")}}),
+            ),
+            (
+                "busy",
+                409,
+                json!({"code": "maintenance-busy", "args": {"operation": text(BUSY_OPERATION)}}),
+            ),
+        ] {
+            let request = json!({"maintain-here": false}).to_string();
+            let (response, _) = send_counted(Method::PUT, &route(alias), request).await;
+            let (actual, answer) = json_of(response).await;
+            assert_eq!(actual.as_u16(), status, "{alias}");
+            assert_eq!(answer, expected, "{alias}");
+        }
+        for request in ["not json", "{}", r#"{"maintain-here": true, "more": 1}"#] {
+            let (response, calls) = send_counted(Method::PUT, &route("demo"), request.into()).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{request}");
+            assert_eq!(
+                calls, 0,
+                "a body that is not the request reached the daemon"
+            );
+        }
     }
 
     async fn json_of(response: Response) -> (StatusCode, serde_json::Value) {

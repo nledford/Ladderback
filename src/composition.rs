@@ -820,6 +820,7 @@ async fn state_over(
     let (run_ends, ends) = app::retry::run_ends();
     let runner = Arc::new(PlanRunner {
         config: Arc::clone(&config),
+        writes: Arc::clone(&writes),
         resolve: Arc::clone(&resolve),
         agent_id,
         engine: Arc::clone(&engine),
@@ -1409,6 +1410,10 @@ impl Publish {
 /// events WebSocket, so the route answers with the operation's ID alone.
 struct PlanRunner {
     config: Arc<dyn ConfigStore>,
+    /// The one lock of every write of the configuration, which a
+    /// maintenance start holds while it reads again that this agent
+    /// maintains the repository (I1).
+    writes: Arc<ConfigWrites>,
     resolve: Arc<ResolveRepository>,
     agent_id: AgentId,
     engine: Arc<dyn Engine>,
@@ -3142,6 +3147,15 @@ impl Repositories for RepositoryService {
             }),
             Err(error) => Err(refusal_of(error, &saved.entry.settings).await),
         }
+    }
+
+    async fn change_maintainer(
+        &self,
+        alias: String,
+        request: api::MaintainerDto,
+    ) -> Result<(), RepositoriesError> {
+        let _ = (alias, request, &self.writes);
+        todo!()
     }
 }
 
@@ -5747,6 +5761,7 @@ mod tests {
             ends: app::retry::run_ends().0,
             runs: crate::composition::runs::Runs::default(),
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+            writes: Arc::default(),
         };
         (runner, entered, open_gate, scratch)
     }
@@ -6843,6 +6858,13 @@ mod tests {
         ) -> Result<bool, app::ports::StoreError> {
             self.inner.ever_succeeded(plan).await
         }
+
+        async fn running_maintenance(
+            &self,
+            repository: Option<&domain::RepositoryId>,
+        ) -> Result<Option<OperationId>, app::ports::StoreError> {
+            self.inner.running_maintenance(repository).await
+        }
     }
 
     /// A client that gives up on its start while the log is still being
@@ -7034,6 +7056,13 @@ mod tests {
             plan: &domain::PlanId,
         ) -> Result<bool, app::ports::StoreError> {
             self.inner.ever_succeeded(plan).await
+        }
+
+        async fn running_maintenance(
+            &self,
+            repository: Option<&domain::RepositoryId>,
+        ) -> Result<Option<OperationId>, app::ports::StoreError> {
+            self.inner.running_maintenance(repository).await
         }
     }
 
@@ -7538,6 +7567,13 @@ mod tests {
             plan: &domain::PlanId,
         ) -> Result<bool, app::ports::StoreError> {
             self.inner.ever_succeeded(plan).await
+        }
+
+        async fn running_maintenance(
+            &self,
+            repository: Option<&domain::RepositoryId>,
+        ) -> Result<Option<OperationId>, app::ports::StoreError> {
+            self.inner.running_maintenance(repository).await
         }
     }
 
@@ -8066,6 +8102,13 @@ mod tests {
             plan: &domain::PlanId,
         ) -> Result<bool, app::ports::StoreError> {
             self.inner.ever_succeeded(plan).await
+        }
+
+        async fn running_maintenance(
+            &self,
+            repository: Option<&domain::RepositoryId>,
+        ) -> Result<Option<OperationId>, app::ports::StoreError> {
+            self.inner.running_maintenance(repository).await
         }
     }
 
@@ -11361,6 +11404,7 @@ mod repository_service_tests {
                 ends: app::retry::run_ends().0,
                 runs: crate::composition::runs::Runs::default(),
                 readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+                writes: Arc::default(),
             };
             let detail = detail.map(str::to_owned);
             assert_eq!(
@@ -11410,6 +11454,7 @@ mod repository_service_tests {
                 ends: app::retry::run_ends().0,
                 runs: crate::composition::runs::Runs::default(),
                 readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+                writes: Arc::default(),
             };
 
             let place = runner
@@ -11504,6 +11549,7 @@ mod repository_service_tests {
             ends: app::retry::run_ends().0,
             runs: crate::composition::runs::Runs::default(),
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+            writes: Arc::default(),
         };
 
         let refused = runner
@@ -11757,6 +11803,7 @@ mod repository_service_tests {
             ends,
             runs: crate::composition::runs::Runs::default(),
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+            writes: Arc::default(),
         };
         (runner, heard, scripted, plan)
     }
@@ -12286,6 +12333,13 @@ mod repository_service_tests {
             &self,
             _plan: &domain::PlanId,
         ) -> Result<bool, app::ports::StoreError> {
+            Err(no_log())
+        }
+
+        async fn running_maintenance(
+            &self,
+            _repository: Option<&domain::RepositoryId>,
+        ) -> Result<Option<OperationId>, app::ports::StoreError> {
             Err(no_log())
         }
 

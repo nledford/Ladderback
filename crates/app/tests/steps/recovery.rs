@@ -691,6 +691,13 @@ impl OperationStore for UnwritableLog {
         self.0.ever_succeeded(plan).await
     }
 
+    async fn running_maintenance(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<OperationId>, StoreError> {
+        self.0.running_maintenance(repository).await
+    }
+
     async fn recover(&self, _reason: &FailureReason) -> Result<app::ports::Recovered, StoreError> {
         Err(StoreError::Unavailable {
             detail: "the log cannot be written".to_owned(),
