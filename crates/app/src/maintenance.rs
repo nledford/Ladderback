@@ -560,8 +560,10 @@ impl RunMaintenance {
 
     /// Takes the assessed run's repository slot (I7): the operation is stored
     /// as running in the one step that decides it, or refused, naming the
-    /// operation that holds the repository, with nothing stored. On success
-    /// the run's own job has not been started: only `execute` starts it.
+    /// operation that holds the repository, with nothing stored. A run of a
+    /// repository this agent no longer maintains is refused with
+    /// [`MaintenanceError::NotOwner`], nothing stored. On success the run's
+    /// own job has not been started: only `execute` starts it.
     ///
     /// A call dropped while it waits for the log may already have stored the
     /// operation as running, and the row then holds the repository until
@@ -582,6 +584,13 @@ impl RunMaintenance {
             other_hosts,
             secret_warnings,
         } = assessment;
+        // Read again under the configuration's write lock, held until the
+        // slot is taken: maintenance turned off after the assessment, or
+        // while this waits, refuses the run with nothing stored, and a
+        // change of who maintains the repository waits for the run to hold
+        // its slot, which keeps it maintained here until it ends (I1).
+        let _writing = self.writes.lock().await;
+        self.maintained(&alias).await?;
         let mut operation = Operation::queue(
             id,
             job.kind(),
