@@ -15,7 +15,7 @@ use crate::backend::{
     OperationsState, REREAD_PATIENCE, Rereads, asks_for_a_reread, ended, events_url,
     reconnect_backoff, succeeded,
 };
-use crate::maintenance::{self, Kind, Next, Watch, Watched};
+use crate::maintenance::{self, Awaited, Beat, Kind, Pace, Watched};
 use crate::session::{
     Answer, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered, signed_out_all_the_same,
     wait_ms,
@@ -788,26 +788,40 @@ pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operati
 }
 
 /// Reads the operation of a maintenance run of `kind` until it has ended, as
-/// the page's own reads. The pace of the reads and the patience with a
-/// silent daemon are `maintenance::Watch`'s; `alive` says whether the page
-/// that waits is still there.
+/// [`await_operation`] does.
 pub(crate) async fn await_end(
     base: &str,
     operation: &str,
     kind: Kind,
     alive: impl Fn() -> bool,
 ) -> Watched {
+    Watched::of(kind, await_operation(base, operation, alive).await)
+}
+
+/// Reads `operation` until it has ended, as the page's own reads. The pace
+/// of the reads and the patience with a silent daemon are
+/// `maintenance::Pace`'s; `alive` says whether the page that waits is still
+/// there.
+pub(crate) async fn await_operation(
+    base: &str,
+    operation: &str,
+    alive: impl Fn() -> bool,
+) -> Awaited {
     let url = format!("{base}{}", maintenance::operation_path(operation));
-    let mut watch = Watch::new(kind);
+    let mut pace = Pace::default();
     while alive() {
         let answer = read_as::<OperationDetailDto>(&url, Asked::OnItsOwn, None).await;
-        match watch.after(answer.as_ref()) {
-            Next::Again(delay) => sleep(delay).await,
-            Next::Ended(end, findings) => return Watched::Ended(end, findings),
-            Next::GaveUp => return Watched::GaveUp,
+        match pace.after(answer.as_ref()) {
+            Beat::Again(delay) => sleep(delay).await,
+            Beat::Ended(_) => {
+                if let Some(detail) = answer {
+                    return Awaited::Ended(Box::new(detail));
+                }
+            }
+            Beat::GaveUp => return Awaited::GaveUp,
         }
     }
-    Watched::Gone
+    Awaited::Gone
 }
 
 /// How long a settle-poll keeps reading, and how often.
