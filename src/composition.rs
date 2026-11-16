@@ -24,7 +24,6 @@ use app::conditions::{NameWatch, NetworkWait};
 use app::notifications::{Notify, Report};
 use app::ports::DELIVERY_TIMEOUT;
 use app::ports::Retention;
-use app::ports::{Keyring, KeyringError};
 use app::ports::SecretResolver;
 use app::ports::{
     AdminPasswordError, BackupJob, Clock, ConfigError, ConfigStore, Engine, EngineError,
@@ -33,6 +32,7 @@ use app::ports::{
     ProfileNotice, RELEASE_TIMEOUT, Random, ReleaseFeed, ReleaseFeedError, RunningJob,
     ScheduleStore, SnapshotSummary,
 };
+use app::ports::{Keyring, KeyringError};
 use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
 use app::recovery::RecoverOperations;
@@ -3014,6 +3014,7 @@ impl Repositories for RepositoryService {
         let alias =
             RepositoryAlias::parse(&request.alias).map_err(|_| RepositoriesError::AliasInvalid)?;
         let settings = settings_of(request.settings)?;
+        let keep_in_keyring = keeps_in_keyring(request.keep_in_keyring, Some(&alias), &settings)?;
         // Asked for, this agent maintains it; otherwise nobody is asked, for
         // a repository that exists may already be maintained elsewhere (I1).
         let maintenance = if request.maintain_here {
@@ -3022,14 +3023,20 @@ impl Repositories for RepositoryService {
             Maintenance::None
         };
         let _writing = self.writes.lock().await;
-        let id = match ConnectRepository::new(
+        let connecting = ConnectRepository::new(
             Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
             Arc::clone(&self.config),
-        )
-        .connect(new_operation(), alias, &settings, maintenance)
-        .await
+        );
+        let connecting = if keep_in_keyring {
+            connecting.keeping_password_in(Arc::clone(&self.keyring))
+        } else {
+            connecting
+        };
+        let id = match connecting
+            .connect(new_operation(), alias, &settings, maintenance)
+            .await
         {
             Ok(value) => value,
             Err(error) => return Err(refusal_of(error, &settings).await),
@@ -3052,20 +3059,24 @@ impl Repositories for RepositoryService {
             .transpose()
             .map_err(|_| RepositoriesError::AliasInvalid)?;
         let settings = settings_of(request.settings)?;
+        let keep_in_keyring = keeps_in_keyring(request.keep_in_keyring, alias.as_ref(), &settings)?;
         // Only a saving initialisation writes the configuration.
         let _writing = match alias {
             Some(_) => Some(self.writes.lock().await),
             None => None,
         };
-        let initialised = match InitRepository::new(
+        let initialising = InitRepository::new(
             Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
             Arc::clone(&self.config),
-        )
-        .init(new_operation(), &settings, alias)
-        .await
-        {
+        );
+        let initialising = if keep_in_keyring {
+            initialising.keeping_password_in(Arc::clone(&self.keyring))
+        } else {
+            initialising
+        };
+        let initialised = match initialising.init(new_operation(), &settings, alias).await {
             Ok(value) => value,
             Err(error) => return Err(refusal_of(error, &settings).await),
         };
@@ -3268,10 +3279,60 @@ async fn refusal_of(error: RepositoryError, settings: &RepositorySettings) -> Re
         RepositoryError::Failed(reason) => failed_refusal(reason, settings),
         RepositoryError::Config(error) => config_refusal(error),
         RepositoryError::Keyring { entry, error } => {
-            let _ = (entry, error);
-            todo!()
+            RepositoriesError::SecretRefused(keyring_refusal(&entry, error, settings).await)
         }
         RepositoryError::TimedOut => unavailable(ErrorCode::RepositoryTimedOut, Vec::new(), None),
+    }
+}
+
+/// Whether a request that asks to keep its password in the system keyring
+/// may: the keyring keeps a password typed for a repository saved under a
+/// name (§10.2), so a request with no name, or with a password that is
+/// already a reference, is one the form never sends. A password longer than
+/// the resolver reads from an entry (`MAX_SECRET_BYTES`) is refused too, as
+/// settings over their caps are, rather than kept where no job could read it.
+fn keeps_in_keyring(
+    asked: bool,
+    alias: Option<&RepositoryAlias>,
+    settings: &RepositorySettings,
+) -> Result<bool, RepositoriesError> {
+    let readable = settings
+        .password
+        .inline()
+        .is_some_and(|typed| typed.expose().len() <= domain::secrets::MAX_SECRET_BYTES);
+    if asked && (alias.is_none() || !readable) {
+        return Err(RepositoriesError::InvalidBody);
+    }
+    Ok(asked)
+}
+
+/// A typed password the keyring couldn't keep, as the secret refusal the
+/// routes answer with: the entry it was to be kept in, and what the platform
+/// said, masked of every secret of the repository, the typed password first
+/// (I4). A keyring that never answered is one that couldn't keep it.
+async fn keyring_refusal(
+    entry: &KeyringEntry,
+    error: KeyringError,
+    settings: &RepositorySettings,
+) -> SecretRefusal {
+    let (code, said) = match error {
+        KeyringError::Taken => (ErrorCode::KeyringEntryTaken, None),
+        KeyringError::Unavailable { detail } => (ErrorCode::KeyringUnavailable, Some(detail)),
+        KeyringError::Unwritable { detail } => (ErrorCode::KeyringUnwritable, Some(detail)),
+        KeyringError::TimedOut { .. } => (ErrorCode::KeyringUnwritable, None),
+    };
+    let detail = match said.filter(|said| !said.is_empty()) {
+        Some(said) => Some(
+            failure_redactor(settings, &SystemSecrets::default())
+                .await
+                .redact(&said),
+        ),
+        None => None,
+    };
+    SecretRefusal {
+        code,
+        args: vec![("entry", MsgArg::Text(entry.to_string()))],
+        detail,
     }
 }
 
@@ -9153,7 +9214,9 @@ mod repository_service_tests {
             .unwrap_or_else(|e| panic!("creates {creates}: {e:?}"));
             let config = saved(&*config).await;
             assert_eq!(
-                config.repository(&alias("demo")).map(|r| &r.settings.password),
+                config
+                    .repository(&alias("demo"))
+                    .map(|r| &r.settings.password),
                 Some(&SecretRef::Keyring(entry.clone())),
                 "creates {creates}"
             );
@@ -9214,6 +9277,47 @@ mod repository_service_tests {
         );
         assert_eq!(jobs(&engine), 0);
         assert!(saved(&*config).await.repositories().is_empty());
+    }
+
+    /// The resolver reads at most `MAX_SECRET_BYTES` from a keyring entry,
+    /// so a longer typed password is refused rather than kept where no
+    /// backup could read it back.
+    #[tokio::test]
+    async fn a_password_kept_in_the_keyring_is_one_the_resolver_can_read_back() {
+        use domain::secrets::{KeyringEntry, MAX_SECRET_BYTES};
+        let entry = KeyringEntry::parse("ladderback/demo").expect("an entry");
+        let typed = |length: usize| RepositorySettingsDto {
+            password: PasswordDto::Inline {
+                value: "p".repeat(length),
+            },
+            ..settings_dto()
+        };
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let secrets = Arc::new(FakeSecrets::new());
+        let service = service_keeping(&engine, config.clone(), secrets.clone());
+        assert_eq!(
+            service
+                .connect(api::ConnectRepositoryDto {
+                    keep_in_keyring: true,
+                    ..connect("demo", typed(MAX_SECRET_BYTES + 1))
+                })
+                .await
+                .map(|_| ()),
+            Err(RepositoriesError::InvalidBody)
+        );
+        assert_eq!(secrets.keyring_entry(&entry), None);
+        assert_eq!(jobs(&engine), 0);
+        service
+            .connect(api::ConnectRepositoryDto {
+                keep_in_keyring: true,
+                ..connect("demo", typed(MAX_SECRET_BYTES))
+            })
+            .await
+            .expect("a password as long as the limit is kept");
+        assert_eq!(
+            secrets.keyring_entry(&entry).map(|kept| kept.len()),
+            Some(MAX_SECRET_BYTES)
+        );
     }
 
     /// A keyring that refuses every password with its error, and has nothing
