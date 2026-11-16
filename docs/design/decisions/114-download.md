@@ -1,4 +1,4 @@
-# Decision 113: How an entry of a snapshot is downloaded from the web UI
+# Decision 114: How an entry of a snapshot is downloaded from the web UI
 
 **A download hands one entry of one snapshot to the browser that asked: a file as itself, a folder or the snapshot's top as one tar or zip archive whose entries are stored, not compressed. It is confirmed by step-up, as a restore is, then waits behind a ticket the browser fetches once within a minute, and streams a piece at a time. At most two run at once; a third is refused, never queued. Each is recorded in the operation history as a restore is** (recorded 2026-11-16, §10.4, §4.1, §9; the archive crates, the history, the busy refusal, the refusal without random bytes and the restart's effect decided by the maintainer on #564, 2026-11-16).
 
