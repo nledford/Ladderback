@@ -80,6 +80,20 @@ fn the_routes_of_a_proposal_are_under_its_encoded_id() {
     assert_eq!(reject_path("a/b"), "/api/v1/proposals/a%2Fb/reject");
 }
 
+/// Focus returns to the button whose `id` this is once its proposal is
+/// decided, so each proposal's must be its own and usable as an HTML `id`.
+#[test]
+fn each_proposals_review_button_has_an_id_of_its_own() {
+    let first = review_id("0192abcd");
+    let second = review_id("0192abce");
+    assert_ne!(first, second);
+    for id in [&first, &second] {
+        assert!(id.starts_with(|c: char| c.is_ascii_alphabetic()), "{id}");
+        assert!(!id.contains(char::is_whitespace), "{id}");
+    }
+    assert!(first.ends_with("0192abcd"), "{first}");
+}
+
 #[test]
 fn each_summary_line_names_its_plan_and_a_change_lists_its_settings() {
     let plan = || vec![("plan", MsgArg::Text("home".to_owned()))];
