@@ -1152,6 +1152,113 @@ mod tests {
         }
     }
 
+    /// A secret in a TOML file (`config.toml`, a rustic profile) is written
+    /// in a basic string with TOML's escapes: `\b`, `\t`, `\n`, `\f`, `\r`,
+    /// `\e`, `\"` and `\\`, any character as `\xHH`, `\uHHHH` or
+    /// `\UHHHHHHHH` in either case, which the `toml` crate writes for a
+    /// control character (`\u0007`), or a person for any one (#839). Text
+    /// that quotes such a file shows the secret so, and it is masked whole.
+    #[test]
+    fn a_secret_is_replaced_as_toml_escapes_it() {
+        for (secret, written) in [
+            ("canary\u{7}bell", r"canary\u0007bell"),
+            ("canary\u{7}bell", r"canary\U00000007bell"),
+            ("canary\u{7}bell", r"canary\x07bell"),
+            ("canary\u{1b}bell", r"canary\u001Bbell"),
+            ("canary\u{1b}bell", r"canary\u001bbell"),
+            ("canary\u{1b}bell", r"canary\ebell"),
+            ("canary\u{c}bell\u{8}", r"canary\u000Cbell\b"),
+            ("canary\u{7f}del", r"canary\u007Fdel"),
+            ("canary\"it\\s\t\n\r", r#"canary\"it\\s\t\n\r"#),
+            // Any character may be escaped, a letter or one beyond the BMP.
+            ("canary-bell", r"\u0063anary\x2Dbe\U0000006Cl"),
+            ("canary\u{1f600}", r"canary\U0001F600"),
+        ] {
+            let line = format!("password = \"{written}\"");
+            assert_eq!(
+                redactor(&[secret]).redact(&line),
+                r#"password = "***""#,
+                "{secret:?} written {written:?}"
+            );
+            assert_eq!(
+                Redactor::redact_together([&redactor(&["other"]), &redactor(&[secret])], &line),
+                r#"password = "***""#,
+                "{secret:?} written {written:?}, masked together"
+            );
+        }
+    }
+
+    /// A multi-line basic string may break a secret at a backslash that
+    /// ends a line: TOML drops it, the line break and the white space up to
+    /// the next character, line breaks included. The secret is masked whole,
+    /// from its first character to its last, with the break inside it.
+    #[test]
+    fn a_secret_broken_by_a_line_ending_backslash_is_replaced_whole() {
+        let redactor = redactor(&["canary-bell demo"]);
+        for written in [
+            "canary-\\\n    bell demo",
+            "canary-\\  \r\n\n\t  bell\\u0020demo",
+            "can\\\nary-bell\\\n \\u0020\\\n demo",
+        ] {
+            assert_eq!(
+                redactor.redact(&format!("password = \"\"\"\n{written}\"\"\"\n")),
+                "password = \"\"\"\n***\"\"\"\n",
+                "{written:?}"
+            );
+        }
+    }
+
+    /// A text masked a line at a time (a worker's stderr, a log record)
+    /// splits a multi-line string where a backslash ends a line. A line
+    /// that ends so is masked as a cut one is, from where a secret the
+    /// break may go through begins; an escape open at the end of a whole
+    /// text, or a line end after no start of a secret, is text.
+    #[test]
+    fn a_line_that_ends_in_a_line_ending_backslash_is_masked_as_a_cut_one() {
+        let redactor = redactor(&["canary-bell demo"]);
+        for line in [
+            "password = \"\"\"canary-\\",
+            "password = \"\"\"canary-\\ \t",
+            "password = \"\"\"canary-\\\r",
+            "password = \"\"\"can\\u0061ry-\\",
+        ] {
+            assert_eq!(redactor.redact(line), "password = \"\"\"***", "{line:?}");
+        }
+        for line in [
+            r"canary\u00",
+            r"canary\x0",
+            r"canary\U0",
+            r"C:\temp\",
+            "done \\  ",
+        ] {
+            assert_eq!(redactor.redact(line), line);
+        }
+    }
+
+    /// A text cut inside an escape (`\u00` of `\u0007`) may end partway
+    /// through a secret: it is masked from where the secret begins, the
+    /// escape included, as a cut text is (`redact_cut`, `redact_clipped`).
+    #[test]
+    fn a_text_cut_inside_a_toml_escape_is_masked_from_where_the_secret_begins() {
+        let redactor = redactor(&["canary\u{7}bell"]);
+        for (kept, masked) in [
+            (r#"password = "canary\u00"#, r#"password = "***"#),
+            (r#"password = "canary\U0000000"#, r#"password = "***"#),
+            (r#"password = "canary\x0"#, r#"password = "***"#),
+            (r#"password = "\u0063anary\u0"#, r#"password = "***"#),
+            // Where the escape may begin the secret, it is masked alone.
+            (r#"password = "\u006"#, r#"password = "***"#),
+            ("password = \"\"\"\ncanary\\\n  ", "password = \"\"\"\n***"),
+        ] {
+            assert_eq!(redactor.redact_cut(kept.as_bytes()), masked, "{kept:?}");
+            assert_eq!(
+                redactor.redact_clipped(&format!("{kept}…"), "…"),
+                format!("{masked}…"),
+                "{kept:?} clipped"
+            );
+        }
+    }
+
     /// A secret Go prints as it is, `'` and a combining character included,
     /// adds no needle: only what Go escapes costs one.
     #[test]

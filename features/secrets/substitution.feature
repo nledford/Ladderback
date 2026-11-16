@@ -401,6 +401,13 @@ Feature: Secret references in a repository's settings
       Then the resolution fails for the field "password"
       And the problem is that the command exited with status 1 saying "rejected ***"
 
+    Scenario: A command that quotes its password as a TOML file writes it shows none of it
+      Given the command "vault-reader" prints "CANARY-toml-password\n" and fails with status 1 saying "line 3 rejected: CANARY-\u0074oml-password"
+      And the repository's password is printed by the command "vault-reader"
+      When the repository is resolved
+      Then the resolution fails for the field "password"
+      And the problem is that the command exited with status 1 saying "line 3 rejected: ***"
+
     Scenario: A command that stops partway through printing its password shows nothing it said
       Given the command "vault-reader" prints "CANARY-cut" and fails with status 1 saying "rejected CANARY-cut-password"
       And the repository's password is printed by the command "vault-reader"

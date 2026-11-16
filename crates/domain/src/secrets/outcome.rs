@@ -799,6 +799,27 @@ mod tests {
         );
     }
 
+    /// A helper that reads its secrets from a TOML file may quote the line
+    /// it rejected, where the secret is written with TOML's escapes: it is
+    /// masked there whole (#839).
+    #[test]
+    fn what_a_failed_command_printed_is_masked_where_it_quotes_it_as_toml_writes_it() {
+        let source = command("pass");
+        let error = command_failure(
+            &source,
+            Some(1),
+            Stdout::ReadToEnd(b"CANARY\x07bell\n"),
+            br#"line 3: password = "CANARY\u0007bell" rejected"#,
+        );
+        assert_eq!(
+            error.problem,
+            Problem::CommandFailed {
+                status: Some(1),
+                detail: r#"line 3: password = "***" rejected"#.to_owned(),
+            }
+        );
+    }
+
     /// The kept stderr can end inside the secret a helper quotes, or hold
     /// less than the whole of a long one: no part of it reaches the detail
     /// (I4).

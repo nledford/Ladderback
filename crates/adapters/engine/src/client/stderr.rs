@@ -243,6 +243,36 @@ mod tests {
         );
     }
 
+    /// A line that quotes a TOML file, as a program's error quotes the line
+    /// it choked on, shows a secret written there with TOML's escapes
+    /// (`\u0007`, `\e`): it is masked whole on the worker's stderr (#839).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_is_masked_where_a_line_quotes_it_as_toml_writes_it_on_the_workers_stderr() {
+        capture_the_worker_log();
+        let script = format!(
+            r#"cat >/dev/null; printf '%s\n' 'TOML parse error at line 3: password = "CANARY-toml\u0007bell\e"' >&2; echo '{}'"#,
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &["CANARY-toml\u{7}bell\u{1b}"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
+        let line = logged_soon(log::Level::Warn, |text| {
+            text.starts_with("TOML parse error at line 3")
+        })
+        .await
+        .expect("the worker's stderr never reached the log");
+        assert_eq!(line, r#"TOML parse error at line 3: password = "***""#);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_secret_straddling_the_cut_of_a_long_stderr_line_leaves_nothing_of_itself() {
