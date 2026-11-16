@@ -13,6 +13,7 @@ use domain::{RepositoryAlias, RepositoryId};
 
 use crate::edit::saved;
 use crate::files::{self, Contents};
+use crate::mask::masked;
 use crate::record::{reads_back, with_id};
 use crate::schema::{MAX_CONFIG_BYTES, Schemas, parse, render_as};
 
@@ -177,15 +178,17 @@ impl Job {
         self.replace(old.as_deref(), &text, None).map(|_| ())
     }
 
-    /// The file as it is, and as a save of `config` would write it.
+    /// The file as it is, and as a save of `config` would write it, each
+    /// with every value that holds a secret of `config` masked.
     fn draft(&self, config: &AgentConfig) -> Result<ConfigDraft, ConfigError> {
         let old = self.current_bytes()?;
         let after = self.rendered(old.as_deref(), config)?;
         let before = String::from_utf8(old.unwrap_or_default()).map_err(|_| self.not_utf8())?;
+        let redactors = config.redactors();
         Ok(ConfigDraft {
             revision: ConfigRevision::of(before.as_bytes()),
-            before,
-            after,
+            before: masked(&before, &redactors),
+            after: masked(&after, &redactors),
         })
     }
 

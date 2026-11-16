@@ -274,6 +274,24 @@ impl AgentConfig {
         &self.repositories
     }
 
+    /// A redactor for each repository's settings and for each of its
+    /// further locations: together they mask every secret the configuration
+    /// holds as text.
+    pub fn redactors(&self) -> Vec<crate::secrets::Redactor> {
+        self.repositories
+            .values()
+            .flat_map(|repository| {
+                std::iter::once(repository.settings.redactor()).chain(
+                    repository
+                        .locations
+                        .further
+                        .iter()
+                        .map(super::Location::redactor),
+                )
+            })
+            .collect()
+    }
+
     pub fn repository(&self, alias: &RepositoryAlias) -> Option<&RepositoryConfig> {
         self.repositories.get(alias)
     }

@@ -3,14 +3,16 @@ use domain::planning::{AgentConfig, ConfigRevision, ProposalId};
 
 use crate::ports::ConfigError;
 
-/// The configuration file as it is, and as a configuration would write it.
+/// The configuration file as it is, and as a configuration would write it,
+/// each with every value that holds a secret masked (I4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigDraft {
     /// The file as it is.
     pub revision: ConfigRevision,
-    /// Its text as it is; empty when there is no file.
+    /// Its text as it is, masked; empty when there is no file.
     pub before: String,
-    /// Its text as the configuration would write it, as a save would.
+    /// Its text as the configuration would write it, as a save would,
+    /// masked.
     pub after: String,
 }
 
@@ -30,8 +32,11 @@ pub enum SavedOver {
 ///
 /// Contract (checked by `contract::config_drafts`):
 /// - [`draft`](Self::draft) writes nothing; its `before` is the file as
-///   it is, `revision` that text's revision, and `after` the text a
-///   [`save_over`](Self::save_over) of the same configuration writes.
+///   it is, `revision` the revision of the file's bytes, and `after` the
+///   text a [`save_over`](Self::save_over) of the same configuration
+///   writes. In both texts each value that holds a secret of `config`
+///   ([`AgentConfig::redactors`]) is masked, however the file writes it:
+///   escaped, over several lines or in pieces.
 /// - [`save_over`](Self::save_over) writes `config` only when the file is
 ///   still the revision `base` just before it is written, as the draft
 ///   gave it, and otherwise writes nothing; the history's version it keeps

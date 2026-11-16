@@ -17,17 +17,16 @@ use std::sync::Arc;
 use api::{ProposalStatusDto, UiEvent};
 use domain::access::Password;
 use domain::planning::{
-    AgentConfig, ConfigChange, ConfigRevision, DiffHash, Location, MAX_ENDED, MAX_PENDING,
-    Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale,
-    Rejection, RejectionRefused, Shown, SummaryLine, TooSoon, confirms_proposal,
+    AgentConfig, ConfigChange, ConfigRevision, DiffHash, MAX_ENDED, MAX_PENDING, Proposal,
+    ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale, Rejection,
+    RejectionRefused, Shown, SummaryLine, TooSoon, confirms_proposal,
 };
 use domain::secrets::Redactor;
 
 use crate::access::{Access, PasswordRefused};
 use crate::ports::{
-    Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError,
-    ConfigStore, EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError,
-    StoredProposal,
+    Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError, ConfigStore,
+    EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError, StoredProposal,
 };
 use crate::repositories::ConfigWrites;
 use crate::schedule::ConfigChanged;
@@ -363,7 +362,12 @@ impl Proposals {
         }
         proposal.decided_at = Some(now);
         self.announce(id, ProposalStatus::Applying).await;
-        match self.ports.drafts.save_over(&draft.revision, &after, id).await {
+        match self
+            .ports
+            .drafts
+            .save_over(&draft.revision, &after, id)
+            .await
+        {
             Ok(SavedOver::Saved { kept }) => {
                 self.ports.changed.tell();
                 self.ports
@@ -442,7 +446,11 @@ impl Proposals {
     }
 
     /// Ends the apply of `id` with `status`, and announces it.
-    async fn end_apply(&self, id: &ProposalId, status: ProposalStatus) -> Result<(), ProposalError> {
+    async fn end_apply(
+        &self,
+        id: &ProposalId,
+        status: ProposalStatus,
+    ) -> Result<(), ProposalError> {
         self.ports
             .store
             .change_status(id, ProposalStatus::Applying, status)
@@ -580,23 +588,13 @@ pub fn status_dto(status: ProposalStatus) -> ProposalStatusDto {
 }
 
 /// The diff of `before` to `after`, with every secret `config` holds as
-/// text masked: each repository's and each of its further locations'.
-/// A proposal changes plans only, so the secrets are the same on both sides.
+/// text masked: each repository's and each of its further locations'. The
+/// drafts mask each value of the file that holds one, however it is
+/// written ([`ConfigDraft`]); this masks what else holds one, such as a
+/// comment. A proposal changes plans only, so the secrets are the same on
+/// both sides.
 fn masked_diff(config: &AgentConfig, before: &str, after: &str) -> String {
-    let redactors: Vec<Redactor> = config
-        .repositories()
-        .values()
-        .flat_map(|repository| {
-            std::iter::once(repository.settings.redactor()).chain(
-                repository
-                    .locations
-                    .further
-                    .iter()
-                    .map(Location::redactor),
-            )
-        })
-        .collect();
-    Redactor::redact_together(&redactors, &unified_diff(before, after))
+    Redactor::redact_together(&config.redactors(), &unified_diff(before, after))
 }
 
 /// Whether `a` and `b` are one proposer: one token, or both no token.
