@@ -266,6 +266,12 @@ Go's `%#q` writes a secret as it is between backquotes where it can, which its r
 
 A Go-quoted form adds at most 4 bytes of needles per byte of the secret (`\x01`), none when it is the secret or its `Debug` form, so the three of them at most 12.
 
+A secret is also masked as a TOML file writes it (#839), because a program that reads `config.toml`, a rustic profile or a secret helper's own TOML file quotes the line it rejects as written: a helper's error on stderr, a hook's output, a worker's stderr. A basic string writes it with TOML's escapes (`\b`, `\t`, `\n`, `\f`, `\r`, `\e`, `\"`, `\\`, any character as `\xHH`, `\uHHHH` or `\UHHHHHHHH` in either case, which the `toml` crate writes for a control character as `\u0007`), and a multi-line one may break it with a backslash that ends a line, which TOML drops with the line breaks and white space after it.
+
+A person may escape any character, so these forms are too many to list as needles: a text with an escape in it is read again as TOML reads it, every backslash wherever it stands, and a secret found there is masked in the text whole, from the first byte it was read from to the last, the escapes and breaks inside it included. A cut text is read so on either side of the cut, and an escape the cut went through (`\u00`) is masked with the start of a secret before it, or alone where it may be how the secret's first character is written. That masks more than a secret, never less. Where the configuration's own text is shown (the diff of a proposal, decision 89), it passes through the redactor, which masks it so too.
+
+A text masked a line at a time (a worker's or rclone's stderr, a log record) splits a multi-line string where a backslash ends a line. A line that ends so is masked as a cut text is, from where a secret the break may go through begins. Masking keeps nothing from one line to the next, so the rest of that secret, on the lines after the break, shows unless one of its needles matches it there.
+
 **How long masking takes.** A redactor looks for each needle in one pass over the text (Knuth, Morris and Pratt): each needle keeps, for each of its bytes, where a search goes on after a byte of the text that doesn't match, so each byte of the text is compared at most twice with a byte of each needle, however long and repetitive both are (#236). The tests count those comparisons rather than time them, so they can't flake. Before, each place in the text was compared with up to a needle's length of bytes, the product of the two lengths on a long, repetitive secret. Measured in a release build:
 
 | Masking | Before | After |
@@ -276,7 +282,9 @@ A Go-quoted form adds at most 4 bytes of needles per byte of the secret (`\x01`)
 | A URL with a 32 KiB password | 15 ms | 0.3 ms |
 | A password at the cap with the characters a URL splits at, in itself (cut, `redact_cut`) | 4.9 ms (31.6 ms) | 3.0 ms (3.3 ms) |
 
-Memory: a needle keeps 4 bytes per byte of it beside its text (a `u32`: a needle is at most `u32::MAX` bytes, half of what a `usize` takes), and masking a text takes 4 bytes per byte of the text.
+A text read a second time, as TOML reads it, is compared at most four times per byte with each needle: one with a TOML escape in it, one cut with a backslash in it, or one that ends in a line-ending backslash. No escape is read as more bytes than it is written in, so what is read is never longer than the text.
+
+Memory: a needle keeps 4 bytes per byte of it beside its text (a `u32`: a needle is at most `u32::MAX` bytes, half of what a `usize` takes), and masking a text takes 4 bytes per byte of the text, and 9 more where it is read as TOML reads it (what was read, and where each byte of it starts and ends in the text, each a `u32`). A text longer than `u32::MAX` bytes with a backslash in it is masked whole.
 
 A secret gives up to about 80 bytes of needles per byte of it, measured: 80.3 on 64 KiB of `\`, `\x01`, `é`, `#`, a capital and DEL in turn with a line break every 1,000 bytes, its forms above, the most of the mixes measured (70.4 with a tab for `\x01` and no line breaks), so its needles and their borders take up to about 400 bytes per byte of secret (401 measured; the Go-quoted forms of #331 added 2.4 of the 80).
 
