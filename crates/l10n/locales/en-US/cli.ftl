@@ -297,3 +297,41 @@ cli-mcp-token-file-unreadable = cannot use the token file { $file }: { $detail }
 
 # `ladderback mcp --connect` has an API token but its address is plain HTTP to another machine, where anyone on the way could read the token, so it did not start.
 cli-mcp-token-over-plain-http = an { -api-token } is sent only to an { "https" } address or one on this computer, never over plain { "http" } to another machine: connect to the daemon through { "https" }, or without a token
+
+## One-shot calls (components §4.6): `ladderback mcp call`.
+
+# `ladderback mcp call` was given the name of a tool that doesn't exist, so it called nothing.
+# $tool (text): the name given. It is shown as it is.
+cli-mcp-call-no-tool = there is no tool named { $tool }: { "ladderback mcp" } lists its tools to a client, such as { "status" } and { "list_plans" }
+
+# `ladderback mcp call` was given an argument after the tool's name that isn't written as NAME=VALUE, so it called nothing. The argument isn't repeated: it may hold a password.
+# $position (count): which argument after the tool's name, counted from 1.
+cli-mcp-call-not-a-pair = the argument at position { $position } after the tool's name isn't written as { "NAME=VALUE" }, so no tool was called
+
+# `ladderback mcp call` was given the same argument twice, so it called nothing.
+# $name (text): the argument's name, as it was given.
+cli-mcp-call-repeated = the argument { $name } is given more than once, so no tool was called
+
+# `ladderback mcp call --args` was given something other than one JSON object, so it called nothing. What was given isn't repeated: it may hold a password.
+cli-mcp-call-not-an-object = the arguments after { "--args" } aren't one JSON object, such as { "{\"limit\": 10}" }, so no tool was called
+
+# `ladderback mcp call run_plan` was given on its own with --headless or --scratch, so it called nothing: the session the command starts ends after the call, and its end stops the backup the call would start.
+cli-mcp-call-run-alone = a run started on its own here would stop when this command's session ends, before it finished, so no tool was called: give { "run_plan" } and then { "wait_operation" } in a script with { "--script" }, or call a running Ladderback with { "--connect" }
+
+# `ladderback mcp call --script` could not read its script of calls, so it called nothing more.
+# $file (text): the script's path as it was given, or "-" for standard input. It is shown as it is.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-mcp-call-script-unreadable = cannot read the script of calls { $file }: { $detail }
+
+# A line of the script of calls isn't a call, so it was not made and counts as a failed call. The line isn't repeated: it may hold a password.
+# $line (count): the line's number in the script, counted from 1.
+cli-mcp-call-line-not-a-call = line { $line } of the script isn't a call: one JSON object, with the tool's name under { "tool" } and its arguments, an object, under { "arguments" }
+
+# A line of the script of calls names a tool that doesn't exist, so it was not made and counts as a failed call. The name isn't repeated: the line may hold a password.
+# $line (count): the line's number in the script, counted from 1.
+cli-mcp-call-line-no-tool = line { $line } of the script names no tool that exists: { "ladderback mcp" } lists its tools to a client, such as { "status" } and { "list_plans" }
+
+# A line of the script of calls is longer than a call may be, so it was not read and counts as a failed call.
+# $line (count): the line's number in the script, counted from 1.
+# $limit (bytes): the longest line read.
+cli-mcp-call-line-too-long = line { $line } of the script is longer than { $limit }, so it was not read

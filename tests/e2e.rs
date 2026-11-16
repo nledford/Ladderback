@@ -67,6 +67,8 @@ mod interop_steps;
 mod locations_steps;
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
+#[path = "steps/mcp_call.rs"]
+mod mcp_call_steps;
 #[path = "steps/mcp.rs"]
 mod mcp_steps;
 #[path = "steps/notifications.rs"]
@@ -130,6 +132,7 @@ struct Agent {
     api_tokens: api_tokens_steps::ApiTokensE2e,
     restarting: restart_from_settings_steps::Restarting,
     mcp: mcp_steps::McpE2e,
+    mcp_call: mcp_call_steps::McpCallE2e,
     core_dumps: core_dumps_steps::CoreDumpsE2e,
 }
 
@@ -185,6 +188,7 @@ impl Agent {
             api_tokens: api_tokens_steps::ApiTokensE2e::default(),
             restarting: restart_from_settings_steps::Restarting::default(),
             mcp: mcp_steps::McpE2e::default(),
+            mcp_call: mcp_call_steps::McpCallE2e::default(),
             core_dumps: core_dumps_steps::CoreDumpsE2e::default(),
         }
     }
