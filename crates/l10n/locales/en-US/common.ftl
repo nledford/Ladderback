@@ -385,11 +385,13 @@ error-restore-hub-not-allowed = This agent doesn't take restores from the hub, s
 # set restore-folder, so nothing ran.
 error-restore-folder-unset = This agent has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the agent's configuration file to a folder for restores, then try again.
 
-# This agent doesn't maintain the repository: its entry doesn't set
-# maintenance to local, so a forget, a prune, a check or an adoption, or the
-# preview of one, was refused and nothing was asked of the repository.
+# This agent doesn't maintain the repository: its entry doesn't ask this
+# agent to maintain it, so a forget, a prune, a check or an adoption, or the
+# preview of one, was refused and nothing in the repository was changed. The
+# refusal can come after the repository was read, when maintenance from this
+# agent was turned off meanwhile.
 # $alias (text): the repository's alias, such as demo.
-error-maintenance-not-owner = This agent does not maintain the repository { $alias }, so nothing was asked of it. To maintain it from this agent, set { "maintenance = \"local\"" } in its entry in the configuration file.
+error-maintenance-not-owner = This agent does not maintain the repository { $alias }, so nothing in it was changed. To maintain it from this agent, turn its maintenance on from the Snapshots page.
 
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.

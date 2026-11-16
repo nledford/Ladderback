@@ -24,9 +24,10 @@ use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsValue;
 use leptos_router::components::A;
 
+use crate::announcer::Politeness;
 use crate::components::tree::rules::snapshot_href;
 use crate::components::{Confirmation, ReviewDialog, Working, recover_focus, sentence_view};
-use crate::live::say;
+use crate::live::{reply, say};
 use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
 };
@@ -50,6 +51,12 @@ const FORGET_BUTTON: &str = "maintenance-forget";
 const PRUNE_BUTTON: &str = "maintenance-prune";
 const CHECK_BUTTON: &str = "maintenance-check";
 
+/// The button that turns maintenance from this agent on or off, which focus
+/// returns to when its dialog is closed, and the element of that dialog that
+/// says what the change means.
+const MAINTAINER_BUTTON: &str = "maintainer-switch";
+const MAINTAINER_BODY: &str = "maintainer-body";
+
 /// The element of a review that says what it is about.
 const REVIEW_SUMMARY: &str = "review-summary";
 
@@ -71,8 +78,21 @@ struct Page {
     base: StoredValue<String>,
     alias: StoredValue<String>,
     /// Whether this agent maintains the repository: only then does the page
-    /// offer to forget, prune, check or adopt in it (I1).
-    maintained: bool,
+    /// offer to forget, prune, check or adopt in it (I1). It changes when
+    /// maintenance from this agent is turned on or off here.
+    maintained: RwSignal<bool>,
+    /// Whether this agent maintained the repository when the dialog that
+    /// turns its maintenance on or off was last asked for, which decides
+    /// what that dialog offers: `None` until it is asked for.
+    switch: RwSignal<Option<bool>>,
+    switch_open: RwSignal<bool>,
+    /// Whether the change the dialog confirmed is out.
+    switch_busy: RwSignal<bool>,
+    /// The daemon's refusal of the change, said inside the dialog.
+    switch_refused: RwSignal<Option<Sentence>>,
+    /// Tells the list of repositories who maintains the one shown now, so
+    /// that picking it again shows it so.
+    remember: Callback<(String, bool)>,
     unreachable: RwSignal<bool>,
     /// The history read last: `None` until a read is answered, and again when
     /// the history is asked for as if for the first time.
@@ -92,13 +112,19 @@ impl Page {
         alias: String,
         maintained: bool,
         unreachable: RwSignal<bool>,
+        remember: Callback<(String, bool)>,
     ) -> Page {
         Page {
             localizer: StoredValue::new(localizer),
             viewer: StoredValue::new(l10n::viewer_zone()),
             base: StoredValue::new(ws::origin()),
             alias: StoredValue::new(alias),
-            maintained,
+            maintained: RwSignal::new(maintained),
+            switch: RwSignal::new(None),
+            switch_open: RwSignal::new(false),
+            switch_busy: RwSignal::new(false),
+            switch_refused: RwSignal::new(None),
+            remember,
             unreachable,
             groups: RwSignal::new(None),
             reading: RwSignal::new(false),
@@ -402,6 +428,65 @@ impl Page {
             }
         });
     }
+
+    /// Opens the dialog that turns maintenance from this agent on or off,
+    /// as this agent maintains the repository now. The dialog is drawn anew
+    /// only when what it offers changed, as `close_modal_when_gone` asks of
+    /// the view that holds a dialog; asked again unchanged, the same dialog
+    /// opens again.
+    fn ask_switch(self) {
+        self.switch_refused.set(None);
+        let asked = Some(self.maintained.get_untracked());
+        if self.switch.get_untracked() != asked {
+            self.switch.set(asked);
+        }
+        self.switch_open.set(true);
+    }
+
+    /// Turns maintenance from this agent off when it `maintained` the
+    /// repository as the dialog was asked for, on when it didn't. The
+    /// dialog holds still until the daemon answers, and a refusal is an
+    /// alert inside it.
+    fn switch_maintainer(self, maintained: bool) {
+        if self.switch_busy.get_untracked() {
+            return;
+        }
+        self.switch_busy.set(true);
+        self.switch_refused.set(None);
+        let alias = self.alias.get_value();
+        let url = self.url(maintenance::maintainer_path(&alias));
+        let request = api::MaintainerDto {
+            maintain_here: !maintained,
+        };
+        spawn_local(async move {
+            let answer = ws::put(&url, &request).await;
+            if !self.alive() {
+                return;
+            }
+            self.switch_busy.set(false);
+            self.answered(answer.is_some());
+            match answer {
+                Some(Posted::Done(_)) => {
+                    self.switch_open.set(false);
+                    self.maintained.set(!maintained);
+                    self.remember.run((alias.clone(), !maintained));
+                    let done = wording::switch(maintained, &alias).done;
+                    reply(Politeness::Polite, &self.words(&done));
+                    // What the history offers to adopt follows who maintains
+                    // the repository.
+                    self.reload(false);
+                }
+                Some(Posted::Refused(code, args, detail)) => {
+                    let refused = self.refused_sentence(&Refusal { code, args, detail });
+                    self.switch_refused.set(Some(refused));
+                }
+                None => {
+                    let unanswered = Sentence::new(&self.plain(msg::UI_SESSION_UNREACHABLE), None);
+                    self.switch_refused.set(Some(unanswered));
+                }
+            }
+        });
+    }
 }
 
 /// The snapshots page, the route `/snapshots`: the repositories to pick from,
@@ -454,6 +539,17 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
             None => unreachable.set(unreachable_after(false)),
         }
     });
+    // Who maintains a repository once its page turned that on or off, so
+    // that picking it again shows it so.
+    let remember = Callback::new(move |(alias, maintained): (String, bool)| {
+        repositories.update(|rows| {
+            for row in rows.iter_mut().flatten() {
+                if row.0 == alias {
+                    row.1 = maintained;
+                }
+            }
+        });
+    });
     let picker = Arc::clone(&localizer);
     view! {
         <PageHeading>
@@ -502,6 +598,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                             maintained=maintained
                             unreachable=unreachable
                             picks=picks
+                            remember=remember
                         />
                     }
                 })
@@ -513,7 +610,8 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
 /// whatever is asked. It is made anew for each repository picked, and reads
 /// its history again each time its repository is picked. A repository this
 /// agent does not maintain shows its history and says why it offers no
-/// maintenance.
+/// maintenance. Either way the page offers to turn maintenance from this
+/// agent on or off, after a dialog that says what that means.
 #[component]
 fn Repository(
     localizer: Arc<Localizer>,
@@ -521,8 +619,9 @@ fn Repository(
     maintained: bool,
     unreachable: RwSignal<bool>,
     picks: RwSignal<u32>,
+    remember: Callback<(String, bool)>,
 ) -> impl IntoView {
-    let page = Page::new(localizer, alias.clone(), maintained, unreachable);
+    let page = Page::new(localizer, alias.clone(), maintained, unreachable, remember);
     Effect::new(move |_| {
         picks.track();
         untrack(|| page.reload(true));
@@ -532,49 +631,63 @@ fn Repository(
         &[("alias", MsgArg::Text(alias.clone()))],
     );
     let stats_heading = page.text(msg::UI_STATS_HEADING, &[("alias", MsgArg::Text(alias))]);
-    let intro = page.plain(if maintained {
-        msg::UI_MAINTENANCE_BODY
-    } else {
-        msg::UI_MAINTENANCE_ELSEWHERE
-    });
-    let (forget, prune, check) = (
-        page.plain(msg::UI_MAINTENANCE_FORGET),
-        page.plain(msg::UI_MAINTENANCE_PRUNE),
-        page.plain(msg::UI_MAINTENANCE_CHECK),
-    );
-    let buttons = maintained.then(|| {
-        view! {
-            <p class="actions">
-                <button
-                    type="button"
-                    id=FORGET_BUTTON
-                    on:click=move |_| {
-                        page.preview(maintenance::request(Kind::Forget), FORGET_BUTTON.to_owned());
-                    }
-                >
-                    {forget}
-                </button>
-                <button
-                    type="button"
-                    id=PRUNE_BUTTON
-                    on:click=move |_| {
-                        page.preview(maintenance::request(Kind::Prune), PRUNE_BUTTON.to_owned());
-                    }
-                >
-                    {prune}
-                </button>
-                <button
-                    type="button"
-                    id=CHECK_BUTTON
-                    on:click=move |_| {
-                        page.preview(maintenance::request(Kind::Check), CHECK_BUTTON.to_owned());
-                    }
-                >
-                    {check}
-                </button>
-            </p>
-        }
-    });
+    let intro = move || {
+        page.plain(if page.maintained.get() {
+            msg::UI_MAINTENANCE_BODY
+        } else {
+            msg::UI_MAINTENANCE_ELSEWHERE
+        })
+    };
+    let buttons = move || {
+        page.maintained.get().then(|| {
+            view! {
+                <p class="actions">
+                    <button
+                        type="button"
+                        id=FORGET_BUTTON
+                        on:click=move |_| {
+                            page.preview(
+                                maintenance::request(Kind::Forget),
+                                FORGET_BUTTON.to_owned(),
+                            );
+                        }
+                    >
+                        {page.plain(msg::UI_MAINTENANCE_FORGET)}
+                    </button>
+                    <button
+                        type="button"
+                        id=PRUNE_BUTTON
+                        on:click=move |_| {
+                            page.preview(
+                                maintenance::request(Kind::Prune),
+                                PRUNE_BUTTON.to_owned(),
+                            );
+                        }
+                    >
+                        {page.plain(msg::UI_MAINTENANCE_PRUNE)}
+                    </button>
+                    <button
+                        type="button"
+                        id=CHECK_BUTTON
+                        on:click=move |_| {
+                            page.preview(
+                                maintenance::request(Kind::Check),
+                                CHECK_BUTTON.to_owned(),
+                            );
+                        }
+                    >
+                        {page.plain(msg::UI_MAINTENANCE_CHECK)}
+                    </button>
+                </p>
+            }
+        })
+    };
+    // One button whose words follow who maintains the repository, so focus
+    // stays on it once its dialog has changed that.
+    let switch_label = move || {
+        let switch = wording::switch(page.maintained.get(), &page.alias.get_value());
+        page.words(&switch.button)
+    };
     let cancel = page.plain(msg::UI_MAINTENANCE_CANCEL);
     let loading = page.plain(msg::UI_LOADING);
     let empty = page.plain(msg::UI_NO_SNAPSHOTS);
@@ -609,6 +722,11 @@ fn Repository(
                     .collect_view()
             }}
             {buttons}
+            <p class="actions">
+                <button type="button" id=MAINTAINER_BUTTON on:click=move |_| page.ask_switch()>
+                    {switch_label}
+                </button>
+            </p>
             {move || {
                 step.get()
                     .map(|step| {
@@ -674,6 +792,7 @@ fn Repository(
         }}
         {stats_view(page, stats_heading)}
         {move || page.review.get().map(|reviewing| review_view(page, reviewing))}
+        {move || page.switch.get().map(|maintained| switch_view(page, maintained))}
     }
 }
 
@@ -875,7 +994,7 @@ fn orphaned_group_view(page: Page, index: usize, group: OrphanedGroupDto) -> imp
         .adopt_into
         .iter()
         .enumerate()
-        .filter(|_| page.maintained)
+        .filter(|_| page.maintained.get())
         .filter_map(|(target, into)| {
             wording::adopt_orphaned(&group, into).map(|adoption| {
                 adoption_view(page, format!("adopt-orphaned-{index}-{target}"), adoption)
@@ -940,7 +1059,7 @@ fn unmanaged_group_view(page: Page, index: usize, group: UnmanagedGroupDto) -> i
         .adopt_into
         .iter()
         .enumerate()
-        .filter(|_| page.maintained)
+        .filter(|_| page.maintained.get())
         .map(|(target, into)| {
             let adoption = wording::adopt_unmanaged(&group, into);
             adoption_view(page, format!("adopt-unmanaged-{index}-{target}"), adoption)
@@ -972,6 +1091,40 @@ fn adoption_view(page: Page, id: String, adoption: Adoption) -> impl IntoView {
                 {label}
             </button>
         </p>
+    }
+}
+
+/// The dialog that turns maintenance of the repository from this agent on or
+/// off, as this agent `maintained` it when the dialog was asked for: what
+/// that means, then Cancel, where focus starts, and the button that does it.
+fn switch_view(page: Page, maintained: bool) -> impl IntoView {
+    let switch = wording::switch(maintained, &page.alias.get_value());
+    let confirm = Confirmation {
+        label: page.words(&switch.confirm),
+        action: Callback::new(move |()| page.switch_maintainer(maintained)),
+    };
+    let working = Working {
+        active: page.switch_busy.into(),
+        status: page.plain(msg::UI_MAINTAINER_SAVING),
+    };
+    view! {
+        <ReviewDialog
+            open=page.switch_open
+            title=page.words(&switch.title)
+            dismiss_label=page.plain(msg::UI_REVIEW_CANCEL)
+            confirm=Some(confirm)
+            returns_to=MAINTAINER_BUTTON.to_owned()
+            described_by=MAINTAINER_BODY.to_owned()
+            working=working
+            fallback=MAINTENANCE_HEADING.to_owned()
+        >
+            <p id=MAINTAINER_BODY>{page.words(&switch.body)}</p>
+            {move || {
+                page.switch_refused
+                    .get()
+                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            }}
+        </ReviewDialog>
     }
 }
 

@@ -252,7 +252,7 @@ pub enum ErrorCode {
     /// `operation` names it.
     MaintenanceBusy,
     /// This agent doesn't maintain the repository: its entry doesn't ask for
-    /// `local` (I1, §7.3), so nothing was asked of it. The argument `alias`
+    /// `local` (I1, §7.3), so nothing in it was changed. The argument `alias`
     /// names it.
     MaintenanceNotOwner,
     /// The plan's retention policy is set and would keep nothing, so the
