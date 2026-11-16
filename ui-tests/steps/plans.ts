@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 
 import { Given, Then, When } from "@cucumber/cucumber";
-import type { Request } from "playwright";
+import type { Request, Route } from "playwright";
 
 import { journey, namePattern } from "../support/keyboard.ts";
 import { type BrowserWorld, evaluateAll } from "../support/world.ts";
@@ -52,6 +52,44 @@ Given(
     });
   },
 );
+
+// Every read of the plans list after the first, the one a save makes among
+// them, is answered by `answer` instead of the daemon.
+function answerReadsAfterFirst(world: BrowserWorld, answer: (route: Route) => Promise<void>): void {
+  let reads = 0;
+  world.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname === "/api/v1/plans",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          reads += 1;
+          if (reads > 1) return answer(route);
+        }
+        await route.continue();
+      },
+    );
+  });
+}
+
+// The daemon refuses the list as it does when it can't read the
+// configuration file (503 config-unavailable).
+Given("the daemon refuses each read of the plans list after the first", function (this: BrowserWorld) {
+  answerReadsAfterFirst(this, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: "config-unavailable",
+        args: { file: { type: "text", value: "/etc/ladderback/config.toml" } },
+      }),
+    }),
+  );
+});
+
+// The read is lost on its way, as when the daemon has stopped.
+Given("each read of the plans list after the first reaches no daemon", function (this: BrowserWorld) {
+  answerReadsAfterFirst(this, (route) => route.abort("connectionrefused"));
+});
 
 // Once the page has each held read's whole answer, and has done what it does
 // with it: a saved plan's page closes the form on the answer, then moves focus
