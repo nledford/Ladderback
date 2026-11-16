@@ -273,6 +273,41 @@ mod tests {
         assert_eq!(line, r#"TOML parse error at line 3: password = "***""#);
     }
 
+    /// A program that quotes a multi-line TOML string quotes it a line at a
+    /// time, and a secret a line-ending backslash broke goes on at the start
+    /// of the next line: each line reaches the log masked (#861).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_broken_by_a_line_ending_backslash_is_masked_on_both_lines_of_the_workers_stderr()
+     {
+        capture_the_worker_log();
+        let script = format!(
+            r#"cat >/dev/null; printf '%s\n' 'line 3: password = """CANARY-split-\' '    bell-demo""" (line 4)' >&2; echo '{}'"#,
+            result_line()
+        );
+        let engine = WorkerEngine::new("sh", ["-c", script.as_str()]);
+        let job = identify("hunter2-demo", &["CANARY-split-bell-demo"]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let events = engine
+            .run(op, job)
+            .await
+            .unwrap()
+            .events
+            .collect::<Vec<_>>()
+            .await;
+        assert_matches!(events.as_slice(), [EngineEvent::Succeeded(_)]);
+        let first = logged_soon(log::Level::Warn, |text| {
+            text.starts_with("line 3: password")
+        })
+        .await
+        .expect("the first line never reached the log");
+        assert_eq!(first, r#"line 3: password = """***"#);
+        let next = logged_soon(log::Level::Warn, |text| text.ends_with("(line 4)"))
+            .await
+            .expect("the next line never reached the log");
+        assert_eq!(next, r#"    ***""" (line 4)"#);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_secret_straddling_the_cut_of_a_long_stderr_line_leaves_nothing_of_itself() {

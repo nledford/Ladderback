@@ -1271,6 +1271,87 @@ mod tests {
         }
     }
 
+    /// A text masked a line at a time splits a multi-line string where a
+    /// backslash ends a line, and the rest of a secret the break went
+    /// through begins the next line, after the white space TOML drops. A
+    /// text that begins, after its white space, with the last 4 bytes or
+    /// more of a secret is masked from there to where the secret ends,
+    /// however it is masked (#861).
+    #[test]
+    fn a_text_that_begins_with_the_end_of_a_secret_is_masked_to_where_it_ends() {
+        let redactor = redactor(&["canary-bell demo"]);
+        for (line, masked) in [
+            ("bell demo\"\"\"", "***\"\"\""),
+            ("    bell demo\"\"\"", "    ***\"\"\""),
+            ("\t \t-bell demo\"\"\"", "\t \t***\"\"\""),
+            ("demo, it said", "***, it said"),
+            (" \tdemo", " \t***"),
+        ] {
+            assert_eq!(redactor.redact(line), masked, "{line:?}");
+            assert_eq!(redactor.redact_cut(line.as_bytes()), masked, "{line:?} cut");
+            assert_eq!(
+                redactor.redact_clipped(&format!("{line}…"), "…"),
+                format!("{masked}…"),
+                "{line:?} clipped"
+            );
+            assert_eq!(
+                Redactor::redact_together([&redactor], line),
+                masked,
+                "{line:?} together"
+            );
+        }
+        // The end of a form of a secret, as `Debug` writes it.
+        let bell = super::Redactor::new(&[SecretValue::new("canary\u{7}bell")]);
+        assert_eq!(bell.redact("{7}bell failed"), "*** failed");
+    }
+
+    /// A tail of 1 to 3 bytes stays: it is too short to tell from other
+    /// text. Nor is a tail masked anywhere but at the start of the text.
+    #[test]
+    fn only_a_text_that_begins_with_four_bytes_or_more_of_the_end_of_a_secret_is_masked_so() {
+        let redactor = redactor(&["canary-bell demo"]);
+        assert_eq!(redactor.redact("  demo"), "  ***");
+        for text in [
+            "emo said",
+            "  emo",
+            "mo",
+            "o",
+            "a demo",
+            "said: demo",
+            "x\n demo",
+            "bell dem",
+            "",
+            "   ",
+        ] {
+            assert_eq!(redactor.redact(text), text, "{text:?}");
+            assert_eq!(redactor.redact_cut(text.as_bytes()), text, "{text:?} cut");
+        }
+    }
+
+    /// The rest of a secret after a line-ending backslash is TOML too, and
+    /// may be written with its escapes: it is read as TOML reads it, and a
+    /// tail of 4 bytes or more of the secret as read is masked, the escapes
+    /// it was read from included.
+    #[test]
+    fn a_secret_broken_by_a_line_ending_backslash_is_masked_line_by_line() {
+        let redactor = redactor(&["canary-bell demo"]);
+        let file = "password = \"\"\"canary-\\\n    bell\\u0020demo\"\"\"\n";
+        let masked: Vec<String> = file.lines().map(|line| redactor.redact(line)).collect();
+        assert_eq!(masked, ["password = \"\"\"***", "    ***\"\"\""]);
+        for (line, masked) in [
+            (r#"\u0064emo""""#, r#"***""""#),
+            (r#"  \x64\x65\x6d\x6F""""#, r#"  ***""""#),
+            (r"-\U00000062ell demo, it said", "***, it said"),
+        ] {
+            assert_eq!(redactor.redact(line), masked, "{line:?}");
+            assert_eq!(redactor.redact_cut(line.as_bytes()), masked, "{line:?} cut");
+        }
+        // Three bytes of it, however written, stay.
+        for line in [r#"\u0065mo""""#, r#"  e\x6do""""#] {
+            assert_eq!(redactor.redact(line), line, "{line:?}");
+        }
+    }
+
     /// A text cut inside an escape (`\u00` of `\u0007`) may end partway
     /// through a secret: it is masked from where the secret begins, the
     /// escape included, as a cut text is (`redact_cut`, `redact_clipped`).
