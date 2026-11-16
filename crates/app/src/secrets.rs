@@ -10,14 +10,15 @@ use domain::execution::FailureReason;
 use domain::execution::refusal::SettingRefusal;
 use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_location};
 use domain::secrets::{
-    MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Problem,
-    Redactor, Reference, RepositorySecrets, SecretError, SecretRef, SecretValue, SecretWarning,
-    SourceName, Template, TemplateError, TooMuchToMask, has_reference, is_command_option,
+    KeyringCause, MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part,
+    Problem, Redactor, Reference, RepositorySecrets, SecretError, SecretRef, SecretValue,
+    SecretWarning, SourceName, Template, TemplateError, TooMuchToMask, has_reference,
+    is_command_option,
     too_many_rclone_credentials,
 };
 
 use crate::conditions::NETWORK_WAIT;
-use crate::ports::{Clock, RepositoryAccess, SavedEntry, SecretResolver};
+use crate::ports::{Clock, RepositoryAccess, Resolved, SavedEntry, SecretResolver};
 
 /// How long after the daemon starts a run nobody waits on holds for the
 /// session's keyring service: the network wait's bound (§5, decision NN).
@@ -353,9 +354,19 @@ impl ResolveRepository {
         &self,
         settings: &RepositorySettings,
     ) -> Result<ResolvedRepository, ResolveError> {
+        self.resolve_holding(settings, None).await
+    }
+
+    /// As [`Self::resolve`], holding for the keyring by `hold` when given.
+    async fn resolve_holding(
+        &self,
+        settings: &RepositorySettings,
+        hold: Option<Hold<'_>>,
+    ) -> Result<ResolvedRepository, ResolveError> {
         refuse_references_in_arguments(settings)?;
         refuse_too_many_credentials(settings)?;
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
+        run.hold = hold;
         let access = match run.password(&settings.password).await {
             Ok(password) => run.access(settings, password).await,
             Err(error) => Err(error),
@@ -404,17 +415,7 @@ impl ResolveRepository {
         alias: &RepositoryAlias,
         entry: &RepositoryConfig,
     ) -> Result<ResolvedRepository, ResolveError> {
-        let mut resolved = if entry.has_several_locations() {
-            self.resolve_password(&entry.settings.password).await?
-        } else {
-            self.resolve(&entry.settings).await?
-        };
-        resolved.access.id = entry.id.clone();
-        resolved.access.entry = Some(SavedEntry {
-            alias: alias.clone(),
-            entry: entry.clone(),
-        });
-        Ok(resolved)
+        self.resolve_saved_holding(alias, entry, None).await
     }
 
     /// As [`Self::resolve_saved`], for a run nobody waits on: one the
@@ -431,8 +432,46 @@ impl ResolveRepository {
         entry: &RepositoryConfig,
         waiting: KeyringWaiting<'_>,
     ) -> Result<ResolvedRepository, ResolveError> {
-        let _ = (alias, entry, waiting);
-        todo!()
+        let hold = self.wait.as_ref().map(|wait| Hold { wait, waiting });
+        self.resolve_saved_holding(alias, entry, hold).await
+    }
+
+    async fn resolve_saved_holding(
+        &self,
+        alias: &RepositoryAlias,
+        entry: &RepositoryConfig,
+        hold: Option<Hold<'_>>,
+    ) -> Result<ResolvedRepository, ResolveError> {
+        let mut resolved = if entry.has_several_locations() {
+            self.password_holding(&entry.settings.password, hold)
+                .await?
+        } else {
+            self.resolve_holding(&entry.settings, hold).await?
+        };
+        resolved.access.id = entry.id.clone();
+        resolved.access.entry = Some(SavedEntry {
+            alias: alias.clone(),
+            entry: entry.clone(),
+        });
+        Ok(resolved)
+    }
+}
+
+/// What a run nobody waits on holds for the keyring by: the daemon's start,
+/// and whom to tell it waits.
+#[derive(Clone, Copy)]
+struct Hold<'a> {
+    wait: &'a KeyringWait,
+    waiting: KeyringWaiting<'a>,
+}
+
+impl KeyringWait {
+    /// How much of [`KEYRING_WAIT`] since the daemon started is left now;
+    /// `None` once it has passed.
+    fn left(&self) -> Option<domain::SignedDuration> {
+        let end = self.started.saturating_add(KEYRING_WAIT).ok()?;
+        let left = end.duration_since(self.clock.now());
+        left.is_positive().then_some(left)
     }
 }
 
@@ -453,11 +492,22 @@ impl ResolveRepository {
         &self,
         password: &SecretRef,
     ) -> Result<ResolvedRepository, ResolveError> {
+        self.password_holding(password, None).await
+    }
+
+    /// As [`Self::resolve_password`], holding for the keyring by `hold` when
+    /// given.
+    async fn password_holding(
+        &self,
+        password: &SecretRef,
+        hold: Option<Hold<'_>>,
+    ) -> Result<ResolvedRepository, ResolveError> {
         // A password alone is never more than a redactor masks (the
         // assertion below), so one that fails was never read and gave no
         // warning to tell.
         const _: () = assert!(MAX_SECRET_BYTES < MAX_MASKED_BYTES);
         let mut run = Run::new(self.resolver.as_ref(), BTreeMap::new());
+        run.hold = hold;
         let password = run.password(password).await?;
         let access = RepositoryAccess {
             repository: String::new(),
@@ -590,6 +640,8 @@ struct Run<'a> {
     masked: MaskedSecrets,
     /// The password, once read or given.
     password: Option<SecretValue>,
+    /// How a keyring with no service to ask is waited for, if it is.
+    hold: Option<Hold<'a>>,
 }
 
 impl<'a> Run<'a> {
@@ -602,6 +654,7 @@ impl<'a> Run<'a> {
             warnings: Vec::new(),
             masked: MaskedSecrets::default(),
             password: None,
+            hold: None,
         }
     }
 
@@ -611,8 +664,7 @@ impl<'a> Run<'a> {
             cause,
         };
         let resolved = self
-            .resolver
-            .resolve(password)
+            .read(password)
             .await
             .map_err(|error| fail(Cause::Unresolved(error)))?;
         self.warn(resolved.warnings);
@@ -621,6 +673,39 @@ impl<'a> Run<'a> {
             .secret(&resolved.value)
             .map_err(|too_much| fail(too_much_to_mask(too_much)))?;
         Ok(resolved.value)
+    }
+
+    /// What `secret` resolves to. Under a hold, a keyring with no service to
+    /// ask is read again every [`KEYRING_POLL`] while the daemon is in its
+    /// first [`KEYRING_WAIT`], and the hold's `waiting` is told once; every
+    /// other answer, and the last, is as the resolver gave it.
+    async fn read(&self, secret: &SecretRef) -> Result<Resolved, SecretError> {
+        let mut told = false;
+        loop {
+            let read = self.resolver.resolve(secret).await;
+            let Some(hold) = self.hold else {
+                return read;
+            };
+            let Err(SecretError {
+                source,
+                problem:
+                    Problem::KeyringUnavailable {
+                        cause: KeyringCause::NoService,
+                        ..
+                    },
+            }) = &read
+            else {
+                return read;
+            };
+            let Some(left) = hold.wait.left() else {
+                return read;
+            };
+            if !told {
+                (hold.waiting)(source);
+                told = true;
+            }
+            hold.wait.clock.sleep(left.min(KEYRING_POLL)).await;
+        }
     }
 
     /// The rest of `settings`, past the password, resolved: the access a job

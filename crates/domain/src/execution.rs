@@ -419,7 +419,7 @@ impl Trigger {
     /// it, late after a wake or as a retry. Only such a run waits for the
     /// session's keyring service while the daemon starts (§5).
     pub fn is_unattended(&self) -> bool {
-        todo!()
+        matches!(self, Self::Schedule | Self::CatchUp | Self::Retry)
     }
 }
 

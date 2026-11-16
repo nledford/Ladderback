@@ -894,6 +894,17 @@ async fn schedule_starts_after_start(agent: &mut Agent, seconds: i64) {
     agent.secrets.outcome = Some(outcome);
 }
 
+#[when(expr = "a person tests the repository {int} seconds after the daemon started")]
+async fn person_tests_after_start(agent: &mut Agent, seconds: i64) {
+    agent.clock.advance(SignedDuration::from_secs(seconds));
+    let outcome = agent
+        .secrets
+        .waits(agent.clock.clone())
+        .resolve_saved(&demo_alias(), &agent.secrets.entry())
+        .await;
+    agent.secrets.outcome = Some(outcome);
+}
+
 #[when(
     expr = "the schedule starts a backup {int} seconds after the daemon started and the daemon stops once the run waits"
 )]

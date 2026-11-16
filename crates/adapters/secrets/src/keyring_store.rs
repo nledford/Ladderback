@@ -179,10 +179,7 @@ pub(crate) fn failure(
         keyring::Error::NoEntry => match store {
             OsStore::SecretService => match locked() {
                 Lock::Unlocked => Failure::NoEntry,
-                Lock::Locked(said) => {
-                    let _ = said;
-                    todo!()
-                }
+                Lock::Locked(said) => Failure::Refused(said),
                 Lock::Unknown(why) => Failure::Unconfirmed(why),
             },
             OsStore::Keychain => Failure::NoEntry,
@@ -209,8 +206,13 @@ pub(crate) fn failure(
 fn secret_service_unavailable(
     source: &(dyn std::error::Error + Send + Sync + 'static),
 ) -> Option<KeyringCause> {
-    let _ = source;
-    todo!()
+    use dbus_secret_service::Error;
+    match source.downcast_ref::<Error>() {
+        Some(Error::Unavailable) => Some(KeyringCause::NoService),
+        Some(Error::Locked | Error::NoResult | Error::Prompt) => Some(KeyringCause::Refused),
+        Some(Error::Dbus(error)) => error.name().and_then(bus_error_cause),
+        _ => None,
+    }
 }
 
 /// What a D-Bus error, by its name, says of the Secret Service: none to ask
@@ -222,8 +224,15 @@ fn secret_service_unavailable(
 /// neither. Only Linux reads D-Bus errors; the tests run it everywhere.
 #[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
 pub(crate) fn bus_error_cause(name: &str) -> Option<KeyringCause> {
-    let _ = name;
-    todo!()
+    match name {
+        "org.freedesktop.DBus.Error.NoServer"
+        | "org.freedesktop.DBus.Error.FileNotFound"
+        | "org.freedesktop.DBus.Error.NotSupported"
+        | "org.freedesktop.DBus.Error.ServiceUnknown"
+        | "org.freedesktop.DBus.Error.NameHasNoOwner" => Some(KeyringCause::NoService),
+        "org.freedesktop.Secret.Error.IsLocked" => Some(KeyringCause::Refused),
+        _ => None,
+    }
 }
 
 /// The store where there is none. Tests build it on every OS, so what it

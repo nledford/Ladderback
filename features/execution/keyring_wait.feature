@@ -44,6 +44,13 @@ Feature: A scheduled run waits for the session's keyring service while the daemo
     And the keyring entry "ladderback/demo" was read 1 time
     And the daemon never logged that the run waits
 
+  Scenario: A person who tests the repository is answered at once
+    Given the session's keyring service starts 55 seconds after the daemon
+    When a person tests the repository 30 seconds after the daemon started
+    Then the run fails 30 seconds after the daemon started because there is no keyring service to ask
+    And the keyring entry "ladderback/demo" was read 1 time
+    And the daemon never logged that the run waits
+
   Scenario: After 2 minutes of uptime a run with no keyring service fails at once
     Given the machine has no keyring service
     When the schedule starts a backup 120 seconds after the daemon started

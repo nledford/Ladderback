@@ -193,10 +193,10 @@ impl SystemSecrets {
                 detail,
                 cause: KeyringCause::NoService,
             })),
-            Err(Failure::Refused(detail)) => {
-                let _ = detail;
-                todo!()
-            }
+            Err(Failure::Refused(detail)) => Err(fail(Problem::KeyringUnavailable {
+                detail,
+                cause: KeyringCause::Refused,
+            })),
         }
     }
 
