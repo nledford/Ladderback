@@ -13,7 +13,7 @@ import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
 import { journey, namePattern } from "../support/keyboard.ts";
-import { type BrowserWorld, evaluateAll } from "../support/world.ts";
+import type { BrowserWorld } from "../support/world.ts";
 
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -131,19 +131,6 @@ Then("the banner describing the button {string} is edged unlike its focus ring",
 
 Then("the button {string} has no description", async function (this: BrowserWorld, name: string) {
   await expect(this.page.getByRole("button", { name, exact: true })).toHaveAccessibleDescription("");
-});
-
-Then("the table {string} is sorted by repository ascending", async function (this: BrowserWorld, name: string) {
-  const cells = await evaluateAll(
-    this.page.getByRole("table", { name }).getByRole("cell"),
-    (found) => found.map((cell) => cell.textContent ?? ""),
-    undefined,
-  );
-  assert.deepEqual(
-    cells,
-    [...cells].sort((a, b) => a.localeCompare(b)),
-    `the table ${JSON.stringify(name)} is not sorted ascending: ${cells.join(", ")}`,
-  );
 });
 
 // The wrap the dialog's own trap does: Tab on its last control puts focus on
@@ -1864,21 +1851,131 @@ Then(
 const SNAPSHOTS: Record<string, string> = {
   Dialog: `- heading "Dialog" [level=2]
 - button "Open the demo dialog"`,
-  "Data table": `- heading "Data table" [level=2]
-- table "Demo repositories":
-  - caption: Demo repositories
-  - rowgroup:
-    - row "Repository Sort by repository":
-      - columnheader "Repository Sort by repository":
-        - text: Repository
-        - button "Sort by repository"
-  - rowgroup:
-    - row "moor":
-      - cell "moor"
-    - row "harbor":
-      - cell "harbor"
-    - row "anchor":
-      - cell "anchor"`,
+  Table: `- heading "Table" [level=2]
+- group "Demo table shows":
+  - text: Demo table shows
+  - radio "Demo rows" [checked]
+  - text: Demo rows
+  - radio "Demo loading"
+  - text: Demo loading
+  - radio "Demo empty"
+  - text: Demo empty
+  - radio "Demo unreachable"
+  - text: Demo unreachable
+- region "Demo folders":
+  - table "Demo folders":
+    - caption: Demo folders
+    - rowgroup:
+      - row "Name Sort by name Size Sort by size Changed Sort by changed Files Sort by files Actions":
+        - columnheader "Name Sort by name":
+          - text: Name
+          - button "Sort by name"
+        - columnheader "Size Sort by size":
+          - text: Size
+          - button "Sort by size"
+        - columnheader "Changed Sort by changed":
+          - text: Changed
+          - button "Sort by changed"
+        - columnheader "Files Sort by files":
+          - text: Files
+          - button "Sort by files"
+        - columnheader "Actions"
+    - rowgroup:
+      - row "photos 4.2 GiB Oct 4, 2026 1,204 Add a file to ⁨photos⁩":
+        - rowheader "photos"
+        - cell "4.2 GiB"
+        - cell "Oct 4, 2026"
+        - cell "1,204"
+        - cell "Add a file to ⁨photos⁩":
+          - button "Add a file to ⁨photos⁩"
+      - row "music 12.6 GiB Aug 21, 2026 12 Add a file to ⁨music⁩":
+        - rowheader "music"
+        - cell "12.6 GiB"
+        - cell "Aug 21, 2026"
+        - cell "12"
+        - cell "Add a file to ⁨music⁩":
+          - button "Add a file to ⁨music⁩"
+      - row "documents 820 MiB Nov 2, 2026 312 Add a file to ⁨documents⁩":
+        - rowheader "documents"
+        - cell "820 MiB"
+        - cell "Nov 2, 2026"
+        - cell "312"
+        - cell "Add a file to ⁨documents⁩":
+          - button "Add a file to ⁨documents⁩"
+      - row "notes 1.5 MiB Nov 12, 2026 12 Add a file to ⁨notes⁩":
+        - rowheader "notes"
+        - cell "1.5 MiB"
+        - cell "Nov 12, 2026"
+        - cell "12"
+        - cell "Add a file to ⁨notes⁩":
+          - button "Add a file to ⁨notes⁩"
+    - rowgroup:
+      - row "Total 17.6 GiB 1,540":
+        - rowheader "Total"
+        - cell "17.6 GiB"
+        - cell
+        - cell "1,540"
+        - cell
+- region "Demo folders in a narrow frame":
+  - table "Demo folders in a narrow frame":
+    - caption: Demo folders in a narrow frame
+    - rowgroup:
+      - row "Name Size Changed Files":
+        - columnheader "Name"
+        - columnheader "Size"
+        - columnheader "Changed"
+        - columnheader "Files"
+    - rowgroup:
+      - row "photos 4.2 GiB Oct 4, 2026 1,204":
+        - rowheader "photos"
+        - cell "4.2 GiB"
+        - cell "Oct 4, 2026"
+        - cell "1,204"
+      - row "music 12.6 GiB Aug 21, 2026 12":
+        - rowheader "music"
+        - cell "12.6 GiB"
+        - cell "Aug 21, 2026"
+        - cell "12"
+      - row "documents 820 MiB Nov 2, 2026 312":
+        - rowheader "documents"
+        - cell "820 MiB"
+        - cell "Nov 2, 2026"
+        - cell "312"
+      - row "notes 1.5 MiB Nov 12, 2026 12":
+        - rowheader "notes"
+        - cell "1.5 MiB"
+        - cell "Nov 12, 2026"
+        - cell "12"
+- region "Demo folders, right to left":
+  - table "Demo folders, right to left":
+    - caption: Demo folders, right to left
+    - rowgroup:
+      - row "Name Size Changed Files":
+        - columnheader "Name"
+        - columnheader "Size"
+        - columnheader "Changed"
+        - columnheader "Files"
+    - rowgroup:
+      - row "photos 4.2 GiB Oct 4, 2026 1,204":
+        - rowheader "photos"
+        - cell "4.2 GiB"
+        - cell "Oct 4, 2026"
+        - cell "1,204"
+      - row "music 12.6 GiB Aug 21, 2026 12":
+        - rowheader "music"
+        - cell "12.6 GiB"
+        - cell "Aug 21, 2026"
+        - cell "12"
+      - row "documents 820 MiB Nov 2, 2026 312":
+        - rowheader "documents"
+        - cell "820 MiB"
+        - cell "Nov 2, 2026"
+        - cell "312"
+      - row "notes 1.5 MiB Nov 12, 2026 12":
+        - rowheader "notes"
+        - cell "1.5 MiB"
+        - cell "Nov 12, 2026"
+        - cell "12"`,
   "Text field": `- heading "Text field" [level=2]
 - text: Repository name
 - paragraph: The name of the repository to check.

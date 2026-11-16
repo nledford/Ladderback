@@ -222,6 +222,12 @@ Then("the page doesn't scroll sideways", async function (this: BrowserWorld) {
 // Counting it made the check depend on when the region was last written: the
 // announcer writes it a moment after a press or an event, and its one line
 // never fits the region's 1 px box.
+// Text inside a focusable, named region that scrolls sideways, a table's
+// frame (§4.5), is held to that frame instead of the viewport: it must lie
+// within the frame's scroll extent, where scrolling the frame (with the arrow
+// keys once it has focus) brings it into view, and the frame must lie within
+// the viewport. 1.4.10 lets a data table scroll in two dimensions; the first
+// rule still catches anything an inner box cuts off inside the frame.
 Then("no text is clipped", async function (this: BrowserWorld) {
   const clipped = await this.page.evaluate(async () => {
     await document.fonts.ready;
@@ -236,6 +242,22 @@ Then("no text is clipped", async function (this: BrowserWorld) {
       (el) => getComputedStyle(el).clipPath === "inset(50%)",
     );
     const seen = (el: Element) => !unseenBoxes.some((box) => box.contains(el));
+    const scrollFrames = [...document.body.querySelectorAll('[role="region"][tabindex="0"]')].filter(
+      (el) =>
+        (el.hasAttribute("aria-labelledby") || el.hasAttribute("aria-label")) &&
+        ["auto", "scroll"].includes(getComputedStyle(el).overflowX),
+    );
+    // The span, in viewport coordinates, a frame's content can be scrolled
+    // through: from its start at a scroll of 0 to its end. In right to left a
+    // scroll of 0 is the right end, and scrollLeft runs negative.
+    const extent = (frame: Element) => {
+      const box = frame.getBoundingClientRect();
+      const rtl = getComputedStyle(frame).direction === "rtl";
+      const left = rtl
+        ? box.left + frame.clientLeft + frame.clientWidth - frame.scrollLeft - frame.scrollWidth
+        : box.left + frame.clientLeft - frame.scrollLeft;
+      return { left, right: left + frame.scrollWidth, box };
+    };
 
     for (const el of document.body.querySelectorAll("*")) {
       const style = getComputedStyle(el);
@@ -252,14 +274,21 @@ Then("no text is clipped", async function (this: BrowserWorld) {
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const parent = node.parentElement;
       if (!(node.textContent ?? "").trim() || parent === null || !seen(parent)) continue;
+      const frame = scrollFrames.find((frame) => frame.contains(parent));
+      const span = frame === undefined ? undefined : extent(frame);
+      if (span !== undefined && (span.box.left < -0.5 || span.box.right > viewportWidth + 0.5)) {
+        problems.push(`the frame around ${describe(parent)} reaches beyond the ${viewportWidth}px viewport`);
+        continue;
+      }
+      const [from, to] = span === undefined ? [0, viewportWidth] : [span.left, span.right];
       if (getComputedStyle(parent).display === "none") continue;
       const range = document.createRange();
       range.selectNodeContents(node);
       for (const rect of range.getClientRects()) {
         if (rect.width === 0) continue;
-        if (rect.left < -0.5 || rect.right > viewportWidth + 0.5) {
+        if (rect.left < from - 0.5 || rect.right > to + 0.5) {
           problems.push(
-            `${describe(parent)} reaches ${Math.round(rect.left)}..${Math.round(rect.right)}px of a ${viewportWidth}px viewport`,
+            `${describe(parent)} reaches ${Math.round(rect.left)}..${Math.round(rect.right)}px of ${frame === undefined ? `a ${viewportWidth}px viewport` : `its frame's ${Math.round(from)}..${Math.round(to)}px`}`,
           );
           break;
         }
