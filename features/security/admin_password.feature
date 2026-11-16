@@ -135,6 +135,23 @@ Feature: Setting and changing the admin password in Settings
       And the page doesn't show "demo-admin-pass"
       And the page has no accessibility violations
 
+    Scenario: A password shown while it was typed is hidden again once it is set and the form is cleared
+      Given a daemon with sign-in off
+      When I open the address "/settings"
+      And I press Tab until focus is on the textbox "New password"
+      And I type "demo-admin-pass"
+      And I press Tab
+      Then focus is on the button "Show password" described by "New password"
+      When I press Space
+      Then the field "New password" shows what it holds, "demo-admin-pass", its caret 0 characters before its end
+      When I press Tab until focus is on the textbox "New password again"
+      And I type "demo-admin-pass"
+      And I press Tab until focus is on the button "Set the admin password"
+      And I press Enter
+      Then the page shows a message containing "Admin password set. Restart Ladderback to turn sign-in on."
+      And the field "New password" hides what it holds
+      And the textbox "New password" still holds ""
+
     Scenario: Passwords that differ move focus to an error summary that says how to fix it
       Given a daemon with sign-in off
       When I open the address "/settings"

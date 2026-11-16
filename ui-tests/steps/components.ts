@@ -1,8 +1,9 @@
 // Journey steps for the shared component set in the gallery (technical design
-// §4.5): the dialog, the data table, the form field, the checkbox, the
+// §4.5): the dialog, the data table, the text field, the checkbox, the
 // progress bar, the toast, the pause control, the status badge and the
-// shared vocabulary of tones, sizes and placements, the spinner and the
-// icon. Keyboard only, role-and-name locators, as everywhere in steps/.
+// shared vocabulary of tones, sizes and placements, the spinner, the icon
+// and the button. Keyboard only, role-and-name locators, as everywhere in
+// steps/.
 
 import assert from "node:assert/strict";
 
@@ -32,6 +33,18 @@ Then("focus is on the button {string}", async function (this: BrowserWorld, name
     `the button ${JSON.stringify(name)}`,
   );
 });
+
+// One of several buttons of one name, told apart by the whole of what it is
+// described by: each field's Show password button by its field's label.
+Then(
+  "focus is on the button {string} described by {string}",
+  async function (this: BrowserWorld, name: string, description: string) {
+    await journey(this.page).assertFocused(
+      journey(this.page).byRole("button", { name: namePattern(name), description: namePattern(description) }),
+      `the button ${JSON.stringify(name)} described by ${JSON.stringify(description)}`,
+    );
+  },
+);
 
 // A review says in its own polite region what the page's announcer can't
 // while the modal is open (§4.5). The region has no role of its own (a second
@@ -72,6 +85,15 @@ Then("the button {string} is pressed", async function (this: BrowserWorld, name:
 Then("the button {string} is not pressed", async function (this: BrowserWorld, name: string) {
   await expect(this.page.getByRole("button", { name, exact: true, pressed: false })).toHaveCount(1);
 });
+
+Then(
+  "the button {string} described by {string} is not pressed",
+  async function (this: BrowserWorld, name: string, description: string) {
+    await expect(
+      this.page.getByRole("button", { name: namePattern(name), description: namePattern(description), pressed: false }),
+    ).toHaveCount(1);
+  },
+);
 
 // What a screen reader reads after the button's name and state: the banner
 // the button is described by while live updates are paused. Its numbers sit
@@ -1382,7 +1404,8 @@ Then("the button {string} is square, at least 24 pixels a side", async function 
 Then(
   /^every button with an icon and words shows its icon before its words, as tall as them, in a page that runs (left to right|right to left)$/,
   async function (this: BrowserWorld, direction: string) {
-    await this.page.locator(".button").first().waitFor({ timeout: 5_000 });
+    // A visible one: a step-up field's Show password waits in a closed dialog.
+    await this.page.locator(".button:visible").first().waitFor({ timeout: 5_000 });
     const found = await this.page.evaluate(() => ({
       rtl: getComputedStyle(document.documentElement).direction === "rtl",
       buttons: Array.from(document.querySelectorAll(".button")).flatMap((button) => {
@@ -1569,6 +1592,227 @@ Then(
   },
 );
 
+// A text field (§4.5), found by its label as a screen reader finds it, the
+// whole of it ("New password" is never "New password again"): its input,
+// and the parts the input's id names, the label above it, its description
+// and its error.
+const textField = (world: BrowserWorld, name: string): Locator =>
+  world.page.getByRole("textbox", { name: namePattern(name) });
+
+// The field's edge, as wide as it is drawn, and in a token's color where
+// the scenario names one, resolved on the field's own place in the page so
+// light and dark each give their own.
+Then(
+  /^the field "([^"]*)" is edged (\d) pixels? wide(?: in (--[\w-]+))?$/,
+  async function (this: BrowserWorld, name: string, width: string, token: string | undefined) {
+    const field = textField(this, name);
+    await expect(field).toHaveCount(1);
+    const drawn = await field.evaluate((element, token) => {
+      const style = getComputedStyle(element);
+      let wanted: string | null = null;
+      if (token) {
+        const probe = document.createElement("span");
+        probe.style.color = `var(${token})`;
+        element.parentElement?.append(probe);
+        wanted = getComputedStyle(probe).color;
+        probe.remove();
+      }
+      return { width: style.borderTopWidth, color: style.borderTopColor, wanted };
+    }, token);
+    assert.equal(drawn.width, `${width}px`, `the edge of "${name}"`);
+    if (token) assert.equal(drawn.color, drawn.wanted, `the edge of "${name}" in ${token}`);
+  },
+);
+
+Then("the field {string} is edged with dashes", async function (this: BrowserWorld, name: string) {
+  await expect(textField(this, name)).toHaveCSS("border-top-style", "dashed");
+});
+
+Then("the field {string} is disabled", async function (this: BrowserWorld, name: string) {
+  await expect(textField(this, name)).toBeDisabled();
+});
+
+Then(
+  "the field {string} shows its label, its description and its error above it, in that order",
+  async function (this: BrowserWorld, name: string) {
+    const field = textField(this, name);
+    await expect(field).toHaveCount(1);
+    const tops = await field.evaluate((input) => {
+      const top = (element: Element | null) => element?.getBoundingClientRect();
+      return [
+        top(document.querySelector(`label[for="${input.id}"]`)),
+        top(document.getElementById(`${input.id}-description`)),
+        top(document.getElementById(`${input.id}-error`)),
+        top(input),
+      ].map((rect) => rect && { top: rect.top, bottom: rect.bottom });
+    });
+    const parts = ["label", "description", "error", "field"];
+    tops.forEach((rect, at) => assert.ok(rect, `"${name}" shows no ${parts[at]}`));
+    for (let at = 1; at < tops.length; at++) {
+      const [above, below] = [tops[at - 1]!, tops[at]!];
+      assert.ok(above.bottom <= below.top + 0.5, `the ${parts[at - 1]} of "${name}" isn't above its ${parts[at]}`);
+    }
+  },
+);
+
+// A password is hidden while its type is `password`, and shown as text.
+Then("the field {string} hides what it holds", async function (this: BrowserWorld, name: string) {
+  await expect(textField(this, name)).toHaveAttribute("type", "password");
+});
+
+Then(
+  "the field {string} shows what it holds, {string}, its caret {int} character(s) before its end",
+  async function (this: BrowserWorld, name: string, value: string, back: number) {
+    const field = textField(this, name);
+    await expect(field).toHaveAttribute("type", "text");
+    await expect(field).toHaveValue(value);
+    const caret = await field.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd]);
+    assert.deepEqual(caret, [value.length - back, value.length - back], `the caret of "${name}"`);
+  },
+);
+
+// A number is text that asks a phone for its keyboard of digits: never
+// `type="number"`, whose value a scroll of the wheel changes.
+Then(
+  "the textbox {string} asks for the keyboard of digits, and is a text input",
+  async function (this: BrowserWorld, name: string) {
+    const field = textField(this, name);
+    await expect(field).toHaveAttribute("inputmode", "numeric");
+    await expect(field).toHaveAttribute("type", "text");
+  },
+);
+
+// The marker is shown after the label and hidden from a screen reader,
+// which hears "required" once, from `aria-required`.
+Then(
+  "the field {string} shows {string} after its label, which a screen reader skips",
+  async function (this: BrowserWorld, name: string, marker: string) {
+    const field = textField(this, name);
+    await expect(field).toHaveCount(1);
+    const label = this.page.locator(`label[for="${await field.getAttribute("id")}"]`);
+    await expect(label).toHaveText(`${name} ${marker}`);
+    await expect(label.locator('[aria-hidden="true"]')).toHaveText(marker);
+  },
+);
+
+Then("the field {string} is required, its name its label alone", async function (this: BrowserWorld, name: string) {
+  const field = this.page.getByRole("textbox", { name, exact: true });
+  await expect(field).toHaveCount(1);
+  await expect(field).toHaveAttribute("aria-required", "true");
+});
+
+Then(
+  "the field {string} is {float} times as tall as the page's text",
+  async function (this: BrowserWorld, name: string, times: number) {
+    const field = textField(this, name);
+    await expect(field).toHaveCount(1);
+    const { tall, text } = await field.evaluate((element) => ({
+      tall: element.getBoundingClientRect().height,
+      text: Number.parseFloat(getComputedStyle(document.body).fontSize),
+    }));
+    assert.ok(Math.abs(tall - times * text) < 0.5, `"${name}" is ${tall}px tall, the page's text ${text}px`);
+  },
+);
+
+Then(
+  "the field {string} is as tall as the button {string} beside it, their feet level",
+  async function (this: BrowserWorld, name: string, button: string) {
+    const field = textField(this, name);
+    const pressed = this.page.getByRole("button", { name: button, exact: true });
+    const [a, b] = await Promise.all(
+      [field, pressed].map((locator) =>
+        locator.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+        }),
+      ),
+    );
+    assert.ok(Math.abs(a!.bottom - a!.top - (b!.bottom - b!.top)) < 0.5, `"${name}" ${JSON.stringify(a)}, "${button}" ${JSON.stringify(b)}`);
+    assert.ok(Math.abs(a!.bottom - b!.bottom) < 0.5, `"${name}" and "${button}" don't stand level`);
+    assert.ok(a!.right <= b!.left || b!.right <= a!.left, `"${button}" isn't beside "${name}"`);
+  },
+);
+
+// Found by its part, as a pseudolocale renames the demo's heading and its
+// fields.
+Then(
+  /^the field with an icon shows it at its start, inside its edge, in a page that runs (left to right|right to left)$/,
+  async function (this: BrowserWorld, direction: string) {
+    const box = this.page.locator(".text-field-with-icon");
+    await expect(box).toHaveCount(1);
+    const found = await box.evaluate((element) => {
+      const rect = (part: Element | null) => {
+        const r = part?.getBoundingClientRect();
+        return r && { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      };
+      const input = element.querySelector("input");
+      const svg = element.querySelector(".text-field-icon svg");
+      return {
+        rtl: getComputedStyle(document.documentElement).direction === "rtl",
+        input: rect(input),
+        icon: rect(svg),
+        hidden: svg?.getAttribute("aria-hidden"),
+        edge: input ? Number.parseFloat(getComputedStyle(input).borderTopWidth) : 0,
+        // Where the input's text starts and ends, inside its padding.
+        textStart: input ? input.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(input).paddingLeft) : 0,
+        textEnd: input ? input.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(input).paddingRight) : 0,
+      };
+    });
+    assert.equal(found.rtl, direction === "right to left", "the page's direction");
+    const { input, icon } = found;
+    assert.ok(input && icon, `the field with an icon: ${JSON.stringify(found)}`);
+    assert.equal(found.hidden, "true", "a screen reader skips the icon");
+    const inside =
+      icon.left >= input.left + found.edge &&
+      icon.right <= input.right - found.edge &&
+      icon.top >= input.top + found.edge &&
+      icon.bottom <= input.bottom - found.edge;
+    assert.ok(inside, `the icon isn't inside the field's edge: ${JSON.stringify(found)}`);
+    // At the start, before where the text starts: the text's padding at the
+    // start makes room for the icon.
+    const atStart = found.rtl ? icon.left >= found.textEnd : icon.right <= found.textStart;
+    assert.ok(atStart, `the icon isn't at the field's start: ${JSON.stringify(found)}`);
+  },
+);
+
+Then(
+  "every field of the {string} demo is drawn in the reader's field colors, a disabled one in the color of unavailable text",
+  async function (this: BrowserWorld, component: string) {
+    const section = demoSection(this.page, component);
+    await section.waitFor({ timeout: 5_000 });
+    const found = await section.evaluate((element) => {
+      const probe = document.createElement("span");
+      document.body.append(probe);
+      const system = (color: string) => {
+        probe.style.color = color;
+        return getComputedStyle(probe).color;
+      };
+      probe.style.backgroundColor = "Field";
+      const field = getComputedStyle(probe).backgroundColor;
+      const [text, gray] = [system("FieldText"), system("GrayText")];
+      probe.remove();
+      return {
+        field,
+        text,
+        gray,
+        inputs: Array.from(element.querySelectorAll(".text-field-input"), (input) => {
+          const style = getComputedStyle(input);
+          return {
+            id: input.id,
+            disabled: (input as HTMLInputElement).disabled,
+            drawn: { text: style.color, fill: style.backgroundColor, edge: style.borderTopColor },
+          };
+        }),
+      };
+    });
+    assert.ok(found.inputs.some((input) => input.disabled), `the ${component} demo has no disabled field`);
+    for (const input of found.inputs) {
+      const ink = input.disabled ? found.gray : found.text;
+      assert.deepEqual(input.drawn, { text: ink, fill: found.field, edge: ink }, input.id);
+    }
+  },
+);
+
 // The pinned structure of each demo (roles and names, not styling), compared
 // with locator.ariaSnapshot(): toMatchAriaSnapshot() only works inside a
 // Playwright test, and these run under Cucumber. Regenerate a snapshot by
@@ -1591,18 +1835,58 @@ const SNAPSHOTS: Record<string, string> = {
       - cell "harbor"
     - row "anchor":
       - cell "anchor"`,
-  "Form field": `- heading "Form field" [level=2]
+  "Text field": `- heading "Text field" [level=2]
 - text: Repository name
-- textbox "Repository name"
 - paragraph: The name of the repository to check.
+- textbox "Repository name"
 - paragraph:
-  - button "Check the repository name"`,
-  "Multi-line form field": `- heading "Multi-line form field" [level=2]
+  - button "Check the repository name"
 - text: Demo folders
-- textbox "Demo folders"
 - paragraph: One folder or file a line.
+- textbox "Demo folders"
 - paragraph:
-  - button "Check the demo folders"`,
+  - button "Check the demo folders"
+- text: Demo password
+- paragraph: "A demo field: what is typed here goes nowhere."
+- textbox "Demo password"
+- button "Show password"
+- text: Demo copies to keep
+- paragraph: A whole number, such as 7.
+- textbox "Demo copies to keep"
+- text: Demo backup time
+- paragraph: When the demo backup starts, such as 02:00.
+- textbox "Demo backup time"
+- text: Demo plan name
+- paragraph: A demo field that must be filled in.
+- textbox "Demo plan name"
+- text: Demo host
+- paragraph: The demo machine's host name.
+- paragraph: Enter a host name, such as backup.example.
+- textbox "Demo host" [invalid]
+- text: Demo snapshot ID
+- paragraph: The demo snapshot's short ID.
+- paragraph: "Read only: you can select and copy it, but not change it."
+- textbox "Demo snapshot ID": 1a2b3c4d
+- text: Demo repository location
+- paragraph: Set when the demo repository was made.
+- paragraph: "Unavailable: it can't be changed now."
+- textbox "Demo repository location" [disabled]: /srv/demo
+- text: Demo keyring password
+- paragraph: Kept in the demo keyring, and changed there.
+- paragraph: "Unavailable: it can't be changed now."
+- textbox "Demo keyring password" [disabled]
+- text: Demo tag at the Small size
+- textbox "Demo tag at the Small size"
+- button "Add the demo tag at the Small size"
+- text: Demo tag at the Medium size
+- textbox "Demo tag at the Medium size"
+- button "Add the demo tag at the Medium size"
+- text: Demo tag at the Large size
+- textbox "Demo tag at the Large size"
+- button "Add the demo tag at the Large size"
+- text: Demo tag at the Extra large size
+- textbox "Demo tag at the Extra large size"
+- button "Add the demo tag at the Extra large size"`,
   Checkbox: `- heading "Checkbox" [level=2]
 - checkbox "Send a demo notification"
 - text: Send a demo notification

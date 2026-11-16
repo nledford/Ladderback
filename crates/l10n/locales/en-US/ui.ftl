@@ -1474,6 +1474,24 @@ ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
 
+## The text field (§4.5): what it says of itself, the same on every page.
+
+# The marker after a required text field's label, which says it must be
+# filled in. A screen reader skips it: the field says it is required itself.
+ui-text-field-required = (required)
+
+# The name of the toggle button beside a password field, pressed while the
+# password is shown. It keeps this one name pressed or not.
+ui-text-field-show-password = Show password
+
+# Under a read-only text field's label: it can be read and copied, not
+# changed.
+ui-text-field-read-only = Read only: you can select and copy it, but not change it.
+
+# Under a disabled text field's label: it can't be used now. The field's
+# own hint says why, where there is a reason.
+ui-text-field-disabled = Unavailable: it can't be changed now.
+
 ## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
 ## admin password with sign-in on, the short ID of what it confirms with
 ## sign-in off. Paste and password managers work in it.

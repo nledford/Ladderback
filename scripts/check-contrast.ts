@@ -37,6 +37,11 @@ const PAIRS = [
   { name: "error tone on surface", fg: "--error", bg: "--surface", min: 4.5 },
   ...buttonPairs(),
   { name: "tooltip text", fg: "--bg", bg: "--fg", min: 4.5 },
+  // A text field (components §4.5): its edge against the page and a
+  // surface (1.4.11); its invalid edge is the error tone's pairs above, its
+  // text the text on page, a disabled one's muted text on surface.
+  { name: "text field edge on page", fg: "--field-edge", bg: "--bg", min: 3 },
+  { name: "text field edge on surface", fg: "--field-edge", bg: "--surface", min: 3 },
 ];
 
 // A button (components §4.5) in each tone but Inherit, whose colors are the

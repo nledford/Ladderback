@@ -210,6 +210,12 @@ impl Field {
         }
     }
 
+    /// Whether a plan is refused without it (the catalog's `missing`): its
+    /// name, its repository and its sources, each field marked required.
+    pub(crate) fn required(self) -> bool {
+        todo!()
+    }
+
     /// What the field takes.
     pub(crate) fn kind(self) -> Kind {
         match self {
