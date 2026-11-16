@@ -55,6 +55,8 @@ mod interop_steps;
 mod notifications_steps;
 #[path = "steps/plans.rs"]
 mod plans_steps;
+#[path = "steps/proposals.rs"]
+mod proposals_steps;
 #[path = "steps/recent_log.rs"]
 mod recent_log_steps;
 #[path = "steps/recovery.rs"]
@@ -100,6 +102,7 @@ struct Agent {
     sign_in: sign_in_steps::SignInWorld,
     api_tokens: api_tokens_steps::ApiTokensWorld,
     plans: plans_steps::PlansWorld,
+    proposals: proposals_steps::ProposalsWorld,
     stats: stats_steps::StatsWorld,
     updates: updates_steps::UpdatesWorld,
     restore: restore_steps::RestoreWorld,
@@ -151,6 +154,7 @@ impl Agent {
             preview: Default::default(),
             notifications: Default::default(),
             plans: Default::default(),
+            proposals: Default::default(),
             stats: Default::default(),
             updates: Default::default(),
             recent_log: Default::default(),

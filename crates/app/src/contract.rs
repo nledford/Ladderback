@@ -3,6 +3,7 @@
 //! a fake can't drift from reality. A suite panics on the first violation.
 pub mod admin_password;
 pub mod api_token_store;
+pub mod change_codec;
 pub mod clock;
 pub mod config_store;
 pub mod engine;
@@ -14,6 +15,7 @@ pub mod notifier;
 pub mod operation_store;
 pub mod power;
 pub mod profiles;
+pub mod proposal_store;
 pub mod random;
 pub mod recent_log;
 pub mod release_feed;

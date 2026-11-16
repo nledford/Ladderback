@@ -279,6 +279,51 @@ error-plan-invalid = { $problem ->
 # $rule (text): the notification rule's name, such as failures.
 error-plan-in-use = The notification rule { $rule } names the plan { $plan }, so the plan was not deleted. Remove the plan from that rule, then delete it again.
 
+# A proposal of configuration changes holds no change, so nothing was kept.
+error-proposal-empty = The proposal holds no change, so it was not kept. Propose at least one change.
+
+# A change of a proposal is not one the configuration takes, so nothing was kept.
+# $change (count): the change's place in the proposal, from 1.
+# $field (text): the plan's setting at fault, as its key in the configuration file, such as id, repository or sources.
+# $problem (text): what is wrong with it, one of { "missing" }, { "unknown-key" }, { "wrong-type" }, { "invalid" }, { "taken" }, { "unknown-repository" }, { "no-sources" }, { "unknown-plan" }, { "in-use" } or { "hooks" }.
+error-proposal-invalid = { $problem ->
+    [unknown-plan] Change { $change } of the proposal names a plan the configuration doesn't have, so the proposal was not kept. Correct it, then propose again.
+    [in-use] Change { $change } of the proposal removes a plan a notification rule names, so the proposal was not kept. Correct it, then propose again.
+    [hooks] Change { $change } of the proposal gives a plan hooks it doesn't have, so the proposal was not kept. A proposal can't add, change or remove hooks yet: propose the plan with the hooks it has, or none for a new plan.
+   *[other] The { $field } of change { $change } of the proposal is not one the configuration takes, so the proposal was not kept. Correct it, then propose again.
+  }
+
+# A proposal is larger than a proposal may be, so nothing was kept.
+# $what (text): what is over its limit, { "changes" } or { "rationale" }.
+# $limit (count): how many changes, or characters of rationale, a proposal may hold.
+error-proposal-too-large = { $what ->
+    [rationale] The proposal's rationale is longer than { $limit } characters, so the proposal was not kept. Shorten it, then propose again.
+   *[other] The proposal holds more than { $limit } changes, so it was not kept. Split it, then propose again.
+  }
+
+# The proposer has as many proposals pending as it may.
+# $limit (count): how many proposals one proposer may have pending.
+error-proposal-limit = { $limit } proposals are pending already, so this one was not kept. Withdraw one, or wait until one expires, then propose again.
+
+# The request names a proposal the asker can't see, or that isn't kept.
+# $proposal (text): the proposal's ID.
+error-proposal-unknown = There is no proposal { $proposal }. Choose a proposal from the list of proposals.
+
+# A proposal that is not pending was asked to be withdrawn.
+# $status (text): the proposal's status, one of { "applying" }, { "applied" }, { "failed" }, { "rejected" }, { "withdrawn" }, { "expired" } or { "stale" }.
+error-proposal-not-pending = { $status ->
+    [applying] The proposal is being applied, so it was not withdrawn.
+    [applied] The proposal has been applied, so it was not withdrawn.
+    [failed] The proposal failed to apply, so it was not withdrawn.
+    [rejected] The proposal was rejected, so it was not withdrawn.
+    [withdrawn] The proposal was withdrawn already.
+    [expired] The proposal has expired, so it was not withdrawn.
+   *[other] The proposal has gone stale, as a change of it no longer applies, so it was not withdrawn.
+  }
+
+# The proposals could not be read or kept; the daemon's log says why.
+error-proposals-unavailable = { -brand-name } could not read or keep the proposals. Its log says why; check the data folder and try again.
+
 # The request names a repository the configuration does not have.
 # $alias (text): the repository's alias, such as demo.
 error-repository-unknown = There is no repository { $alias }. Add it to the configuration, or choose a repository that exists.

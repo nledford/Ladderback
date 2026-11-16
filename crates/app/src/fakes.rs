@@ -3,6 +3,7 @@
 
 mod admin_password;
 mod api_token_store;
+mod change_codec;
 mod clock;
 mod config_store;
 mod engine;
@@ -12,6 +13,7 @@ mod notifier;
 mod operation_store;
 mod platform;
 mod profiles;
+mod proposal_store;
 mod random;
 mod recent_log;
 mod release_feed;
@@ -25,6 +27,7 @@ mod stats_store;
 
 pub use admin_password::InMemoryAdminPassword;
 pub use api_token_store::InMemoryApiTokenStore;
+pub use change_codec::FakeChangeCodec;
 pub use clock::FakeClock;
 pub use config_store::InMemoryConfigStore;
 pub use engine::SimulatedEngine;
@@ -34,6 +37,7 @@ pub use notifier::RecordingNotifier;
 pub use operation_store::InMemoryOperationStore;
 pub use platform::{FakeNetwork, FakeNetworkLink, FakePower};
 pub use profiles::{FakeProfileReader, FakeProfileWriter};
+pub use proposal_store::InMemoryProposalStore;
 pub use random::SeededRandom;
 pub use recent_log::InMemoryRecentLog;
 pub use release_feed::ScriptedReleaseFeed;

@@ -30,6 +30,7 @@ pub mod notifications;
 pub mod plans;
 pub mod ports;
 pub mod progress;
+pub mod proposals;
 pub mod queue;
 pub mod recent_log;
 pub mod recovery;

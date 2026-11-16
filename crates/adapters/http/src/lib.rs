@@ -17,6 +17,7 @@ mod listener;
 mod maintenance;
 mod plans;
 mod profiles;
+mod proposals;
 mod repositories;
 mod request_checks;
 mod response_headers;
@@ -51,6 +52,7 @@ pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use plans::{Plans, PlansError};
 pub use profiles::{Profiles, ProfilesError};
+pub use proposals::{Proposals, ProposalsError};
 pub use repositories::{Repositories, RepositoriesError, SecretRefusal};
 pub use request_checks::{
     Exposure, InvalidHostName, RequestChecks, StartupRefusal, proxied_hosts, startup_rule,
@@ -87,6 +89,9 @@ pub struct AppState {
     pub profiles: Arc<dyn Profiles>,
     /// How a request previews and starts a restore (§10.4).
     pub restores: Arc<dyn Restores>,
+    /// How a request proposes configuration changes, and reads and
+    /// withdraws proposals (decision 89).
+    pub proposals: Arc<dyn Proposals>,
     /// Whether sign-in is on, and the sessions it has started (§10.1).
     pub sign_in: SignIn,
     /// Who can reach the daemon at the address it listens on, which the
@@ -502,6 +507,18 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/plans/{id}/profile",
             axum::routing::get(profiles::export),
+        )
+        .route(
+            "/api/v1/proposals",
+            axum::routing::get(proposals::list).post(proposals::propose),
+        )
+        .route(
+            "/api/v1/proposals/{id}",
+            axum::routing::get(proposals::read),
+        )
+        .route(
+            "/api/v1/proposals/{id}/withdraw",
+            axum::routing::post(proposals::withdraw),
         )
         // `body_limit` bounds this body by its own class, over the 2 MiB
         // axum's JSON extractor would otherwise allow.
@@ -1483,6 +1500,7 @@ mod tests {
             plans: Arc::new(crate::request_checks::tests::NoPlans),
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
+            proposals: Arc::new(crate::request_checks::tests::NoProposals),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -1527,6 +1545,7 @@ mod tests {
             plans: Arc::new(crate::request_checks::tests::NoPlans),
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
+            proposals: Arc::new(crate::request_checks::tests::NoProposals),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),
@@ -2906,6 +2925,7 @@ mod tests {
             plans: Arc::new(crate::request_checks::tests::NoPlans),
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
+            proposals: Arc::new(crate::request_checks::tests::NoProposals),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
             build: crate::request_checks::tests::test_build(),

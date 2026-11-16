@@ -79,6 +79,8 @@ mod notifications_steps;
 mod plan_settings_steps;
 #[path = "steps/plans.rs"]
 mod plans_steps;
+#[path = "steps/proposals.rs"]
+mod proposals_steps;
 #[path = "steps/repositories.rs"]
 mod repositories_steps;
 #[path = "steps/rest_server.rs"]
@@ -134,6 +136,7 @@ struct Agent {
     install_restart: install_restart_steps::InstallRestartE2e,
     notifications: notifications_steps::NotificationsE2e,
     api_tokens: api_tokens_steps::ApiTokensE2e,
+    proposals: proposals_steps::ProposalsE2e,
     restarting: restart_from_settings_steps::Restarting,
     mcp: mcp_steps::McpE2e,
     mcp_call: mcp_call_steps::McpCallE2e,
@@ -191,6 +194,7 @@ impl Agent {
             maintenance: maintenance_steps::MaintenanceE2e::default(),
             notifications: notifications_steps::NotificationsE2e::default(),
             api_tokens: api_tokens_steps::ApiTokensE2e::default(),
+            proposals: proposals_steps::ProposalsE2e::default(),
             restarting: restart_from_settings_steps::Restarting::default(),
             mcp: mcp_steps::McpE2e::default(),
             mcp_call: mcp_call_steps::McpCallE2e::default(),

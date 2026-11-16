@@ -19,6 +19,7 @@
     reason = "`ConfigError` is the port's, its shape fixed there; loading a file is not a hot path"
 )]
 
+mod change;
 mod edit;
 mod files;
 #[cfg(test)]
@@ -37,6 +38,7 @@ mod tables;
 mod write;
 mod zone;
 
+pub use change::JsonChangeCodec;
 pub use plan::{plan_as, read_plan};
 pub use schema::{
     CURRENT_SCHEMA, KEPT_VERSIONS, MAX_CONFIG_BYTES, MigrationError, Parsed, Schemas, Step, parse,

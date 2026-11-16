@@ -1,14 +1,14 @@
 //! The SQLite store against the operation store's, the schedule store's,
-//! the API token store's, the session store's and the stats store's contract
-//! suites, the ones the in-memory fakes pass too, so the fakes can't drift
-//! from the real thing.
+//! the API token store's, the session store's, the stats store's and the
+//! proposal store's contract suites, the ones the in-memory fakes pass too,
+//! so the fakes can't drift from the real thing.
 
 mod support;
 
 use std::sync::{Arc, Mutex};
 
 use app::contract;
-use app::ports::{ApiTokenStore, ScheduleStore, SessionStore, StatsStore};
+use app::ports::{ApiTokenStore, ProposalStore, ScheduleStore, SessionStore, StatsStore};
 use async_trait::async_trait;
 use support::*;
 
@@ -165,6 +165,27 @@ async fn sqlite_store_meets_the_stats_store_contract() {
         120,
         "the stats store contract suite",
         contract::stats_store::run(&SqliteFiles::default()),
+    )
+    .await;
+}
+
+#[async_trait]
+impl contract::proposal_store::ProposalHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn ProposalStore> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn ProposalStore> {
+        Arc::new(self.last_store().await)
+    }
+}
+
+#[tokio::test]
+async fn sqlite_store_meets_the_proposal_store_contract() {
+    within(
+        120,
+        "the proposal store contract suite",
+        contract::proposal_store::run(&SqliteFiles::default()),
     )
     .await;
 }

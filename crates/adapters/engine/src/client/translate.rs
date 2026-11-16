@@ -300,6 +300,13 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::PlanUnknown
                 | ErrorCode::PlanInvalid
                 | ErrorCode::PlanInUse
+                | ErrorCode::ProposalEmpty
+                | ErrorCode::ProposalInvalid
+                | ErrorCode::ProposalTooLarge
+                | ErrorCode::ProposalLimit
+                | ErrorCode::ProposalUnknown
+                | ErrorCode::ProposalNotPending
+                | ErrorCode::ProposalsUnavailable
                 | ErrorCode::RepositoryUnknown
                 | ErrorCode::SnapshotUnknown
                 | ErrorCode::FolderUnknown

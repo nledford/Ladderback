@@ -45,6 +45,7 @@ pub(crate) fn test_state() -> AppState {
         plans: Arc::new(NoPlans),
         profiles: Arc::new(NoProfiles),
         restores: Arc::new(NoRestores),
+        proposals: Arc::new(NoProposals),
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
         build: test_build(),
@@ -128,6 +129,43 @@ impl crate::Plans for NoPlans {
 
     async fn delete(&self, _id: String) -> Result<(), crate::PlansError> {
         Err(crate::PlansError::InvalidBody)
+    }
+}
+
+/// Does nothing: the checks never reach a route.
+pub(crate) struct NoProposals;
+
+#[async_trait]
+impl crate::Proposals for NoProposals {
+    async fn propose(
+        &self,
+        _asker: domain::planning::Proposer,
+        _proposal: api::NewProposalDto,
+    ) -> Result<api::ProposalDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
+
+    async fn list(
+        &self,
+        _asker: domain::planning::Proposer,
+    ) -> Result<api::ProposalsDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
+
+    async fn proposal(
+        &self,
+        _asker: domain::planning::Proposer,
+        _id: String,
+    ) -> Result<api::ProposalDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
+
+    async fn withdraw(
+        &self,
+        _asker: domain::planning::Proposer,
+        _id: String,
+    ) -> Result<api::ProposalDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
     }
 }
 

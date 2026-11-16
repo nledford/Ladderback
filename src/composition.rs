@@ -84,6 +84,7 @@ mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
 mod profiles;
+mod proposals;
 mod restores;
 mod runs;
 
@@ -868,6 +869,16 @@ async fn state_over(
         Arc::clone(&config),
         app::plans::EditPlans::new(Arc::clone(&config), writes, changed),
     ));
+    let proposals: Arc<dyn http_adapter::Proposals> = Arc::new(proposals::ProposalService::new(
+        FileConfigStore::new(config_file.clone(), Arc::new(SystemClock)),
+        app::proposals::Proposals::new(
+            Arc::<SqliteStore>::clone(&log.store),
+            Arc::new(config_adapter::JsonChangeCodec),
+            Arc::clone(&config),
+            Arc::new(SystemClock),
+            Arc::new(platform::random::OsRandom),
+        ),
+    ));
     let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService::new(
         Arc::clone(&config),
         config_file,
@@ -906,6 +917,7 @@ async fn state_over(
             plans,
             profiles,
             restores,
+            proposals,
             sign_in,
             exposure: http_adapter::Exposure::Loopback,
             build: crate::build_info::running(),
