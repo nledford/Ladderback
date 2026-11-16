@@ -2682,6 +2682,9 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
                 MsgArg::Count(u64::try_from(further).unwrap_or(u64::MAX)),
             )],
         ),
+        ProfileNotice::CommandLeftOut { key } => {
+            (WarningCode::ProfileCommandLeftOut, vec![("key", text(key))])
+        }
     };
     Notice { code, args }
 }

@@ -942,6 +942,10 @@ warning-profile-keyring-command-missing = { $program ->
    *[other] The profile reads the repository's password with { $program }, which is not on this computer's { "PATH" }, so rustic cannot read the password here. Run the profile where { $program } is on the { "PATH" }.
   }
 
+# An export for an AI agent or an API token left a command out of the profile: the password's command or a list of hooks, which a person wrote and which may hold a token.
+# $key (text): the command's place in the profile, such as repository.password-command or global.hooks.run-before. Keep it as it is.
+warning-profile-command-left-out = The command at { $key } was left out of the profile, because this export may be read by an AI agent or another program. To have it, export the plan from the web UI or the command line.
+
 # A notification of an event was not delivered to its channel, and is not tried again.
 # $event (text): the event's name, such as backup.failed. Keep it as it is.
 # $rule (text): the rule's name in the configuration. Keep it as it is.

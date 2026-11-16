@@ -27,7 +27,7 @@ pub use inline::{
     too_many_rclone_credentials, url_password_written,
 };
 use options::is_rclone_secret_option;
-pub use options::is_secret_option;
+pub use options::{is_command_option, is_secret_option};
 pub use outcome::{
     MAX_DETAIL_BYTES, Problem, SecretError, SecretWarning, Stdout, command_failure, command_secret,
     decode, file_warning,

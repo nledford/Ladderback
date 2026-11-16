@@ -191,7 +191,11 @@ impl crate::Profiles for NoProfiles {
         Err(crate::ProfilesError::InvalidBody)
     }
 
-    async fn export(&self, _plan: String) -> Result<api::ProfileExportDto, crate::ProfilesError> {
+    async fn export(
+        &self,
+        _plan: String,
+        _commands: api::ProfileCommands,
+    ) -> Result<api::ProfileExportDto, crate::ProfilesError> {
         Err(crate::ProfilesError::InvalidBody)
     }
 }

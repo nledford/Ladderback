@@ -894,7 +894,9 @@ fn tools() -> Vec<Tool> {
         Tool::new(
             EXPORT_PROFILE,
             "A plan as a profile the stock rustic reads, and what the export left out. A \
-             password stored in the configuration is refused, never written out.",
+             password stored in the configuration is refused, never written out; the \
+             password command, every option rustic runs as a command and every hook are \
+             left out, each named in a notice.",
             input_schema::<ExportArguments>(),
         )
         .with_title("Export profile")

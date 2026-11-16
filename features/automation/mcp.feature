@@ -445,6 +445,55 @@ Feature: AI agents and scripts use Ladderback through MCP
     When the MCP client exports the plan "scratch" as a profile
     Then the exported profile reads the repository's password from a file
 
+  # A person wrote each command a profile runs, and one may carry a token, as
+  # a hook's health-check address does: the AI agent gets none of them.
+  Scenario: A headless server exports a plan without the commands its profile would run
+    Given the daemon's config file holds:
+      """
+      schema = 1
+
+      [hooks]
+      run-before = ["curl -fsS https://hc.demo/CANARY-856-agent"]
+
+      [repositories.nas]
+      repository = "/srv/demo-repo"
+      password-command = "demo-vault read --token=CANARY-856-password"
+
+      [[plans]]
+      id = "home"
+      repository = "nas"
+      sources = ["/home/demo"]
+      hooks = { run-failed = ["curl -fsS https://hc.demo/CANARY-856-plan"] }
+      """
+    And an MCP server running headless on that configuration
+    When the MCP client exports the plan "home" as a profile
+    Then nothing the MCP server wrote shows "CANARY-856"
+    And the export notes that "global.hooks.run-before" was left out because it runs a command
+    And the export notes that "repository.password-command" was left out because it runs a command
+    And the export notes that "backup.snapshots.hooks.run-failed" was left out because it runs a command
+
+  Scenario: A connected server exports a plan without the commands its profile would run
+    Given the daemon's config file holds:
+      """
+      schema = 1
+
+      [repositories.nas]
+      repository = "/srv/demo-repo"
+      password-command = "demo-vault read --token=CANARY-856-password"
+      hooks = { run-after = ["curl -fsS https://hc.demo/CANARY-856-repository"] }
+
+      [[plans]]
+      id = "home"
+      repository = "nas"
+      sources = ["/home/demo"]
+      """
+    And Ladderback is serving on loopback with that config file
+    And an MCP server connected to it
+    When the MCP client exports the plan "home" as a profile
+    Then nothing the MCP server wrote shows "CANARY-856"
+    And the export notes that "repository.password-command" was left out because it runs a command
+    And the export notes that "repository.hooks.run-after" was left out because it runs a command
+
   Scenario: A one-shot call prints the tool's result as one JSON line
     Given Ladderback is serving on loopback with the plan "home"
     When an agent runs "mcp call list_plans limit=10 --connect {daemon}"

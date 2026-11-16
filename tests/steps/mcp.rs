@@ -1262,6 +1262,21 @@ async fn exports_the_plan(agent: &mut Agent, plan: String) {
     call(agent, "export_profile".to_owned(), json!({"plan": plan})).await;
 }
 
+#[then(expr = "the export notes that {string} was left out because it runs a command")]
+fn export_notes_command_left_out(agent: &mut Agent, key: String) {
+    let content = content(agent);
+    let notes = content["notices"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no notices: {content}"));
+    assert!(
+        notes
+            .iter()
+            .any(|note| note["code"] == "profile-command-left-out"
+                && note["args"]["key"]["value"] == key.as_str()),
+        "no note that {key:?} was left out: {content}"
+    );
+}
+
 #[then("the exported profile reads the repository's password from a file")]
 fn exported_reads_a_password_file(agent: &mut Agent) {
     let content = content(agent);

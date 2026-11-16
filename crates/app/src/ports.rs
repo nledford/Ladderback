@@ -58,8 +58,8 @@ pub use operation_store::{
 };
 pub use platform::{Network, NetworkLink, PlatformError, PowerSupply};
 pub use profiles::{
-    ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileProblem,
-    ProfileReader, ProfileWriter, RenderedProfile,
+    ExportCommands, ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice,
+    ProfileProblem, ProfileReader, ProfileWriter, RenderedProfile,
 };
 pub use proposal_store::{ProposalStore, StoredProposal};
 pub use random::{Random, RandomUnavailable};

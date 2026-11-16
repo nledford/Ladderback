@@ -18,6 +18,16 @@ async fn serving_with_that_config_file(agent: &mut Agent) {
     web::serve_on_loopback(agent).await;
 }
 
+/// As above, with the admin password `password` set in those folders first,
+/// so sign-in is on.
+#[given(
+    expr = "Ladderback is serving on loopback with that config file, sign-in on and the admin password {string}"
+)]
+async fn serving_with_that_config_file_and_sign_in(agent: &mut Agent, password: String) {
+    agent.web.home = Some(agent.scratch().join("daemon"));
+    super::sign_in_steps::serving_with_sign_in(agent, password).await;
+}
+
 /// The answer's lines, each an object, newest first.
 fn lines(agent: &Agent) -> Vec<Value> {
     let response = agent.web.response();

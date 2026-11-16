@@ -96,6 +96,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | WarningCode::ProfileSettingKept
                 | WarningCode::ProfileKeyringCommandMissing
                 | WarningCode::ProfileLocationsNotExported
+                | WarningCode::ProfileCommandLeftOut
                 | WarningCode::LocationPlainHttpCredentials
                 | WarningCode::LocationEveryRuled
                 | WarningCode::LocationLastRuledNoRetry

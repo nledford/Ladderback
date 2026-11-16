@@ -8,13 +8,15 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::RepositoryAlias;
+use domain::planning::Hooks;
 use domain::secrets::{
-    Part, Template, is_secret_option, rclone_secret, url_credentials, url_passwords,
+    Part, SecretRef, Template, is_command_option, is_secret_option, rclone_secret, url_credentials,
+    url_passwords,
 };
 
 use crate::ports::{
-    ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice, ProfileReader,
-    ProfileWriter, RenderedProfile,
+    ExportCommands, ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice,
+    ProfileReader, ProfileWriter, RenderedProfile,
 };
 
 /// Gives the scripted profile for any file, and remembers what it was asked.
@@ -145,7 +147,11 @@ impl ProfileWriter for FakeProfileWriter {
         if further > 0 {
             notices.push(ProfileNotice::LocationsNotExported { further });
         }
+        let left_out = export.commands == ExportCommands::LeftOut;
         for (name, value) in &settings.options {
+            if left_out && is_command_option(name) {
+                continue;
+            }
             if !is_plain(value) || is_secret_option(name) || !url_credentials(value).is_empty() {
                 notices.push(ProfileNotice::OptionLeftOut {
                     option: name.clone(),
@@ -153,11 +159,63 @@ impl ProfileWriter for FakeProfileWriter {
                 });
             }
         }
+        if left_out {
+            notices.extend(commands_left_out(export));
+        }
         Ok(RenderedProfile {
             text: format!("# a profile for the plan {}\n", export.plan.id.as_str()),
             notices,
         })
     }
+}
+
+/// The commands an export leaves out, as the real writer names them: the
+/// agent's hooks, the password's command, the options rustic runs as
+/// commands, the repository's hooks, then the plan's.
+fn commands_left_out(export: &PlanExport) -> Vec<ProfileNotice> {
+    let hooks = |header: &str, hooks: &Hooks| {
+        [
+            ("run-before", hooks.run_before.is_empty()),
+            ("run-after", hooks.run_after.is_empty()),
+            ("run-failed", hooks.run_failed.is_empty()),
+            ("run-finally", hooks.run_finally.is_empty()),
+        ]
+        .into_iter()
+        .filter(|(_, empty)| !empty)
+        .map(|(name, _)| format!("{header}.{name}"))
+        .collect::<Vec<_>>()
+    };
+    let password = match export.repository.settings.password {
+        SecretRef::Command(_) | SecretRef::Env(_) | SecretRef::Keyring(_) => {
+            vec!["repository.password-command".to_owned()]
+        }
+        SecretRef::File { .. } | SecretRef::Inline(_) => Vec::new(),
+    };
+    let settings = &export.repository.settings;
+    let options = [
+        ("options", &settings.options),
+        ("options-hot", &settings.options_hot),
+        ("options-cold", &settings.options_cold),
+    ]
+    .into_iter()
+    .flat_map(|(table, options)| {
+        options
+            .keys()
+            .filter(|name| is_command_option(name))
+            .map(move |name| format!("repository.{table}.{name}"))
+    })
+    .collect();
+    [
+        hooks("global.hooks", &export.agent_hooks),
+        password,
+        options,
+        hooks("repository.hooks", &export.repository.hooks),
+        hooks("backup.snapshots.hooks", &export.plan.hooks),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|key| ProfileNotice::CommandLeftOut { key })
+    .collect()
 }
 
 /// Whether a repository value is only text: no `${…}` reference in it.

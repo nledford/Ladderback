@@ -594,6 +594,12 @@ pub enum WarningCode {
     /// argument `program` is the program: `secret-tool`, or `security` on
     /// macOS.
     ProfileKeyringCommandMissing,
+    /// An export left out a command the profile would run, as it was asked
+    /// to: one for an AI agent or an API token has none (#856). The argument
+    /// `key` is its path in the profile: `repository.password-command`, an
+    /// option rustic runs as a command, as `repository.options.rclone-command`,
+    /// or a hook's list, as `global.hooks.run-before`.
+    ProfileCommandLeftOut,
     /// A notification of an event wasn't delivered to its channel (§11). It
     /// is not tried again. The arguments: `event`, the event's name
     /// (`backup.failed`); `rule` and `channel`, their names in the
@@ -1609,6 +1615,11 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ProfileCommandLeftOut => &[ArgSpec {
+                name: "key",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::NotificationUndelivered => &[
                 ArgSpec {
                     name: "event",
@@ -1792,6 +1803,28 @@ pub struct ProfilePreviewDto {
 pub struct ProfileExportDto {
     pub text: String,
     pub notices: Vec<WarningDto>,
+}
+
+/// The query `GET /api/v1/plans/{id}/profile` takes: `commands=left-out`
+/// leaves the profile's commands out, as the MCP tool `export_profile` asks
+/// (#856). Without it the export writes them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default)]
+pub struct ProfileExportQuery {
+    pub commands: ProfileCommands,
+}
+
+/// What an export does with the commands a profile runs: its
+/// `password-command`, the options rustic runs as commands and each hook's
+/// command line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProfileCommands {
+    /// Written, as the web UI's and the command line's exports have them.
+    #[default]
+    Written,
+    /// Left out, each named by a `profile-command-left-out` notice.
+    LeftOut,
 }
 
 /// What a command prints in `--json` mode when it refused: the typed error,

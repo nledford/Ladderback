@@ -693,7 +693,9 @@ fn forget_preview() -> Value {
 }
 
 /// A daemon that answers a test, a forget preview, a profile's preview and
-/// a plan's export as the daemon's routes do, recording each request.
+/// a plan's export as the daemon's routes do, recording each request. The
+/// export answers only when it is asked to leave the commands out, as with
+/// sign-in off the daemon can't tell the MCP server from a browser (#856).
 fn a_daemon_that_checks(sent: Sent) -> Router {
     recording(sent, |path| match path {
         "/api/v1/repositories/nas/test" => axum::Json(json!({"locations": [
@@ -707,7 +709,7 @@ fn a_daemon_that_checks(sent: Sent) -> Router {
             axum::Json(json!({"repository": "nas", "plans": ["home"], "notices": []}))
                 .into_response()
         }
-        "/api/v1/plans/home/profile" => {
+        "/api/v1/plans/home/profile?commands=left-out" => {
             axum::Json(json!({"text": "[repository]\n", "notices": []})).into_response()
         }
         _ => StatusCode::NOT_FOUND.into_response(),
@@ -753,7 +755,7 @@ async fn each_check_is_sent_to_its_route_and_reads_the_daemons_answer() {
             ),
             (
                 "GET".to_owned(),
-                "/api/v1/plans/home/profile".to_owned(),
+                "/api/v1/plans/home/profile?commands=left-out".to_owned(),
                 Value::Null
             ),
         ]

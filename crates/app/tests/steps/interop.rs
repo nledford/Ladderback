@@ -13,7 +13,8 @@ use app::interop::{
     ExportError, ExportProfile, ExportedProfile, ImportError, ImportProfile, Imported,
 };
 use app::ports::{
-    ConfigStore, ExportRefusal, ImportedProfile, ProfileError, ProfileNotice, ProfileReader,
+    ConfigStore, ExportCommands, ExportRefusal, ImportedProfile, ProfileError, ProfileNotice,
+    ProfileReader,
 };
 use cucumber::{given, then, when};
 use domain::execution::plan_tags::PlanTags;
@@ -362,10 +363,24 @@ async fn imports(agent: &mut Agent, name: String) {
 
 #[when(expr = "the owner exports the plan {string}")]
 async fn exports(agent: &mut Agent, id: String) {
+    exports_with(agent, &id, ExportCommands::Written).await;
+}
+
+#[when(expr = "the plan {string} is exported for an AI agent")]
+async fn exports_for_an_ai_agent(agent: &mut Agent, id: String) {
+    exports_with(agent, &id, ExportCommands::LeftOut).await;
+}
+
+async fn exports_with(agent: &mut Agent, id: &str, commands: ExportCommands) {
     let world = &mut agent.interop;
     world.saved().await;
     let use_case = ExportProfile::new(world.writer.clone(), world.store.clone(), this_agent());
-    world.exported = Some(use_case.export(&plan_id(&id)).await);
+    world.exported = Some(use_case.export(&plan_id(id), commands).await);
+}
+
+#[then("the profile writer was asked to leave out every command the profile would run")]
+fn asked_to_leave_commands_out(agent: &mut Agent) {
+    assert_eq!(rendered(agent).commands, ExportCommands::LeftOut);
 }
 
 #[then("the import succeeds")]

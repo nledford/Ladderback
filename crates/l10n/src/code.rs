@@ -185,6 +185,7 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     ProfileRetentionEmpty => msg::WARNING_PROFILE_RETENTION_EMPTY,
     ProfileSettingKept => msg::WARNING_PROFILE_SETTING_KEPT,
     ProfileKeyringCommandMissing => msg::WARNING_PROFILE_KEYRING_COMMAND_MISSING,
+    ProfileCommandLeftOut => msg::WARNING_PROFILE_COMMAND_LEFT_OUT,
     NotificationUndelivered => msg::WARNING_NOTIFICATION_UNDELIVERED,
     CoreDumpsOn => msg::WARNING_CORE_DUMPS_ON,
     DebuggerAttachAllowed => msg::WARNING_DEBUGGER_ATTACH_ALLOWED,

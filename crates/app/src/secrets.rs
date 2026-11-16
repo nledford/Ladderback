@@ -12,7 +12,8 @@ use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_locatio
 use domain::secrets::{
     MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part, Problem,
     Redactor, Reference, RepositorySecrets, SecretError, SecretRef, SecretValue, SecretWarning,
-    SourceName, Template, TemplateError, TooMuchToMask, has_reference, too_many_rclone_credentials,
+    SourceName, Template, TemplateError, TooMuchToMask, has_reference, is_command_option,
+    too_many_rclone_credentials,
 };
 
 use crate::ports::{RepositoryAccess, SavedEntry, SecretResolver};
@@ -420,15 +421,6 @@ impl ResolveRepository {
 /// `rclone:…` starts rclone with the rest as its argument.
 const ARGUMENT_REPOSITORY_PREFIX: &str = "rclone:";
 
-/// The options of the pinned `rustic_backend` that are run as commands:
-/// `rclone-command` starts rclone (`rclone.rs`), and the local backend runs
-/// `post-create-command` and `post-delete-command` (`local.rs`).
-const COMMAND_OPTIONS: [&str; 3] = [
-    "rclone-command",
-    "post-create-command",
-    "post-delete-command",
-];
-
 /// A resolved secret in a process's arguments shows in `ps` and in
 /// `/proc/<pid>/cmdline` (I4), so a reference in a field that becomes one is
 /// refused, before anything is read. A plain `rclone:remote:path` is fine.
@@ -448,7 +440,7 @@ fn refuse_references_in_arguments(settings: &RepositorySettings) -> Result<(), R
     let commands = |options: &BTreeMap<String, String>| {
         options
             .iter()
-            .find(|(name, text)| COMMAND_OPTIONS.contains(&name.as_str()) && has_reference(text))
+            .find(|(name, text)| is_command_option(name) && has_reference(text))
             .map(|(name, _)| name.clone())
     };
     if let Some(name) = commands(&settings.options) {
