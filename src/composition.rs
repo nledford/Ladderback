@@ -3579,7 +3579,7 @@ fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> Repos
         F::RepositoryExists => exists(settings),
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => RepositoriesError::NotFound,
-        F::CredentialsRefused => unavailable(ErrorCode::CredentialsRefused, Vec::new(), None),
+        F::CredentialsRefused { .. } | F::RepositoryConfigNotFound { .. } => todo!(),
         F::SecretsTooLargeToMask { field, limit } => {
             RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
         }
@@ -10452,8 +10452,26 @@ mod repository_service_tests {
                 unavailable(ErrorCode::RepositoryReplaced, vec![], None),
             ),
             (
-                F::CredentialsRefused,
+                F::CredentialsRefused { half: None },
                 unavailable(ErrorCode::CredentialsRefused, vec![], None),
+            ),
+            (
+                F::CredentialsRefused {
+                    half: Some(domain::execution::RepositoryHalf::Hot),
+                },
+                unavailable(
+                    ErrorCode::CredentialsRefused,
+                    vec![("half", text("hot"))],
+                    None,
+                ),
+            ),
+            (
+                F::RepositoryConfigNotFound {
+                    detail: "No repository config file found for `/srv/demo/repo`.".into(),
+                },
+                Err(RepositoriesError::ConfigNotFound {
+                    detail: "No repository config file found for `/srv/demo/repo`.".into(),
+                }),
             ),
             (
                 F::RepositoryExists,
@@ -11252,6 +11270,69 @@ mod repository_service_tests {
             "{logged}"
         );
         assert!(!logged.contains("CANARY-rclone-log"), "{logged}");
+    }
+
+    /// A listing or a folder read the engine ran and failed is told by the
+    /// code of its failure, as a test of the repository tells it: a wrong
+    /// password is `password-not-accepted`, never an engine that can't run
+    /// (#637), and no repository at the location is told as such (#525).
+    #[tokio::test]
+    async fn a_listing_or_folder_read_that_failed_is_told_by_the_code_of_its_failure() {
+        use domain::execution::RepositoryHalf;
+        let said = "No repository config file found for `/srv/demo/repo`.";
+        for (reason, expected) in [
+            (
+                FailureReason::PasswordNotAccepted,
+                SnapshotsError::Unavailable {
+                    code: ErrorCode::PasswordNotAccepted,
+                    args: Vec::new(),
+                    detail: None,
+                },
+            ),
+            (
+                FailureReason::CredentialsRefused {
+                    half: Some(RepositoryHalf::Hot),
+                },
+                SnapshotsError::Unavailable {
+                    code: ErrorCode::CredentialsRefused,
+                    args: vec![("half", MsgArg::Text("hot".to_owned()))],
+                    detail: None,
+                },
+            ),
+            (
+                FailureReason::RepositoryNotFound,
+                SnapshotsError::RepositoryNotFound,
+            ),
+            (
+                FailureReason::RepositoryConfigNotFound {
+                    detail: said.to_owned(),
+                },
+                SnapshotsError::RepositoryConfigNotFound {
+                    detail: said.to_owned(),
+                },
+            ),
+        ] {
+            let engine = engine();
+            *engine
+                .outcome
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Err(reason.clone());
+            let (catalog, _scratch) =
+                catalog_with_a_password_command("failing", "echo not-a-real-password", engine)
+                    .await;
+            assert_eq!(
+                catalog.snapshots("failing".to_owned()).await,
+                Err(expected.clone()),
+                "{reason:?}"
+            );
+            assert_eq!(
+                catalog
+                    .folder("failing".to_owned(), a_snapshot(), docs(), 0)
+                    .await,
+                Err(FolderError::Repository(expected)),
+                "{reason:?}"
+            );
+        }
     }
 
     use app::ports::FolderAnswer;

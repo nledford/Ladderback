@@ -412,6 +412,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
+    use domain::execution::RepositoryHalf;
     use domain::secrets::SecretValue;
     use domain::{OperationId, Uuid};
     use rustic_core::{ConfigOptions, KeyOptions};
@@ -683,10 +684,10 @@ mod tests {
     /// A repository folder that isn't there, or isn't a folder, is no
     /// definite answer: it is what an unplugged drive looks like, and
     /// creating a repository there would make a new, empty one in its
-    /// place (decision 53). The job fails as it would have, never as
-    /// `repository-not-found`, and nothing is made.
+    /// place (decision 53). The job fails as `repository-config-not-found`
+    /// (#525), never as `repository-not-found`, and nothing is made.
     #[test]
-    fn a_repository_folder_that_is_not_there_is_not_said_to_hold_no_repository() {
+    fn a_repository_folder_that_is_not_there_fails_as_no_repository_config_found() {
         let root = tempfile::tempdir().unwrap();
         let file = root.path().join("a-file");
         fs::write(&file, b"x").unwrap();
@@ -695,7 +696,7 @@ mod tests {
         for location in [&missing, &unplugged, &file] {
             assert_eq!(
                 failed_code(&spec_at(&location.to_string_lossy())),
-                api::ErrorCode::OperationFailed,
+                api::ErrorCode::RepositoryConfigNotFound,
                 "{location:?}"
             );
         }
@@ -703,24 +704,36 @@ mod tests {
         assert!(!unplugged.exists(), "opening made a repository folder");
     }
 
-    /// Opens `spec` and returns the code the job failed with.
-    fn failed_code(spec: &RepositorySpec) -> api::ErrorCode {
+    /// Opens `spec` and returns how the job failed.
+    fn failure(spec: &RepositorySpec) -> JobError {
         let (ctx, _capture) = context(None);
         match open(&ctx, spec) {
-            Err(JobError::Failed { code, .. }) => code,
-            Err(other) => panic!("opening {} broke the events: {other:?}", spec.repository),
+            Err(JobError::Events(error)) => {
+                panic!("opening {} broke the events: {error}", spec.repository)
+            }
+            Err(failed) => failed,
             Ok(_) => panic!("{} opened", spec.repository),
+        }
+    }
+
+    /// Opens `spec` and returns the code the job failed with.
+    fn failed_code(spec: &RepositorySpec) -> api::ErrorCode {
+        match failure(spec) {
+            JobError::Failed { code, .. } => code,
+            JobError::CredentialsRefused { .. } => api::ErrorCode::CredentialsRefused,
+            JobError::Events(_) => panic!("`failure` panics on a broken stream"),
         }
     }
 
     /// A location the backend says no config file is at, when the backend
     /// says so of a location it couldn't read too, is not a definite answer:
-    /// the job fails as it would have, never as `repository-not-found`, so
-    /// a repository that is only out of reach is never offered to be
-    /// created (decision 53). Here a real repository in a folder nobody may
-    /// read, which rustic's local backend lists as holding no config file.
+    /// the job fails as `repository-config-not-found` (#525), never as
+    /// `repository-not-found`, so a repository that is only out of reach is
+    /// never offered to be created (decision 53). Here a real repository in
+    /// a folder nobody may read, which rustic's local backend lists as
+    /// holding no config file.
     #[test]
-    fn a_folder_that_cannot_be_read_is_not_said_to_hold_no_repository() {
+    fn a_folder_that_cannot_be_read_fails_as_no_repository_config_found() {
         let root = tempfile::tempdir().unwrap();
         let repository = root.path().join("repo");
         init(&repository);
@@ -731,7 +744,24 @@ mod tests {
         }
         assert_eq!(
             failed_code(&spec_at(&repository.to_string_lossy())),
-            api::ErrorCode::OperationFailed
+            api::ErrorCode::RepositoryConfigNotFound
+        );
+    }
+
+    /// The engine's words for no config file come with the code, masked as
+    /// every word of the stream is, so the person sees where it looked.
+    #[test]
+    fn no_repository_config_found_keeps_the_engines_words_as_its_detail() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("nowhere");
+        let JobError::Failed { code, detail } = failure(&spec_at(&missing.to_string_lossy()))
+        else {
+            panic!("a missing folder is no refusal");
+        };
+        assert_eq!(code, api::ErrorCode::RepositoryConfigNotFound);
+        assert!(
+            detail.contains("No repository config file found"),
+            "{detail}"
         );
     }
 
@@ -802,15 +832,16 @@ mod tests {
     }
 
     /// A REST server that takes the credentials and holds no repository
-    /// answers `404 Not Found`, which is no refusal: the job fails as it
-    /// always did, never as `repository-not-found`, since a server's missing
-    /// repository can't be told from one out of reach (decision 53).
+    /// answers `404 Not Found`, which is no refusal: the job fails as
+    /// `repository-config-not-found` (#525), never as `repository-not-found`,
+    /// since a server's missing repository can't be told from one out of
+    /// reach (decision 53).
     #[test]
-    fn a_rest_server_that_holds_no_repository_fails_the_job_as_before() {
+    fn a_rest_server_that_holds_no_repository_fails_as_no_repository_config_found() {
         let empty = format!("rest:http://{}/", server_answering("404 Not Found"));
         assert_eq!(
             failed_code(&spec_at(&empty)),
-            api::ErrorCode::OperationFailed
+            api::ErrorCode::RepositoryConfigNotFound
         );
     }
 
@@ -839,12 +870,77 @@ mod tests {
             let spec = spec_at(&format!("rest:http://{}/", server_answering(status)));
             let (ctx, _capture) = context(None);
             match super::super::jobs::init(&ctx, &spec) {
-                Err(JobError::Failed { code, .. }) => {
-                    assert_eq!(code, api::ErrorCode::CredentialsRefused, "{status}");
+                Err(JobError::CredentialsRefused { half, .. }) => {
+                    assert_eq!(half, None, "{status}");
                 }
-                Err(other) => panic!("creating broke the events: {other:?}"),
+                Err(other) => panic!("creating failed otherwise: {other:?}"),
                 Ok(_) => panic!("a repository was created on a server answering {status}"),
             }
+        }
+    }
+
+    /// Which half of a hot/cold repository refused the credentials, as
+    /// opening tells it: the hot half's server, the cold half's, and none
+    /// named for a repository with no hot half (#521).
+    #[test]
+    fn opening_names_the_half_whose_server_refused_the_credentials() {
+        let root = tempfile::tempdir().unwrap();
+        let cold = root.path().join("cold");
+        init(&cold);
+        let hot_refused = RepositorySpec {
+            repo_hot: Some(refusing_rest_server()),
+            ..spec_at(&cold.to_string_lossy())
+        };
+        let hot = root.path().join("hot");
+        fs::create_dir(&hot).unwrap();
+        let cold_refused = RepositorySpec {
+            repo_hot: Some(hot.to_string_lossy().into_owned()),
+            ..spec_at(&refusing_rest_server())
+        };
+        for (spec, named) in [
+            (hot_refused, Some(RepositoryHalf::Hot)),
+            (cold_refused, Some(RepositoryHalf::Cold)),
+            (spec_at(&refusing_rest_server()), None),
+        ] {
+            let JobError::CredentialsRefused { half, .. } = failure(&spec) else {
+                panic!("{spec:?} was not refused");
+            };
+            assert_eq!(half, named, "{spec:?}");
+        }
+    }
+
+    /// Creating a hot/cold repository whose hot half's server refuses the
+    /// credentials fails before anything is written: rustic creates the cold
+    /// half first, so the halves' servers are asked before it (#521). The
+    /// failure names the half, the hot one here and the cold one when its
+    /// server is the one that refuses.
+    #[test]
+    fn creating_a_hot_cold_repository_a_server_refuses_writes_nothing_and_names_the_half() {
+        let root = tempfile::tempdir().unwrap();
+        let cold = root.path().join("cold");
+        let hot = root.path().join("hot");
+        let hot_refused = RepositorySpec {
+            repo_hot: Some(refusing_rest_server()),
+            ..spec_at(&cold.to_string_lossy())
+        };
+        let cold_refused = RepositorySpec {
+            repo_hot: Some(hot.to_string_lossy().into_owned()),
+            ..spec_at(&refusing_rest_server())
+        };
+        for (spec, named) in [
+            (hot_refused, RepositoryHalf::Hot),
+            (cold_refused, RepositoryHalf::Cold),
+        ] {
+            let (ctx, _capture) = context(None);
+            match super::super::jobs::init(&ctx, &spec) {
+                Err(JobError::CredentialsRefused { half, .. }) => {
+                    assert_eq!(half, Some(named), "{spec:?}");
+                }
+                Err(other) => panic!("creating failed otherwise: {other:?}"),
+                Ok(_) => panic!("a repository was created with a refusing half"),
+            }
+            assert!(!cold.exists(), "the cold half was written");
+            assert!(!hot.exists(), "the hot half was written");
         }
     }
 
@@ -959,10 +1055,10 @@ mod tests {
 
     /// OpenDAL's `fs` is a folder on this machine, looked at as a local one:
     /// an empty root folder holds no repository, and one that can't be read
-    /// is no answer, which fails the job as before. A root folder that isn't
-    /// there is no definite answer either, as with a local folder: it fails
-    /// the job as before, and before the backend is set up, which would
-    /// make it.
+    /// is no answer, which fails the job with the backend's error.
+    /// A root folder that isn't there is no definite answer either, as with
+    /// a local folder: it fails the job as `repository-config-not-found`
+    /// (#525), and before the backend is set up, which would make it.
     #[test]
     fn an_opendal_fs_root_is_no_repository_only_when_it_is_an_empty_folder() {
         let root = tempfile::tempdir().unwrap();
@@ -982,7 +1078,10 @@ mod tests {
             api::ErrorCode::RepositoryNotFound
         );
         let missing = root.path().join("usb").join("restic");
-        assert_eq!(failed_code(&at(&missing)), api::ErrorCode::OperationFailed);
+        assert_eq!(
+            failed_code(&at(&missing)),
+            api::ErrorCode::RepositoryConfigNotFound
+        );
         assert!(
             !root.path().join("usb").exists(),
             "opening made a root folder"
@@ -1000,7 +1099,10 @@ mod tests {
             .into(),
             ..spec_at(&empty.to_string_lossy())
         };
-        assert_eq!(failed_code(&hot_unplugged), api::ErrorCode::OperationFailed);
+        assert_eq!(
+            failed_code(&hot_unplugged),
+            api::ErrorCode::RepositoryConfigNotFound
+        );
         assert!(
             !root.path().join("usb-hot").exists(),
             "opening made a hot root folder"
@@ -1022,9 +1124,9 @@ mod tests {
     /// is a server or a store elsewhere, where a missing root is the remote
     /// form of an unplugged drive: rustic lists no config file for one that
     /// isn't there, and creating a repository would make it (decision 53).
-    /// So the job fails as it would have, never as `repository-not-found`,
-    /// like REST's. Here a WebDAV server that answers `404 Not Found` to
-    /// everything and an empty in-memory store.
+    /// So the job fails as `repository-config-not-found` (#525), never as
+    /// `repository-not-found`, like REST's. Here a WebDAV server that answers
+    /// `404 Not Found` to everything and an empty in-memory store.
     #[test]
     fn an_opendal_service_other_than_fs_is_never_said_to_hold_no_repository() {
         let webdav = RepositorySpec {
@@ -1041,7 +1143,7 @@ mod tests {
         for spec in [webdav, spec_at("opendal:memory")] {
             assert_eq!(
                 failed_code(&spec),
-                api::ErrorCode::OperationFailed,
+                api::ErrorCode::RepositoryConfigNotFound,
                 "{}",
                 spec.repository
             );
@@ -1052,9 +1154,9 @@ mod tests {
     /// `keys`, `data`, `index` or `snapshots` folder) is no empty location:
     /// an initialisation cut short, or a repository whose config file was
     /// lost. Creating one there would mix a new repository into what is left
-    /// of another, so the job fails as it would have, never as
-    /// `repository-not-found` (decision 53), on either half and through
-    /// OpenDAL's `fs` as well.
+    /// of another, so the job fails as `repository-config-not-found` (#525),
+    /// never as `repository-not-found` (decision 53), on either half and
+    /// through OpenDAL's `fs` as well.
     #[test]
     fn a_folder_holding_repository_content_but_no_config_is_not_said_to_hold_no_repository() {
         let root = tempfile::tempdir().unwrap();
@@ -1063,7 +1165,7 @@ mod tests {
         fs::remove_file(lost_config.join("config")).unwrap();
         assert_eq!(
             failed_code(&spec_at(&lost_config.to_string_lossy())),
-            api::ErrorCode::OperationFailed
+            api::ErrorCode::RepositoryConfigNotFound
         );
         let empty = root.path().join("empty");
         fs::create_dir(&empty).unwrap();
@@ -1082,7 +1184,7 @@ mod tests {
             for spec in [spec_at(&location), through_fs, as_hot_half] {
                 assert_eq!(
                     failed_code(&spec),
-                    api::ErrorCode::OperationFailed,
+                    api::ErrorCode::RepositoryConfigNotFound,
                     "{content}: {spec:?}"
                 );
             }
@@ -1092,7 +1194,8 @@ mod tests {
     /// A repository with a hot half is no repository only when both halves
     /// are empty folders: a hot half on a local folder that isn't there is
     /// what an unplugged drive looks like, as with the cold half, and
-    /// creating the repository would make that folder (decision 53).
+    /// creating the repository would make that folder (decision 53). It
+    /// fails as `repository-config-not-found` (#525).
     #[test]
     fn a_local_hot_half_that_is_not_there_is_not_said_to_hold_no_repository() {
         let root = tempfile::tempdir().unwrap();
@@ -1103,7 +1206,10 @@ mod tests {
             repo_hot: Some(hot.to_string_lossy().into_owned()),
             ..spec_at(&cold.to_string_lossy())
         };
-        assert_eq!(failed_code(&with_hot), api::ErrorCode::OperationFailed);
+        assert_eq!(
+            failed_code(&with_hot),
+            api::ErrorCode::RepositoryConfigNotFound
+        );
         assert!(!hot.exists(), "opening made the hot folder");
         fs::create_dir(&hot).unwrap();
         assert_eq!(failed_code(&with_hot), api::ErrorCode::RepositoryNotFound);

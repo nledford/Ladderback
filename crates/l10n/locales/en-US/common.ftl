@@ -496,8 +496,19 @@ error-repository-exists = { -brand-name } did not initialise a repository at { $
 # No repository is at the location: it is a folder on this machine holding nothing of a repository, so nothing was opened or written.
 error-repository-not-found = There is no repository at this location. First check that the drive or location can be reached and is the right one; if it is, you can create the repository there.
 
+# No repository's config file was found at the location, and nothing tells whether the place is empty or out of reach: a folder that isn't there (as on a drive that isn't plugged in) or can't be read, or a server that holds no repository there. Nothing was opened or written.
+# $detail (text): the engine's own message, which names the location, with every secret in it masked. It is shown as it came.
+error-repository-config-not-found = No repository was found at this location, so nothing was read or written. Check that the location is the right one and that its drive, folder or server can be reached and read; a repository that was never created there has to be created first.
+    .with-detail = No repository was found at this location ({ $detail }), so nothing was read or written. Check that the location is the right one and that its drive, folder or server can be reached and read; a repository that was never created there has to be created first.
+
 # The server the repository is on answered and refused the credentials it was sent (HTTP 401 or 403), so nothing was read or written. Not a missing repository: the server never said what it holds.
-error-credentials-refused = The server refused the credentials { -brand-name } sent for this repository, so nothing was read or written. Check the user name and password in the repository's location or its options, and that the server gives that user this repository; a credential read from a file must hold nothing else, not even a trailing space.
+# $half (text): cold or hot, the half of a hot/cold repository whose server refused them. The sender leaves it out for a repository with no hot half, and the program then supplies the text none; any other value names neither half.
+error-credentials-refused = { $half ->
+    [cold] The server of this repository's cold half refused the credentials { -brand-name } sent, so nothing was read or written. Check the user name and password in the cold half's location or its options, and that the server gives that user this repository; a credential read from a file must hold nothing else, not even a trailing space.
+    [hot] The server of this repository's hot half refused the credentials { -brand-name } sent, so nothing was read or written. Check the user name and password in the hot half's location or its options, and that the server gives that user this repository; a credential read from a file must hold nothing else, not even a trailing space.
+    [none] The server refused the credentials { -brand-name } sent for this repository, so nothing was read or written. Check the user name and password in the repository's location or its options, and that the server gives that user this repository; a credential read from a file must hold nothing else, not even a trailing space.
+   *[other] The server of one half of this repository refused the credentials { -brand-name } sent, so nothing was read or written. Check the user name and password in each half's location and options, and that each server gives that user this repository; a credential read from a file must hold nothing else, not even a trailing space.
+  }
 
 # A repository reached at several locations had none that could be used: each was silent, refused, held no repository or another one, or a secret of it was unavailable. The operation's detail lists each location and why.
 error-no-location-usable = No location of this repository could be used, so nothing was read or written. The operation lists each location and why it was skipped; check that one of them can be reached, then try again.

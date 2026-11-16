@@ -64,6 +64,11 @@ pub enum MaintenanceRefusal {
     /// No repository is at the location: it is a folder on this machine
     /// holding nothing of a repository (decision 53).
     RepositoryNotFound,
+    /// No repository's config file was found at the location, and nothing
+    /// tells whether it is empty or out of reach (#525). `detail` is the
+    /// engine's own words, masked, or Ladderback's naming a missing OpenDAL
+    /// `fs` root folder.
+    RepositoryConfigNotFound { detail: String },
     /// The engine ran the read and it failed: the wrong password, no
     /// repository at the location. `detail` is the engine's own words.
     OperationFailed { detail: String },
@@ -312,6 +317,7 @@ fn answer(alias: &str, error: MaintenanceRefusal) -> (StatusCode, api::ErrorDto)
             Vec::new(),
             None,
         ),
+        MaintenanceRefusal::RepositoryConfigNotFound { .. } => todo!(),
         MaintenanceRefusal::OperationFailed { detail } => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::OperationFailed,

@@ -39,10 +39,10 @@ Feature: Repositories over HTTP
     And no answer shows "canary-wrong-secret"
     And the daemon lists no repositories
 
-  Scenario: Testing at a server that holds no repository is refused with the engine's words
+  Scenario: Testing at a server that holds no repository is refused as no repository found, with the engine's words
     Given a REST server that takes the credentials the client sends it and holds no repository
     When the client tests the repository
-    Then the refusal has status 422 and the typed code "operation-failed"
+    Then the refusal has status 404 and the typed code "repository-config-not-found"
     And the refusal carries the engine's detail
     And no answer shows "canary-not-a-secret"
     And the daemon lists no repositories
@@ -143,6 +143,15 @@ Feature: Repositories over HTTP
     When the client initialises the repository
     Then the refusal has status 503 and the typed code "credentials-refused"
     And no answer holds the password
+    And no answer shows "canary-wrong-secret"
+    And the daemon lists no repositories
+
+  Scenario: Initialising a hot/cold repository whose hot half's server refuses the credentials names that half, and writes nothing
+    Given an empty repository location whose hot half is on a REST server that refuses the credentials the client sends it
+    When the client initialises the repository
+    Then the refusal has status 503 and the typed code "credentials-refused"
+    And the refusal names the hot half
+    And the repository location holds nothing
     And no answer shows "canary-wrong-secret"
     And the daemon lists no repositories
 

@@ -304,6 +304,13 @@ pub enum SnapshotsError {
     /// The repository's secrets cannot be resolved, or a setting with a
     /// reference is not valid: the refusal says which.
     SecretRefused(SecretRefusal),
+    /// No repository is at the location: it is a folder on this machine
+    /// holding nothing of a repository (decision 53).
+    RepositoryNotFound,
+    /// No repository's config file was found at the location, and nothing
+    /// tells whether it is empty or out of reach (#525). `detail` is the
+    /// engine's own words, masked.
+    RepositoryConfigNotFound { detail: String },
     /// The snapshots cannot be read just now: the configuration cannot be
     /// read or used (its `config-*` code, arguments and the store's words,
     /// as [`CatalogError::Unavailable`] carries them), or the engine cannot
@@ -866,6 +873,12 @@ async fn list_snapshots(
             vec![("alias", api::MsgArg::Text(alias))],
         ),
         Err(SnapshotsError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
+        Err(
+            error @ (SnapshotsError::RepositoryNotFound
+            | SnapshotsError::RepositoryConfigNotFound { .. }),
+        ) => {
+            todo!("{error:?}")
+        }
         Err(SnapshotsError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
@@ -920,6 +933,10 @@ async fn read_folder(
         Err(FolderError::Repository(SnapshotsError::SecretRefused(secret))) => {
             repositories::secret_refusal(&secret)
         }
+        Err(FolderError::Repository(
+            error @ (SnapshotsError::RepositoryNotFound
+            | SnapshotsError::RepositoryConfigNotFound { .. }),
+        )) => todo!("{error:?}"),
         Err(FolderError::Repository(SnapshotsError::Unavailable { code, args, detail })) => {
             unavailable(code, args, detail)
         }
@@ -1183,6 +1200,9 @@ mod tests {
                 detail: None,
             }),
             "not-found" => MaintenanceRefusal::RepositoryNotFound,
+            "no-config" => MaintenanceRefusal::RepositoryConfigNotFound {
+                detail: text("No repository config file found for `/media/usb/restic`."),
+            },
             "failed" => MaintenanceRefusal::OperationFailed {
                 detail: text("wrong password or no repository at the location"),
             },
@@ -1391,6 +1411,17 @@ mod tests {
         .unwrap()
     }
 
+    /// What the fake catalog says of the repository `empty` (an empty
+    /// folder) and of `no-config` (no config file found).
+    fn no_repository(alias: &str) -> SnapshotsError {
+        match alias {
+            "empty" => SnapshotsError::RepositoryNotFound,
+            _ => SnapshotsError::RepositoryConfigNotFound {
+                detail: "No repository config file found for `/media/usb/restic`.".to_owned(),
+            },
+        }
+    }
+
     #[async_trait]
     impl Catalog for DemoCatalog {
         async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
@@ -1428,6 +1459,7 @@ mod tests {
                     args: Vec::new(),
                     detail: None,
                 }),
+                "empty" | "no-config" => Err(no_repository(&alias)),
                 _ => Ok(api::SnapshotsDto {
                     snapshots: vec![demo_snapshot()],
                 }),
@@ -1446,6 +1478,9 @@ mod tests {
         ) -> Result<api::FolderDto, FolderError> {
             match alias.as_str() {
                 "missing" => return Err(FolderError::Repository(SnapshotsError::Unknown)),
+                "empty" | "no-config" => {
+                    return Err(FolderError::Repository(no_repository(&alias)));
+                }
                 "engine-down" => {
                     return Err(FolderError::Repository(SnapshotsError::Unavailable {
                         code: api::ErrorCode::EngineUnavailable,
@@ -2057,6 +2092,14 @@ mod tests {
                 }),
             ),
             ("not-found", 404, json!({"code": "repository-not-found"})),
+            (
+                "no-config",
+                404,
+                json!({
+                    "code": "repository-config-not-found",
+                    "detail": "No repository config file found for `/media/usb/restic`.",
+                }),
+            ),
             ("bad-token", 400, json!({"code": "invalid-body"})),
             ("slow", 504, json!({"code": "repository-read-timed-out"})),
             ("unreachable", 503, json!({"code": "config-unavailable"})),
@@ -2629,6 +2672,31 @@ mod tests {
         assert_eq!(body(response).await, r#"{"code":"engine-unavailable"}"#);
     }
 
+    /// No repository at the location is a configuration to correct, not a
+    /// daemon that is unavailable: a listing and a folder read are refused
+    /// as 404, an empty folder as `repository-not-found` and a location with
+    /// no config file as `repository-config-not-found` with the engine's
+    /// masked words (#525).
+    #[tokio::test]
+    async fn a_listing_or_folder_read_of_no_repository_is_refused_as_not_found() {
+        for (alias, expected) in [
+            ("empty", r#"{"code":"repository-not-found"}"#),
+            (
+                "no-config",
+                r#"{"code":"repository-config-not-found","detail":"No repository config file found for `/media/usb/restic`."}"#,
+            ),
+        ] {
+            for route in [
+                format!("/api/v1/repositories/{alias}/snapshots"),
+                folder_route(alias, ""),
+            ] {
+                let response = get(&route).await;
+                assert_eq!(response.status(), StatusCode::NOT_FOUND, "{route}");
+                assert_eq!(body(response).await, expected, "{route}");
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_repository_snapshots_are_listed_newest_first() {
         let response = get("/api/v1/repositories/demo/snapshots").await;
@@ -2802,6 +2870,9 @@ mod tests {
                     location: "/exists".to_owned(),
                 }),
                 "/not-found" => Err(RepositoriesError::NotFound),
+                "/config-not-found" => Err(RepositoriesError::ConfigNotFound {
+                    detail: "No repository config file found for `/media/usb/restic`.".to_owned(),
+                }),
                 "/relative" => Err(RepositoriesError::PathRelative {
                     field: "repo-hot".to_owned(),
                 }),
@@ -3149,6 +3220,14 @@ mod tests {
                 json!({"code": "repository-exists", "args": {"location": text("/exists")}}),
             ),
             ("/not-found", 404, json!({"code": "repository-not-found"})),
+            (
+                "/config-not-found",
+                404,
+                json!({
+                    "code": "repository-config-not-found",
+                    "detail": "No repository config file found for `/media/usb/restic`.",
+                }),
+            ),
             (
                 "/relative",
                 422,

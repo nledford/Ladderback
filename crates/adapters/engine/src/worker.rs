@@ -34,7 +34,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use api::ErrorCode;
+use api::{ErrorCode, MsgArg};
 use domain::execution::deadline::Deadline;
 use domain::{OperationId, RepositoryId, SignedDuration, Timestamp};
 
@@ -379,6 +379,18 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             events.emit(&WorkerEvent::Failed {
                 code,
                 args: Vec::new(),
+                detail: Some(detail),
+            })?;
+            Ok(Exit::Reported { failed: true })
+        }
+        // The half whose server refused, as the code's optional argument.
+        Err(JobError::CredentialsRefused { half, detail }) => {
+            events.emit(&WorkerEvent::Failed {
+                code: ErrorCode::CredentialsRefused,
+                args: half
+                    .map(|half| ("half".to_owned(), MsgArg::Text(half.code().to_owned())))
+                    .into_iter()
+                    .collect(),
                 detail: Some(detail),
             })?;
             Ok(Exit::Reported { failed: true })

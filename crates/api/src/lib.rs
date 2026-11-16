@@ -82,8 +82,16 @@ pub enum ErrorCode {
     /// No repository is at the location: the engine found an empty folder
     /// on this machine there, so nothing was opened or written.
     RepositoryNotFound,
+    /// No repository's config file was found at the location, and nothing
+    /// tells whether it is empty or out of reach (a folder that isn't there,
+    /// a server that holds no repository), so nothing was opened or written.
+    /// The detail is the engine's own words, masked, or, for an OpenDAL `fs`
+    /// root folder that isn't there, Ladderback's words naming it.
+    RepositoryConfigNotFound,
     /// The server the repository is on answered and refused the credentials
-    /// it was sent (HTTP 401 or 403), so nothing was opened or written.
+    /// it was sent (HTTP 401 or 403), so nothing was opened or written. The
+    /// optional argument `half`, `cold` or `hot`, names the half whose server
+    /// refused them, for a hot/cold repository only.
     CredentialsRefused,
     /// A repository reached at several locations had none that could be
     /// used (decision 80): each was silent, refused, held no repository or
@@ -956,8 +964,13 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::CredentialsRefused => &[ArgSpec {
+                name: "half",
+                kind: ArgKind::Text,
+                optional: true,
+            }],
             Self::RepositoryNotFound
-            | Self::CredentialsRefused
+            | Self::RepositoryConfigNotFound
             | Self::CreateNotOffered
             | Self::NoLocationUsable
             | Self::NoLocationRuleHolds
@@ -2287,6 +2300,10 @@ mod tests {
             ErrorCode::TemplateInvalid.args(),
             &[named[0], spec("at", ArgKind::Text, true)]
         );
+        assert_eq!(
+            ErrorCode::CredentialsRefused.args(),
+            &[spec("half", ArgKind::Text, true)]
+        );
         for code in [
             ErrorCode::InvalidJobSpec,
             ErrorCode::OperationFailed,
@@ -2296,7 +2313,7 @@ mod tests {
             ErrorCode::EngineExitTimedOut,
             ErrorCode::RepositoryTimedOut,
             ErrorCode::RepositoryReplaced,
-            ErrorCode::CredentialsRefused,
+            ErrorCode::RepositoryConfigNotFound,
             ErrorCode::DaemonStopped,
             ErrorCode::DaemonShutDown,
             ErrorCode::HostNotAllowed,

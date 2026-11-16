@@ -19,7 +19,7 @@
 use api::MsgArg;
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
-    FailureReason, OperationKind, OperationStatus, Transition, Trigger, WarningKind,
+    FailureReason, OperationKind, OperationStatus, RepositoryHalf, Transition, Trigger, WarningKind,
 };
 
 use crate::error_args;
@@ -201,7 +201,8 @@ pub(crate) fn encode_failure(
         FailureReason::RepositoryExists => ("repository-exists", Vec::new(), None),
         FailureReason::RepositoryReplaced => ("repository-replaced", Vec::new(), None),
         FailureReason::RepositoryNotFound => ("repository-not-found", Vec::new(), None),
-        FailureReason::CredentialsRefused => ("credentials-refused", Vec::new(), None),
+        FailureReason::RepositoryConfigNotFound { .. } => todo!(),
+        FailureReason::CredentialsRefused { .. } => todo!(),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
         FailureReason::HookFailed { exit_code } => (
@@ -329,7 +330,7 @@ pub(crate) fn decode_failure(
         "repository-exists" => Ok(FailureReason::RepositoryExists),
         "repository-replaced" => Ok(FailureReason::RepositoryReplaced),
         "repository-not-found" => Ok(FailureReason::RepositoryNotFound),
-        "credentials-refused" => Ok(FailureReason::CredentialsRefused),
+        "credentials-refused" => todo!(),
         "engine-start-timed-out" => Ok(FailureReason::EngineStartTimedOut),
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
@@ -684,20 +685,59 @@ mod tests {
         assert_eq!(back, FailureReason::RepositoryReplaced);
     }
 
+    /// Encodes `reason` and decodes what it wrote.
+    fn round_trip(reason: &FailureReason) -> FailureReason {
+        let columns = encode_failure(reason).expect("the failure encodes");
+        match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        }
+    }
+
     /// A persisted `credentials-refused` failure reads back as the typed
-    /// reason: no arguments, no detail.
+    /// reason: no detail, and no argument unless a half is named.
     #[test]
     fn credentials_refused_round_trips() {
-        let columns = encode_failure(&FailureReason::CredentialsRefused)
+        let columns = encode_failure(&FailureReason::CredentialsRefused { half: None })
             .expect("a failure with no arguments encodes");
         assert_eq!(columns.code, "credentials-refused");
         assert_eq!(columns.args, "[]");
         assert_eq!(columns.detail, None);
-        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
-            Ok(reason) => reason,
-            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        for half in [None, Some(RepositoryHalf::Cold), Some(RepositoryHalf::Hot)] {
+            let reason = FailureReason::CredentialsRefused { half };
+            assert_eq!(round_trip(&reason), reason);
+        }
+    }
+
+    /// A half the log names that is neither `cold` nor `hot`, or isn't
+    /// text, is a column that can't be read, never a refusal of another
+    /// half or of none.
+    #[test]
+    fn credentials_refused_with_a_half_of_no_name_does_not_decode() {
+        for half in [MsgArg::Text("warm".to_owned()), MsgArg::Count(1)] {
+            let args = error_args::encode(&[("half", half)]).expect("arguments encode");
+            let Err(bad) = decode_failure(Some("credentials-refused"), Some(&args), None) else {
+                panic!("{args} decoded");
+            };
+            assert_eq!(bad.column, "error_args");
+        }
+    }
+
+    /// A persisted `repository-config-not-found` failure reads back with the
+    /// engine's masked words, which it must have.
+    #[test]
+    fn repository_config_not_found_round_trips_with_its_detail() {
+        let reason = FailureReason::RepositoryConfigNotFound {
+            detail: "no config file at local:/media/usb/restic".to_owned(),
         };
-        assert_eq!(back, FailureReason::CredentialsRefused);
+        let columns = encode_failure(&reason).expect("the failure encodes");
+        assert_eq!(columns.code, "repository-config-not-found");
+        assert_eq!(columns.args, "[]");
+        assert_eq!(round_trip(&reason), reason);
+        let Err(bad) = decode_failure(Some("repository-config-not-found"), Some("[]"), None) else {
+            panic!("a failure with no detail decoded");
+        };
+        assert_eq!(bad.column, "error_detail");
     }
 
     /// A persisted `repository-not-found` failure reads back as the typed

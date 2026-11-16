@@ -583,7 +583,7 @@ fn failed(reason: FailureReason) -> MaintenanceRefusal {
         }
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
-        F::CredentialsRefused => unavailable(ErrorCode::CredentialsRefused, Vec::new(), None),
+        F::CredentialsRefused { .. } | F::RepositoryConfigNotFound { .. } => todo!(),
         F::SecretsTooLargeToMask { field, limit } => {
             MaintenanceRefusal::SecretRefused(super::too_much_to_mask(field, limit))
         }
@@ -1226,8 +1226,26 @@ mod tests {
                 MaintenanceRefusal::RepositoryNotFound,
             ),
             (
-                FailureReason::CredentialsRefused,
+                FailureReason::CredentialsRefused { half: None },
                 unavailable_with(ErrorCode::CredentialsRefused, Vec::new(), None),
+            ),
+            (
+                FailureReason::CredentialsRefused {
+                    half: Some(domain::execution::RepositoryHalf::Cold),
+                },
+                unavailable_with(
+                    ErrorCode::CredentialsRefused,
+                    vec![("half", text("cold"))],
+                    None,
+                ),
+            ),
+            (
+                FailureReason::RepositoryConfigNotFound {
+                    detail: "No repository config file found for `/srv/demo/repo`.".to_owned(),
+                },
+                MaintenanceRefusal::RepositoryConfigNotFound {
+                    detail: "No repository config file found for `/srv/demo/repo`.".to_owned(),
+                },
             ),
             (
                 FailureReason::SecretsTooLargeToMask {

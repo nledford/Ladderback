@@ -85,6 +85,9 @@ pub struct RepositoriesSetup {
     /// of `cold`.
     rest: Option<String>,
     hot: Option<PathBuf>,
+    /// A REST server's location, which the client's requests name as the
+    /// hot half in place of `hot`.
+    hot_rest: Option<String>,
     /// A second repository's location, beside the scenario's own.
     other: Option<PathBuf>,
     settings: Option<RepositorySettings>,
@@ -427,6 +430,9 @@ fn api_settings(agent: &Agent) -> serde_json::Value {
     if let Some(hot) = &agent.repositories.hot {
         settings["repo-hot"] = serde_json::json!(text(hot));
     }
+    if let Some(hot) = &agent.repositories.hot_rest {
+        settings["repo-hot"] = serde_json::json!(hot);
+    }
     settings
 }
 
@@ -565,6 +571,14 @@ async fn api_empty_rest_server(agent: &mut Agent) {
     agent.repositories.rest = Some(location(SERVER_PASSWORD).await);
 }
 
+#[given(
+    "an empty repository location whose hot half is on a REST server that refuses the credentials the client sends it"
+)]
+async fn api_hot_half_on_refusing_rest_server(agent: &mut Agent) {
+    empty_location(agent);
+    agent.repositories.hot_rest = Some(location(WRONG_SERVER_PASSWORD).await);
+}
+
 #[given(expr = "the client has connected it as {string}")]
 async fn api_has_connected(agent: &mut Agent, alias: String) {
     api_connect(agent, &alias).await;
@@ -666,6 +680,27 @@ fn api_refused(agent: &mut Agent, status: u16, code: String) {
     let (actual, json) = api_answer(agent);
     assert_eq!(actual, status, "the refusal: {json}");
     assert_eq!(json["code"], serde_json::json!(code), "the refusal: {json}");
+}
+
+#[then("the refusal names the hot half")]
+fn api_refusal_names_hot_half(agent: &mut Agent) {
+    let (_, json) = api_answer(agent);
+    assert_eq!(
+        json["args"]["half"],
+        serde_json::json!({"type": "text", "value": "hot"}),
+        "the refusal: {json}"
+    );
+}
+
+/// Nothing was written to the location: no file or folder of a repository.
+#[then("the repository location holds nothing")]
+fn api_location_holds_nothing(agent: &mut Agent) {
+    let cold = agent.repositories.cold.as_ref().expect("the location");
+    let held: Vec<_> = fs::read_dir(cold)
+        .expect("the location is a folder")
+        .map(|entry| entry.expect("an entry").file_name())
+        .collect();
+    assert!(held.is_empty(), "{} holds {held:?}", cold.display());
 }
 
 /// A `config-invalid` refusal that says where the setting is and nothing of

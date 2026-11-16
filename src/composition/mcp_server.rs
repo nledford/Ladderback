@@ -438,6 +438,12 @@ impl ::mcp::Backend for InProcess {
                 SnapshotsError::SecretRefused(secret) => {
                     api::ErrorDto::new(secret.code, secret.args, secret.detail)
                 }
+                SnapshotsError::RepositoryNotFound => {
+                    api::ErrorDto::new(api::ErrorCode::RepositoryNotFound, [], None)
+                }
+                SnapshotsError::RepositoryConfigNotFound { detail } => {
+                    api::ErrorDto::new(api::ErrorCode::RepositoryConfigNotFound, [], Some(detail))
+                }
                 SnapshotsError::Unavailable { code, args, detail } => {
                     api::ErrorDto::new(code, args, detail)
                 }

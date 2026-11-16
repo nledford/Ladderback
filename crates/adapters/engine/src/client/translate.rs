@@ -225,8 +225,10 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 ErrorCode::RepositoryReplaced => FailureReason::RepositoryReplaced,
                 ErrorCode::RepositoryNotFound => FailureReason::RepositoryNotFound,
                 // A server refused the credentials (decision 85): nothing was
-                // read or written, and the code says it all.
-                ErrorCode::CredentialsRefused => FailureReason::CredentialsRefused,
+                // read or written. The worker names the half whose server
+                // refused, for a hot/cold repository.
+                ErrorCode::CredentialsRefused => FailureReason::CredentialsRefused { half: None },
+                ErrorCode::RepositoryConfigNotFound => todo!(),
                 // No key opened with the repository's password (#481): the
                 // code a repository of several locations fails with too.
                 ErrorCode::PasswordNotAccepted => FailureReason::PasswordNotAccepted,
@@ -393,7 +395,9 @@ mod tests {
     use std::assert_matches;
     use std::time::Duration;
 
+    use api::MsgArg;
     use app::ports::{FakeEnd, FakeJob, Job, OperationStep};
+    use domain::execution::RepositoryHalf;
 
     use super::*;
     use crate::client::job_kind::job_kind;
@@ -512,6 +516,64 @@ mod tests {
         assert_eq!(
             translate(failed(ErrorCode::DeadlinePassed), &Redactor::default()),
             Some(EngineEvent::Failed(FailureReason::DeadlinePassed))
+        );
+    }
+
+    /// A refusal of the credentials names the half its worker named, and
+    /// none when it named none or a half there is no such name for.
+    #[test]
+    fn a_refusal_of_the_credentials_keeps_the_half_the_worker_named() {
+        for (said, half) in [
+            (
+                Some(MsgArg::Text("hot".to_owned())),
+                Some(RepositoryHalf::Hot),
+            ),
+            (
+                Some(MsgArg::Text("cold".to_owned())),
+                Some(RepositoryHalf::Cold),
+            ),
+            (None, None),
+            (Some(MsgArg::Text("warm".to_owned())), None),
+            (Some(MsgArg::Count(1)), None),
+        ] {
+            let event = WorkerEvent::Failed {
+                code: ErrorCode::CredentialsRefused,
+                args: said
+                    .clone()
+                    .map(|arg| ("half".to_owned(), arg))
+                    .into_iter()
+                    .collect(),
+                detail: Some("the server answered 401".to_owned()),
+            };
+            assert_eq!(
+                translate(event, &Redactor::default()),
+                Some(EngineEvent::Failed(FailureReason::CredentialsRefused {
+                    half
+                })),
+                "{said:?}"
+            );
+        }
+    }
+
+    /// No repository config found keeps the engine's words, masked of the
+    /// job's secrets: they name where it looked (#525).
+    #[test]
+    fn no_repository_config_found_keeps_the_engines_masked_words() {
+        let redactor = redactor_of(&["hunter2-demo"]);
+        assert_eq!(
+            translate(
+                failed_saying(
+                    ErrorCode::RepositoryConfigNotFound,
+                    "No repository config file found for `rest:http://ann:hunter2-demo@nas/`."
+                ),
+                &redactor
+            ),
+            Some(EngineEvent::Failed(
+                FailureReason::RepositoryConfigNotFound {
+                    detail: "No repository config file found for `rest:http://ann:***@nas/`."
+                        .to_owned()
+                }
+            ))
         );
     }
 

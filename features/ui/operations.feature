@@ -43,7 +43,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     And a backup of the plan "home" has failed
     When I open the address "/operations"
     Then the row "home" of the table "Operations" shows "Failed" in its "Status" column
-    And the row "home" of the table "Operations" shows "The operation failed:" in its "Result" column
+    And the row "home" of the table "Operations" shows "No repository was found at this location" in its "Result" column
     And the row "home" of the table "Operations" gives the engine's own words in English in its "Result" column
     And the row "home" of the table "Operations" doesn't show "canary-not-a-secret" in its "Result" column
     And the page has no accessibility violations
