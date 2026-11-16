@@ -592,7 +592,11 @@ const APART_REM = 0.25;
 Then(
   "the button {string} sits inside the column header {string}, apart from its text",
   async function (this: BrowserWorld, button: string, header: string) {
-    const cell = this.page.getByRole("columnheader", { name: new RegExp(`^${ISOLATION}${escape(header)}\\b`) });
+    // The header holding the button: a page may show other tables with a
+    // column of the same name.
+    const cell = this.page
+      .getByRole("columnheader", { name: new RegExp(`^${ISOLATION}${escape(header)}\\b`) })
+      .filter({ has: this.page.getByRole("button", { name: namePattern(button) }) });
     assert.equal(await cell.count(), 1, `the column header "${header}" is not on the page once`);
     const control = cell.getByRole("button", { name: namePattern(button) });
     assert.equal(await control.count(), 1, `the column header "${header}" holds no button "${button}"`);

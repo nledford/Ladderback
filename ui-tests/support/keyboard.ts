@@ -14,6 +14,13 @@ import { engine } from "./world.ts";
 // every control.
 const tabModifier = engine === "webkit" && process.platform === "darwin" ? "Alt+" : "";
 
+// WebKit on macOS, as Playwright drives it, scrolls neither the page nor a
+// focused frame on a bare arrow key, though it does on Page Down and on
+// Option+arrow, which scrolls by most of the frame's width. WebKit on Linux,
+// where CI runs, scrolls on the bare arrows, as Chromium and Firefox do.
+export const scrollKey = (key: string): string =>
+  engine === "webkit" && process.platform === "darwin" ? `Alt+${key}` : key;
+
 // A name the page built from fetched text carries bidi isolation marks
 // around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
 // journey's "Cancel demo-home". The marks are optional wherever they may
