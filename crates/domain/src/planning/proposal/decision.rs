@@ -7,7 +7,7 @@ use jiff::{SignedDuration, Timestamp};
 
 use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex};
 use crate::PlanId;
-use crate::planning::{AgentConfig, Plan};
+use crate::planning::{AgentConfig, Plan, Source};
 
 /// The most proposals one proposer makes in [`RATE_WINDOW`].
 pub const MAX_PER_HOUR: usize = 30;
@@ -54,9 +54,41 @@ impl ProposerRecord {
     /// Whether the proposer may make one more at `now`, with
     /// `pending_at_most` pending at most.
     pub fn admits(&self, now: Timestamp, pending_at_most: usize) -> Result<(), TooSoon> {
-        let _ = (now, pending_at_most);
-        todo!()
+        if self.pending >= pending_at_most {
+            return Err(TooSoon::Pending);
+        }
+        if let Some(rejected) = self.last_rejected {
+            let until = later(rejected, QUIET_AFTER_REJECTION);
+            if now < until {
+                return Err(TooSoon::AfterRejection { until });
+            }
+        }
+        // Those made less than an hour before `now`, the oldest first.
+        let mut recent: Vec<Timestamp> = self
+            .made
+            .iter()
+            .copied()
+            .filter(|made| now.duration_since(*made) < RATE_WINDOW)
+            .collect();
+        if recent.len() < MAX_PER_HOUR {
+            return Ok(());
+        }
+        recent.sort_unstable();
+        // One more is made once all but `MAX_PER_HOUR - 1` of them are an
+        // hour old.
+        let oldest_left = recent
+            .get(recent.len().saturating_sub(MAX_PER_HOUR))
+            .copied()
+            .unwrap_or(now);
+        Err(TooSoon::Hourly {
+            until: later(oldest_left, RATE_WINDOW),
+        })
     }
+}
+
+/// `by` after `at`, or the last instant there is.
+fn later(at: Timestamp, by: SignedDuration) -> Timestamp {
+    at.saturating_add(by).unwrap_or(Timestamp::MAX)
 }
 
 /// A person's reason for rejecting one change: the AI agent reads it and
@@ -67,8 +99,7 @@ pub struct RejectReason(String);
 impl RejectReason {
     /// `text`, unless it is longer than [`MAX_REASON_CHARS`] characters.
     pub fn parse(text: String) -> Option<Self> {
-        let _ = text;
-        todo!()
+        (text.chars().count() <= MAX_REASON_CHARS).then_some(Self(text))
     }
 
     pub fn as_str(&self) -> &str {
@@ -93,8 +124,17 @@ pub struct Rejection(Vec<RejectReason>);
 impl Rejection {
     /// One reason for each of a proposal's `changes`.
     pub fn new(changes: usize, reasons: Vec<String>) -> Result<Self, RejectionRefused> {
-        let _ = (changes, reasons);
-        todo!()
+        if reasons.len() != changes {
+            return Err(RejectionRefused::Count { changes });
+        }
+        reasons
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| {
+                RejectReason::parse(text).ok_or(RejectionRefused::TooLong { index })
+            })
+            .collect::<Result<_, _>>()
+            .map(Self)
     }
 
     /// Reasons as a store kept them.
@@ -115,14 +155,12 @@ pub struct DiffHash(String);
 impl DiffHash {
     /// The hash of the diff `text`.
     pub fn of(text: &str) -> Self {
-        let _ = (text, sha256_hex);
-        todo!()
+        Self(sha256_hex(text.as_bytes()))
     }
 
     /// The hash `text` names, as [`DiffHash::as_str`] gives it.
     pub fn parse(text: &str) -> Option<Self> {
-        let _ = (text, ConfigRevision::parse);
-        todo!()
+        ConfigRevision::parse(text).map(|_| Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -141,15 +179,16 @@ pub struct Shown {
 
 /// The short ID of `id`, which confirms its approval while sign-in is off.
 pub fn short_proposal_id(id: &ProposalId) -> &str {
-    let _ = id;
-    todo!()
+    id.as_str()
+        .get(..SHORT_PROPOSAL_ID_CHARS)
+        .unwrap_or(id.as_str())
 }
 
 /// Whether `typed` confirms the approval of `id` while sign-in is off: its
 /// short ID or its whole ID, in either case, the spaces around it dropped.
 pub fn confirms_proposal(typed: &str, id: &ProposalId) -> bool {
-    let _ = (typed, id);
-    todo!()
+    let typed = typed.trim().to_ascii_lowercase();
+    typed == short_proposal_id(id) || typed == id.as_str()
 }
 
 /// A plan's setting, as the summary names what a change changes.
@@ -202,15 +241,65 @@ impl Proposal {
     /// against what the changes before it made. A change that no longer
     /// applies ends the summary.
     pub fn summary(&self, config: &AgentConfig) -> Vec<SummaryLine> {
-        let _ = config;
-        todo!()
+        let mut after = config.clone();
+        let mut lines = Vec::with_capacity(self.changes.len());
+        for change in &self.changes {
+            let line = match change {
+                ConfigChange::AddPlan(plan) => SummaryLine::AddsPlan(plan.id.clone()),
+                ConfigChange::ChangePlan(plan) => SummaryLine::ChangesPlan {
+                    plan: plan.id.clone(),
+                    settings: after
+                        .plan(&plan.id)
+                        .map(|kept| changed_settings(kept, plan))
+                        .unwrap_or_default(),
+                },
+                ConfigChange::RemovePlan(id) => SummaryLine::RemovesPlan(id.clone()),
+            };
+            match after.apply(change) {
+                Ok(next) => after = next,
+                Err(_) => break,
+            }
+            lines.push(line);
+        }
+        lines
     }
 
     /// The warnings of `changes` against `config`, in the order of the
     /// changes.
     pub fn warnings(config: &AgentConfig, changes: &[ConfigChange]) -> Vec<ProposalWarning> {
-        let _ = (config, changes);
-        todo!()
+        let mut after = config.clone();
+        let mut warnings = Vec::new();
+        for (index, change) in changes.iter().enumerate() {
+            match after.apply(change) {
+                Ok(next) => after = next,
+                Err(_) => break,
+            }
+            let (ConfigChange::AddPlan(plan) | ConfigChange::ChangePlan(plan)) = change else {
+                continue;
+            };
+            if let Some(other) = after
+                .plans()
+                .iter()
+                .find(|other| other.id != plan.id && same_sources(other, plan))
+            {
+                warnings.push(ProposalWarning::SameSources {
+                    index,
+                    plan: plan.id.clone(),
+                    other: other.id.clone(),
+                });
+            }
+            let globs = plan.filter.globs.iter().map(|glob| (glob, false));
+            let iglobs = plan.filter.iglobs.iter().map(|glob| (glob, true));
+            for (glob, any_case) in globs.chain(iglobs) {
+                if never_matches(glob, &plan.sources, any_case) {
+                    warnings.push(ProposalWarning::GlobNeverMatches {
+                        index,
+                        glob: glob.clone(),
+                    });
+                }
+            }
+        }
+        warnings
     }
 
     /// Whether a change of it could delete snapshots, so that approving it
@@ -224,4 +313,80 @@ impl Proposal {
         let _ = config;
         todo!()
     }
+}
+
+/// The settings `to` changes of `from`, in the order of [`PlanSetting`].
+fn changed_settings(from: &Plan, to: &Plan) -> Vec<PlanSetting> {
+    [
+        (PlanSetting::Repository, from.repository != to.repository),
+        (PlanSetting::Host, from.host != to.host),
+        (PlanSetting::Label, from.label != to.label),
+        (PlanSetting::Sources, from.sources != to.sources),
+        (PlanSetting::Tags, from.tags != to.tags),
+        (PlanSetting::Schedule, from.schedule != to.schedule),
+        (PlanSetting::Overlap, from.overlap != to.overlap),
+        (PlanSetting::Retry, from.retry != to.retry),
+        (PlanSetting::Filter, from.filter != to.filter),
+        (PlanSetting::Retention, from.retention != to.retention),
+    ]
+    .into_iter()
+    .filter_map(|(setting, changed)| changed.then_some(setting))
+    .collect()
+}
+
+/// Whether `a` and `b` back up the same sources, in any order.
+fn same_sources(a: &Plan, b: &Plan) -> bool {
+    let mut a: Vec<&str> = a.sources.iter().map(Source::as_str).collect();
+    let mut b: Vec<&str> = b.sources.iter().map(Source::as_str).collect();
+    a.sort_unstable();
+    a.dedup();
+    b.sort_unstable();
+    b.dedup();
+    a == b
+}
+
+/// Whether the glob `glob`, read as rustic reads a plan's globs (from the
+/// root, a leading `!` excluding), can never match a path under `sources`:
+/// an absolute glob whose fixed folder is neither inside a source nor holds
+/// one. A relative glob matches at any depth, so it always may.
+fn never_matches(glob: &str, sources: &[Source], any_case: bool) -> bool {
+    let pattern = glob.strip_prefix('!').unwrap_or(glob);
+    if !pattern.starts_with('/') {
+        return false;
+    }
+    let fixed_end = pattern
+        .find(['*', '?', '[', '{', '\\'])
+        .unwrap_or(pattern.len());
+    let fixed = pattern.get(..fixed_end).unwrap_or(pattern);
+    // The folder the fixed part names whole: up to its last `/` when a
+    // wildcard follows, all of it otherwise.
+    let folder = if fixed_end < pattern.len() {
+        fixed
+            .rfind('/')
+            .and_then(|end| fixed.get(..end))
+            .unwrap_or("")
+    } else {
+        fixed.trim_end_matches('/')
+    };
+    let fold = |text: &str| {
+        if any_case {
+            text.to_lowercase()
+        } else {
+            text.to_owned()
+        }
+    };
+    let folder = fold(folder);
+    !sources.iter().any(|source| {
+        let source = fold(source.as_str().trim_end_matches('/'));
+        within(&source, &folder) || within(&folder, &source)
+    })
+}
+
+/// Whether the path `inner` is the folder `outer` or inside it.
+fn within(inner: &str, outer: &str) -> bool {
+    outer.is_empty()
+        || inner == outer
+        || inner
+            .strip_prefix(outer)
+            .is_some_and(|rest| rest.starts_with('/'))
 }

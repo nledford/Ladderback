@@ -488,6 +488,14 @@ fn a_rejection_gives_one_reason_per_change_each_at_most_a_thousand_characters() 
 }
 
 #[test]
+fn a_rejection_a_store_kept_gives_its_reasons_in_order() {
+    let reasons = ["Back up weekly instead", "", "Keep the old host"]
+        .map(|text| RejectReason::parse(text.to_owned()).unwrap());
+    let kept = Rejection::kept(reasons.to_vec());
+    assert_eq!(kept.reasons(), reasons);
+}
+
+#[test]
 fn an_approval_with_sign_in_off_is_confirmed_by_the_short_or_whole_id() {
     let id = proposal_id();
     let short = short_proposal_id(&id);
@@ -594,6 +602,32 @@ fn a_glob_that_can_never_match_is_a_warning() {
         [ProposalWarning::GlobNeverMatches {
             index: 0,
             glob: "!/elsewhere/cache".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn a_glob_that_may_match_a_source_is_no_warning_and_a_sibling_path_is_one() {
+    // The plan's one source is `/home/demo/home`. A wildcard in the last
+    // segment leaves `/home/demo` as the fixed folder, which holds the
+    // source; a glob of the source itself names it.
+    let config = config(&[]);
+    let mut home = plan("home");
+    home.filter.globs = vec![
+        "/home/demo/home/cache".to_owned(),
+        "!/home/demo/*.tmp".to_owned(),
+        "/home/demo/ho*".to_owned(),
+        "/home/demo/home".to_owned(),
+        "*.log".to_owned(),
+        "/home/demo/homework".to_owned(),
+    ];
+    home.filter.iglobs = vec!["/HOME/Demo/Home/Mail/*".to_owned()];
+    let warnings = Proposal::warnings(&config, &[ConfigChange::AddPlan(home)]);
+    assert_eq!(
+        warnings,
+        [ProposalWarning::GlobNeverMatches {
+            index: 0,
+            glob: "/home/demo/homework".to_owned(),
         }]
     );
 }
