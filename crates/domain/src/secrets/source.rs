@@ -139,8 +139,10 @@ impl KeyringEntry {
     /// name of lower-case letters, digits and hyphens, so the entry is always
     /// one `parse` reads back.
     pub fn for_repository(alias: &crate::RepositoryAlias) -> Self {
-        let _ = (alias, KEYRING_SERVICE);
-        todo!()
+        Self {
+            service: KEYRING_SERVICE.to_owned(),
+            name: alias.as_str().to_owned(),
+        }
     }
 }
 

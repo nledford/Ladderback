@@ -82,8 +82,14 @@ impl RepositorySettings {
     /// a password that is already a reference, which stays as written. The
     /// rest of the settings is unchanged.
     pub fn with_password_in_keyring(&self, entry: KeyringEntry) -> Option<(Self, SecretValue)> {
-        let _ = entry;
-        todo!()
+        let SecretRef::Inline(password) = &self.password else {
+            return None;
+        };
+        let moved = Self {
+            password: SecretRef::Keyring(entry),
+            ..self.clone()
+        };
+        Some((moved, password.clone()))
     }
 
     /// Every secret these settings hold as text: a credential written in
