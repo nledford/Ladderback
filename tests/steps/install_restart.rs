@@ -13,6 +13,9 @@
 //! log is the real store's, migrated as the daemon migrates it and kept open
 //! while the scenario runs, in a data folder whose lock file names the
 //! service's process, as the daemon's does.
+//!
+//! `@needs-node`: the runner skips the feature where
+//! `translations_steps::node_runs_typescript` fails.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
