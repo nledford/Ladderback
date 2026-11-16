@@ -79,6 +79,9 @@ pub enum RestoreRefusal {
     InPlaceNotHere,
     /// The agent doesn't take restores from the hub.
     HubNotAllowed,
+    /// A restore into a new folder, and the agent has no folder to make it
+    /// in: no home folder, and `[agent] restore-folder` unset.
+    NoRestoreFolder,
     /// A restore runs on the agent already: names it.
     Running { operation: String },
     /// The repository holds no snapshot by that ID.
@@ -173,8 +176,11 @@ pub(crate) async fn start(
 /// The refusal of `error`, for the snapshot `snapshot` of the repository
 /// `alias` as the request named them: a step-up that failed is 403, during a
 /// wait 429 with `Retry-After`, as a sign-in's; a restore the agent doesn't
-/// take here 403; one beside a running restore 409; a snapshot the
-/// repository doesn't hold 404; the rest as a read of the repository is.
+/// take here 403; one beside a running restore 409; one to a new folder on
+/// an agent with no folder for restores 409, as a request sign-in being off
+/// refuses is: the agent's configuration doesn't allow it now, and setting
+/// it does; a snapshot the repository doesn't hold 404; the rest as a read
+/// of the repository is.
 fn refusal(alias: &str, snapshot: &str, error: RestoreRefusal) -> Response {
     use api::{ErrorCode, MsgArg};
     match error {
@@ -194,6 +200,9 @@ fn refusal(alias: &str, snapshot: &str, error: RestoreRefusal) -> Response {
         }
         RestoreRefusal::HubNotAllowed => {
             refused(StatusCode::FORBIDDEN, ErrorCode::RestoreHubNotAllowed)
+        }
+        RestoreRefusal::NoRestoreFolder => {
+            refused(StatusCode::CONFLICT, ErrorCode::RestoreFolderUnset)
         }
         RestoreRefusal::Running { operation } => refused_with(
             StatusCode::CONFLICT,

@@ -387,6 +387,10 @@ pub enum ErrorCode {
     /// A restore was asked for through the hub, and the agent doesn't set
     /// `allow-hub-restore` (§10.4): nothing ran.
     RestoreHubNotAllowed,
+    /// A restore into a new folder was asked for, and the agent has no
+    /// folder to make it in: no home folder, and `[agent] restore-folder`
+    /// unset (§10.4). Nothing ran.
+    RestoreFolderUnset,
     #[serde(other)]
     Unknown,
 }
@@ -1214,6 +1218,7 @@ impl ErrorCode {
             | Self::RestoreTargetUnwritable
             | Self::RestoreInPlaceNotHere
             | Self::RestoreHubNotAllowed
+            | Self::RestoreFolderUnset
             | Self::Unknown => &[],
         }
     }
@@ -2572,6 +2577,7 @@ mod tests {
                 ErrorCode::RestoreHubNotAllowed,
                 r#""restore-hub-not-allowed""#,
             ),
+            (ErrorCode::RestoreFolderUnset, r#""restore-folder-unset""#),
         ] {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);
             assert_eq!(serde_json::from_str::<ErrorCode>(wire).unwrap(), code);

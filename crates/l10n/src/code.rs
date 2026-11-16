@@ -113,6 +113,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     RestoreRunning => msg::ERROR_RESTORE_RUNNING,
     RestoreInPlaceNotHere => msg::ERROR_RESTORE_IN_PLACE_NOT_HERE,
     RestoreHubNotAllowed => msg::ERROR_RESTORE_HUB_NOT_ALLOWED,
+    RestoreFolderUnset => msg::ERROR_RESTORE_FOLDER_UNSET,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,
     MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,

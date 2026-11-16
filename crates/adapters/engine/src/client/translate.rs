@@ -332,6 +332,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::RestoreRunning
                 | ErrorCode::RestoreInPlaceNotHere
                 | ErrorCode::RestoreHubNotAllowed
+                | ErrorCode::RestoreFolderUnset
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

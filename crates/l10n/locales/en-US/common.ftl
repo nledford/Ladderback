@@ -331,6 +331,11 @@ error-restore-in-place-not-here = A restore over the original files can only be 
 # restores from the hub, so nothing ran.
 error-restore-hub-not-allowed = This agent doesn't take restores from the hub, so nothing was restored. Set { "allow-hub-restore = true" } in the agent's configuration file to allow them.
 
+# A restore into a new folder was asked for, and this agent has no folder
+# to make it in: it has no home folder, and its configuration file doesn't
+# set restore-folder, so nothing ran.
+error-restore-folder-unset = This agent has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the agent's configuration file to a folder for restores, then try again.
+
 # This agent doesn't maintain the repository: its entry doesn't set
 # maintenance to local, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing was asked of the repository.

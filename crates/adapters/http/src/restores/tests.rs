@@ -187,6 +187,11 @@ async fn each_refusal_is_answered_with_its_code_and_status() {
             "restore-hub-not-allowed",
         ),
         (
+            RestoreRefusal::NoRestoreFolder,
+            StatusCode::CONFLICT,
+            "restore-folder-unset",
+        ),
+        (
             RestoreRefusal::SnapshotUnknown,
             StatusCode::NOT_FOUND,
             "snapshot-unknown",
