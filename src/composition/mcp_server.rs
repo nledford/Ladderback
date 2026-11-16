@@ -447,6 +447,9 @@ impl ::mcp::Backend for InProcess {
                 SnapshotsError::Unavailable { code, args, detail } => {
                     api::ErrorDto::new(code, args, detail)
                 }
+                SnapshotsError::TimedOut => {
+                    api::ErrorDto::new(api::ErrorCode::RepositoryReadTimedOut, [], None)
+                }
             })
     }
 

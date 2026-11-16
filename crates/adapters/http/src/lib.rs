@@ -330,6 +330,9 @@ pub enum SnapshotsError {
         args: Vec<(&'static str, api::MsgArg)>,
         detail: Option<String>,
     },
+    /// No turn came free, or the read didn't end, within the read timeout
+    /// (`repository-read-timed-out`).
+    TimedOut,
 }
 
 /// Why a folder of a snapshot couldn't be read.
@@ -906,6 +909,7 @@ async fn list_snapshots(
         Err(SnapshotsError::RepositoryNotFound) => no_repository(None),
         Err(SnapshotsError::RepositoryConfigNotFound { detail }) => no_repository(Some(detail)),
         Err(SnapshotsError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
+        Err(SnapshotsError::TimedOut) => read_timed_out(),
     }
 }
 
@@ -966,6 +970,7 @@ async fn read_folder(
         Err(FolderError::Repository(SnapshotsError::Unavailable { code, args, detail })) => {
             unavailable(code, args, detail)
         }
+        Err(FolderError::Repository(SnapshotsError::TimedOut)) => read_timed_out(),
     }
 }
 
@@ -979,6 +984,16 @@ fn no_repository(detail: Option<String>) -> Response {
         Some(_) => api::ErrorCode::RepositoryConfigNotFound,
     };
     refused_detailed(StatusCode::NOT_FOUND, code, Vec::new(), detail)
+}
+
+/// The refusal of a read of a repository that ran out of time: no turn came
+/// free, or the worker didn't answer, within the read timeout.
+fn read_timed_out() -> Response {
+    refused_with(
+        StatusCode::GATEWAY_TIMEOUT,
+        api::ErrorCode::RepositoryReadTimedOut,
+        Vec::new(),
+    )
 }
 
 /// The refusal of a snapshot the repository doesn't hold, naming it as the
@@ -1498,6 +1513,7 @@ mod tests {
                     detail: None,
                 }),
                 "empty" | "no-config" => Err(no_repository(&alias)),
+                "slow" => Err(SnapshotsError::TimedOut),
                 _ => Ok(api::SnapshotsDto {
                     snapshots: vec![demo_snapshot()],
                 }),
@@ -1526,6 +1542,7 @@ mod tests {
                         detail: None,
                     }));
                 }
+                "slow" => return Err(FolderError::Repository(SnapshotsError::TimedOut)),
                 "no-secret" => {
                     return Err(FolderError::Repository(SnapshotsError::SecretRefused(
                         SecretRefusal {
@@ -2739,6 +2756,17 @@ mod tests {
         }
     }
 
+    /// A listing that ran out of time is told as a read that timed out.
+    #[tokio::test]
+    async fn a_listing_that_ran_out_of_time_is_refused_as_a_read_that_timed_out() {
+        let response = get("/api/v1/repositories/slow/snapshots").await;
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"repository-read-timed-out"}"#
+        );
+    }
+
     #[tokio::test]
     async fn a_repository_snapshots_are_listed_newest_first() {
         let response = get("/api/v1/repositories/demo/snapshots").await;
@@ -2886,6 +2914,9 @@ mod tests {
         let down = get(&folder_route("engine-down", "")).await;
         assert_eq!(down.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body(down).await, r#"{"code":"engine-unavailable"}"#);
+        let slow = get(&folder_route("slow", "")).await;
+        assert_eq!(slow.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(body(slow).await, r#"{"code":"repository-read-timed-out"}"#);
     }
 
     /// Answers by the location a request names, and counts the requests
