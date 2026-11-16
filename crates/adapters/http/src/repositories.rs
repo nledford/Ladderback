@@ -204,8 +204,13 @@ pub(crate) async fn change_maintainer(
     Path(alias): Path<String>,
     body: Result<Json<api::MaintainerDto>, JsonRejection>,
 ) -> Response {
-    let _ = (state, alias, body);
-    todo!()
+    let Ok(Json(request)) = body else {
+        return refusal(&RepositoriesError::InvalidBody);
+    };
+    match state.repositories.change_maintainer(alias, request).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// The refusal for a secret: 422, like a setting the daemon can't take.

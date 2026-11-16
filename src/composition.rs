@@ -36,8 +36,8 @@ use app::progress::LiveProgress;
 use app::queue::{Place, RunQueue};
 use app::recovery::RecoverOperations;
 use app::repositories::{
-    ConfigWrites, ConnectRepository, CreateOffers, InitRepository, RecordOpened, Recording,
-    RepositoryError, SavedEntryError, TestRepository,
+    ChangeMaintainer, ConfigWrites, ConnectRepository, CreateOffers, InitRepository,
+    MaintainerError, RecordOpened, Recording, RepositoryError, SavedEntryError, TestRepository,
 };
 use app::schedule::{PlanRuns, ScheduleReport, Scheduler};
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
@@ -3154,8 +3154,38 @@ impl Repositories for RepositoryService {
         alias: String,
         request: api::MaintainerDto,
     ) -> Result<(), RepositoriesError> {
-        let _ = (alias, request, &self.writes);
-        todo!()
+        // A name that is no alias is one the configuration can't hold.
+        let Ok(parsed) = RepositoryAlias::parse(&alias) else {
+            return Err(RepositoriesError::Unknown { alias });
+        };
+        // The change runs under the configuration's write lock, which a
+        // maintenance start holds too while it reads again whether this agent
+        // maintains the repository and takes its slot (I1).
+        match ChangeMaintainer::new(
+            Arc::clone(&self.config),
+            Arc::clone(&self.operations),
+            Arc::clone(&self.writes),
+        )
+        .change(&parsed, request.maintain_here)
+        .await
+        {
+            Ok(_) => Ok(()),
+            Err(MaintainerError::Unknown(_)) => Err(RepositoriesError::Unknown { alias }),
+            Err(MaintainerError::Busy { running }) => Err(RepositoriesError::MaintenanceBusy {
+                operation: running.as_uuid().hyphenated().to_string(),
+            }),
+            Err(MaintainerError::Config(error)) => Err(config_refusal(error)),
+            // The log's own words say what it couldn't do, as Create tells
+            // it.
+            Err(MaintainerError::Log(
+                app::ports::StoreError::Unavailable { detail }
+                | app::ports::StoreError::Corrupt { detail },
+            )) => Err(unavailable(
+                ErrorCode::OperationFailed,
+                Vec::new(),
+                Some(detail),
+            )),
+        }
     }
 }
 
@@ -9466,6 +9496,79 @@ mod repository_service_tests {
             );
         }
         assert_eq!(jobs(&engine), 0);
+    }
+
+    /// Maintenance turned on and off through the route's service: the entry
+    /// asks for it, a run of the repository's maintenance keeps it, named by
+    /// its ID as the wire writes one, and a name the configuration doesn't
+    /// hold is unknown.
+    #[tokio::test]
+    async fn maintenance_of_a_saved_repository_is_turned_on_and_off_unless_its_maintenance_runs() {
+        use domain::execution::{Operation, OperationKind, Target, Trigger};
+        let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
+        let operations = Arc::new(app::fakes::InMemoryOperationStore::new());
+        let service = RepositoryService::new(
+            clock(),
+            engine.clone(),
+            Arc::new(app::fakes::FakeNetworkLink::new()),
+            ResolveRepository::new(Arc::new(FakeSecrets::new())),
+            config.clone(),
+            operations.clone(),
+            Arc::default(),
+        );
+        service
+            .connect(connect("demo", settings_dto()))
+            .await
+            .expect("the entry is saved");
+        let maintenance = |config: domain::planning::AgentConfig| {
+            config
+                .repository(&alias("demo"))
+                .map(|entry| entry.maintenance)
+        };
+        let turn = |maintain_here| {
+            service.change_maintainer("demo".to_owned(), api::MaintainerDto { maintain_here })
+        };
+
+        assert_eq!(turn(true).await, Ok(()));
+        assert_eq!(maintenance(saved(&*config).await), Some(Maintenance::Local));
+
+        let running = OperationId::from_uuid(domain::Uuid::from_u128(0x619));
+        let at = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+        let target = Target {
+            plan: None,
+            repository: Some(repository_id()),
+        };
+        let mut prune =
+            Operation::queue(running, OperationKind::Prune, Trigger::Manual, target, at);
+        prune.start(at).expect("a queued operation starts");
+        assert_eq!(
+            operations.try_start(&prune).await,
+            Ok(app::ports::Start::Started)
+        );
+        assert_eq!(
+            turn(false).await,
+            Err(RepositoriesError::MaintenanceBusy {
+                operation: "00000000-0000-0000-0000-000000000619".to_owned(),
+            })
+        );
+        assert_eq!(maintenance(saved(&*config).await), Some(Maintenance::Local));
+
+        for alias in ["other", "Not A Name"] {
+            assert_eq!(
+                service
+                    .change_maintainer(
+                        alias.to_owned(),
+                        api::MaintainerDto {
+                            maintain_here: true
+                        }
+                    )
+                    .await,
+                Err(RepositoriesError::Unknown {
+                    alias: alias.to_owned()
+                }),
+                "{alias}"
+            );
+        }
     }
 
     #[tokio::test]
