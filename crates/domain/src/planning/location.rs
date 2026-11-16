@@ -249,7 +249,7 @@ impl ExposedCredentials {
             Self::PlainHttp => "plain-http",
             Self::UncheckedCertificate => "unchecked-certificate",
             Self::PlainEndpoint => "plain-endpoint",
-            Self::PlainRclone => todo!(),
+            Self::PlainRclone => "plain-rclone",
             Self::PlainFtp => "plain-ftp",
         }
     }
@@ -304,7 +304,7 @@ impl ExposedCredentials {
                 .to_ascii_lowercase()
                 .replace(['"', '\''], "")
                 .contains("url=http://");
-            return (plain && credential()).then_some(Self::PlainEndpoint);
+            return (plain && credential()).then_some(Self::PlainRclone);
         }
         None
     }

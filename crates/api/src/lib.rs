@@ -416,11 +416,12 @@ pub enum WarningCode {
     /// A location of a repository sends its credentials where whoever
     /// answers at its address can read them (decision 80, §10.6). The
     /// arguments are `position`, the location's, from 1; `cause`:
-    /// `plain-http`, `unchecked-certificate`, `plain-endpoint` or
-    /// `plain-ftp`; `rule`: `network` when the location has a rule, which
-    /// a network made to look like the person's own passes too, or `none`;
-    /// and `locations`: `one` for a repository of one location, whose text
-    /// names no position, or `several`. Never the address or a credential.
+    /// `plain-http`, `unchecked-certificate`, `plain-endpoint`,
+    /// `plain-rclone` or `plain-ftp`; `rule`: `network` when the location
+    /// has a rule, which a network made to look like the person's own
+    /// passes too, or `none`; and `locations`: `one` for a repository of
+    /// one location, whose text names no position, or `several`. Never the
+    /// address or a credential.
     LocationPlainHttpCredentials,
     /// Every location of a repository has a rule (decision 80): a scheduled
     /// run is skipped on a network where none holds, and any other run fails
