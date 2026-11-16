@@ -10,13 +10,16 @@ Feature: AI agents and scripts use Ladderback through MCP
   seeded with a plan, and deletes it at the end. A client of the current
   protocol revision asks the server what it offers without a handshake; a
   client of the two revisions before it starts with one, and both are
-  served. Standard output holds protocol messages only.
+  served. Standard output holds protocol messages only. A tool's refusal
+  gives its code and arguments, then says what to do next in the words of
+  the catalog, in the language of the environment the server runs in.
 
   `ladderback mcp call` runs tools once, without a client: the same tools,
   with the same checks and results, each call's outcome printed as one JSON
   line, a result or a refusal. With no mode named, it connects to a running
   Ladderback; headless and in a scratch folder it holds a session of its
-  own, for as long as its calls take, so a script of calls shares one.
+  own, for as long as its calls take, so a script of calls shares one. A
+  refused call's sentence is said on standard error.
 
   Scenario: A client of the current revision asks what the server offers
     Given Ladderback is serving on loopback
@@ -65,6 +68,26 @@ Feature: AI agents and scripts use Ladderback through MCP
       | wait_operation | {"id": "x"}       | id       | unknown-key |
       | run_plan       | {}                | plan     | missing     |
       | list_plans     | {"limit": "many"} | limit    | invalid     |
+
+  # The code and its arguments stay as they are, for a client to branch on.
+  # After them the refusal says, as the catalog says it, what to do next, for
+  # the AI agent or the person it relays the refusal to.
+  Scenario: A refusal says after its code what to do next
+    Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
+    And the admin has signed in over HTTP with "demo-admin-pass"
+    And the admin has created an API token over HTTP with the scopes "run" and the label "runner"
+    And an MCP server connected to it with that API token in a file
+    When the MCP client calls the tool "status"
+    Then the result is the error "api-token-scope"
+    And after its code the error is said in "en-US" as the catalog says it
+
+  # An MCP client asks for no language: the sentence follows the locale of the
+  # environment the server runs in, as the command line's own messages do.
+  Scenario: A refusal is said in the language of the server's environment
+    Given an MCP server running in a scratch folder in the language "en-XA"
+    When the MCP client calls the tool "run_plan" with the arguments '{}'
+    Then the result is the error "invalid-arguments"
+    And after its code the error is said in "en-XA" as the catalog says it
 
   Scenario: The status names each build part by part
     Given Ladderback is serving on loopback
@@ -432,6 +455,14 @@ Feature: AI agents and scripts use Ladderback through MCP
       | --args {"limit":"many"} | limit    | invalid     |
       | plan=home               | plan     | unknown-key |
 
+  Scenario: A refused one-shot call says on standard error what to do next
+    Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
+    When an agent runs "mcp call status --connect {daemon}"
+    Then the command exits with status 1
+    And standard output has 1 line
+    And line 1 says the tool "status" refused with "sign-in-required"
+    And standard error says the refusal of line 1 as the catalog says it
+
   Scenario Outline: A one-shot call line that can't be read is refused before any call
     When an agent runs "mcp call <call line>"
     Then the command exits with status 2
@@ -513,6 +544,19 @@ Feature: AI agents and scripts use Ladderback through MCP
       | keep going   | lines   |
       |              | 1 line  |
       | --keep-going | 2 lines |
+
+  Scenario: A script's refused calls say on standard error what to do next, in the order of the calls
+    Given a file of calls "calls.jsonl" holding:
+      """
+      {"tool": "run_plan", "arguments": {"plan": "nowhere"}}
+      {"tool": "run_plan", "arguments": {"plan": "elsewhere"}}
+      """
+    When an agent runs "mcp call --scratch --script {scratch}/calls.jsonl --keep-going"
+    Then the command exits with status 1
+    And standard output has 2 lines
+    And line 2 says the tool "run_plan" refused with "plan-unknown"
+    And standard error says the refusals of lines 1 and 2, in that order
+    And no scratch folder is left
 
   Scenario: A script's lines that aren't calls are said by their numbers, never their text
     Given a file of calls "calls.jsonl" holding:

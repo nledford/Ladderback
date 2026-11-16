@@ -20,7 +20,8 @@ use l10n::{Localizer, msg};
 use super::events_steps::Events;
 use super::interop_steps::{Ran, ran};
 use super::mcp_steps::{
-    ANSWER, OPERATION_WAIT, STOP, daemon_url, headless_root, mcp_command, save_token,
+    ANSWER, OPERATION_WAIT, STOP, catalog_sentence, daemon_url, headless_root, mcp_command,
+    save_token,
 };
 use super::{Agent, api_tokens_steps, blocking};
 
@@ -300,6 +301,47 @@ fn refused(agent: &Agent, number: usize, tool: &str, code: &str) -> Value {
     assert!(line.get("result").is_none(), "{line}");
     assert_eq!(line["error"]["code"], code, "{line}");
     line["error"].clone()
+}
+
+#[then(expr = "standard error says the refusal of line {int} as the catalog says it")]
+fn stderr_says_the_refusal(agent: &mut Agent, number: usize) {
+    let Ran { stdout, stderr, .. } = ran(agent);
+    let said = refusal_said(stdout, number);
+    assert!(
+        stderr.contains(&said),
+        "standard error {stderr:?} doesn't say {said:?}"
+    );
+}
+
+#[then(expr = "standard error says the refusals of lines {int} and {int}, in that order")]
+fn stderr_says_the_refusals_in_order(agent: &mut Agent, first: usize, second: usize) {
+    let Ran { stdout, stderr, .. } = ran(agent);
+    let at = |number| {
+        let said = refusal_said(stdout, number);
+        stderr
+            .find(&said)
+            .unwrap_or_else(|| panic!("standard error {stderr:?} doesn't say {said:?}"))
+    };
+    assert!(
+        at(first) < at(second),
+        "standard error {stderr:?} says line {second}'s refusal before line {first}'s"
+    );
+}
+
+/// The stderr line that says the refusal on stdout's line `number`, as the
+/// catalog says it. The command runs in an environment that asks for no
+/// language.
+fn refusal_said(stdout: &str, number: usize) -> String {
+    let text = stdout
+        .lines()
+        .nth(number.checked_sub(1).expect("lines count from 1"))
+        .unwrap_or_else(|| panic!("no line {number}: {stdout:?}"));
+    let line: Value =
+        serde_json::from_str(text).unwrap_or_else(|error| panic!("not JSON ({error}): {text}"));
+    format!(
+        "ladderback: {}\n",
+        catalog_sentence("en-US", &line["error"])
+    )
 }
 
 #[then(expr = "line {int} says the tool {string} answered, listing the plan {string}")]

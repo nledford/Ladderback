@@ -76,7 +76,7 @@ export const GRAPH: Readonly<Record<string, Row | typeof ANY>> = {
   "http-adapter": adapter(),
   hooks: adapter(),
   interop: adapter(),
-  mcp: adapter(),
+  mcp: adapter("l10n"),
   "notify-adapter": adapter("l10n"),
   platform: adapter(),
   "releases-adapter": adapter(),

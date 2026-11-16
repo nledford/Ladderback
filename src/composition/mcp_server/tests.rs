@@ -821,7 +821,11 @@ impl Session {
         use tokio::io::AsyncBufReadExt as _;
         let (client, server) = tokio::io::duplex(mcp::MAX_MESSAGE_BYTES);
         let (server_input, server_output) = tokio::io::split(server);
-        let server = mcp::Server::new(Arc::new(backend), crate::build_info::running());
+        let server = mcp::Server::new(
+            Arc::new(backend),
+            crate::build_info::running(),
+            l10n::Localizer::new(&[]),
+        );
         tokio::spawn(server.serve(server_input, server_output));
         let (output, input) = tokio::io::split(client);
         Self {

@@ -94,8 +94,9 @@ ladderback/
 | Web UI: labels, messages, errors, `aria-*` text, page titles | Yes, in the browser's negotiated locale |
 | Default notification text (ntfy, Gotify, Discord/Slack, email) | Yes, in the configured locale |
 | Ladderback's own CLI messages and errors | Yes, from the POSIX locale. `clap`'s generated help and usage errors stay English |
+| The sentence an MCP refusal gives after its `{code, args}`, and the one `ladderback mcp call` says on stderr for a refused call (§4.6) | Yes, from the POSIX locale of the environment the server runs in, as the CLI's own messages: an MCP client sends no language |
 | The static `index.html` shown before the wasm app loads | No: a minimal `lang="en"` loading text, replaced on startup |
-| Logs, `config.toml` keys, API and sync field names, webhook JSON keys and event names, MCP tool names, arguments and results, the CLI's `--json` documents, exported rustic profiles | **Never.** These are machine-facing or grep targets |
+| Logs, `config.toml` keys, API and sync field names, webhook JSON keys and event names, MCP tool names, arguments and results (a refusal's `{code, args}` included), the CLI's `--json` documents, exported rustic profiles | **Never.** These are machine-facing or grep targets |
 | Text from rustic itself (warning and error details) | Shown verbatim, in English, inside a localized frame (`backup-failed = Backup failed: { $detail }`), marked `lang="en"` in the UI |
 | User-written notification templates (§11) | Never; the user's own words |
 
@@ -110,13 +111,13 @@ ladderback/
 
 **The `l10n` crate.**
 
-- **Placement.** It is a presentation library: neither a ring nor an adapter. It depends only on `api` (for the codes), the Fluent and formatter crates, and `jiff` (for the plain UTC date and, under `icu`, an instant's wall clock in its zone). `web`, `adapters/notify` and the CLI in the composition root use it; `domain` and `app` must not (§3.2 banned crates).
+- **Placement.** It is a presentation library: neither a ring nor an adapter. It depends only on `api` (for the codes), the Fluent and formatter crates, and `jiff` (for the plain UTC date and, under `icu`, an instant's wall clock in its zone). `web`, `adapters/notify`, `adapters/mcp` and the CLI in the composition root use it; `domain` and `app` must not (§3.2 banned crates).
 - **Fallback chain.** One `FluentBundle` holds one locale's messages; its plural rules come from that locale. The negotiated chain (always ending in `en-US`) is therefore an ordered `Vec` of bundles, one per locale, and a lookup falls through per message. The browser uses the single-threaded `FluentBundle`; the daemon uses `fluent_bundle::concurrent::FluentBundle`, shared across tasks.
 - **Generated catalog table.** `build.rs` scans `locales/`, embeds every file with `include_str!`, and generates the message-ID constants in `l10n::msg` from `en-US`. A typo is a compile error, and the constants can't drift from the catalog. There are no runtime-loaded or remote catalogs.
 - **Locale negotiation:** `fluent-langneg`, filtering strategy, default `en-US`, over the languages the build offers (*Scope*, above): a release build ignores a request for a catalog it carries but doesn't offer, in all three places below.
   - UI: the user's language choice (stored in the browser), then `navigator.languages`.
   - Notifications: `[agent] locale` on the hub or standalone agent, then the service's POSIX locale, then `en-US`. Services under systemd or launchd usually have no `LANG`.
-  - CLI: `LC_ALL`, `LC_MESSAGES` and `LANG`, with `LANGUAGE` (a list) ahead of the locale; the rules are under *Core as built*. POSIX values are normalized before parsing: strip the codeset and modifier, turn `_` into `-`, and ignore `C` and `POSIX`.
+  - CLI: `LC_ALL`, `LC_MESSAGES` and `LANG`, with `LANGUAGE` (a list) ahead of the locale; the rules are under *Core as built*. POSIX values are normalized before parsing: strip the codeset and modifier, turn `_` into `-`, and ignore `C` and `POSIX`. `ladderback mcp` says its refusals by the same rule, read once when the session starts (§4.6).
   - Tags are parsed with `unic-langid`. An invalid tag is ignored; tags never reach a file path, because catalogs are compiled in.
 - **Numbers.** `fluent-bundle`'s built-in `NUMBER` keeps a value numeric, so plural selectors work, but it formats without locale-aware grouping. Ladderback keeps the built-in and does locale-aware output in the bundle's `set_formatter` hook. That hook is a plain `fn`, so it reaches the host formatter through the bundle's memoizer (`intl_memoizer::Memoizable`, keyed by locale).
 - **Dates.** `fluent-bundle` has no `DATETIME`. Ladderback registers one that returns a `FluentValue::Custom` value carrying the instant and its style. The same hook writes it through the memoized host formatter; the value's own text is the plain one (*Plain fallbacks*, below).
