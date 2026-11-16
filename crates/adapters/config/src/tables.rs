@@ -52,6 +52,7 @@ table! {
         nice: i64,
         allow_hub_restore: bool,
         locale: String,
+        check_for_updates: bool,
     }
 }
 

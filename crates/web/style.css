@@ -201,6 +201,22 @@ a {
   padding-inline: 0.75rem;
 }
 
+/* The available update, on a line of its own under the running version and
+   at the same side; its padding is its link's. The sentence wraps on a
+   narrow screen rather than stick out (1.4.10). */
+.site-update {
+  flex-basis: 100%;
+  margin: 0;
+  text-align: end;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.site-update a {
+  display: inline-block;
+  padding-block: 0.25rem;
+}
+
 /* The pages' links, in the header of every page; the current page is bold,
    which is more than its color (§4.5, A2). */
 .site-nav ul {

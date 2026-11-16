@@ -126,6 +126,11 @@ export interface Server {
   url: string;
 }
 
+// Where every daemon the scenarios start asks for Ladderback's newest
+// release: an address nothing answers at, so no scenario asks GitHub. A
+// scenario that shows an available update gives the page one itself.
+export const NO_RELEASE_FEED = "http://127.0.0.1:9/";
+
 // Starts one `ladderback serve` in scratch folders of its own, so two
 // daemons never contend on one database (the e2e suites hit that). `extraEnv`
 // names what a caller has already prepared, such as the config folder of a
@@ -138,7 +143,13 @@ export function startServer(
     stdio: ["ignore", "inherit", "pipe"],
     // The banner below is read in English, whatever language the machine
     // speaks: `C` makes the daemon ignore LANGUAGE, which is cleared too.
-    env: { ...process.env, LC_ALL: "C", LANGUAGE: "", ...extraEnv },
+    env: {
+      ...process.env,
+      LC_ALL: "C",
+      LANGUAGE: "",
+      LADDERBACK_RELEASES_URL: NO_RELEASE_FEED,
+      ...extraEnv,
+    },
   });
   return new Promise((resolve, reject) => {
     let output = "";

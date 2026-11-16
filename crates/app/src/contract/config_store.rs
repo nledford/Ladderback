@@ -138,6 +138,7 @@ fn rich_agent_settings() -> Option<AgentSettings> {
         nice: Some(Nice::new(10).ok()?),
         allow_hub_restore: true,
         locale: Some(Locale::parse("en-US").ok()?),
+        update_check: domain::planning::UpdateCheck::Off,
     })
 }
 

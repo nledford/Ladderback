@@ -67,7 +67,7 @@ fn a_file_with_a_repository_and_a_plan_gets_the_defaults_for_the_rest() {
 #[test]
 fn the_agent_table_is_read() {
     let text = "schema = 1\n\n[agent]\nhostname = \"demo-host\"\nconcurrency = 4\nnice = 10\n\
-                allow-hub-restore = true\nlocale = \"en-US\"\n";
+                allow-hub-restore = true\nlocale = \"en-US\"\ncheck-for-updates = false\n";
     assert_eq!(
         parsed(text).expect("valid").config.agent(),
         &AgentSettings {
@@ -76,6 +76,7 @@ fn the_agent_table_is_read() {
             nice: Some(Nice::new(10).expect("a nice")),
             allow_hub_restore: true,
             locale: Some(Locale::parse("en-US").expect("a locale")),
+            update_check: domain::planning::UpdateCheck::Off,
         }
     );
 }

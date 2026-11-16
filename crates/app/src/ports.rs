@@ -12,6 +12,7 @@ mod operation_store;
 mod platform;
 mod profiles;
 mod random;
+mod releases;
 mod retention;
 mod schedule_store;
 mod secrets;
@@ -52,8 +53,9 @@ pub use profiles::{
     ProfileReader, ProfileWriter, RenderedProfile,
 };
 pub use random::{Random, RandomUnavailable};
+pub use releases::{RELEASE_TIMEOUT, ReleaseFeed, ReleaseFeedError};
 pub use retention::{Retention, RetentionError};
-pub use schedule_store::{PendingRetry, PlannedRun, ScheduleStore};
+pub use schedule_store::{PendingRetry, PlannedRun, ReleaseCheck, ScheduleStore};
 pub use secrets::{Resolved, SecretResolver};
 pub use service::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
 pub use session_store::SessionStore;

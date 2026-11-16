@@ -3261,6 +3261,7 @@ dependencies = [
  "nix 0.31.3",
  "notify-adapter",
  "platform",
+ "releases-adapter",
  "rustic_backend",
  "rustic_core",
  "secrets",
@@ -5431,6 +5432,19 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "releases-adapter"
+version = "0.3.1"
+dependencies = [
+ "app",
+ "async-trait",
+ "domain",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "reqsign-aliyun-oss"

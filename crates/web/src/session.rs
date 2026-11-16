@@ -5,7 +5,10 @@
 //! and the DOM around them are `ws.rs` and `sign_in.rs`, which the `@ui`
 //! scenarios of `features/security/sign_in.feature` run in a browser.
 
-use api::{AdminPasswordDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SignInStateDto};
+use api::{
+    AdminPasswordDto, AvailableUpdateDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto,
+    SignInStateDto,
+};
 use l10n::{MessageId, msg};
 use serde::Deserialize;
 
@@ -217,13 +220,13 @@ fn millis(seconds: u64) -> i64 {
 }
 
 /// A live session, as a sign-in or the session route gave it: the CSRF token
-/// its changed requests carry, its lease, and the build the daemon runs, which
-/// the header shows once the page may see the pages (decision 90).
+/// its changed requests carry, its lease, and what the daemon tells of
+/// itself, which the header shows once the page may see the pages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Signed {
     pub(crate) csrf: String,
     pub(crate) lease: Lease,
-    pub(crate) build: Option<BuildDto>,
+    pub(crate) told: Option<Told>,
 }
 
 impl Signed {
@@ -243,7 +246,28 @@ impl Signed {
                 read.ends_in_seconds.map_or(i64::MAX, millis),
                 sent,
             ),
-            build: read.build.clone(),
+            told: Told::of(read),
+        })
+    }
+}
+
+/// What the daemon tells a page that may see the pages of itself, which the
+/// header shows: the build it runs (decision 90) and the update its release
+/// check found, when there is one (decision 107).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Told {
+    pub(crate) build: BuildDto,
+    pub(crate) update: Option<AvailableUpdateDto>,
+}
+
+impl Told {
+    /// What `read` tells; `None` when it leaves out the build, as for a page
+    /// yet to sign in, whatever else it says: the update comes only with
+    /// the build.
+    pub(crate) fn of(read: &SessionDto) -> Option<Self> {
+        read.build.clone().map(|build| Self {
+            build,
+            update: read.available_update.clone(),
         })
     }
 }
@@ -389,6 +413,7 @@ mod tests {
             ends_in_seconds: None,
             exposure: api::ExposureDto::Loopback,
             build: None,
+            available_update: None,
             admin_password: None,
             keep_signed_in_offered: None,
         }
@@ -601,7 +626,7 @@ mod tests {
             Answer::SignedIn(Signed {
                 csrf: "abc".to_owned(),
                 lease: fresh(),
-                build: None,
+                told: None,
             })
         );
     }
@@ -616,14 +641,39 @@ mod tests {
             Answer::SignedIn(Signed {
                 csrf: "abc".to_owned(),
                 lease: fresh(),
-                build: Some(BuildDto {
-                    version: "0.3.0".to_owned(),
-                    commit: Some("3f937cf0".to_owned()),
-                    dirty: false,
-                    release: false,
+                told: Some(Told {
+                    build: BuildDto {
+                        version: "0.3.0".to_owned(),
+                        commit: Some("3f937cf0".to_owned()),
+                        dirty: false,
+                        release: false,
+                    },
+                    update: None,
                 }),
             })
         );
+    }
+
+    #[test]
+    fn the_available_update_is_told_only_with_the_build() {
+        let update = r#""available-update":{"version":"0.4.0","release-notes":"https://github.com/nledford/Ladderback/releases/tag/v0.4.0"}"#;
+        let with_build: SessionDto = serde_json::from_str(&format!(
+            r#"{{"sign-in":"off","exposure":"loopback","version":"0.3.0","dirty":false,"release":true,{update}}}"#
+        ))
+        .unwrap();
+        assert_eq!(
+            Told::of(&with_build).and_then(|told| told.update),
+            Some(AvailableUpdateDto {
+                version: "0.4.0".to_owned(),
+                release_notes: "https://github.com/nledford/Ladderback/releases/tag/v0.4.0"
+                    .to_owned(),
+            })
+        );
+        let without_build: SessionDto = serde_json::from_str(&format!(
+            r#"{{"sign-in":"signed-out","exposure":"loopback",{update}}}"#
+        ))
+        .unwrap();
+        assert_eq!(Told::of(&without_build), None);
     }
 
     #[test]

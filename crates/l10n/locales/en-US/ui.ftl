@@ -11,6 +11,12 @@ ui-brand = { -brand-name }
 # navigation. $version is the release's number, such as 0.3.0.
 ui-version = Version { $version }
 
+# The available update, under the running version wherever the header shows
+# it, when the daemon's release check found a newer release. The whole
+# sentence is the link to that release's notes. $version is the release's
+# number, such as 0.4.0.
+ui-update-available = Version { $version } is available
+
 # The start page's title, as the browser's tab and history show it.
 ui-start-title = { -brand-name }
 

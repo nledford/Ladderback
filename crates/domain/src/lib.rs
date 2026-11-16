@@ -25,6 +25,7 @@ mod properties;
 pub mod secrets;
 pub mod service;
 pub mod snapshot;
+pub mod updates;
 
 pub use ids::{
     AgentId, IdKind, InvalidId, OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId,

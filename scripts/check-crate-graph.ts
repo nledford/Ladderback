@@ -79,6 +79,7 @@ export const GRAPH: Readonly<Record<string, Row | typeof ANY>> = {
   mcp: adapter(),
   "notify-adapter": adapter("l10n"),
   platform: adapter(),
+  "releases-adapter": adapter(),
   secrets: adapter(),
   store: adapter(),
   ladderback: ANY,

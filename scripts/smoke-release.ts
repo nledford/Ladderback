@@ -519,10 +519,13 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
   report.add("--version", shown.status === 0 && said === `ladderback ${version}`, `said ${JSON.stringify(said)}${shown.status === 0 ? "" : `, exit ${shown.status}: ${shown.stderr.trim()}`}`);
 
   const scratch = place.scratch;
+  // Each daemon's own folders, and a release feed nothing answers at, so
+  // the smoke test never asks GitHub for the newest release.
   const folders = (name: string): Env => ({
     LADDERBACK_CONFIG_DIR: `${scratch}/${name}/config`,
     LADDERBACK_DATA_DIR: `${scratch}/${name}/data`,
     LADDERBACK_CACHE_DIR: `${scratch}/${name}/cache`,
+    LADDERBACK_RELEASES_URL: "http://127.0.0.1:9/",
   });
   const source = `${scratch}/source`;
   const repository = `${scratch}/repository`;

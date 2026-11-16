@@ -2221,6 +2221,7 @@ mod tests {
             admin_password: None,
             keep_signed_in_offered: None,
             build: None,
+            available_update: None,
         };
         assert_eq!(
             serde_json::to_value(&signed_in).unwrap(),
@@ -2240,6 +2241,7 @@ mod tests {
             admin_password: None,
             keep_signed_in_offered: None,
             build: None,
+            available_update: None,
         };
         assert_eq!(
             serde_json::to_value(&off).unwrap(),
@@ -2315,6 +2317,7 @@ mod tests {
             admin_password: None,
             keep_signed_in_offered: None,
             build: Some(build(Some(COMMIT), true, false)),
+            available_update: None,
         };
         let written = serde_json::json!({
             "sign-in": "off",
@@ -3908,7 +3911,9 @@ pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 /// the pages, with sign-in off or a live session, and left out for a page
 /// that has yet to sign in. A request sending a `read` API token is answered
 /// `signed-out` with the build, without `keep-signed-in-offered` or a CSRF
-/// token, whatever session cookie it also sends (decision 95).
+/// token, whatever session cookie it also sends (decision 95). With the
+/// build, and only with it, comes the `available-update` the agent's release
+/// check found, when there is one (decision 107).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionDto {
@@ -3927,6 +3932,18 @@ pub struct SessionDto {
     pub keep_signed_in_offered: Option<bool>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_update: Option<AvailableUpdateDto>,
+}
+
+/// A newer release of Ladderback than the one the daemon runs, which the
+/// header shows (decision 107): its version, and the address of its notes,
+/// built from the version, never from what the release feed answered.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct AvailableUpdateDto {
+    pub version: String,
+    pub release_notes: String,
 }
 
 /// What `GET /api/v1/restart` answers, and `POST` once it has taken a

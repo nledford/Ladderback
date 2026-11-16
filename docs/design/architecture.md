@@ -44,6 +44,8 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Hub | The agent running `--hub`; holds the registry, ownership and aggregated history |
 | Service | An agent the user's **service manager** runs in the background, from login on: a systemd user unit on Linux, a launchd agent on macOS. Its **service file** says what the manager runs: this `ladderback` program's `serve`. `ladderback install-service` writes the file and has the manager start it; `ladderback remove-service` has the manager stop it and removes the file (§12). On Linux the service stops with the user's last session unless the user **lingers** (`loginctl enable-linger`) |
 | Build | The program as built from one commit: its **version**, the **commit** (unknown when the build had no `git` to ask), whether tracked files had uncommitted changes (**dirty**), and whether the commit is its version's **release** (the tag `v<version>` names it). Shown as `0.3.0` for a clean build of the release, otherwise as `0.3.0+3f937cf`, or `0.3.0+3f937cf.dirty` with changes (decision 90) |
+| Release check | The agent asking GitHub Releases for Ladderback's newest release while it serves: a day after its last check, never within 5 minutes of its start (5 to 65 minutes after it starts when it has never checked or that day is over), each time spread by up to an hour of jitter. On unless `[agent] check-for-updates = false`; the last one is kept in the store, so a restart neither asks again within the day nor forgets what it found (§5, §10.7; §16, decision 107) |
+| Available update | The newest release a release check found, when it is a full release (not marked a prerelease, a draft or a version with a prerelease part) with a higher version than the one running. The header shows it with a link to its notes; the log says so once per version (§16, decision 107) |
 | Plan | What to back up, from which agent, into which repository, when, and how long to keep it |
 | AI agent | A language-model program acting through MCP or the API, such as a coding assistant. Never called an agent alone, which is a machine running Ladderback |
 | Configuration change | One typed edit of an agent's configuration: add, change or remove a repository, a plan or a hook, set a plan's retention, claim maintenance. Applied by `AgentConfig`, which keeps its rules; the web UI's plan editor and a proposal both write the configuration through it (§16, decision 89) |
@@ -113,6 +115,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | **Profile interop** | Supporting | Anti-corruption layer only (`adapters/interop`): translates rustic profiles to and from Planning | List replacement, hook order, `[snapshot-filter]` export rules (§6.2) |
 | **Secrets** | Generic | `SecretRef`, `Redactor` (replaces every resolved secret value, and its common encodings, with `***`) | No secret in logs, templates or sync messages (I4) |
 | **Notifications, auth** | Generic | `Notifications` (the channels and the rules, owned by `AgentConfig`), value objects `Channel`, `Rule`, `Template`, `EventKind`; `Sessions`, `SignInWaits` and `ApiToken` (`domain::access`) | A rule names a channel and plans the configuration has; a channel holds no secret as text and starts no program by a relative path; a template reads only an event's facts (I4). A session ends unused or old, and with a new admin password; a changed request carries its session's CSRF token; failed sign-ins make the next one wait, never lock the admin out; an API token opens only the routes of its scopes, ends with a new admin password, and a failed one counts as a failed sign-in |
+| **Updates** | Generic | Value objects `Version` (SemVer 2.0.0 precedence) and `Release`, domain services `available_update` and `next_check` (`domain::updates`) | A prerelease or a version no higher than the running one is never an update; a check comes at most once a day, never within 5 minutes of the agent's start, after jitter, and, planned on a clock set back, never more than a day ahead; outside text that isn't a version is refused, never shown |
 
 **Context map.** Planning feeds Execution (plans become operations) and, through the hub, Maintenance (published plans carry retention). Execution emits domain events that Maintenance, notifications and the sync outbox consume. Two anti-corruption layers keep foreign models out: profile interop for rustic's TOML model, and the engine adapter for `rustic_core`'s types. The sync protocol in `api` is the published language between agent and hub; `app` speaks its own `AgentReport` and `HubCommand` types, and the sync adapter translates.
 
@@ -164,6 +167,7 @@ flowchart LR
     CFG[config: config.toml + migrations]
     SEC[secrets]
     NOTE[notify]
+    REL[releases: GitHub Releases]
     PLAT[platform: clock, power, network, identity]
     SYNCOUT[sync: hub link]
   end
@@ -177,6 +181,7 @@ flowchart LR
   CFG -. implements port .-> APP
   SEC -. implements port .-> APP
   NOTE -. implements port .-> APP
+  REL -. implements port .-> APP
   PLAT -. implements port .-> APP
   SYNCOUT -. implements port .-> APP
 ```
@@ -210,6 +215,7 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 | `ServiceManager` | Install, start, stop and remove the agent's user service (§12, decision 64) | systemd user unit through `systemctl --user` on Linux, launchd agent through `launchctl` on macOS | In-memory fake |
 | `EventPublisher` | Deliver domain events to in-process subscribers (UI, outbox, notifications) | Broadcast channel | Recording fake |
 | `Notifier` | Deliver a rendered notification | reqwest, lettre | Recording fake |
+| `ReleaseFeed` | Ladderback's newest release: its version and whether it is a prerelease (§10.7; §16, decision 107) | reqwest `GET` of GitHub's latest-release API | Scripted fake that records when it was asked |
 | `HubLink` / `AgentLink` | Send `AgentReport`s to the hub / `HubCommand`s to an agent | WebSocket sync | In-memory pair |
 | `HookRunner` | Run hook commands with a scrubbed environment | Process spawner | Recording fake |
 

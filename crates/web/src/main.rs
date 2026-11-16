@@ -254,16 +254,16 @@ fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
 fn Account(
     localizer: Arc<Localizer>,
     standing: RwSignal<Standing>,
-    running: RwSignal<Option<api::BuildDto>>,
+    told: RwSignal<Option<session::Told>>,
     sign_out_failed: RwSignal<bool>,
 ) -> impl IntoView {
     let versions = Arc::clone(&localizer);
     let version = move || {
-        running.get().map(|build| {
+        told.get().map(|told| {
             let version = routes::text_with(
                 &versions,
                 msg::UI_VERSION,
-                &[("version", api::MsgArg::Text(build.display()))],
+                &[("version", api::MsgArg::Text(told.build.display()))],
             );
             view! { <p class="site-version">{version}</p> }
         })
@@ -331,8 +331,9 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // Only a change shows or takes away the dialog that asks to sign in
     // again: a request refused while it is open leaves it as it is.
     let asking = Memo::new(move |_| ended.get());
-    // The build the daemon runs, once it has told the page (decision 90).
-    let build = RwSignal::new(None::<api::BuildDto>);
+    // What the daemon runs, and the update it found, once it has told the
+    // page (decision 90, decision 107).
+    let told = RwSignal::new(None::<session::Told>);
     provide_context(standing);
     provide_context(notice);
     provide_context(sign_in::PasswordChanged(RwSignal::new(false)));
@@ -340,7 +341,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // before the choice reads it.
     let keep_offered = RwSignal::new(true);
     provide_context(sign_in::KeepOffered(keep_offered));
-    ws::watch_session(warning, ended, build, keep_offered);
+    ws::watch_session(warning, ended, told, keep_offered);
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
         let read = ws::session().await;
@@ -370,6 +371,29 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         sign_out_failed.update(|failed| *failed = standing.keeps_sign_out_failure(*failed));
     });
     let failure = Arc::clone(&localizer);
+    // The update the daemon's release check found, on a line of its own
+    // under the running version and Sign out, whose whole sentence links to
+    // the release's notes without telling GitHub the page it came from.
+    // Plain text, not a live region: only the announcer talks to screen
+    // readers (A3), and the header is read in order like the version before
+    // it.
+    let updates = Arc::clone(&localizer);
+    let update = move || {
+        told.get().and_then(|told| told.update).map(|update| {
+            let sentence = routes::text_with(
+                &updates,
+                msg::UI_UPDATE_AVAILABLE,
+                &[("version", api::MsgArg::Text(update.version))],
+            );
+            view! {
+                <p class="site-update">
+                    <a href=update.release_notes rel="noreferrer">
+                        {sentence}
+                    </a>
+                </p>
+            }
+        })
+    };
     let pages = Arc::clone(&localizer);
     let dialog = Arc::clone(&localizer);
     let idle = Arc::clone(&localizer);
@@ -414,9 +438,10 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                                 <Account
                                     localizer=Arc::clone(&account)
                                     standing=standing
-                                    running=build
+                                    told=told
                                     sign_out_failed=sign_out_failed
                                 />
+                                {update.clone()}
                             }
                         })
                 }}

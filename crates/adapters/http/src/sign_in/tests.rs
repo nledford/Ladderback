@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
+use api::BuildDto;
 use app::fakes::{FakeClock, InMemoryAdminPassword, InMemorySessionStore, SeededRandom};
 use app::ports::{AdminPassword, AdminPasswordError};
 use async_trait::async_trait;
@@ -237,6 +238,40 @@ async fn the_session_route_tells_a_build_with_no_known_commit_as_null() {
             "dirty": false,
             "release": false
         })
+    );
+}
+
+/// The session route's answer to a GET of it, from a daemon whose release
+/// check found `0.4.0`, under `sign_in`.
+async fn session_with_update(sign_in: &SignIn) -> serde_json::Value {
+    let mut state = test_state();
+    state.sign_in = sign_in.clone();
+    state
+        .updates
+        .show(Some(domain::updates::Version::parse("0.4.0").unwrap()));
+    let response = router(Arc::new(NoUi), RequestChecks::default(), state)
+        .oneshot(get(SESSION_PATH, &[]))
+        .await
+        .unwrap();
+    json(response).await
+}
+
+#[tokio::test]
+async fn the_session_route_tells_the_available_update_with_the_build() {
+    assert_eq!(
+        session_with_update(&sign_in_off()).await,
+        told_the_build(serde_json::json!({
+            "sign-in": "off",
+            "available-update": {
+                "version": "0.4.0",
+                "release-notes": "https://github.com/nledford/Ladderback/releases/tag/v0.4.0"
+            }
+        }))
+    );
+    // A page yet to sign in is told neither.
+    assert_eq!(
+        session_with_update(&on()).await,
+        serde_json::json!({ "sign-in": "signed-out", "keep-signed-in-offered": true })
     );
 }
 

@@ -13,8 +13,8 @@
 use std::sync::Arc;
 
 use api::{
-    AdminPasswordDto, BuildDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SetAdminPasswordDto,
-    SignInDto, SignInStateDto,
+    AdminPasswordDto, ErrorCode, ExposureDto, MsgArg, SessionDto, SetAdminPasswordDto, SignInDto,
+    SignInStateDto,
 };
 use app::access::{
     Access, PasswordChangeRefused, PasswordSet, PasswordWaiting, SetPasswordRefused, SignInRefused,
@@ -29,7 +29,7 @@ use axum::response::{IntoResponse, Response};
 use domain::SignedDuration;
 use domain::access::{CookieLife, PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS, Password, Token};
 
-use crate::{Exposure, refused, refused_with};
+use crate::{Exposure, Running, refused, refused_with};
 
 /// The session cookie's name.
 pub const COOKIE_NAME: &str = "ladderback-session";
@@ -197,13 +197,13 @@ fn session_cookie(token: &Token, life: CookieLife, secure: bool) -> Option<Heade
 pub(crate) async fn current(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
-    State(build): State<BuildDto>,
+    State(running): State<Running>,
     api_token: Option<axum::Extension<crate::api_tokens::TokenOf>>,
     headers: HeaderMap,
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
-        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, build),
+        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, running),
     };
     if api_token.is_some() {
         return answer_told(
@@ -212,7 +212,7 @@ pub(crate) async fn current(
             None,
             None,
             exposure,
-            Some(build),
+            Some(running),
         );
     }
     let token = session_token(&headers);
@@ -222,7 +222,7 @@ pub(crate) async fn current(
         None => None,
     };
     let (Some(session), Some(token)) = (live, token) else {
-        return answer_signed_out(&access, exposure, build);
+        return answer_signed_out(&access, exposure, running);
     };
     let mut response = answer(
         SignInStateDto::SignedIn,
@@ -234,7 +234,7 @@ pub(crate) async fn current(
         None,
         None,
         exposure,
-        build,
+        running,
     );
     if let Some(cookie) = session
         .renewed_cookie()
@@ -247,14 +247,14 @@ pub(crate) async fn current(
 
 /// The session route's answer to a page with no live session, saying
 /// whether the sign-in form offers Keep me signed in on this device.
-fn answer_signed_out(access: &Access, exposure: Exposure, build: BuildDto) -> Response {
+fn answer_signed_out(access: &Access, exposure: Exposure, running: Running) -> Response {
     answer(
         SignInStateDto::SignedOut,
         None,
         None,
         Some(access.offers_keep_signed_in()),
         exposure,
-        build,
+        running,
     )
 }
 
@@ -266,12 +266,12 @@ fn answer_signed_out(access: &Access, exposure: Exposure, build: BuildDto) -> Re
 pub(crate) async fn sign_in(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
-    State(build): State<BuildDto>,
+    State(running): State<Running>,
     request: Request,
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
-        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, build),
+        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, running),
     };
     // Each client's sign-ins wait on their own, keyed by the connection's
     // address (§10.1). A server that didn't hand it over would put every
@@ -325,7 +325,7 @@ pub(crate) async fn sign_in(
                 None,
                 None,
                 exposure,
-                build,
+                running,
             );
             if let Some(cookie) = session_cookie(&signed_in.token, signed_in.cookie, secure) {
                 response.headers_mut().insert(SET_COOKIE, cookie);
@@ -358,12 +358,12 @@ pub(crate) async fn sign_in(
 pub(crate) async fn sign_out(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
-    State(build): State<BuildDto>,
+    State(running): State<Running>,
     headers: HeaderMap,
 ) -> Response {
     let access = match sign_in {
         SignIn::On(access) => access,
-        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, build),
+        SignIn::Off { password, .. } => return answer_off(password.as_ref(), exposure, running),
     };
     if let Some(token) = session_token(&headers)
         && let Some(session) = access.peek(&token)
@@ -382,7 +382,7 @@ pub(crate) async fn sign_out(
             return response;
         }
     }
-    let mut response = answer_signed_out(&access, exposure, build);
+    let mut response = answer_signed_out(&access, exposure, running);
     forget_cookie(&mut response);
     response
 }
@@ -395,13 +395,13 @@ pub(crate) async fn sign_out(
 pub(crate) async fn sign_out_everywhere(
     State(sign_in): State<SignIn>,
     State(exposure): State<Exposure>,
-    State(build): State<BuildDto>,
+    State(running): State<Running>,
 ) -> Response {
     let SignIn::On(access) = sign_in else {
         return refused(StatusCode::CONFLICT, ErrorCode::SignInOff);
     };
     let mut response = match access.sign_out_everywhere().await {
-        Ok(()) => answer_signed_out(&access, exposure, build),
+        Ok(()) => answer_signed_out(&access, exposure, running),
         Err(error) => {
             // Every session has ended here, but the store still holds them
             // until its next write succeeds, and a restart before then
@@ -601,12 +601,12 @@ fn over_https(headers: &HeaderMap) -> bool {
 /// The session route's answer with sign-in off: an admin password kept since
 /// the daemon started, looked for now, waits for the next start to turn
 /// sign-in on (decision 70).
-fn answer_off(kept: &dyn AdminPassword, exposure: Exposure, build: BuildDto) -> Response {
+fn answer_off(kept: &dyn AdminPassword, exposure: Exposure, running: Running) -> Response {
     let waiting = PasswordWaiting::of(kept).map(|waiting| match waiting {
         PasswordWaiting::Set => AdminPasswordDto::Set,
         PasswordWaiting::Unreadable => AdminPasswordDto::Unreadable,
     });
-    answer(SignInStateDto::Off, None, waiting, None, exposure, build)
+    answer(SignInStateDto::Off, None, waiting, None, exposure, running)
 }
 
 /// What the session route says of a live session: its CSRF token, how long
@@ -622,38 +622,44 @@ struct LiveAnswer {
 /// daemon (so the page can say who can use it with sign-in off), for a live
 /// session what [`LiveAnswer`] holds, with sign-in off an admin password
 /// that waits for a restart, signed out whether the sign-in form offers Keep
-/// me signed in on this device, and, for a page that may see the pages, the
-/// `build` the daemon runs.
+/// me signed in on this device, and, for a page that may see the pages,
+/// what it is told of the daemon that runs.
 fn answer(
     sign_in: SignInStateDto,
     live: Option<LiveAnswer>,
     admin_password: Option<AdminPasswordDto>,
     keep_signed_in_offered: Option<bool>,
     exposure: Exposure,
-    build: BuildDto,
+    running: Running,
 ) -> Response {
     // A page yet to sign in isn't told the build, as it isn't shown the
-    // version (#502).
-    let build = matches!(sign_in, SignInStateDto::Off | SignInStateDto::SignedIn).then_some(build);
+    // version (#502), nor the available update.
+    let running =
+        matches!(sign_in, SignInStateDto::Off | SignInStateDto::SignedIn).then_some(running);
     answer_told(
         sign_in,
         live,
         admin_password,
         keep_signed_in_offered,
         exposure,
-        build,
+        running,
     )
 }
 
-/// [`answer`], telling `build` when there is one.
+/// [`answer`], telling the build and the available update when `running`
+/// is some.
 fn answer_told(
     sign_in: SignInStateDto,
     live: Option<LiveAnswer>,
     admin_password: Option<AdminPasswordDto>,
     keep_signed_in_offered: Option<bool>,
     exposure: Exposure,
-    build: Option<BuildDto>,
+    running: Option<Running>,
 ) -> Response {
+    let (build, available_update) = match running {
+        Some(running) => (Some(running.build), running.update),
+        None => (None, None),
+    };
     let (csrf_token, idle_seconds, ends_in_seconds) = match live {
         Some(live) => (
             Some(live.csrf),
@@ -676,6 +682,7 @@ fn answer_told(
             admin_password,
             keep_signed_in_offered,
             build,
+            available_update,
         }),
     )
         .into_response()

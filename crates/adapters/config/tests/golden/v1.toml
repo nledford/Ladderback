@@ -6,6 +6,7 @@ concurrency = 2
 nice = 10
 allow-hub-restore = true
 locale = "en-US"
+check-for-updates = false
 
 [hooks]
 run-before = ["echo 'agent starting'"]

@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use app::ports::{
     EngineResult, HistoryPage, HistoryQuery, OperationDetail, OperationStore, PendingRetry,
-    PlannedRun, Recovered, ScheduleStore, Start, StoreError, maintained_repository,
+    PlannedRun, Recovered, ReleaseCheck, ScheduleStore, Start, StoreError, maintained_repository,
 };
 use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
@@ -674,6 +674,26 @@ impl ScheduleStore for SqliteStore {
         let _call = self.call().await;
         sqlx::query(sql::DROP_RETRY)
             .bind(plan.as_str())
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
+    }
+
+    async fn release_check(&self) -> Result<Option<ReleaseCheck>, StoreError> {
+        let _call = self.call().await;
+        let found = sqlx::query(sql::RELEASE_CHECK)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        found.as_ref().map(row::release_check).transpose()
+    }
+
+    async fn keep_release_check(&self, check: &ReleaseCheck) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        sqlx::query(sql::KEEP_RELEASE_CHECK)
+            .bind(check.at.as_millisecond())
+            .bind(check.update.as_ref().map(ToString::to_string))
             .execute(&self.pool)
             .await
             .map_err(unavailable)?;
