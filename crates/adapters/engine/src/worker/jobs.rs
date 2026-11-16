@@ -274,6 +274,11 @@ pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobErro
     // step that can now take its time, as `identify` does. It names no
     // repository opened: its result names the one it makes.
     ctx.start(None, None)?;
+    // rustic writes the cold half before the hot one: a refusal of a half's
+    // credentials is asked for first, so none is written (#521).
+    if let Some(refused) = location::halves_refusal(spec) {
+        return Err(refused);
+    }
     let repository = repository
         .init(
             &Credentials::password(spec.password.expose()),

@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use api::ErrorCode;
 use domain::RepositoryId;
+use domain::execution::RepositoryHalf;
 use reqwest::StatusCode;
 use rustic_backend::util::{BackendLocation, location_to_type_and_path};
 use rustic_backend::{BackendOptions, RestBackend, SupportedBackend};
@@ -191,34 +192,75 @@ fn refused(error: &RusticError) -> bool {
 }
 
 /// The refusal a REST server the repository is on gave its credentials
-/// (HTTP 401 or 403), if one did, as the failed opening's `error` tells it.
-/// rustic's REST backend reads the config with a `HEAD` and takes any status
-/// but success for "no config file", dropping the status (`rest.rs`). So
-/// when the error holds no answer of a server, and only then, each half on
-/// a REST server lists its keys, a `GET` whose status rustic keeps, once,
-/// without retrying. No other half is set up again: an rclone half starts a
-/// process, and one on OpenDAL's `fs` makes its root folder.
-fn refusal(spec: &RepositorySpec, error: &RusticError) -> Option<StatusCode> {
-    match answer(error) {
-        Some(status) => status.filter(refuses),
-        None => rest_halves(spec).find_map(|(location, options)| {
-            let listed =
-                RestBackend::new(location, options).and_then(|backend| backend.list(FileType::Key));
-            answer(listed.err()?.as_ref()).flatten().filter(refuses)
-        }),
-    }
+/// (HTTP 401 or 403), if one did, as the failed opening's `error` tells it,
+/// with the half whose server refused for a hot/cold repository. rustic's
+/// REST backend reads the config with a `HEAD` and takes any status but
+/// success for "no config file", dropping the status (`rest.rs`). So when
+/// the error holds no answer of a server, or the repository has two halves
+/// and the error can't say whose server answered, each half on a REST server
+/// lists its keys ([`listing_refusal`]).
+fn refusal(
+    spec: &RepositorySpec,
+    error: &RusticError,
+) -> Option<(StatusCode, Option<RepositoryHalf>)> {
+    let (status, half) = match answer(error) {
+        Some(status) => {
+            let status = status.filter(refuses)?;
+            match spec.repo_hot {
+                Some(_) => listing_refusal(spec).unwrap_or((status, None)),
+                None => (status, None),
+            }
+        }
+        None => listing_refusal(spec)?,
+    };
+    Some((status, half.filter(|_| spec.repo_hot.is_some())))
+}
+
+/// The first half on a REST server, the cold one first, whose server
+/// refuses the credentials when it lists its keys: a `GET` whose status
+/// rustic keeps, once, without retrying. No other half is set up again: an
+/// rclone half starts a process, and one on OpenDAL's `fs` makes its root
+/// folder.
+fn listing_refusal(spec: &RepositorySpec) -> Option<(StatusCode, Option<RepositoryHalf>)> {
+    rest_halves(spec).find_map(|(half, location, options)| {
+        let listed =
+            RestBackend::new(location, options).and_then(|backend| backend.list(FileType::Key));
+        answer(listed.err()?.as_ref())
+            .flatten()
+            .filter(refuses)
+            .map(|status| (status, Some(half)))
+    })
 }
 
 /// The job's failure when a REST server the repository is on refused its
 /// credentials, as [`refusal`] tells it from `error`: opening's and creating's
 /// one check (#478, #484).
 pub(crate) fn credentials_refused(spec: &RepositorySpec, error: &RusticError) -> Option<JobError> {
-    refusal(spec, error).map(|status| JobError::Failed {
-        code: ErrorCode::CredentialsRefused,
+    refusal(spec, error).map(|(status, half)| refused_by(status, half))
+}
+
+/// The job's failure, before a hot/cold repository is created, when the
+/// server of one of its halves on a REST server refuses the credentials.
+/// rustic writes the cold half first, so a refusal of the hot half's would
+/// come only after the cold half was written (#521); asking first writes
+/// nothing.
+pub(crate) fn halves_refusal(spec: &RepositorySpec) -> Option<JobError> {
+    spec.repo_hot.as_ref()?;
+    listing_refusal(spec).map(|(status, half)| refused_by(status, half))
+}
+
+/// `credentials-refused`, naming `half` when there is one.
+fn refused_by(status: StatusCode, half: Option<RepositoryHalf>) -> JobError {
+    let server = match half {
+        Some(half) => format!("the server of the {} half", half.code()),
+        None => "the server".to_owned(),
+    };
+    JobError::CredentialsRefused {
+        half,
         detail: format!(
-            "the server answered {status}: it refused the credentials sent for the repository"
+            "{server} answered {status}: it refused the credentials sent for the repository"
         ),
-    })
+    }
 }
 
 /// What `error`'s chain says of an HTTP request: `None` when it holds no
@@ -235,24 +277,31 @@ fn refuses(status: &StatusCode) -> bool {
     matches!(*status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
 }
 
-/// Each half of the repository on a REST server, the cold one first: its
-/// location, and its options as rustic gives them to it (`options_cold` or
-/// `options_hot` over `options`), with retries off.
+/// Each half of the repository on a REST server, the cold one first: which
+/// half, its location, and its options as rustic gives them to it
+/// (`options_cold` or `options_hot` over `options`), with retries off.
 fn rest_halves(
     spec: &RepositorySpec,
-) -> impl Iterator<Item = (BackendLocation, BTreeMap<String, String>)> + '_ {
-    let cold = (spec.repository.as_str(), &spec.options_cold);
-    let hot = spec.repo_hot.as_deref().map(|hot| (hot, &spec.options_hot));
+) -> impl Iterator<Item = (RepositoryHalf, BackendLocation, BTreeMap<String, String>)> + '_ {
+    let cold = (
+        RepositoryHalf::Cold,
+        spec.repository.as_str(),
+        &spec.options_cold,
+    );
+    let hot = spec
+        .repo_hot
+        .as_deref()
+        .map(|hot| (RepositoryHalf::Hot, hot, &spec.options_hot));
     std::iter::once(cold)
         .chain(hot)
-        .filter_map(|(location, half_options)| {
+        .filter_map(|(half, location, half_options)| {
             let Ok((SupportedBackend::Rest, location)) = location_to_type_and_path(location) else {
                 return None;
             };
             let mut options = spec.options.clone();
             options.extend(half_options.clone());
             options.insert("retry".to_owned(), "off".to_owned());
-            Some((location, options))
+            Some((half, location, options))
         })
 }
 
