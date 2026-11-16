@@ -156,12 +156,27 @@ fn original_path(names: &[OsString]) -> Result<String, JobError> {
 
 /// Makes the restore's new folder, with the folders above it it needs. The
 /// folder itself is made exclusively: one that is there already is refused,
-/// so nothing in it is touched.
+/// so nothing in it is touched. Each folder it makes is the owner's alone
+/// (0700 on Unix), whatever the umask: rustic sets the modes of the entry's
+/// contents but not of the folder they land in, and what a snapshot holds
+/// may be private, so another user of the machine never reads it there.
 fn new_folder(path: &Path) -> Result<(), JobError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| folder_failure(path, &error))?;
+        private_folder()
+            .recursive(true)
+            .create(parent)
+            .map_err(|error| folder_failure(path, &error))?;
     }
-    fs::create_dir(path).map_err(|error| folder_failure(path, &error))
+    private_folder()
+        .create(path)
+        .map_err(|error| folder_failure(path, &error))
+}
+
+fn private_folder() -> fs::DirBuilder {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder
 }
 
 fn folder_failure(path: &Path, error: &io::Error) -> JobError {

@@ -151,6 +151,29 @@ async fn a_new_folder_that_is_there_already_is_refused_and_nothing_in_it_is_touc
     assert!(!folder.join("report.txt").exists());
 }
 
+/// The new folder holds what the snapshot holds, which may be private: it
+/// and the folders above it the worker makes are the owner's alone, whatever
+/// the umask, since rustic sets the modes of the entry's contents only.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_new_folder_and_the_folders_made_above_it_are_the_owner_s_alone() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let restorable = Restorable::new().await;
+    let folder = restorable.new_folder();
+
+    let events = restorable
+        .restore("docs", RestoreTarget::NewFolder(text(&folder)))
+        .await;
+
+    succeeded(&events);
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        (mode(&folder), mode(folder.parent().unwrap())),
+        (0o700, 0o700)
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn a_new_folder_that_cannot_be_made_fails_as_an_unwritable_target() {
