@@ -2886,6 +2886,19 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_shows_what_it_binds_to_and_hides_its_confirmation() {
+        let approval = ApproveProposalDto {
+            revision: "demo-revision".to_owned(),
+            diff_hash: "demo-diff".to_owned(),
+            confirmation: "canary-admin-password".to_owned(),
+        };
+        assert_eq!(
+            format!("{approval:?}"),
+            r#"ApproveProposalDto { revision: "demo-revision", diff_hash: "demo-diff", confirmation: "[hidden]" }"#
+        );
+    }
+
+    #[test]
     fn a_restore_request_travels_in_kebab_case_and_its_debug_hides_the_confirmation() {
         let request: RestoreRequestDto = serde_json::from_str(
             r#"{"path":"home/docs","destination":"in-place","confirmation":"canary-admin-password"}"#,

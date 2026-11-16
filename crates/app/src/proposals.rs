@@ -119,8 +119,9 @@ pub struct Review {
     pub rejected: usize,
 }
 
-/// A person's approval of a proposal, as the page sends it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A person's approval of a proposal, as the page sends it. The
+/// confirmation is never logged or shown (I4): its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ApprovalAsk {
     /// What the page showed.
     pub shown: Shown,
@@ -130,6 +131,16 @@ pub struct ApprovalAsk {
     /// The browser's address, whose sign-in waits a wrong password counts
     /// against.
     pub address: IpAddr,
+}
+
+impl std::fmt::Debug for ApprovalAsk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApprovalAsk")
+            .field("shown", &self.shown)
+            .field("confirmation", &"[hidden]")
+            .field("address", &self.address)
+            .finish()
+    }
 }
 
 /// What [`Proposals`] works with.

@@ -610,12 +610,18 @@ fn an_approval_never_shows_its_confirmation() {
         address: HOME.ip(),
         confirmation: "canary-step-up".to_owned(),
     };
-    assert!(!format!("{approval:?}").contains("canary"));
+    let shown = format!("{approval:?}");
+    assert!(shown.starts_with("Approval "), "{shown}");
+    assert!(shown.contains("confirmation: \"[hidden]\""), "{shown}");
+    assert!(!shown.contains("canary"), "{shown}");
     let body: api::ApproveProposalDto = serde_json::from_str(
         r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"canary-step-up"}"#,
     )
     .unwrap();
-    assert!(!format!("{body:?}").contains("canary"));
+    let shown = format!("{body:?}");
+    assert!(shown.starts_with("ApproveProposalDto"), "{shown}");
+    assert!(shown.contains("confirmation: \"[hidden]\""), "{shown}");
+    assert!(!shown.contains("canary"), "{shown}");
 }
 
 #[tokio::test]

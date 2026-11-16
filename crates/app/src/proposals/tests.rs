@@ -336,6 +336,25 @@ async fn as_shown(world: &World, id: &ProposalId) -> ApprovalAsk {
     }
 }
 
+#[test]
+fn an_approval_ask_never_shows_its_confirmation() {
+    let ask = ApprovalAsk {
+        shown: Shown {
+            revision: ShownRevision::of(
+                &RevisionKey::new([7; domain::planning::REVISION_KEY_BYTES]),
+                &ConfigRevision::of(b""),
+            ),
+            diff: DiffHash::of(""),
+        },
+        confirmation: "canary-admin-password".to_owned(),
+        address: HOME,
+    };
+    let shown = format!("{ask:?}");
+    assert!(shown.starts_with("ApprovalAsk"), "{shown}");
+    assert!(shown.contains("confirmation: \"[hidden]\""), "{shown}");
+    assert!(!shown.contains("canary-admin-password"), "{shown}");
+}
+
 #[tokio::test]
 async fn a_review_shows_the_diff_it_binds_an_approval_to_and_whether_the_file_changed() {
     let world = world().await;
