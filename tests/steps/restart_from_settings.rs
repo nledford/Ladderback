@@ -160,3 +160,24 @@ async fn a_prune_is_refused(agent: &mut Agent, code: String) {
         "the prune was answered {status}: {body}"
     );
 }
+
+/// A download of a snapshot's file, confirmed by its short ID as with
+/// sign-in off: refused before the snapshot is looked for.
+#[then(expr = "a download from the repository is refused with the code {string}")]
+async fn a_download_is_refused(agent: &mut Agent, code: String) {
+    let addr = agent.events.addr();
+    let (status, body) = blocking(move || {
+        super::operations_steps::exchange_at(
+            addr,
+            "POST",
+            "/api/v1/repositories/demo/snapshots/3f2a1b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708/download",
+            r#"{"path":"source/notes.txt","format":"tar","confirmation":"3f2a1b4c"}"#,
+        )
+    })
+    .await;
+    assert_eq!(
+        code_of(status, &body),
+        code,
+        "the download was answered {status}: {body}"
+    );
+}

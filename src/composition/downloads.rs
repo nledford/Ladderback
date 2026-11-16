@@ -16,7 +16,7 @@ use http_adapter::{DownloadRefusal, DownloadStart, Handover, MaintenanceRefusal,
 use platform::SystemClock;
 use uuid::Uuid;
 
-use super::{PlanRunner, maintenance};
+use super::{PlanRunner, maintenance, runs};
 
 /// How often the downloads whose minute ran out are given up, when no
 /// other download asks first: their engine jobs stop and their turns are
@@ -27,6 +27,7 @@ const SWEEP_EVERY: Duration = Duration::from_secs(10);
 pub(super) struct DownloadService {
     downloads: Arc<Downloads>,
     config: Arc<dyn ConfigStore>,
+    runs: runs::Runs,
 }
 
 impl DownloadService {
@@ -51,6 +52,7 @@ impl DownloadService {
         Self {
             downloads,
             config: Arc::clone(&runner.config),
+            runs: runner.runs.clone(),
         }
     }
 }
@@ -106,12 +108,24 @@ async fn refusal(
 impl http_adapter::Downloads for DownloadService {
     /// Confirms the download on a task of its own, as a restore's start
     /// does: a client that hangs up can't drop the record of the download
-    /// halfway, and the route waits for its answer.
+    /// halfway, and the route waits for its answer. While a restart waits
+    /// for the running operations, none is confirmed, as no restore starts
+    /// then; one being handed over doesn't hold the restart off, which cuts
+    /// it short.
     async fn start(
         &self,
         repository: String,
         start: DownloadStart,
     ) -> Result<DownloadTicket, DownloadRefusal> {
+        if self.runs.held() {
+            return Err(DownloadRefusal::Repository(
+                MaintenanceRefusal::Unavailable {
+                    code: api::ErrorCode::RestartPending,
+                    args: Vec::new(),
+                    detail: None,
+                },
+            ));
+        }
         let alias = RepositoryAlias::parse(&repository)
             .map_err(|_| DownloadRefusal::Repository(MaintenanceRefusal::UnknownRepository))?;
         let DownloadStart {

@@ -8,11 +8,13 @@ Feature: Restarting Ladderback from Settings
 
   The admin chooses when. Once the running operations finish is the
   default: from then on the daemon starts no new operation, neither a queued
-  backup nor maintenance, and it stops once none is running. Queued backups
-  stay queued for the next start (decision 73). Until then the admin may
-  cancel the restart, and the daemon starts its queued operations again. Now
-  stops at once: every run is frozen, and each operation still running is
-  recorded as ended by the stop.
+  backup nor maintenance, a restore or a download, and it stops once none is
+  running. Queued backups stay queued for the next start (decision 73). A
+  download being handed over doesn't hold the restart off: the stop cuts it
+  short, and the browser fails it. Until then the admin may cancel the
+  restart, and the daemon starts its queued operations again. Now stops at
+  once: every run is frozen, and each operation still running is recorded as
+  ended by the stop.
 
   The daemon can only stop; its service manager brings it back. So a restart
   is offered only to a daemon its service file says a service manager runs
@@ -39,6 +41,7 @@ Feature: Restarting Ladderback from Settings
     Then the request is accepted
     And Ladderback says a restart waits for the running operations
     And a prune of the repository is refused with the code "restart-pending"
+    And a download from the repository is refused with the code "restart-pending"
     And the daemon is still serving
     When the plan's after hook is let go
     Then the daemon exits of itself with the restart status
