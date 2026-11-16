@@ -155,6 +155,17 @@ impl ProcessHookRunner {
         self
     }
 
+    /// Starts hooks with `vars` as the environment they are scrubbed from,
+    /// instead of this process's own.
+    #[must_use]
+    pub fn with_environment(
+        self,
+        vars: impl IntoIterator<Item = (impl Into<OsString>, impl Into<OsString>)>,
+    ) -> Self {
+        let _ = (self, vars.into_iter().count());
+        todo!()
+    }
+
     /// Runs one hook to its end, or stops it at `self.timeout`. What was
     /// read until then is kept either way.
     async fn spawn_and_wait(
