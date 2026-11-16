@@ -86,6 +86,13 @@ impl Held {
     }
 }
 
+/// What a server says its refusals through: the locale of the environment
+/// the session runs in, found as for the command line's own messages, since
+/// an MCP client asks for none (§4.6, §8.4).
+fn localizer() -> l10n::Localizer {
+    l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences())
+}
+
 /// The server for a session that drives the daemon at `daemon`, sending the
 /// API token of `token_file`, or else of `mcp-token` in the configuration
 /// folder `config_dir`, when either holds one.
@@ -111,6 +118,7 @@ pub(crate) fn connect(
     Ok(::mcp::Server::new(
         Arc::new(backend),
         crate::build_info::running(),
+        localizer(),
     ))
 }
 
@@ -353,6 +361,7 @@ fn in_process(daemon: Daemon, scratch: Option<Scratch>) -> (::mcp::Server, Held)
     let server = ::mcp::Server::new(
         Arc::new(InProcess::over(&state)),
         crate::build_info::running(),
+        localizer(),
     );
     let held = Held {
         log,

@@ -13,6 +13,8 @@ api = { workspace = true, features = ["schemars"] }
 async-trait.workspace = true
 # The tag that names a snapshot's plan, which `list_snapshots` filters by.
 domain.workspace = true
+# A refusal's sentence, in the catalog's words beside its code (§4.6).
+l10n.workspace = true
 # Connect mode's client of the daemon's API (§4.6): no defaults, rustls for an
 # `https` daemon.
 reqwest.workspace = true
@@ -31,6 +33,8 @@ uuid.workspace = true
 # `adapters/http` (§3.2).
 axum.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "test-util"] }
+# The pseudolocales, so a test can tell a sentence in another locale apart.
+l10n = { workspace = true, features = ["pseudo"] }
 
 [lints]
 workspace = true

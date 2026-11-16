@@ -30,6 +30,7 @@ use api::{
     ProfileExportDto, ProfileImportDto, RepositoriesDto, SnapshotsDto,
 };
 use async_trait::async_trait;
+use l10n::Localizer;
 use rmcp::handler::server::tool::{schema_for_input, schema_for_output};
 use rmcp::model::{
     CallToolRequestMethod, CallToolRequestParams, CallToolResponse, CallToolResult, ConstString,
@@ -330,10 +331,11 @@ struct Status {
 }
 
 /// The MCP server: the tools over a [`Backend`], for one session on one pair
-/// of streams.
+/// of streams, saying each refusal in the catalog's words of its locale.
 pub struct Server {
     backend: Arc<dyn Backend>,
     build: BuildDto,
+    localizer: Localizer,
 }
 
 /// Why a session ended other than by the client closing its input.
@@ -350,9 +352,22 @@ impl std::error::Error for SessionFailed {}
 
 impl Server {
     /// A server whose tools reach Ladderback through `backend`, naming
-    /// `build` as this program's.
-    pub fn new(backend: Arc<dyn Backend>, build: BuildDto) -> Self {
-        Self { backend, build }
+    /// `build` as this program's, and saying refusals through `localizer`:
+    /// in the locale of the environment it runs in, as the command line's
+    /// own messages are (§4.6, §8.4).
+    pub fn new(backend: Arc<dyn Backend>, build: BuildDto, localizer: Localizer) -> Self {
+        Self {
+            backend,
+            build,
+            localizer,
+        }
+    }
+
+    /// The sentence the catalog says `error` in, in the server's locale,
+    /// with the code's own arguments and detail: what an AI agent, or the
+    /// person it relays the refusal to, reads to know what to do next.
+    pub fn sentence(&self, _error: &ErrorDto) -> String {
+        todo!()
     }
 
     /// Serves one session: reads requests from `input` and writes answers to

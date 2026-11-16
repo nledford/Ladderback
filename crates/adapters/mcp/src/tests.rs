@@ -139,7 +139,7 @@ fn connect(backend: impl Backend) -> Client {
 fn connect_to(backend: Arc<dyn Backend>) -> Client {
     let (client, server) = tokio::io::duplex(64 * 1024);
     let (server_input, server_output) = tokio::io::split(server);
-    let server = Server::new(backend, build());
+    let server = Server::new(backend, build(), english());
     let session = tokio::spawn(server.serve(server_input, server_output));
     let (output, input) = tokio::io::split(client);
     Client {
@@ -430,7 +430,7 @@ async fn a_refusal_from_the_backend_is_a_result_marked_as_an_error() {
 }
 
 /// The `{code, args}` of a refusal: a result marked as an error, with no
-/// `structuredContent`, whose one text content holds it as JSON.
+/// `structuredContent`, whose first text content holds it as JSON.
 fn refusal(answer: &Value) -> Value {
     let result = &answer["result"];
     assert_eq!(result["isError"], true, "{answer}");
@@ -439,6 +439,100 @@ fn refusal(answer: &Value) -> Value {
         .as_str()
         .unwrap_or_else(|| panic!("no text: {answer}"));
     serde_json::from_str(text).unwrap_or_else(|error| panic!("{error}: {text}"))
+}
+
+/// The sentence a refusal says after its `{code, args}`: its second and last
+/// text content.
+fn said(answer: &Value) -> &str {
+    let content = answer["result"]["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no content: {answer}"));
+    assert_eq!(content.len(), 2, "{answer}");
+    assert_eq!(content[1]["type"], "text", "{answer}");
+    content[1]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no sentence: {answer}"))
+}
+
+/// The localizer of a server whose environment asks for no locale.
+fn english() -> Localizer {
+    Localizer::new(&[])
+}
+
+/// The localizer of a server whose environment asks for the pseudolocale
+/// `en-XA` (§8.4, "Checking your text").
+fn pseudo() -> Localizer {
+    let environment = l10n::PosixEnv::from_lookup(|name| match name {
+        "LANG" => Some("en_US.UTF-8".to_owned()),
+        "LANGUAGE" => Some("en-XA".to_owned()),
+        _ => None,
+    });
+    Localizer::new(&environment.preferences())
+}
+
+/// What the catalog of `localizer` says of the error `code` with `args`
+/// and `detail`.
+fn catalog(
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(&str, api::MsgArg)],
+    detail: Option<&str>,
+) -> String {
+    localizer.error(code, args, detail).into_text()
+}
+
+/// A refusal keeps its `{code, args}` for a client to branch on, and says
+/// after it, in the catalog's words, what the agent can do next (§4.6).
+#[tokio::test(start_paused = true)]
+async fn a_refusal_says_the_catalogs_sentence_after_its_code() {
+    let scope = [("scope", api::MsgArg::Text("run".to_owned()))];
+    let refused = ErrorDto::new(ErrorCode::ApiTokenScope, scope.clone(), None);
+    let mut client = connect(Told(Err(refused.clone())));
+    let answer = client.call_status(json!({})).await;
+    assert_eq!(refusal(&answer), serde_json::to_value(&refused).unwrap());
+    assert_eq!(
+        said(&answer),
+        catalog(&english(), ErrorCode::ApiTokenScope, &scope, None)
+    );
+}
+
+/// The sentence carries the sender's own words where the catalog puts them.
+#[tokio::test(start_paused = true)]
+async fn a_refusals_sentence_holds_its_detail() {
+    let refused = ErrorDto::new(
+        ErrorCode::OperationFailed,
+        [],
+        Some("the disk is full".to_owned()),
+    );
+    let mut client = connect(Told(Err(refused)));
+    let answer = client.call_status(json!({})).await;
+    let expected = catalog(
+        &english(),
+        ErrorCode::OperationFailed,
+        &[],
+        Some("the disk is full"),
+    );
+    assert!(expected.contains("the disk is full"), "{expected}");
+    assert_eq!(said(&answer), expected);
+}
+
+/// The sentence is in the server's locale, which the environment it runs in
+/// chose, never fixed English.
+#[test]
+fn a_refusal_is_said_in_the_locale_the_server_was_given() {
+    let plan = [("plan", api::MsgArg::Text("home".to_owned()))];
+    let error = ErrorDto::new(ErrorCode::PlanUnknown, plan.clone(), None);
+    let server = Server::new(Arc::new(told()), build(), pseudo());
+    let sentence = server.sentence(&error);
+    assert_eq!(
+        sentence,
+        catalog(&pseudo(), ErrorCode::PlanUnknown, &plan, None)
+    );
+    assert_ne!(
+        sentence,
+        catalog(&english(), ErrorCode::PlanUnknown, &plan, None)
+    );
+    assert!(sentence.contains("home"), "{sentence}");
 }
 
 #[tokio::test(start_paused = true)]
@@ -1991,7 +2085,7 @@ fn a_calls_line_is_its_tool_with_its_result_or_its_refusal() {
 /// `backend`.
 fn both_over(backend: impl Backend) -> (Client, Server) {
     let backend: Arc<dyn Backend> = Arc::new(backend);
-    let server = Server::new(Arc::clone(&backend), build());
+    let server = Server::new(Arc::clone(&backend), build(), english());
     (connect_to(backend), server)
 }
 
@@ -2045,6 +2139,7 @@ async fn a_one_shot_call_answers_as_a_tools_call_does() {
                     serde_json::to_value(&error).unwrap(),
                     "{tool}"
                 );
+                assert_eq!(said(&answer), server.sentence(&error), "{tool}");
             }
             Answer::Unwritten(why) => panic!("{tool}: unwritten: {why}"),
         }
@@ -2065,7 +2160,7 @@ async fn a_one_shot_wait_waits_its_length_with_no_client() {
         }),
         ..Lists::default()
     };
-    let server = Server::new(Arc::new(lists), build());
+    let server = Server::new(Arc::new(lists), build(), english());
     let call = Call::of_line(
         &json!({"tool": "wait_operation", "arguments": {"operation": id, "timeout": 3}})
             .to_string(),

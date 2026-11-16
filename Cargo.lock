@@ -3628,6 +3628,7 @@ dependencies = [
  "async-trait",
  "axum",
  "domain",
+ "l10n",
  "reqwest",
  "rmcp",
  "serde",

@@ -109,7 +109,16 @@ pub(super) fn temporary_folder(scratch: &Path) -> PathBuf {
 
 impl Session {
     fn start(scratch: &Path, root: &Path, args: &[&str]) -> Self {
+        Self::start_in(scratch, root, args, None)
+    }
+
+    /// Starts the server in an environment that asks for `language`, when
+    /// it names one; in one that asks for none (`C`) otherwise.
+    fn start_in(scratch: &Path, root: &Path, args: &[&str], language: Option<&str>) -> Self {
         let (mut command, log) = mcp_command(scratch, root, args);
+        if let Some(language) = language {
+            command.envs(environment_asking_for(language));
+        }
         command.stdin(Stdio::piped());
         let child = Owned::spawn(&mut command).expect("ladderback mcp starts");
         let input = child.take_stdin();
@@ -319,6 +328,38 @@ fn refusal_of(result: &Value) -> Value {
     serde_json::from_str(text).unwrap_or_else(|error| panic!("{error}: {text}"))
 }
 
+/// The environment of a server asking for `language`: a locale that isn't
+/// `C`, so `LANGUAGE` is honored (§8.4, "Checking your text").
+fn environment_asking_for(language: &str) -> [(&'static str, String); 2] {
+    [
+        ("LC_ALL", "en_US.UTF-8".to_owned()),
+        ("LANGUAGE", language.to_owned()),
+    ]
+}
+
+/// What the catalog says of the refusal `error`, a `{code, args, detail}`,
+/// in an environment asking for `language`, as the command line finds it.
+pub(super) fn catalog_sentence(language: &str, error: &Value) -> String {
+    let error: api::ErrorDto = serde_json::from_value(error.clone())
+        .unwrap_or_else(|failure| panic!("not a refusal ({failure}): {error}"));
+    let environment = environment_asking_for(language);
+    let preferences = l10n::PosixEnv::from_lookup(|name| {
+        environment
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.clone())
+    })
+    .preferences();
+    let args: Vec<(&str, MsgArg)> = error
+        .args
+        .iter()
+        .map(|(name, arg)| (name.as_str(), arg.clone()))
+        .collect();
+    Localizer::new(&preferences)
+        .error(error.code, &args, error.detail.as_deref())
+        .into_text()
+}
+
 /// The address of the daemon the scenario started: the one `Ladderback is
 /// serving on loopback` started, or the one started with a plan, which the
 /// operation steps drive.
@@ -457,6 +498,17 @@ fn headless_refused(agent: &mut Agent) {
 async fn in_a_scratch_folder(agent: &mut Agent) {
     let root = agent.scratch().join("mcp");
     start_serving(agent, root, &["--scratch"]).await;
+}
+
+#[given(expr = "an MCP server running in a scratch folder in the language {string}")]
+async fn in_a_scratch_folder_in(agent: &mut Agent, language: String) {
+    let scratch = agent.scratch().to_owned();
+    let root = scratch.join("mcp");
+    let session =
+        blocking(move || Session::start_in(&scratch, &root, &["--scratch"], Some(&language))).await;
+    agent.mcp.session = Some(session);
+    ask(agent, "server/discover", current(json!({}))).await;
+    result(agent);
 }
 
 #[given("a scratch folder a crashed session left behind")]
@@ -671,6 +723,24 @@ fn sign_in_off_on_loopback(agent: &mut Agent) {
 fn result_is_the_error(agent: &mut Agent, code: String) {
     let refusal = refusal_of(result(agent));
     assert_eq!(refusal["code"], code.as_str(), "{refusal}");
+}
+
+#[then(expr = "after its code the error is said in {string} as the catalog says it")]
+fn error_is_said(agent: &mut Agent, language: String) {
+    let result = result(agent);
+    let refusal = refusal_of(result);
+    let content = result["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no content: {result}"));
+    assert_eq!(content.len(), 2, "{result}");
+    assert_eq!(content[1]["type"], "text", "{result}");
+    let expected = catalog_sentence(&language, &refusal);
+    assert_eq!(content[1]["text"], expected, "{result}");
+    // Another language's sentence isn't the English one, so a server that
+    // said English whatever was asked can't pass.
+    if language != "en-US" {
+        assert_ne!(expected, catalog_sentence("en-US", &refusal), "{result}");
+    }
 }
 
 #[then(expr = "the error names the scope {string}")]
