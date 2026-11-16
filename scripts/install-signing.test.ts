@@ -219,12 +219,11 @@ test("install-restart warns of the keychain, Photos and Full Disk Access for an 
   assert.equal(reinstallWarning({ [IDENTITY_VARIABLE]: NAME }, "linux"), undefined);
 });
 
-test("install-restart says a signed build's grants should carry over, still unconfirmed, and the keychain may ask", () => {
+test("install-restart says a signed build keeps its grants, as tested on a Mac", () => {
   const note = reinstallWarning({ [IDENTITY_VARIABLE]: NAME }, "darwin") ?? "";
-  assert.match(note, new RegExp(`signed with "${NAME}", so macOS should keep the Full Disk Access and Photos grants`));
-  assert.match(note, /still being confirmed \(#281\)/);
-  assert.match(note, /the keychain may still ask again/);
-  assert.doesNotMatch(note, /Photos and Full Disk Access may need granting again/);
+  assert.match(note, new RegExp(`signed with "${NAME}", so macOS keeps the Full Disk Access, Photos and keychain grants`));
+  assert.doesNotMatch(note, /still being confirmed/);
+  assert.doesNotMatch(note, /may need granting again|may still ask/);
 });
 
 test("cargo install's bin folder: CARGO_INSTALL_ROOT, then CARGO_HOME, then ~/.cargo", () => {

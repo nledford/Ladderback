@@ -10,9 +10,16 @@
 - **The name:** the person names the identity in `LADDERBACK_SIGN_IDENTITY`, by its name or its SHA-1 hash, which `just install` and so `just install-restart` read; not a recipe argument, as the recipes' arguments go to `cargo install`.
 - **The identifier:** `io.github.nledford.ladderback`, the launchd agent's label.
 - **Refused before the build:** a name that `security find-identity -v -p codesigning` doesn't list as a valid identity's whole name or hash, or lists more than once, so a mistyped or untrusted certificate installs nothing. After the install it signs with that identity's hash, as `codesign` would also take a name as part of a longer one, then runs `codesign --verify` (scripts/install-signing.ts). A signing that fails then leaves the new binary installed, says how it is signed, and fails the recipe.
-- **The warning:** after a restart, `install-restart` warns that the keychain, Photos and Full Disk Access ask again for a build signed ad hoc; for a signed one, it says those grants should carry over, which is still unconfirmed, and that the keychain may still ask.
+- **The note:** after a restart, `install-restart` warns that the keychain, Photos and Full Disk Access ask again for a build signed ad hoc, and says for a signed one that those grants carry over.
 
-Making the certificate is in the [install guide](../../guide/install.md#signing-your-build). The checks on a Mac are still to run: the Full Disk Access and Photos grants across an upgrade, the keychain's "Always Allow" across one (a certificate without an Apple team ID may not carry it), the grant reaching the worker, and the bare binary in System Settings.
+Making the certificate is in the [install guide](../../guide/install.md#signing-your-build).
+
+**Tested on a Mac, 2026-11-16 (macOS 27.3; #281):** with a self-signed certificate, a rebuild of an empty commit had a new code hash and the same designated requirement, and macOS asked for nothing on it:
+
+- the Full Disk Access grant given to the first signed build held, and the next backup of the whole home folder ended `succeeded`, with no `source-unreadable`;
+- the grant on the launchd daemon reaches its `worker` child, which needs none of its own (§17, question 2);
+- a keychain item's "Always Allow", answered once for the first signed build, carried over, though the certificate has no Apple team ID;
+- System Settings accepts the bare binary, `~/.cargo/bin/ladderback`.
 
 Why:
 
