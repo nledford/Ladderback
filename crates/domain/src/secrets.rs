@@ -14,6 +14,7 @@ mod outcome;
 mod properties;
 mod source;
 mod template;
+mod toml_read;
 
 pub use command::{CommandLine, CommandLineError};
 pub(crate) use inline::MAX_RCLONE_DEPTH;
@@ -229,16 +230,24 @@ fn option_secrets(name: &str, value: &str) -> Vec<SecretValue> {
 /// without the tab and newlines it takes out; with `\` read as `/`; and
 /// lower-cased, as a host is; and in pieces, where a parser splits it at
 /// `@`, `#`, `?`, `/` or `:`; see `url_needles`), with [`REDACTED`]; and what
-/// else of it shows in text on its own (see `partial_needles`). Secrets that
-/// overlap or touch are replaced as one span. Masking a text compares each of
-/// its bytes at most twice per needle, whatever the needles and the text are.
+/// else of it shows in text on its own (see `partial_needles`); and as a
+/// TOML file writes it, found in the text as TOML reads its escapes (see
+/// `toml_read`). Secrets that overlap or touch are replaced as one span.
+/// Masking a text compares each of its bytes at most twice per needle,
+/// whatever the needles and the text are, and four times where the text
+/// holds a TOML escape, is cut with a backslash in it or ends in a
+/// line-ending backslash.
 ///
 /// Masking a masked text again is not always idempotent: when a secret holds
 /// `*`, the character of [`REDACTED`], a mask and the text beside it can make
 /// up the secret, and a second pass masks that too (secret `*?`: `*??` masks
-/// to `***?`, and that to `*****`). A second pass only ever masks more, never
-/// reveals what the first masked (I4). Matches inside a mask are not skipped:
-/// a real `*` beside a secret would then leave part of it unmasked (#287).
+/// to `***?`, and that to `*****`). So can a mask that ends between the two
+/// backslashes of `\\`: the one left after it can begin a TOML escape of
+/// another secret (secrets `\u0041Z\` and `\u{7}bell`: `x \u0041Z\\x07bell`
+/// masks to `x ***\x07bell`, and that to `x ******`). A second pass only
+/// ever masks more, never reveals what the first masked (I4). Matches inside
+/// a mask are not skipped: a real `*` beside a secret would then leave part
+/// of it unmasked (#287).
 #[derive(Clone, Default)]
 pub struct Redactor {
     needles: Vec<Needle>,
@@ -492,10 +501,12 @@ impl Redactor {
     /// where it is the start of a needle on (the earliest start of a secret
     /// the cut could have gone through) is part of the same spans.
     ///
-    /// One pass over the text per needle: each byte of the text is compared
-    /// at most twice with a byte of the needle, however long and repetitive
-    /// both are. A needle and a valid text are UTF-8, so what matches starts
-    /// and ends between characters.
+    /// One pass over the text per needle, and one over the text as TOML reads
+    /// it where it holds an escape, is cut with a backslash in it or ends in
+    /// a line-ending backslash: each byte of the text is compared at most
+    /// twice with a byte of the needle in each pass, however long and
+    /// repetitive both are. A needle and a valid text are UTF-8, so what
+    /// matches starts and ends between characters.
     fn mask_with<'a>(
         needles: impl IntoIterator<Item = &'a Needle>,
         everything: bool,
@@ -505,9 +516,17 @@ impl Redactor {
         if everything && !text.is_empty() {
             return REDACTED.to_owned();
         }
+        // A place in the text as TOML reads it is kept in a `u32`: a longer
+        // text that holds an escape is masked whole, more than a secret,
+        // never less (I4).
+        if u32::try_from(text.len()).is_err() && text.contains('\\') {
+            return REDACTED.to_owned();
+        }
+        let toml = toml_read::TomlRead::of(text, cut);
         let bytes = text.as_bytes();
         // The longest span, of a needle or of the cut, that ends at each byte:
-        // at most a needle's length, which a `u32` holds.
+        // at most a needle's length, which a `u32` holds, or the bytes it was
+        // read from as TOML reads its escapes.
         let mut spans = vec![0_u32; bytes.len()];
         for needle in needles {
             let whole = needle.text.as_bytes();
@@ -517,6 +536,9 @@ impl Redactor {
                 if matched as usize == whole.len() || cut == Some(at + 1) {
                     *span = (*span).max(matched);
                 }
+            }
+            if let Some(toml) = &toml {
+                toml.mask(needle, &mut spans);
             }
         }
         // From the end: a byte is covered when a span that ends at it or
@@ -1259,6 +1281,110 @@ mod tests {
         }
     }
 
+    /// Each of TOML's short escapes is read as its character: beside a
+    /// `\u0007`, which neither `Debug` nor Go writes so, only TOML's reading
+    /// finds the secret.
+    #[test]
+    fn each_short_escape_of_toml_is_read_as_its_character() {
+        for (c, written) in [
+            ('\u{8}', r"\b"),
+            ('\t', r"\t"),
+            ('\n', r"\n"),
+            ('\u{c}', r"\f"),
+            ('\r', r"\r"),
+            ('\u{1b}', r"\e"),
+            ('"', r#"\""#),
+            ('\\', r"\\"),
+        ] {
+            let secret = format!("canary{c}\u{7}");
+            assert_eq!(
+                redactor(&[&secret]).redact(&format!(r#"password = "canary{written}\u0007""#)),
+                r#"password = "***""#,
+                "{written}"
+            );
+        }
+    }
+
+    /// A line-ending backslash drops the line breaks after it, a CRLF
+    /// among them; a backslash and white space before anything but a line
+    /// break is no line end. A text cut partway through one, after the
+    /// start of a secret, is masked from there, between the CR and the LF
+    /// of a later break too.
+    #[test]
+    fn a_line_ending_backslash_is_read_only_before_a_line_break() {
+        let redactor = redactor(&["canary-bell demo"]);
+        assert_eq!(
+            redactor.redact("\"\"\"canary-\\\n\r\n  bell demo\"\"\""),
+            "\"\"\"***\"\"\""
+        );
+        let no_line_end = r#""canary-\ bell demo""#;
+        assert_eq!(redactor.redact(no_line_end), no_line_end);
+        for kept in [
+            "\"\"\"canary-\\  ",
+            "\"\"\"canary-\\ \r",
+            "\"\"\"canary-\\",
+            "\"\"\"canary-\\\n\r",
+            "\"\"\"canary-\\\n  \r",
+            "\"\"\"canary-\\\r\n\r",
+        ] {
+            assert_eq!(
+                redactor.redact_cut(kept.as_bytes()),
+                "\"\"\"***",
+                "{kept:?}"
+            );
+        }
+    }
+
+    /// What reads as no escape is text, and a text cut inside an escape that
+    /// can't begin a secret is kept: `\u01` can't be how `c` starts, nor
+    /// `\u` how a character beyond the BMP does. A line end begins nothing,
+    /// but a backslash alone may begin any escape, and is masked.
+    #[test]
+    fn an_escape_that_stands_for_no_secret_leaves_the_text_as_it_was() {
+        let redactor = redactor(&["canary\u{7}bell"]);
+        for text in [
+            r"C:\new\temp\canary",
+            r"\q \uZZZZ \uD800 \U00110000 \x",
+            r"done \u00",
+        ] {
+            assert_eq!(redactor.redact(text), text);
+        }
+        for kept in [r"done \u01", r"done \x7", r"done \U0001", "done \\ \t"] {
+            assert_eq!(redactor.redact_cut(kept.as_bytes()), kept);
+        }
+        for kept in [r"done \", r"done \x6", r"done \U0000006"] {
+            assert_eq!(redactor.redact_cut(kept.as_bytes()), "done ***", "{kept:?}");
+        }
+        // The largest character each escape writes; Go writes U+FFFF as
+        // `\uffff`, so the upper case is TOML's alone. (A shorter escape
+        // may still write the `%` its URL-encoded needles begin with.)
+        for (secret, fits) in [
+            ("\u{ff}canary", r"done \xF"),
+            ("\u{ffff}canary", r"done \uFF"),
+            ("\u{1f600}canary", r"done \U0001f"),
+        ] {
+            let largest = super::Redactor::new(&[SecretValue::new(secret)]);
+            assert_eq!(largest.redact_cut(fits.as_bytes()), "done ***", "{fits:?}");
+        }
+        // The end of a text that isn't cut is text, and what it ends a
+        // secret with is read so.
+        let ends_open = super::Redactor::new(&[SecretValue::new("canary\u{7}C:\\u")]);
+        assert_eq!(ends_open.redact(r"x canary\u0007C:\u"), "x ***");
+    }
+
+    /// A text whose backslashes stand for nothing is looked at once per
+    /// needle, as one without them: only a text with an escape in it, or a
+    /// cut one, is read again as TOML reads it.
+    #[test]
+    fn a_text_whose_backslashes_stand_for_nothing_is_not_read_again() {
+        let redactor = redactor(&["canary\u{7}bell"]);
+        let needles = redactor.needles.len();
+        let text = r"done \q \u00 \x";
+        let (masked, work) = compared(|| redactor.redact(text));
+        assert_eq!(masked, text);
+        assert_eq!(work, text.len() * needles);
+    }
+
     /// A secret Go prints as it is, `'` and a combining character included,
     /// adds no needle: only what Go escapes costs one.
     #[test]
@@ -1375,6 +1501,17 @@ mod tests {
                 .all(|c| first.any(|f| f == c)),
             "{once:?} then {twice:?}"
         );
+    }
+
+    /// A mask that ends between the two backslashes of `\\` leaves the
+    /// second before the text after it, where it can begin a TOML escape of
+    /// another secret: a second pass masks that too, never less.
+    #[test]
+    fn a_second_pass_may_mask_a_toml_escape_a_mask_left_a_backslash_of() {
+        let redactor = redactor(&[r"\u0041Z\", "\u{7}bell"]);
+        let once = redactor.redact(r"x \u0041Z\\x07bell y");
+        assert_eq!(once, r"x ***\x07bell y");
+        assert_eq!(redactor.redact(&once), "x ****** y");
     }
 
     #[test]
@@ -2530,6 +2667,23 @@ mod tests {
         (done, COMPARED.with(std::cell::Cell::get) - before)
     }
 
+    /// A redactor of dozens of needles that share their first 32 KiB: a
+    /// password half the cap long, one byte over and over, then the
+    /// characters a URL parser writes in different ways, and a location at
+    /// the cap whose password is the same. All of it is in a text of `a` at
+    /// every byte.
+    fn a_redactor_of_long_repetitive_needles() -> Redactor {
+        let cap = MAX_SECRET_BYTES;
+        let mut settings =
+            Settings::new(&format!("rest:https://demo:{}@nas/", "a".repeat(cap - 23)));
+        assert_eq!(settings.repository.len(), cap);
+        settings.password =
+            SecretValue::new(format!("{}\"`#'^{{}}?/:@\\ <>|", "a".repeat(cap / 2)));
+        let redactor = settings.redactor();
+        assert!(redactor.needles.len() > 40, "{}", redactor.needles.len());
+        redactor
+    }
+
     /// Masking compares each byte of the text at least once and at most
     /// twice per needle, however long and repetitive a secret and the text
     /// are: the work grows with the length of the text, never with the
@@ -2537,18 +2691,8 @@ mod tests {
     #[test]
     fn masking_a_text_compares_each_byte_at_most_twice_per_needle() {
         let cap = MAX_SECRET_BYTES;
-        // A password half the cap long, one byte over and over, then the
-        // characters a URL parser writes in different ways: dozens of
-        // needles that share their first 32 KiB, all of it in the text at
-        // every byte. And a location at the cap whose password is the same.
-        let mut settings =
-            Settings::new(&format!("rest:https://demo:{}@nas/", "a".repeat(cap - 23)));
-        assert_eq!(settings.repository.len(), cap);
-        settings.password =
-            SecretValue::new(format!("{}\"`#'^{{}}?/:@\\ <>|", "a".repeat(cap / 2)));
-        let redactor = settings.redactor();
+        let redactor = a_redactor_of_long_repetitive_needles();
         let needles = redactor.needles.len();
-        assert!(needles > 40, "{needles}");
         let text = "a".repeat(cap);
         let clipped = format!("{text}…");
         for (what, length, (masked, work), expected) in [
@@ -2569,6 +2713,45 @@ mod tests {
             assert_eq!(masked, expected, "{what}");
             assert!(
                 (length * needles..=2 * length * needles).contains(&work),
+                "{what}: {work} comparisons for {length} bytes and {needles} needles"
+            );
+        }
+    }
+
+    /// A text with a TOML escape in it is read a second time, as TOML reads
+    /// it, and what is read is no longer than the text: each byte of the
+    /// text is compared at most four times per needle (#839). The most is
+    /// where the escape is one byte shorter as read than as written, so
+    /// the text is read again nearly whole.
+    #[test]
+    fn masking_a_text_with_a_toml_escape_compares_each_byte_at_most_four_times_per_needle() {
+        let redactor = a_redactor_of_long_repetitive_needles();
+        let needles = redactor.needles.len();
+        let text = format!(r"{}\t", "a".repeat(MAX_SECRET_BYTES - 2));
+        let clipped = format!("{text}…");
+        for (what, length, (masked, work), expected) in [
+            (
+                "whole",
+                text.len(),
+                compared(|| redactor.redact(&text)),
+                r"***\t",
+            ),
+            (
+                "cut",
+                text.len(),
+                compared(|| redactor.redact_cut(text.as_bytes())),
+                r"***\t",
+            ),
+            (
+                "clipped",
+                clipped.len(),
+                compared(|| redactor.redact_clipped(&clipped, "…")),
+                r"***\t…",
+            ),
+        ] {
+            assert_eq!(masked, expected, "{what}");
+            assert!(
+                ((2 * length - 1) * needles..=4 * length * needles).contains(&work),
                 "{what}: {work} comparisons for {length} bytes and {needles} needles"
             );
         }
