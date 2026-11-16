@@ -389,6 +389,27 @@ check-pr-title title:
 [group('quality')]
 verify: fmt-check lint lint-workflows architecture test test-contrast test-release test-wasm test-ui
 
+# The quick part of what CI checks, run before pushing (AGENTS.md, "Local
+# checks, then CI"): formatting, the lints, the dependency rule, then the
+# unit, contract and acceptance tests in a scratch home, with the skip list.
+# CI runs the rest on clean runners: doc tests, the @e2e runner, the release
+# build, wasm, contrast, the @ui suite, mutants. Arguments narrow the nextest
+# run (a filterset, a test name); the acceptance scenarios always run, as they
+# use fakes and a fake clock. Red-first is separate: `just red-first` on a
+# branch whose first commit is its test: commit.
+[doc('Run the quick checks before pushing; CI runs the full suites.')]
+[group('quality')]
+[positional-arguments]
+quick-ci *args: fmt-check lint architecture
+    scripts/with-skip-log.sh scripts/with-test-home.sh '{{ just_executable() }}' _quick-suites "$@"
+
+# The suites `quick-ci` runs, under its one skip log (see `_test-suites`).
+[positional-arguments]
+[private]
+_quick-suites *args:
+    cargo nextest run --workspace "$@"
+    cargo test --workspace --test acceptance
+
 # Shows the version bump and CHANGELOG.md entry that the release PR would
 # contain for the committed history (§12.1). Changes nothing.
 [doc('Preview the next release.')]
