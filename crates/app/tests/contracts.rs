@@ -417,12 +417,12 @@ impl FakeHooksHarness {
     }
 
     fn secret() -> &'static str {
-        "hunter2-demo"
+        "hunter2-pw"
     }
 
     /// The proxy URL of the environment the fake claims to give a hook.
     fn proxy() -> &'static str {
-        "http://demo:hunter3-proxy@proxy.demo:3128"
+        "http://demo:hunter3-proxy-pw@proxy.demo:3128"
     }
 }
 
@@ -517,7 +517,7 @@ impl HooksHarness for FakeHooksHarness {
     }
 
     fn proxy_password(&self) -> String {
-        "hunter3-proxy".to_owned()
+        "hunter3-proxy-pw".to_owned()
     }
 
     fn leaked_env_var(&self) -> String {

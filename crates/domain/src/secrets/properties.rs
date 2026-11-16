@@ -488,4 +488,44 @@ proptest! {
             );
         }
     }
+
+    /// A text masked a line at a time begins a line after a break: the line
+    /// after a secret's one break, the rest of it, is masked whole after the
+    /// white space TOML drops, escapes included, where it is 4 bytes or more
+    /// of the secret as read (#861).
+    #[test]
+    fn the_rest_of_a_toml_secret_after_a_break_is_masked_on_its_own_line(
+        ((secret, mut ways), pick) in (toml_secret(), any::<Index>())
+    ) {
+        let redactor = redactor(std::slice::from_ref(&secret));
+        // `toml_written` breaks before a character it doesn't write as white
+        // space, after the first.
+        let breaks: Vec<(usize, usize)> = secret
+            .char_indices()
+            .enumerate()
+            .zip(&ways)
+            .filter(|&((nth, (at, c)), &(way, _))| {
+                nth > 0
+                    && secret.len() - at >= 4
+                    && !(way % 6 == 0 && matches!(c, ' ' | '\t'))
+            })
+            .map(|((nth, (at, _)), _)| (nth, at))
+            .collect();
+        prop_assume!(!breaks.is_empty());
+        let &(nth, at) = pick.get(&breaks);
+        for (each, (_, broken)) in ways.iter_mut().enumerate() {
+            *broken = each == nth;
+        }
+        let written = toml_written(&secret, &ways);
+        let line = written.lines().next_back().unwrap();
+        let white = line.len() - line.trim_start().len();
+        prop_assert_eq!(
+            redactor.redact(line),
+            format!("{}***", line.get(..white).unwrap()),
+            "{:?} of {:?}, the rest from byte {}",
+            line,
+            written,
+            at
+        );
+    }
 }
