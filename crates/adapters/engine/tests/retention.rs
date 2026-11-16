@@ -490,3 +490,35 @@ async fn an_rclone_command_that_cannot_start_is_not_quoted_in_the_failure() {
     assert!(detail.contains("os error"), "the reason stays: {detail}");
     assert!(!detail.contains(canary), "the detail leaks: {detail}");
 }
+
+/// An `rclone-command` the daemon can't split into words, for an open of its
+/// own, fails without quoting the line (I4, #874): the failure says the
+/// command isn't valid, and why.
+#[tokio::test]
+async fn an_rclone_command_that_cannot_be_split_is_not_quoted_in_the_failure() {
+    let canary = "CANARY-typed-token";
+    let access = rclone_repository(format!("rclone serve restic --token={canary} 'unclosed"));
+    let error = RusticRetention
+        .removes(
+            &access,
+            &RetentionPolicy {
+                keep_last: Some(KeepCount::new(1).unwrap()),
+                ..RetentionPolicy::default()
+            },
+            &one_snapshot(),
+        )
+        .await
+        .expect_err("the command can't be split");
+    let RetentionError::Engine { detail } = &error else {
+        panic!("an engine failure, not {error:?}");
+    };
+    assert!(
+        detail.contains("Expected rclone command to be valid"),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("missing closing quote"),
+        "the reason stays: {detail}"
+    );
+    assert!(!detail.contains(canary), "the detail leaks: {detail}");
+}

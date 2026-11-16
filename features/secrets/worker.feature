@@ -52,16 +52,17 @@ Feature: A worker and its backend never show a secret
       And the failure shows "***"
       And nothing the engine reported or logged shows "CANARY-hot-endpoint-file"
 
-  Rule: What is typed into a command line is never quoted
-    A command line can carry a credential the redactor doesn't know, such as
-    a token typed into an `rclone-command`. A failure to start one says that
-    it couldn't start, and why, without the line.
+  Rule: What is typed into an rclone command is never quoted
+    An `rclone-command` can carry a credential the redactor doesn't know,
+    such as a token typed into it. A failure to start it, or to read it, says
+    so, and why, without the line.
 
     Scenario: An rclone command that can't start is not quoted in the failure
       Given an rclone repository
       And the repository's option "rclone-command" is "{scratch}/no-such-rclone serve restic --token=CANARY-typed-token"
       When the repository is identified
       Then the failure shows "Could not start rclone"
+      And the failure shows "os error"
       And nothing the engine reported or logged shows "CANARY-typed-token"
 
     Scenario: An rclone command that can't be read is not quoted in the failure
@@ -69,6 +70,7 @@ Feature: A worker and its backend never show a secret
       And the repository's option "rclone-command" is "rclone serve restic --token=CANARY-typed-token 'unclosed"
       When the repository is identified
       Then the failure shows "Expected rclone command to be valid"
+      And the failure shows "missing closing quote"
       And nothing the engine reported or logged shows "CANARY-typed-token"
 
   Rule: A worker starts from a scrubbed environment

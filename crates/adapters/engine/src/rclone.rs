@@ -961,4 +961,44 @@ mod tests {
             assert!(!text.contains("rclone-secret"), "{text}");
         }
     }
+
+    /// rustic's own `rclone:` backend, which a worker builds, quotes its
+    /// command line when it can't start rclone or split the line, and
+    /// `without_command` leaves the line out and the reason in (I4, #874).
+    /// It finds both errors by their shape at the pinned rustic, so a
+    /// version that changes it fails here: one that stops quoting the line
+    /// fails the first assertion, and the scrub can go.
+    #[test]
+    fn rustic_s_rclone_errors_lose_the_command_line_and_keep_the_reason() {
+        let canary = "CANARY-typed-token";
+        let scratch = tempfile::tempdir().unwrap();
+        let missing = scratch.path().join("no-such-rclone");
+        for (line, reason) in [
+            (
+                format!("{} serve restic --token={canary}", missing.display()),
+                "os error",
+            ),
+            (
+                format!("rclone serve restic --token={canary} 'unclosed"),
+                "missing closing quote",
+            ),
+        ] {
+            let Err(error) = BackendOptions::default()
+                .repository("rclone:demo-remote:repo".to_owned())
+                .options(BTreeMap::from([("rclone-command".to_owned(), line)]))
+                .to_backends()
+            else {
+                panic!("rustic built a backend whose rclone fails with {reason}");
+            };
+            let quoted = error.display_log();
+            assert!(quoted.contains(canary), "rustic no longer quotes: {quoted}");
+            let scrubbed = without_command(error).display_log();
+            assert!(!scrubbed.contains(canary), "the line stays: {scrubbed}");
+            assert!(scrubbed.contains(reason), "the reason is lost: {scrubbed}");
+            assert!(
+                scrubbed.contains("Could not load the backend"),
+                "{scrubbed}"
+            );
+        }
+    }
 }
