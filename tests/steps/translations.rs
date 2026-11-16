@@ -2,7 +2,8 @@
 //! run by Node as `just translations` and `just accept-translations` run it,
 //! through `interop_steps::run` (a scratch home, nothing of the developer's
 //! environment), over catalogs in a scratch folder that a git repository of
-//! its own keeps, with `git` alone on the `PATH`.
+//! its own keeps, with `git` alone on the `PATH`. The feature is tagged
+//! `@needs-node`: the runner skips it where [`node_runs_typescript`] fails.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,18 +45,39 @@ fn write_catalog(agent: &Agent, tag: &str, step: &Step) {
 }
 
 /// The first `name` on the test's own `PATH`.
-fn on_path(name: &str) -> PathBuf {
-    let path = std::env::var_os("PATH").expect("a PATH");
+fn on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())
-        .unwrap_or_else(|| panic!("{name} is on the PATH"))
+}
+
+/// Whether the `node` on the test's own `PATH` runs a TypeScript file, as
+/// the recipes have it do: without one, or with a Node too old to strip
+/// types, there is nothing to run the script with.
+pub(crate) fn node_runs_typescript() -> bool {
+    let Some(node) = on_path("node") else {
+        return false;
+    };
+    let dir = tempfile::tempdir().expect("a folder for the probe");
+    let probe = dir.path().join("probe.ts");
+    fs::write(&probe, "const status: number = 0;\nprocess.exitCode = status;\n")
+        .expect("the probe");
+    let mut command = Command::new(node);
+    command
+        .arg(&probe)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    spawn_gate::hold(|| command.spawn())
+        .and_then(|mut child| child.wait())
+        .is_ok_and(|status| status.success())
 }
 
 /// Runs the script with Node, `git` alone on its `PATH` and no git
 /// configuration but the repository's own.
 async fn run_script(agent: &mut Agent, args: &[&str]) {
-    let git = on_path("git");
+    let git = on_path("git").expect("git is on the PATH");
     let git_dir = git.parent().expect("git is in a folder");
     agent.interop.env = vec![
         ("PATH".to_owned(), git_dir.display().to_string()),
@@ -65,7 +87,8 @@ async fn run_script(agent: &mut Agent, args: &[&str]) {
     let mut all = vec![SCRIPT];
     all.extend_from_slice(args);
     all.extend_from_slice(&["--locales", &locales]);
-    agent.interop.program = Some(on_path("node").display().to_string());
+    let node = on_path("node").expect("node is on the PATH");
+    agent.interop.program = Some(node.display().to_string());
     run(agent, &all).await;
     agent.interop.program = None;
     agent.interop.env.clear();
@@ -79,7 +102,7 @@ async fn accept(agent: &mut Agent, ids: &[&str]) {
 
 /// Runs `git` in `dir` with no configuration but the repository's own.
 async fn git(agent: &Agent, dir: &Path, args: &[&str]) {
-    let mut command = Command::new(on_path("git"));
+    let mut command = Command::new(on_path("git").expect("git is on the PATH"));
     command
         .args(args)
         .current_dir(dir)

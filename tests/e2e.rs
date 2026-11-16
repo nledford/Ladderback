@@ -363,6 +363,7 @@ async fn main() {
     let features = concat!(env!("CARGO_MANIFEST_DIR"), "/features");
     let permissions_work = file_permissions_work();
     let ipv6_works = ipv6_works();
+    let node_runs_typescript = translations_steps::node_runs_typescript();
     // `--name` and `--tags` narrow this runner's scenarios rather than
     // replace its filter (see `operation_steps::picked_by_cli_tags`).
     let mut cli = cucumber::cli::Opts::<_, _, _>::parsed();
@@ -417,6 +418,17 @@ async fn main() {
                 testkit::record_skip(
                     module_path!(),
                     &format!("{}: this machine can't listen on IPv6", scenario.name),
+                );
+                return false;
+            }
+            if !node_runs_typescript && operation_steps::tagged(feature, rule, scenario, "needs-node")
+            {
+                testkit::record_skip(
+                    module_path!(),
+                    &format!(
+                        "{}: no node on the PATH that runs a TypeScript file",
+                        scenario.name
+                    ),
                 );
                 return false;
             }

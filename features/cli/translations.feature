@@ -1,4 +1,4 @@
-@e2e
+@e2e @needs-node
 Feature: Keep a translation current
   `just translations` (scripts/translations.ts) lists, for each language
   besides American English, the messages its catalog lacks, the ones
