@@ -8,8 +8,6 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use domain::access::Password;
-use domain::access::step_up::confirms_snapshot;
 use domain::browse::FolderPath;
 use domain::execution::Trigger;
 use domain::execution::deadline::backup_budget;
@@ -20,7 +18,7 @@ use domain::restore::{
 use domain::secrets::SecretWarning;
 use domain::{OperationId, RepositoryAlias, SnapshotId, TimeZone};
 
-use crate::access::{Access, PasswordRefused};
+use crate::access::{Access, StepUpRefused, confirm_step_up};
 use crate::execution::{Finished, Queued, RunOperation};
 use crate::maintenance::{MaintenanceError, run_read};
 use crate::ports::{
@@ -294,25 +292,18 @@ impl Restores {
     /// address's sign-in waits, with sign-in on; the snapshot's ID
     /// otherwise.
     async fn step_up(&self, ask: &RestoreAsk) -> Result<(), RestoreError> {
-        let Some(access) = &self.access else {
-            return if confirms_snapshot(&ask.confirmation, &ask.snapshot) {
-                Ok(())
-            } else {
-                Err(RestoreError::StepUpFailed)
-            };
-        };
-        // Nothing typed, or more than any password, is no attempt at it.
-        let attempt =
-            Password::parse(ask.confirmation.clone()).map_err(|_| RestoreError::StepUpFailed)?;
-        access
-            .step_up(ask.address, &attempt)
-            .await
-            .map(|_| ())
-            .map_err(|refused| match refused {
-                PasswordRefused::WrongPassword => RestoreError::StepUpFailed,
-                PasswordRefused::Wait { seconds } => RestoreError::StepUpWait { seconds },
-                PasswordRefused::Unavailable(text) => RestoreError::StepUpUnavailable(text),
-            })
+        confirm_step_up(
+            self.access.as_deref(),
+            ask.address,
+            &ask.confirmation,
+            &ask.snapshot,
+        )
+        .await
+        .map_err(|refused| match refused {
+            StepUpRefused::Failed => RestoreError::StepUpFailed,
+            StepUpRefused::Wait { seconds } => RestoreError::StepUpWait { seconds },
+            StepUpRefused::Unavailable(text) => RestoreError::StepUpUnavailable(text),
+        })
     }
 
     /// The agent's restore slot, for `op`, unless a restore holds it.

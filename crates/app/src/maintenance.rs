@@ -1520,7 +1520,7 @@ pub(crate) async fn within_read_timeout<T>(
     }
 }
 
-fn engine_error(error: EngineError) -> MaintenanceError {
+pub(crate) fn engine_error(error: EngineError) -> MaintenanceError {
     match error {
         EngineError::Unavailable { detail } => MaintenanceError::Engine { detail },
         error @ (EngineError::StartTimedOut | EngineError::SecretsTooLargeToMask { .. }) => {
