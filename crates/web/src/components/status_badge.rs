@@ -11,10 +11,10 @@ pub(crate) mod rules;
 #[cfg(target_arch = "wasm32")]
 mod tests;
 
-/// A status badge: a short labeled state on a colored pill, one of
-/// `badge-loading`, `badge-empty`, `badge-error` or `badge-success`, whose
-/// text token on its background token is pair-checked by
-/// `scripts/check-contrast.ts`, with the state's own icon before the label
+/// A status badge: a short labeled state on a colored pill, its words and
+/// its fill the Tailwind utilities of [`BadgeState::pill`], whose tokens are
+/// pair-checked by `scripts/check-contrast.ts`, with the state's own icon
+/// before the label
 /// ([`BadgeState::glyph`]), so the state never rests on its color (A2). The
 /// icon is an [`Icon`] of the default kind, decoration beside the text:
 /// `aria-hidden`, so a screen reader reads the label once, never a tab stop,
@@ -30,7 +30,7 @@ pub fn StatusBadge(
     #[prop(into)] label: Signal<String>,
 ) -> impl IntoView {
     view! {
-        <span class=move || format!("badge badge-{}", state.get().pill())>
+        <span class=move || format!("badge {}", state.get().pill())>
             <Icon glyph=Signal::derive(move || state.get().glyph()) />
             {move || label.get()}
         </span>

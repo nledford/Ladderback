@@ -10,6 +10,14 @@
 
 **Amended 2026-11-17 (the maintainer, decision 117):** a tone, a size and a placement become sets of Tailwind utilities that `variants.rs` returns, as each component moves onto utilities (#931); until then each stays a class of `style.css`. Where "Why" below says each value is a class of `style.css`, this replaces it. The values, their meanings and the shared size scale don't change.
 
+**Amended 2026-11-17 (#941):** each status tone gains a pair of colors for a part tinted in it, its words on its fill: `--success-fg` on `--success-bg`, `--warning-fg` on `--warning-bg` and `--error-fg` on `--error-bg`, a pale fill under dark words in light colors and a deep fill under pale words in dark ones, each mapped as a Tailwind color.
+
+`variants.rs` gives them by tone (`StatusTone`, whose `pair()` is the two utilities), so the badge, the alert, the banner, the toast and the progress bar take one pair rather than each inventing its own; the badge-only `--badge-success-*` and `--badge-error-*` go, and the error words also draw a form's errors on the page. The contrast gate holds each pair's words to 4.5:1 on its fill in both schemes. Where "Why" below says the badge pairs keep their own text tokens, this replaces it for the three status tones; Loading and Empty keep the badge's own pairs.
+
+The measure that keeps Warning and Error apart: their fills differ by at least 0.1 in OKLab lightness (0 black, 1 white) in each scheme, and the gate fails a pair closer than that. Lightness, not hue: amber and red are neighboring hues, which a reader who can't tell red from green sees as one, and a dark fill holds too little color for its hue to tell; lightness survives both. A tenth of the scale is the floor because #790's dark fills, 0.07 apart (1.24:1 in luminance), read as one. The values chosen put Error's fill further from the page than Warning's in both schemes, darker in light and lighter in dark, so the failure is the more visible of the two; the gate measures the distance, not its direction.
+
+Success is not held to the measure: #941 asked that Warning and Error be told apart, though the same argument reaches green. In light colors Success's fill sits between the other two, 0.025 from Warning's in lightness, so a Success part beside a Warning one can read alike; holding it apart too means retuning Success's fill, a choice for the first component that sets the two side by side (the toast, #789). Until then, as for every tone, a part's words and its icon tell its status, never its fill alone (1.4.1).
+
 ## Why
 
 - **One set of words for every component.** The shared component set (#776) grows by some twenty components. Without one vocabulary each would name its colors, sizes and sides its own way, and a page would learn each one. Each value is a class of `style.css`, so a component names a value of the module and never a color, a length or a side.
