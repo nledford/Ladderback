@@ -915,10 +915,11 @@ ui-cancel-plan = Cancel { $plan }
 # ui-cancel-operation-of or ui-cancel-operation) begins with it.
 ui-cancel = Cancel
 
-# The row header of a maintenance run: what ran and the repository it ran on,
-# by the alias this agent gave the repository when the run started.
-# $kind is the wire text of what ran: forget, prune, check or adopt; any other
-# kind is an operation.
+# The row header of a maintenance run, a restore or a download: what ran and
+# the repository it ran on or read, by the alias this agent gave the repository
+# when the run was first logged.
+# $kind is the wire text of what ran: forget, prune, check, adopt, restore or
+# download; any other kind is an operation.
 # $repository (text): the repository's alias. It is shown as it came.
 ui-operation-of =
     { $kind ->
@@ -926,13 +927,15 @@ ui-operation-of =
         [prune] Prune of { $repository }
         [check] Check of { $repository }
         [adopt] Adoption in { $repository }
+        [restore] Restore from { $repository }
+        [download] Download from { $repository }
        *[other] Operation on { $repository }
     }
 
 # The row header of a run the log names no plan or repository for, such as a
-# maintenance run an earlier version logged: what ran.
-# $kind is the wire text of what ran: backup, forget, prune, check or adopt;
-# any other kind is an operation.
+# maintenance run or a restore an earlier version logged: what ran.
+# $kind is the wire text of what ran: backup, forget, prune, check, adopt,
+# restore or download; any other kind is an operation.
 ui-operation =
     { $kind ->
         [backup] Backup
@@ -940,13 +943,16 @@ ui-operation =
         [prune] Prune
         [check] Check
         [adopt] Adoption
+        [restore] Restore
+        [download] Download
        *[other] Operation
     }
 
-# The button that cancels a running or queued maintenance run, named as its
-# row is, so each Cancel says which run it stops. It begins with ui-cancel.
-# $kind is the wire text of what runs: forget, prune, check or adopt; any other
-# kind is an operation.
+# The button that cancels a running or queued maintenance run, restore or
+# download, named as its row is, so each Cancel says which run it stops. It
+# begins with ui-cancel.
+# $kind is the wire text of what runs: forget, prune, check, adopt, restore or
+# download; any other kind is an operation.
 # $repository (text): the repository's alias. It is shown as it came.
 ui-cancel-operation-of =
     { $kind ->
@@ -954,13 +960,15 @@ ui-cancel-operation-of =
         [prune] Cancel the prune of { $repository }
         [check] Cancel the check of { $repository }
         [adopt] Cancel the adoption in { $repository }
+        [restore] Cancel the restore from { $repository }
+        [download] Cancel the download from { $repository }
        *[other] Cancel the operation on { $repository }
     }
 
 # The button that cancels a running or queued run the log names no plan or
 # repository for. It begins with ui-cancel.
-# $kind is the wire text of what runs: backup, forget, prune, check or adopt;
-# any other kind is an operation.
+# $kind is the wire text of what runs: backup, forget, prune, check, adopt,
+# restore or download; any other kind is an operation.
 ui-cancel-operation =
     { $kind ->
         [backup] Cancel the backup
@@ -968,12 +976,14 @@ ui-cancel-operation =
         [prune] Cancel the prune
         [check] Cancel the check
         [adopt] Cancel the adoption
+        [restore] Cancel the restore
+        [download] Cancel the download
        *[other] Cancel the operation
     }
 
 # Announced politely on the Operations page when a run it watched ended well,
 # warnings or not. $kind is the wire text of what ran: backup, forget, prune,
-# check or adopt; any other kind is an operation.
+# check, adopt, restore or download; any other kind is an operation.
 ui-operation-finished =
     { $kind ->
         [backup] Backup finished.
@@ -981,12 +991,14 @@ ui-operation-finished =
         [prune] Prune finished.
         [check] Check finished.
         [adopt] Adoption finished.
+        [restore] Restore finished.
+        [download] Download finished.
        *[other] Operation finished.
     }
 
 # Announced politely on the Operations page when a run it watched was
-# cancelled. $kind is the wire text of what ran: backup, forget, prune, check
-# or adopt; any other kind is an operation.
+# cancelled. $kind is the wire text of what ran: backup, forget, prune, check,
+# adopt, restore or download; any other kind is an operation.
 ui-operation-cancelled =
     { $kind ->
         [backup] Backup cancelled.
@@ -994,12 +1006,14 @@ ui-operation-cancelled =
         [prune] Prune cancelled.
         [check] Check cancelled.
         [adopt] Adoption cancelled.
+        [restore] Restore cancelled.
+        [download] Download cancelled.
        *[other] Operation cancelled.
     }
 
 # Announced assertively on the Operations page when a run it watched ended
-# badly. $kind is the wire text of what ran: backup, forget, prune, check or
-# adopt; any other kind is an operation.
+# badly. $kind is the wire text of what ran: backup, forget, prune, check,
+# adopt, restore or download; any other kind is an operation.
 ui-operation-failed =
     { $kind ->
         [backup] Backup failed.
@@ -1007,6 +1021,8 @@ ui-operation-failed =
         [prune] Prune failed.
         [check] Check failed.
         [adopt] Adoption failed.
+        [restore] Restore failed.
+        [download] Download failed.
        *[other] Operation failed.
     }
 
@@ -1131,11 +1147,12 @@ ui-progress-working = Working…
 # $plan (text): the plan's ID, as config.toml names it. It is shown as it came.
 ui-plan-progress = Backup progress of { $plan }
 
-# The name of a running maintenance run's progress bar: what it measures and
-# the repository it runs on, by the alias this agent gave the repository when
-# the run started, as its row is named.
-# $kind is the wire text of what runs: forget, prune, check or adopt; any other
-# kind is an operation.
+# The name of a running maintenance run's, restore's or download's progress
+# bar: what it measures and the repository it runs on or reads, by the alias
+# this agent gave the repository when the run was first logged, as its row is
+# named.
+# $kind is the wire text of what runs: forget, prune, check, adopt, restore or
+# download; any other kind is an operation.
 # $repository (text): the repository's alias. It is shown as it came.
 ui-operation-progress-of =
     { $kind ->
@@ -1143,13 +1160,15 @@ ui-operation-progress-of =
         [prune] Prune progress of { $repository }
         [check] Check progress of { $repository }
         [adopt] Adoption progress in { $repository }
+        [restore] Restore progress from { $repository }
+        [download] Download progress from { $repository }
        *[other] Operation progress on { $repository }
     }
 
 # The name of the progress bar of a run the log names no plan or repository
 # for, such as one an earlier version logged: what it measures.
-# $kind is the wire text of what runs: backup, forget, prune, check or adopt;
-# any other kind is an operation.
+# $kind is the wire text of what runs: backup, forget, prune, check, adopt,
+# restore or download; any other kind is an operation.
 ui-operation-progress =
     { $kind ->
         [backup] Backup progress
@@ -1157,6 +1176,8 @@ ui-operation-progress =
         [prune] Prune progress
         [check] Check progress
         [adopt] Adoption progress
+        [restore] Restore progress
+        [download] Download progress
        *[other] Operation progress
     }
 

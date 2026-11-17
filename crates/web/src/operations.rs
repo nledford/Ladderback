@@ -23,9 +23,10 @@ pub(crate) enum Name {
     Words(Words),
 }
 
-/// The name of `operation`'s row: a backup by its plan, and a maintenance run
-/// by what ran and the alias of its repository, or by what ran alone when the
-/// log has no alias for it (a run an earlier version logged).
+/// The name of `operation`'s row: a backup by its plan, and a maintenance
+/// run, a restore or a download by what ran and the alias of its repository,
+/// or by what ran alone when the log has no alias for it (a run an earlier
+/// version logged).
 pub(crate) fn name(operation: &OperationSummaryDto) -> Name {
     match plan_of(operation) {
         Some(plan) => Name::Plan(plan.to_owned()),
