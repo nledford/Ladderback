@@ -2337,6 +2337,9 @@ const SNAPSHOTS: Record<string, string> = {
   - text: العربية`,
   "Status badge": `- heading "Status badge" [level=2]
 - paragraph: Queued Running Succeeded Succeeded with warnings Failed Cancelled Empty`,
+  Badge: `- heading "Badge" [level=2]
+- paragraph: Pending changes ⁨3⁩ Demo tag Kept by the demo plan's retention rules
+- paragraph: Primary Secondary Success Warning Error`,
   Progress: `- heading "Progress" [level=2]
 - progressbar "Demo backup progress": Backing up… 40%
 - paragraph:

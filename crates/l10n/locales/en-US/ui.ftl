@@ -465,6 +465,19 @@ ui-gallery-badge-heading = Status badge
 # The empty badge of the status badge demo: a badge with nothing to tell.
 ui-gallery-badge-empty = Empty
 
+# The heading of the gallery's badge demo: the shared badge, a count or a tag on a pill.
+ui-gallery-badges-heading = Badge
+
+# A badge of the badge demo that counts something: the changes a demo plan has waiting. The words say what the number counts.
+# $count (number): how many changes wait, 3 in the demo.
+ui-gallery-badges-pending = Pending changes { $count }
+
+# A badge of the badge demo that names something: a tag a demo snapshot carries.
+ui-gallery-badges-tag = Demo tag
+
+# A badge of the badge demo whose words are long enough to wrap on a small screen with larger text.
+ui-gallery-badges-long = Kept by the demo plan's retention rules
+
 # The heading of the gallery's demo of the shared vocabulary (§4.5): the
 # tones, sizes and placements every shared component takes.
 ui-gallery-vocabulary-heading = Shared vocabulary
