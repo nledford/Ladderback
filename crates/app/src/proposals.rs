@@ -453,14 +453,6 @@ impl Proposals {
         // the file the page showed.
         let after =
             Proposal::check(&config, &proposal.changes).map_err(|_| ProposalError::Changed)?;
-        let forget = if proposal.needs_forget_preview(&config) {
-            let Some(shown) = &ask.forget else {
-                return Err(ProposalError::NeedsForgetPreview);
-            };
-            Some(shown)
-        } else {
-            None
-        };
         let draft = self.draft(&after).await?;
         let rebuilt = Shown {
             revision: self.shown_revision(&draft.revision)?,
@@ -469,7 +461,12 @@ impl Proposals {
         if rebuilt != ask.shown {
             return Err(ProposalError::Changed);
         }
-        if let Some(shown) = forget {
+        // Only once the file and the diff are the ones shown: a refusal
+        // that asks for the forget preview is about this proposal as shown.
+        if proposal.needs_forget_preview(&config) {
+            let Some(shown) = &ask.forget else {
+                return Err(ProposalError::NeedsForgetPreview);
+            };
             // Read again under the lock this apply holds, so what the
             // person saw is what holds when the file is saved.
             let read = self

@@ -743,6 +743,24 @@ async fn an_approval_of_a_proposal_that_could_delete_snapshots_changes_nothing()
 }
 
 #[tokio::test]
+async fn a_diff_not_shown_is_refused_as_changed_before_the_forget_preview_is_asked_for() {
+    let world = world().await;
+    let mut kept = plan("home");
+    kept.retention.keep_daily = Some(domain::planning::KeepCount::new(7).unwrap());
+    let made = propose(&world, ConfigChange::AddPlan(kept)).await.unwrap();
+    let mut ask = as_shown(&world, &made.id).await;
+    ask.shown.diff = DiffHash::of("+[plans.elsewhere]\n");
+    assert_eq!(
+        world.proposals.approve(&made.id, ask, OP, &unread()).await,
+        Err(ProposalError::Changed)
+    );
+    assert_eq!(
+        world.store.get(&made.id).await.unwrap().unwrap().status,
+        ProposalStatus::Pending
+    );
+}
+
+#[tokio::test]
 async fn a_plan_saved_brings_the_proposals_up_to_date_and_announces_those_gone_stale() {
     let world = world().await;
     let made = propose(&world, ConfigChange::AddPlan(plan("home")))
