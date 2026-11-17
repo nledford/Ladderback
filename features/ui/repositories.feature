@@ -545,3 +545,11 @@ Feature: Repositories page
     When I open the address "/repositories"
     Then the table "Repositories" has a row "demo" that shows "Kept in the configuration file"
     And the page notes nothing of the keyring
+
+  Scenario: The keyring's note is a warning banner
+    Given a demo plan "demo-home" with a scratch repository
+    And the agent finds the keyring running but not startable on demand
+    When I open the address "/repositories"
+    Then the page shows a warning banner that says "nothing can start it when a program asks for it"
+    And the page notes that the keyring can't be started on demand
+    And the page has no accessibility violations

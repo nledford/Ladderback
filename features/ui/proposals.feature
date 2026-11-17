@@ -194,4 +194,9 @@ Feature: Pending changes page
     When I press Tab until focus is on the button "Reject the proposal"
     And I press Enter
     Then the open proposal shows one alert, after the button "Reject the proposal"
+
+  Scenario: With sign-in off, the page's notice that approving is no safety boundary is a warning banner
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    When I open the address "/proposals"
+    Then the page shows a warning banner that says "Sign-in is off, so approving here is a convenience, not a safety boundary"
     And the page has no accessibility violations

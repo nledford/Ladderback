@@ -53,3 +53,10 @@ Feature: The Full Disk Access warning on the start page
     Then the page warns that Full Disk Access is missing
     And the page doesn't scroll sideways
     And the page has no accessibility violations
+
+  Scenario: The warning is a warning banner
+    Given the agent has found Full Disk Access missing
+    When I open the web UI
+    Then the page shows a warning banner that says "Full Disk Access is missing"
+    And the page warns that Full Disk Access is missing
+    And the page has no accessibility violations
