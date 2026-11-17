@@ -188,7 +188,8 @@ Then(
       assert.equal(drawn.fill, drawn.text, `the fill of "${drawn.name}"`);
       assert.equal(drawn.track, gray, `the track of "${drawn.name}"`);
     }
-    assert.ok(tracks > 0, "no progress bar of the gallery draws a track");
+    // Every bar but the one of unknown size and the one of a step.
+    assert.equal(tracks, BARS - 2, "the progress bars of the gallery that draw a track");
   },
 );
 
@@ -239,6 +240,6 @@ Then(
         `the fill of "${drawn.name}" doesn't start at the track's ${start}: ${JSON.stringify(drawn)}`,
       );
     }
-    assert.ok(fills > 0, "no progress bar of the gallery draws a fill");
+    assert.equal(fills, BARS - 2, "the progress bars of the gallery that draw a fill");
   },
 );
