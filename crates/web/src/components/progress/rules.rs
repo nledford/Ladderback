@@ -1,9 +1,10 @@
-//! What a progress bar tells a screen reader, and when (technical design
-//! §4.5; §16, decision 83). The bar is drawn from every report, so it moves
-//! smoothly; what it exposes, its `aria-valuenow` and `aria-valuetext`, is
-//! told at most every [`HOLD`], and at once when the step changes, when the
-//! bar learns or loses its total, and when it reaches its total. The time
-//! left is told once the step has a pace worth telling.
+//! What a progress bar tells a screen reader, and when, and how it is drawn
+//! (technical design §4.5; §16, decisions 83 and 108). The bar is drawn from
+//! every report, so it moves smoothly; what it exposes, its `aria-valuenow`
+//! and `aria-valuetext`, is told at most every [`HOLD`], and at once when the
+//! step changes, when the bar learns or loses its total, and when it reaches
+//! its total. The time left is told once the step has a pace worth telling.
+//! Its tone and size come from the shared vocabulary (`variants.rs`).
 //!
 //! Pure: the clock is the caller's, a [`Duration`] since any fixed instant
 //! (the page's `performance.now()`), so `cargo nextest run -p web` tests it
@@ -16,6 +17,17 @@ use api::{MsgArg, OperationStep, ProgressUnit};
 use l10n::{MessageId, msg};
 
 use crate::backend::Progress;
+use crate::variants::{Size, Tone};
+
+/// The size a bar is drawn at when its page names none.
+pub(crate) fn default_size() -> Size {
+    todo!()
+}
+
+/// The classes of a bar.
+pub(crate) fn bar_class(_tone: Tone, _size: Size) -> String {
+    todo!()
+}
 
 /// The least time between two values told to a screen reader, while the
 /// step stays the same.
@@ -948,5 +960,29 @@ mod tests {
             "all of the largest total is all of it"
         );
         assert_eq!(percent(1, Some(3)), Some(33));
+    }
+
+    /// A bar a page names no size for is Small, its track half a line of
+    /// text thick, as the bar was before it took a size.
+    #[test]
+    fn a_bar_is_small_unless_its_page_names_another_size() {
+        assert_eq!(default_size(), Size::Small);
+    }
+
+    /// The bar's own class, which names it, then its tone's, which its fill
+    /// takes, and its size's, which its track's thickness is drawn from.
+    #[test]
+    fn a_bar_takes_its_tone_and_its_size_from_the_shared_vocabulary() {
+        for tone in Tone::ALL {
+            for size in Size::ALL {
+                let class = bar_class(tone, size);
+                let classes: Vec<&str> = class.split_whitespace().collect();
+                assert_eq!(
+                    classes,
+                    ["progress", tone.class(), size.class()],
+                    "{tone:?} {size:?}"
+                );
+            }
+        }
     }
 }
