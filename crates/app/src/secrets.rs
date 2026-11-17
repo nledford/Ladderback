@@ -99,18 +99,18 @@ pub enum Cause {
     ReferenceInProcessArguments,
     /// The field is an rclone connection string that holds more than
     /// `limit` credentials
-    /// ([`too_many_rclone_credentials`](domain::secrets::too_many_rclone_credentials)):
+    /// ([`too_many_rclone_credentials`]):
     /// each is a secret to look for in every text a job shows, so a job
     /// takes no more.
     TooManyCredentials { limit: usize },
     /// The secrets of the repository, each counted once, come to more than
-    /// `limit` bytes ([`MAX_MASKED_BYTES`](domain::secrets::MAX_MASKED_BYTES))
+    /// `limit` bytes ([`MAX_MASKED_BYTES`])
     /// with this field's: more than a job masks, so the job can't run (I4).
     /// Nothing after this field is read.
     TooMuchToMask { limit: usize },
     /// The field is a location that, resolved, names a folder on this machine
     /// by a relative path
-    /// ([`is_relative_location`](domain::planning::is_relative_location)),
+    /// ([`is_relative_location`]),
     /// which rustic would read from wherever the daemon was started. Nothing
     /// of what it resolved to is kept: a reference may hold a secret (I4).
     RelativePath,

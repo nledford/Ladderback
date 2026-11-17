@@ -60,7 +60,7 @@ pub fn rclone_location(location: &str) -> bool {
 const RCLONE: &str = "rclone:";
 
 /// Whether the URL in `text` has a password written as text in its userinfo
-/// ([`WrittenUrl::userinfo`], to the authority's standard end): what follows
+/// (`WrittenUrl::userinfo`, to the authority's standard end): what follows
 /// the first `:` of the userinfo, not empty and with no `${…}` reference in
 /// it. A user name alone is not a password. Percent-encoding is not undone:
 /// `%70` is text in the file all the same.
@@ -245,7 +245,7 @@ fn rclone_credential_written(location: &str) -> bool {
 pub const MAX_RCLONE_CREDENTIALS: usize = 16;
 
 /// Whether an rclone location holds more than [`MAX_RCLONE_CREDENTIALS`]
-/// credentials, as [`Walk::of`] finds them, at every level. False for any
+/// credentials, as `Walk::of` finds them, at every level. False for any
 /// other location.
 pub fn too_many_rclone_credentials(location: &str) -> bool {
     rclone_remote(location).is_some_and(|remote| {

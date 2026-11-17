@@ -319,7 +319,7 @@ impl Keyring for SystemSecrets {
         self.within(removing).await.map_err(unanswered)?
     }
 
-    /// Asks the platform within [`ACTIVATION_LIMIT`]; an answer that comes
+    /// Asks the platform within `ACTIVATION_LIMIT`; an answer that comes
     /// later, or a question that was lost, is unknown.
     async fn activation(&self) -> KeyringActivation {
         let probe = Arc::clone(&self.activation);

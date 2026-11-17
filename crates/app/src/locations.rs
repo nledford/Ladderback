@@ -97,7 +97,7 @@ type Probing = Arc<Mutex<Phase>>;
 
 impl ChooseLocation {
     /// Probes through `inner`, each probe bounded by
-    /// [`LOCATION_PROBE_SECONDS`](domain::planning::LOCATION_PROBE_SECONDS)
+    /// [`LOCATION_PROBE_SECONDS`]
     /// on `clock`, evaluates the locations' rules against `link`, read once
     /// per choice, resolves each location's references with `resolve` when
     /// it is about to be probed, and tells `report` what the log says.

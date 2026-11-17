@@ -35,7 +35,7 @@ use crate::secrets::{ResolveError, ResolveRepository};
 /// there, with [`RepositoryError::Exists`]: it never overwrites one.
 ///
 /// When `alias` is given, the repository is saved into the configuration
-/// after the initialisation succeeded, as [`ConnectRepository`](crate::repositories::ConnectRepository)
+/// after the initialisation succeeded, as [`ConnectRepository`]
 /// saves one. A repository the configuration already holds, such as one an
 /// imported profile added, is initialised from its own entry by
 /// [`InitRepository::init_saved`], which records only the new ID in it.
