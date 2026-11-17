@@ -221,7 +221,8 @@ test("install-restart warns of the keychain, Photos and Full Disk Access for an 
 
 test("install-restart says a signed build keeps its grants, as tested on a Mac", () => {
   const note = reinstallWarning({ [IDENTITY_VARIABLE]: NAME }, "darwin") ?? "";
-  assert.match(note, new RegExp(`signed with "${NAME}", so macOS keeps the Full Disk Access, Photos and keychain grants`));
+  assert.match(note, new RegExp(`signed with "${NAME}", so macOS keeps the Full Disk Access and Photos grants`));
+  assert.match(note, /the keychain still asks once for this build/);
   assert.doesNotMatch(note, /still being confirmed/);
   assert.doesNotMatch(note, /may need granting again|may still ask/);
 });

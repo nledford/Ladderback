@@ -18,8 +18,13 @@ Making the certificate is in the [install guide](../../guide/install.md#signing-
 
 - the Full Disk Access grant given to the first signed build held, and the next backup of the whole home folder ended `succeeded`, with no `source-unreadable`;
 - the grant on the launchd daemon reaches its `worker` child, which needs none of its own (§17, question 2);
-- a keychain item's "Always Allow", answered once for the first signed build, carried over, though the certificate has no Apple team ID;
+- a keychain item's "Always Allow", answered once for the first signed build, carried over, though the certificate has no Apple team ID (corrected below: it doesn't);
 - System Settings accepts the bare binary, `~/.cargo/bin/ladderback`.
+
+**Amended 2026-11-16 (#892, the maintainer approved the command):** the keychain asks once for each new build, signed or not. A keychain item's partition list lets a program in by its Apple Team ID, which a self-signed certificate lacks, so "Always Allow" adds only that build's code hash; the #281 test most likely read an item whose partition list already held that build's hash. The certificate still keeps Full Disk Access, Photos and the item's decrypt access list.
+
+- **`ladderback check-keyring`** reads each keyring entry the configuration names once (a repository's password, a notification channel's address, token or password), with the program that runs it, so the keychain asks while someone is at the terminal (§12).
+- **`install-restart`** runs it with the new build before it waits and restarts, and stops when an entry can't be read unless `--ignore-keyring-failure`. Its note after a restart says for a signed build that Full Disk Access and Photos carry over and the keychain asks once more.
 
 Why:
 

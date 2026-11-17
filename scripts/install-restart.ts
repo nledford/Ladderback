@@ -12,6 +12,11 @@
 //   2. The installed program's `--version` must name the build of this
 //      checkout as it was when the install began, or nothing is restarted.
 //      It is asked again after the wait, just before step 4.
+//   2a. `<bin>/ladderback check-keyring`: the new program reads each
+//      `password-keyring` entry once, in this terminal, so that the
+//      keychain, which asks once for each new build (#892), asks while
+//      someone is there. An entry it can't read stops the script here,
+//      unless `--ignore-keyring-failure`.
 //   3. The wait: every 5 s, until the daemon's operation log holds no
 //      operation `running` or `queued`, for up to `--wait` minutes, after
 //      which it gives up without restarting. `--now` skips the wait.
@@ -49,7 +54,7 @@
 // features/execution/recovery.feature).
 //
 // Usage: node scripts/install-restart.ts [--now] [--wait <minutes>]
-//          [args for `just install`]...
+//          [--ignore-keyring-failure] [args for `just install`]...
 // Exit status: 0 once the daemon runs the new build; 1 when it isn't
 // restarted, or is but can't be confirmed to run the new build; 2 on bad
 // usage.
@@ -99,7 +104,7 @@ const ENDED = new Set(["succeeded", "succeeded_with_warnings", "failed", "cancel
 
 function usage(message: string): never {
   console.error(`error: ${message}`);
-  console.error("usage: just install-restart [--now] [--wait <minutes>] [args for just install]...");
+  console.error("usage: just install-restart [--now] [--wait <minutes>] [--ignore-keyring-failure] [args for just install]...");
   process.exit(2);
 }
 
@@ -328,6 +333,7 @@ function run(program: string, args: string[]): number {
 
 async function main(argv: string[]): Promise<number> {
   let now = false;
+  let ignoreKeyring = false;
   let minutes = DEFAULT_WAIT_MINUTES;
   const install: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -335,6 +341,7 @@ async function main(argv: string[]): Promise<number> {
     const value = () => argv[++i] ?? usage(`${arg} needs a value`);
     if (arg === "--help" || arg === "-h") usage("help");
     else if (arg === "--now") now = true;
+    else if (arg === "--ignore-keyring-failure") ignoreKeyring = true;
     else if (arg === "--wait") {
       const given = value();
       minutes = Number(given);
@@ -360,6 +367,18 @@ async function main(argv: string[]): Promise<number> {
   if (checked !== true) {
     console.error(`install-restart: ${checked.why}. Not restarting; the running daemon is untouched.`);
     return 1;
+  }
+
+  // The keychain asks once for each new build before it lets the build read
+  // a `password-keyring` entry (#892): asked here, in the terminal, the
+  // question comes while someone is there, not at the next scheduled run.
+  if (run(ladderback, ["check-keyring"]) !== 0) {
+    console.error("install-restart: the new program couldn't read every keyring entry, or the configuration that names them (above), so a backup or a notification that needs one may fail too.");
+    if (!ignoreKeyring) {
+      console.error("install-restart: Not restarting; the running daemon is untouched. --ignore-keyring-failure restarts all the same.");
+      return 1;
+    }
+    console.log("install-restart: --ignore-keyring-failure: restarting all the same.");
   }
 
   if (now) console.log("install-restart: --now: restarting without waiting.");

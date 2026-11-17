@@ -3,13 +3,12 @@
 //! says what came of it, in the catalog's words. What a command did goes to
 //! stdout; why it did nothing, or stopped, goes to stderr, and it ends with 1.
 
-use std::io::{self, Read as _};
+use std::io;
 use std::path::Path;
 use std::process::ExitCode;
 
 use api::MsgArg;
 use app::ports::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
-use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
 use domain::service::{ServicePath, ServicePathProblem};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::dirs;
@@ -118,27 +117,13 @@ fn remove(localizer: &Localizer) -> io::Result<ExitCode> {
 /// How many repositories of the configuration read their password from the
 /// keyring: none when there is no configuration, or it can't be read, which
 /// the service says itself when it starts. The file is only read, never
-/// migrated: a daemon may be running on it, and only the one that holds the
-/// data folder's lock may rewrite it.
+/// migrated (`check_keyring::read_config`).
 fn keyring_passwords() -> usize {
     let Some(folder) = dirs::config_dir() else {
         return 0;
     };
-    let file = folder.join("config.toml");
-    let Ok(opened) = std::fs::File::open(&file) else {
-        return 0;
-    };
-    let mut text = String::new();
-    if opened
-        .take(MAX_CONFIG_BYTES.saturating_add(1))
-        .read_to_string(&mut text)
-        .is_err()
-        || u64::try_from(text.len()).unwrap_or(u64::MAX) > MAX_CONFIG_BYTES
-    {
-        return 0;
-    }
-    parse(&file, &text, &Schemas::production())
-        .map_or(0, |parsed| parsed.config.keyring_passwords())
+    crate::check_keyring::read_config(&folder.join("config.toml"))
+        .map_or(0, |config| config.keyring_passwords())
 }
 
 /// The line that says a lingering service can't read the `keyring`

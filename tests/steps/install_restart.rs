@@ -132,16 +132,24 @@ async fn daemon_keeps_its_log(agent: &mut Agent) {
         .expect("the installed program's version");
     write_program(&folder.join("just"), "#!/bin/sh\nexit 0\n");
     // `--version` names `version`, and from its second call on
-    // `version-later` when a scenario has written one.
+    // `version-later` when a scenario has written one. Each call's first
+    // argument goes to `calls`. `check-keyring` fails as the real program
+    // fails for an entry it can't read when a scenario has written
+    // `keyring-fails`.
     write_program(
         &folder.join("ladderback"),
         &format!(
             "#!/bin/sh\n\
              d='{}'\n\
+             echo \"$1\" >> \"$d/calls\"\n\
              if [ \"$1\" = --version ]; then\n\
              if [ -e \"$d/asked\" ] && [ -e \"$d/version-later\" ]; then exec /bin/cat \"$d/version-later\"; fi\n\
              : > \"$d/asked\"\n\
              exec /bin/cat \"$d/version\"\n\
+             fi\n\
+             if [ \"$1\" = check-keyring ] && [ -e \"$d/keyring-fails\" ]; then\n\
+             echo 'ladderback: nas: could not read the keyring entry ladderback/nas (secret-keyring-unavailable)' >&2\n\
+             exit 1\n\
              fi\n\
              exec '{LADDERBACK}' \"$@\"\n",
             folder.display()
@@ -239,6 +247,51 @@ fn installed_says(agent: &mut Agent, said: String) {
 fn installed_over(agent: &mut Agent, said: String) {
     fs::write(installed(agent).join("version-later"), format!("{said}\n"))
         .expect("the later program's version");
+}
+
+#[given("the installed program can't read a keyring entry")]
+fn keyring_fails(agent: &mut Agent) {
+    fs::write(installed(agent).join("keyring-fails"), "")
+        .expect("the stand-in is told to fail its keyring check");
+}
+
+/// The installed program's commands, by their first argument, in the order
+/// they ran.
+fn calls(agent: &Agent) -> Vec<String> {
+    fs::read_to_string(installed(agent).join("calls"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[then("the installed program read the keyring entries")]
+fn keyring_read(agent: &mut Agent) {
+    let calls = calls(agent);
+    assert!(
+        calls.iter().any(|call| call == "check-keyring"),
+        "the installed program ran {calls:?}"
+    );
+}
+
+#[then("the installed program read the keyring entries before the service was restarted")]
+fn keyring_read_before_restart(agent: &mut Agent) {
+    let calls = calls(agent);
+    let checked = calls.iter().position(|call| call == "check-keyring");
+    let restarted = calls.iter().position(|call| call == "install-service");
+    assert!(
+        checked.is_some() && checked < restarted,
+        "the installed program ran {calls:?}"
+    );
+}
+
+#[then("the installed program never restarted the service")]
+fn never_restarted(agent: &mut Agent) {
+    let calls = calls(agent);
+    assert!(
+        !calls.iter().any(|call| call == "install-service"),
+        "the installed program ran {calls:?}"
+    );
 }
 
 #[given(expr = "the operation log shows a backup {word}")]

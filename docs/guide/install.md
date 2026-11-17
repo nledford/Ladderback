@@ -88,7 +88,13 @@ On macOS, grant the installed `ladderback` Full Disk Access by hand, in System S
 
 ### Signing your build
 
-A build from source carries the linker's ad-hoc signature, which changes with every build, so macOS sees each update as a new program: it drops the Full Disk Access grant and asks again for Photos and the keychain. Signed with a certificate from your own keychain under one fixed identifier, every build has the same signature to macOS, so its Full Disk Access and Photos grants and the keychain's "Always Allow" carry over to the next update (tested on macOS 27.3, [#281](https://github.com/nledford/Ladderback/issues/281)). No Apple Developer account is needed.
+A build from source carries the linker's ad-hoc signature, which changes with every build, so macOS sees each update as a new program: it drops the Full Disk Access grant and asks again for Photos and the keychain. Signed with a certificate from your own keychain under one fixed identifier, every build has the same signature to macOS, so its Full Disk Access and Photos grants carry over to the next update (tested on macOS 27.3, [#281](https://github.com/nledford/Ladderback/issues/281)). No Apple Developer account is needed.
+
+The keychain still asks once for each new build, signed or not, before it lets the build read a keyring entry: a self-signed certificate has no Apple Team ID, so "Always Allow" lets in only the build that was answered ([#892](https://github.com/nledford/Ladderback/issues/892), [technical design §12](../design/operations.md#12-packaging-and-deployment)). Left unanswered, the prompt fails the first scheduled backup, or notification, after an update. Any of these avoids that:
+
+- `just install-restart` reads each keyring entry once with the new program, a repository's password and a notification channel's address, token or password, in your terminal, before it restarts the service, so the keychain asks while you are there. Answer "Always Allow": a single "Allow" is for that one read, and the service is asked again. It stops before the restart when an entry can't be read; `--ignore-keyring-failure` restarts all the same. After any other update, run `ladderback check-keyring` yourself.
+- Read the entry with Apple's `security` program, which a new build of Ladderback doesn't change: `password-command = "security find-generic-password -s ladderback -a nas -w"` for the entry `ladderback/nas`. The keychain may ask once for `security` itself, so run that command once in a terminal and answer "Always Allow".
+- Keep the password in a `password-file` only you can read (`chmod 600`).
 
 Make the certificate once:
 

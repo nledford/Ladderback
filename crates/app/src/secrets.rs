@@ -134,6 +134,66 @@ impl std::fmt::Display for ResolveError {
 
 impl std::error::Error for ResolveError {}
 
+/// Why a run is refused when the secret `secret` names couldn't be read:
+/// where it was looked for, and what a platform or a command said, masked
+/// through `redactor` first (I4); a text masked to nothing is left out.
+pub fn unresolved_refusal(secret: &SecretError, redactor: &Redactor) -> SettingRefusal {
+    let source = redactor.redact(&source_text(&secret.source));
+    // A line cut at its cap (it ends in `…`) may end in the start of a
+    // secret whoever cut it didn't know, which is masked as a whole one is.
+    let said =
+        |detail: &str| Some(redactor.redact_clipped(detail, "…")).filter(|said| !said.is_empty());
+    match &secret.problem {
+        Problem::Missing => SettingRefusal::SecretMissing { source },
+        Problem::Unreachable { detail } => SettingRefusal::SecretUnreadable {
+            source,
+            detail: said(detail),
+        },
+        // The platform's words about the service, never about a secret it
+        // gave: none was read. Masked all the same.
+        Problem::KeyringUnavailable { detail, .. } => SettingRefusal::SecretKeyringUnavailable {
+            source,
+            detail: said(detail),
+        },
+        Problem::NotUnicode => SettingRefusal::SecretNotText { source },
+        Problem::TooLarge { limit } => SettingRefusal::SecretTooLarge {
+            source,
+            limit: u64::try_from(*limit).unwrap_or(u64::MAX),
+        },
+        Problem::CommandFailed { detail, .. } => SettingRefusal::SecretCommandFailed {
+            source,
+            detail: said(detail),
+        },
+        // A source that waited out the limit keeps its kind and the seconds,
+        // so the words can name the likely cause: a keychain prompt nobody
+        // answered, or a mount that hung (#891). The environment is read
+        // without waiting.
+        Problem::TimedOut { seconds } => match secret.source {
+            SourceName::Command { .. } => SettingRefusal::SecretCommandTimedOut {
+                source,
+                seconds: *seconds,
+            },
+            SourceName::Keyring { .. } => SettingRefusal::SecretKeyringTimedOut {
+                source,
+                seconds: *seconds,
+            },
+            SourceName::File { .. } => SettingRefusal::SecretFileTimedOut {
+                source,
+                seconds: *seconds,
+            },
+            SourceName::Env { .. } => SettingRefusal::SecretUnreadable {
+                source,
+                detail: None,
+            },
+        },
+        // A command that succeeded while something it started kept its
+        // output open before its secret's line ended gave no secret, and
+        // nothing it printed is shown. Not a failure of the command, which
+        // exited as it should.
+        Problem::OutputCut => SettingRefusal::SecretCommandOutputOpen { source },
+    }
+}
+
 impl ResolveError {
     /// Why a run of the repository is refused, by its code: `Err` with the
     /// cap when the repository's secrets come to more than a job masks
@@ -144,66 +204,7 @@ impl ResolveError {
     pub fn refusal(&self, redactor: &Redactor) -> Result<SettingRefusal, usize> {
         let bytes = |limit: usize| u64::try_from(limit).unwrap_or(u64::MAX);
         let refusal = match &self.cause {
-            Cause::Unresolved(secret) => {
-                let source = redactor.redact(&source_text(&secret.source));
-                // A line cut at its cap (it ends in `…`) may end in the start
-                // of a secret whoever cut it didn't know, which is masked as
-                // a whole one is.
-                let said = |detail: &str| {
-                    Some(redactor.redact_clipped(detail, "…")).filter(|said| !said.is_empty())
-                };
-                match &secret.problem {
-                    Problem::Missing => SettingRefusal::SecretMissing { source },
-                    Problem::Unreachable { detail } => SettingRefusal::SecretUnreadable {
-                        source,
-                        detail: said(detail),
-                    },
-                    // The platform's words about the service, never about a
-                    // secret it gave: none was read. Masked all the same.
-                    Problem::KeyringUnavailable { detail, .. } => {
-                        SettingRefusal::SecretKeyringUnavailable {
-                            source,
-                            detail: said(detail),
-                        }
-                    }
-                    Problem::NotUnicode => SettingRefusal::SecretNotText { source },
-                    Problem::TooLarge { limit } => SettingRefusal::SecretTooLarge {
-                        source,
-                        limit: bytes(*limit),
-                    },
-                    Problem::CommandFailed { detail, .. } => SettingRefusal::SecretCommandFailed {
-                        source,
-                        detail: said(detail),
-                    },
-                    // A source that waited out the limit keeps its kind and
-                    // the seconds, so the words can name the likely cause: a
-                    // keychain prompt nobody answered, or a mount that hung
-                    // (#891). The environment is read without waiting.
-                    Problem::TimedOut { seconds } => match secret.source {
-                        SourceName::Command { .. } => SettingRefusal::SecretCommandTimedOut {
-                            source,
-                            seconds: *seconds,
-                        },
-                        SourceName::Keyring { .. } => SettingRefusal::SecretKeyringTimedOut {
-                            source,
-                            seconds: *seconds,
-                        },
-                        SourceName::File { .. } => SettingRefusal::SecretFileTimedOut {
-                            source,
-                            seconds: *seconds,
-                        },
-                        SourceName::Env { .. } => SettingRefusal::SecretUnreadable {
-                            source,
-                            detail: None,
-                        },
-                    },
-                    // A command that succeeded while something it started
-                    // kept its output open before its secret's line ended
-                    // gave no secret, and nothing it printed is shown. Not a
-                    // failure of the command, which exited as it should.
-                    Problem::OutputCut => SettingRefusal::SecretCommandOutputOpen { source },
-                }
-            }
+            Cause::Unresolved(secret) => unresolved_refusal(secret, redactor),
             Cause::ReferenceInProcessArguments => SettingRefusal::SecretInProcessArguments,
             Cause::ExpansionTooLong { limit } => SettingRefusal::SecretExpansionTooLong {
                 limit: bytes(*limit),
