@@ -17,6 +17,7 @@ use leptos_router::components::A;
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
 use crate::components::alert::rules::AlertTone;
+use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
 use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
@@ -25,10 +26,11 @@ use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
 use crate::components::{
-    Alert, Align, Button, Checkbox, Column, Confirmation, Dismissal, FolderLoader, FolderPage,
-    Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup,
-    ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp,
-    StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
+    Alert, Align, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation, Dismissal,
+    FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates,
+    Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State,
+    StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree,
+    show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -223,6 +225,16 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             last: Share::percent(40),
         },
     );
+    // The banner demo: its words in each tone it takes, and the edition of
+    // its dismissible notice, which the button after it makes newer, so the
+    // dismissal of the one before doesn't keep it away.
+    let (banner_information, banner_warning, banner_notice) = (
+        t(msg::UI_GALLERY_BANNER_INFORMATION),
+        t(msg::UI_GALLERY_BANNER_WARNING),
+        t(msg::UI_GALLERY_BANNER_DISMISSIBLE),
+    );
+    let banner_edition = RwSignal::new(0_u32);
+    let banner_demo_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>
@@ -1104,6 +1116,45 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
+        // Its id finds the demo under a pseudolocale too, which renames its
+        // heading.
+        <section id="banner-demo">
+            <h2>{t(msg::UI_GALLERY_BANNER_HEADING)}</h2>
+            // Each tone it takes, information first, which is the default.
+            <Banner localizer=Arc::clone(&localizer)>{banner_information}</Banner>
+            // A long path, which wraps inside the banner on a small screen.
+            <Banner localizer=Arc::clone(&localizer) tone=BannerTone::Warning>
+                {banner_warning}
+            </Banner>
+            // A notice the reader dismisses: it goes, focus goes to the
+            // button that brings a newer one, and this browser keeps this
+            // edition away on every later load.
+            {move || {
+                let edition = banner_edition.get().to_string();
+                let notice = banner_notice.clone();
+                view! {
+                    <Banner
+                        localizer=Arc::clone(&banner_demo_localizer)
+                        dismissal=BannerDismissal {
+                            remember_as: BANNER_DEMO,
+                            edition,
+                            then_focus: BANNER_DEMO_NEWER.to_owned(),
+                        }
+                    >
+                        {notice}
+                    </Banner>
+                }
+            }}
+            <p>
+                <Button
+                    id=BANNER_DEMO_NEWER
+                    content=Content::Text(t(msg::UI_GALLERY_BANNER_NEWER).into())
+                    on_press=Callback::new(move |()| {
+                        banner_edition.update(|edition| *edition = edition.saturating_add(1));
+                    })
+                />
+            </p>
+        </section>
         <section>
             <h2>{t(msg::UI_GALLERY_LINK_HEADING)}</h2>
             // A page of the app, and the page the reader is on, which is the
@@ -1771,6 +1822,14 @@ const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
 /// The ID of the alert demo's button that brings its dismissed notice back,
 /// where focus goes when the notice is dismissed.
 const ALERT_DEMO_SHOW: &str = "alert-demo-show";
+
+/// The name the gallery's dismissible demo banner is remembered under in
+/// the browser's local storage.
+const BANNER_DEMO: &str = "gallery-demo";
+
+/// The ID of the banner demo's button that brings a newer edition of its
+/// notice, where focus goes when the notice is dismissed.
+const BANNER_DEMO_NEWER: &str = "banner-demo-newer";
 
 /// A demo route. The gallery's literal paths all parse (the link's rules
 /// test their shapes); one that didn't would show no link, which the link
