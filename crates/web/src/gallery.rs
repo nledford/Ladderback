@@ -16,25 +16,26 @@ use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
+use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
 use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
 use crate::components::skeleton::rules::{Shape, Share};
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
-use crate::components::tabs::{Activation, Holds, TabSet, TabsName};
+use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
 use crate::components::{
-    Align, Button, Checkbox, Column, Confirmation, FolderLoader, FolderPage, Footer, Icon,
-    LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, ReviewDialog,
-    Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Tab,
-    Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
+    Alert, Align, Button, Checkbox, Column, Confirmation, Dismissal, FolderLoader, FolderPage,
+    Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup,
+    ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp,
+    StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
 use crate::text;
-use crate::variants::{Placement, Rem, Side, Size, Tone};
+use crate::variants::{Placement, Rem, Side, Size, StatusTone, Tone};
 
 #[component]
 pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
@@ -80,6 +81,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     // the toast text.
     let form_error = RwSignal::<Option<String>>::new(None);
     let form_value = RwSignal::new(String::new());
+    let address_value = RwSignal::new(String::new());
     let required_error = t(msg::UI_GALLERY_REPOSITORY_REQUIRED);
     // The multi-line field's demo: its entries and its error, which its own
     // button shows and clears as the one-line field's does.
@@ -163,6 +165,28 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let form_sent = t(msg::UI_GALLERY_BUTTON_SENT);
     // The tooltip demo's icon-only button: its name, the tooltip's too.
     let schedule = t(msg::UI_GALLERY_TOOLTIP_SCHEDULE);
+    // The alert demo: its words in each tone, the warning's with a link
+    // inside it in the alert's text color (Inherit), and whether its
+    // dismissible notice shows, which its Dismiss button clears and the
+    // button after it sets again.
+    let (alert_information, alert_success, alert_error) = (
+        t(msg::UI_GALLERY_ALERT_INFORMATION),
+        t(msg::UI_GALLERY_ALERT_SUCCESS),
+        t(msg::UI_GALLERY_ALERT_ERROR),
+    );
+    let alert_warning = sentence_link(
+        &localizer,
+        route("/operations", Matching::Section),
+        msg::UI_GALLERY_ALERT_WARNING,
+        t(msg::UI_GALLERY_ALERT_WARNING_LINK),
+        LinkTone::Inherit,
+    );
+    let notice_shown = RwSignal::new(true);
+    let (notice, notice_show) = (
+        t(msg::UI_GALLERY_ALERT_DISMISSIBLE),
+        t(msg::UI_GALLERY_ALERT_SHOW),
+    );
+    let alert_localizer = Arc::clone(&localizer);
     // The skeleton demo: whether its plan has come, which its toggle sets,
     // the words that say the wait, and the plan's own lines.
     let plan_shown = RwSignal::new(false);
@@ -389,6 +413,26 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                                 {swatch("vocabulary-swatch".to_owned())} <span>{t(name)}</span>
                             </li>
                         }
+                    })
+                    .collect_view()}
+            </ul>
+            // Every status tone's pair, its name in its words on its fill,
+            // so the axe row reads each pair's words on its fill.
+            <h3 id="gallery-status-pairs">{t(msg::UI_GALLERY_STATUS_PAIRS_HEADING)}</h3>
+            <ul
+                class="vocabulary-demo flex flex-wrap gap-2"
+                role="list"
+                aria-labelledby="gallery-status-pairs"
+            >
+                {[
+                    (StatusTone::Success, msg::UI_GALLERY_TONE_SUCCESS),
+                    (StatusTone::Warning, msg::UI_GALLERY_TONE_WARNING),
+                    (StatusTone::Error, msg::UI_GALLERY_TONE_ERROR),
+                ]
+                    .into_iter()
+                    .map(|(tone, name)| {
+                        let class = format!("px-2 rounded-(--radius-small) {}", tone.pair());
+                        view! { <li class=class>{t(name)}</li> }
                     })
                     .collect_view()}
             </ul>
@@ -1129,6 +1173,52 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 {demo_link(&localizer, outside(RUSTIC_DOCS), t(msg::UI_GALLERY_LINK_OUTSIDE_RTL))}
             </p>
         </section>
+        // Its id finds the demo under a pseudolocale too, which renames its
+        // heading.
+        <section id="alert-demo">
+            <h2>{t(msg::UI_GALLERY_ALERT_HEADING)}</h2>
+            // Each tone, information first, which is the default.
+            <Alert localizer=Arc::clone(&localizer)>{alert_information}</Alert>
+            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Success>
+                {alert_success}
+            </Alert>
+            // A link inside, in the alert's text color.
+            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Warning>
+                {alert_warning}
+            </Alert>
+            // A long path, which wraps inside the alert on a small screen.
+            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
+                {alert_error}
+            </Alert>
+            // A notice the reader dismisses: the page takes it away, and
+            // focus goes to the button that brings it back.
+            {move || {
+                notice_shown
+                    .get()
+                    .then(|| {
+                        let notice = notice.clone();
+                        view! {
+                            <Alert
+                                localizer=Arc::clone(&alert_localizer)
+                                dismissal=Dismissal {
+                                    on_dismiss: Callback::new(move |()| notice_shown.set(false)),
+                                    then_focus: ALERT_DEMO_SHOW.to_owned(),
+                                }
+                            >
+                                {notice}
+                            </Alert>
+                        }
+                    })
+            }}
+            <p>
+                <Button
+                    id=ALERT_DEMO_SHOW
+                    content=Content::Text(notice_show.into())
+                    disabled=notice_shown
+                    on_press=Callback::new(move |()| notice_shown.set(true))
+                />
+            </p>
+        </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TABS_HEADING)}</h2>
             // Each tab the arrow keys arrive at is selected, the set named by
@@ -1238,6 +1328,131 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                                 t(msg::UI_GALLERY_TABS_THIRD),
                                 Holds::Text,
                                 view! { <p>{t(msg::UI_GALLERY_TABS_THIRD_TEXT)}</p> },
+                            ),
+                        ],
+                    )
+                />
+            </div>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TABS_VERTICAL_HEADING)}</h2>
+            // A column at the start of the panel: the down arrow goes to
+            // the next tab and the up arrow to the one before.
+            <Tabs
+                id="gallery-tabs-vertical"
+                name=TabsName::Label(t(msg::UI_GALLERY_TABS_PLAN))
+                orientation=Orientation::Vertical
+                tabs=TabSet::new(
+                    Tab::new(
+                        t(msg::UI_GALLERY_TABS_SOURCES),
+                        Holds::Text,
+                        view! { <p>{t(msg::UI_GALLERY_TABS_SOURCES_TEXT)}</p> },
+                    ),
+                    vec![
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_TIMES),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_TIMES_TEXT)}</p> },
+                        ),
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_HOOKS),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_HOOKS_TEXT)}</p> },
+                        ),
+                    ],
+                )
+            />
+            // The same in a part of the page that runs right to left: the
+            // column at the panel's start, on the right, and the down arrow
+            // still going to the next tab.
+            <div dir="rtl">
+                <Tabs
+                    id="gallery-tabs-vertical-rtl"
+                    name=TabsName::Label(t(msg::UI_GALLERY_TABS_VERTICAL_RTL))
+                    orientation=Orientation::Vertical
+                    tabs=TabSet::new(
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_VERTICAL_RTL_FIRST),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_VERTICAL_RTL_FIRST_TEXT)}</p> },
+                        ),
+                        vec![
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_VERTICAL_RTL_SECOND),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_VERTICAL_RTL_SECOND_TEXT)}</p> },
+                            ),
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_VERTICAL_RTL_THIRD),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_VERTICAL_RTL_THIRD_TEXT)}</p> },
+                            ),
+                        ],
+                    )
+                />
+            </div>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TABS_RESPONSIVE_HEADING)}</h2>
+            // As wide as the page: a column where the page is wide, a row
+            // in a narrow window or with larger text. What is typed in the
+            // middle panel stays while the layout changes.
+            <Tabs
+                id="gallery-tabs-responsive"
+                name=TabsName::Label(t(msg::UI_GALLERY_TABS_SETTINGS))
+                orientation=Orientation::Responsive
+                tabs=TabSet::new(
+                    Tab::new(
+                        t(msg::UI_GALLERY_TABS_GENERAL),
+                        Holds::Text,
+                        view! { <p>{t(msg::UI_GALLERY_TABS_GENERAL_TEXT)}</p> },
+                    ),
+                    vec![
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_ADDRESS),
+                            Holds::Controls,
+                            view! {
+                                <TextField
+                                    id="gallery-tabs-address-input"
+                                    localizer=Arc::clone(&localizer)
+                                    value=address_value
+                                    label=t(msg::UI_GALLERY_TABS_ADDRESS_FIELD)
+                                    description=t(msg::UI_GALLERY_TABS_ADDRESS_HINT)
+                                />
+                            },
+                        ),
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_ABOUT),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_ABOUT_TEXT)}</p> },
+                        ),
+                    ],
+                )
+            />
+            // The same tabs in a narrow column of a part of the page that
+            // runs right to left: too narrow for the list beside the panel,
+            // so a row, the left arrow going to the next tab.
+            <div dir="rtl" class="max-w-sm">
+                <Tabs
+                    id="gallery-tabs-column"
+                    name=TabsName::Label(t(msg::UI_GALLERY_TABS_COLUMN))
+                    orientation=Orientation::Responsive
+                    tabs=TabSet::new(
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_COLUMN_FIRST),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_COLUMN_FIRST_TEXT)}</p> },
+                        ),
+                        vec![
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_COLUMN_SECOND),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_COLUMN_SECOND_TEXT)}</p> },
+                            ),
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_COLUMN_THIRD),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_COLUMN_THIRD_TEXT)}</p> },
                             ),
                         ],
                     )
@@ -1496,6 +1711,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
 
 /// rustic's documentation, the demo's other site.
 const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
+
+/// The ID of the alert demo's button that brings its dismissed notice back,
+/// where focus goes when the notice is dismissed.
+const ALERT_DEMO_SHOW: &str = "alert-demo-show";
 
 /// A demo route. The gallery's literal paths all parse (the link's rules
 /// test their shapes); one that didn't would show no link, which the link

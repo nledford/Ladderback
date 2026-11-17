@@ -28,6 +28,14 @@ Given("a viewport of {int} by {int} pixels", function (this: BrowserWorld, width
   this.contextOptions.viewport = { width, height };
 });
 
+// The window changes width with the page open, as a reader resizing it or
+// turning a tablet would; its height stays.
+When(/^the window (?:narrows|widens) to (\d+) pixels$/, async function (this: BrowserWorld, width: string) {
+  const now = this.page.viewportSize();
+  assert.ok(now, "the page has no viewport");
+  await this.page.setViewportSize({ width: Number(width), height: now.height });
+});
+
 Given("the browser asks for {string}", function (this: BrowserWorld, setting: string) {
   const options = BROWSER_SETTINGS[setting];
   assert.ok(options, `unknown browser setting "${setting}"`);

@@ -339,6 +339,35 @@ ui-gallery-link-status = The demo check failed: { $link } says why.
 # The words of the link inside ui-gallery-link-status.
 ui-gallery-link-status-link = the demo log
 
+# The heading of the gallery's alert demo (§4.5): an inline message in each
+# tone, one with a link inside it and one the reader can dismiss.
+ui-gallery-alert-heading = Alert
+
+# The demo alert in the Primary tone, information.
+ui-gallery-alert-information = The demo plan backs up the demo folder every night.
+
+# The demo alert in the Success tone.
+ui-gallery-alert-success = The demo backup finished and added 12 files.
+
+# The demo alert in the Warning tone, with a link inside it, drawn in the
+# alert's text color; $link is the link's words
+# (ui-gallery-alert-warning-link).
+ui-gallery-alert-warning = The demo repository hasn't been checked in 30 days: { $link } lists its last runs.
+
+# The words of the link inside ui-gallery-alert-warning.
+ui-gallery-alert-warning-link = the demo operations
+
+# The demo alert in the Error tone, with a long path in it that wraps on a
+# small screen.
+ui-gallery-alert-error = The demo repository at /srv/demo-backups/ladderback-demo-repository couldn't be read, so nothing was backed up.
+
+# The demo alert the reader can dismiss with its button.
+ui-gallery-alert-dismissible = This demo notice goes when you dismiss it.
+
+# A demo button that brings the dismissed demo notice back, unavailable
+# while the notice shows; focus moves to it when the notice is dismissed.
+ui-gallery-alert-show = Show the demo notice again
+
 # The heading of the gallery's text field demo (§4.5): every kind, size and
 # state of the shared text field.
 ui-gallery-text-field-heading = Text field
@@ -420,9 +449,11 @@ ui-gallery-badge-empty = Empty
 # tones, sizes and placements every shared component takes.
 ui-gallery-vocabulary-heading = Shared vocabulary
 
-# The headings of the vocabulary demo's three lists, which name the lists
-# too.
+# The headings of the vocabulary demo's four lists, which name the lists
+# too. Status pairs lists Success, Warning and Error again, each in its words
+# on its fill: the two colors a part tinted in that status takes.
 ui-gallery-tones-heading = Tones
+ui-gallery-status-pairs-heading = Status pairs
 ui-gallery-sizes-heading = Sizes
 ui-gallery-placements-heading = Placements
 
@@ -828,6 +859,56 @@ ui-gallery-tabs-second = Second demo tab
 ui-gallery-tabs-second-text = The second demo panel.
 ui-gallery-tabs-third = Third demo tab
 ui-gallery-tabs-third-text = The third demo panel.
+
+# The heading of the gallery's vertical tabs demo (§4.5): a column of tabs
+# at the start of their panel, which the up and down arrows move between.
+ui-gallery-tabs-vertical-heading = Vertical tabs
+
+# A set of demo vertical tabs, named by its own label.
+ui-gallery-tabs-plan = Demo plan
+ui-gallery-tabs-sources = Demo sources
+ui-gallery-tabs-sources-text = The demo plan backs up two demo folders.
+ui-gallery-tabs-times = Demo times
+ui-gallery-tabs-times-text = The demo plan runs every night.
+ui-gallery-tabs-hooks = Demo hooks
+ui-gallery-tabs-hooks-text = The demo plan runs no hooks.
+
+# The same kind of tabs in a part of the page that runs right to left: a
+# column at the start of the panel, on the right.
+ui-gallery-tabs-vertical-rtl = Demo plan, right to left
+ui-gallery-tabs-vertical-rtl-first = First vertical tab
+ui-gallery-tabs-vertical-rtl-first-text = The first vertical panel.
+ui-gallery-tabs-vertical-rtl-second = Second vertical tab
+ui-gallery-tabs-vertical-rtl-second-text = The second vertical panel.
+ui-gallery-tabs-vertical-rtl-third = Third vertical tab
+ui-gallery-tabs-vertical-rtl-third-text = The third vertical panel.
+
+# The heading of the gallery's responsive tabs demo (§4.5): tabs in a column
+# where their container has room for it beside the panel, and in a row
+# above the panel where it hasn't.
+ui-gallery-tabs-responsive-heading = Responsive tabs
+
+# A set of demo responsive tabs as wide as the page. Its middle panel holds
+# a field, to show that what is typed in it stays while the tabs change
+# layout.
+ui-gallery-tabs-settings = Demo settings
+ui-gallery-tabs-general = Demo general
+ui-gallery-tabs-general-text = The demo settings shown here change nothing.
+ui-gallery-tabs-address = Demo address
+ui-gallery-tabs-address-field = Demo address text
+ui-gallery-tabs-address-hint = What you type here stays while the tabs change layout.
+ui-gallery-tabs-about = Demo about
+ui-gallery-tabs-about-text = The demo agent runs on this computer.
+
+# The same kind of tabs in a narrow column of the page that runs right to
+# left: a row, as the column has no room for the list beside the panel.
+ui-gallery-tabs-column = Demo settings in a narrow column, right to left
+ui-gallery-tabs-column-first = First column tab
+ui-gallery-tabs-column-first-text = The first column panel.
+ui-gallery-tabs-column-second = Second column tab
+ui-gallery-tabs-column-second-text = The second column panel.
+ui-gallery-tabs-column-third = Third column tab
+ui-gallery-tabs-column-third-text = The third column panel.
 
 # The heading of the gallery's tooltip demo (§4.5): a short note beside a
 # control, shown on keyboard focus or a resting pointer.
@@ -1755,6 +1836,19 @@ ui-still-waiting = Still waiting for Ladderback to say how the run ended.
 # it and the link's words, { " " }, which a language that writes none there
 # leaves out. A whole phrase of its own, never part of the link's words.
 ui-link-outside = { " " }(goes to another site)
+
+## The alert (§4.5): what it says of itself, the same on every page.
+
+# The name of an alert's icon, heard by a screen reader before the alert's
+# words: the alert's tone in one word, which its icon's shape shows.
+ui-alert-information = Information
+ui-alert-success = Success
+ui-alert-warning = Warning
+ui-alert-error = Error
+
+# The name of the icon-only button that takes an alert away, which its
+# tooltip shows.
+ui-alert-dismiss = Dismiss
 
 ## The text field (§4.5): what it says of itself, the same on every page.
 

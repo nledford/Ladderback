@@ -599,7 +599,7 @@ jobs:
       - if: github.event_name == 'push'
         run: rm -rf target
 
-  # The dependency tree against deny.toml: RustSec advisories, licences, banned
+  # The dependency tree against deny.toml: RustSec advisories, licenses, banned
   # crates and sources (technical design §13.6). It also runs on the nightly
   # schedule, because an advisory can appear with no change to the code; a
   # scheduled run notifies no one, so a failed one opens an issue (`deny-report`

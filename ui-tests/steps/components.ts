@@ -495,22 +495,82 @@ Then(
   },
 );
 
+// A status tone's pair (technical design §4.5, the shared vocabulary): a part
+// tinted in it draws its words in the pair's words token on its fill token.
+// Each token is read through a probe, as the page resolves it, with a
+// fallback no token has, so a token style.css lacks fails here rather than
+// matching whatever color the probe inherits. The part is read alone with
+// `evaluate`, as `expect` finds it (issue #774).
+async function drawnOnItsFill(part: Locator, name: string, words: string, fill: string) {
+  await expect(part).toHaveCount(1);
+  const missing = "rgb(1, 2, 3)";
+  const drawn = await part.evaluate(
+    (element, { tokens, missing }) => {
+      const probe = document.createElement("span");
+      document.body.append(probe);
+      const resolve = (token: string) => {
+        probe.style.color = `var(${token}, ${missing})`;
+        return getComputedStyle(probe).color;
+      };
+      const expected = { words: resolve(tokens.words), fill: resolve(tokens.fill) };
+      probe.remove();
+      const style = getComputedStyle(element);
+      return { expected, found: { words: style.color, fill: style.backgroundColor } };
+    },
+    { tokens: { words, fill }, missing },
+  );
+  assert.notEqual(drawn.expected.words, missing, `${words} is not defined`);
+  assert.notEqual(drawn.expected.fill, missing, `${fill} is not defined`);
+  assert.deepEqual(drawn.found, drawn.expected, name);
+}
+
+// The vocabulary demo's status pairs, each named in words drawn in its pair,
+// so the axe row reads each pair's words on its fill too.
+Then(
+  "each status pair of the {string} demo is named in words, drawn on its fill:",
+  async function (this: BrowserWorld, component: string, pairs: DataTable) {
+    const list = demoSection(this.page, component).getByRole("list", { name: "Status pairs", exact: true });
+    const rows = pairs.hashes() as { pair: string; words: string; fill: string }[];
+    await expect(list.getByRole("listitem")).toHaveCount(rows.length);
+    for (const { pair, words, fill } of rows) {
+      await drawnOnItsFill(list.getByRole("listitem").filter({ hasText: wholly(pair) }), pair, words, fill);
+    }
+  },
+);
+
+// A status badge (§4.5) whose operation ended draws its words and its pill in
+// the pair of its status tone, found by its words, the whole of them
+// ("Succeeded" is never "Succeeded with warnings").
+Then(
+  "each of these badges of the {string} demo is drawn on its fill:",
+  async function (this: BrowserWorld, component: string, badges: DataTable) {
+    const section = demoSection(this.page, component);
+    for (const { badge, words, fill } of badges.hashes() as { badge: string; words: string; fill: string }[]) {
+      const pill = section.getByText(badge, { exact: true });
+      await drawnOnItsFill(pill, badge, words, fill);
+    }
+  },
+);
+
+/** Text that is the whole of an element's, never a part of it. */
+function wholly(text: string): RegExp {
+  return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+}
+
 // A placement (technical design §4.5) is in logical terms: Start is the
 // line's start in the page's direction, the left in English and the right in
 // Arabic. Each row of the demo's last list is a part placed in its line (the
 // list's content box), its swatch and its name; Inline keeps the part in the
 // line of text, as wide as what it holds. The vocabulary demo holds the
-// gallery's only lists (tones, sizes, placements, in that order); they are
-// found by order, since a pseudolocale changes their names. A pixel of
-// rounding is allowed.
+// gallery's only lists, the placements last; it is found by order, since a
+// pseudolocale changes the names. A pixel of rounding is allowed.
 Then(
   /^the placements of the vocabulary demo put each part where they say, in a page that runs (left to right|right to left)$/,
   async function (this: BrowserWorld, direction: string) {
-    const lists = this.page.getByRole("main").getByRole("list");
-    await expect(lists).toHaveCount(3);
-    const items = lists.nth(2).getByRole("listitem");
+    const placements = this.page.getByRole("main").getByRole("list").last();
+    const items = placements.getByRole("listitem");
     await expect(items).toHaveCount(4);
-    const rows = await lists.nth(2).evaluate((list) => {
+    const rows = await placements.evaluate((list) => {
       const frame = list.getBoundingClientRect();
       const style = getComputedStyle(list);
       const inset = (side: "left" | "right") =>
@@ -2305,6 +2365,32 @@ const SNAPSHOTS: Record<string, string> = {
   - tab "Third demo tab"
 - tabpanel "First demo tab":
   - paragraph: The first demo panel.`,
+  "Vertical tabs": `- heading "Vertical tabs" [level=2]
+- tablist "Demo plan":
+  - tab "Demo sources" [selected]
+  - tab "Demo times"
+  - tab "Demo hooks"
+- tabpanel "Demo sources":
+  - paragraph: The demo plan backs up two demo folders.
+- tablist "Demo plan, right to left":
+  - tab "First vertical tab" [selected]
+  - tab "Second vertical tab"
+  - tab "Third vertical tab"
+- tabpanel "First vertical tab":
+  - paragraph: The first vertical panel.`,
+  "Responsive tabs": `- heading "Responsive tabs" [level=2]
+- tablist "Demo settings":
+  - tab "Demo general" [selected]
+  - tab "Demo address"
+  - tab "Demo about"
+- tabpanel "Demo general":
+  - paragraph: The demo settings shown here change nothing.
+- tablist "Demo settings in a narrow column, right to left":
+  - tab "First column tab" [selected]
+  - tab "Second column tab"
+  - tab "Third column tab"
+- tabpanel "First column tab":
+  - paragraph: The first column panel.`,
   "Shared vocabulary": `- heading "Shared vocabulary" [level=2]
 - heading "Tones" [level=3]
 - list "Tones":
@@ -2314,6 +2400,11 @@ const SNAPSHOTS: Record<string, string> = {
   - listitem: Warning
   - listitem: Error
   - listitem: Inherit
+- heading "Status pairs" [level=3]
+- list "Status pairs":
+  - listitem: Success
+  - listitem: Warning
+  - listitem: Error
 - heading "Sizes" [level=3]
 - list "Sizes":
   - listitem: Small
@@ -2450,4 +2541,25 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph: Loading the demo plan…
 - paragraph:
   - button "Show the demo plan"`,
+  // Each alert is its icon, an image named for its tone, then its words,
+  // with no role of its own: no live region. The notice ends with its
+  // Dismiss button, whose tooltip is hidden from a screen reader; the
+  // button that brings it back is unavailable while it shows.
+  Alert: `- heading "Alert" [level=2]
+- img "Information"
+- text: The demo plan backs up the demo folder every night.
+- img "Success"
+- text: The demo backup finished and added 12 files.
+- img "Warning"
+- text: "The demo repository hasn't been checked in 30 days: \u2068"
+- link "the demo operations":
+  - /url: /operations
+- text: \u2069 lists its last runs.
+- img "Error"
+- text: The demo repository at /srv/demo-backups/ladderback-demo-repository couldn't be read, so nothing was backed up.
+- img "Information"
+- text: This demo notice goes when you dismiss it.
+- button "Dismiss"
+- paragraph:
+  - button "Show the demo notice again" [disabled]`,
 };
