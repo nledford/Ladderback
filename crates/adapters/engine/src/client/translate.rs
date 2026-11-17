@@ -288,6 +288,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::SecretCommandFailed
                 | ErrorCode::SecretCommandOutputOpen
                 | ErrorCode::SecretCommandTimedOut
+                | ErrorCode::SecretKeyringTimedOut
+                | ErrorCode::SecretFileTimedOut
                 | ErrorCode::SecretInProcessArguments
                 | ErrorCode::SecretExpansionTooLong
                 | ErrorCode::SecretsTooLargeToMask

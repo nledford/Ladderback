@@ -209,6 +209,16 @@ pub fn refused(
             with(from(source), ("seconds", MsgArg::Count(*seconds))),
             None,
         ),
+        R::SecretKeyringTimedOut { source, seconds } => (
+            ErrorCode::SecretKeyringTimedOut,
+            with(from(source), ("seconds", MsgArg::Count(*seconds))),
+            None,
+        ),
+        R::SecretFileTimedOut { source, seconds } => (
+            ErrorCode::SecretFileTimedOut,
+            with(from(source), ("seconds", MsgArg::Count(*seconds))),
+            None,
+        ),
         R::SecretCommandOutputOpen { source } => {
             (ErrorCode::SecretCommandOutputOpen, from(source), None)
         }
@@ -794,6 +804,26 @@ mod tests {
                 ErrorCode::SecretCommandTimedOut,
                 "secret-command-timed-out",
                 vec![field(), source(), ("seconds", MsgArg::Count(30))],
+                None,
+            ),
+            (
+                R::SecretKeyringTimedOut {
+                    source: "ladderback/demo".to_owned(),
+                    seconds: 60,
+                },
+                ErrorCode::SecretKeyringTimedOut,
+                "secret-keyring-timed-out",
+                vec![field(), source(), ("seconds", MsgArg::Count(60))],
+                None,
+            ),
+            (
+                R::SecretFileTimedOut {
+                    source: "ladderback/demo".to_owned(),
+                    seconds: 60,
+                },
+                ErrorCode::SecretFileTimedOut,
+                "secret-file-timed-out",
+                vec![field(), source(), ("seconds", MsgArg::Count(60))],
                 None,
             ),
             (

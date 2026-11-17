@@ -273,6 +273,14 @@ fn refusal_args(refusal: &SettingRefusal) -> Vec<(&'static str, MsgArg)> {
         R::SecretCommandTimedOut {
             source: from,
             seconds,
+        }
+        | R::SecretKeyringTimedOut {
+            source: from,
+            seconds,
+        }
+        | R::SecretFileTimedOut {
+            source: from,
+            seconds,
         } => vec![source(from), ("seconds", MsgArg::Count(*seconds))],
         R::SecretExpansionTooLong { limit } => vec![("limit", MsgArg::Bytes(*limit))],
         R::TemplateInvalid { at } => at
@@ -401,6 +409,14 @@ fn refused(
             detail: said,
         },
         "secret-command-timed-out" => R::SecretCommandTimedOut {
+            source: source()?,
+            seconds: count(args, "seconds")?,
+        },
+        "secret-keyring-timed-out" => R::SecretKeyringTimedOut {
+            source: source()?,
+            seconds: count(args, "seconds")?,
+        },
+        "secret-file-timed-out" => R::SecretFileTimedOut {
             source: source()?,
             seconds: count(args, "seconds")?,
         },
@@ -838,6 +854,14 @@ mod tests {
                 source: "pass".to_owned(),
                 seconds: 30,
             },
+            R::SecretKeyringTimedOut {
+                source: "ladderback/demo".to_owned(),
+                seconds: 60,
+            },
+            R::SecretFileTimedOut {
+                source: "/mnt/share/demo.password".to_owned(),
+                seconds: 60,
+            },
             R::SecretCommandOutputOpen {
                 source: "pass".to_owned(),
             },
@@ -876,7 +900,7 @@ mod tests {
             };
             assert_eq!(back, reason);
         }
-        assert_eq!(codes.len(), 13, "one code per refusal: {codes:?}");
+        assert_eq!(codes.len(), 15, "one code per refusal: {codes:?}");
     }
 
     /// A refusal's columns that lack what its code needs, or hold it as the

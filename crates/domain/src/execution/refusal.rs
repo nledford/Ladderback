@@ -40,6 +40,12 @@ pub enum SettingRefusal {
     },
     /// The command `source` ran for longer than `seconds`.
     SecretCommandTimedOut { source: String, seconds: u64 },
+    /// The keyring didn't give the entry `source` within `seconds`: on
+    /// macOS, the keychain may be waiting for its prompt to be answered.
+    SecretKeyringTimedOut { source: String, seconds: u64 },
+    /// The file `source` wasn't read within `seconds`, as when the network
+    /// share it is on stopped answering.
+    SecretFileTimedOut { source: String, seconds: u64 },
     /// The command `source` exited while something it started still held its
     /// output open, before its secret's line ended.
     SecretCommandOutputOpen { source: String },
@@ -70,6 +76,8 @@ impl SettingRefusal {
             Self::SecretTooLarge { .. } => "secret-too-large",
             Self::SecretCommandFailed { .. } => "secret-command-failed",
             Self::SecretCommandTimedOut { .. } => "secret-command-timed-out",
+            Self::SecretKeyringTimedOut { .. } => "secret-keyring-timed-out",
+            Self::SecretFileTimedOut { .. } => "secret-file-timed-out",
             Self::SecretCommandOutputOpen { .. } => "secret-command-output-open",
             Self::SecretInProcessArguments => "secret-in-process-arguments",
             Self::SecretExpansionTooLong { .. } => "secret-expansion-too-long",

@@ -90,6 +90,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     SecretCommandFailed => msg::ERROR_SECRET_COMMAND_FAILED,
     SecretCommandOutputOpen => msg::ERROR_SECRET_COMMAND_OUTPUT_OPEN,
     SecretCommandTimedOut => msg::ERROR_SECRET_COMMAND_TIMED_OUT,
+    SecretKeyringTimedOut => msg::ERROR_SECRET_KEYRING_TIMED_OUT,
+    SecretFileTimedOut => msg::ERROR_SECRET_FILE_TIMED_OUT,
     SecretInProcessArguments => msg::ERROR_SECRET_IN_PROCESS_ARGUMENTS,
     SecretExpansionTooLong => msg::ERROR_SECRET_EXPANSION_TOO_LONG,
     SecretsTooLargeToMask => msg::ERROR_SECRETS_TOO_LARGE_TO_MASK,

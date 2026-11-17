@@ -9,6 +9,9 @@ Feature: A scheduled run refused before it starts
   as they follow any failed scheduled run. A backup left queued when the
   daemon stopped, and refused the same way when the next start takes it up
   again, ends failed with that refusal too, not because the daemon stopped.
+  A keyring or a password file that doesn't answer within the time limit is
+  refused as that, with the limit's seconds, never as a source that can't be
+  read: on macOS, a keychain prompt nobody answered is the usual cause.
   A run a person asks for is refused to them instead, and nothing is kept
   (technical design §5).
 
@@ -19,6 +22,20 @@ Feature: A scheduled run refused before it starts
     And the operation never started
     And the history shows the operation as it ended
     And the run ends as a failed scheduled run of the plan "home"
+
+  Scenario: A scheduled run whose keyring doesn't answer in time keeps the time limit in its failure
+    Given the repository's password is in the keyring under "ladderback/demo"
+    And the keyring doesn't answer in time
+    When the schedule starts a backup of the plan "home" on the repository
+    Then the operation ends as failed because the keyring entry "ladderback/demo" of the password didn't answer within 60 seconds
+    And the operation never started
+
+  Scenario: A scheduled run whose password file doesn't answer in time keeps the time limit in its failure
+    Given the repository's password is in the file "/mnt/share/demo.password"
+    And the file "/mnt/share/demo.password" doesn't answer in time
+    When the schedule starts a backup of the plan "home" on the repository
+    Then the operation ends as failed because the file "/mnt/share/demo.password" of the password didn't answer within 60 seconds
+    And the operation never started
 
   @e2e
   Scenario: A missed scheduled run whose password file is gone is kept as a failed backup after a restart

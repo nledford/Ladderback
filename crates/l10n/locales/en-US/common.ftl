@@ -655,6 +655,29 @@ error-secret-command-timed-out = { $seconds ->
    *[other] The command { $source }, which gives the repository's { $field }, did not finish in { $seconds } seconds, so { -brand-name } stopped it.
   }
 
+# The keyring did not give a repository's secret within the time limit. On
+# macOS the usual cause is a keychain prompt asking to allow access that nobody
+# answered.
+# $field (text): where in the settings the secret is.
+# $source (text): the keyring entry, as service/name.
+# $seconds (count): the seconds it was given.
+# "Always Allow" is the label of the button in the macOS keychain prompt: use
+# the label macOS shows in your language.
+error-secret-keyring-timed-out = { $seconds ->
+    [one] The keyring did not answer within { $seconds } second when asked for the keyring entry { $source }, which the repository's { $field } refers to. On macOS, the keychain may be waiting for you to allow access in a prompt: answer it with Always Allow, then try again.
+   *[other] The keyring did not answer within { $seconds } seconds when asked for the keyring entry { $source }, which the repository's { $field } refers to. On macOS, the keychain may be waiting for you to allow access in a prompt: answer it with Always Allow, then try again.
+  }
+
+# A repository's secret file could not be read within the time limit, as when
+# it is on a network share that stopped answering.
+# $field (text): where in the settings the secret is.
+# $source (text): the file's path.
+# $seconds (count): the seconds it was given.
+error-secret-file-timed-out = { $seconds ->
+    [one] { -brand-name } could not read the file { $source }, which the repository's { $field } refers to, within { $seconds } second. A file on a network share that stopped answering can hang this way: check that the share can be reached, then try again.
+   *[other] { -brand-name } could not read the file { $source }, which the repository's { $field } refers to, within { $seconds } seconds. A file on a network share that stopped answering can hang this way: check that the share can be reached, then try again.
+  }
+
 # A setting that a program is started with refers to a secret.
 # $field (text): where in the settings it is.
 error-secret-in-process-arguments = The repository's { $field } is handed to a program as an argument, so it cannot refer to a secret: every user of the computer could read it there. Write the value out, or put the secret where the program reads it on its own.

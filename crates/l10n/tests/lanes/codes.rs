@@ -585,3 +585,38 @@ fn an_answer_too_large_points_to_the_web_ui_only_for_an_operation() {
         "{detail}"
     );
 }
+
+/// A keyring or a file that didn't answer in time is named with the time
+/// limit and the likely cause, never told to check that it is there and
+/// readable, which is the advice for a source that can't be read (#891).
+#[test]
+fn a_keyring_or_file_that_did_not_answer_in_time_says_so_with_its_seconds() {
+    let localizer = english();
+    let text = |text: &str| MsgArg::Text(text.to_owned());
+    let cases = [
+        (
+            ErrorCode::SecretKeyringTimedOut,
+            "ladderback/demo",
+            "Always Allow",
+        ),
+        (
+            ErrorCode::SecretFileTimedOut,
+            "/mnt/share/demo.password",
+            "network",
+        ),
+    ];
+    for (code, source, cause) in cases {
+        let args = [
+            ("field", text("password")),
+            ("source", text(source)),
+            ("seconds", MsgArg::Count(60)),
+        ];
+        let shown = localizer.error(code, &args, None);
+        assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+        let said = shown.text();
+        assert!(said.contains(source), "{code:?}: {said}");
+        assert!(said.contains("60 seconds"), "{code:?}: {said}");
+        assert!(said.contains(cause), "{code:?}: {said}");
+        assert!(!said.contains("Check that it is there"), "{code:?}: {said}");
+    }
+}

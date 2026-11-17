@@ -159,6 +159,14 @@ pub enum ErrorCode {
     /// A command that gives a repository's secret ran for longer than it
     /// may. As `SecretMissing`, and `seconds`.
     SecretCommandTimedOut,
+    /// A keyring that holds a repository's secret didn't give it within the
+    /// time limit: on macOS, the keychain may be waiting for its prompt to
+    /// be answered. As `SecretMissing`, and `seconds`.
+    SecretKeyringTimedOut,
+    /// A file that holds a repository's secret wasn't read within the time
+    /// limit, as when the network share it is on stopped answering. As
+    /// `SecretMissing`, and `seconds`.
+    SecretFileTimedOut,
     /// A repository's setting becomes an argument of a process and holds a
     /// reference, so the secret it names would show in the process list. The
     /// argument `field` names the setting.
@@ -1069,7 +1077,9 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
-            Self::SecretCommandTimedOut => &[
+            Self::SecretCommandTimedOut
+            | Self::SecretKeyringTimedOut
+            | Self::SecretFileTimedOut => &[
                 ArgSpec {
                     name: "field",
                     kind: ArgKind::Text,
@@ -2359,10 +2369,17 @@ mod tests {
             ErrorCode::SecretTooLarge.args(),
             &[named[0], named[1], spec("limit", ArgKind::Bytes, false)]
         );
-        assert_eq!(
-            ErrorCode::SecretCommandTimedOut.args(),
-            &[named[0], named[1], spec("seconds", ArgKind::Count, false)]
-        );
+        for code in [
+            ErrorCode::SecretCommandTimedOut,
+            ErrorCode::SecretKeyringTimedOut,
+            ErrorCode::SecretFileTimedOut,
+        ] {
+            assert_eq!(
+                code.args(),
+                &[named[0], named[1], spec("seconds", ArgKind::Count, false)],
+                "{code:?}"
+            );
+        }
         for code in [
             ErrorCode::RepositoryAliasTaken,
             ErrorCode::RepositoryAlreadyConfigured,

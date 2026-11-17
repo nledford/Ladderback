@@ -139,6 +139,32 @@ async fn a_secret_that_failed_to_resolve_is_refused_with_the_code_of_its_cause()
             None,
         ),
         (
+            unresolved(
+                Field::Password,
+                SourceName::Keyring {
+                    entry: "ladderback/demo".to_owned(),
+                },
+                Problem::TimedOut { seconds: 60 },
+            ),
+            ErrorCode::SecretKeyringTimedOut,
+            vec![
+                ("field", text("password")),
+                ("source", text("ladderback/demo")),
+                ("seconds", count(60)),
+            ],
+            None,
+        ),
+        (
+            unresolved(Field::Password, file(), Problem::TimedOut { seconds: 60 }),
+            ErrorCode::SecretFileTimedOut,
+            vec![
+                ("field", text("password")),
+                ("source", text("/run/secrets/pw")),
+                ("seconds", count(60)),
+            ],
+            None,
+        ),
+        (
             unresolved(Field::Password, command(), Problem::OutputCut),
             ErrorCode::SecretCommandOutputOpen,
             at("password", "pass"),
