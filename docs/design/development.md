@@ -33,7 +33,7 @@ A bug fix starts with a test that reproduces the bug.
    - **What the engines cost.** The workflow installs all three engines from the caches `.github/actions/browser` keeps for that set, which ci.yml's `Browser cache for the red-first check` job saves on each push to `main` (a pull request can restore only `main`'s caches), so it takes seconds per engine. Each new `@ui` scenario starts the runner three times; the head build happens only for a scenario red outside Chromium alone.
    - **Older trees, the rules, and macOS.** A tree whose `world.ts` predates `LADDERBACK_UI_BROWSER` runs in Chromium alone, and the log says so. The verdict's rules live in `scripts/red-first-ui.ts`, tested by `node --test` in `just lint`. WebKit on macOS moves focus to buttons and links with Option+Tab, not Tab, unlike Linux CI, so a local run's WebKit lines can differ from CI's.
 2. **Mutation testing.** CI writes the pull request's diff against the base to a file and runs `cargo mutants --in-diff <file>` on the gated crates. A mutant that survives in changed code means behaviour no test asserts, and blocks the merge.
-   - **The gated crates.** The Justfile's `mutants_packages` lists the ones that exist so far:
+   - **The gated crates.** The Justfile's `mutants_packages` lists them:
      - `domain`;
      - `app`;
      - `api` (the wire contract, including each code's arguments);
@@ -167,11 +167,11 @@ A change is done when:
 - every invariant in §0 it touches has a test;
 - for UI changes: axe-core is clean, the journey works by keyboard alone, and new components have contract tests; the milestone's screen-reader pass covers them (§4.5);
 - docs are updated, and `fmt` and `clippy` are clean, which includes the robustness rules (§13.5);
-- paragraphs and list items in `docs/` stay under 150 words, which `just lint` checks (`scripts/check-paragraph-length.ts`; a file whose first line is `<!-- paragraph-length: exempt until restructured (#592) -->` is exempt until its restructure, and the line goes then).
+- paragraphs and list items in `docs/` run to at most 150 words, which `just lint` checks (`scripts/check-paragraph-length.ts`).
 
 ### 13.5 Robustness rules
 
-These rules keep the daemon running and the workspace safe to work in (§16, decision 21). The daemon runs unattended and owns the operation queue: a panic in it silently stops backups, and input it didn't expect is the likeliest cause of one.
+These rules keep the daemon running and the workspace safe to work in. Rules 1 to 4 are §16, decision 21; rules 6 and 7 cite their own. The daemon runs unattended and owns the operation queue: a panic in it silently stops backups, and input it didn't expect is the likeliest cause of one.
 
 1. **Never crash in non-test code.** No `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!` or `unimplemented!` outside tests.
    - Return typed errors through `Result` and `?`; use `let … else`, `ok_or` and `unwrap_or…` only where the fallback can't hide corruption.
@@ -179,7 +179,7 @@ These rules keep the daemon running and the workspace safe to work in (§16, dec
    - A poisoned mutex is `lock().unwrap_or_else(PoisonError::into_inner)` or an error, and a thread join is a `Result`.
    - **Enforcement.** Every production crate root (each `lib.rs`, `src/main.rs` and the `web` crate root; crate-level `//!` docs come first) carries `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`. The deny is not in `[workspace.lints]`, which would also reach integration tests and the cucumber runners.
    - **In tests.** Clippy lets tests use `unwrap`, `expect` and `panic!` (`allow-unwrap-in-tests`, `allow-expect-in-tests`, `allow-panic-in-tests`); `todo!`, `unimplemented!` and `unreachable!` stay denied in tests too.
-   - **`clippy.toml`.** Clippy reads the nearest `clippy.toml` only, so the root file covers the crates without one and `crates/{domain,app}/clippy.toml` repeat the three settings; `just architecture` checks that every `clippy.toml` and every crate root agree.
+   - **`clippy.toml`.** Clippy reads the nearest `clippy.toml` only, so the root file covers the crates without one and `crates/{domain,app}/clippy.toml` repeat its settings: this rule's three `allow-*-in-tests` and rule 7's two; `just architecture` checks that every `clippy.toml` and every crate root agree.
    - **Printing.** `src/main.rs` also denies `clippy::print_stdout` and `clippy::print_stderr`, because `print!` and `eprint!` panic when nobody reads what they print: a command writes through `output` and takes the failure (§4.5).
    - **Where it doesn't hold.** `testkit` is test support and has no deny. A red `test:` commit's `todo!()` stubs (§13.1) are the one place the lint doesn't hold, and the next commit removes them.
 2. **Input-derived numbers are hostile.** Bytes from outside the process (the worker's stdout lines, the `JobSpec` on its stdin, `/api/v1` and other HTTP requests, `config.toml`, imported rustic profiles, later hub sync messages) never size an allocation unbounded and are never indexed unchecked.
@@ -199,8 +199,6 @@ These rules keep the daemon running and the workspace safe to work in (§16, dec
    - **Shared paths.** It never runs `rm -rf` on a shared path, deletes its target directory when done, and keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace.
    - **cargo-mutants.** `just mutants` and `just mutants-all` unset `CARGO_TARGET_DIR` and `CARGO_BUILD_TARGET_DIR` for cargo-mutants, so each of its jobs builds in its own copy of the tree. The config-file keys `build.target-dir` and `build.build-dir` are out of scope, because the repo sets neither.
    - **Why mutants need their own folder.** Cargo judges a crate up to date by file times and by paths relative to the workspace, not by where the copy is. In one shared target directory, a job can find the crate another job just built up to date and test that job's mutant instead of its own, so a mutant is counted caught, missed or timed out wrongly. Even with one job, the last mutant's build stays in that folder, and the worktree's next `cargo test` finds it up to date and tests the mutant.
-   - **Decision files.** A §16 decision is a file, `docs/design/decisions/NN-<slug>.md`, whose row in the index in §16 `just decision-index` writes from its number and heading (`just lint` fails when the index doesn't match the files, or two files share a number).
-   - **Decision numbers.** A decision gets its number when its branch rebases before merging, the next after the highest on `main`. Branches open at the same time can't see each other's decisions, so a number taken earlier can clash, and the branch that merges second renumbers its file and every reference to it. A conflict in the index is resolved by taking either side and running `just decision-index`.
    - **The daemons the tests start.** The same goes for them: a test that starts `ladderback serve` gives it a data and a config folder of its own with `testkit::daemon::isolate` (`LADDERBACK_DATA_DIR`, `LADDERBACK_CONFIG_DIR`), never the platform's, which a developer's own daemon uses. A shared operation log means racing migrations, `NewerSchema` on a branch older than the real database, and test writes in the real log.
    - **A scratch home for every test binary.** `just test`, `just test-release`, `just test-acceptance` and `just test-e2e` run through `scripts/with-test-home.sh`, which has Cargo and nextest start every test binary (the cucumber runners and the doc tests too) through a target runner, `scripts/test-home-runner.sh`. The runner points `HOME` and the XDG data, config, cache and state folders into one scratch home and removes the `LADDERBACK_*_DIR` overrides.
    - **What the scratch home checks.** Where the platform keeps the config, that home holds a `config.toml` of a newer schema, so a daemon that reads it refuses to start. After the suites, the recipe fails when anything else is left there, naming the paths, and when the runner never ran (a build for another target).
@@ -235,6 +233,10 @@ These rules keep the daemon running and the workspace safe to work in (§16, dec
 
    Left out: `too_many_lines`, which mostly flags exhaustive `match`es over closed enums; `missing_docs`, a decision of its own; and `arithmetic_side_effects`, which flags all arithmetic, not only input-derived numbers.
 
+8. **Decisions.** How a §16 decision is filed and numbered:
+   - **Decision files.** A §16 decision is a file, `docs/design/decisions/NN-<slug>.md`, whose row in the index in §16 `just decision-index` writes from its number and heading (`just lint` fails when the index doesn't match the files, or two files share a number).
+   - **Numbers.** A decision gets its number when its branch rebases before merging, the next after the highest on `main`. Branches open at the same time can't see each other's decisions, so a number taken earlier can clash, and the branch that merges second renumbers its file and every reference to it. A conflict in the index is resolved by taking either side and running `just decision-index`.
+
 ### 13.6 Dependency checks
 
 **`cargo deny`, with the policy in `deny.toml` at the repository root** (§16, decision 43).
@@ -242,10 +244,10 @@ These rules keep the daemon running and the workspace safe to work in (§16, dec
 `just deny` runs `cargo deny --locked --all-features --workspace check` (`--workspace` because `web` is not a dependency of the root package) against the lockfile for the host targets (Linux and macOS, both architectures) and `wasm32-unknown-unknown`, and checks four things:
 
 - **Advisories.** RustSec vulnerabilities, unmaintained and yanked crates fail. An advisory that can't be fixed with `cargo update -p <crate>` inside the requirements of `Cargo.toml` and of the crates above it is listed under `ignore` with its ID, why it doesn't reach Ladderback, and what ends the ignore; there is no entry without a reason.
-- **Licences.** An explicit allow list of permissive licences, compatible with MIT OR Apache-2.0, built from what the tree uses.
+- **Licenses.** An explicit allow list of permissive licenses, compatible with MIT OR Apache-2.0, built from what the tree uses.
   - An `OR` expression passes on any one allowed term, so `self_cell`, which offers `Apache-2.0 OR GPL-2.0-only`, is used under Apache-2.0 and GPL stays off the list.
-  - The one dependency that has only a copyleft licence, `option-ext` (MPL-2.0, file-level copyleft, which we never modify), is allowed by name as an `exception`, so a second MPL-2.0 crate fails.
-  - A licence not on the list is the maintainer's decision, not an edit made to turn the check green.
+  - The one dependency that has only a copyleft license, `option-ext` (MPL-2.0, file-level copyleft, which we never modify), is allowed by name as an `exception`, so a second MPL-2.0 crate fails.
+  - A license not on the list is the maintainer's decision, not an edit made to turn the check green.
 - **Bans.** Wildcard requirements are denied; duplicate versions only warn, because the tree has some we don't control. `chrono` is denied except as a dependency of `suppaftp`, `rmcp` or `schemars`, which can't drop it (decision 22), so a Ladderback crate that starts to use it fails.
 - **Sources.** crates.io only, plus the one git repository, `rustic-rs/rustic_core`, that the pinned engine crates come from (decision 7).
 
@@ -258,7 +260,7 @@ These rules keep the daemon running and the workspace safe to work in (§16, dec
 
 ### 13.7 Changes that touch several places
 
-Each list is one change: leave out a step and something breaks later, often far from the edit.
+Each list is one change, unless a step says it lands later (§13.7.6, step 3): leave out a step and something breaks later, often far from the edit.
 
 #### 13.7.1 An error or warning code
 
@@ -373,9 +375,9 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 - **`install` needs a throwaway machine.** `install` installs the real service under its real name, and the daemon keeps its data in the user's real folders. So it also needs `LADDERBACK_TEST_INSTALL_SERVICE=1`, which says the machine is a throwaway one such as a CI runner, and it refuses to start where a Ladderback service is installed or anything listens on its port; `contract` may run anywhere.
 - **Not required.** They are not required checks; the maintainer may add them to the ruleset once they have a clean record.
 
-### 13.9 Dependencies, licence and fixtures
+### 13.9 Dependencies, license and fixtures
 
-What may come into the repository, under which licence, and what test data may hold:
+What may come into the repository, under which license, and what test data may hold:
 
 - **Dependencies:** ask the maintainer before adding an external dependency (a crates.io crate, an npm package, a GitHub Action). Its license must be compatible with MIT OR Apache-2.0. A new workspace crate is not a dependency in this sense.
 - **License:** MIT OR Apache-2.0 ([LICENSE-MIT](../../LICENSE-MIT), [LICENSE-APACHE](../../LICENSE-APACHE)). Ladderback is inspired by Backrest and never derived from it: Backrest is GPL-3.0, so never copy, port or paraphrase its code ([design](README.md)).
