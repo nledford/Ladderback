@@ -35,6 +35,7 @@ struct Scripted {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Decision {
     Review(String),
+    ForgetPreview(String),
     Approve(String, Approval),
     Reject(String, Vec<String>),
 }
@@ -106,6 +107,36 @@ fn proposal() -> api::ProposalDto {
     }
 }
 
+/// A forget preview of one repository: the plan `home` forgets one
+/// snapshot now and none once it is removed.
+fn forget_preview() -> api::ProposalForgetPreviewDto {
+    let forgotten = api::ForgetPlanDto {
+        plan: "home".to_owned(),
+        total: 3,
+        remove: 1,
+        listed: vec![api::SnapshotDto {
+            id: "a".repeat(64),
+            time: "2027-01-14T08:00:00Z".to_owned(),
+            offset: None,
+            hostname: "demo-host".to_owned(),
+            label: String::new(),
+            tags: Vec::new(),
+            tags_truncated: false,
+            paths: vec!["/home/demo".to_owned()],
+            paths_truncated: false,
+        }],
+    };
+    api::ProposalForgetPreviewDto {
+        repositories: vec![api::RepositoryForgetDto::Compared {
+            repository: "demo".to_owned(),
+            before: Some(vec![forgotten.clone()]),
+            after: Some(Vec::new()),
+            forgets_more: Vec::new(),
+            forgets_less: vec![forgotten],
+        }],
+    }
+}
+
 #[async_trait]
 impl Proposals for Scripted {
     async fn propose(
@@ -153,6 +184,14 @@ impl Proposals for Scripted {
             rejected: 0,
             short_id: "abcdef".to_owned(),
         })
+    }
+
+    async fn forget_preview(
+        &self,
+        id: String,
+    ) -> Result<api::ProposalForgetPreviewDto, ProposalsError> {
+        self.decide(Decision::ForgetPreview(id))?;
+        Ok(forget_preview())
     }
 
     async fn approve(
@@ -295,6 +334,16 @@ fn the_proposal_routes_need_the_propose_scope_and_no_others_open_to_it() {
         (Method::GET, "/api/v1/proposals/abcdefghijkl/withdraw", None),
         (Method::POST, "/api/v1/proposals/abcdefghijkl/approve", None),
         (Method::GET, "/api/v1/proposals/abcdefghijkl/review", None),
+        (
+            Method::POST,
+            "/api/v1/proposals/abcdefghijkl/forget-preview",
+            None,
+        ),
+        (
+            Method::GET,
+            "/api/v1/proposals/abcdefghijkl/forget-preview",
+            None,
+        ),
         (Method::POST, "/api/v1/proposals/abcdefghijkl/reject", None),
         (Method::POST, "/api/v1/proposals//withdraw", None),
     ] {
@@ -503,6 +552,7 @@ async fn no_token_reviews_approves_or_rejects_whatever_its_scopes() {
     let auth = [("authorization", bearer.as_str())];
     for request in [
         get("/api/v1/proposals/abcdefghijkl/review", &auth),
+        post("/api/v1/proposals/abcdefghijkl/forget-preview", &auth, ""),
         post("/api/v1/proposals/abcdefghijkl/approve", &auth, APPROVAL),
         post(
             "/api/v1/proposals/abcdefghijkl/reject",
@@ -571,6 +621,38 @@ async fn a_session_reviews_approves_and_rejects_as_its_requests_say() {
                 vec!["Back up weekly instead".to_owned()]
             ),
         ]
+    );
+}
+
+/// The forget preview answers a session what the proposal would forget in
+/// each repository, by snapshot ID, time and count, as the snapshot
+/// listing shows them (decision 89, point 8). It asks nothing of the
+/// proposal but its preview.
+#[tokio::test]
+async fn a_session_previews_what_a_proposal_would_forget() {
+    let daemon = Daemon::new();
+    let headers = session_headers(&daemon).await;
+    let headers = borrowed(&headers);
+    let previewed = daemon
+        .send(post(
+            "/api/v1/proposals/abcdefghijkl/forget-preview",
+            &headers,
+            "",
+        ))
+        .await;
+    assert_eq!(previewed.status(), StatusCode::OK);
+    let previewed = json(previewed).await;
+    assert_eq!(
+        serde_json::from_value::<api::ProposalForgetPreviewDto>(previewed.clone()).ok(),
+        Some(forget_preview()),
+        "{previewed}"
+    );
+    let repository = &previewed["repositories"][0];
+    assert_eq!(repository["kind"], "compared");
+    assert_eq!(repository["forgets-less"][0]["remove"], 1);
+    assert_eq!(
+        daemon.proposals.decisions(),
+        [Decision::ForgetPreview("abcdefghijkl".to_owned())]
     );
 }
 

@@ -80,6 +80,10 @@ Given(
   },
 );
 
+Given("a proposal to remove the plan {string}", async function (this: BrowserWorld, plan: string) {
+  await propose(this, { kind: "remove-plan", plan });
+});
+
 When("I press Tab until focus is on the proposal's Review button", async function (this: BrowserWorld) {
   await pressUntilFocusIsOn(this, "Tab", "button", `Review proposal ${proposalOf(this)}, made without an API token`);
 });

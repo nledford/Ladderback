@@ -2733,8 +2733,71 @@ ui-proposal-rejected-before = { $count ->
 # The heading of the exact changes to the configuration file, with each secret it holds shown as ***.
 ui-proposal-diff-heading = Changes to the configuration file
 
-# Said in the place of Approve for a proposal that could delete snapshots: approving such a proposal comes with the forget preview, a later version.
-ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. Approving changes that can delete { -snapshot(form: "other") } comes with the forget preview, which shows which ones would go, so for now you can only reject it.
+# Said in the place of Approve for a proposal that could delete snapshots: the forget preview shows which ones would go, and approving such a proposal comes in a later version.
+ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. The forget preview shows which ones would go. Approving changes that can delete { -snapshot(form: "other") } comes in a later version, so for now you can only reject it.
+
+# The button that reads what the open proposal would change about the snapshots retention forgets, in each repository it touches.
+ui-proposal-forget-preview = Show what it would forget
+
+# Said while the forget preview reads the repositories.
+ui-proposal-forget-previewing = Reading what it would forget…
+
+# The heading of the forget preview.
+ui-proposal-forget-heading = What it would forget
+
+# The heading of one repository in the forget preview.
+# $repository (text): the repository's alias, such as demo.
+ui-proposal-forget-repository = Repository { $repository }
+
+# Said of a repository this agent maintains neither before nor after the proposal.
+ui-proposal-forget-not-maintained = { -brand-name } doesn't maintain this { -repository }, before or after the proposal, so its retention forgets nothing there.
+
+# Said of a repository this agent doesn't maintain now.
+ui-proposal-forget-before-not-maintained = Now, { -brand-name } doesn't maintain this { -repository }, so its retention forgets nothing there.
+
+# Said of a repository this agent wouldn't maintain after the proposal.
+ui-proposal-forget-after-not-maintained = After the proposal, { -brand-name } wouldn't maintain this { -repository }, so its retention would forget nothing there.
+
+# Said of a repository no plan backs up to now.
+ui-proposal-forget-before-no-plans = Now, no plan backs up to this { -repository }, so retention forgets nothing there.
+
+# Said of a repository no plan would back up to after the proposal.
+ui-proposal-forget-after-no-plans = After the proposal, no plan would back up to this { -repository }, so retention would forget nothing there.
+
+# What retention forgets of one plan now.
+# $plan (text): the plan's ID. $remove (count): how many of its snapshots retention forgets. $total (count): how many it owns.
+ui-proposal-forget-before =
+    { $total ->
+        [one] Now, retention forgets { $remove } of the 1 { -snapshot(form: "one") } of the plan { $plan }.
+       *[other] Now, retention forgets { $remove } of the { $total } { -snapshot(form: "other") } of the plan { $plan }.
+    }
+
+# What retention would forget of one plan after the proposal.
+# $plan (text): the plan's ID. $remove (count): how many of its snapshots retention would forget. $total (count): how many it would own.
+ui-proposal-forget-after =
+    { $total ->
+        [one] After the proposal, retention would forget { $remove } of the 1 { -snapshot(form: "one") } of the plan { $plan }.
+       *[other] After the proposal, retention would forget { $remove } of the { $total } { -snapshot(form: "other") } of the plan { $plan }.
+    }
+
+# Said when the proposal forgets neither more nor less in the repository.
+ui-proposal-forget-same = The proposal changes nothing retention forgets in this { -repository }.
+
+# The caption of the snapshots the proposal would forget that retention keeps now.
+# $plan (text): the plan's ID. $count (count): how many.
+ui-proposal-forgets-more =
+    { $count ->
+        [one] After the proposal, retention would forget 1 { -snapshot(form: "one") } of the plan { $plan } that it keeps now
+       *[other] After the proposal, retention would forget { $count } { -snapshot(form: "other") } of the plan { $plan } that it keeps now
+    }
+
+# The caption of the snapshots retention forgets now and would keep after the proposal.
+# $plan (text): the plan's ID. $count (count): how many.
+ui-proposal-forgets-less =
+    { $count ->
+        [one] After the proposal, retention would no longer forget 1 { -snapshot(form: "one") } of the plan { $plan }
+       *[other] After the proposal, retention would no longer forget { $count } { -snapshot(form: "other") } of the plan { $plan }
+    }
 
 # The heading of the part of the page that approves the proposal.
 ui-proposal-approve-heading = Approve

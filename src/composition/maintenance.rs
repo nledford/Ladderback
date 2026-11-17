@@ -26,7 +26,7 @@ use super::{PlanRunner, secret_refusal};
 
 impl PlanRunner {
     /// The maintenance use case over this runner's parts.
-    fn maintenance(&self) -> RunMaintenance {
+    pub(super) fn maintenance(&self) -> RunMaintenance {
         let maintenance = RunMaintenance::new(
             Arc::clone(&self.engine),
             Arc::new(SystemClock),

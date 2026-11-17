@@ -7,8 +7,8 @@ use jiff::{SignedDuration, Timestamp};
 use subtle::ConstantTimeEq as _;
 
 use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex, sha256_hex_of};
-use crate::PlanId;
 use crate::planning::{AgentConfig, Plan, Source};
+use crate::{PlanId, RepositoryAlias};
 
 /// The most proposals one proposer makes in [`RATE_WINDOW`].
 pub const MAX_PER_HOUR: usize = 30;
@@ -386,6 +386,15 @@ impl Proposal {
             }
         }
         false
+    }
+
+    /// The repositories its changes touch, which its forget preview covers
+    /// (decision 89, point 8): the repository of each plan a change adds,
+    /// changes or removes, before the change and after it, each change read
+    /// against what the changes before it made, in the order first named,
+    /// each once.
+    pub fn repositories(&self, config: &AgentConfig) -> Vec<RepositoryAlias> {
+        todo!()
     }
 }
 

@@ -5,8 +5,9 @@
 //! field is said as. `proposals_page.rs` is its glue.
 
 use api::{
-    ApproveProposalDto, ErrorCode, MsgArg, PlanSettingDto, ProposalDto, ProposalReviewDto,
-    ProposalStatusDto, RejectProposalDto, SummaryLineDto,
+    ApproveProposalDto, ErrorCode, ErrorDto, MsgArg, PlanSettingDto, ProposalDto,
+    ProposalReviewDto, ProposalStatusDto, RejectProposalDto, RepositoryForgetDto, SnapshotDto,
+    SummaryLineDto,
 };
 use l10n::{MessageId, msg};
 
@@ -35,6 +36,42 @@ pub(crate) fn approve_path(id: &str) -> String {
 /// The route that rejects the proposal `id`.
 pub(crate) fn reject_path(id: &str) -> String {
     format!("{}/reject", proposal_path(id))
+}
+
+/// The route that reads the forget preview of the proposal `id`.
+pub(crate) fn forget_preview_path(id: &str) -> String {
+    let _ = id;
+    todo!("the forget preview's route")
+}
+
+/// The snapshots one difference of a forget preview names: the sentence
+/// that captions them, the ones the daemon listed, newest first, and what
+/// is said of the ones it left out.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ForgetListing {
+    pub(crate) caption: Said,
+    pub(crate) snapshots: Vec<SnapshotDto>,
+    pub(crate) more: Option<Said>,
+}
+
+/// What the forget preview says of one repository (decision 89, point 8).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum RepositoryShown {
+    /// Under the repository's heading: what retention forgets now and
+    /// after the proposal, then each difference with its snapshots.
+    Compared {
+        repository: String,
+        lines: Vec<Said>,
+        listings: Vec<ForgetListing>,
+    },
+    /// Under the repository's heading: why it couldn't be read.
+    Refused { repository: String, error: ErrorDto },
+}
+
+/// What the forget preview says of `repository`.
+pub(crate) fn repository_shown(repository: &RepositoryForgetDto) -> RepositoryShown {
+    let _ = repository;
+    todo!("what the forget preview says of a repository")
 }
 
 /// The proposals a person can still decide, in the order the daemon lists
