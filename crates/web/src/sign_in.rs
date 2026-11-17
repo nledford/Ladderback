@@ -16,7 +16,7 @@ use leptos::task::spawn_local;
 
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    Button, Checkbox, ErrorSummary, ModalDialog, SummaryItem, TextField, text_field,
+    Banner, Button, Checkbox, ErrorSummary, ModalDialog, SummaryItem, TextField, text_field,
 };
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, refusal, text_with};
@@ -383,15 +383,18 @@ pub(crate) fn SignOutFailure(localizer: Arc<Localizer>, failed: RwSignal<bool>) 
     }
 }
 
-/// The start page's notice that sign-in is off: anyone on this machine can
-/// use Ladderback, and how to turn sign-in on. Shown only while it is off on
-/// loopback; on the network every page has a notice of its own (`App`).
+/// The start page's notice that sign-in is off, an information banner:
+/// anyone on this machine can use Ladderback, and how to turn sign-in on.
+/// Shown only while it is off on loopback; on the network every page has a
+/// warning of its own (`App`).
 #[component]
 pub(crate) fn SignInOff(localizer: Arc<Localizer>) -> impl IntoView {
     let notice = use_context::<RwSignal<SignInOffNotice>>();
     let words = text(&localizer, msg::UI_SIGN_IN_OFF);
     move || {
-        (notice.map(|notice| notice.get()) == Some(SignInOffNotice::StartPage))
-            .then(|| view! { <p>{words.clone()}</p> })
+        (notice.map(|notice| notice.get()) == Some(SignInOffNotice::StartPage)).then(|| {
+            let words = words.clone();
+            view! { <Banner localizer=Arc::clone(&localizer)>{words}</Banner> }
+        })
     }
 }

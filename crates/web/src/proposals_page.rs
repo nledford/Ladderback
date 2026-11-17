@@ -19,10 +19,11 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 
 use crate::announcer::Politeness;
+use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    Button, StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone, refusal_alert,
-    say_refusals, text_field,
+    Banner, Button, StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone,
+    refusal_alert, say_refusals, text_field,
 };
 use crate::live::reply;
 use crate::plans::Said;
@@ -172,13 +173,21 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
     let unreachable = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let none = text(&localizer, msg::UI_PROPOSALS_NONE);
     // With sign-in off, approving here is no safety boundary, and the page
-    // says so (decision 89, point 7).
+    // says so in a warning banner (decision 89, point 7).
     let standing = use_context::<RwSignal<Standing>>();
     let sign_in_off = text(&localizer, msg::UI_PROPOSALS_SIGN_IN_OFF);
+    let off_localizer = Arc::clone(&localizer);
     let off = move || {
         standing
             .is_some_and(|standing| standing.get() == Standing::Off)
-            .then(|| view! { <p>{sign_in_off.clone()}</p> })
+            .then(|| {
+                let words = sign_in_off.clone();
+                view! {
+                    <Banner localizer=Arc::clone(&off_localizer) tone=BannerTone::Warning>
+                        {words}
+                    </Banner>
+                }
+            })
     };
     // What the list's place shows; a memo, so a read again that changes
     // only which proposals are listed keeps the list, and its items follow

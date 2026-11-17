@@ -2,8 +2,8 @@
 // #923): how the agent finds the keyring is started, as a Given sets it in
 // the daemon's answer, and the note the page shows for it. The answer is
 // scripted, so each journey is the same whatever keyring the computer that
-// runs it has. Elements are found by role and accessible name, as in every
-// journey.
+// runs it has. A note is a banner (#930), which has no role and so no name:
+// it is found by its class and its words, as the banner's own steps find it.
 
 import assert from "node:assert/strict";
 
@@ -40,7 +40,7 @@ function answerNotes(world: BrowserWorld, notes: Array<{ code: string }>): void 
 }
 
 function keyringNote(world: BrowserWorld) {
-  return world.page.getByRole("note").filter({ hasText: KEYRING_NOTE });
+  return world.page.locator(".banner").filter({ hasText: KEYRING_NOTE });
 }
 
 Given("the agent finds the keyring running but not startable on demand", function (this: BrowserWorld) {
@@ -56,7 +56,7 @@ Then("the page notes that the keyring can't be started on demand", async functio
 });
 
 // Only once the page has read its notes: a page that never asked would show
-// no note either.
+// no note either. Its words, in a banner or not, are nowhere on the page.
 Then("the page notes nothing of the keyring", async function (this: BrowserWorld) {
   const answers = scripted.get(this);
   assert.ok(answers, "no Given set how the agent finds the keyring");
@@ -65,5 +65,5 @@ Then("the page notes nothing of the keyring", async function (this: BrowserWorld
   const outcome = await Promise.race([answers.read.then(() => "read" as const), late]);
   clearTimeout(timer);
   assert.equal(outcome, "read", "the page never asked for its notes");
-  await expect(keyringNote(this)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
+  await expect(this.page.getByText(KEYRING_NOTE)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
 });

@@ -44,7 +44,10 @@ pub struct BannerDismissal {
 /// the words and no tone is told by its color alone (1.4.1). Its `tone` comes
 /// from the shared vocabulary ([`BannerTone`]): Primary, information, unless
 /// its page names Warning. It has no size and no placement: its words are
-/// the page's text, and it takes the whole width of the content.
+/// the page's text, and it takes the whole width of the content. Its `id`,
+/// when the page gives one, lets another element point at it, as each
+/// page's heading is described by the notice that sign-in is off on the
+/// network.
 ///
 /// It is not a live region (no `role="alert"`, no `aria-live`) and never a
 /// stop for Tab. Given a [`BannerDismissal`], it ends with a Ghost Small
@@ -65,6 +68,7 @@ pub struct BannerDismissal {
 #[component]
 pub fn Banner(
     localizer: Arc<Localizer>,
+    #[prop(optional)] id: Option<&'static str>,
     #[prop(optional)] tone: BannerTone,
     #[prop(optional)] dismissal: Option<BannerDismissal>,
     children: Children,
@@ -122,7 +126,7 @@ pub fn Banner(
                 },
             );
             view! {
-                <div class=rules::banner_class(tone)>
+                <div id=id class=rules::banner_class(tone)>
                     // The icon, centered on the first line of the words (one
                     // line tall: `1lh`, which no utility names).
                     <span class="banner-icon flex flex-none items-center [min-block-size:1lh]">

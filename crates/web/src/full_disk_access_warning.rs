@@ -1,10 +1,11 @@
 //! The DOM glue of the start page's Full Disk Access warning (§4.4, §16
-//! decision 115): it reads what the agent's probe found, draws the warning,
-//! sends Check again and the request to open System Settings, and hands
-//! focus to the page's heading when the warning goes from under it. Whether
-//! it warns, whether it offers the settings button, its steps and what each
-//! answer says are `full_disk_access.rs`'s, on the host; the `@ui` scenarios
-//! of `features/ui/full_disk_access.feature` run this in Chromium.
+//! decision 115), a warning banner: it reads what the agent's probe found,
+//! draws the warning, sends Check again and the request to open System
+//! Settings, and hands focus to the page's heading when the warning goes
+//! from under it. Whether it warns, whether it offers the settings button,
+//! its steps and what each answer says are `full_disk_access.rs`'s, on the
+//! host; the `@ui` scenarios of `features/ui/full_disk_access.feature` run
+//! this in Chromium.
 
 use std::sync::Arc;
 
@@ -14,8 +15,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Button, Content};
-use crate::components::{hand_focus_when_gone, sentence_view};
+use crate::components::{Banner, hand_focus_when_gone, sentence_view};
 use crate::full_disk_access::{STEPS, opens_settings, said_after_check, warns};
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -143,45 +145,57 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
             // Check again is what makes the warning go: focus then moves to
             // the page's heading, never to the page itself (WCAG 2.4.3).
             hand_focus_when_gone(check_button, PAGE_HEADING_ID.to_owned());
-            let open_label = open_label.clone();
+            let (open_label, check_label) = (open_label.clone(), check_label.clone());
+            let (heading, body, steps) = (heading.clone(), body.clone(), steps.clone());
             view! {
-                <section class="full-disk-access" aria-labelledby=HEADING_ID>
-                    <h2 id=HEADING_ID>{heading.clone()}</h2>
-                    <p>{body.clone()}</p>
-                    <ol>
-                        {steps.iter().map(|step| view! { <li>{step.clone()}</li> }).collect_view()}
-                    </ol>
-                    <div class="actions">
-                        {move || {
-                            offers_settings
-                                .get()
-                                .then(|| {
-                                    view! {
-                                        <Button
-                                            content=Content::Text(open_label.clone().into())
-                                            appearance=Appearance::Filled
-                                            tone=Tone::Primary
-                                            busy=Signal::derive(move || {
-                                                pending.get() == Some(Request::Open)
-                                            })
-                                            disabled=Signal::derive(move || {
-                                                pending.get() == Some(Request::Check)
-                                            })
-                                            on_press=open
-                                        />
-                                    }
+                // A warning banner, its words the region its heading names,
+                // which a screen reader lists by that name as before.
+                <Banner localizer=Arc::clone(&localizer) tone=BannerTone::Warning>
+                    <section aria-labelledby=HEADING_ID>
+                        <h2 id=HEADING_ID class="my-1 text-[1.125rem]">
+                            {heading}
+                        </h2>
+                        <p>{body}</p>
+                        <ol>
+                            {steps
+                                .iter()
+                                .map(|step| view! { <li>{step.clone()}</li> })
+                                .collect_view()}
+                        </ol>
+                        <div class="actions">
+                            {move || {
+                                offers_settings
+                                    .get()
+                                    .then(|| {
+                                        view! {
+                                            <Button
+                                                content=Content::Text(open_label.clone().into())
+                                                appearance=Appearance::Filled
+                                                tone=Tone::Primary
+                                                busy=Signal::derive(move || {
+                                                    pending.get() == Some(Request::Open)
+                                                })
+                                                disabled=Signal::derive(move || {
+                                                    pending.get() == Some(Request::Check)
+                                                })
+                                                on_press=open
+                                            />
+                                        }
+                                    })
+                            }}
+                            <Button
+                                content=Content::Text(check_label.clone().into())
+                                node_ref=check_button
+                                busy=Signal::derive(move || pending.get() == Some(Request::Check))
+                                disabled=Signal::derive(move || {
+                                    pending.get() == Some(Request::Open)
                                 })
-                        }}
-                        <Button
-                            content=Content::Text(check_label.clone().into())
-                            node_ref=check_button
-                            busy=Signal::derive(move || pending.get() == Some(Request::Check))
-                            disabled=Signal::derive(move || pending.get() == Some(Request::Open))
-                            on_press=check
-                        />
-                    </div>
-                    <p role="alert">{move || problem.get().map(sentence_view)}</p>
-                </section>
+                                on_press=check
+                            />
+                        </div>
+                        <p role="alert">{move || problem.get().map(sentence_view)}</p>
+                    </section>
+                </Banner>
             }
         })
     }

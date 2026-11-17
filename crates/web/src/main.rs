@@ -148,6 +148,8 @@ mod wording;
 )]
 mod variants;
 
+use components::Banner;
+use components::banner::rules::BannerTone;
 use daemon_log_page::DaemonLog;
 use page_width::PageWidth;
 use plans_page::Plans;
@@ -421,10 +423,10 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         sign_out_failed.update(|failed| *failed = standing.keeps_sign_out_failure(*failed));
     });
     let failure = Arc::clone(&localizer);
-    // The update the daemon's release check found, on a line of its own
-    // under the running version and Sign out, whose whole sentence links to
-    // the release's notes without telling GitHub the page it came from.
-    // Plain text, not a live region: only the announcer talks to screen
+    // The update the daemon's release check found, an information banner on
+    // a line of its own under the running version and Sign out, whose whole
+    // sentence links to the release's notes without telling GitHub the page
+    // it came from. Not a live region: only the announcer talks to screen
     // readers (A3), and the header is read in order like the version before
     // it.
     let updates = Arc::clone(&localizer);
@@ -436,11 +438,13 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                 &[("version", api::MsgArg::Text(update.version))],
             );
             view! {
-                <p class="site-update">
-                    <a href=update.release_notes rel="noreferrer">
-                        {sentence}
-                    </a>
-                </p>
+                <div class="site-update basis-full [min-inline-size:0]">
+                    <Banner localizer=Arc::clone(&updates)>
+                        <a href=update.release_notes rel="noreferrer">
+                            {sentence}
+                        </a>
+                    </Banner>
+                </div>
             }
         })
     };
@@ -449,6 +453,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let idle = Arc::clone(&localizer);
     let main = NodeRef::<leptos::html::Main>::new();
     let on_the_network = text(&localizer, msg::UI_SIGN_IN_OFF_NETWORK);
+    let network_banner = Arc::clone(&localizer);
     view! {
         // The skip link moves focus into `<main>` itself and stops the click
         // there. The router takes any click on a same-origin link it was not
@@ -500,8 +505,15 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                 {move || {
                     (notice.get() == SignInOffNotice::EveryPage)
                         .then(|| {
+                            let words = on_the_network.clone();
                             view! {
-                                <p id=routes::SIGN_IN_OFF_NETWORK_ID>{on_the_network.clone()}</p>
+                                <Banner
+                                    localizer=Arc::clone(&network_banner)
+                                    id=routes::SIGN_IN_OFF_NETWORK_ID
+                                    tone=BannerTone::Warning
+                                >
+                                    {words}
+                                </Banner>
                             }
                         })
                 }}

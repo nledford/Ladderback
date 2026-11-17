@@ -110,8 +110,11 @@ pub(crate) fn waiting_password(read: Option<&SessionDto>) -> Option<MessageId> {
 /// a warning that the password file is damaged and must be set again,
 /// information that a restart turns sign-in on.
 pub(crate) fn waiting_tone(waiting: MessageId) -> BannerTone {
-    let _ = waiting;
-    todo!()
+    if waiting == msg::UI_ADMIN_PASSWORD_DAMAGED {
+        BannerTone::Warning
+    } else {
+        BannerTone::Primary
+    }
 }
 
 /// Whether the sign-in form offers **Keep me signed in on this device**, as
