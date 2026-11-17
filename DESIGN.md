@@ -234,7 +234,7 @@ Every component is plain and exact: a control is the browser's own element, size
 
 ### Shared Vocabulary
 
-Every shared component takes the same choices, defined once in `crates/web/src/variants.rs`, as it is built or reworked. A tone, a size and a placement are each a class of `style.css`, which the gallery's "Shared vocabulary" demo shows; a side is where the page places a part, which the "Tooltip" demo shows. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
+Every shared component takes the same choices, defined once in `crates/web/src/variants.rs`, as it is built or reworked. A tone, a size and a placement are each a set of Tailwind utilities that `variants.rs` returns, or, until its component moves (#931), a class of `style.css`; the gallery's "Shared vocabulary" demo shows them. A side is where the page places a part, which the "Tooltip" demo shows. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
 
 - **Tone:** Primary (Ladder Blue, the default, unless a component names its own, as the icon and the button do), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
 - **Size:** Small, Medium, Large and XLarge, one scale every component shares, in `em`, so a size grows with the reader's text: Small 1em, Medium 1.5em, Large 2em, XLarge 3em. A size's class sets `--size`, which the component draws its length with, so a spinner and an icon of one size line up. A component that needs other lengths may deviate, saying why with it. The vocabulary has no default size: each component picks its own.
@@ -349,7 +349,8 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 ### Do:
 
 - **Do** use the shared components in `crates/web/src/components/` and add new ones to `/_gallery`, each taking its color, size and placement from the shared vocabulary.
-- **Do** take colors only from the custom properties in `style.css`, through `var()` or their Tailwind names (`text-muted`, `bg-surface`).
+- **Do** style with Tailwind utilities first, and write custom CSS in `style.css` only for what they can't reasonably express, with a comment saying why (decision 117).
+- **Do** take colors only from the custom properties in `style.css`, through their Tailwind names (`text-muted`, `bg-surface`), or `var()` in the custom CSS that remains.
 - **Do** give every state words and an icon or weight as well as its color.
 - **Do** keep a changing table's columns still: fixed shares, or widths that don't depend on a cell's changing content.
 - **Do** check a new layout at 320 px with 200 % text, right to left, in dark mode and under forced colors.
