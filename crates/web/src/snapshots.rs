@@ -26,8 +26,7 @@ use leptos::wasm_bindgen::JsValue;
 
 use crate::announcer::Politeness;
 use crate::components::button::Content;
-use crate::components::link::rules::{Destination, Matching};
-use crate::components::tree::rules::snapshot_href;
+use crate::components::tree::rules::snapshot_link;
 use crate::components::{
     Button, Confirmation, Link, ReviewDialog, Working, dialog_refusal_alert, recover_focus,
     refusal_alert, say_refusals, sentence_view,
@@ -955,10 +954,7 @@ fn snapshots_view(page: Page, caption: String, snapshots: Vec<SnapshotDto>, rows
             // An ID the link's rules refuse as a path of this site shows as
             // text, never a link that could leave it.
             let short = short_id(&snapshot.id);
-            let id = match Destination::route(
-                &snapshot_href(&page.alias.get_value(), &snapshot.id),
-                Matching::Exact,
-            ) {
+            let id = match snapshot_link(&page.alias.get_value(), &snapshot.id) {
                 Some(to) => view! {
                     <Link to=to localizer=Arc::clone(&localizer)>
                         {short}
