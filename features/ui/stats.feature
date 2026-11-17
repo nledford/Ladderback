@@ -31,6 +31,8 @@ Feature: A repository's stats on the Snapshots page
     And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
+    And the table "Snapshots of plan home" has 2 rows
+    And the main content shows the line "No stats have been read yet."
     And the repository is moved away
     And I press Tab until focus is on the button "Read the stats now"
     And I press Enter
