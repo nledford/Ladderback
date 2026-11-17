@@ -44,6 +44,15 @@ It amends decision 20 ("nothing … edits config or adds a command") and I4 (one
 - **The page** is "Pending changes" (`/proposals`), linked after Plans: the pending proposals, each with a Review button, and a review with the summary, the rationale apart and isolated, whether the file changed since the proposal was drafted, the rejections before, the masked diff, Approve with the step-up field (or why only Reject is offered) and Reject with a field per change. With sign-in off it says that approval is then a convenience (point 7).
 - **Later steps:** the forget preview and approving what needs it, the count in the navigation, commands with their ticks, secrets, maintenance claims and the retry of a failed apply.
 
+**Amended 2026-11-16 (#518, the forget preview):** a person sees, on request, what a pending proposal would change about the snapshots retention forgets (point 8); approving a proposal that could delete snapshots stays refused `proposal-needs-forget-preview` until a later step binds an approval to the preview. In this step:
+
+- **One route, a session's only** (point 7): `POST /api/v1/proposals/{id}/forget-preview`. A POST, since it reads the repositories: their secrets are resolved and their locations contacted, though it changes nothing. No token scope opens it, so an AI agent can't make the daemon read a repository on its behalf.
+- **Every repository the proposal touches** (I6), in the order its changes name them: a plan's repository before and after a change, and a removed plan's. For each, what this agent's forget would remove under the configuration as it is and as the proposal makes it, each read as a forget's preview reads it (decision 44), and the difference by snapshot: what only after, and what only before, would forget, per plan. A new plan that takes the ID of an orphaned group's plan shows that group's history forgotten after, and a removal shows the removed plan's history no longer forgotten, since a forget leaves a group no plan owns alone.
+- **A side this agent doesn't maintain** the repository under (decision 48) forgets nothing there, and says so: no forget of its runs there.
+- **A side whose forget would be refused**, because the policy of a plan with history there keeps nothing (decision 25), forgets nothing there and says which plan; the other side is told all the same.
+- **A repository that can't be read** is told as the maintenance routes tell it, each secret of its settings masked (I4); the others are answered all the same. A proposal that is no longer pending has no preview (`proposal-not-pending`).
+- **The page** offers "Show what it would forget" beside the reason only Reject is offered, and shows each repository's lines and the snapshots of each difference in a table. Reject stays available while the preview reads, since rejecting deletes nothing and the read can take minutes; the preview isn't offered while a rejection waits.
+
 The terms are in the glossary first (§3.1): an **AI agent**, a **proposal**, a **configuration change** and a **plan dry run** with its **dry-run allowlist**. An *agent*, alone, is still a machine running Ladderback.
 
 ## Why
