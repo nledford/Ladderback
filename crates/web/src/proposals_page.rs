@@ -345,6 +345,13 @@ fn Review(
     // preview read every repository; and whether one was shown at all.
     let forget_digest = RwSignal::new(None::<String>);
     let forget_shown = RwSignal::new(false);
+    // A new preview read makes an earlier approval's refusal no longer
+    // about what the page shows.
+    Effect::new(move |_| {
+        if forget_digest.with(Option::is_none) {
+            approve_alert.set(None);
+        }
+    });
     let approve_url = list.url(&approve_path(&id));
     let approve_localizer = Arc::clone(&localizer);
     let approve_id = id.clone();
@@ -545,7 +552,7 @@ fn Review(
             <ForgetPreview
                 localizer=Arc::clone(&localizer)
                 url=url
-                disabled=Signal::derive(move || working.get() == Some(Deciding::Rejecting))
+                disabled=Signal::derive(move || working.get().is_some())
                 digest=forget_digest
                 shown_any=forget_shown
             />
@@ -612,9 +619,10 @@ fn Review(
 /// person asks, since it reads every repository the proposal touches: under
 /// its heading, each repository's lines and differences, or why it couldn't
 /// be read. While it reads, its button is busy and the page says so; while
-/// `disabled`, as while a rejection waits, its button is unavailable. Once
-/// read, `shown_any` is set and `digest` holds what an approval of the
-/// preview shown brings, none while a repository couldn't be read.
+/// `disabled`, as while an approval or a rejection waits, its button is
+/// unavailable. Once read, `shown_any` is set and `digest` holds what an
+/// approval of the preview shown brings, none while a repository couldn't
+/// be read.
 #[component]
 fn ForgetPreview(
     localizer: Arc<Localizer>,

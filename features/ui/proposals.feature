@@ -80,3 +80,31 @@ Feature: Pending changes page
     And I press Enter
     Then the polite region comes to contain "is applied, and the configuration file is saved."
     And the daemon no longer lists the plan "demo-home"
+
+  Scenario: An approval refused because what the proposal would forget changed says so until a new forget preview
+    Given a demo plan "demo-home" with a tiny scratch repository
+    And the plan "demo-home" has been backed up 3 times
+    And the plan "demo-home" keeps the last 1 snapshots
+    And a proposal to remove the plan "demo-home"
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the button "Show what it would forget"
+    And I press Enter
+    Then the proposal says "After the proposal, retention would no longer forget 2 snapshots of the plan demo-home"
+    When the plan "demo-home" has been backed up 1 times
+    And I press Tab until focus is on the textbox "Proposal ID"
+    And I type the proposal's short ID
+    And I press Tab until focus is on the button "Approve the proposal"
+    And I press Enter
+    Then the page alerts "What this proposal would forget has changed since you previewed it, or a repository it touches couldn't be read again, so nothing was applied. Show what it would forget again, then approve it if it still looks right."
+    And the daemon lists the plan "demo-home"
+    When I press Shift+Tab until focus is on the button "Show what it would forget"
+    And I press Enter
+    Then the proposal says "After the proposal, retention would no longer forget 3 snapshots of the plan demo-home"
+    And the open proposal alerts nothing
+    When I press Tab until focus is on the button "Approve the proposal"
+    And I press Enter
+    Then the polite region comes to contain "is applied, and the configuration file is saved."
+    And the daemon no longer lists the plan "demo-home"

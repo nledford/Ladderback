@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
+import { expect } from "playwright/test";
 
 import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
@@ -145,4 +146,9 @@ Then("the daemon no longer lists the plan {string}", async function (this: Brows
     ANSWER_PATIENCE_MS,
     `the daemon still lists the plan ${plan}`,
   );
+});
+
+// No refusal, of an approval or a rejection, is shown in the open proposal.
+Then("the open proposal alerts nothing", async function (this: BrowserWorld) {
+  await expect(openProposal(this).getByRole("alert")).toHaveCount(0);
 });

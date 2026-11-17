@@ -331,7 +331,7 @@ error-proposal-changed = The configuration file changed since this proposal was 
 error-proposal-needs-forget-preview = This proposal holds a change that could delete snapshots, so it was not approved. Show what it would forget first, then approve it from that preview if it still looks right.
 
 # What the proposal would forget, read again as it was approved, isn't what the forget preview showed, or a repository it touches couldn't be read; nothing was applied.
-error-proposal-forget-preview-changed = What this proposal would forget has changed since you previewed it, so nothing was applied. Show what it would forget again, then approve it if it still looks right.
+error-proposal-forget-preview-changed = What this proposal would forget has changed since you previewed it, or a repository it touches couldn't be read again, so nothing was applied. Show what it would forget again, then approve it if it still looks right.
 
 # The proposer made as many proposals in the last hour as it may.
 # $seconds (count): how long until it may propose again.
