@@ -1197,8 +1197,10 @@ Feature: The shared components in the gallery
 
   Scenario: Enter on a link to a page of the app goes there without reloading, titles the page and moves focus to its heading
     When I open the component gallery
+    And I skip to the content
     And the page carries a mark that a reload would lose
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the link "Demo link to the start page"
     And I press Enter
@@ -1209,7 +1211,9 @@ Feature: The shared components in the gallery
 
   Scenario: A link to the page the reader is on says it is the current page and is bold, and a link elsewhere is neither
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the link "Demo link to this page"
     Then the link "Demo link to this page" is the current page, drawn bold
@@ -1217,7 +1221,9 @@ Feature: The shared components in the gallery
 
   Scenario: A link to another site says so in its name after its words, shows an icon after them that a screen reader skips, is marked as leaving the app, and tells that site nothing of the page
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the link "Demo rustic documentation (goes to another site)"
     Then the link "Demo rustic documentation (goes to another site)" shows the words "Demo rustic documentation", then an icon a screen reader skips
