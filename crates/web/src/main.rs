@@ -20,7 +20,7 @@ use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos::wasm_bindgen::JsCast;
-use leptos_router::components::{A, Route, Router, Routes};
+use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_location;
 use leptos_router::path;
 
@@ -148,6 +148,8 @@ mod wording;
 )]
 mod variants;
 
+use components::Link;
+use components::link::rules::{Destination, LinkTone, Matching};
 use daemon_log_page::DaemonLog;
 use page_width::PageWidth;
 use plans_page::Plans;
@@ -247,44 +249,41 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
+/// The navigation's pages, in its order: each one's path and the message
+/// that names it. A page's link is current on its path and on every page
+/// below it (`Matching::Section`), as a snapshot's page is below Snapshots.
+const PAGES: [(&str, MessageId); 7] = [
+    ("/operations", msg::UI_NAV_OPERATIONS),
+    ("/plans", msg::UI_NAV_PLANS),
+    ("/proposals", msg::UI_NAV_PROPOSALS),
+    ("/snapshots", msg::UI_NAV_SNAPSHOTS),
+    ("/repositories", msg::UI_NAV_REPOSITORIES),
+    ("/log", msg::UI_NAV_LOG),
+    ("/settings", msg::UI_NAV_SETTINGS),
+];
+
 /// The pages' links, shown wherever the pages are.
 #[component]
 fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
-    let (label, operations, plans, proposals, snapshots, repositories, log, settings) = (
-        text(&localizer, msg::UI_NAV_LABEL),
-        text(&localizer, msg::UI_NAV_OPERATIONS),
-        text(&localizer, msg::UI_NAV_PLANS),
-        text(&localizer, msg::UI_NAV_PROPOSALS),
-        text(&localizer, msg::UI_NAV_SNAPSHOTS),
-        text(&localizer, msg::UI_NAV_REPOSITORIES),
-        text(&localizer, msg::UI_NAV_LOG),
-        text(&localizer, msg::UI_NAV_SETTINGS),
-    );
+    let label = text(&localizer, msg::UI_NAV_LABEL);
+    let links = PAGES
+        .into_iter()
+        .filter_map(|(path, name)| {
+            let words = text(&localizer, name);
+            Destination::route(path, Matching::Section).map(|to| {
+                view! {
+                    <li>
+                        <Link to=to localizer=Arc::clone(&localizer)>
+                            {words}
+                        </Link>
+                    </li>
+                }
+            })
+        })
+        .collect_view();
     view! {
         <nav class="site-nav" aria-label=label>
-            <ul>
-                <li>
-                    <A href="/operations">{operations}</A>
-                </li>
-                <li>
-                    <A href="/plans">{plans}</A>
-                </li>
-                <li>
-                    <A href="/proposals">{proposals}</A>
-                </li>
-                <li>
-                    <A href="/snapshots">{snapshots}</A>
-                </li>
-                <li>
-                    <A href="/repositories">{repositories}</A>
-                </li>
-                <li>
-                    <A href="/log">{log}</A>
-                </li>
-                <li>
-                    <A href="/settings">{settings}</A>
-                </li>
-            </ul>
+            <ul>{links}</ul>
         </nav>
     }
 }
@@ -437,9 +436,9 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
             );
             view! {
                 <p class="site-update">
-                    <a href=update.notes.href().to_owned() rel="noreferrer">
+                    <Link to=Destination::Outside(update.notes) localizer=Arc::clone(&updates)>
                         {sentence}
-                    </a>
+                    </Link>
                 </p>
             }
         })
@@ -470,13 +469,19 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         <Router>
             <header class="site-header">
                 // The product's mark and name lead back to the start page,
-                // marked as the current page there; `exact`, or every page
-                // would match "/".
+                // marked as the current page there and only there, in the
+                // color of the text around it, so it still looks like the
+                // brand.
                 <p class="brand">
-                    <A href="/" exact=true>
-                        <BrandMark />
-                        {text(&localizer, msg::UI_BRAND)}
-                    </A>
+                    {Destination::route("/", Matching::Exact)
+                        .map(|to| {
+                            view! {
+                                <Link to=to localizer=Arc::clone(&localizer) tone=LinkTone::Inherit>
+                                    <BrandMark />
+                                    {text(&localizer, msg::UI_BRAND)}
+                                </Link>
+                            }
+                        })}
                 </p>
                 {move || {
                     shown

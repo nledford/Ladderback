@@ -14,7 +14,6 @@ use lepticons_data::LucideGlyph;
 use leptos::either::Either;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
-use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
@@ -23,7 +22,7 @@ use crate::components::badge::rules::BadgeTone;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
-use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
+use crate::components::link::rules::{Destination, LinkTone, Matching};
 use crate::components::skeleton::rules::{Shape, Share};
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
@@ -244,7 +243,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     );
     let alert_warning = sentence_link(
         &localizer,
-        route("/operations", Matching::Section),
+        Destination::route("/operations", Matching::Section),
         msg::UI_GALLERY_ALERT_WARNING,
         t(msg::UI_GALLERY_ALERT_WARNING_LINK),
         LinkTone::Inherit,
@@ -298,11 +297,9 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let banner_demo_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
+        <p>{demo_link(&localizer, Destination::route("/", Matching::Exact), start_link)}</p>
         <p>
-            <A href="/">{start_link}</A>
-        </p>
-        <p>
-            <A href="/_missing">{missing_link}</A>
+            {demo_link(&localizer, Destination::route("/_missing", Matching::Exact), missing_link)}
         </p>
         <section>
             <h2>{announcer_heading}</h2>
@@ -1409,25 +1406,35 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             // A page of the app, and the page the reader is on, which is the
             // current page and bold.
             <p>
-                {demo_link(&localizer, route("/", Matching::Exact), t(msg::UI_GALLERY_LINK_START))}
+                {demo_link(
+                    &localizer,
+                    Destination::route("/", Matching::Exact),
+                    t(msg::UI_GALLERY_LINK_START),
+                )}
             </p>
             <p>
                 {demo_link(
                     &localizer,
-                    route("/_gallery", Matching::Exact),
+                    Destination::route("/_gallery", Matching::Exact),
                     t(msg::UI_GALLERY_LINK_HERE),
                 )}
             </p>
             // Another site: its icon after its words, and words for a
             // screen reader after them. Long enough to wrap at 320 px with
             // 200 % text.
-            <p>{demo_link(&localizer, outside(RUSTIC_DOCS), t(msg::UI_GALLERY_LINK_OUTSIDE))}</p>
+            <p>
+                {demo_link(
+                    &localizer,
+                    Destination::outside(RUSTIC_DOCS),
+                    t(msg::UI_GALLERY_LINK_OUTSIDE),
+                )}
+            </p>
             // A link inside a sentence, and one inside a status sentence in
             // the Error tone, drawn in the sentence's color (Inherit).
             <p>
                 {sentence_link(
                     &localizer,
-                    route("/plans", Matching::Section),
+                    Destination::route("/plans", Matching::Section),
                     msg::UI_GALLERY_LINK_IN_SENTENCE,
                     t(msg::UI_GALLERY_LINK_IN_SENTENCE_LINK),
                     LinkTone::Primary,
@@ -1436,7 +1443,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             <p class="text-error">
                 {sentence_link(
                     &localizer,
-                    route("/log", Matching::Section),
+                    Destination::route("/log", Matching::Section),
                     msg::UI_GALLERY_LINK_STATUS,
                     t(msg::UI_GALLERY_LINK_STATUS_LINK),
                     LinkTone::Inherit,
@@ -1445,7 +1452,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             // Another site in a line set right to left: its icon on the
             // words' left.
             <p dir="rtl">
-                {demo_link(&localizer, outside(RUSTIC_DOCS), t(msg::UI_GALLERY_LINK_OUTSIDE_RTL))}
+                {demo_link(
+                    &localizer,
+                    Destination::outside(RUSTIC_DOCS),
+                    t(msg::UI_GALLERY_LINK_OUTSIDE_RTL),
+                )}
             </p>
         </section>
         // Its id finds the demo under a pseudolocale too, which renames its
@@ -2083,18 +2094,6 @@ const BANNER_DEMO_NEWER: &str = "banner-demo-newer";
 /// The ID of the toast demo's Save button, where focus goes when a toast is
 /// dismissed.
 const TOAST_DEMO_SAVE: &str = "toast-demo-save";
-
-/// A demo route. The gallery's literal paths all parse (the link's rules
-/// test their shapes); one that didn't would show no link, which the link
-/// demo's scenarios would catch.
-fn route(href: &str, matching: Matching) -> Option<Destination> {
-    Route::parse(href, matching).ok().map(Destination::Route)
-}
-
-/// A demo address on another site, which parses as [`route`]'s paths do.
-fn outside(address: &str) -> Option<Destination> {
-    Outside::parse(address).ok().map(Destination::Outside)
-}
 
 /// A demo link of its own, in its default tone.
 fn demo_link(

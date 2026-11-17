@@ -23,13 +23,13 @@ use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsValue;
-use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::components::button::Content;
+use crate::components::link::rules::{Destination, Matching};
 use crate::components::tree::rules::snapshot_href;
 use crate::components::{
-    Button, Confirmation, ReviewDialog, Working, dialog_refusal_alert, recover_focus,
+    Button, Confirmation, Link, ReviewDialog, Working, dialog_refusal_alert, recover_focus,
     refusal_alert, say_refusals, sentence_view,
 };
 use crate::live::{reply, say};
@@ -952,12 +952,24 @@ fn snapshots_view(page: Page, caption: String, snapshots: Vec<SnapshotDto>, rows
                 viewer_offset,
                 writes_instants,
             );
-            let href = snapshot_href(&page.alias.get_value(), &snapshot.id);
+            // An ID the link's rules refuse as a path of this site shows as
+            // text, never a link that could leave it.
+            let short = short_id(&snapshot.id);
+            let id = match Destination::route(
+                &snapshot_href(&page.alias.get_value(), &snapshot.id),
+                Matching::Exact,
+            ) {
+                Some(to) => view! {
+                    <Link to=to localizer=Arc::clone(&localizer)>
+                        {short}
+                    </Link>
+                }
+                .into_any(),
+                None => short.into_any(),
+            };
             view! {
                 <tr>
-                    <td>
-                        <A href=href>{short_id(&snapshot.id)}</A>
-                    </td>
+                    <td>{id}</td>
                     <td title=snapshot.time>{shown}</td>
                 </tr>
             }

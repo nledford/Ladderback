@@ -13,16 +13,16 @@ use l10n::{Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos_router::components::A;
 use serde::Serialize;
 use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::link::rules::{Destination, Matching};
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, Checkbox, ErrorSummary, Icon, PauseUpdates, Progress, RadioGroup, StatusBadge,
+    Button, Checkbox, ErrorSummary, Icon, Link, PauseUpdates, Progress, RadioGroup, StatusBadge,
     SummaryItem, TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view,
     sentence_view, text_field,
 };
@@ -149,6 +149,8 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let viewer = l10n::viewer_zone();
     let notice = Arc::clone(&localizer);
     let full_disk_access = Arc::clone(&localizer);
+    let links = Arc::clone(&localizer);
+    let operations_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>
             {move || {
@@ -228,10 +230,19 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                     }
                     _ => {
                         let repositories_link = repositories_link.clone();
+                        let to = Destination::route("/repositories", Matching::Exact);
+                        let localizer = Arc::clone(&localizer);
                         view! {
                             <p>{empty.clone()}</p>
                             <p>
-                                <A href="/repositories">{repositories_link}</A>
+                                {to
+                                    .map(|to| {
+                                        view! {
+                                            <Link to=to localizer=localizer>
+                                                {repositories_link}
+                                            </Link>
+                                        }
+                                    })}
                             </p>
                         }
                             .into_any()
@@ -240,10 +251,24 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
             }
         }}
         <p>
-            <a href=PLAN_FORMAT_URL>{plan_format_link}</a>
+            {Destination::outside(PLAN_FORMAT_URL)
+                .map(|to| {
+                    view! {
+                        <Link to=to localizer=links>
+                            {plan_format_link}
+                        </Link>
+                    }
+                })}
         </p>
         <p>
-            <A href="/operations">{operations_link}</A>
+            {Destination::route("/operations", Matching::Exact)
+                .map(|to| {
+                    view! {
+                        <Link to=to localizer=operations_localizer>
+                            {operations_link}
+                        </Link>
+                    }
+                })}
         </p>
     }
 }
@@ -1975,11 +2000,21 @@ pub(crate) fn short_id(id: &str) -> String {
 #[component]
 pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_NOT_FOUND_HEADING);
+    let to = Destination::route("/", Matching::Exact);
+    let body = text(&localizer, msg::UI_NOT_FOUND_BODY);
+    let words = text(&localizer, msg::UI_NOT_FOUND_LINK);
     view! {
         <PageHeading>{heading}</PageHeading>
-        <p>{text(&localizer, msg::UI_NOT_FOUND_BODY)}</p>
+        <p>{body}</p>
         <p>
-            <A href="/">{text(&localizer, msg::UI_NOT_FOUND_LINK)}</A>
+            {to
+                .map(|to| {
+                    view! {
+                        <Link to=to localizer=localizer>
+                            {words}
+                        </Link>
+                    }
+                })}
         </p>
     }
 }

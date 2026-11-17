@@ -338,7 +338,12 @@ impl AvailableUpdate {
     /// `update`, unless its notes are no web address: the header then shows
     /// no update rather than a link it can't follow.
     fn of(update: &AvailableUpdateDto) -> Option<Self> {
-        todo!("{update:?}")
+        Outside::parse(&update.release_notes)
+            .ok()
+            .map(|notes| Self {
+                version: update.version.clone(),
+                notes,
+            })
     }
 }
 

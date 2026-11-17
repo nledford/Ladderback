@@ -172,13 +172,13 @@ impl Destination {
     /// for a path [`Route::parse`] refuses, which the page then shows
     /// without a link rather than one that could leave the site.
     pub fn route(href: &str, matching: Matching) -> Option<Self> {
-        todo!("{href} {matching:?}")
+        Route::parse(href, matching).ok().map(Self::Route)
     }
 
     /// An address on another site: `None` for one [`Outside::parse`]
     /// refuses, as [`Destination::route`] is for a path.
     pub fn outside(address: &str) -> Option<Self> {
-        todo!("{address}")
+        Outside::parse(address).ok().map(Self::Outside)
     }
 
     /// The link's `rel`: an outside link is never routed, even an address
