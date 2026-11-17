@@ -12,7 +12,7 @@ import { type DataTable, Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
-import { journey, namePattern } from "../support/keyboard.ts";
+import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { pointer } from "../support/pointer.ts";
 import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 
@@ -46,6 +46,30 @@ Then(
     await journey(this.page).assertFocused(
       journey(this.page).byRole("button", { name: namePattern(name), description: namePattern(description) }),
       `the button ${JSON.stringify(name)} described by ${JSON.stringify(description)}`,
+    );
+  },
+);
+
+// A button of one name in more than one demo, told apart by its demo: the
+// alert's Dismiss and the banner's.
+function demoButton(page: Page, name: string, component: string): Locator {
+  return demoSection(page, component).getByRole("button", { name: namePattern(name) });
+}
+
+When(
+  "I press Tab until focus is on the button {string} of the {string} demo",
+  async function (this: BrowserWorld, name: string, component: string) {
+    const description = `the button ${JSON.stringify(name)} of the ${JSON.stringify(component)} demo`;
+    await pressUntilFocused(this.page, "Tab", demoButton(this.page, name, component), description);
+  },
+);
+
+Then(
+  "focus is on the button {string} of the {string} demo",
+  async function (this: BrowserWorld, name: string, component: string) {
+    await journey(this.page).assertFocused(
+      demoButton(this.page, name, component),
+      `the button ${JSON.stringify(name)} of the ${JSON.stringify(component)} demo`,
     );
   },
 );

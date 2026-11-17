@@ -1369,7 +1369,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
     And I press Tab
-    Then focus is on the button "Dismiss"
+    Then focus is on the button "Dismiss" of the "Banner" demo
 
   Scenario Outline: <key> on a banner's Dismiss button takes the banner away, says nothing, leaves focus on the control its page names and keeps it away on the next load
     When I open the component gallery
@@ -1377,7 +1377,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
-    And I press Tab until focus is on the button "Dismiss"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
     And I press <key>
     Then the "Banner" demo shows no banner with the words "A demo update is ready."
     And focus is on the button "Show a newer demo notice"
@@ -1397,7 +1397,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
-    And I press Tab until focus is on the button "Dismiss"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
     And I press Enter
     And I press Enter
     Then the "Banner" demo shows a banner with the words "A demo update is ready."
@@ -1410,7 +1410,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
-    And I press Tab until focus is on the button "Dismiss"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
     And I press Enter
     Then the "Banner" demo shows no banner with the words "A demo update is ready."
     And focus is on the button "Show a newer demo notice"
@@ -1810,7 +1810,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Show the demo plan"
     And I press Tab until focus is on the link "the demo operations"
     And I press Tab
-    Then focus is on the button "Dismiss"
+    Then focus is on the button "Dismiss" of the "Alert" demo
 
   Scenario Outline: <key> on an alert's Dismiss button takes the alert away, says nothing and leaves focus on the control its page names
     When I open the component gallery
@@ -1818,7 +1818,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
-    And I press Tab until focus is on the button "Dismiss"
+    And I press Tab until focus is on the button "Dismiss" of the "Alert" demo
     And I press <key>
     Then the "Alert" demo shows no alert with the words "This demo notice goes when you dismiss it."
     And focus is on the button "Show the demo notice again"
