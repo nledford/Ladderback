@@ -57,10 +57,11 @@ Feature: The Log page
       [2026-11-15T09:00:01.250Z WARN  ladderback::config] repository nas: a demo warning
       """
 
-  Scenario: A read of the recent log the daemon refuses is said as an alert, in the lines' place
+  Scenario: A read of the recent log the daemon refuses is an error alert in the lines' place, said assertively once
     Given the daemon can't read its sessions when the recent log is read
     When I open the address "/log"
-    Then the page shows an alert containing "could not keep or forget sessions"
+    Then the page shows an error alert containing "could not keep or forget sessions"
+    And the assertive region comes to contain "could not keep or forget sessions"
     And the main heading reads "Log"
     And the page has no accessibility violations
 
@@ -76,6 +77,22 @@ Feature: The Log page
     And the browser asks for "<colors>"
     When I open the address "/log"
     Then the main heading reads "Log"
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
+
+    Examples:
+      | size | colors       |
+      | 100  | light colors |
+      | 200  | dark colors  |
+
+  Scenario Outline: A refused read of the recent log fits a small screen, at <size> percent text in <colors>
+    Given the daemon can't read its sessions when the recent log is read
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to <size> percent
+    And the browser asks for "<colors>"
+    When I open the address "/log"
+    Then the page shows an error alert containing "could not keep or forget sessions"
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations

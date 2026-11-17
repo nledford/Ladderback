@@ -131,6 +131,8 @@ pub struct ForgetWorld {
     source_reads: Arc<AtomicUsize>,
     /// The agent's own hostname, when a scenario gives it one.
     hostname: Option<Hostname>,
+    /// The environment variables the repositories' secrets resolve from.
+    pub env: BTreeMap<String, String>,
 }
 
 impl Default for ForgetWorld {
@@ -151,6 +153,7 @@ impl Default for ForgetWorld {
             assessed: None,
             unreadable_folder: None,
             recorded_folder: None,
+            env: BTreeMap::new(),
             source_reads: Arc::new(AtomicUsize::new(0)),
             hostname: None,
         }
@@ -254,6 +257,28 @@ impl ForgetWorld {
         self.save().await;
     }
 
+    /// Adds the repository `name`, maintained by this agent as the first
+    /// is, its password `password`. The scripted engine lists the same
+    /// snapshots in it.
+    pub async fn another_repository(&mut self, name: &str, password: SecretRef) {
+        let mut entry = self
+            .repositories
+            .get(&alias())
+            .expect("the repository was added first")
+            .clone();
+        entry.settings.repository = format!("/srv/{name}/repo");
+        entry.settings.password = password;
+        self.repositories
+            .insert(RepositoryAlias::parse(name).expect("an alias"), entry);
+        self.save().await;
+    }
+
+    /// Forgets every snapshot the repository holds, as a repository
+    /// replaced by another at the same location would.
+    pub fn drop_snapshots(&mut self) {
+        self.snapshots.clear();
+    }
+
     /// Sets who the repository's entry asks to maintain it.
     pub async fn maintained_by(&mut self, maintenance: Maintenance) {
         self.repositories
@@ -335,6 +360,19 @@ impl ForgetWorld {
     /// added is the newest.
     pub async fn snapshots(&mut self, count: u64, plan: Option<(String, AgentId)>) {
         self.snapshots_of_folder(count, plan, "/home/demo").await;
+    }
+
+    /// Adds `count` snapshots of the plan `plan` of `agent`, as backups
+    /// taken since do: each newer than every snapshot the repository holds.
+    pub fn backed_up(&mut self, count: u64, plan: &str, agent: &AgentId) {
+        let tags = [
+            format!("{PLAN_TAG_PREFIX}{plan}"),
+            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+        ];
+        for _ in 0..count {
+            let time = at(i64::try_from((self.made + 1) * 3_600).expect("an hour"));
+            self.snapshot_at(time, &tags, "/home/demo", MACHINE);
+        }
     }
 
     /// Adds `count` snapshots of `folder`, tagged as the plan's or none at
@@ -683,6 +721,10 @@ impl Engine for Scripted {
 
 /// The maintenance use case wired to the scenario's own pieces.
 pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
+    let secrets = app::fakes::FakeSecrets::default();
+    for (name, value) in &agent.forget.env {
+        secrets.set_env(name, value);
+    }
     Arc::new(
         agent
             .announcement
@@ -690,7 +732,7 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
                 agent.forget.engine(),
                 agent.clock.clone(),
                 agent.store.clone(),
-                app::secrets::ResolveRepository::new(Arc::new(app::fakes::FakeSecrets::default())),
+                app::secrets::ResolveRepository::new(Arc::new(secrets)),
                 match agent.forget.fail {
                     ReadFailure::RetentionSilent => Arc::new(NeverAnswers),
                     _ => Arc::new(FakeRetention),

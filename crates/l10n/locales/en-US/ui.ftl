@@ -498,6 +498,20 @@ ui-gallery-demo-unknown-progress = Demo progress of unknown size
 # running operation is in.
 ui-gallery-demo-step-progress = Demo progress of a step
 
+# The names of the demo's progress bars, each 60% done, one for each size of
+# the shared vocabulary (Small, Medium, Large, Extra large), then one for each
+# of its tones. The size and tone names match the vocabulary demo's.
+ui-gallery-progress-small = Demo progress at the Small size
+ui-gallery-progress-medium = Demo progress at the Medium size
+ui-gallery-progress-large = Demo progress at the Large size
+ui-gallery-progress-xlarge = Demo progress at the Extra large size
+ui-gallery-progress-primary = Demo progress in the Primary tone
+ui-gallery-progress-secondary = Demo progress in the Secondary tone
+ui-gallery-progress-success = Demo progress in the Success tone
+ui-gallery-progress-warning = Demo progress in the Warning tone
+ui-gallery-progress-error = Demo progress in the Error tone
+ui-gallery-progress-inherit = Demo progress in the Inherit tone
+
 # The heading of the gallery's toast demo.
 ui-gallery-toast-heading = Toast
 
@@ -859,6 +873,56 @@ ui-gallery-tabs-second = Second demo tab
 ui-gallery-tabs-second-text = The second demo panel.
 ui-gallery-tabs-third = Third demo tab
 ui-gallery-tabs-third-text = The third demo panel.
+
+# The heading of the gallery's vertical tabs demo (§4.5): a column of tabs
+# at the start of their panel, which the up and down arrows move between.
+ui-gallery-tabs-vertical-heading = Vertical tabs
+
+# A set of demo vertical tabs, named by its own label.
+ui-gallery-tabs-plan = Demo plan
+ui-gallery-tabs-sources = Demo sources
+ui-gallery-tabs-sources-text = The demo plan backs up two demo folders.
+ui-gallery-tabs-times = Demo times
+ui-gallery-tabs-times-text = The demo plan runs every night.
+ui-gallery-tabs-hooks = Demo hooks
+ui-gallery-tabs-hooks-text = The demo plan runs no hooks.
+
+# The same kind of tabs in a part of the page that runs right to left: a
+# column at the start of the panel, on the right.
+ui-gallery-tabs-vertical-rtl = Demo plan, right to left
+ui-gallery-tabs-vertical-rtl-first = First vertical tab
+ui-gallery-tabs-vertical-rtl-first-text = The first vertical panel.
+ui-gallery-tabs-vertical-rtl-second = Second vertical tab
+ui-gallery-tabs-vertical-rtl-second-text = The second vertical panel.
+ui-gallery-tabs-vertical-rtl-third = Third vertical tab
+ui-gallery-tabs-vertical-rtl-third-text = The third vertical panel.
+
+# The heading of the gallery's responsive tabs demo (§4.5): tabs in a column
+# where their container has room for it beside the panel, and in a row
+# above the panel where it hasn't.
+ui-gallery-tabs-responsive-heading = Responsive tabs
+
+# A set of demo responsive tabs as wide as the page. Its middle panel holds
+# a field, to show that what is typed in it stays while the tabs change
+# layout.
+ui-gallery-tabs-settings = Demo settings
+ui-gallery-tabs-general = Demo general
+ui-gallery-tabs-general-text = The demo settings shown here change nothing.
+ui-gallery-tabs-address = Demo address
+ui-gallery-tabs-address-field = Demo address text
+ui-gallery-tabs-address-hint = What you type here stays while the tabs change layout.
+ui-gallery-tabs-about = Demo about
+ui-gallery-tabs-about-text = The demo agent runs on this computer.
+
+# The same kind of tabs in a narrow column of the page that runs right to
+# left: a row, as the column has no room for the list beside the panel.
+ui-gallery-tabs-column = Demo settings in a narrow column, right to left
+ui-gallery-tabs-column-first = First column tab
+ui-gallery-tabs-column-first-text = The first column panel.
+ui-gallery-tabs-column-second = Second column tab
+ui-gallery-tabs-column-second-text = The second column panel.
+ui-gallery-tabs-column-third = Third column tab
+ui-gallery-tabs-column-third-text = The third column panel.
 
 # The heading of the gallery's tooltip demo (§4.5): a short note beside a
 # control, shown on keyboard focus or a resting pointer.
@@ -2621,6 +2685,24 @@ ui-language-save = Save the language
 # Shown when the browser refused to keep the language chosen: its settings, or a private window, may let a site keep nothing.
 ui-language-not-kept = This browser didn't keep the language. Its settings may stop sites from keeping anything.
 
+# The heading of the section of Settings that chooses how wide each page's content is.
+ui-page-width-heading = Page width
+
+# The legend of the choice of how wide each page's content is: Narrow (ui-page-width-narrow) or Full width (ui-page-width-full).
+ui-page-width-legend = Width of each page
+
+# The description under that legend. The choice is kept in this browser alone, not by the daemon, and takes effect as soon as it is chosen, with no button. In Full width the tables use the window's width, while paragraphs and forms stay about 70 characters wide.
+ui-page-width-hint = Kept in this browser, and applied as soon as it's chosen. Full width lets tables use the whole window, while paragraphs and forms keep a readable line length.
+
+# The first choice of the page's width, the one chosen until another is: the content stays at a fixed width, centered in a wide window.
+ui-page-width-narrow = Narrow
+
+# The second choice of the page's width: the content uses the window's whole width.
+ui-page-width-full = Full width
+
+# Shown when the browser refused to keep the page width chosen: its settings, or a private window, may let a site keep nothing. The page keeps the width it had.
+ui-page-width-not-kept = This browser didn't keep the page width, so the page stays as it was. Its settings may stop sites from keeping anything.
+
 # The heading of the section of Settings about signing in: how long a session lasts, and signing out every browser at once.
 ui-signing-in-heading = Signing in
 
@@ -2904,8 +2986,11 @@ ui-proposal-rejected-before = { $count ->
 # The heading of the exact changes to the configuration file, with each secret it holds shown as ***.
 ui-proposal-diff-heading = Changes to the configuration file
 
-# Said in the place of Approve for a proposal that could delete snapshots: the forget preview shows which ones would go, and approving such a proposal comes in a later version.
-ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. The forget preview shows which ones would go. Approving changes that can delete { -snapshot(form: "other") } comes in a later version, so for now you can only reject it.
+# Said in the place of Approve for a proposal that could delete snapshots, until the person shows its forget preview: approving it comes with that preview.
+ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. Show what it would forget first: you can approve it once the forget preview shows which ones would go.
+
+# Said in the place of Approve once the forget preview couldn't read a repository the proposal touches: it can be approved only from a preview that read them all.
+ui-proposal-forget-preview-unread = A repository this proposal touches couldn't be read, so it can't be approved from this preview. Show what it would forget again once the repository can be read.
 
 # The button that reads what the open proposal would change about the snapshots retention forgets, in each repository it touches.
 ui-proposal-forget-preview = Show what it would forget

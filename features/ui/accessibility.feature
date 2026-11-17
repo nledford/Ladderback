@@ -51,6 +51,29 @@ Feature: Accessibility of the app shell
     When I press Tab
     Then focus is on the link "Skip to content"
 
+  # Every Tab press checks that the control it focuses shows a focus ring and
+  # that nothing lies over it (2.4.7, 2.4.11), here where a page has the least
+  # room: 320 pixels wide with 200 % text.
+  Scenario Outline: On a small screen with larger text the first stops after the skip link show uncovered, in <colors>
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    And the browser asks for "<colors>"
+    When I open the address "<page>"
+    And I skip to the content
+    And I press Tab
+    And I press Tab
+    And I press Tab
+    Then focus is on a control in the main content
+
+    Examples:
+      | page      | colors        |
+      | /_gallery | light colors  |
+      | /_gallery | dark colors   |
+      | /_gallery | forced colors |
+      | /         | light colors  |
+      | /         | dark colors   |
+      | /         | forced colors |
+
   Scenario: A polite message reaches the polite region
     When I open the component gallery
     And I skip to the content

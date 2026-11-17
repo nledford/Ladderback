@@ -92,6 +92,8 @@ pub struct Approval {
     pub revision: String,
     /// The hash of the diff shown.
     pub diff_hash: String,
+    /// The digest of the forget preview shown, when the page showed one.
+    pub forget_digest: Option<String>,
     /// The connection's address, whose sign-in waits a wrong step-up
     /// password counts against.
     pub address: IpAddr,
@@ -133,8 +135,12 @@ pub enum ProposalsError {
     /// by hand during its apply: nothing was applied, and it is pending.
     Changed,
     /// The proposal holds a change that could delete snapshots, approved
-    /// only with the forget preview: nothing was applied.
+    /// only with the forget preview, and the approval brought none:
+    /// nothing was applied.
     NeedsForgetPreview,
+    /// What the proposal would forget isn't what the forget preview the
+    /// approval brought showed: nothing was applied, and it is pending.
+    ForgetPreviewChanged,
     /// A rejection gave another number of reasons than the proposal's
     /// `changes`.
     ReasonCount { changes: usize },
@@ -272,6 +278,7 @@ pub(crate) async fn approve(
     let Ok(api::ApproveProposalDto {
         revision,
         diff_hash,
+        forget_digest,
         confirmation,
     }) = serde_json::from_slice(&body)
     else {
@@ -285,6 +292,7 @@ pub(crate) async fn approve(
     let approval = Approval {
         revision,
         diff_hash,
+        forget_digest,
         address: peer.ip(),
         confirmation,
     };
@@ -393,6 +401,11 @@ fn refusal(error: &ProposalsError) -> Response {
         ProposalsError::NeedsForgetPreview => (
             StatusCode::CONFLICT,
             ErrorCode::ProposalNeedsForgetPreview,
+            Vec::new(),
+        ),
+        ProposalsError::ForgetPreviewChanged => (
+            StatusCode::CONFLICT,
+            ErrorCode::ProposalForgetPreviewChanged,
             Vec::new(),
         ),
         ProposalsError::ReasonCount { changes } => (

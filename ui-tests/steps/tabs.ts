@@ -334,3 +334,137 @@ Then(
     assert.ok(lines.size > 1, `the tabs stand on ${lines.size} line at 320 px with 200 % text`);
   },
 );
+
+/** Where a tab list stands beside the panel its selected tab shows, each
+ *  tab's box and the direction the list's text runs. */
+async function layoutOf(world: BrowserWorld, name: string) {
+  const panel = await panelOf(
+    world,
+    ((await listOf(world, name).locator('[role="tab"][aria-selected="true"]').textContent()) ?? "").trim(),
+  );
+  const panelBox = await panel.boundingBox();
+  assert.ok(panelBox, `the panel shown beside the list of the tab "${name}" is not drawn`);
+  const found = await listOf(world, name).evaluate((element) => ({
+    direction: getComputedStyle(element).direction,
+    list: element.getBoundingClientRect().toJSON() as DOMRect,
+    tabs: Array.from(element.querySelectorAll('[role="tab"]'), (each) => {
+      const box = each.getBoundingClientRect();
+      return { name: (each.textContent ?? "").trim(), top: box.top, left: box.left, right: box.right };
+    }),
+  }));
+  return { ...found, panel: panelBox };
+}
+
+// A vertical list (§4.5) says so to a screen reader (`aria-orientation`),
+// whose up and down arrows then move between its tabs, and is drawn as it
+// says: its tabs one under another, the panel beside it at its end, the
+// list at the panel's start in either direction.
+Then(
+  "the tab list of the tab {string} is vertical, a column at the start of its panel",
+  async function (this: BrowserWorld, name: string) {
+    await expect(listOf(this, name)).toHaveAttribute("aria-orientation", "vertical");
+    const { direction, list, tabs, panel } = await layoutOf(this, name);
+    for (const [above, below] of tabs.slice(0, -1).map((each, i) => [each, tabs[i + 1]] as const)) {
+      assert.ok(below && below.top > above.top + 0.5, `the tab "${below?.name}" doesn't stand under "${above.name}"`);
+      assert.ok(Math.abs(below.left - above.left) <= 0.5, `the tabs "${above.name}" and "${below.name}" don't share a column`);
+    }
+    if (direction === "rtl") {
+      assert.ok(panel.x + panel.width <= list.left + 0.5, `the panel ends at ${panel.x + panel.width}, past the list's start at ${list.left}`);
+    } else {
+      assert.ok(panel.x >= list.right - 0.5, `the panel starts at ${panel.x}, before the list's end at ${list.right}`);
+    }
+    assert.ok(panel.y < list.bottom, `the panel starts at ${panel.y}, under the list's end at ${list.bottom}`);
+  },
+);
+
+// A horizontal list says so too, which a list that can change layout must
+// (a responsive one), and its panel stands under it.
+Then(
+  "the tab list of the tab {string} is horizontal, a row above its panel",
+  async function (this: BrowserWorld, name: string) {
+    await expect(listOf(this, name)).toHaveAttribute("aria-orientation", "horizontal");
+    const { list, panel } = await layoutOf(this, name);
+    assert.ok(panel.y >= list.bottom - 0.5, `the panel starts at ${panel.y}, above the list's end at ${list.bottom}`);
+  },
+);
+
+/** A vertical tab's edges, beside the list's rule at its end, measured with
+ *  a token or the system's text color read through a probe. */
+async function drawnVerticalTab(world: BrowserWorld, name: string, token: string) {
+  const list = await listOf(world, name).elementHandle();
+  assert.ok(list, `no tab list holds the tab "${name}"`);
+  return tab(world, name).evaluate(
+    (element, { list, token }) => {
+      const probe = document.createElement("span");
+      document.body.append(probe);
+      probe.style.color = token;
+      const wanted = getComputedStyle(probe).color;
+      probe.style.color = "";
+      const text = getComputedStyle(probe).color;
+      probe.remove();
+      const edge = (style: CSSStyleDeclaration, side: string) => ({
+        width: style.getPropertyValue(`border-${side}-width`),
+        color: style.getPropertyValue(`border-${side}-color`),
+        style: style.getPropertyValue(`border-${side}-style`),
+      });
+      const style = getComputedStyle(element);
+      const listStyle = getComputedStyle(list as Element);
+      const box = element.getBoundingClientRect();
+      const listBox = (list as Element).getBoundingClientRect();
+      const rtl = listStyle.direction === "rtl";
+      return {
+        wanted,
+        text,
+        weight: style.fontWeight,
+        color: style.color,
+        bar: edge(style, "inline-end"),
+        under: edge(style, "block-end"),
+        rule: edge(listStyle, "inline-end"),
+        end: rtl ? box.left : box.right,
+        listEnd: rtl ? listBox.left : listBox.right,
+      };
+    },
+    { list, token },
+  );
+}
+
+// In a column the selected tab's bar stands at its end, on the list's rule
+// between the list and the panel, and nothing is drawn under a tab; the
+// selected one is told by its weight and that shape, never color alone
+// (1.4.1).
+for (const [what, token, forced] of [
+  ["--accent", "var(--accent)", false],
+  ["--muted", "var(--muted)", false],
+  ["the system's text color", "CanvasText", true],
+] as const) {
+  Then(
+    `the tab {string} is bold, with a {int} pixel bar in ${what} on the rule beside its list`,
+    async function (this: BrowserWorld, name: string, width: number) {
+      const drawn = await drawnVerticalTab(this, name, token);
+      assert.equal(drawn.weight, "700", `the weight of the tab "${name}"`);
+      assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the bar beside the tab "${name}"`);
+      assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
+      assert.ok(Math.abs(drawn.end - drawn.listEnd) <= 0.5, `the bar beside the tab "${name}" stands at ${drawn.end}, the list's rule at ${drawn.listEnd}`);
+    },
+  );
+
+  Then(
+    `the tab {string} is in the text's weight and color, with no bar, on a {int} pixel rule in ${what} beside its list`,
+    async function (this: BrowserWorld, name: string, width: number) {
+      const drawn = await drawnVerticalTab(this, name, token);
+      assert.equal(drawn.weight, "400", `the weight of the tab "${name}"`);
+      assert.equal(drawn.color, forced ? drawn.wanted : drawn.text, `the words of the tab "${name}" are not in the text's color`);
+      assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the rule beside the tab "${name}"`);
+      assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
+      assert.ok(Math.abs(drawn.end - drawn.listEnd) <= 0.5, `the rule beside the tab "${name}" stands at ${drawn.end}, the list's at ${drawn.listEnd}`);
+    },
+  );
+
+  Then(
+    `the tab list of the tab {string} stands beside a {int} pixel rule in ${what}`,
+    async function (this: BrowserWorld, name: string, width: number) {
+      const drawn = await drawnVerticalTab(this, name, token);
+      assert.deepEqual(drawn.rule, { width: `${width}px`, color: drawn.wanted, style: "solid" }, "the list's rule");
+    },
+  );
+}

@@ -30,7 +30,9 @@ function workers(): number {
 
 const config: Partial<IConfiguration> = {
   paths: ["../features/**/*.feature"],
-  import: ["support/**/*.ts", "steps/**/*.ts"],
+  // Not `*.test.ts`: those are `node --test` files, which would run their
+  // tests in cucumber-js's process (`just test-ui` runs them first).
+  import: ["support/**/!(*.test).ts", "steps/**/*.ts"],
   tags: "@ui",
   strict: true,
   format: ["progress"],

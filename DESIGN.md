@@ -125,7 +125,8 @@ components:
   progress-track:
     backgroundColor: "{colors.ledger-gray}"
     rounded: "{rounded.pill}"
-    height: "0.5rem"
+    # Small, the default: half the shared scale's 1em.
+    height: "0.5em"
     width: "16rem"
   spinner:
     # The drawing's color (its arc); the label keeps the text's color.
@@ -169,7 +170,7 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 
 - **Paper** (`--bg`): the page.
 - **Graphite Ink** (`--fg`): all body text and headings.
-- **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and under a row of tabs, and the line around the pause banner.
+- **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and between a list of tabs and its panel, and the line around the pause banner.
 - **Ledger Gray** (`--surface`): the site header, toasts, alerts, the pause banner, a progress bar's empty track and an unavailable text field.
 - **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 - **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
@@ -216,13 +217,13 @@ The badge's own pairs, for the states that tell no result: Loading (dark blue on
 
 ### Named Rules
 
-**The Weight Not Color Rule.** Current, selected and pressed are said by weight (and an inset edge on a pressed button, a bar under a selected tab), never by color alone.
+**The Weight Not Color Rule.** Current, selected and pressed are said by weight (and an inset edge on a pressed button, a bar beside a selected tab), never by color alone.
 
 **The Reader's Size Rule.** Form controls inherit the page's font (`font: inherit`), so a button's label doubles when the reader doubles their text.
 
 ## Layout
 
-One column, `main` centered at up to 60rem with 1rem padding. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
+One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main` (`page_width.rs`), never a `style.css` rule. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
 
 Spacing steps are 0.25, 0.5, 0.75 and 1rem; forms stack fields 1rem apart, and an `.actions` row puts its buttons 0.5rem apart, wrapping. Inputs fill their line up to 32rem (40rem for a token).
 
@@ -317,7 +318,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Progress Bar
 
-A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, with a Ladder Blue fill that eases to each report (0.4 s) and jumps under reduced motion. The current step sits on its own line above it.
+A Ledger Gray pill track, half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The fill is the tone's own color, never a status pair: a pair is for words on a tinted fill, and the fill carries none, so each tone's fill keeps 3:1 against the track and the page instead. The current step sits on its own line above it.
 
 ### Spinner
 
@@ -339,7 +340,7 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 
 ### Alerts
 
-- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. Pages move onto it in #929.
+- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. The Log and Plans pages show their refusals with it, as Error alerts; the other pages move onto it in #929.
 - **Look:** Ledger Gray with the small corner, the words and any link in them in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a failure is not a red banner.
 - **Tone:** Primary (information, the default), Success, Warning and Error, each with its own icon: Info, CircleCheck, TriangleAlert and CircleX, the icon named by its tone in words for a screen reader. No Secondary and no Inherit: an alert always says its tone.
 - **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page takes the alert away and names where focus goes.
@@ -366,12 +367,13 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 
 ### Tabs
 
-- **Use:** switching between views within one page, each tab showing its panel below the row. Never navigation between pages: that is the navigation's links.
-- **Look:** a row of tabs on one Slate Note rule, each tab its words in the text's color, no fill and no box. The selected tab is bold with a 3 px Ladder Blue bar over the rule under it; a hovered one shows a Slate Note line as thick as the bar in the bar's place. Flat: no boxed, lifted or pill tabs, which say a depth this system doesn't use, and no icons.
-- **Size:** the text's size, no shared size; each tab at least 24 × 24 CSS px. A bold copy of the words, unseen, keeps each tab as wide selected as not, so the row stays still as the selection moves.
-- **Narrow screens:** the row wraps onto more lines, every tab whole. Each tab stands on its own stretch of the rule, edge to edge with the next, so a tab selected on an earlier line keeps its bar over a rule; the rule runs on to the row's end under the last line.
+- **Use:** switching between views within one page. Never navigation between pages: that is the navigation's links.
+- **Orientation:** horizontal (the default), a row of tabs above the panel; vertical, a column at the panel's start, for a list too long or its words too wide for a row; responsive, a column while the tabs' own space has room for the list beside the panel and a row below that, for tabs that sit in a wide page and a narrow column alike. A change of layout moves nothing else: the selected tab, the focus and what a panel holds stay.
+- **Look:** the tabs on one Slate Note rule between them and the panel, under a row and at the end of a column, each tab its words in the text's color, no fill and no box. The selected tab is bold with a 3 px Ladder Blue bar on the rule beside it; a hovered one shows a Slate Note line as thick as the bar in the bar's place. Flat: no boxed, lifted or pill tabs, which say a depth this system doesn't use, and no icons.
+- **Size:** the text's size, no shared size; each tab at least 24 × 24 CSS px. A bold copy of the words, unseen, keeps each tab as wide selected as not, so the row stays still as the selection moves. A column takes at most half the width, its words wrapping.
+- **Narrow screens:** the row wraps onto more lines, every tab whole. Each tab stands on its own stretch of the rule, edge to edge with the next, so a tab selected on an earlier line keeps its bar over a rule; the rule runs on to the row's end under the last line. Responsive tabs are a row there, and with larger text.
 - **No tone:** the bar is the accent, and tabs aren't a status.
-- **Forced colors:** the rule and the selected bar in the text's own color, as the focus ring is, the bar told by its thickness and the weight kept.
+- **Forced colors:** the rule and the selected bar in the text's own color, as the focus ring is, the bar told by its thickness and the weight kept, in either layout.
 - **Focus:** the global 3 px ring, on a tab and on a panel that is a Tab stop of its own.
 
 ### Dialogs

@@ -43,6 +43,7 @@ const PAIRS = [
   { name: "error tone on page", fg: "--error", bg: "--bg", min: 4.5 },
   { name: "error tone on surface", fg: "--error", bg: "--surface", min: 4.5 },
   ...buttonPairs(),
+  ...progressPairs(),
   { name: "tooltip text", fg: "--bg", bg: "--fg", min: 4.5 },
   // A text field (components §4.5): its edge against the page and a
   // surface (1.4.11); its invalid edge is the error tone's pairs above, its
@@ -94,6 +95,26 @@ function buttonPairs() {
     { name: `${name} button edge on page, hovered`, fg: hover, bg: "--bg", min: 3 },
     { name: `${name} button edge on surface, hovered`, fg: hover, bg: "--surface", min: 3 },
     { name: `${name} button label on surface, hovered`, fg: hover, bg: "--surface", min: 4.5 },
+  ]);
+}
+
+// A progress bar (components §4.5) in each tone it takes: its fill, a part
+// with no words on it, against its Ledger Gray track and against the page
+// around the track (1.4.11). Inherit fills with the text's own color. The
+// fill takes the tone's own token, not its status pair, which is for words
+// on a tinted fill (decision 108).
+function progressPairs() {
+  const tones = [
+    { name: "primary", tone: "--accent" },
+    { name: "secondary", tone: "--muted" },
+    { name: "success", tone: "--success" },
+    { name: "warning", tone: "--warning" },
+    { name: "error", tone: "--error" },
+    { name: "inherit", tone: "--fg" },
+  ];
+  return tones.flatMap(({ name, tone }) => [
+    { name: `${name} progress fill on its track`, fg: tone, bg: "--surface", min: 3 },
+    { name: `${name} progress fill on page`, fg: tone, bg: "--bg", min: 3 },
   ]);
 }
 

@@ -19,6 +19,9 @@ import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
+/** What makes an element a live region, by role or by attribute. */
+export const LIVE_REGION = "[aria-live], [role~='status'], [role~='alert'], [role~='log'], [role~='marquee'], [role~='timer'], output";
+
 /** The gallery section of a component, found by its heading, not by a test id. */
 export function demoSection(page: Page, component: string): Locator {
   return page.locator("section", {
@@ -798,13 +801,13 @@ Then("the {string} demo shows no text {string}", async function (this: BrowserWo
 Then("the {string} demo has spinners but no live region", async function (this: BrowserWorld, component: string) {
   const section = demoSection(this.page, component);
   await section.waitFor({ timeout: 5_000 });
-  const found = await section.evaluate((element) => ({
-    spinners: element.querySelectorAll(".spinner").length,
-    live: Array.from(
-      element.querySelectorAll("[aria-live], [role~='status'], [role~='alert'], [role~='log'], [role~='marquee'], [role~='timer'], output"),
-      (region) => region.outerHTML,
-    ),
-  }));
+  const found = await section.evaluate(
+    (element, live) => ({
+      spinners: element.querySelectorAll(".spinner").length,
+      live: Array.from(element.querySelectorAll(live), (region) => region.outerHTML),
+    }),
+    LIVE_REGION,
+  );
   assert.ok(found.spinners > 0, `the ${component} demo has no spinner`);
   assert.deepEqual(found.live, []);
 });
@@ -2314,7 +2317,17 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - button "Advance the demo progress"
 - progressbar "Demo progress of unknown size": Working…
-- progressbar "Demo progress of a step": Reading the index…`,
+- progressbar "Demo progress of a step": Reading the index…
+- progressbar "Demo progress at the Small size": Backing up… 60%
+- progressbar "Demo progress at the Medium size": Backing up… 60%
+- progressbar "Demo progress at the Large size": Backing up… 60%
+- progressbar "Demo progress at the Extra large size": Backing up… 60%
+- progressbar "Demo progress in the Primary tone": Backing up… 60%
+- progressbar "Demo progress in the Secondary tone": Backing up… 60%
+- progressbar "Demo progress in the Success tone": Backing up… 60%
+- progressbar "Demo progress in the Warning tone": Backing up… 60%
+- progressbar "Demo progress in the Error tone": Backing up… 60%
+- progressbar "Demo progress in the Inherit tone": Backing up… 60%`,
   Toast: `- heading "Toast" [level=2]
 - paragraph:
   - button "Save the demo settings"`,
@@ -2365,6 +2378,32 @@ const SNAPSHOTS: Record<string, string> = {
   - tab "Third demo tab"
 - tabpanel "First demo tab":
   - paragraph: The first demo panel.`,
+  "Vertical tabs": `- heading "Vertical tabs" [level=2]
+- tablist "Demo plan":
+  - tab "Demo sources" [selected]
+  - tab "Demo times"
+  - tab "Demo hooks"
+- tabpanel "Demo sources":
+  - paragraph: The demo plan backs up two demo folders.
+- tablist "Demo plan, right to left":
+  - tab "First vertical tab" [selected]
+  - tab "Second vertical tab"
+  - tab "Third vertical tab"
+- tabpanel "First vertical tab":
+  - paragraph: The first vertical panel.`,
+  "Responsive tabs": `- heading "Responsive tabs" [level=2]
+- tablist "Demo settings":
+  - tab "Demo general" [selected]
+  - tab "Demo address"
+  - tab "Demo about"
+- tabpanel "Demo general":
+  - paragraph: The demo settings shown here change nothing.
+- tablist "Demo settings in a narrow column, right to left":
+  - tab "First column tab" [selected]
+  - tab "Second column tab"
+  - tab "Third column tab"
+- tabpanel "First column tab":
+  - paragraph: The first column panel.`,
   "Shared vocabulary": `- heading "Shared vocabulary" [level=2]
 - heading "Tones" [level=3]
 - list "Tones":

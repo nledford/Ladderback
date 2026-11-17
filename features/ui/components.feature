@@ -7,8 +7,9 @@ Feature: The shared components in the gallery
   frame of its own on a small screen, a checkbox, a
   radio group, which marks a choice's label written in another language with
   that language and its direction, a progress bar a keyboard user can reach, whose changes
-  are never announced and are told at most every 30 seconds, and which shows
-  no percentage while its size isn't known, a toast, the
+  are never announced and are told at most every 30 seconds, which shows
+  no percentage while its size isn't known, and whose fill takes its tone
+  and whose track its thickness from the shared vocabulary, a toast, the
   control that pauses live updates, a status badge for every state an
   operation can be in, whose icon tells the state by its shape, a
   snapshot's tree, one stop for Tab, whose folders are read as they are
@@ -42,11 +43,13 @@ Feature: The shared components in the gallery
   is on, a skeleton, the still shape of content on its way, which a screen
   reader and Tab both skip, beside the words that say the wait in a region
   that is busy until the content takes its place, as tall as it was, a set
-  of tabs, one stop for Tab, whose arrow keys follow the page's direction,
-  each panel kept as it was while another is shown, and an alert, an inline
-  message about a page's state whose icon names its tone in words, which
-  is no live region and no stop for Tab, and whose Dismiss button takes it
-  away and leaves focus where its page names.
+  of tabs, one stop for Tab, in a row above its panel, in a column at its
+  start, or in whichever of the two its container has room for, whose arrow
+  keys follow the layout shown and the page's direction, each panel kept as
+  it was while another is shown or the layout changes, and an alert, an
+  inline message about a page's state whose icon names its tone in words,
+  which is no live region and no stop for Tab, and whose Dismiss button
+  takes it away and leaves focus where its page names.
   Every demo state a component can show (loading, empty, error, success,
   on and off) stays clear
   of accessibility violations, and each component's structure is pinned by an
@@ -242,6 +245,11 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
+    And I press Tab until focus is on the button "Check the demo folders"
     And I press Tab until focus is on the progressbar "Demo backup progress"
     Then the progress bar "Demo backup progress" reads "Backing up… 40%, 4 GiB of 10 GiB"
     When I press Tab until focus is on the button "Advance the demo progress"
@@ -260,6 +268,77 @@ Feature: The shared components in the gallery
     And the progress bar "Demo progress of unknown size" reads "Working…"
     And the progress bar "Demo progress of a step" reads "Reading the index…"
     And the "Progress" demo has no accessibility violations
+
+  Scenario: Every progress bar is a stop for Tab whatever its size and tone, its focus ring around all it draws, and reads its value
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
+    And I press Tab until focus is on the button "Check the demo folders"
+    And I press Tab until focus is on the progressbar "Demo progress of a step"
+    Then pressing Tab moves focus to these progress bars in turn, each holding its track and its words inside its focus ring:
+      | bar                                   |
+      | Demo progress at the Small size       |
+      | Demo progress at the Medium size      |
+      | Demo progress at the Large size       |
+      | Demo progress at the Extra large size |
+      | Demo progress in the Primary tone     |
+      | Demo progress in the Secondary tone   |
+      | Demo progress in the Success tone     |
+      | Demo progress in the Warning tone     |
+      | Demo progress in the Error tone       |
+      | Demo progress in the Inherit tone     |
+    And the progress bar "Demo progress in the Inherit tone" reads "Backing up… 60%, 6 GiB of 10 GiB"
+    And the live regions stay silent
+
+  Scenario Outline: A progress bar's track is half its size on the shared scale thick, a multiple of the reader's text size, Small unless its page names another
+    Given the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then the track of the progress bar "<bar>" is <times> times as thick as the page's text
+
+    Examples:
+      | bar                                   | times |
+      | Demo progress at the Small size       | 0.5   |
+      | Demo progress at the Medium size      | 0.75  |
+      | Demo progress at the Large size       | 1     |
+      | Demo progress at the Extra large size | 1.5   |
+
+  Scenario Outline: A progress bar's tone colors its fill only, Primary unless its page names another, on a Ledger Gray track, its words in the text's color, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then each progress bar fills its track in its tone, the track in --surface and its words in the color of the text around it:
+      | bar                                 | tone               |
+      | Demo progress in the Primary tone   | --accent           |
+      | Demo progress in the Secondary tone | --muted            |
+      | Demo progress in the Success tone   | --success          |
+      | Demo progress in the Warning tone   | --warning          |
+      | Demo progress in the Error tone     | --error            |
+      | Demo progress in the Inherit tone   | the text around it |
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors, every progress bar fills its track in the text's color, as every tone is, and its track is GrayText
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then every progress bar of the gallery fills its track in the color of the text around it, and its track is GrayText
+
+  Scenario Outline: On a small screen with larger text, every progress bar keeps its track and its words inside it, its fill at the track's start, in a page that runs <direction>
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery asking for the locale "<locale>"
+    Then every progress bar of the gallery holds its track and its words inside it, its fill at the track's start, in a page that runs <direction>
+    And the page doesn't scroll sideways
+    And no text is clipped
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
 
   Scenario: A toast appears and is announced politely, and its going is not announced
     When I open the component gallery
@@ -568,6 +647,174 @@ Feature: The shared components in the gallery
     And every tab of the list of the tab "Demo overview" stands on its own rule: the selected one on a 3 pixel bar in --accent, the others on a 1 pixel rule in --muted
     And the page doesn't scroll sideways
 
+  Scenario: Horizontal tabs, the default, stand in a row above their panel, say so, and leave the up and down arrows to the page
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo overview"
+    Then the tab list of the tab "Demo overview" is horizontal, a row above its panel
+    When I press ArrowDown
+    Then focus is on the tab "Demo overview"
+    When I press ArrowUp
+    Then focus is on the tab "Demo overview"
+    And the tab "Demo overview" is selected and the one Tab stop of its list
+
+  Scenario: Vertical tabs stand in a column at the start of their panel, say so, and the up and down arrows move between them, wrapping at either end
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo sources"
+    Then the tab list of the tab "Demo sources" is vertical, a column at the start of its panel
+    And the tab "Demo sources" is selected and the one Tab stop of its list
+    When I press ArrowDown
+    Then focus is on the tab "Demo times"
+    And the tab "Demo times" is selected and the one Tab stop of its list
+    And the tab "Demo times" shows its panel, and every other panel of its list is drawn but hidden
+    When I press ArrowDown
+    Then focus is on the tab "Demo hooks"
+    When I press ArrowDown
+    Then focus is on the tab "Demo sources"
+    When I press ArrowUp
+    Then focus is on the tab "Demo hooks"
+    And the tab "Demo hooks" is selected and the one Tab stop of its list
+    When I press Home
+    Then focus is on the tab "Demo sources"
+    When I press End
+    Then focus is on the tab "Demo hooks"
+    When I press ArrowLeft
+    Then focus is on the tab "Demo hooks"
+    When I press ArrowRight
+    Then focus is on the tab "Demo hooks"
+    When I press Tab
+    Then focus is on the panel of the tab "Demo hooks", which the tab names
+    And the live regions stay silent
+
+  Scenario Outline: Vertical tabs, right to left too, and responsive tabs in a column stand on a rule at the end of their list, the selected one bold with a bar in Ladder Blue on it, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then the tab "Demo sources" is bold, with a 3 pixel bar in --accent on the rule beside its list
+    And the tab "Demo times" is in the text's weight and color, with no bar, on a 1 pixel rule in --muted beside its list
+    And the tab list of the tab "Demo sources" stands beside a 1 pixel rule in --muted
+    And the tab "First vertical tab" is bold, with a 3 pixel bar in --accent on the rule beside its list
+    And the tab "Second vertical tab" is in the text's weight and color, with no bar, on a 1 pixel rule in --muted beside its list
+    And the tab list of the tab "First vertical tab" stands beside a 1 pixel rule in --muted
+    And the tab "Demo general" is bold, with a 3 pixel bar in --accent on the rule beside its list
+    And the tab "Demo address" is in the text's weight and color, with no bar, on a 1 pixel rule in --muted beside its list
+    And the tab list of the tab "Demo general" stands beside a 1 pixel rule in --muted
+    And the "Vertical tabs" demo has no accessibility violations
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors vertical tabs, right to left too, and responsive tabs in a column keep the selected tab's weight and bar, and the others stand on the rule, in the system's text color
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then the tab "Demo sources" is bold, with a 3 pixel bar in the system's text color on the rule beside its list
+    And the tab "Demo times" is in the text's weight and color, with no bar, on a 1 pixel rule in the system's text color beside its list
+    And the tab list of the tab "Demo sources" stands beside a 1 pixel rule in the system's text color
+    And the tab "First vertical tab" is bold, with a 3 pixel bar in the system's text color on the rule beside its list
+    And the tab "Second vertical tab" is in the text's weight and color, with no bar, on a 1 pixel rule in the system's text color beside its list
+    And the tab list of the tab "First vertical tab" stands beside a 1 pixel rule in the system's text color
+    And the tab "Demo general" is bold, with a 3 pixel bar in the system's text color on the rule beside its list
+    And the tab "Demo address" is in the text's weight and color, with no bar, on a 1 pixel rule in the system's text color beside its list
+    And the tab list of the tab "Demo general" stands beside a 1 pixel rule in the system's text color
+
+  Scenario: Vertical tabs in a part of the page that runs right to left stand at its start, on the right, and the down arrow still goes to the next tab
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo sources"
+    And I press Tab until focus is on the tab "First vertical tab"
+    Then the tab list of the tab "First vertical tab" is vertical, a column at the start of its panel
+    When I press ArrowDown
+    Then focus is on the tab "Second vertical tab"
+    And the tab "Second vertical tab" is selected and the one Tab stop of its list
+    When I press ArrowUp
+    Then focus is on the tab "First vertical tab"
+    When I press ArrowUp
+    Then focus is on the tab "Third vertical tab"
+    When I press ArrowLeft
+    Then focus is on the tab "Third vertical tab"
+    When I press ArrowRight
+    Then focus is on the tab "Third vertical tab"
+    And the tab "Third vertical tab" is selected and the one Tab stop of its list
+
+  Scenario: Responsive tabs are vertical where their container has room for the list beside the panel, and horizontal in a narrow column of the same wide page
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo general"
+    Then the tab list of the tab "Demo general" is vertical, a column at the start of its panel
+    When I press ArrowDown
+    Then focus is on the tab "Demo address"
+    And the tab "Demo address" is selected and the one Tab stop of its list
+    When I press Tab until focus is on the tab "First column tab"
+    Then the tab list of the tab "First column tab" is horizontal, a row above its panel
+    When I press ArrowLeft
+    Then focus is on the tab "Second column tab"
+    And the tab "Second column tab" is selected and the one Tab stop of its list
+    When I press ArrowDown
+    Then focus is on the tab "Second column tab"
+    When I press ArrowRight
+    Then focus is on the tab "First column tab"
+
+  Scenario: Responsive tabs that change layout keep the selected tab, the focus and what was typed in a panel, and their arrow keys follow the new layout
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo general"
+    And I press ArrowDown
+    And I press Tab
+    Then focus is on the textbox "Demo address text"
+    When I type "Kept while the layout changes"
+    And I press Shift+Tab
+    Then focus is on the tab "Demo address"
+    When the window narrows to 480 pixels
+    Then the tab list of the tab "Demo address" is horizontal, a row above its panel
+    And focus is on the tab "Demo address"
+    And the tab "Demo address" is selected and the one Tab stop of its list
+    When I press ArrowRight
+    Then focus is on the tab "Demo about"
+    When I press ArrowLeft
+    Then the textbox "Demo address text" still holds "Kept while the layout changes"
+    When the window widens to 1280 pixels
+    Then the tab list of the tab "Demo address" is vertical, a column at the start of its panel
+    And focus is on the tab "Demo address"
+    And the tab "Demo address" is selected and the one Tab stop of its list
+    When I press ArrowUp
+    Then focus is on the tab "Demo general"
+    And the live regions stay silent
+
+  Scenario Outline: On a small screen with larger text responsive tabs are horizontal, right to left too, every tab whole and in view, in <colors>
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    And the browser asks for "<colors>"
+    When I open the component gallery
+    Then the tab list of the tab "Demo general" is horizontal, a row above its panel
+    And every tab of the list of the tab "Demo general" shows whole inside the window, on more than one line, above the list's rule
+    And the tab list of the tab "First column tab" is horizontal, a row above its panel
+    And every tab of the list of the tab "First column tab" shows whole inside the window, on more than one line, above the list's rule
+    And the page doesn't scroll sideways
+    And the "Responsive tabs" demo has no accessibility violations
+
+    Examples:
+      | colors        |
+      | light colors  |
+      | dark colors   |
+      | forced colors |
+
   Scenario Outline: Each component's demo states have no accessibility violations
     When I open the component gallery
     Then the "<component>" demo has no accessibility violations
@@ -586,6 +833,8 @@ Feature: The shared components in the gallery
       | Pause control |
       | Tree        |
       | Tabs        |
+      | Vertical tabs |
+      | Responsive tabs |
       | Shared vocabulary |
       | Spinner     |
       | Icon        |
@@ -614,6 +863,8 @@ Feature: The shared components in the gallery
       | Pause control |
       | Tree        |
       | Tabs        |
+      | Vertical tabs |
+      | Responsive tabs |
       | Shared vocabulary |
       | Spinner     |
       | Icon        |
@@ -729,9 +980,22 @@ Feature: The shared components in the gallery
     Examples:
       | button                    |
       | Open the demo dialog      |
-      | Advance the demo progress |
       | Pause the demo updates    |
       | Filled Primary            |
+
+  # The progress demo sits past the tabs demos, so its walk stops on the way.
+  Scenario: The progress demo's button label grows with the reader's text size
+    Given the reader sets the text size to 200 percent
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
+    And I press Tab until focus is on the button "Check the demo folders"
+    And I press Tab until focus is on the button "Advance the demo progress"
+    Then the label of the button "Advance the demo progress" is as large as the page's text
+    And the page has no accessibility violations
 
   # The table's sort button sits past the 40 Tab presses a journey allows
   # from the page's start, but within them by Shift+Tab.
@@ -1344,6 +1608,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the textbox "Demo password"
     And I type "demo-secret"
     And I press ArrowLeft
@@ -1370,6 +1635,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the textbox "Demo copies to keep"
     Then the textbox "Demo copies to keep" asks for the keyboard of digits, and is a text input
     When I type "1a2"
@@ -1381,6 +1647,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the textbox "Demo snapshot ID"
     Then the field "Demo snapshot ID" is described by "Read only: you can select and copy it, but not change it."
     And the field "Demo snapshot ID" is edged with dashes

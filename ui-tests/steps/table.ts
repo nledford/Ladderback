@@ -166,7 +166,7 @@ When(
   "I press {word} until the region {string} has scrolled to its end",
   async function (this: BrowserWorld, key: string, name: string) {
     const frame = journey(this.page).byRole("region", { name: namePattern(name) });
-    const press = scrollKey(key);
+    const press = scrollKey(this.page, key);
     await expect(frame).toBeFocused();
     const atEnd = () => frame.evaluate((el) => el.scrollWidth - el.clientWidth - Math.abs(el.scrollLeft) < 1);
     const scrolls = await frame.evaluate((el) => el.scrollWidth > el.clientWidth + 1);

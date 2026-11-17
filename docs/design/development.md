@@ -58,7 +58,7 @@ There is deliberately **no coverage percentage gate**. Coverage counts executed 
 
 ### 13.2 Behaviour first (BDD)
 
-Every user-visible behaviour starts as a Given/When/Then scenario in `features/<context>/*.feature`, written in the ubiquitous language (§3.1) before any test or code for it. Scenarios describe outcomes, never endpoints, tables or crates.
+Every user-visible behaviour starts as a Given/When/Then scenario in `features/<context>/*.feature`, written in the ubiquitous language (§3.1) before any test or code for it. Scenarios describe outcomes, never endpoints, tables or crates. Tests of the test tooling itself are not scenarios but `node --test` files: `scripts/*.test.ts`, which `just lint` runs and which need no browser, and, beside the UI test tooling, `ui-tests/support/*.browser.test.ts`, which need one and which `just test-ui <engine>` runs in that engine before the scenarios.
 
 - **Runner:** the `cucumber` crate (cucumber-rs). `crates/app/tests/acceptance.rs` (`harness = false`) runs every scenario tagged neither `@e2e` nor `@ui`. Because it lives in `app`, `cargo mutants` runs it for every `app` mutant.
 - **Default level:** steps drive `app` use cases with the in-memory fakes and the fake clock, so scenarios about sleep, deadlines, leases and catch-up run in milliseconds and deterministically.
