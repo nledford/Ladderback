@@ -829,6 +829,39 @@ sources = ["/home/demo"]
         assert_ne!(std::fs::read_to_string(&file).expect("the file"), CONFIG);
     }
 
+    #[tokio::test]
+    async fn a_forget_digest_that_is_no_digest_is_refused_as_a_changed_forget_preview() {
+        let (parts, _scratch, file) = parts();
+        let service = ProposalService::new(&parts, &signed_out(), maintenance(&parts));
+        let made = service
+            .propose(
+                Proposer::NoToken,
+                proposal(json!([{"kind": "add-plan", "plan": photos()}])),
+            )
+            .await
+            .expect("proposed");
+        let id = ProposalId::parse(&made.id).expect("an ID");
+        let review = service.review(made.id.clone()).await.expect("reviewed");
+        let approval = Approval {
+            revision: review.revision,
+            diff_hash: review.diff_hash,
+            forget_digest: Some("not a digest".to_owned()),
+            address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+            confirmation: StepUpConfirmation::parse(short_proposal_id(&id).to_owned())
+                .expect("a confirmation"),
+        };
+        assert_eq!(
+            service.approve(made.id.clone(), approval).await,
+            Err(ProposalsError::ForgetPreviewChanged)
+        );
+        let kept = parts.store.get(&id).await.expect("the store reads");
+        assert_eq!(
+            kept.expect("the proposal is kept").status,
+            ProposalStatus::Pending
+        );
+        assert_eq!(std::fs::read_to_string(&file).expect("the file"), CONFIG);
+    }
+
     /// A plan with no retention policy: adding it can't delete a snapshot,
     /// so its approval needs no forget preview.
     fn photos() -> serde_json::Value {
