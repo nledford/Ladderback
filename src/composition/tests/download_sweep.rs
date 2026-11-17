@@ -80,7 +80,10 @@ async fn the_sweep_gives_up_a_download_nobody_fetched_within_its_minute() {
         Arc::clone(&clock) as Arc<dyn Clock>,
     );
     let snapshot = domain::SnapshotId::parse(&"3f2a1b4c".repeat(8)).expect("a snapshot ID");
-    let confirmation = domain::access::step_up::short_id(&snapshot).to_owned();
+    let confirmation = domain::access::step_up::StepUpConfirmation::parse(
+        domain::access::step_up::short_id(&snapshot).to_owned(),
+    )
+    .expect("a confirmation");
     service
         .start(
             "demo".to_owned(),
