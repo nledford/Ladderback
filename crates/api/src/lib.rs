@@ -3835,6 +3835,13 @@ pub struct OperationSummaryDto {
     /// repository of one location and an operation that opens none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locations: Vec<LocationTriedDto>,
+    /// The entry of a snapshot a restore or a download read, as the log
+    /// kept it: its path from the snapshot's top, `/` first, with every
+    /// secret of the repository masked and a path past 1 KiB cut to its end
+    /// after `…` (#847). Left out for every other operation and for one an
+    /// earlier version logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
 }
 
 impl OperationSummaryDto {
@@ -3842,6 +3849,16 @@ impl OperationSummaryDto {
     #[must_use]
     pub fn with_locations(self, locations: Vec<LocationTriedDto>) -> Self {
         Self { locations, ..self }
+    }
+
+    /// The same summary, naming the entry of a snapshot a restore or a
+    /// download read, as the log kept it (#847).
+    #[must_use]
+    pub fn with_entry(self, entry: String) -> Self {
+        Self {
+            entry: Some(entry),
+            ..self
+        }
     }
 
     /// The location the run used, and how many the repository had then,
@@ -3917,6 +3934,7 @@ impl OperationSummaryDto {
             result,
             repository,
             locations: Vec::new(),
+            entry: None,
         })
     }
 }
@@ -5661,6 +5679,18 @@ mod operation_dto_tests {
         );
         assert_eq!(from_str::<OperationSummaryDto>(&json).unwrap(), dto);
         assert!(!to_string(&summary()).unwrap().contains("locations"));
+    }
+
+    /// A restore's or a download's summary names the entry it read, on the
+    /// wire; a summary of anything else leaves the key out (#847).
+    #[test]
+    fn a_summary_carries_the_entry_its_run_read() {
+        let dto = summary().with_entry("/demo/demo-1.txt".to_owned());
+        assert_eq!(dto.entry.as_deref(), Some("/demo/demo-1.txt"));
+        let json = to_string(&dto).unwrap();
+        assert!(json.contains(r#""entry":"/demo/demo-1.txt""#), "{json}");
+        assert_eq!(from_str::<OperationSummaryDto>(&json).unwrap(), dto);
+        assert!(!to_string(&summary()).unwrap().contains("\"entry\""));
     }
 
     #[test]

@@ -299,6 +299,7 @@ mod tests {
                 result: None,
                 repository: Some("demo".to_owned()),
                 locations: Vec::new(),
+                entry: None,
             },
             warnings: Vec::new(),
         }))

@@ -209,6 +209,9 @@ impl Downloads {
             self.clock.now(),
         )
         .with_repository_alias(ask.alias);
+        if let Some(entry) = job.entry() {
+            operation = operation.with_entry(entry);
+        }
         let (header, running) = self.found(op, job, &mut operation, &ruled).await?;
         if operation.started_at().is_none() {
             let _ = operation.start(self.clock.now());

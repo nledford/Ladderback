@@ -137,6 +137,7 @@ fn demoted(n: u128, kind: OperationKind) -> OperationRecord {
         result: None,
         repository_alias: None,
         locations: None,
+        entry: None,
     }
 }
 
@@ -236,7 +237,8 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
             (11, true),
             (12, true),
             (13, true),
-            (14, true)
+            (14, true),
+            (15, true)
         ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
@@ -301,7 +303,8 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
             (11, true),
             (12, true),
             (13, true),
-            (14, true)
+            (14, true),
+            (15, true)
         ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
@@ -364,7 +367,8 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
             (11, true),
             (12, true),
             (13, true),
-            (14, true)
+            (14, true),
+            (15, true)
         ]
     );
     let check = store
@@ -458,7 +462,8 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (11, true),
             (12, true),
             (13, true),
-            (14, true)
+            (14, true),
+            (15, true)
         ]
     );
     let index: Option<String> = sqlx::query_scalar(
@@ -517,7 +522,7 @@ async fn a_database_at_version_9_gains_no_session_and_no_session_length_and_keep
     assert!(matches!(length, Ok(None)), "{length:?}");
     let mut raw = scratch.raw().await;
     assert_eq!(api_token_row(&mut raw).await, before);
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(15, true)));
 }
 
 #[tokio::test]
@@ -540,7 +545,7 @@ async fn a_database_at_version_10_gains_no_reading_and_keeps_its_sessions_length
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(15, true)));
 }
 
 #[tokio::test]
@@ -562,7 +567,7 @@ async fn a_database_at_version_11_gains_no_release_check_and_keeps_its_session_l
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(15, true)));
 }
 
 #[tokio::test]
@@ -581,7 +586,7 @@ async fn a_database_at_version_12_gains_no_proposal_and_keeps_its_release_check(
     let check = app::ports::ScheduleStore::release_check(&store).await;
     assert!(matches!(check, Ok(Some(_))), "{check:?}");
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(15, true)));
 }
 
 #[tokio::test]
@@ -610,5 +615,26 @@ async fn a_database_at_version_13_keeps_its_proposals_with_nothing_decided() {
     assert_eq!(kept.approved_from, None);
     assert_eq!(kept.applied_as, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(14, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(15, true)));
+}
+
+/// A restore an earlier build logged names no entry: the column the
+/// upgrade adds is NULL for it, and the row reads back (#847).
+#[tokio::test]
+async fn a_database_at_version_14_keeps_its_restores_naming_no_entry() {
+    let scratch = Scratch::new();
+    let mut old = database_at_version(&scratch, 14).await;
+    legacy(&mut old, 0x70, "restore", "failed", Some(REPOSITORY_HEX)).await;
+    old.close().await.expect("the old database is closed");
+
+    let store = scratch.open().await;
+    let restore = store
+        .get(id(0x70))
+        .await
+        .expect("reading works")
+        .expect("the restore is in the log");
+    assert_eq!(restore.record.kind, OperationKind::Restore);
+    assert_eq!(restore.record.entry, None);
+    let mut raw = scratch.raw().await;
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(15, true)));
 }

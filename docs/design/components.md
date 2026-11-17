@@ -584,6 +584,8 @@ The events WebSocket answers a client's ping with a pong, so a live page survive
 
   A run whose choice used one of several locations says so after that, whatever became of the run, a failed one included: "Used location 2 of 2: rest:https://backup.example.net/laptop", the address as the run recorded it with credentials masked (decision 80; the earlier locations and their outcomes are in the summary's `locations`, which no page shows until an operation detail view exists). Each Cancel button names the run it stops.
 
+  A restore's or a download's Result names first the entry of the snapshot it read, whatever became of the run: "Entry /home/docs/notes.md", by its path from the snapshot's top (`/` is the top), as the log keeps it (`entry`, §9): each name as the snapshot's tree shows it (rustic's escaped form undone, its controls made visible), masked of the repository's secrets (I4), and, when longer, cut to at most 1,024 bytes, its end after "…", so the entry's own name stays (#847).
+
   A backup the schedule started that was refused before it ran (§5) is a failed row like any other: its Started cell is the moment it was refused, the time it was queued, as it never started, and its Result says why as the refusal of a run by hand does: the refusal's code, its arguments, and what a platform or a command said as the detail, masked of the repository's secrets (I4).
 - **Re-read on an end.** An end event carries no result, and the run tells of its end only after its last write to the log, so the page reads the history again when an end arrives (`backend::asks_for_a_reread`) and merges it, and the row's Result shows without a reload; a run started elsewhere, which the page did not hold, comes in with it.
 

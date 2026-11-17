@@ -590,6 +590,7 @@ fn expected_good_record() -> OperationRecord {
         })),
         repository_alias: None,
         locations: None,
+        entry: None,
     }
 }
 

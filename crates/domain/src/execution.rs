@@ -4,6 +4,7 @@ pub mod conditions;
 pub mod deadline;
 pub mod full_disk_access;
 pub mod locations;
+pub mod logged_entry;
 pub mod next_run;
 pub mod plan_tags;
 #[cfg(test)]
@@ -469,6 +470,11 @@ pub struct Operation {
     /// repository of one location and an operation that opens none.
     #[serde(default)]
     locations: Option<locations::LocationsRecord>,
+    /// The entry of a snapshot a restore or a download read, as the log
+    /// names it (#847). `None` for every other operation, and for one an
+    /// earlier build logged.
+    #[serde(default)]
+    entry: Option<logged_entry::LoggedEntry>,
 }
 
 impl Operation {
@@ -492,6 +498,7 @@ impl Operation {
             warning_count: 0,
             repository_alias: None,
             locations: None,
+            entry: None,
         }
     }
 
@@ -522,6 +529,20 @@ impl Operation {
     /// was given ([`Self::with_repository_alias`]).
     pub fn repository_alias(&self) -> Option<&RepositoryAlias> {
         self.repository_alias.as_ref()
+    }
+
+    /// The operation, naming the entry of a snapshot it reads.
+    pub fn with_entry(self, entry: logged_entry::LoggedEntry) -> Self {
+        Self {
+            entry: Some(entry),
+            ..self
+        }
+    }
+
+    /// The entry of a snapshot the operation reads, when it was given
+    /// ([`Self::with_entry`]).
+    pub fn entry(&self) -> Option<&logged_entry::LoggedEntry> {
+        self.entry.as_ref()
     }
 
     /// Which location the run used and why each earlier one was skipped,
@@ -1000,6 +1021,16 @@ mod tests {
         op.start(t(10)).unwrap();
         op.succeed(t(20)).unwrap();
         assert_eq!(op.repository_alias(), Some(&alias));
+    }
+
+    #[test]
+    fn an_operation_keeps_the_entry_it_reads_through_its_run() {
+        let entry = logged_entry::LoggedEntry::kept("/demo/demo-1.txt".to_owned());
+        assert_eq!(queued().entry(), None);
+        let mut op = queued().with_entry(entry.clone());
+        op.start(t(10)).unwrap();
+        op.succeed(t(20)).unwrap();
+        assert_eq!(op.entry(), Some(&entry));
     }
 
     #[test]

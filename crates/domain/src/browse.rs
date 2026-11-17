@@ -69,6 +69,59 @@ impl EntryName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The name as the file system wrote it: rustic's escaped form undone,
+    /// as rustic's `unescape_filename` reads it, and a byte that isn't
+    /// UTF-8 as U+FFFD, as `rustic ls` prints it. Not yet made visible: see
+    /// [`DisplayName`]. A name holding an escape rustic can't read, which no
+    /// snapshot records, is kept as it is written.
+    pub fn unescaped(&self) -> String {
+        unescape(&self.0).map_or_else(
+            || self.0.clone(),
+            |bytes| String::from_utf8_lossy(&bytes).into_owned(),
+        )
+    }
+}
+
+/// The bytes `name` escapes, as rustic's `unescape_filename` reads them;
+/// `None` for an escape it refuses.
+fn unescape(name: &str) -> Option<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(name.len());
+    let mut chars = name.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            continue;
+        }
+        match chars.next()? {
+            '\\' => bytes.push(b'\\'),
+            '"' => bytes.push(b'"'),
+            '\'' => bytes.push(b'\''),
+            '`' => bytes.push(b'`'),
+            'a' => bytes.push(0x07),
+            'b' => bytes.push(0x08),
+            'f' => bytes.push(0x0c),
+            'n' => bytes.push(b'\n'),
+            'r' => bytes.push(b'\r'),
+            't' => bytes.push(b'\t'),
+            'v' => bytes.push(0x0b),
+            'x' => bytes.push(u8::from_str_radix(&digits(&mut chars, 2)?, 16).ok()?),
+            escape @ ('u' | 'U') => {
+                let count = if escape == 'u' { 4 } else { 8 };
+                let code = u32::from_str_radix(&digits(&mut chars, count)?, 16).ok()?;
+                let unicode = char::from_u32(code)?;
+                bytes.extend_from_slice(unicode.encode_utf8(&mut [0; 4]).as_bytes());
+            }
+            _ => return None,
+        }
+    }
+    Some(bytes)
+}
+
+/// The next `count` characters of `chars`, when there are as many.
+fn digits(chars: &mut std::str::Chars<'_>, count: usize) -> Option<String> {
+    let taken: String = chars.take(count).collect();
+    (taken.chars().count() == count).then_some(taken)
 }
 
 impl TryFrom<String> for EntryName {

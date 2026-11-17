@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
+use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::{
     FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
     WarningKind, warning_kinds,
@@ -271,6 +272,9 @@ pub struct OperationRecord {
     /// repository reached at several ([`Operation::locations`], decision 80);
     /// `None` for every other operation.
     pub locations: Option<LocationsRecord>,
+    /// The entry of a snapshot a restore or a download read
+    /// ([`Operation::entry`], #847); `None` for every other operation.
+    pub entry: Option<LoggedEntry>,
 }
 
 impl OperationRecord {
@@ -291,6 +295,7 @@ impl OperationRecord {
             result: result.cloned(),
             repository_alias: operation.repository_alias().cloned(),
             locations: operation.locations().cloned(),
+            entry: operation.entry().cloned(),
         }
     }
 
@@ -317,8 +322,12 @@ impl OperationRecord {
             self.target.clone(),
             self.queued_at,
         );
-        Some(match &self.repository_alias {
+        let operation = match &self.repository_alias {
             Some(alias) => operation.with_repository_alias(alias.clone()),
+            None => operation,
+        };
+        Some(match &self.entry {
+            Some(entry) => operation.with_entry(entry.clone()),
             None => operation,
         })
     }

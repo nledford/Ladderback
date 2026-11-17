@@ -435,6 +435,12 @@
         },
         "OperationSummaryDto": {
           "properties": {
+            "entry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "failure": {
               "anyOf": [
                 {
@@ -1717,6 +1723,12 @@
         },
         "OperationSummaryDto": {
           "properties": {
+            "entry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "failure": {
               "anyOf": [
                 {
@@ -2197,6 +2209,12 @@
         },
         "OperationSummaryDto": {
           "properties": {
+            "entry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "failure": {
               "anyOf": [
                 {
@@ -2749,6 +2767,12 @@
         },
         "OperationSummaryDto": {
           "properties": {
+            "entry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "failure": {
               "anyOf": [
                 {

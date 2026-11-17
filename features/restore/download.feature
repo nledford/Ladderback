@@ -9,7 +9,8 @@ Feature: Downloading files from a snapshot
   time, so the agent never holds a whole file. At most two downloads run at
   once on an agent. A download changes nothing, but the history shows each
   one the snapshot held, as it shows a restore: who started it, from which
-  repository and how it ended. A reader that goes away stops it.
+  repository, which entry it read and how it ended. A reader that goes away
+  stops it.
 
   # The untagged scenarios run the download use case with a scripted engine
   # and a fake clock. The scripted snapshot holds "home/docs/notes.md", a
@@ -26,6 +27,14 @@ Feature: Downloading files from a snapshot
     And the download is the file "notes.md" of 11 bytes
     And the download hands over "hello world"
     And the history shows the download, started by hand, as succeeded
+
+  Scenario: The history names the entry a download read
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And sign-in is off
+    When the person downloads "home/docs/notes.md" of the snapshot, confirming with "3f2a1b4c"
+    Then the download hands over "hello world"
+    And the history shows the download, started by hand, as succeeded
+    And the history names the entry "/home/docs/notes.md"
 
   Scenario Outline: A folder is downloaded as one archive in the format picked
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"

@@ -64,13 +64,24 @@ pub(crate) fn progress_label(operation: &OperationSummaryDto) -> Words {
     }
 }
 
-/// The facts of `operation` its Result cell lists, in order: what it
-/// produced, none for a run that has not succeeded, then the location it
-/// used when its repository has several (decision 80), whatever became of
-/// the run. A fact the log did not keep, such as the bytes a backup an
-/// earlier version ran went through, is left out, never shown as zero.
+/// The facts of `operation` its Result cell lists, in order: the entry of a
+/// snapshot a restore or a download read (#847), then what it produced, none
+/// for a run that has not succeeded, then the location it used when its
+/// repository has several (decision 80), the entry and the location whatever
+/// became of the run. A fact the log did not keep, such as the bytes a backup
+/// an earlier version ran went through, is left out, never shown as zero.
 pub(crate) fn result(operation: &OperationSummaryDto) -> Vec<Words> {
-    let mut facts = operation.result.as_ref().map_or_default(produced);
+    let mut facts: Vec<Words> = operation
+        .entry
+        .iter()
+        .map(|entry| Words {
+            id: msg::UI_RESULT_ENTRY,
+            args: vec![("entry", text(entry))],
+        })
+        .collect();
+    if let Some(done) = &operation.result {
+        facts.extend(produced(done));
+    }
     if let Some((used, count)) = operation.used_location() {
         facts.push(Words {
             id: msg::UI_RESULT_USED_LOCATION,
@@ -321,6 +332,7 @@ mod tests {
             result,
             repository: repository.map(str::to_owned),
             locations: Vec::new(),
+            entry: None,
         }
     }
 
@@ -628,6 +640,34 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// A restore's or a download's row names the entry it read first, as
+    /// the log kept it, before what it wrote, whatever became of the run
+    /// (#847).
+    #[test]
+    fn a_restore_names_the_entry_it_read_before_what_it_wrote() {
+        let entry = said(msg::UI_RESULT_ENTRY, &[("entry", text("/home/docs"))]);
+        let done = OperationResultDto::Restore {
+            files: 7,
+            bytes: 2_048,
+            duration_ms: 2_000,
+        };
+        let restored =
+            summary("restore", "", Some("demo"), Some(done)).with_entry("/home/docs".to_owned());
+        let facts = result(&restored);
+        assert_eq!(facts.len(), 4, "{facts:?}");
+        assert_eq!(facts.first(), Some(&entry));
+        assert_eq!(
+            english(&entry),
+            "Entry /home/docs",
+            "the words the Operations page shows"
+        );
+
+        let mut failed =
+            summary("download", "", Some("demo"), None).with_entry("/home/docs".to_owned());
+        "failed".clone_into(&mut failed.status);
+        assert_eq!(result(&failed), [entry]);
     }
 
     #[test]

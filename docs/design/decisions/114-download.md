@@ -2,6 +2,8 @@
 
 **A download hands one entry of one snapshot to the browser that asked: a file as itself, a folder or the snapshot's top as one tar or zip archive whose entries are stored, not compressed. It is confirmed by step-up, as a restore is, then waits behind a ticket the browser fetches once within a minute, and streams a piece at a time. At most two run at once; a third is refused, never queued. Each is recorded in the operation history as a restore is** (recorded 2026-11-16, §10.4, §4.1, §9; the archive crates, the history, the busy refusal, the refusal without random bytes and the restart's effect decided by the maintainer on #564, 2026-11-16).
 
+**Amended 2026-11-16 (#847):** a download's row, like a restore's, names the entry it read (`entry`, data-model §9): its path from the snapshot's top as the file system wrote it, masked of the repository's secrets and at most 1 KiB, where this decision first kept no entry path.
+
 ## Why
 
 - **The archive crates.** A folder's archive is written by `tar` 0.4 and `zip` 9.6, each with its default features off, approved by the maintainer. They bring `crc32fast`, `constant_time_eq` and `typed-path`, and on macOS and the BSDs `nix` 0.32, which `zip` 9.6 names for those systems with no feature to turn it off; it isn't built on Linux or Windows. Every licence is one `deny.toml` already allows: tar (MIT OR Apache-2.0), zip (MIT), crc32fast (MIT OR Apache-2.0), constant_time_eq (CC0-1.0 OR MIT-0 OR Apache-2.0), typed-path (MIT OR Apache-2.0), nix (MIT).
