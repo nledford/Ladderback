@@ -132,11 +132,24 @@ Feature: Plans page
     And I press Tab until focus is on the button "Delete the plan"
     And I press Enter
     Then the polite region comes to contain "The plan demo-work is deleted."
-    And the page shows an alert containing "could not read or write its configuration file /etc/ladderback/config.toml"
+    And the page shows an error alert containing "could not read or write its configuration file /etc/ladderback/config.toml"
+    And the assertive region comes to contain "could not read or write its configuration file /etc/ladderback/config.toml"
     When I press Tab until focus is on the button "Close without saving"
     And I press Enter
     Then the button "Close without saving" leaves the page
     And focus is on the main heading "Plans"
+
+  Scenario: A plan whose form can't be read is an error alert after the Add button, said assertively, and focus stays on its Change button
+    Given a demo plan "demo-home" with a scratch repository
+    And the daemon refuses the read of the plan "demo-home"
+    When I open the address "/plans"
+    And I skip to the content
+    And I press Tab until focus is on the button "Change demo-home"
+    And I press Enter
+    Then the page shows an error alert containing "could not read or write its configuration file /etc/ladderback/config.toml"
+    And the assertive region comes to contain "could not read or write its configuration file /etc/ladderback/config.toml"
+    And focus stays on the button "Change demo-home"
+    And the page has no accessibility violations
 
   Scenario: A reader who leaves the form while its plan is saved keeps their place
     Given a demo plan "demo-home" with a scratch repository
@@ -210,7 +223,7 @@ Feature: Plans page
     And I press Enter
     Then the dialog "Delete the plan demo-home?" says "A new plan with the ID demo-home would take these snapshots over and apply its own retention to them."
 
-  Scenario: A plan a notification rule names is not deleted, and the dialog says why
+  Scenario: A plan a notification rule names is not deleted, and the dialog says why in an error alert of its own
     Given a demo plan "demo-home" that the notification rule "failures" names
     When I open the address "/plans"
     And I skip to the content
@@ -219,7 +232,8 @@ Feature: Plans page
     Then the dialog "Delete the plan demo-home?" opens with focus on the button "Cancel"
     When I press Tab until focus is on the button "Delete the plan"
     And I press Enter
-    Then the page shows an alert containing "The notification rule failures names the plan demo-home, so the plan was not deleted. Remove the plan from that rule, then delete it again."
+    Then the dialog "Delete the plan demo-home?" alerts "The notification rule failures names the plan demo-home, so the plan was not deleted. Remove the plan from that rule, then delete it again."
+    And the page shows an error alert containing "The notification rule failures names the plan demo-home, so the plan was not deleted. Remove the plan from that rule, then delete it again."
     And the dialog "Delete the plan demo-home?" stays open
     And the page has no accessibility violations
     And the table "Plans" has a row "demo-home" that shows "demo"

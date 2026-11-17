@@ -12,6 +12,7 @@ import { Then } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { ISOLATION } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "./components.ts";
 
@@ -288,3 +289,42 @@ Then(
     }
   },
 );
+
+// A page waits for the daemon's answer before it shows a refusal; ten
+// seconds is generous.
+const PAGE_PATIENCE_MS = 10_000;
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// What makes an element a live region, by role or by attribute.
+const LIVE = "[role~='alert'], [role~='status'], [role~='log'], [role~='marquee'], [role~='timer'], [aria-live], output";
+
+// A page's own message (§4.5, #929): an Error alert, found by its class, as
+// it has no role. What the catalog filled in is set apart by bidi isolation
+// marks, which may stand between any two characters. The alert is no live
+// region and holds none. On the page nothing around it is one either, so
+// only the announcer says it, once; in a dialog, whose modal page silences
+// the announcer, it stands inside the dialog's own `role="alert"` (the
+// Dialog contract).
+Then("the page shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  const heard = [...needle].map(escape).join(ISOLATION);
+  const alert = this.page.locator(".alert.tone-error").filter({ hasText: new RegExp(heard) });
+  await alert.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  const found = await alert.first().evaluate((element, live) => {
+    const dialog = element.closest("dialog");
+    const around = element.parentElement?.closest(live) ?? null;
+    return {
+      role: element.getAttribute("role"),
+      holds: element.querySelectorAll(live).length,
+      dialog: dialog !== null,
+      around: around === null ? null : { role: around.getAttribute("role"), inDialog: dialog?.contains(around) ?? false },
+    };
+  }, LIVE);
+  assert.equal(found.role, null, "the alert's own role");
+  assert.equal(found.holds, 0, "live regions inside the alert");
+  if (found.dialog) {
+    assert.deepEqual(found.around, { role: "alert", inDialog: true }, "the dialog's alert around the error alert");
+  } else {
+    assert.equal(found.around, null, "a live region around the alert, which would say it a second time");
+  }
+});
