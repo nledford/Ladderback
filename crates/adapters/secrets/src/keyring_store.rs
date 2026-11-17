@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use app::ports::KeyringActivation;
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use domain::secrets::KeyringCause;
 
@@ -64,6 +66,19 @@ pub(crate) fn os_store() -> Arc<dyn KeyringStore> {
     return Arc::new(Os);
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     return Arc::new(Unavailable);
+}
+
+/// How this machine's keyring service is started: the macOS keychain is
+/// always there, the Secret Service as the session bus says, and where
+/// there is no OS keyring there is nothing to start.
+pub(crate) fn os_activation() -> KeyringActivation {
+    todo!()
+}
+
+/// How the Secret Service is started, as the bus `connection` reaches says.
+#[cfg(target_os = "linux")]
+pub(crate) fn activation_on(_connection: &dbus::blocking::Connection) -> KeyringActivation {
+    todo!()
 }
 
 /// Which OS store an error came from: the same `keyring` error says another

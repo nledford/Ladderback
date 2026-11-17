@@ -197,5 +197,6 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     CoreDumpsOn => msg::WARNING_CORE_DUMPS_ON,
     DebuggerAttachAllowed => msg::WARNING_DEBUGGER_ATTACH_ALLOWED,
     FullDiskAccessMissing => msg::WARNING_FULL_DISK_ACCESS_MISSING,
+    KeyringNotActivatable => msg::WARNING_KEYRING_NOT_ACTIVATABLE,
     Unknown => msg::WARNING_UNKNOWN,
 });

@@ -650,6 +650,11 @@ pub enum WarningCode {
     /// the grant explains why the item was left out. The detail is the
     /// engine's own message, as for `source-unreadable`.
     FullDiskAccessMissing,
+    /// On Linux, the keyring service, the Secret Service, runs now, but no
+    /// activation file names it, so nothing can start it on demand: a run
+    /// that asks for it before the desktop starts it finds no keyring
+    /// (#923). Said on the Repositories page only. No arguments.
+    KeyringNotActivatable,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -1701,6 +1706,7 @@ impl WarningCode {
             | Self::CoreDumpsOn
             | Self::DebuggerAttachAllowed
             | Self::FullDiskAccessMissing
+            | Self::KeyringNotActivatable
             | Self::Unknown => &[],
         }
     }
@@ -4277,6 +4283,16 @@ impl ArgumentProblem {
 #[serde(rename_all = "kebab-case")]
 pub struct RepositoriesDto {
     pub repositories: Vec<RepositoryDto>,
+}
+
+/// What the Repositories page notes above its list, of the machine rather
+/// than of one repository: `keyring-not-activatable` while the keyring runs
+/// but can't be started on demand (#923). Left empty when there is nothing
+/// to note.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryNotesDto {
+    pub notes: Vec<WarningDto>,
 }
 
 /// One configured repository, as a list shows it: where it is, with any

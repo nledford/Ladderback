@@ -59,6 +59,12 @@ pub trait Repositories: Send + Sync {
         alias: String,
         request: api::MaintainerDto,
     ) -> Result<(), RepositoriesError>;
+
+    /// What the page notes above its list, of the machine rather than of one
+    /// repository: whether the keyring can be started on demand (#923). It
+    /// asks the platform within a short limit, and has no refusal: an answer
+    /// it can't get notes nothing.
+    async fn notes(&self) -> api::RepositoryNotesDto;
 }
 
 /// A refusal for a secret that couldn't be resolved or a template that isn't
@@ -215,6 +221,16 @@ pub(crate) async fn change_maintainer(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => refusal(&error),
     }
+}
+
+/// The path the page reads its notes at: underscore-prefixed, so no alias
+/// can be it, and in no API token's scope, so only a session reads it.
+pub(crate) const NOTES_PATH: &str = "/api/v1/repositories/_notes";
+
+/// What the Repositories page notes above its list: 200, always.
+pub(crate) async fn notes(State(state): State<AppState>) -> Response {
+    let _ = state;
+    todo!()
 }
 
 /// The refusal for a secret: 422, like a setting the daemon can't take.

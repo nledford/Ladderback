@@ -6,10 +6,12 @@
 
 mod create_offers;
 mod maintainer;
+mod page_notes;
 mod record_opened;
 
 pub use create_offers::CreateOffers;
 pub use maintainer::{ChangeMaintainer, MaintainerError};
+pub use page_notes::page_notes;
 pub use record_opened::{ConfigWrites, RecordOpened, Recording};
 
 use std::sync::Arc;
@@ -1203,6 +1205,10 @@ mod tests {
             Err(crate::ports::KeyringError::Unwritable {
                 detail: "the keyring is locked".to_owned(),
             })
+        }
+
+        async fn activation(&self) -> crate::ports::KeyringActivation {
+            crate::ports::KeyringActivation::OnDemand
         }
     }
 

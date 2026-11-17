@@ -501,6 +501,10 @@ warning-source-unreadable = { -brand-name } could not read this item, so it was 
 warning-full-disk-access-missing = { -brand-name } could not read this item because macOS hasn't given it { -full-disk-access }, so it was left out of the snapshot. Turn on { -full-disk-access } for { -brand-name } in System Settings, under Privacy & Security; the start page shows how.
     .with-detail = { -brand-name } could not read this item because macOS hasn't given it { -full-disk-access } ({ $detail }), so it was left out of the snapshot. Turn on { -full-disk-access } for { -brand-name } in System Settings, under Privacy & Security; the start page shows how.
 
+# On Linux, the Repositories page notes that the keyring service (the Secret Service) runs now, but that the session bus has no activation file for it, so nothing can start it when a program asks for it.
+# `org.freedesktop.secrets.service` is the activation file's name, typed as it is: keep it a string literal.
+warning-keyring-not-activatable = Your keyring service is running, but nothing can start it when a program asks for it, so a backup that starts as you log in, before the desktop starts the keyring, may wait for it and then fail. Repair the keyring's D-Bus activation file, { "org.freedesktop.secrets.service" }, or keep { -repository } passwords in a file or a systemd credential instead.
+
 # A secret was read from a file other users of this machine can read.
 # $path (text): the file's path.
 # $mode (text): the file's permissions in octal, such as 0644.

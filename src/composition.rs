@@ -3453,6 +3453,13 @@ impl Repositories for RepositoryService {
             )),
         }
     }
+
+    /// Asks the OS keyring the page's question, and only it: never a run.
+    async fn notes(&self) -> api::RepositoryNotesDto {
+        api::RepositoryNotesDto {
+            notes: app::repositories::page_notes(&*self.keyring).await,
+        }
+    }
 }
 
 /// Every location of a choice or a Test, as the wire carries it: by

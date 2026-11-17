@@ -588,6 +588,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::post(repositories::init_repository),
         )
         .route(
+            repositories::NOTES_PATH,
+            axum::routing::get(repositories::notes),
+        )
+        .route(
             "/api/v1/repositories/{alias}/init",
             axum::routing::post(repositories::create_saved_repository),
         )
@@ -3077,6 +3081,36 @@ mod tests {
                 _ => Err(RepositoriesError::InvalidBody),
             }
         }
+
+        async fn notes(&self) -> api::RepositoryNotesDto {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            api::RepositoryNotesDto {
+                notes: vec![api::WarningDto::new(
+                    api::WarningCode::KeyringNotActivatable,
+                    [],
+                )],
+            }
+        }
+    }
+
+    /// The page's notes are what the daemon says, each a code with no
+    /// sentence, and only a session reads them: no token's scope opens the
+    /// path, and no alias is it.
+    #[tokio::test]
+    async fn the_repositories_page_reads_its_notes_as_codes() {
+        let (response, calls) =
+            send_counted(Method::GET, repositories::NOTES_PATH, String::new()).await;
+        assert_eq!(calls, 1);
+        assert_eq!(response.status(), StatusCode::OK);
+        let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"notes": [{"code": "keyring-not-activatable"}]})
+        );
+        assert_eq!(
+            crate::api_tokens::required_scope(&Method::GET, repositories::NOTES_PATH),
+            None
+        );
     }
 
     const TEST: &str = "/api/v1/repositories/_test";

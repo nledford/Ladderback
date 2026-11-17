@@ -8,7 +8,9 @@ use domain::secrets::{
     command_failure, command_secret, decode, file_warning,
 };
 
-use crate::ports::{Clock, Kept, Keyring, KeyringError, Resolved, SecretResolver};
+use crate::ports::{
+    Clock, Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver,
+};
 
 /// What the fake does when told to run a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -162,6 +164,11 @@ impl FakeSecrets {
     /// prompt nobody answered: every keyring entry fails as `TimedOut`.
     pub fn stall_keyring(&self) {
         self.lock().keyring_stalls = true;
+    }
+
+    /// How the keyring service is started, as `activation` then answers.
+    pub fn set_keyring_activation(&self, _activation: KeyringActivation) {
+        todo!()
     }
 
     /// A file at `path` whose read doesn't answer, as one on a network
@@ -364,6 +371,10 @@ impl Keyring for FakeSecrets {
         unavailable(&state)?;
         state.keyring.remove(&entry.to_string());
         Ok(())
+    }
+
+    async fn activation(&self) -> KeyringActivation {
+        todo!()
     }
 }
 
