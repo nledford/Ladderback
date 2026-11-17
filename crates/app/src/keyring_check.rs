@@ -10,7 +10,7 @@
 
 use domain::RepositoryAlias;
 use domain::execution::refusal::SettingRefusal;
-use domain::notifications::ChannelName;
+use domain::notifications::{Auth, ChannelName};
 use domain::planning::AgentConfig;
 use domain::secrets::{KeyringEntry, Redactor, SecretRef};
 
@@ -53,18 +53,39 @@ impl KeyringCheck {
     }
 }
 
-/// Reads, through `secrets`, each keyring entry a repository of `config`
-/// takes its password from, once, however many repositories share it.
+/// Reads, through `secrets`, each keyring entry a repository or a
+/// notification channel of `config` takes a secret from, once, however
+/// many of them share it.
 pub async fn check_keyring_entries(
     config: &AgentConfig,
     secrets: &dyn SecretResolver,
 ) -> KeyringCheck {
     // Nothing was read, so there is no secret to mask.
     let redactor = Redactor::new([]);
+    let repositories = config.repositories().iter().map(|(alias, repository)| {
+        (
+            KeyringUser::Repository(alias.clone()),
+            &repository.settings.password,
+        )
+    });
+    let channels = config
+        .notifications()
+        .channels()
+        .iter()
+        .flat_map(|(name, channel)| {
+            let auth = channel.auth().map(|auth| match auth {
+                Auth::Bearer(token) => token,
+                Auth::Basic { password, .. } => password,
+            });
+            [Some(channel.url()), auth]
+                .into_iter()
+                .flatten()
+                .map(|secret| (KeyringUser::Channel(name.clone()), secret))
+        });
     let mut read: Vec<(KeyringEntry, Option<SettingRefusal>)> = Vec::new();
     let mut reads = Vec::new();
-    for (alias, repository) in config.repositories() {
-        let SecretRef::Keyring(entry) = &repository.settings.password else {
+    for (user, secret) in repositories.chain(channels) {
+        let SecretRef::Keyring(entry) = secret else {
             continue;
         };
         let refused = match read.iter().find(|(seen, _)| seen == entry) {
@@ -72,7 +93,7 @@ pub async fn check_keyring_entries(
             None => {
                 // The value is dropped here, unread by anything.
                 let refused = secrets
-                    .resolve(&repository.settings.password)
+                    .resolve(secret)
                     .await
                     .err()
                     .map(|error| unresolved_refusal(&error, &redactor));
@@ -81,7 +102,7 @@ pub async fn check_keyring_entries(
             }
         };
         reads.push(KeyringRead {
-            user: KeyringUser::Repository(alias.clone()),
+            user,
             entry: entry.clone(),
             refused,
         });

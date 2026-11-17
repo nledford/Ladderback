@@ -373,7 +373,7 @@ async function main(argv: string[]): Promise<number> {
   // a `password-keyring` entry (#892): asked here, in the terminal, the
   // question comes while someone is there, not at the next scheduled run.
   if (run(ladderback, ["check-keyring"]) !== 0) {
-    console.error("install-restart: the new program couldn't read every keyring entry, so the service would fail to read them too.");
+    console.error("install-restart: the new program couldn't read every keyring entry, or the configuration that names them (above), so a backup or a notification that needs one may fail too.");
     if (!ignoreKeyring) {
       console.error("install-restart: Not restarting; the running daemon is untouched. --ignore-keyring-failure restarts all the same.");
       return 1;

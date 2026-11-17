@@ -17,6 +17,7 @@ use api::MsgArg;
 use app::keyring_check::{KeyringCheck, KeyringUser, check_keyring_entries};
 use app::ports::ConfigError;
 use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
+use domain::execution::refusal::SettingRefusal;
 use domain::planning::AgentConfig;
 use l10n::{Localizer, msg};
 use platform::dirs;
@@ -115,25 +116,35 @@ fn report(
         out.write_all(said(localizer, msg::CLI_CHECK_KEYRING_NONE, &[]).as_bytes())?;
     }
     for read in &checked.reads {
-        let repository = match &read.user {
-            KeyringUser::Repository(alias) => ("repository", text(alias.as_str())),
-            KeyringUser::Channel(_) => todo!(),
-        };
         let entry = ("entry", text(&read.entry));
-        match &read.refused {
-            None => out.write_all(
-                said(localizer, msg::CLI_CHECK_KEYRING_READ, &[repository, entry]).as_bytes(),
-            )?,
-            Some(refusal) => {
-                let (code, args, detail) = app::announce::refused("password", refusal);
-                let reason = localizer.error(code, &args, detail.as_deref());
+        let code = |refusal: &SettingRefusal| ("code", MsgArg::Text(refusal.code().to_owned()));
+        match (&read.user, &read.refused) {
+            (KeyringUser::Repository(alias), None) => {
+                let args = [("repository", text(alias.as_str())), entry];
+                out.write_all(said(localizer, msg::CLI_CHECK_KEYRING_READ, &args).as_bytes())?;
+            }
+            (KeyringUser::Repository(alias), Some(refusal)) => {
+                let (error, args, detail) = app::announce::refused("password", refusal);
+                let reason = localizer.error(error, &args, detail.as_deref());
                 let args = [
-                    repository,
+                    ("repository", text(alias.as_str())),
                     entry,
-                    ("code", MsgArg::Text(refusal.code().to_owned())),
+                    code(refusal),
                     ("reason", text(reason)),
                 ];
                 err.write_all(said(localizer, msg::CLI_CHECK_KEYRING_REFUSED, &args).as_bytes())?;
+            }
+            (KeyringUser::Channel(name), None) => {
+                let args = [("channel", text(name.as_str())), entry];
+                let line = said(localizer, msg::CLI_CHECK_KEYRING_CHANNEL_READ, &args);
+                out.write_all(line.as_bytes())?;
+            }
+            // A run's message speaks of a repository's password, so a
+            // channel's entry is said by its code alone.
+            (KeyringUser::Channel(name), Some(refusal)) => {
+                let args = [("channel", text(name.as_str())), entry, code(refusal)];
+                let line = said(localizer, msg::CLI_CHECK_KEYRING_CHANNEL_REFUSED, &args);
+                err.write_all(line.as_bytes())?;
             }
         }
     }
