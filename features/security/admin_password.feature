@@ -125,7 +125,8 @@ Feature: Setting and changing the admin password in Settings
       Given a daemon with sign-in off
       When I open the address "/settings"
       Then the page shows a message containing "Once it is set, sign-in protects Ladderback"
-      When I press Tab until focus is on the textbox "New password"
+      When I skip to the content
+      And I press Tab until focus is on the textbox "New password"
       And I type "demo-admin-pass"
       And I press Tab until focus is on the textbox "New password again"
       And I type "demo-admin-pass"
@@ -138,6 +139,7 @@ Feature: Setting and changing the admin password in Settings
     Scenario: A password shown while it was typed is hidden again once it is set and the form is cleared
       Given a daemon with sign-in off
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the textbox "New password"
       And I type "demo-admin-pass"
       And I press Tab
@@ -155,6 +157,7 @@ Feature: Setting and changing the admin password in Settings
     Scenario: Passwords that differ move focus to an error summary that says how to fix it
       Given a daemon with sign-in off
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the textbox "New password"
       And I type "demo-admin-pass"
       And I press Tab until focus is on the textbox "New password again"
@@ -169,6 +172,7 @@ Feature: Setting and changing the admin password in Settings
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Current password"
       And I type "demo-admin-pass"
       And I press Tab until focus is on the textbox "New password"
@@ -189,6 +193,7 @@ Feature: Setting and changing the admin password in Settings
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Current password"
       And I type "not-the-password"
       And I press Tab until focus is on the textbox "New password"

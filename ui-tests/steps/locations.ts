@@ -13,7 +13,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 
-import { journey } from "../support/keyboard.ts";
+import { journey, pressUntilFocused } from "../support/keyboard.ts";
 import { partsBrokenInside } from "../support/parts.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
@@ -24,7 +24,6 @@ const PASSWORD = "demo-password";
 // A Test probes each location, and a backup opens the repository: each takes
 // the engine a moment, in a debug build more than one.
 const PATIENCE_MS = 25_000;
-const MAX_TABS = 80;
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** What the scenario knows of its repository's locations. */
@@ -267,11 +266,7 @@ Then(
 When("I press {string} for the repository {string}", async function (this: BrowserWorld, label: string, alias: string) {
   const keys = journey(this.page);
   const button = keys.byRole("button", { name: new RegExp(`^${escape(label)}\\b.*${escape(alias)}\\W?$`) });
-  const focused = async () => (await button.count()) === 1 && (await button.evaluate((el) => el === document.activeElement));
-  for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
-    await keys.press("Tab");
-  }
-  assert.ok(await focused(), `focus did not reach the button "${label}" of ${alias} within ${MAX_TABS} presses`);
+  await pressUntilFocused(this.page, "Tab", button, `the button "${label}" of ${alias}`);
   await keys.press("Enter");
 });
 

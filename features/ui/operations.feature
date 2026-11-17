@@ -229,6 +229,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     Given the daemon reports a running backup of "demo-home"
     And the daemon queues each backup the page starts
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the polite region comes to contain "Backup started."
@@ -241,6 +242,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     Given the daemon reports a running backup of "demo-home"
     And the daemon accepts each cancel the page asks for, and the run goes on
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Cancel demo-home"
     And I press Enter
     And the daemon has accepted the cancel of the backup of "demo-home"
@@ -399,6 +401,7 @@ Feature: Each row of the Operations page names its operation and says what it di
   Scenario: A backup refused for a mistake in the configuration file says where it is, by keyboard alone
     Given a demo plan "home" with a tiny scratch repository
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of home"
     And someone has written a setting the daemon does not know on line 6 of its configuration file
     And I press Enter

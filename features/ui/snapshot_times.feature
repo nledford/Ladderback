@@ -14,6 +14,7 @@ Feature: The time a listed snapshot was taken
     And the browser is in the time zone "America/Chicago"
     And the plan "home" has been backed up 2 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the table "Snapshots of plan home" has 2 rows
@@ -25,6 +26,7 @@ Feature: The time a listed snapshot was taken
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -43,6 +45,7 @@ Feature: The time a listed snapshot was taken
       | 2026-11-10 00:30:00+13:00 |
     And the browser is in the time zone "Pacific/Honolulu"
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the table "Snapshots of plan home" shows these times in its "Time" column:
@@ -54,6 +57,7 @@ Feature: The time a listed snapshot was taken
     And the browser is in the time zone "America/Chicago"
     And the plan "home" has been backed up 1 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the table "Snapshots of plan home" has 1 rows
@@ -69,6 +73,7 @@ Feature: The time a listed snapshot was taken
       | 2026-11-01 00:30:00-05:00 |
     And the browser is in the time zone "America/Chicago"
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the table "Snapshots of plan home" shows these times in its "Time" column:

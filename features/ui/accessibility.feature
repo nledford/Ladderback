@@ -12,7 +12,8 @@ Feature: Accessibility of the app shell
     When I open the component gallery
     Then the page is titled "Component gallery – Ladderback"
     And the page has no accessibility violations
-    When I press Tab until focus is on the link "Back to the start page"
+    When I skip to the content
+    And I press Tab until focus is on the link "Back to the start page"
     And I press Enter
     Then focus is on the main heading "Welcome to Ladderback"
     And the page is titled "Ladderback"
@@ -20,6 +21,7 @@ Feature: Accessibility of the app shell
 
   Scenario: A page that does not exist has a heading of its own and takes focus
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the link "Open a page that does not exist"
     And I press Enter
     Then focus is on the main heading "Page not found"
@@ -29,14 +31,12 @@ Feature: Accessibility of the app shell
 
   Scenario Outline: A page that does not exist is in the language of the page
     When I open the address "/_gallery?locale=<locale>"
-    And I press Tab
-    And I press Tab
-    And I press Tab
-    And I press Tab
+    And I skip to the content
     And I press Tab
     And I press Tab
     And I press Enter
     Then focus is on the main heading
+    And the page's address is "/_missing"
     And every visible text is transformed
     And the page title is transformed
 
@@ -53,6 +53,7 @@ Feature: Accessibility of the app shell
 
   Scenario: A polite message reaches the polite region
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Say politely: backup finished"
     And I press Enter
     Then the polite region reads "Backup finished."
@@ -61,6 +62,7 @@ Feature: Accessibility of the app shell
 
   Scenario: Polite messages sent within two seconds arrive merged
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Say politely: backup finished"
     And I press Enter
     And I press Tab until focus is on the button "Say politely: agent back online"
@@ -69,6 +71,7 @@ Feature: Accessibility of the app shell
 
   Scenario: An assertive message reaches the assertive region
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Say urgently: restore failed"
     And I press Enter
     Then the assertive region reads "Restore failed."
@@ -76,6 +79,7 @@ Feature: Accessibility of the app shell
 
   Scenario: A polite message sent while a modal is open is spoken after it closes
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Enter
     Then focus is inside the dialog "Modal stand-in"
@@ -88,6 +92,7 @@ Feature: Accessibility of the app shell
 
   Scenario: An urgent message sent while a modal is open is spoken after it closes
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Enter
     Then focus is inside the dialog "Modal stand-in"
@@ -100,6 +105,7 @@ Feature: Accessibility of the app shell
 
   Scenario: The gallery has no accessibility violations while a modal is open
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Enter
     Then focus is inside the dialog "Modal stand-in"
@@ -115,7 +121,8 @@ Feature: Accessibility of the app shell
     When I open the address "/operations"
     Then the page is titled "Operations – Ladderback"
     And the page has no accessibility violations
-    When I press Tab until focus is on the button "Start backup of demo-home"
+    When I skip to the content
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     Then the table "Operations" has a row "demo-home" that shows "Running"
     And the polite region comes to contain "Backup started."
@@ -130,7 +137,8 @@ Feature: Accessibility of the app shell
     Given two demo plans "demo-home" and "demo-work" with a scratch repository
     When I open the address "/operations"
     Then the page has no accessibility violations
-    When I press Tab until focus is on the button "Start backup of demo-home"
+    When I skip to the content
+    And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     Then the table "Operations" has a row "demo-home" that shows "Succeeded"
     And the table "Operations" has 1 rows
@@ -143,6 +151,7 @@ Feature: Accessibility of the app shell
   Scenario: Cancelling a running backup by keyboard
     Given a demo plan "demo-home" with a big scratch repository
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Running"
@@ -155,6 +164,7 @@ Feature: Accessibility of the app shell
   Scenario: The operations table sorts by keyboard with the sort announced
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
@@ -179,6 +189,7 @@ Feature: Accessibility of the app shell
     Given the daemon reports a queued backup of "demo-home"
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Queued"
+    And I skip to the content
     And I press Tab until focus is on the button "Cancel demo-home"
     And the daemon reports that the backup of "demo-home" has started
     And the daemon reports 4 steps of progress of the backup of "demo-home"
@@ -190,6 +201,7 @@ Feature: Accessibility of the app shell
     Given the daemon reports a running backup of "demo-home"
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
+    And I skip to the content
     And I press Tab until focus is on the button "Cancel demo-home"
     And the daemon reports that the backup of "demo-home" has succeeded with 3 files
     Then the table "Operations" has a row "demo-home" that shows "Succeeded"
@@ -203,6 +215,7 @@ Feature: Accessibility of the app shell
     And the daemon accepts each cancel the page asks for, and the run goes on
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
+    And I skip to the content
     And I press Tab until focus is on the button "Cancel demo-home"
     And I press Enter
     And the daemon has accepted the cancel of the backup of "demo-home"
@@ -215,6 +228,7 @@ Feature: Accessibility of the app shell
     Given the daemon reports two finished backups of "demo-home"
     When I open the address "/operations"
     And the table "Operations" has 2 rows
+    And I skip to the content
     And I press Tab until focus is on the button "Sort by started"
     And I press Enter
     Then the table "Operations" shows its "Started" column newest first
@@ -227,6 +241,7 @@ Feature: Accessibility of the app shell
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/snapshots"
     Then the page is titled "Snapshots – Ladderback"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the paragraph "No snapshots yet."
@@ -235,6 +250,7 @@ Feature: Accessibility of the app shell
   Scenario: The snapshots page lists a plan's snapshots newest first
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
@@ -243,6 +259,7 @@ Feature: Accessibility of the app shell
     And the table "Operations" has 2 rows
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the table "Snapshots of plan demo-home" has 2 rows
@@ -255,6 +272,7 @@ Feature: Accessibility of the app shell
     Given a demo plan "demo-home" with a scratch repository
     And the browser is in the time zone "Pacific/Auckland"
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Succeeded"
@@ -269,6 +287,7 @@ Feature: Accessibility of the app shell
   Scenario: A page opened mid-run shows the running operation before any event arrives
     Given a demo plan "demo-home" with a big scratch repository
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Running"

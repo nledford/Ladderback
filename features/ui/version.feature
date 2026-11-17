@@ -21,7 +21,8 @@ Feature: The running version in the header
     When I open the address "/repositories"
     Then the main heading reads "Sign in to Ladderback"
     And the page doesn't show the running version
-    When I press Tab until focus is on the textbox "Admin password"
+    When I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
     And I press Enter
     Then focus is on the heading "Repositories"

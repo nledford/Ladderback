@@ -29,6 +29,7 @@ Feature: The Log page
 
   Scenario: Choosing a level shows only the lines at that level or worse, and focus stays on the choice
     When I open the address "/log"
+    And I skip to the content
     And I press Tab until focus is on the radio "All levels"
     And I press the down arrow until focus is on the radio "Warnings and errors"
     Then the radio "Warnings and errors" of the group "Show" is checked
@@ -44,6 +45,7 @@ Feature: The Log page
   Scenario: Copy for a bug report puts the lines shown on the clipboard as the log writes them
     Given the page may use the clipboard
     When I open the address "/log"
+    And I skip to the content
     And I press Tab until focus is on the radio "All levels"
     And I press the down arrow until focus is on the radio "Warnings and errors"
     And I press Tab until focus is on the button "Copy for a bug report"

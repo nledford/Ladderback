@@ -29,6 +29,7 @@ Feature: Buttons on every page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
+    And I skip to the content
     And I press Tab until focus is on a tree item
     And I press ArrowRight until focus is on the tree item "demo-1.txt"
     Then the button "Restore demo-1.txt" has the look "filled in Ladder Blue"
@@ -49,6 +50,7 @@ Feature: Buttons on every page
     Given a demo plan "demo-home" with a scratch repository
     And the daemon answers the next save of a plan 2 seconds late
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     And I press Tab until focus is on the button "Save the plan"
@@ -64,6 +66,7 @@ Feature: Buttons on every page
     When a backup of "demo-home" fails because no repository is there
     And I open the address "/repositories"
     And the list of repositories is slow to answer from now on
+    And I skip to the content
     And I press Tab until focus is on the button "Create demo"
     And I press Enter
     Then focus is on the message "Created demo."
@@ -73,6 +76,7 @@ Feature: Buttons on every page
     Given a daemon with a scratch demo repository and no repositories
     And the daemon answers the next test of a repository 2 seconds late
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
@@ -97,6 +101,7 @@ Feature: Buttons on every page
     And the browser runs on the agent's own Mac
     And the agent takes 2 seconds to check again
     When I open the web UI
+    And I skip to the content
     And I press Tab until focus is on the button "Check again"
     And I press Enter
     Then the button "Check again" is busy, a spinner a screen reader skips before its label
@@ -106,7 +111,8 @@ Feature: Buttons on every page
     Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
     When I open the address "/proposals"
     Then every button on the page is drawn from the tokens, none in the browser's own look
-    When I press Tab until focus is on the proposal's Review button
+    When I skip to the content
+    And I press Tab until focus is on the proposal's Review button
     And I press Enter
     Then the button "Approve the proposal" has the look "filled in Ladder Blue"
     And the button "Reject the proposal" has the look "outlined"
@@ -116,6 +122,7 @@ Feature: Buttons on every page
     Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
     And the daemon answers the next approval of a proposal 2 seconds late
     When I open the address "/proposals"
+    And I skip to the content
     And I press Tab until focus is on the proposal's Review button
     And I press Enter
     And I press Tab until focus is on the textbox "Proposal ID"
@@ -133,6 +140,7 @@ Feature: Buttons on every page
     Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
     And the daemon answers the next rejection of a proposal 2 seconds late
     When I open the address "/proposals"
+    And I skip to the content
     And I press Tab until focus is on the proposal's Review button
     And I press Enter
     And I press Tab until focus is on the button "Reject the proposal"

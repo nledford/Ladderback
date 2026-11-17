@@ -375,6 +375,7 @@ Feature: Sign-in
     Scenario: Signing in by keyboard alone opens the page that was asked for
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       When I open the address "/repositories"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -385,6 +386,7 @@ Feature: Sign-in
     Scenario: A wrong password moves focus to an error summary that says how to fix it
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       When I open the web UI
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "not-the-password"
       And I press Tab until focus is on the button "Sign in"
@@ -398,6 +400,7 @@ Feature: Sign-in
     Scenario: An empty password is refused before it is sent, with a suggestion
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       When I open the web UI
+      And I skip to the content
       And I press Tab until focus is on the button "Sign in"
       And I press Enter
       Then focus is on the heading "There is 1 problem with the form"
@@ -407,6 +410,7 @@ Feature: Sign-in
     Scenario: A session that ends mid-use asks to sign in again, keeps what was typed and does what was asked
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       When I open the address "/repositories"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -430,6 +434,7 @@ Feature: Sign-in
     Scenario: A page whose reading waited for a sign-in that never came says so once the dialog is closed
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       When I open the address "/no-such-page"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -451,6 +456,7 @@ Feature: Sign-in
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the page's clock can be moved on
       When I open the address "/repositories"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -470,6 +476,7 @@ Feature: Sign-in
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the page's clock can be moved on
       When I open the address "/repositories"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -488,6 +495,7 @@ Feature: Sign-in
       And the daemon reports a running backup of "demo-home"
       And the page's clock can be moved on
       When I open the address "/operations"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -506,6 +514,7 @@ Feature: Sign-in
       And the daemon reports a running backup of "demo-home"
       And the page's clock can be moved on
       When I open the address "/operations"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -528,6 +537,7 @@ Feature: Sign-in
     Scenario: Signing out by keyboard alone lands on the sign-in page with focus on its heading
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       When I open the address "/repositories"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -548,6 +558,7 @@ Feature: Sign-in
     Scenario: A change made in one tab goes through after signing out and in again in another
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       When I open the address "/repositories"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter

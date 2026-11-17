@@ -14,6 +14,7 @@ Feature: The header bar
     Given a viewport of 1280 by 720 pixels
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
     And I press Enter
@@ -33,6 +34,7 @@ Feature: The header bar
     And the browser asks for "<colors>"
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
     And I press Enter
@@ -55,6 +57,7 @@ Feature: The header bar
   Scenario: A failed sign-out isn't said again once the session has ended another way and the admin signs in again
     Given a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/settings"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
     And I press Enter
@@ -79,6 +82,7 @@ Feature: The header bar
     And the reader sets the text size to <size> percent
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
     And I press Enter

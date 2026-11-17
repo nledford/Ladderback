@@ -9,14 +9,9 @@ import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 import { expect } from "playwright/test";
 
-import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
+import { ISOLATION, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { latestSnapshotOf } from "./maintenance.ts";
-
-// More presses than any page has stops, and than a real snapshot's tree has
-// folders to open on the way from its root to the scratch source: each folder
-// takes two, one to open it and one to move into it.
-const MAX_PRESSES = 60;
 
 // A folder the daemon reads from a real repository, or a page that reads the
 // snapshot list first: generous, as the other journeys that wait for a read.
@@ -49,17 +44,14 @@ async function settled(world: BrowserWorld): Promise<void> {
 
 /** Presses `key` until focus is on `target`, giving each folder a press
  *  opened time to be read before the next press. */
-async function pressUntilFocused(world: BrowserWorld, key: string, target: Locator, what: string): Promise<void> {
-  const keys = journey(world.page);
-  const focused = async () =>
-    (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement));
-  for (let presses = 0; presses < MAX_PRESSES && !(await focused()); presses += 1) {
-    await keys.press(key);
-    // A press that opens a folder marks it busy as the page draws again.
-    await sleep(50);
-    await settled(world);
-  }
-  assert.ok(await focused(), `focus did not reach ${what} within ${MAX_PRESSES} ${key} presses`);
+async function pressUntilFolderFocused(world: BrowserWorld, key: string, target: Locator, what: string): Promise<void> {
+  await pressUntilFocused(world.page, key, target, what, {
+    afterEach: async () => {
+      // A press that opens a folder marks it busy as the page draws again.
+      await sleep(50);
+      await settled(world);
+    },
+  });
 }
 
 When("I open the component gallery asking for the locale {string}", async function (this: BrowserWorld, locale: string) {
@@ -70,16 +62,13 @@ When("I open the component gallery asking for the locale {string}", async functi
 When("I press Tab until focus is on a tree item", async function (this: BrowserWorld) {
   const items = journey(this.page).byRole("treeitem");
   await items.first().waitFor({ state: "visible", timeout: READ_PATIENCE_MS });
-  const onItem = () =>
-    this.page.evaluate(() => document.activeElement?.getAttribute("role") === "treeitem");
-  for (let presses = 0; presses < MAX_PRESSES && !(await onItem()); presses += 1) {
-    await journey(this.page).press("Tab");
-  }
-  assert.ok(await onItem(), `focus did not reach a tree item within ${MAX_PRESSES} Tab presses`);
+  await pressUntilFocused(this.page, "Tab", items, "a tree item", {
+    reached: () => this.page.evaluate(() => document.activeElement?.getAttribute("role") === "treeitem"),
+  });
 });
 
 When("I press {word} until focus is on the tree item {string}", async function (this: BrowserWorld, key: string, name: string) {
-  await pressUntilFocused(this, key, treeItem(this, name), `the tree item "${name}"`);
+  await pressUntilFolderFocused(this, key, treeItem(this, name), `the tree item "${name}"`);
 });
 
 When("I type {string} in the tree", async function (this: BrowserWorld, text: string) {
@@ -95,7 +84,7 @@ When(
     const short = (await latestSnapshotOf(this, plan)).slice(0, 8);
     const link = journey(this.page).byRole("link", { name: namePattern(short) });
     await link.waitFor({ state: "visible", timeout: READ_PATIENCE_MS });
-    await pressUntilFocused(this, "Tab", link, `the link to the snapshot ${short}`);
+    await pressUntilFolderFocused(this, "Tab", link, `the link to the snapshot ${short}`);
   },
 );
 

@@ -28,6 +28,7 @@ Feature: The Full Disk Access warning on the start page
     Given the agent has found Full Disk Access missing
     And the agent finds the grant when it checks again
     When I open the web UI
+    And I skip to the content
     And I press Tab until focus is on the button "Check again"
     And I press Enter
     Then the page doesn't warn of Full Disk Access

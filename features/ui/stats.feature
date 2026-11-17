@@ -11,6 +11,7 @@ Feature: A repository's stats on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Stats of demo"
@@ -27,6 +28,7 @@ Feature: A repository's stats on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Check the repository"

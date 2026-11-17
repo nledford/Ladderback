@@ -192,6 +192,7 @@ Feature: API tokens
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the page may use the clipboard
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Enter
@@ -226,6 +227,7 @@ Feature: API tokens
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Label"
       And I type "nightly-mcp"
       And I press Tab until focus is on the checkbox "Read"
@@ -253,6 +255,7 @@ Feature: API tokens
       And the admin is signed in with "demo-admin-pass"
       And the admin has created the API token "nightly-mcp" with the scopes "read, run"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the button "Revoke token nightly-mcp"
       And I press Enter
       Then the dialog "Revoke token nightly-mcp" opens with focus on the button "Cancel"
@@ -274,6 +277,7 @@ Feature: API tokens
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the button "Create the token"
       And I press Enter
       Then focus is on the heading "There are 2 problems with the form"

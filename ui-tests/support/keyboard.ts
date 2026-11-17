@@ -62,6 +62,81 @@ export function journey(page: Page) {
   };
 }
 
+// The most presses a walk makes before it gives up. A walk on a page's
+// content starts in `<main>`, which the skip link moves focus to ("I skip to
+// the content"), so the limit counts stops within `<main>` only: a link added
+// to the header uses up no walk's presses but the header's own. A page with
+// more stops than this is crossed in stretches: a scenario first stops at a
+// named control partway down, then presses on from there. An arrow walk
+// through a real snapshot's tree takes two presses a folder from its root, so
+// a scratch source under a deep temporary folder uses up more of it.
+export const MAX_PRESSES = 30;
+
+/** Where focus is, as the end of a sentence. */
+export function whereFocusIs(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    return el === null || el === document.body
+      ? "on the page body"
+      : `on <${el.localName}> ${JSON.stringify((el.textContent ?? "").trim().slice(0, 40))}`;
+  });
+}
+
+/** Presses `key` until focus is on the one element `target` finds, or, given
+ *  `reached`, until it says so. Each press but one to the header itself must
+ *  stay out of the header and the skip link: a walk on the page's content
+ *  starts after them, so that a change to the header reaches no other walk.
+ *  `afterEach` runs after every press, for a page that changes as it is
+ *  walked. */
+export async function pressUntilFocused(
+  page: Page,
+  key: string,
+  target: Locator,
+  description: string,
+  { reached, afterEach }: { reached?: () => Promise<boolean>; afterEach?: () => Promise<void> } = {},
+): Promise<void> {
+  const keys = journey(page);
+  const focused =
+    reached ??
+    (async () => (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement)));
+  for (let presses = 0; presses < MAX_PRESSES && !(await focused()); presses += 1) {
+    await keys.press(key);
+    await afterEach?.();
+    if ((await focusIsAboveTheContent(page)) && !(await isAboveTheContent(target))) {
+      assert.fail(
+        `the walk to ${description} crossed the header, ${await whereFocusIs(page)}: ` +
+          'a walk on the page\'s content starts after it, with "I skip to the content"',
+      );
+    }
+  }
+  assert.ok(await focused(), `focus did not reach ${description} within ${MAX_PRESSES} ${key} presses`);
+}
+
+/** Whether focus is on the skip link or in the header: outside `<main>` and
+ *  outside any dialog, which the page opens beside `<main>`. */
+function focusIsAboveTheContent(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    const main = document.querySelector("main");
+    return (
+      el !== null &&
+      el !== document.body &&
+      main !== null &&
+      !main.contains(el) &&
+      el.closest("dialog, [role=dialog], [role=alertdialog]") === null
+    );
+  });
+}
+
+/** Whether every element `target` finds, and at least one, is outside `<main>`:
+ *  a walk to the header's own controls crosses the header. */
+function isAboveTheContent(target: Locator): Promise<boolean> {
+  return target.evaluateAll((els) => {
+    const main = document.querySelector("main");
+    return els.length > 0 && main !== null && els.every((el) => !main.contains(el));
+  });
+}
+
 // WebKit scrolls a newly focused element into view at its next rendering
 // update, not inside the key press as Chromium and Firefox do, so the check
 // waits two frames there to see the page as its reader does.

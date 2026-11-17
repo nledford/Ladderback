@@ -31,6 +31,7 @@ Feature: Plans page
   Scenario: Creating a plan by keyboard alone lists it with its next run
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Add a plan"
     And I press Enter
     Then focus is on the heading "New plan"
@@ -52,6 +53,7 @@ Feature: Plans page
   Scenario: An invalid schedule is refused at its field
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Add a plan"
     And I press Enter
     Then focus is on the heading "New plan"
@@ -75,6 +77,7 @@ Feature: Plans page
   Scenario: Changing a plan's schedule by keyboard alone keeps it in the list
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     Then focus is on the heading "Change the plan demo-home"
@@ -92,6 +95,7 @@ Feature: Plans page
     Given a demo plan "demo-home" with a scratch repository
     And the daemon refuses each read of the plans list after the first
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     Then focus is on the heading "Change the plan demo-home"
@@ -105,6 +109,7 @@ Feature: Plans page
     Given a demo plan "demo-home" with a scratch repository
     And each read of the plans list after the first reaches no daemon
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     Then focus is on the heading "Change the plan demo-home"
@@ -118,6 +123,7 @@ Feature: Plans page
     Given two demo plans "demo-home" and "demo-work" with a scratch repository
     And the daemon refuses each read of the plans list after the first
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     Then focus is on the heading "Change the plan demo-home"
@@ -136,6 +142,7 @@ Feature: Plans page
     Given a demo plan "demo-home" with a scratch repository
     And the daemon answers each read of the plans list after the first 10 seconds late
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     Then focus is on the heading "Change the plan demo-home"
@@ -151,6 +158,7 @@ Feature: Plans page
     Given two demo plans "demo-home" and "demo-work" with a scratch repository
     And the daemon answers each read of the plans list after the first 10 seconds late
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     Then focus is on the heading "Change the plan demo-home"
@@ -167,6 +175,7 @@ Feature: Plans page
     Given a demo plan "demo-home" with a scratch repository
     And the daemon answers each read of the plans list after the first 3 seconds late
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
     And I press Enter
     Then focus is on the heading "Change the plan demo-home"
@@ -181,6 +190,7 @@ Feature: Plans page
   Scenario: Deleting a plan asks first and says its snapshots stay
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Delete demo-home"
     And I press Enter
     Then the dialog "Delete the plan demo-home?" opens with focus on the button "Cancel"
@@ -195,6 +205,7 @@ Feature: Plans page
   Scenario: Deleting a plan says a new plan with its ID would take its snapshots over
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Delete demo-home"
     And I press Enter
     Then the dialog "Delete the plan demo-home?" says "A new plan with the ID demo-home would take these snapshots over and apply its own retention to them."
@@ -202,6 +213,7 @@ Feature: Plans page
   Scenario: A plan a notification rule names is not deleted, and the dialog says why
     Given a demo plan "demo-home" that the notification rule "failures" names
     When I open the address "/plans"
+    And I skip to the content
     And I press Tab until focus is on the button "Delete demo-home"
     And I press Enter
     Then the dialog "Delete the plan demo-home?" opens with focus on the button "Cancel"
@@ -215,6 +227,7 @@ Feature: Plans page
   Scenario Outline: The Plans page and its form are in the language of the page
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/plans?locale=<locale>"
+    And I skip to the content
     And I press Tab until focus is on the first button of the plan "demo-home"
     And I press Enter
     Then the page shows the row "demo-home"

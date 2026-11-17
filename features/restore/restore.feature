@@ -177,6 +177,7 @@ Feature: Restoring files from a snapshot
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
+    And I skip to the content
     And I press Tab until focus is on a tree item
     And I press ArrowRight until focus is on the tree item "demo-1.txt"
     And I press Tab until focus is on the button "Restore demo-1.txt"
@@ -199,6 +200,7 @@ Feature: Restoring files from a snapshot
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
+    And I skip to the content
     And I press Tab until focus is on a tree item
     And I press ArrowRight until focus is on the tree item "demo-1.txt"
     And I press Tab until focus is on the button "Restore demo-1.txt"
@@ -213,6 +215,7 @@ Feature: Restoring files from a snapshot
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
+    And I skip to the content
     And I press Tab until focus is on a tree item
     And I press ArrowRight until focus is on the tree item "demo-1.txt"
     And I press Tab until focus is on the button "Restore demo-1.txt"
@@ -240,6 +243,7 @@ Feature: Restoring files from a snapshot
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
+    And I skip to the content
     And I press Tab until focus is on a tree item
     And I press ArrowRight until focus is on the tree item "demo-1.txt"
     And I press Tab until focus is on the button "Restore demo-1.txt"

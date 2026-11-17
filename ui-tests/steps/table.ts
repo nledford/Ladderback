@@ -21,7 +21,7 @@ import { journey, namePattern, scrollKey } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // More presses than a frame needs to scroll from one end to the other.
-const MAX_PRESSES = 40;
+const MAX_SCROLL_PRESSES = 40;
 
 function table(page: Page, name: string): Locator {
   return page.getByRole("table", { name, exact: true });
@@ -171,7 +171,7 @@ When(
     const atEnd = () => frame.evaluate((el) => el.scrollWidth - el.clientWidth - Math.abs(el.scrollLeft) < 1);
     const scrolls = await frame.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     assert.ok(scrolls, `the region "${name}" has nothing to scroll`);
-    for (let presses = 0; presses < MAX_PRESSES && !(await atEnd()); presses += 1) {
+    for (let presses = 0; presses < MAX_SCROLL_PRESSES && !(await atEnd()); presses += 1) {
       await this.page.keyboard.press(press);
       await scrollSettles(frame);
     }

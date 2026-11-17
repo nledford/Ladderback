@@ -45,7 +45,8 @@ Feature: Start page
     And the row "demo-photos" of the table "Plans" shows "When started from Operations" in its "Next run" column
     And the link "How to write a plan in config.toml, on GitHub" leads to the section "6.1 Source of truth" of "docs/design/scheduling-and-config.md" in this release
     And the page has no accessibility violations
-    When I press Tab until focus is on the link "Start a backup from the Operations page"
+    When I skip to the content
+    And I press Tab until focus is on the link "Start a backup from the Operations page"
     And I press Enter
     Then focus is on the main heading "Operations"
 
@@ -69,7 +70,8 @@ Feature: Start page
     Then the page shows the paragraph "There are no plans yet. To add one, connect a repository on the Repositories page first, then add a plan for it to config.toml. Each plan is listed here with its next run."
     And the link "How to write a plan in config.toml, on GitHub" leads to the section "6.1 Source of truth" of "docs/design/scheduling-and-config.md" in this release
     And the page has no accessibility violations
-    When I press Tab until focus is on the link "Connect a repository on the Repositories page"
+    When I skip to the content
+    And I press Tab until focus is on the link "Connect a repository on the Repositories page"
     And I press Enter
     Then focus is on the main heading "Repositories"
 
