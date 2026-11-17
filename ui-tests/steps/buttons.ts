@@ -60,7 +60,9 @@ Then(
       document.body.append(probe);
       const corner = getComputedStyle(probe).borderTopLeftRadius;
       probe.remove();
-      return Array.from(document.querySelectorAll("button"))
+      // A tab is a button too, drawn flat on its list's rule by the tabs'
+      // own rules (§4.5, "Tabs"), whose look the tabs' scenarios check.
+      return Array.from(document.querySelectorAll("button:not([role='tab'])"))
         .filter((button) => getComputedStyle(button).borderTopLeftRadius !== corner)
         .map((button) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim());
     });

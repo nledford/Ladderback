@@ -38,7 +38,14 @@ impl Section {
     /// The section's name in its tab's address, after the `#`
     /// (`/settings#api-tokens`).
     pub(crate) const fn fragment(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Language => language_choice::SECTION_ID,
+            Self::PageWidth => page_width::SECTION_ID,
+            Self::AdminPassword => "admin-password",
+            Self::SigningIn => "signing-in",
+            Self::ApiTokens => "api-tokens",
+            Self::Restart => "restart",
+        }
     }
 
     /// The section the fragment `hash` of the page's address names, as
@@ -46,8 +53,10 @@ impl Section {
     /// when it names none. The address is outside input: anything but a
     /// section's own name, written exactly, names none.
     pub(crate) fn named(hash: &str) -> Option<Self> {
-        let _ = hash;
-        todo!()
+        let name = hash.strip_prefix('#')?;
+        Self::ALL
+            .into_iter()
+            .find(|section| section.fragment() == name)
     }
 
     /// What the section's panel holds, which decides whether the panel is a
@@ -56,8 +65,11 @@ impl Section {
     /// restart, which has a button only where a service manager runs
     /// Ladderback.
     pub(crate) fn holds(self, signed_in: bool) -> Holds {
-        let _ = signed_in;
-        todo!()
+        match self {
+            Self::Language | Self::PageWidth | Self::AdminPassword => Holds::Controls,
+            Self::SigningIn | Self::ApiTokens if signed_in => Holds::Controls,
+            Self::SigningIn | Self::ApiTokens | Self::Restart => Holds::Text,
+        }
     }
 }
 

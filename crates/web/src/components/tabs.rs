@@ -247,6 +247,32 @@ pub fn Tabs(
     .into_any()
 }
 
+/// Shows each hidden tab panel `element` is in, as a press on its tab does,
+/// so a modal dialog opened there is drawn: one under a hidden panel isn't,
+/// and a dialog that opens when the daemon answers can do so after the
+/// reader has chosen another tab. The press goes through the tab's own
+/// handler, so the tabs stay the one owner of the selection; the panel is
+/// shown at once too, before the tabs' next update would, so the dialog can
+/// take focus as it opens.
+pub(crate) fn show_panel_holding(element: &web_sys::Element) {
+    let mut from = element.parent_element();
+    while let Some(inside) = from {
+        let Ok(Some(panel)) = inside.closest("[role='tabpanel']") else {
+            return;
+        };
+        if panel.has_attribute("hidden")
+            && let Some(tab) = panel
+                .get_attribute("aria-labelledby")
+                .and_then(|id| document().get_element_by_id(&id))
+                .and_then(|tab| tab.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            tab.click();
+            let _ = panel.remove_attribute("hidden");
+        }
+        from = panel.parent_element();
+    }
+}
+
 /// Keeps `layout` to the layout a responsive set's `list` is drawn in: read
 /// once the tabs are drawn, then whenever the tabs' `frame` (the container
 /// its query measures) or the list change size, as a change of layout or of
