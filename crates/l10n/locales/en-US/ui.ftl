@@ -554,6 +554,28 @@ ui-gallery-save-settings = Save the demo settings
 # The toast shown after the demo settings are saved.
 ui-gallery-settings-saved = Settings saved.
 
+# The button that queues a demo check and shows an information toast.
+ui-gallery-queue-check = Queue a demo check
+
+# The information toast shown after the demo check is queued.
+ui-gallery-check-queued = Demo check queued.
+
+# The button that backs up the demo plan and shows a warning toast.
+ui-gallery-back-up-plan = Back up the demo plan
+
+# The warning toast shown after the demo backup finishes with warnings.
+ui-gallery-backup-warned = Demo backup finished with warnings: 2 files couldn't be read.
+
+# The button that restores the demo snapshot and shows an error toast.
+ui-gallery-restore-snapshot = Restore the demo snapshot
+
+# The error toast shown after the demo restore fails.
+ui-gallery-demo-restore-failed = The demo restore failed.
+
+# The alert that keeps the demo restore's failure on the page, under its
+# toast: what failed, why, and what to do.
+ui-gallery-demo-restore-failed-detail = The demo restore failed: its target folder can't be written to. Choose another folder and restore again.
+
 # The heading of the gallery's review dialog demo.
 ui-gallery-review-heading = Review dialog
 
