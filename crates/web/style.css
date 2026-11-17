@@ -1171,6 +1171,16 @@ fieldset.choices > p {
   padding-inline-start: 1.25rem;
 }
 
+/* A note of the machine above a page's list (the Repositories page's
+   keyring note, #923): set apart by its border and its icon, and said in
+   words, never by color alone. */
+.page-note {
+  border: 2px solid var(--warning);
+  padding-block: 0.5rem;
+  padding-inline: 1rem;
+  margin-block: 1rem;
+}
+
 /* The start page's Full Disk Access warning (§16, decision 115): set apart by
    its border and named by its heading, never by color alone. */
 .full-disk-access {

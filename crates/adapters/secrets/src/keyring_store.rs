@@ -72,13 +72,58 @@ pub(crate) fn os_store() -> Arc<dyn KeyringStore> {
 /// always there, the Secret Service as the session bus says, and where
 /// there is no OS keyring there is nothing to start.
 pub(crate) fn os_activation() -> KeyringActivation {
-    todo!()
+    #[cfg(target_os = "linux")]
+    return match dbus::blocking::Connection::new_session() {
+        Ok(connection) => activation_on(&connection),
+        // No session bus to ask.
+        Err(_) => KeyringActivation::Unknown,
+    };
+    #[cfg(target_os = "macos")]
+    return KeyringActivation::OnDemand;
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    return KeyringActivation::Absent;
 }
 
-/// How the Secret Service is started, as the bus `connection` reaches says.
+/// The name the Secret Service owns on the session bus.
 #[cfg(target_os = "linux")]
-pub(crate) fn activation_on(_connection: &dbus::blocking::Connection) -> KeyringActivation {
-    todo!()
+const SECRET_SERVICE: &str = "org.freedesktop.secrets";
+
+/// How long each question to the session bus may take: the bus itself
+/// answers both, from what it holds, so a healthy one answers at once.
+#[cfg(target_os = "linux")]
+const BUS_CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How the Secret Service is started, as the bus `connection` reaches says:
+/// on demand when an activation file names it (`ListActivatableNames`),
+/// whether it runs or not; running only when it owns its name
+/// (`NameHasOwner`) and no file names it; absent when neither. A question
+/// the bus refuses, or doesn't answer within [`BUS_CALL_LIMIT`], leaves it
+/// unknown. Neither question touches an entry, so neither can raise an
+/// unlock prompt, and neither carries a secret.
+#[cfg(target_os = "linux")]
+pub(crate) fn activation_on(connection: &dbus::blocking::Connection) -> KeyringActivation {
+    let bus = connection.with_proxy(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        BUS_CALL_LIMIT,
+    );
+    let activatable: Result<(Vec<String>,), dbus::Error> =
+        bus.method_call("org.freedesktop.DBus", "ListActivatableNames", ());
+    match activatable {
+        Ok((names,)) if names.iter().any(|name| name == SECRET_SERVICE) => {
+            KeyringActivation::OnDemand
+        }
+        Ok(_) => {
+            let running: Result<(bool,), dbus::Error> =
+                bus.method_call("org.freedesktop.DBus", "NameHasOwner", (SECRET_SERVICE,));
+            match running {
+                Ok((true,)) => KeyringActivation::RunningOnly,
+                Ok((false,)) => KeyringActivation::Absent,
+                Err(_) => KeyringActivation::Unknown,
+            }
+        }
+        Err(_) => KeyringActivation::Unknown,
+    }
 }
 
 /// Which OS store an error came from: the same `keyring` error says another

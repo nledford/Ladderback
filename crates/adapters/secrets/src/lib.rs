@@ -322,8 +322,15 @@ impl Keyring for SystemSecrets {
     /// Asks the platform within [`ACTIVATION_LIMIT`]; an answer that comes
     /// later, or a question that was lost, is unknown.
     async fn activation(&self) -> KeyringActivation {
-        let _ = (&self.activation, ACTIVATION_LIMIT);
-        todo!()
+        let probe = Arc::clone(&self.activation);
+        let asking = tokio::task::spawn_blocking(move || probe());
+        match tokio::time::timeout(ACTIVATION_LIMIT, asking).await {
+            Ok(Ok(said)) => said,
+            // The question panicked or the runtime is ending, or the answer
+            // is late: the blocked call is left to end on its own, as the
+            // bus's own limit ends it.
+            Ok(Err(_)) | Err(_) => KeyringActivation::Unknown,
+        }
     }
 }
 

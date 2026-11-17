@@ -64,6 +64,9 @@ struct State {
     /// The session's keyring service starts when this clock reaches this
     /// time: until then there is none to ask, as with `no_keyring_service`.
     service_starts: Option<(Arc<dyn Clock>, Timestamp)>,
+    /// How the keyring service is started, when a test said; otherwise on
+    /// demand, or absent with `no_keyring_service`.
+    activation: Option<KeyringActivation>,
     /// The keyring is locked: every keyring read fails, entry or not.
     keyring_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
@@ -167,8 +170,8 @@ impl FakeSecrets {
     }
 
     /// How the keyring service is started, as `activation` then answers.
-    pub fn set_keyring_activation(&self, _activation: KeyringActivation) {
-        todo!()
+    pub fn set_keyring_activation(&self, activation: KeyringActivation) {
+        self.lock().activation = Some(activation);
     }
 
     /// A file at `path` whose read doesn't answer, as one on a network
@@ -374,7 +377,12 @@ impl Keyring for FakeSecrets {
     }
 
     async fn activation(&self) -> KeyringActivation {
-        todo!()
+        let state = self.lock();
+        match state.activation {
+            Some(activation) => activation,
+            None if state.no_keyring_service => KeyringActivation::Absent,
+            None => KeyringActivation::OnDemand,
+        }
     }
 }
 

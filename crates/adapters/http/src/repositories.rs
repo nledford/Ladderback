@@ -229,8 +229,7 @@ pub(crate) const NOTES_PATH: &str = "/api/v1/repositories/_notes";
 
 /// What the Repositories page notes above its list: 200, always.
 pub(crate) async fn notes(State(state): State<AppState>) -> Response {
-    let _ = state;
-    todo!()
+    (StatusCode::OK, Json(state.repositories.notes().await)).into_response()
 }
 
 /// The refusal for a secret: 422, like a setting the daemon can't take.

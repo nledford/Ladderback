@@ -3,15 +3,22 @@
 //! runs now but that nothing can start on demand (#923). Asked only when the
 //! page asks, never before a run.
 
-use api::WarningDto;
+use api::{WarningCode, WarningDto};
 
-use crate::ports::Keyring;
+use crate::ports::{Keyring, KeyringActivation};
 
 /// The page's notes: `keyring-not-activatable` while `keyring` says its
 /// service runs but can't be started on demand, and nothing otherwise. A
 /// keyring started on demand, none at all, or an answer that couldn't be
 /// had is noted nothing: a false alarm would send a person to repair what
 /// isn't broken.
-pub async fn page_notes(_keyring: &dyn Keyring) -> Vec<WarningDto> {
-    todo!()
+pub async fn page_notes(keyring: &dyn Keyring) -> Vec<WarningDto> {
+    match keyring.activation().await {
+        KeyringActivation::RunningOnly => {
+            vec![WarningDto::new(WarningCode::KeyringNotActivatable, [])]
+        }
+        KeyringActivation::OnDemand | KeyringActivation::Absent | KeyringActivation::Unknown => {
+            Vec::new()
+        }
+    }
 }
