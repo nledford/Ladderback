@@ -8,7 +8,11 @@ use super::hand_focus_when_gone;
 use crate::live::PageClock;
 use crate::routes::text_with;
 use crate::text;
-use rules::{Clear, Next, Teller, Told, Wake, percent, progress_text, value_text, wait_for};
+use crate::variants::{Size, Tone};
+use rules::{
+    Clear, FILL, Next, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class, default_size, percent,
+    progress_text, value_text, wait_for,
+};
 
 // What a progress bar tells a screen reader, and when, decided on the host;
 // `Progress` is its glue.
@@ -37,12 +41,20 @@ mod rules;
 /// A bar that goes while it holds focus, as one does when its run ends,
 /// hands focus to the element with the ID `then_focus` (a row's header), so
 /// focus never falls to the page (WCAG 2.4.3).
+///
+/// Its `tone` (the shared vocabulary, `Primary` unless its page names
+/// another) fills the bar only: the track stays Ledger Gray and the words
+/// the text's color, so how a run goes is never told by color alone
+/// (1.4.1). Its `size` is its track's thickness, half the shared scale's
+/// length, `Small` unless its page names another.
 #[component]
 pub fn Progress(
     localizer: Arc<Localizer>,
     label: String,
     #[prop(into)] reading: Signal<crate::backend::Progress>,
     #[prop(optional, into)] then_focus: Option<String>,
+    #[prop(optional)] tone: Tone,
+    #[prop(optional)] size: Option<Size>,
 ) -> impl IntoView {
     let teller = StoredValue::new(Teller::default());
     let wake = StoredValue::new(Wake::<TimeoutHandle>::default());
@@ -83,7 +95,7 @@ pub fn Progress(
             node_ref=bar
             role="progressbar"
             tabindex="0"
-            class="progress"
+            class=bar_class(tone, size.unwrap_or_else(default_size))
             aria-label=label
             aria-valuemin="0"
             aria-valuemax="100"
@@ -99,7 +111,7 @@ pub fn Progress(
                 said.get()
                     .above
                     .map(|id| {
-                        view! { <span class="progress-step">{text(&step_localizer, id)}</span> }
+                        view! { <span class=STEP>{text(&step_localizer, id)}</span> }
                     })
             }}
             {move || {
@@ -107,11 +119,11 @@ pub fn Progress(
                     .get()
                     .then(|| {
                         view! {
-                            <div class="progress-track">
+                            <div class=TRACK>
                                 // A style property, which the page's content security policy
                                 // allows (§10.1), not a `style` attribute, which it refuses.
                                 <div
-                                    class="progress-fill"
+                                    class=FILL
                                     style:inline-size=move || {
                                         format!("{}%", percent.get().unwrap_or_default())
                                     }
@@ -120,7 +132,7 @@ pub fn Progress(
                         }
                     })
             }}
-            <span>
+            <span class=WORDS>
                 {move || match percent.get() {
                     Some(percent) => format!("{percent}%"),
                     None => text(&localizer, said.get().unknown),

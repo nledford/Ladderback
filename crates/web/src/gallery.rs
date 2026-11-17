@@ -95,6 +95,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         current: 4 * GIB,
         total: Some(10 * GIB),
     });
+    // The reading of the progress demo's bars at each size and tone.
+    let sixty = Reading {
+        current: 6 * GIB,
+        ..progress.get_untracked()
+    };
     let toast = RwSignal::<Option<String>>::new(None);
     let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
     // Whether the icon demo's notifications are on, which its icon-only
@@ -478,36 +483,6 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     })
                     .collect_view()}
             </ul>
-        </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
-                reading=progress
-            />
-            <p>
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_ADVANCE_PROGRESS).into())
-                    on_press=Callback::new(move |()| {
-                        progress
-                            .update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
-                    })
-                />
-            </p>
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
-                reading=Signal::stored(Reading::default())
-            />
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_STEP_PROGRESS)
-                reading=Signal::stored(Reading {
-                    step: Some(api::OperationStep::ReadingIndex),
-                    ..Reading::default()
-                })
-            />
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
@@ -1616,6 +1591,87 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                             />
                             <Button content=Content::Text(t(add).into()) size=size />
                         </div>
+                    }
+                })
+                .collect_view()}
+        </section>
+        // After the text field's, so the walks that cross it to the table
+        // past the many progress bars below stay short.
+        <section>
+            <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
+                reading=progress
+            />
+            <p>
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_ADVANCE_PROGRESS).into())
+                    on_press=Callback::new(move |()| {
+                        progress
+                            .update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
+                    })
+                />
+            </p>
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
+                reading=Signal::stored(Reading::default())
+            />
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_DEMO_STEP_PROGRESS)
+                reading=Signal::stored(Reading {
+                    step: Some(api::OperationStep::ReadingIndex),
+                    ..Reading::default()
+                })
+            />
+            // Every size, then every tone, each 60% done. The Small one and
+            // the Primary one name no size or tone, so they show the
+            // defaults.
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_PROGRESS_SMALL)
+                reading=Signal::stored(sixty)
+            />
+            {[
+                (Size::Medium, msg::UI_GALLERY_PROGRESS_MEDIUM),
+                (Size::Large, msg::UI_GALLERY_PROGRESS_LARGE),
+                (Size::XLarge, msg::UI_GALLERY_PROGRESS_XLARGE),
+            ]
+                .into_iter()
+                .map(|(size, name)| {
+                    view! {
+                        <Progress
+                            localizer=Arc::clone(&localizer)
+                            label=t(name)
+                            reading=Signal::stored(sixty)
+                            size=size
+                        />
+                    }
+                })
+                .collect_view()}
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_PROGRESS_PRIMARY)
+                reading=Signal::stored(sixty)
+            />
+            {[
+                (Tone::Secondary, msg::UI_GALLERY_PROGRESS_SECONDARY),
+                (Tone::Success, msg::UI_GALLERY_PROGRESS_SUCCESS),
+                (Tone::Warning, msg::UI_GALLERY_PROGRESS_WARNING),
+                (Tone::Error, msg::UI_GALLERY_PROGRESS_ERROR),
+                (Tone::Inherit, msg::UI_GALLERY_PROGRESS_INHERIT),
+            ]
+                .into_iter()
+                .map(|(tone, name)| {
+                    view! {
+                        <Progress
+                            localizer=Arc::clone(&localizer)
+                            label=t(name)
+                            reading=Signal::stored(sixty)
+                            tone=tone
+                        />
                     }
                 })
                 .collect_view()}

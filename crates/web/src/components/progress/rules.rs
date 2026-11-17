@@ -19,15 +19,49 @@ use l10n::{MessageId, msg};
 use crate::backend::Progress;
 use crate::variants::{Size, Tone};
 
-/// The size a bar is drawn at when its page names none.
+/// The size a bar is drawn at when its page names none: Small, its track
+/// half a line of text thick, as the bar was before it took a size. The
+/// vocabulary has no default size, so each component picks its own.
 pub(crate) fn default_size() -> Size {
-    todo!()
+    Size::Small
 }
 
-/// The classes of a bar.
-pub(crate) fn bar_class(_tone: Tone, _size: Size) -> String {
-    todo!()
+/// The classes of a bar: its own, which names it, its tone's, which sets
+/// the `--tone` its fill is drawn in, and its size's, which sets the
+/// `--size` its track's thickness is drawn from.
+pub(crate) fn bar_class(tone: Tone, size: Size) -> String {
+    format!("progress {} {}", tone.class(), size.class())
 }
+
+/// The step a run is in, above a track that shows a percentage: a line of
+/// its own, as the bar's words are a line below the track, so the track
+/// keeps the room it is given and a long step wraps in its cell.
+pub(crate) const STEP: &str = "progress-step block";
+
+/// The track, in Tailwind utilities (decision 117), logical ones only: a
+/// Ledger Gray pill half the shared scale's length thick (`--size`, in `em`,
+/// so it grows with the reader's text), filling the room it is given up to
+/// 16rem, so in a table's cell it never widens its column and fits a small
+/// screen. Under forced colors the mode would paint it the page's own
+/// background, so it opts out and takes the color of unavailable text, as a
+/// spinner's track does.
+pub(crate) const TRACK: &str = "progress-track block-[calc(var(--size)/2)] inline-full \
+    max-inline-[16rem] rounded-full bg-surface \
+    forced-colors:forced-color-adjust-none forced-colors:bg-[color:GrayText]";
+
+/// The fill, in its tone (`--tone`, set by the tone's class on the bar),
+/// which eases to each report over 0.4 s; `style.css`'s reduced-motion rule
+/// takes every transition away, so the fill then jumps to the value. Under
+/// forced colors the mode would paint it the page's own background and
+/// leave the bar empty, so it opts out and takes the text's own color, as
+/// every tone does there.
+pub(crate) const FILL: &str = "progress-fill block-full rounded-[inherit] bg-(--tone) \
+    transition-[inline-size] duration-400 ease-out \
+    forced-colors:forced-color-adjust-none forced-colors:bg-[color:CanvasText]";
+
+/// The bar's words below the track: its percentage, or the step or that it
+/// is working while it has none.
+pub(crate) const WORDS: &str = "progress-words";
 
 /// The least time between two values told to a screen reader, while the
 /// step stays the same.
