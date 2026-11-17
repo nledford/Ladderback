@@ -1,8 +1,9 @@
 //! The proposal routes' side of the wiring (§16, decision 89): each change
 //! of a proposal read by the config adapter as the file is read when it
-//! loads, then proposed, listed, read or withdrawn by the use case of
-//! `app`, and each refusal said as the routes answer it: at the change and
-//! its setting, never with a value.
+//! loads, then proposed, listed, read, withdrawn or previewed by the use
+//! case of `app`, and each refusal said as the routes answer it: at the
+//! change and its setting, never with a value. A repository the forget
+//! preview couldn't read is told as the maintenance routes tell it.
 
 use std::sync::Arc;
 
@@ -11,20 +12,21 @@ use app::maintenance::RunMaintenance;
 use app::ports::{
     ConfigError, ConfigStore, EventBus, Problem, ProposalStore, Random as _, RandomUnavailable,
 };
-use app::proposals::{ApprovalAsk, ProposalError, ProposalPorts, Proposals};
+use app::proposals::{ApprovalAsk, ProposalError, ProposalPorts, Proposals, RepositoryForget};
 use app::repositories::ConfigWrites;
 use app::schedule::ConfigChanged;
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
-use domain::PlanId;
 use domain::planning::{
     ChangeRefused, ConfigChange, DiffHash, MAX_CHANGES, MAX_PENDING, MAX_RATIONALE_CHARS,
     PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalWarning, Proposer, Rationale,
     RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon, short_proposal_id,
 };
+use domain::{OperationId, PlanId};
 use http_adapter::{Approval, PlansError, ProposalsError, SignIn};
 use platform::SystemClock;
 use platform::random::OsRandom;
+use uuid::Uuid;
 
 use super::config_unusable;
 use super::plans::{problem_of, violated};
@@ -214,8 +216,28 @@ impl http_adapter::Proposals for ProposalService {
         &self,
         id: String,
     ) -> Result<api::ProposalForgetPreviewDto, ProposalsError> {
-        let _ = (&self.maintenance, &self.config, id);
-        todo!("the forget preview of a proposal")
+        let named = named(&id)?;
+        let operation = OperationId::from_uuid(Uuid::now_v7());
+        let previewed = self
+            .proposals
+            .forget_preview(&named, operation, &self.maintenance)
+            .await
+            .map_err(|error| refused(error, &id))?;
+        let mut repositories = Vec::with_capacity(previewed.len());
+        for RepositoryForget { repository, forget } in previewed {
+            repositories.push(match forget {
+                Ok(comparison) => super::maintenance::compared_dto(&repository, &comparison),
+                // Told as the maintenance routes tell it, each secret of
+                // the repository's settings masked (I4).
+                Err(error) => api::RepositoryForgetDto::Refused {
+                    repository: repository.as_str().to_owned(),
+                    error: super::maintenance::refusal(self.config.as_ref(), &repository, error)
+                        .await
+                        .error(repository.as_str()),
+                },
+            });
+        }
+        Ok(api::ProposalForgetPreviewDto { repositories })
     }
 
     async fn approve(

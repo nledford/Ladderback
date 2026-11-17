@@ -1,12 +1,14 @@
 //! The proposal routes (§16, decision 89): an AI agent, or another API
 //! client, proposes configuration changes for a person to confirm, lists
 //! and reads its proposals and withdraws one; a person reviews one on the
-//! "Pending changes" page, then approves or rejects it. An API token needs
-//! the `propose` scope, and sees and withdraws only the proposals it made;
-//! a session, or any client while sign-in is off, sees them all. Review,
-//! approval and rejection are a session's only, never a token's (point 7).
-//! A refusal names the change and its setting, never a value (I4): a hook
-//! command may hold a secret written in it.
+//! "Pending changes" page, reads its forget preview, then approves or
+//! rejects it. An API token needs the `propose` scope, and sees and
+//! withdraws only the proposals it made; a session, or any client while
+//! sign-in is off, sees them all. Review, the forget preview, approval and
+//! rejection are a session's only, never a token's (point 7): the preview
+//! reads the repositories, resolving their secrets. A refusal names the
+//! change and its setting, never a value (I4): a hook command may hold a
+//! secret written in it.
 
 use std::net::IpAddr;
 
@@ -223,6 +225,20 @@ pub(crate) async fn withdraw(
 pub(crate) async fn review(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     match state.proposals.review(id).await {
         Ok(review) => (StatusCode::OK, Json(review)).into_response(),
+        Err(error) => refusal(&error),
+    }
+}
+
+/// `POST /api/v1/proposals/{id}/forget-preview`: what the proposal would
+/// change about the snapshots retention forgets, read from each repository
+/// it touches. A POST, since it reads the repositories as a forget's
+/// preview does, though it changes nothing.
+pub(crate) async fn forget_preview(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.proposals.forget_preview(id).await {
+        Ok(preview) => (StatusCode::OK, Json(preview)).into_response(),
         Err(error) => refusal(&error),
     }
 }

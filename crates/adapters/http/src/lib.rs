@@ -559,6 +559,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::get(proposals::review),
         )
         .route(
+            "/api/v1/proposals/{id}/forget-preview",
+            axum::routing::post(proposals::forget_preview),
+        )
+        .route(
             "/api/v1/proposals/{id}/approve",
             axum::routing::post(proposals::approve),
         )
