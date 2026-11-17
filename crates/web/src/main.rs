@@ -81,6 +81,9 @@ mod maintenance;
 // What a row of the Operations page says, decided on the host.
 mod operations;
 mod page;
+// What Settings' Page width section offers, keeps and lays the page out
+// with, decided on the host; `settings/page_width.rs` is its glue.
+mod page_width;
 mod repositories;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
