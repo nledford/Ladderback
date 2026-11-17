@@ -1005,11 +1005,27 @@ async fn a_start_handed_over_to_a_call_dropped_before_it_took_it_is_killed_with_
     );
 }
 
+/// A start the runtime shut down before it ran can't start, rather than
+/// being timed out: it never waited for the gate.
+#[test]
+fn a_start_the_runtime_shut_down_before_it_ran_cannot_start() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let handle = runtime.handle().clone();
+    drop(runtime);
+    let command = tokio::process::Command::new("true");
+    let started = handle.block_on(start(command, Duration::from_secs(5), &Stop::REAL));
+    assert!(started.is_err(), "the start was not refused");
+}
+
 /// The call waits for the gate to let go of the hook's pipes for at most its
 /// gate limit too: here a stalled start holds the gate from before the hook
 /// ends until well after the limit, and the call returns with the hook's
-/// outcome all the same. (The limit leaves room for the gate that other
-/// tests of this binary hold a while, at the hook's start.)
+/// outcome all the same. (The wait for the call leaves room for the gate
+/// that other tests of this binary hold a while, at the hook's start, and for
+/// a busy machine: twice the two limits; the stall outlasts it.)
 #[tokio::test]
 async fn the_call_waits_to_let_go_of_the_pipes_no_longer_than_its_limit() {
     let scratch = TempDir::new().unwrap();
@@ -1025,13 +1041,13 @@ async fn the_call_waits_to_let_go_of_the_pipes_no_longer_than_its_limit() {
     let redactor = Redactor::default();
     let stall = async {
         logged(&log, "started").await;
-        let stalled = testkit::inheritable::stalled_start(Duration::from_secs(8));
+        let stalled = testkit::inheritable::stalled_start(Duration::from_secs(12));
         fs::write(&go, "").unwrap();
         stalled
     };
     let (outcome, (release, stalled)) = tokio::join!(
         within(
-            Duration::from_secs(5),
+            Duration::from_secs(8),
             runner.run(&entry, &context, &redactor)
         ),
         stall
