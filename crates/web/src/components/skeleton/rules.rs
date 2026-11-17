@@ -8,6 +8,8 @@
 use std::fmt;
 use std::num::NonZeroU8;
 
+use crate::variants::Rem;
+
 /// What a skeleton stands for, which sets its shape. Its lengths come from
 /// the reader's text, so the room it takes is the content's, and the page
 /// doesn't jump when the content arrives. Its types can't hold a shape that
@@ -39,24 +41,6 @@ impl Share {
 impl fmt::Display for Share {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}%", self.0)
-    }
-}
-
-/// A length in `rem`, to a tenth, so it grows with the reader's text; never
-/// below 0.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rem(u16);
-
-impl Rem {
-    /// `tenths` tenths of a rem: `Rem::tenths(25)` is 2.5rem.
-    pub const fn tenths(tenths: u16) -> Self {
-        Self(tenths)
-    }
-}
-
-impl fmt::Display for Rem {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}rem", self.0 / 10, self.0 % 10)
     }
 }
 

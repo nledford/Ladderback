@@ -51,7 +51,7 @@ pub use skeleton::Skeleton;
 pub use spinner::Spinner;
 pub use status_badge::StatusBadge;
 pub use step_up_field::{StepUp, StepUpField};
-pub use table::{Align, Column, Footer, Name, Rem, Sentences, Sort, SortKey, State, Table};
+pub use table::{Align, Column, Footer, Name, Sentences, Sort, SortKey, State, Table};
 pub use text_field::TextField;
 pub(crate) use toast::{Toast, show_toast};
 pub use tooltip::{Tip, Tooltip};

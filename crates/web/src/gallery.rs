@@ -19,12 +19,12 @@ use crate::backend::Progress as Reading;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
 use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
-use crate::components::skeleton::rules::{Rem as SkeletonRem, Shape, Share};
+use crate::components::skeleton::rules::{Shape, Share};
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Align, Button, Checkbox, Column, Confirmation, FolderLoader, FolderPage, Footer, Icon,
-    LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, Rem, ReviewDialog,
+    LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, ReviewDialog,
     Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Table,
     TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
@@ -33,7 +33,7 @@ use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
 use crate::text;
-use crate::variants::{Placement, Side, Size, Tone};
+use crate::variants::{Placement, Rem, Side, Size, Tone};
 
 #[component]
 pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
@@ -182,8 +182,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             last: Share::percent(60),
         },
         Shape::Block {
-            inline: SkeletonRem::tenths(200),
-            block: SkeletonRem::tenths(25),
+            inline: Rem::tenths(200),
+            block: Rem::tenths(25),
         },
         Shape::Lines {
             // Two lines: one, and one more.
@@ -1719,7 +1719,7 @@ fn folder_columns(
     let name = sort(
         Column::new(
             t(msg::UI_GALLERY_TABLE_NAME),
-            Rem(8.0),
+            Rem::tenths(80),
             |row: Signal<DemoFolder>| (move || row.with(|row| row.name.clone())).into_any(),
         ),
         msg::UI_GALLERY_TABLE_SORT_NAME,
@@ -1731,7 +1731,7 @@ fn folder_columns(
     let size = sort(
         Column::new(
             t(msg::UI_GALLERY_TABLE_SIZE_COLUMN),
-            Rem(7.0),
+            Rem::tenths(70),
             move |row: Signal<DemoFolder>| {
                 let sizes = Arc::clone(&sizes);
                 view! {
@@ -1759,7 +1759,7 @@ fn folder_columns(
     let changed = sort(
         Column::new(
             t(msg::UI_GALLERY_TABLE_CHANGED),
-            Rem(9.0),
+            Rem::tenths(90),
             move |row: Signal<DemoFolder>| {
                 let dates = Arc::clone(&dates);
                 view! {
@@ -1796,7 +1796,7 @@ fn folder_columns(
             t(msg::UI_GALLERY_TABLE_FILES_COLUMN),
             // Wide enough for "Files" and its sort button on one line at
             // 1280 px; at 6rem the button wrapped under the word.
-            Rem(8.0),
+            Rem::tenths(80),
             move |row: Signal<DemoFolder>| {
                 let counts = Arc::clone(&counts);
                 view! {
@@ -1827,7 +1827,7 @@ fn folder_columns(
         let labels = Arc::clone(localizer);
         columns.push(Column::new(
             t(msg::UI_GALLERY_TABLE_ACTIONS),
-            Rem(9.0),
+            Rem::tenths(90),
             move |row: Signal<DemoFolder>| {
                 let name = row.with_untracked(|row| row.name.clone());
                 let label = text_with(
