@@ -186,6 +186,13 @@ impl crate::Proposals for NoProposals {
         Err(crate::ProposalsError::InvalidBody)
     }
 
+    async fn forget_preview(
+        &self,
+        _id: String,
+    ) -> Result<api::ProposalForgetPreviewDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
+
     async fn approve(
         &self,
         _id: String,
