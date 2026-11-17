@@ -148,7 +148,7 @@ fn every_setting_has_a_name_of_its_own() {
 
 #[test]
 fn approve_sends_what_the_page_showed_with_the_confirmation() {
-    let approved = approval(&review(false), "abcdef".to_owned()).expect("approve is offered");
+    let approved = approval(&review(false), None, "abcdef".to_owned()).expect("approve is offered");
     assert_eq!(
         (
             approved.revision.as_str(),
@@ -161,9 +161,22 @@ fn approve_sends_what_the_page_showed_with_the_confirmation() {
 
 #[test]
 fn a_proposal_that_could_delete_snapshots_is_only_rejected_until_the_forget_preview() {
-    assert!(can_approve(&review(false)));
-    assert!(!can_approve(&review(true)));
-    assert_eq!(approval(&review(true), "abcdef".to_owned()), None);
+    assert!(can_approve(&review(false), None));
+    assert!(!can_approve(&review(true), None));
+    assert_eq!(approval(&review(true), None, "abcdef".to_owned()), None);
+}
+
+#[test]
+fn a_proposal_that_could_delete_snapshots_is_approved_with_the_forget_preview_shown() {
+    let digest = "3".repeat(64);
+    assert!(can_approve(&review(true), Some(&digest)));
+    let approved =
+        approval(&review(true), Some(&digest), "abcdef".to_owned()).expect("approve is offered");
+    assert_eq!(approved.forget_digest.as_deref(), Some(digest.as_str()));
+    assert_eq!(
+        (approved.revision, approved.diff_hash),
+        ("1".repeat(64), "2".repeat(64))
+    );
 }
 
 #[test]

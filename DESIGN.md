@@ -169,7 +169,7 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 
 - **Paper** (`--bg`): the page.
 - **Graphite Ink** (`--fg`): all body text and headings.
-- **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and under a row of tabs, and the line around the pause banner.
+- **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and between a list of tabs and its panel, and the line around the pause banner.
 - **Ledger Gray** (`--surface`): the site header, toasts, alerts, the pause banner, a progress bar's empty track and an unavailable text field.
 - **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 - **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
@@ -216,7 +216,7 @@ The badge's own pairs, for the states that tell no result: Loading (dark blue on
 
 ### Named Rules
 
-**The Weight Not Color Rule.** Current, selected and pressed are said by weight (and an inset edge on a pressed button, a bar under a selected tab), never by color alone.
+**The Weight Not Color Rule.** Current, selected and pressed are said by weight (and an inset edge on a pressed button, a bar beside a selected tab), never by color alone.
 
 **The Reader's Size Rule.** Form controls inherit the page's font (`font: inherit`), so a button's label doubles when the reader doubles their text.
 
@@ -339,7 +339,7 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 
 ### Alerts
 
-- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. Pages move onto it in #929.
+- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. The Log and Plans pages show their refusals with it, as Error alerts; the other pages move onto it in #929.
 - **Look:** Ledger Gray with the small corner, the words and any link in them in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a failure is not a red banner.
 - **Tone:** Primary (information, the default), Success, Warning and Error, each with its own icon: Info, CircleCheck, TriangleAlert and CircleX, the icon named by its tone in words for a screen reader. No Secondary and no Inherit: an alert always says its tone.
 - **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page takes the alert away and names where focus goes.
@@ -366,12 +366,13 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 
 ### Tabs
 
-- **Use:** switching between views within one page, each tab showing its panel below the row. Never navigation between pages: that is the navigation's links.
-- **Look:** a row of tabs on one Slate Note rule, each tab its words in the text's color, no fill and no box. The selected tab is bold with a 3 px Ladder Blue bar over the rule under it; a hovered one shows a Slate Note line as thick as the bar in the bar's place. Flat: no boxed, lifted or pill tabs, which say a depth this system doesn't use, and no icons.
-- **Size:** the text's size, no shared size; each tab at least 24 × 24 CSS px. A bold copy of the words, unseen, keeps each tab as wide selected as not, so the row stays still as the selection moves.
-- **Narrow screens:** the row wraps onto more lines, every tab whole. Each tab stands on its own stretch of the rule, edge to edge with the next, so a tab selected on an earlier line keeps its bar over a rule; the rule runs on to the row's end under the last line.
+- **Use:** switching between views within one page. Never navigation between pages: that is the navigation's links.
+- **Orientation:** horizontal (the default), a row of tabs above the panel; vertical, a column at the panel's start, for a list too long or its words too wide for a row; responsive, a column while the tabs' own space has room for the list beside the panel and a row below that, for tabs that sit in a wide page and a narrow column alike. A change of layout moves nothing else: the selected tab, the focus and what a panel holds stay.
+- **Look:** the tabs on one Slate Note rule between them and the panel, under a row and at the end of a column, each tab its words in the text's color, no fill and no box. The selected tab is bold with a 3 px Ladder Blue bar on the rule beside it; a hovered one shows a Slate Note line as thick as the bar in the bar's place. Flat: no boxed, lifted or pill tabs, which say a depth this system doesn't use, and no icons.
+- **Size:** the text's size, no shared size; each tab at least 24 × 24 CSS px. A bold copy of the words, unseen, keeps each tab as wide selected as not, so the row stays still as the selection moves. A column takes at most half the width, its words wrapping.
+- **Narrow screens:** the row wraps onto more lines, every tab whole. Each tab stands on its own stretch of the rule, edge to edge with the next, so a tab selected on an earlier line keeps its bar over a rule; the rule runs on to the row's end under the last line. Responsive tabs are a row there, and with larger text.
 - **No tone:** the bar is the accent, and tabs aren't a status.
-- **Forced colors:** the rule and the selected bar in the text's own color, as the focus ring is, the bar told by its thickness and the weight kept.
+- **Forced colors:** the rule and the selected bar in the text's own color, as the focus ring is, the bar told by its thickness and the weight kept, in either layout.
 - **Focus:** the global 3 px ring, on a tab and on a panel that is a Tab stop of its own.
 
 ### Dialogs

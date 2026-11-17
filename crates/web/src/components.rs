@@ -9,13 +9,18 @@
 //! else: a progress bar's value is never announced.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
+use l10n::Localizer;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::closure::Closure;
 use leptos::wasm_bindgen::{JsCast, JsValue};
 
+use crate::announcer::Politeness;
 use crate::focus::{FocusWrap, focus_wrap};
+use crate::live::reply;
 use crate::repositories::{Run, Sentence, address_parts, runs};
+use alert::rules::AlertTone;
 
 pub(crate) mod alert;
 pub(crate) mod button;
@@ -177,6 +182,47 @@ pub(crate) fn sentence_view(sentence: Sentence) -> impl IntoView {
         {before}
         {detail}
     }
+}
+
+/// A refusal shown on a page (§4.5, #929): an Error [`Alert`] holding its
+/// sentence, the sender's words marked as English (3.1.2). The alert is no
+/// live region: the page says the refusal with [`say_refusals`], or, inside
+/// a dialog, draws it with [`dialog_refusal_alert`].
+pub(crate) fn refusal_alert(
+    localizer: &Arc<Localizer>,
+    sentence: Sentence,
+) -> impl IntoView + use<> {
+    view! {
+        <Alert localizer=Arc::clone(localizer) tone=AlertTone::Error>
+            {sentence_view(sentence)}
+        </Alert>
+    }
+}
+
+/// A refusal shown inside a modal dialog: its [`refusal_alert`] inside a
+/// `role="alert"` of the dialog's own (the Dialog contract, §4.5). The
+/// modal makes the announcer's regions inert, so the dialog says it itself,
+/// and the page doesn't say it again.
+pub(crate) fn dialog_refusal_alert(
+    localizer: &Arc<Localizer>,
+    sentence: Sentence,
+) -> impl IntoView + use<> {
+    view! { <div role="alert">{refusal_alert(localizer, sentence)}</div> }
+}
+
+/// Says each refusal `refused` comes to hold through the announcer's
+/// assertive region, as the page's answer (4.1.3), since its
+/// [`refusal_alert`] is no live region. Each is said once: a page that reads
+/// again and is refused in the same words keeps its alert and says nothing
+/// new, and one cleared, then refused again, is said again. Called once,
+/// where the page makes the signal; it stops with the page.
+pub(crate) fn say_refusals(refused: RwSignal<Option<Sentence>>) {
+    let shown = Memo::new(move |_| refused.get());
+    Effect::new(move |_| {
+        if let Some(sentence) = shown.get() {
+            reply(Politeness::Assertive, &sentence.plain());
+        }
+    });
 }
 
 /// A sentence in a table's cell, as [`sentence_view`] says it, with the
