@@ -10,7 +10,7 @@ use domain::execution::{FailureReason, OperationStatus};
 use domain::planning::{HookEntry, OnFailure};
 use domain::{PlanId, RepositoryAlias};
 use hooks::ProcessHookRunner;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use super::Agent;
@@ -19,6 +19,9 @@ use super::Agent;
 pub struct HooksE2e {
     pub runner: Arc<dyn HookRunner>,
     pub setup: HookSetup,
+    /// Lets go of the spawn gate a stalled start holds, when the scenario
+    /// is over and drops it.
+    pub stalled_start: Option<mpsc::Sender<()>>,
 }
 
 impl HooksE2e {
@@ -33,6 +36,7 @@ impl HooksE2e {
                 repository_alias: RepositoryAlias::parse("nas").unwrap(),
                 redactor: Default::default(),
             },
+            stalled_start: None,
         }
     }
 }
@@ -73,6 +77,22 @@ fn never_ends(agent: &mut Agent) {
     agent.hooks.runner = Arc::new(ProcessHookRunner::with_timeout(Duration::from_millis(500)));
     let hook = script(agent, "hangs", "sleep 30");
     agent.hooks.setup.plan.run_before.push(hook);
+}
+
+/// A start that stalls (an `exec` on a hung mount) holds the spawn gate
+/// until the scenario is over, at most 3 s: the hook can't start within its
+/// gate limit of 500 ms, and must not hold the operation up for longer. The
+/// scenario is `@serial`, so no other scenario waits for the gate meanwhile.
+#[given("a before hook at the plan level that can't start in time, with on-failure error")]
+fn start_stalls(agent: &mut Agent) {
+    agent.hooks.runner = Arc::new(
+        ProcessHookRunner::with_timeout(Duration::from_secs(10))
+            .with_gate_limit(Duration::from_millis(500)),
+    );
+    let hook = script(agent, "succeeds", "exit 0");
+    agent.hooks.setup.plan.run_before.push(hook);
+    let (release, _stalled) = testkit::inheritable::stalled_start(Duration::from_secs(3));
+    agent.hooks.stalled_start = Some(release);
 }
 
 #[given("a before hook at the plan level that writes its environment to the scratch dir")]

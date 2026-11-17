@@ -124,6 +124,13 @@ impl ProcessHookRunner {
         }
     }
 
+    /// A runner whose hooks wait for the spawn gate for at most `limit`
+    /// rather than [`HOOK_TIMEOUT`], for tests.
+    #[must_use]
+    pub fn with_gate_limit(self, _limit: Duration) -> Self {
+        todo!()
+    }
+
     /// Starts hooks with `vars` as the environment they are scrubbed from,
     /// instead of this process's own.
     #[must_use]
@@ -268,6 +275,26 @@ impl ProcessHookRunner {
         let _ = spawn_gate::hold_blocking(move || drop(pipes)).await;
         (status, captured)
     }
+}
+
+/// Starts `command` through the spawn gate, for at most `limit`.
+#[cfg(test)]
+async fn start(
+    _command: tokio::process::Command,
+    _limit: Duration,
+    _stop: &'static Stop<'static>,
+) -> std::io::Result<Option<tokio::process::Child>> {
+    todo!()
+}
+
+/// Hands a start to the call that waits for it.
+#[cfg(test)]
+fn hand_over(
+    _started: std::io::Result<tokio::process::Child>,
+    _to: tokio::sync::oneshot::Sender<std::io::Result<tokio::process::Child>>,
+    _stop: &Stop<'_>,
+) {
+    todo!()
 }
 
 #[async_trait]
