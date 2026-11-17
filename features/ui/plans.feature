@@ -3,10 +3,12 @@ Feature: Plans page
   The Plans page lists the plans in the configuration file and creates,
   changes and deletes them, with the keyboard alone (A1, A2): its form has a
   field for each setting of a plan, its sources and filters, its
-  repository, its schedule, its retention and its hooks. A save returns
-  focus to the button that opened the form, unless the reader has moved it
-  out of the form while the plan was saved, and leaves open a form they
-  opened meanwhile for another plan (A1). A refusal moves
+  repository, its schedule, its retention and its hooks. A save, or closing
+  the form without saving, returns focus to the button that opened the
+  form, or to the page's heading when the list can't be read again and that
+  button is gone, unless the reader
+  has moved it out of the form while the plan was saved, and leaves open a
+  form they opened meanwhile for another plan (A1). A refusal moves
   focus to an error summary that names each problem and links to its field
   (A4, components.md §4.5). Deleting a plan asks first, and says what
   becomes of its snapshots: they stay in the repository, and since forget
@@ -85,6 +87,50 @@ Feature: Plans page
     And focus is on the button "Change demo-home"
     And the table "Plans" has a row "demo-home" that shows "demo"
     And the page has no accessibility violations
+
+  Scenario: A save whose list can't be read again moves focus to the page's heading
+    Given a demo plan "demo-home" with a scratch repository
+    And the daemon refuses each read of the plans list after the first
+    When I open the address "/plans"
+    And I press Tab until focus is on the button "Change demo-home"
+    And I press Enter
+    Then focus is on the heading "Change the plan demo-home"
+    When I press Tab until focus is on the button "Save the plan"
+    And I press Enter
+    Then the polite region comes to contain "The plan demo-home is saved."
+    And the button "Save the plan" leaves the page
+    And focus is on the main heading "Plans"
+
+  Scenario: A save whose list read again gets no answer moves focus to the page's heading
+    Given a demo plan "demo-home" with a scratch repository
+    And each read of the plans list after the first reaches no daemon
+    When I open the address "/plans"
+    And I press Tab until focus is on the button "Change demo-home"
+    And I press Enter
+    Then focus is on the heading "Change the plan demo-home"
+    When I press Tab until focus is on the button "Save the plan"
+    And I press Enter
+    Then the polite region comes to contain "The plan demo-home is saved."
+    And the button "Save the plan" leaves the page
+    And focus is on the main heading "Cannot reach Ladderback"
+
+  Scenario: Closing a form whose list can't be read again moves focus to the page's heading
+    Given two demo plans "demo-home" and "demo-work" with a scratch repository
+    And the daemon refuses each read of the plans list after the first
+    When I open the address "/plans"
+    And I press Tab until focus is on the button "Change demo-home"
+    And I press Enter
+    Then focus is on the heading "Change the plan demo-home"
+    When I press Shift+Tab until focus is on the button "Delete demo-work"
+    And I press Enter
+    And I press Tab until focus is on the button "Delete the plan"
+    And I press Enter
+    Then the polite region comes to contain "The plan demo-work is deleted."
+    And the page shows an alert containing "could not read or write its configuration file /etc/ladderback/config.toml"
+    When I press Tab until focus is on the button "Close without saving"
+    And I press Enter
+    Then the button "Close without saving" leaves the page
+    And focus is on the main heading "Plans"
 
   Scenario: A reader who leaves the form while its plan is saved keeps their place
     Given a demo plan "demo-home" with a scratch repository
