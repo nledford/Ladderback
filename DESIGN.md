@@ -17,10 +17,18 @@ colors:
   empty-fg: "#111827"
   empty-bg: "#e5e7eb"
   empty-bg-dark: "#26303f"
-  error-fg: "#691717"
-  error-bg: "#fee2e2"
   success-fg: "#052e16"
+  success-fg-dark: "#dcfce7"
   success-bg: "#dcfce7"
+  success-bg-dark: "#052e16"
+  warning-fg: "#451a03"
+  warning-fg-dark: "#fef3c7"
+  warning-bg: "#fffbeb"
+  warning-bg-dark: "#451a03"
+  error-fg: "#691717"
+  error-fg-dark: "#fee2e2"
+  error-bg: "#fecaca"
+  error-bg-dark: "#7f1d1d"
   tick-green: "#15803d"
   tick-green-dark: "#4ade80"
   flag-amber: "#b45309"
@@ -137,7 +145,7 @@ components:
 
 Ladderback's web UI is a ledger of backups: ruled rows of facts, each with its unit, read top to bottom. A page is a heading, a sentence that says where things stand, and a table or a form. The person comes to check that every machine is backed up, notice the one that isn't, and act; nothing on the page competes with that.
 
-The look is plain, on purpose. Headings, checkboxes and dialogs are the browser's native controls, and a button is a native `<button>` drawn from the tokens, so it looks the same in every browser while it behaves the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and four quiet status pairs say what a run is doing. Everything else is text.
+The look is plain, on purpose. Headings, checkboxes and dialogs are the browser's native controls, and a button is a native `<button>` drawn from the tokens, so it looks the same in every browser while it behaves the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and quiet pairs, dark words on a pale fill (pale on deep in dark mode), say what a run is doing. Everything else is text.
 
 Accessibility shapes the layout rather than decorating it: every layout holds at 320 px wide with text at 200 %, in both directions of writing, in light, dark and forced colors.
 
@@ -151,7 +159,7 @@ Accessibility shapes the layout rather than decorating it: every layout holds at
 
 ## Colors
 
-A white page (dark: near-black), graphite text, one blue, three status hues and four soft status pairs. Every color is a CSS custom property in `crates/web/style.css`, redefined under `prefers-color-scheme: dark`; `tailwind.css` maps the same properties as Tailwind colors, so `style.css` stays the one source. `just test-contrast` checks every pair the UI relies on.
+A white page (dark: near-black), graphite text, one blue, three status hues, a soft pair for each of them and the badge's two own soft pairs. Every color is a CSS custom property in `crates/web/style.css`, redefined under `prefers-color-scheme: dark`; `tailwind.css` maps the same properties as Tailwind colors, so `style.css` stays the one source. `just test-contrast` checks every pair the UI relies on.
 
 ### Primary
 
@@ -168,13 +176,23 @@ A white page (dark: near-black), graphite text, one blue, three status hues and 
 
 ### Status
 
-The status badges: each state is a text token on a background token, swapped between schemes rather than recolored: Loading (blue), Empty (gray), Error (dark red on pale red), Success (dark green on pale green). The error text color also draws the form error and the error summary's border. A badge's text keeps its pair; the status hues below are not drawn on a badge's background.
-
 The status hues: a color a part draws in to tell how something went, on the page or a surface, at 4.5:1 or more on both and lighter in dark mode. They are the Success, Warning and Error tones of the shared vocabulary (Components), and under forced colors each becomes the reader's text color.
 
 - **Tick Green** (`--success`): something ended well.
 - **Flag Amber** (`--warning`): something needs a look.
 - **Red Ink** (`--error`): something failed.
+
+The status pairs: each status tone's soft pair, for a part tinted in it (a badge's pill, an alert's or a toast's box), its words on its fill, in Tailwind's palette of the same hue. Every shared component that tints a part by status draws from these, never from a pair of its own.
+
+| Pair | Light: words on fill | Dark: words on fill |
+|---|---|---|
+| Success (`--success-fg`, `--success-bg`) | green-950 `#052e16` on green-100 `#dcfce7` | green-100 on green-950 |
+| Warning (`--warning-fg`, `--warning-bg`) | amber-950 `#451a03` on amber-50 `#fffbeb` | amber-100 `#fef3c7` on amber-950 |
+| Error (`--error-fg`, `--error-bg`) | `#691717` on red-200 `#fecaca` | red-100 `#fee2e2` on red-900 `#7f1d1d` |
+
+The words are at 4.5:1 or more on their fill. Warning's and Error's fills stand at least 0.1 apart in OKLab lightness in both schemes, Error's the further from the page (darker in light, lighter in dark), so amber and red never read as one, for a reader who can't tell the hues apart either (decision 108). The Error pair's words also draw a form's errors and the error summary's border on the page. Under forced colors the system's colors replace both.
+
+The badge's own pairs, for the states that tell no result: Loading (dark blue on pale blue) while a run is under way, Empty (gray) while it waits, once it was cancelled, or with nothing to tell. A status badge draws a run that succeeded or failed in its status tone's pair; the status hues above are not drawn on a fill.
 
 ### Named Rules
 
@@ -257,7 +275,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Status Badges
 
-- **Style:** a pill in its state's pair (see Colors), 0.125rem by 0.5rem padding.
+- **Style:** a pill in its state's pair (see Colors): Success's or Error's for a run that succeeded or failed, the badge's own Loading or Empty pair otherwise, 0.125rem by 0.5rem padding.
 - **Content:** an icon as tall as the text, stroked in the text's color, then the label. Where the two don't fit side by side, the label wraps whole below the icon.
 
 ### Inputs / Fields
