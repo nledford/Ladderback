@@ -15,7 +15,9 @@ use app::ports::{ConfigStore, EngineError, StoreError};
 use app::secrets::ResolveError;
 use app::stats::{ReadStats, StatsError};
 use domain::execution::FailureReason;
-use domain::maintenance::{OtherHosts, SelectionToken, Snapshot, StatsReading, Tally};
+use domain::maintenance::{
+    ForgetComparison, OtherHosts, PlanForget, SelectionToken, Snapshot, StatsReading, Tally,
+};
 use domain::{OperationId, PlanId, RepositoryAlias};
 use http_adapter::{MaintenanceRefusal, MaintenanceRequest};
 use platform::SystemClock;
@@ -412,18 +414,7 @@ fn preview_dto(
     let shown = |snapshot: &Snapshot| snapshot_dto(alias, snapshot);
     match preview {
         MaintenancePreview::Forget(forget) => api::MaintenancePreviewDto::Forget {
-            plans: forget
-                .plans
-                .iter()
-                .map(|plan| {
-                    api::ForgetPlanDto::new(
-                        plan.plan.as_str().to_owned(),
-                        counted(plan.total),
-                        &plan.remove,
-                        shown,
-                    )
-                })
-                .collect(),
+            plans: forget_plans(alias, &forget.plans),
             left_alone: api::LeftAloneDto {
                 orphaned: tally_dto(forget.left_alone.orphaned),
                 unmanaged: tally_dto(forget.left_alone.unmanaged),
@@ -450,6 +441,40 @@ fn preview_dto(
         MaintenancePreview::Check(check) => api::MaintenancePreviewDto::Check {
             read_data: check.read_data,
         },
+    }
+}
+
+/// Each plan of a forget as the page reads it: its total, how many it
+/// removes and the ones it lists.
+fn forget_plans(alias: &RepositoryAlias, plans: &[PlanForget]) -> Vec<api::ForgetPlanDto> {
+    plans
+        .iter()
+        .map(|plan| {
+            api::ForgetPlanDto::new(
+                plan.plan.as_str().to_owned(),
+                counted(plan.total),
+                &plan.remove,
+                |snapshot| snapshot_dto(alias, snapshot),
+            )
+        })
+        .collect()
+}
+
+/// What a proposal would change about what retention forgets in `alias`,
+/// as the page reads it: each side's plans and the differences.
+pub(super) fn compared_dto(
+    alias: &RepositoryAlias,
+    comparison: &ForgetComparison,
+) -> api::RepositoryForgetDto {
+    let side = |side: Option<&domain::maintenance::ForgetPreview>| {
+        side.map(|preview| forget_plans(alias, &preview.plans))
+    };
+    api::RepositoryForgetDto::Compared {
+        repository: alias.as_str().to_owned(),
+        before: side(comparison.before.as_ref()),
+        after: side(comparison.after.as_ref()),
+        forgets_more: forget_plans(alias, &comparison.forgets_more()),
+        forgets_less: forget_plans(alias, &comparison.forgets_less()),
     }
 }
 

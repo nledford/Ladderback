@@ -1,11 +1,12 @@
 //! What the "Pending changes" page shows, sends and says (decision 89,
 //! point 6), decided on the host: which proposals it lists, the words of
-//! each summary line, whether a proposal can be approved here yet, the
-//! requests Approve and Reject send, and what a refusal of the step-up
-//! field is said as. `proposals_page.rs` is its glue.
+//! each summary line, whether a proposal can be approved here yet, what
+//! its forget preview says of each repository (point 8), the requests
+//! Approve and Reject send, and what a refusal of the step-up field is said
+//! as. `proposals_page.rs` is its glue.
 
 use api::{
-    ApproveProposalDto, ErrorCode, ErrorDto, MsgArg, PlanSettingDto, ProposalDto,
+    ApproveProposalDto, ErrorCode, ErrorDto, ForgetPlanDto, MsgArg, PlanSettingDto, ProposalDto,
     ProposalReviewDto, ProposalStatusDto, RejectProposalDto, RepositoryForgetDto, SnapshotDto,
     SummaryLineDto,
 };
@@ -40,8 +41,7 @@ pub(crate) fn reject_path(id: &str) -> String {
 
 /// The route that reads the forget preview of the proposal `id`.
 pub(crate) fn forget_preview_path(id: &str) -> String {
-    let _ = id;
-    todo!("the forget preview's route")
+    format!("{}/forget-preview", proposal_path(id))
 }
 
 /// The snapshots one difference of a forget preview names: the sentence
@@ -70,8 +70,104 @@ pub(crate) enum RepositoryShown {
 
 /// What the forget preview says of `repository`.
 pub(crate) fn repository_shown(repository: &RepositoryForgetDto) -> RepositoryShown {
-    let _ = repository;
-    todo!("what the forget preview says of a repository")
+    match repository {
+        RepositoryForgetDto::Compared {
+            repository,
+            before,
+            after,
+            forgets_more,
+            forgets_less,
+        } => {
+            let lines = if before.is_none() && after.is_none() {
+                vec![(msg::UI_PROPOSAL_FORGET_NOT_MAINTAINED, Vec::new())]
+            } else {
+                let mut lines = side_lines(before.as_deref(), Side::Before);
+                lines.extend(side_lines(after.as_deref(), Side::After));
+                if forgets_more.is_empty() && forgets_less.is_empty() {
+                    lines.push((msg::UI_PROPOSAL_FORGET_SAME, Vec::new()));
+                }
+                lines
+            };
+            let listings = forgets_more
+                .iter()
+                .map(|plan| listing(msg::UI_PROPOSAL_FORGETS_MORE, plan))
+                .chain(
+                    forgets_less
+                        .iter()
+                        .map(|plan| listing(msg::UI_PROPOSAL_FORGETS_LESS, plan)),
+                )
+                .collect();
+            RepositoryShown::Compared {
+                repository: repository.clone(),
+                lines,
+                listings,
+            }
+        }
+        RepositoryForgetDto::Refused { repository, error } => RepositoryShown::Refused {
+            repository: repository.clone(),
+            error: error.clone(),
+        },
+    }
+}
+
+/// Which side of a proposal a forget preview's line is about.
+#[derive(Clone, Copy)]
+enum Side {
+    Before,
+    After,
+}
+
+/// What one side says: why it forgets nothing, when it is not maintained
+/// or has no plan, or else what retention forgets of each of its plans.
+fn side_lines(plans: Option<&[ForgetPlanDto]>, side: Side) -> Vec<Said> {
+    let (not_maintained, no_plans, each) = match side {
+        Side::Before => (
+            msg::UI_PROPOSAL_FORGET_BEFORE_NOT_MAINTAINED,
+            msg::UI_PROPOSAL_FORGET_BEFORE_NO_PLANS,
+            msg::UI_PROPOSAL_FORGET_BEFORE,
+        ),
+        Side::After => (
+            msg::UI_PROPOSAL_FORGET_AFTER_NOT_MAINTAINED,
+            msg::UI_PROPOSAL_FORGET_AFTER_NO_PLANS,
+            msg::UI_PROPOSAL_FORGET_AFTER,
+        ),
+    };
+    match plans {
+        None => vec![(not_maintained, Vec::new())],
+        Some([]) => vec![(no_plans, Vec::new())],
+        Some(plans) => plans
+            .iter()
+            .map(|plan| {
+                (
+                    each,
+                    vec![
+                        ("plan", MsgArg::Text(plan.plan.clone())),
+                        ("remove", MsgArg::Count(plan.remove)),
+                        ("total", MsgArg::Count(plan.total)),
+                    ],
+                )
+            })
+            .collect(),
+    }
+}
+
+/// One difference of a plan, captioned by `caption`: the snapshots the
+/// daemon listed, and what is said of those it left out.
+fn listing(caption: MessageId, plan: &ForgetPlanDto) -> ForgetListing {
+    let left_out = plan
+        .remove
+        .saturating_sub(u64::try_from(plan.listed.len()).unwrap_or(u64::MAX));
+    ForgetListing {
+        caption: (
+            caption,
+            vec![
+                ("plan", MsgArg::Text(plan.plan.clone())),
+                ("count", MsgArg::Count(plan.remove)),
+            ],
+        ),
+        snapshots: plan.listed.clone(),
+        more: crate::wording::more(left_out).map(|words| (words.id, words.args)),
+    }
 }
 
 /// The proposals a person can still decide, in the order the daemon lists

@@ -11,7 +11,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use api::{ProposalDto, ProposalReviewDto, ProposalsDto, SummaryLineDto};
+use api::{
+    MsgArg, ProposalDto, ProposalForgetPreviewDto, ProposalReviewDto, ProposalsDto, SummaryLineDto,
+};
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
@@ -25,14 +27,18 @@ use crate::components::{
 use crate::live::reply;
 use crate::plans::Said;
 use crate::proposals::{
-    PROPOSALS_PATH, applied, approval, approve_path, can_approve, field_error, heading, pending,
-    reason_label, reject_path, rejected, rejected_before, rejection, review_id, review_label,
-    review_path, summary_line,
+    ForgetListing, PROPOSALS_PATH, RepositoryShown, applied, approval, approve_path, can_approve,
+    field_error, forget_preview_path, heading, pending, reason_label, reject_path, rejected,
+    rejected_before, rejection, repository_shown, review_id, review_label, review_path,
+    summary_line,
 };
 use crate::repositories::Sentence;
 use crate::restore::Asks;
-use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence, text_with};
+use crate::routes::{
+    PAGE_HEADING_ID, PageHeading, refused_sentence, short_id, snapshot_time, text_with,
+};
 use crate::session::Standing;
+use crate::snapshots::viewer_offset;
 use crate::text;
 use crate::variants::Tone;
 use crate::ws::{self, Got, Phase, Posted};
@@ -508,7 +514,12 @@ fn Review(
         }
         .into_any()
     } else {
-        view! { <p>{text(&localizer, msg::UI_PROPOSAL_NEEDS_FORGET_PREVIEW)}</p> }.into_any()
+        let url = list.url(&forget_preview_path(&id));
+        view! {
+            <p>{text(&localizer, msg::UI_PROPOSAL_NEEDS_FORGET_PREVIEW)}</p>
+            <ForgetPreview localizer=Arc::clone(&localizer) url=url />
+        }
+        .into_any()
     };
     let rejecting = text(&localizer, msg::UI_PROPOSAL_REJECTING);
     view! {
@@ -562,5 +573,181 @@ fn Review(
                     .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
             }}
         </section>
+    }
+}
+
+/// The open proposal's forget preview (decision 89, point 8), read when the
+/// person asks, since it reads every repository the proposal touches: under
+/// its heading, each repository's lines and differences, or why it couldn't
+/// be read. While it reads, its button is busy and the page says so.
+#[component]
+fn ForgetPreview(localizer: Arc<Localizer>, url: String) -> impl IntoView {
+    let reading = RwSignal::new(false);
+    let shown = RwSignal::new(None::<Vec<RepositoryShown>>);
+    let alert = RwSignal::new(None::<Sentence>);
+    let read_localizer = Arc::clone(&localizer);
+    let read = Callback::new(move |()| {
+        if reading.get_untracked() {
+            return;
+        }
+        reading.set(true);
+        alert.set(None);
+        reply(
+            Politeness::Polite,
+            &text(&read_localizer, msg::UI_PROPOSAL_FORGET_PREVIEWING),
+        );
+        let url = url.clone();
+        let localizer = Arc::clone(&read_localizer);
+        spawn_local(async move {
+            let answer = ws::post(&url, &serde_json::Map::new()).await;
+            if reading.try_set(false).is_some() {
+                return;
+            }
+            let read = match answer {
+                Some(Posted::Done(answer)) => {
+                    serde_json::from_str::<ProposalForgetPreviewDto>(&answer).ok()
+                }
+                Some(Posted::Refused(code, args, detail)) => {
+                    alert.set(Some(refused_sentence(
+                        &localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                    return;
+                }
+                None => None,
+            };
+            match read {
+                Some(preview) => {
+                    shown.set(Some(
+                        preview.repositories.iter().map(repository_shown).collect(),
+                    ));
+                    reply(
+                        Politeness::Polite,
+                        &text(&localizer, msg::UI_PROPOSAL_FORGET_HEADING),
+                    );
+                }
+                // No answer, or one that isn't the route's.
+                None => alert.set(Some(unanswered(&localizer))),
+            }
+        });
+    });
+    let previewing = text(&localizer, msg::UI_PROPOSAL_FORGET_PREVIEWING);
+    let view_localizer = Arc::clone(&localizer);
+    let preview = move || {
+        shown.get().map(|repositories| {
+            let localizer = Arc::clone(&view_localizer);
+            let repositories = repositories
+                .into_iter()
+                .map(|repository| repository_view(&localizer, repository))
+                .collect_view();
+            view! {
+                <h3>{text(&localizer, msg::UI_PROPOSAL_FORGET_HEADING)}</h3>
+                {repositories}
+            }
+        })
+    };
+    view! {
+        <p class="actions">
+            <Button
+                content=Content::Text(text(&localizer, msg::UI_PROPOSAL_FORGET_PREVIEW).into())
+                busy=Signal::derive(move || reading.get())
+                on_press=read
+            />
+        </p>
+        {move || reading.get().then(|| view! { <p>{previewing.clone()}</p> })}
+        {move || {
+            alert.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+        }}
+        {preview}
+    }
+}
+
+/// One repository of a forget preview, under its heading.
+fn repository_view(localizer: &Localizer, repository: RepositoryShown) -> AnyView {
+    let heading = |repository: String| {
+        say(
+            localizer,
+            (
+                msg::UI_PROPOSAL_FORGET_REPOSITORY,
+                vec![("repository", MsgArg::Text(repository))],
+            ),
+        )
+    };
+    match repository {
+        RepositoryShown::Compared {
+            repository,
+            lines,
+            listings,
+        } => {
+            let lines = lines
+                .into_iter()
+                .map(|said| view! { <p>{say(localizer, said)}</p> })
+                .collect_view();
+            let listings = listings
+                .into_iter()
+                .map(|listing| listing_view(localizer, listing))
+                .collect_view();
+            view! {
+                <h4>{heading(repository)}</h4>
+                {lines}
+                {listings}
+            }
+            .into_any()
+        }
+        RepositoryShown::Refused { repository, error } => {
+            let args: Vec<(String, MsgArg)> = error.args.into_iter().collect();
+            let sentence = refused_sentence(localizer, error.code, &args, error.detail.as_deref());
+            view! {
+                <h4>{heading(repository)}</h4>
+                <p role="alert">{sentence_view(sentence)}</p>
+            }
+            .into_any()
+        }
+    }
+}
+
+/// The snapshots one difference names, newest first, captioned, and what is
+/// said of those the daemon left out.
+fn listing_view(localizer: &Localizer, listing: ForgetListing) -> impl IntoView + use<> {
+    let zone = l10n::viewer_zone();
+    // Whether the host writes this locale's instants, asked once per table.
+    let writes_instants = localizer.writes_instants();
+    let rows = listing
+        .snapshots
+        .into_iter()
+        .map(|snapshot| {
+            let shown = snapshot_time(
+                localizer,
+                &snapshot.time,
+                snapshot.offset,
+                zone.as_ref(),
+                viewer_offset,
+                writes_instants,
+            );
+            view! {
+                <tr>
+                    <td>{short_id(&snapshot.id)}</td>
+                    <td title=snapshot.time>{shown}</td>
+                </tr>
+            }
+        })
+        .collect_view();
+    let more = listing
+        .more
+        .map(|said| view! { <p>{say(localizer, said)}</p> });
+    view! {
+        <table class="snapshots">
+            <caption class="text-muted">{say(localizer, listing.caption)}</caption>
+            <thead>
+                <tr>
+                    <th scope="col">{text(localizer, msg::UI_COLUMN_SNAPSHOT)}</th>
+                    <th scope="col">{text(localizer, msg::UI_COLUMN_TIME)}</th>
+                </tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+        {more}
     }
 }
