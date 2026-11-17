@@ -190,6 +190,26 @@ ui-gallery-demo-dialog-body = A dialog traps focus and returns it on close.
 # The button inside the demo dialog that closes it.
 ui-gallery-close-demo-dialog = Close the demo dialog
 
+# The button that opens the demo warning, a dialog that hands Escape to the
+# page, as the warning before a session ends unused does.
+ui-gallery-open-demo-warning = Open the demo warning
+
+# The demo warning's accessible name and heading.
+ui-gallery-demo-warning = Demo warning
+
+# What the demo warning says, which describes it.
+ui-gallery-demo-warning-body = Escape keeps this warning open, as Keep the demo warning does. Answer the demo warning, and the page closes it.
+
+# What the demo warning says when Escape or Keep the demo warning has kept it
+# open.
+ui-gallery-demo-warning-kept = The page keeps the demo warning open.
+
+# The demo warning's button that has the page close it.
+ui-gallery-answer-demo-warning = Answer the demo warning
+
+# The demo warning's button that keeps it open, which it opens on.
+ui-gallery-keep-demo-warning = Keep the demo warning
+
 # The heading of the gallery's table demo.
 ui-gallery-table-heading = Table
 

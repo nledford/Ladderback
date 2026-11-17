@@ -73,6 +73,24 @@ Feature: The shared components in the gallery
     When I press Escape
     Then focus is on the button "Open the demo dialog"
 
+  Scenario: A dialog can start on a button of its own, hand Escape to its page, and close once its page has answered
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Open the demo warning"
+    And I press Enter
+    Then the dialog "Demo warning" opens with focus on the button "Keep the demo warning"
+    And the dialog "Demo warning" is described as saying "Escape keeps this warning open"
+    And the page has no accessibility violations
+    When I press Escape
+    Then the dialog "Demo warning" politely says "The page keeps the demo warning open."
+    And the dialog "Demo warning" stays open
+    When I press Tab
+    Then focus is on the first control of the dialog "Demo warning"
+    And focus is on the button "Answer the demo warning"
+    When I press Enter
+    Then the dialog "Demo warning" is closed
+    And focus is on the button "Open the demo warning"
+
   Scenario: The step-up field takes a password from a password manager or paste
     When I open the component gallery
     And I skip to the content
