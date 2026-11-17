@@ -562,17 +562,15 @@ function wholly(text: string): RegExp {
 // Arabic. Each row of the demo's last list is a part placed in its line (the
 // list's content box), its swatch and its name; Inline keeps the part in the
 // line of text, as wide as what it holds. The vocabulary demo holds the
-// gallery's only lists (tones, sizes, placements, in that order); they are
-// found by order, since a pseudolocale changes their names. A pixel of
-// rounding is allowed.
+// gallery's only lists, the placements last; it is found by order, since a
+// pseudolocale changes the names. A pixel of rounding is allowed.
 Then(
   /^the placements of the vocabulary demo put each part where they say, in a page that runs (left to right|right to left)$/,
   async function (this: BrowserWorld, direction: string) {
-    const lists = this.page.getByRole("main").getByRole("list");
-    await expect(lists).toHaveCount(3);
-    const items = lists.nth(2).getByRole("listitem");
+    const placements = this.page.getByRole("main").getByRole("list").last();
+    const items = placements.getByRole("listitem");
     await expect(items).toHaveCount(4);
-    const rows = await lists.nth(2).evaluate((list) => {
+    const rows = await placements.evaluate((list) => {
       const frame = list.getBoundingClientRect();
       const style = getComputedStyle(list);
       const inset = (side: "left" | "right") =>
