@@ -1,6 +1,7 @@
 //! The Settings page, the route `/settings` (§4.4): the language of the web
 //! UI (§8.4, decision 101), kept in this browser, whose glue is
-//! `settings/language.rs`; its admin password
+//! `settings/language.rs`; the width of its pages (§4.5), kept in this
+//! browser too, whose glue is `settings/page_width.rs`; its admin password
 //! (security §10.1, decision 70), set with sign-in off and changed in a
 //! session, whose glue is `settings/password.rs`; its API tokens
 //! (decision 93), listed, created and revoked in a session; and the restart
@@ -16,10 +17,12 @@
 //! left, clears it from the page (I4).
 
 mod language;
+mod page_width;
 mod password;
 mod sign_in;
 
 use language::LanguageSection;
+use page_width::PageWidthSection;
 use password::AdminPassword;
 use sign_in::SignInSection;
 
@@ -45,6 +48,7 @@ use crate::components::{
     copy_text, hand_focus_when_gone, sentence_view, text_field,
 };
 use crate::live::reply;
+use crate::page_width::PageWidth;
 use crate::repositories::Sentence;
 use crate::restart::{
     self, ANSWER_PATIENCE, PENDING_EVERY, RESTART_PATH, Stage, WAIT_EVERY, Wait, Waited,
@@ -97,10 +101,14 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     let waiting_localizer = Arc::clone(&localizer);
     let restart_localizer = Arc::clone(&localizer);
     let language_localizer = Arc::clone(&localizer);
+    let width = use_context::<RwSignal<PageWidth>>().map(|width| {
+        view! { <PageWidthSection localizer=Arc::clone(&localizer) width=width /> }
+    });
     view! {
         <PageHeading>{heading}</PageHeading>
         {move || waiting.get().map(|id| view! { <p>{text(&waiting_localizer, id)}</p> })}
         <LanguageSection localizer=language_localizer />
+        {width}
         {password}
         <ApiTokens localizer=localizer />
         <RestartSection localizer=restart_localizer />

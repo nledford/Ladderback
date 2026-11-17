@@ -4,7 +4,7 @@
 
 The gate is a process-wide lock in the `spawn-gate` crate, held only for the start itself, not while the child runs. Whatever else makes a descriptor that is not close-on-exec from the start (a test's own pipe) makes it inside `hold` and marks it before it lets go.
 
-- **A hook's pipes are let go through the gate too**, when the call returns, so no start in flight still holds a copy of their read ends.
+- **A hook's pipes are let go through the gate too**, once the hook has ended or been stopped, so no start in flight still holds a copy of their read ends. A call that stops waiting for the gate at its limit leaves them to it (amended 2026-11-17, below).
 - **The daemon waits for the gate off the runtime's threads** (`spawn_gate::hold_blocking`, on tokio's blocking pool).
 
 Why:
@@ -24,6 +24,9 @@ Why:
   - **At the deadline.** A start still waiting then fails the open, saying which start was given up and when; its `rclone` is killed and reaped, and the thread that read its output joined, before the error is returned. So the evaluation's blocking thread ends, and however often the evaluation is tried again, no `rclone` and no thread is left behind. `rclone version` is read no further than its first line, then killed and reaped rather than waited for.
   - **Why 2 minutes.** 2 minutes is longer than rclone's own connection timeout (a minute by default), so an `rclone` that can't reach its remote fails in its own words first, and shorter than the use case's read timeout (`READ_TIMEOUT`, 10 minutes; an assertion at compile time keeps it so), so no start the use case gave up on still waits on an `rclone`. The price: a remote slower than that to come up (a token refresh, rclone's own retries) fails the evaluation at 2 minutes, where it used to serve late.
   - **The start's, not the read's.** The deadline belongs to the start, not to the read, so it bounds every caller of the start. Letting the read timeout cancel the evaluation was rejected: it bounds only a caller that has a timeout and drops the call, and a blocking thread can't be cancelled, only asked to stop, so the evaluation would still need a deadline of its own to stop the `rclone` it is waiting on.
+- **A hook's waits for the gate have a limit** (amended 2026-11-17, #968). A hook waits for the gate for at most as long as it may run, 5 minutes (scheduling-and-config.md §6.1), for its start and to let go of its pipes, so a hook behind a stalled start is timed out, or returns its outcome, rather than being held up as long as the stall lasts. Other starts still wait for the stalled one.
+  - **A start given up on.** The gate is still let go only when `spawn` returns. A start the call has given up on is never made once the gate comes free, and one made just as the call gave up is killed by the thread that holds the gate, with its group, its pipes dropped before the gate is let go, so the hook leaves nothing running and no other start inherits its pipes. One handed over to a call that is dropped before it takes it is killed with its group where the call is dropped. Pipes the call stopped waiting to let go of are let go whenever the gate is free, as a dropped call's are.
+  - **Limits of their own.** These limits are separate from the run's rather than one deadline for all, so a stall elsewhere never shortens the time a hook has to run: a hook that takes 4 of its 5 minutes isn't timed out because another program's start stalled for 2. The price: a hook call can take up to 15 minutes and 10 s, 5 minutes to start, 5 to run, then either the stop (5 s from SIGTERM to SIGKILL and at most 5 s more for the reap) or the 1 s its pipes are read on after a hook that ended by itself, and 5 minutes to let go of its pipes.
 
 Rejected:
 
@@ -39,7 +42,7 @@ For rclone:
 Not covered:
 
 - A descriptor a library makes in two steps outside a start, such as a socket the daemon opens to a backend on macOS, can still reach a child that starts in that moment. The HTTP server's connections and its listening socket are made through the gate (decision 66).
-- A hook call that its caller drops, rather than one that returns, lets go of the pipes without the gate, since a drop can't wait (its unreaped hook is killed with its group).
+- A hook call that its caller drops once its hook has started, rather than one that returns, lets go of the pipes without the gate, since a drop can't wait (its unreaped hook is killed with its group). One dropped while it waits for its start leaves the start to the gate, as one that timed out does.
 - A password command's pipes are let go without the gate when the call ends. A start that forks in that moment copies the read end and closes it unread at its `exec`; meanwhile a write of the command's own descendant can go through rather than fail. Nothing reads it, so no secret goes anywhere (I4).
 - A program an `rclone` started that still holds its output keeps the thread reading it, and so the evaluation, until it lets go: killing `rclone` doesn't stop its children, at the deadline as at the end of an evaluation. An `rclone` that has said where it serves, but then never answers, is bounded only by rustic's REST backend (a request's 10-minute timeout, and its retries), not by the start's deadline, and can outlive the read timeout.
 - When the thread that reads `rclone version`'s answer can't be started, the pipe it would have read is let go without the gate.

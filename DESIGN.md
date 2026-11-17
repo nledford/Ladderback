@@ -125,7 +125,8 @@ components:
   progress-track:
     backgroundColor: "{colors.ledger-gray}"
     rounded: "{rounded.pill}"
-    height: "0.5rem"
+    # Small, the default: half the shared scale's 1em.
+    height: "0.5em"
     width: "16rem"
   spinner:
     # The drawing's color (its arc); the label keeps the text's color.
@@ -222,7 +223,7 @@ The badge's own pairs, for the states that tell no result: Loading (dark blue on
 
 ## Layout
 
-One column, `main` centered at up to 60rem with 1rem padding. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
+One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main` (`page_width.rs`), never a `style.css` rule. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
 
 Spacing steps are 0.25, 0.5, 0.75 and 1rem; forms stack fields 1rem apart, and an `.actions` row puts its buttons 0.5rem apart, wrapping. Inputs fill their line up to 32rem (40rem for a token).
 
@@ -317,7 +318,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Progress Bar
 
-A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, with a Ladder Blue fill that eases to each report (0.4 s) and jumps under reduced motion. The current step sits on its own line above it.
+A Ledger Gray pill track, half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The fill is the tone's own color, never a status pair: a pair is for words on a tinted fill, and the fill carries none, so each tone's fill keeps 3:1 against the track and the page instead. The current step sits on its own line above it.
 
 ### Banners
 

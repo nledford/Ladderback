@@ -288,9 +288,10 @@ a {
   margin-block: 0;
 }
 
+/* The frame's width is `<main>`'s own Tailwind utilities, which Settings'
+   Page width chooses (`page_width.rs`): a width here, unlayered, would beat
+   them. */
 main {
-  max-inline-size: 60rem;
-  margin-inline: auto;
   padding: 1rem;
 }
 
@@ -495,34 +496,6 @@ main:focus {
    the label's line. */
 .badge > .icon {
   align-self: center;
-}
-
-/* A progress bar: a filled track whose width follows every report.
-   The track fills the room it is given, up to 16rem: in a table's cell it
-   never widens its column, so the column keeps its width as a run starts
-   and ends, and fits a small screen. */
-.progress-track {
-  background-color: var(--surface);
-  block-size: 0.5rem;
-  border-radius: 9999px;
-  inline-size: 100%;
-  max-inline-size: 16rem;
-}
-
-/* The fill moves smoothly to each report; the reduced-motion rule above
-   takes the transition away, and the fill then jumps to the value. */
-.progress-fill {
-  background-color: var(--focus);
-  block-size: 100%;
-  border-radius: inherit;
-  transition: inline-size 0.4s ease-out;
-}
-
-/* The step a running operation is in, beside a bar that shows a percentage:
-   a line of its own above the bar, as the bar's text is a line below it, so
-   the bar keeps the room it is given and a long step wraps in its cell. */
-.progress-step {
-  display: block;
 }
 
 /* A spinner (§4.5): a faint track and an arc of one circle, beside its label
