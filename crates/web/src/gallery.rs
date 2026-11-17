@@ -1184,7 +1184,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                                     then_focus: ALERT_DEMO_SHOW.to_owned(),
                                 }
                             >
-                                {notice.clone()}
+                                {notice}
                             </Alert>
                         }
                     })

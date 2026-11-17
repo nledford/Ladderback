@@ -3,7 +3,7 @@
 //! and the word that names that icon, so a tone is never told by its color
 //! alone. `components/alert.rs`'s `Alert` is the glue that draws it.
 
-use l10n::MessageId;
+use l10n::{MessageId, msg};
 use lepticons_data::LucideGlyph;
 
 use crate::variants::Tone;
@@ -34,38 +34,63 @@ impl AlertTone {
 
     /// The shared vocabulary's tone it is.
     pub fn tone(self) -> Tone {
-        todo!()
+        match self {
+            Self::Primary => Tone::Primary,
+            Self::Success => Tone::Success,
+            Self::Warning => Tone::Warning,
+            Self::Error => Tone::Error,
+        }
     }
 
     /// The Lucide glyph its icon shows, one shape per tone, the status
     /// badge's for success, warnings and failure.
     pub fn glyph(self) -> LucideGlyph {
-        todo!()
+        match self {
+            Self::Primary => LucideGlyph::Info,
+            Self::Success => LucideGlyph::CircleCheck,
+            Self::Warning => LucideGlyph::TriangleAlert,
+            Self::Error => LucideGlyph::CircleX,
+        }
     }
 
     /// The word that names its icon for a screen reader ("Error"), so the
     /// tone is said before the alert's words.
     pub fn label(self) -> MessageId {
-        todo!()
+        match self {
+            Self::Primary => msg::UI_ALERT_INFORMATION,
+            Self::Success => msg::UI_ALERT_SUCCESS,
+            Self::Warning => msg::UI_ALERT_WARNING,
+            Self::Error => msg::UI_ALERT_ERROR,
+        }
     }
 }
 
-/// The classes of the alert: the alert's own, which draws its box, and its
-/// tone's, which its icon and its edge take.
+/// How an alert is drawn, in Tailwind utilities (decision 117), logical
+/// ones only: on Ledger Gray, as a toast is, its words in the text's color,
+/// so a failure is never a red banner (DESIGN.md), and its tone (`--tone`,
+/// which its tone's class sets) in a 0.25 rem edge at the start of its line,
+/// in rem so it grows with the reader's text. Under forced colors the fill
+/// is dropped, so a 1px edge all round in the system's text color keeps its
+/// box in view, the start edge still the thick one.
+const LOOK: &str = "flex items-start gap-2 my-2 py-2 px-3 bg-surface text-fg \
+    rounded-(--radius-small) border-0 border-s-[0.25rem] border-solid border-(--tone) \
+    forced-colors:border forced-colors:border-s-[0.25rem] \
+    forced-colors:border-[color:CanvasText]";
+
+/// The classes of the alert: the alert's own, which names it, its tone's,
+/// which its icon and its edge take, and its look.
 pub fn alert_class(tone: AlertTone) -> String {
-    let _ = tone;
-    todo!()
+    format!("alert {} {LOOK}", tone.tone().class())
 }
 
 /// The name of an alert's Dismiss button, which its tooltip shows too.
 pub fn dismiss_name() -> MessageId {
-    todo!()
+    msg::UI_ALERT_DISMISS
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use l10n::msg;
 
     #[test]
     fn an_alert_is_information_in_ladder_blue_unless_its_page_names_another_tone() {

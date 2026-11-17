@@ -24,7 +24,10 @@ pub(crate) mod rules;
 /// button is pressed, and its page then takes the alert off the page, the
 /// page's own state being what says it is shown. Focus, on the button as it
 /// goes, moves to the element with the ID `then_focus`, which the page keeps
-/// on the page, so focus never falls to the page (2.4.3).
+/// on the page, so focus never falls to the page (2.4.3). The alert leaves
+/// through a reactive branch (a `move ||` closure or `Show`), whose cleanup
+/// runs while the button is still on the page; never as an item of a keyed
+/// list, which takes the item off first (`hand_focus_when_gone`).
 pub struct Dismissal {
     pub on_dismiss: Callback<()>,
     pub then_focus: String,
@@ -71,7 +74,8 @@ pub fn Alert(
             let button = NodeRef::<leptos::html::Button>::new();
             hand_focus_when_gone(button, then_focus);
             view! {
-                <span class="alert-dismiss">
+                // At the line's end, never squeezed by the words.
+                <span class="alert-dismiss flex-none">
                     <Tooltip tip=Tip::Names(name.clone())>
                         <Button
                             content=Content::IconOnly {
@@ -90,10 +94,15 @@ pub fn Alert(
     );
     view! {
         <div class=rules::alert_class(tone)>
-            <span class="alert-icon">
+            // The icon, centered on the first line of the words (one line
+            // tall: `1lh`, which no utility names).
+            <span class="alert-icon flex flex-none items-center [min-block-size:1lh]">
                 <Icon glyph=tone.glyph() meaning=Meaning::Labelled(label) tone=tone.tone() />
             </span>
-            <div class="alert-words">{children()}</div>
+            // The words take the room left and wrap, a long path too (The
+            // 320 Rule); `min-inline-size` lets them shrink below their
+            // longest word, which no logical utility names.
+            <div class="alert-words flex-auto [min-inline-size:0] wrap-anywhere">{children()}</div>
             {dismiss}
         </div>
     }
