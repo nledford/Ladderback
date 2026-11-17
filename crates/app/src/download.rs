@@ -184,9 +184,13 @@ impl Downloads {
             StepUpRefused::Wait { seconds } => DownloadError::StepUpWait { seconds },
             StepUpRefused::Unavailable(text) => DownloadError::StepUpUnavailable(text),
         })?;
-        // Downloads whose minute ran out give their turns back first.
-        self.give_up_expired().await;
-        let turn = Turn::take(&self.under_way).ok_or(DownloadError::Busy)?;
+        // Downloads whose minute ran out give their turns back first. This
+        // one takes its own before their rows are written, so a slow log
+        // can't hand the turns it freed to one asked for after it (#888).
+        let cancelled = self.stop_expired();
+        let turn = Turn::take(&self.under_way);
+        self.write_cancelled(&cancelled).await;
+        let turn = turn.ok_or(DownloadError::Busy)?;
         let config = self
             .config
             .load()
@@ -303,12 +307,23 @@ impl Downloads {
     /// its own: one dropped halfway leaves the downloads it took running in
     /// the log.
     pub async fn give_up_expired(&self) {
+        let cancelled = self.stop_expired();
+        self.write_cancelled(&cancelled).await;
+    }
+
+    /// Stops every confirmed download whose minute ran out and frees its
+    /// turn, and returns their records, cancelled, for the log.
+    fn stop_expired(&self) -> Vec<Operation> {
         let expired = lock(&self.pending).expire(self.clock.now());
-        let cancelled: Vec<Operation> = expired
+        expired
             .into_iter()
             .map(|confirmed| self.stop(confirmed))
-            .collect();
-        for operation in &cancelled {
+            .collect()
+    }
+
+    /// Writes `cancelled` to the log, one after another.
+    async fn write_cancelled(&self, cancelled: &[Operation]) {
+        for operation in cancelled {
             let _ = save_within_bound(&*self.clock, &*self.store, operation, None).await;
         }
     }
