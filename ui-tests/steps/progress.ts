@@ -154,23 +154,28 @@ Then(
 );
 
 // Forced colors (the reader's own palette): the fill follows the tone rule
-// of the shared vocabulary, every tone the text's own color, and the track
-// takes the color of unavailable text, two of the reader's colors, which
-// they choose to stand apart, as a spinner's arc and track do. A fill the
-// mode turned into the page's background would leave the bar empty.
+// of the shared vocabulary, every tone the system's text color (CanvasText),
+// and the track takes the color of unavailable text, two of the reader's
+// colors, which they choose to stand apart, as a spinner's arc and track do.
+// A fill the mode turned into the page's background would leave the bar
+// empty. Both are measured against the system colors themselves: WebKit's
+// emulation only matches the media query and leaves the page's own text
+// color, as the tabs' and alerts' steps say.
 Then(
   "every progress bar of the gallery fills its track in the color of the text around it, and its track is GrayText",
   async function (this: BrowserWorld) {
     const bars = await eachOf(this.page.getByRole("progressbar"), BARS);
-    const gray = await this.page.evaluate(() => {
-      const probe = document.createElement("span");
-      probe.style.setProperty("forced-color-adjust", "none");
-      probe.style.color = "GrayText";
-      document.body.append(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      return color;
-    });
+    const [text, gray] = await this.page.evaluate(() =>
+      ["CanvasText", "GrayText"].map((system) => {
+        const probe = document.createElement("span");
+        probe.style.setProperty("forced-color-adjust", "none");
+        probe.style.color = system;
+        document.body.append(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      }),
+    );
     let tracks = 0;
     for (const found of bars) {
       const drawn = await found.evaluate((element) => {
@@ -178,14 +183,13 @@ Then(
         const track = element.querySelector(".progress-track");
         return {
           name: element.getAttribute("aria-label") ?? "",
-          text: getComputedStyle(element).color,
           fill: fill === null ? null : getComputedStyle(fill).backgroundColor,
           track: track === null ? null : getComputedStyle(track).backgroundColor,
         };
       });
       if (drawn.track === null) continue;
       tracks += 1;
-      assert.equal(drawn.fill, drawn.text, `the fill of "${drawn.name}"`);
+      assert.equal(drawn.fill, text, `the fill of "${drawn.name}"`);
       assert.equal(drawn.track, gray, `the track of "${drawn.name}"`);
     }
     // Every bar but the one of unknown size and the one of a step.
