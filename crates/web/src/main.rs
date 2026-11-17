@@ -437,7 +437,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
             );
             view! {
                 <p class="site-update">
-                    <a href=update.release_notes rel="noreferrer">
+                    <a href=update.notes.href().to_owned() rel="noreferrer">
                         {sentence}
                     </a>
                 </p>

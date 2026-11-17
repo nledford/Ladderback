@@ -168,6 +168,19 @@ impl Outside {
 }
 
 impl Destination {
+    /// A page of the app at `href`, as a page writes its own paths: `None`
+    /// for a path [`Route::parse`] refuses, which the page then shows
+    /// without a link rather than one that could leave the site.
+    pub fn route(href: &str, matching: Matching) -> Option<Self> {
+        todo!("{href} {matching:?}")
+    }
+
+    /// An address on another site: `None` for one [`Outside::parse`]
+    /// refuses, as [`Destination::route`] is for a path.
+    pub fn outside(address: &str) -> Option<Self> {
+        todo!("{address}")
+    }
+
     /// The link's `rel`: an outside link is never routed, even an address
     /// that turns out to be the app's own (`external`, which the router
     /// leaves to the browser), and tells the site it opens nothing of the
@@ -438,6 +451,22 @@ mod tests {
         let outside = Destination::Outside(Outside("https://rustic.cli.rs/".to_owned()));
         assert_eq!(outside.rel(), Some("external noreferrer"));
         assert!(outside.leaves());
+    }
+
+    #[test]
+    fn a_page_links_to_a_path_or_an_address_only_once_it_parses() {
+        assert_eq!(
+            Destination::route("/plans", Matching::Section),
+            Some(Destination::Route(route("/plans", Matching::Section)))
+        );
+        assert_eq!(Destination::route("//example.com", Matching::Exact), None);
+        assert_eq!(
+            Destination::outside("https://rustic.cli.rs/"),
+            Some(Destination::Outside(Outside(
+                "https://rustic.cli.rs/".to_owned()
+            )))
+        );
+        assert_eq!(Destination::outside("javascript:alert(1)"), None);
     }
 
     #[test]
