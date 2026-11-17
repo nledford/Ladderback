@@ -88,15 +88,6 @@ pub fn hovers(pointer_type: &str) -> bool {
     pointer_type != "touch"
 }
 
-/// The page's direction, from the computed `direction` of a control.
-pub fn direction_of(computed: &str) -> Direction {
-    if computed == "rtl" {
-        Direction::Rtl
-    } else {
-        Direction::Ltr
-    }
-}
-
 /// What happens to a tooltip: its control gains or loses keyboard focus,
 /// the pointer comes onto or leaves the control or the tooltip, the reader
 /// presses Escape, or a wait the tooltip asked for ends.
@@ -368,12 +359,6 @@ mod tests {
         assert!(hovers("mouse"));
         assert!(hovers("pen"));
         assert!(!hovers("touch"));
-    }
-
-    #[test]
-    fn the_direction_is_the_controls_computed_one() {
-        assert_eq!(direction_of("rtl"), Direction::Rtl);
-        assert_eq!(direction_of("ltr"), Direction::Ltr);
     }
 
     /// A tooltip after `events`, from the start.

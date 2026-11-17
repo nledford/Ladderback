@@ -786,6 +786,49 @@ ui-gallery-text-field-add-medium = Add the demo tag at the Medium size
 ui-gallery-text-field-add-large = Add the demo tag at the Large size
 ui-gallery-text-field-add-xlarge = Add the demo tag at the Extra large size
 
+# The heading of the gallery's tabs demo (§4.5): a row of tabs, each showing
+# its panel below the row, one stop for Tab.
+ui-gallery-tabs-heading = Tabs
+
+# A set of demo tabs that selects each tab the arrow keys arrive at, named by
+# the heading above it. Its middle panel holds a field, to show that what is
+# typed in it stays while another tab shows.
+ui-gallery-tabs-repository = Demo repository
+ui-gallery-tabs-overview = Demo overview
+ui-gallery-tabs-overview-text = The demo repository holds 12 snapshots of two demo plans.
+ui-gallery-tabs-note = Demo note
+ui-gallery-tabs-note-field = Demo note text
+ui-gallery-tabs-note-hint = What you type here stays while another tab shows.
+ui-gallery-tabs-history = Demo history
+ui-gallery-tabs-history-text = The last demo check found nothing wrong.
+
+# A set of demo tabs chosen by hand, as tabs whose panels read from the daemon
+# would be: the paragraph says how, and the set is named by its own label. The
+# line after the set names the tab it says is chosen, as a page that reads that
+# tab's panel from the daemon would follow it; $tab is one of the tabs' names.
+ui-gallery-tabs-manual-hint = These demo tabs are chosen with Enter or Space. The arrow keys only move between them.
+ui-gallery-tabs-agent = Demo agent
+ui-gallery-tabs-log = Demo log
+ui-gallery-tabs-log-text = A demo panel that a page would read from the daemon once its tab is chosen.
+ui-gallery-tabs-stats = Demo stats
+ui-gallery-tabs-stats-text = The demo stats, read once their tab is chosen.
+ui-gallery-tabs-plans = Demo plans
+ui-gallery-tabs-plans-text = The demo plans, read once their tab is chosen.
+
+# The gallery's manual tabs demo says which tab is chosen.
+# $tab (text): the chosen tab's name.
+ui-gallery-tabs-chosen = Chosen demo tab: { $tab }
+
+# A set of demo tabs in a part of the page that runs right to left: the first
+# tab is at the right, and the left arrow goes to the next.
+ui-gallery-tabs-rtl = Demo tabs, right to left
+ui-gallery-tabs-first = First demo tab
+ui-gallery-tabs-first-text = The first demo panel.
+ui-gallery-tabs-second = Second demo tab
+ui-gallery-tabs-second-text = The second demo panel.
+ui-gallery-tabs-third = Third demo tab
+ui-gallery-tabs-third-text = The third demo panel.
+
 # The heading of the gallery's tooltip demo (§4.5): a short note beside a
 # control, shown on keyboard focus or a resting pointer.
 ui-gallery-tooltip-heading = Tooltip
