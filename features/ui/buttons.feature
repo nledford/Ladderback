@@ -154,6 +154,7 @@ Feature: Buttons on every page
     Given a demo plan "demo-home" with a scratch repository, and a proposal to remove it
     And the daemon answers the next rejection of a proposal 2 seconds late
     When I open the address "/proposals"
+    And I skip to the content
     And I press Tab until focus is on the proposal's Review button
     And I press Enter
     And I press Tab until focus is on the button "Reject the proposal"

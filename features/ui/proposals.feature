@@ -64,6 +64,7 @@ Feature: Pending changes page
     And the plan "demo-home" keeps the last 1 snapshots
     And a proposal to remove the plan "demo-home"
     When I open the address "/proposals"
+    And I skip to the content
     And I press Tab until focus is on the proposal's Review button
     And I press Enter
     And I press Tab until focus is on the button "Show what it would forget"
