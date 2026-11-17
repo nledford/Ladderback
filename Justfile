@@ -483,14 +483,18 @@ _signing-identity:
     @node scripts/install-signing.ts check
 
 # Updates an installed service from this checkout (#519): `install` with the
-# arguments, then waits until the daemon has no operation running or queued
-# (its operation log, read-only, every 5 s, up to `--wait` minutes, default
-# 120), restarts the service with the new binary (`ladderback
-# install-service`) and checks that the service runs a new process of this
-# checkout's build. A daemon it can't tell is idle isn't restarted unless
-# `--now`, which skips the wait. INSTALL_RESTART_ADDRESS names the service's
-# address when it isn't 127.0.0.1:9898. Why it reads the log, the wait's race
-# and the rest: scripts/install-restart.ts.
+# arguments, then reads each `password-keyring` entry once with the new binary
+# (`ladderback check-keyring`, #892), so the macOS keychain asks for the new
+# build in this terminal rather than at the next scheduled backup; an entry
+# it can't read stops it unless `--ignore-keyring-failure`. Then it waits
+# until the daemon has no operation running or queued (its operation log,
+# read-only, every 5 s, up to `--wait` minutes, default 120), restarts the
+# service with the new binary (`ladderback install-service`) and checks that
+# the service runs a new process of this checkout's build. A daemon it can't
+# tell is idle isn't restarted unless `--now`, which skips the wait.
+# INSTALL_RESTART_ADDRESS names the service's address when it isn't
+# 127.0.0.1:9898. Why it reads the log, the wait's race and the rest:
+# scripts/install-restart.ts.
 [doc('Install from this checkout, then restart the service once it is idle (--now, --wait).')]
 [group('release')]
 [positional-arguments]
