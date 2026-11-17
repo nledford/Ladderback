@@ -21,8 +21,8 @@ use leptos::task::{spawn_local, tick};
 use crate::announcer::Politeness;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    Button, StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone, sentence_view,
-    text_field,
+    Button, StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone, refusal_alert,
+    say_refusals, text_field,
 };
 use crate::live::reply;
 use crate::plans::Said;
@@ -70,7 +70,8 @@ fn unanswered(localizer: &Localizer) -> Sentence {
 
 /// The pending proposals as the page last read them: where the reading
 /// stands, the proposals (`None` until the read answers, and while it is
-/// refused), and a read the daemon refused, said in the list's place.
+/// refused), and a read the daemon refused, an Error alert in the list's
+/// place.
 #[derive(Clone, Copy)]
 struct List {
     base: StoredValue<String>,
@@ -130,13 +131,15 @@ impl List {
 #[component]
 pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
     let list = List::new();
+    say_refusals(list.refused);
     let read_localizer = Arc::clone(&localizer);
     spawn_local(async move { list.read(&read_localizer).await });
 
     // The proposal open, as the daemon showed it, and why it could not
-    // open, said in its place.
+    // open, an Error alert in its place.
     let reviewing = RwSignal::<Option<ProposalReviewDto>>::new(None);
     let not_opened = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(not_opened);
     let open_localizer = Arc::clone(&localizer);
     let open = Callback::new(move |id: String| {
         not_opened.set(None);
@@ -192,6 +195,8 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
         )
     });
     let list_localizer = Arc::clone(&localizer);
+    let refusal_localizer = Arc::clone(&localizer);
+    let not_opened_localizer = Arc::clone(&localizer);
     let review_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>
@@ -209,7 +214,7 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
             (Phase::Loading, _, _) => view! { <p>{loading.clone()}</p> }.into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
-                view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+                refusal_alert(&refusal_localizer, sentence).into_any()
             }
             (Phase::Ready, None, true) => {
                 proposals_list(Arc::clone(&list_localizer), list, open).into_any()
@@ -217,7 +222,7 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
             (Phase::Ready, None, false) => view! { <p>{none.clone()}</p> }.into_any(),
         }}
         {move || {
-            not_opened.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            not_opened.get().map(|sentence| refusal_alert(&not_opened_localizer, sentence))
         }}
         {move || {
             reviewing
@@ -307,6 +312,8 @@ fn Review(
     let working = RwSignal::new(None::<Deciding>);
     let approve_alert = RwSignal::new(None::<Sentence>);
     let reject_alert = RwSignal::new(None::<Sentence>);
+    say_refusals(approve_alert);
+    say_refusals(reject_alert);
     let heading_ref = NodeRef::<leptos::html::H2>::new();
     Effect::new(move |_| {
         if let Some(heading) = heading_ref.get() {
@@ -366,7 +373,10 @@ fn Review(
             return;
         };
         working.set(Some(Deciding::Approving));
+        // One failure, one alert: a rejection's refusal is no longer the
+        // answer once the reader approves.
         approve_alert.set(None);
+        reject_alert.set(None);
         reply(
             Politeness::Polite,
             &text(&approve_localizer, msg::UI_PROPOSAL_APPROVING),
@@ -444,6 +454,7 @@ fn Review(
             .collect();
         let sent = rejection(&typed);
         working.set(Some(Deciding::Rejecting));
+        approve_alert.set(None);
         reject_alert.set(None);
         reply(
             Politeness::Polite,
@@ -491,6 +502,7 @@ fn Review(
     let form_localizer = Arc::clone(&localizer);
     let approve_form = move || {
         let localizer = Arc::clone(&form_localizer);
+        let alert_localizer = Arc::clone(&localizer);
         let approving = approving.clone();
         view! {
             <form
@@ -524,9 +536,7 @@ fn Review(
                     .then(|| view! { <p>{approving.clone()}</p> })
             }}
             {move || {
-                approve_alert
-                    .get()
-                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+                approve_alert.get().map(|sentence| refusal_alert(&alert_localizer, sentence))
             }}
         }
     };
@@ -561,6 +571,7 @@ fn Review(
         .into_any()
     };
     let rejecting = text(&localizer, msg::UI_PROPOSAL_REJECTING);
+    let reject_alert_localizer = Arc::clone(&localizer);
     view! {
         <section aria-labelledby=REVIEW_HEADING_ID>
             <h2 id=REVIEW_HEADING_ID tabindex="-1" node_ref=heading_ref>
@@ -607,9 +618,7 @@ fn Review(
                     .then(|| view! { <p>{rejecting.clone()}</p> })
             }}
             {move || {
-                reject_alert
-                    .get()
-                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+                reject_alert.get().map(|sentence| refusal_alert(&reject_alert_localizer, sentence))
             }}
         </section>
     }
@@ -620,9 +629,10 @@ fn Review(
 /// its heading, each repository's lines and differences, or why it couldn't
 /// be read. While it reads, its button is busy and the page says so; while
 /// `disabled`, as while an approval or a rejection waits, its button is
-/// unavailable. Once read, `shown_any` is set and `digest` holds what an
-/// approval of the preview shown brings, none while a repository couldn't
-/// be read.
+/// unavailable. A refused read, and each repository that couldn't be read,
+/// is an Error alert said assertively once. Once read, `shown_any` is set and
+/// `digest` holds what an approval of the preview shown brings, none while a
+/// repository couldn't be read.
 #[component]
 fn ForgetPreview(
     localizer: Arc<Localizer>,
@@ -634,6 +644,7 @@ fn ForgetPreview(
     let reading = RwSignal::new(false);
     let shown = RwSignal::new(None::<Vec<RepositoryShown>>);
     let alert = RwSignal::new(None::<Sentence>);
+    say_refusals(alert);
     let read_localizer = Arc::clone(&localizer);
     let read = Callback::new(move |()| {
         if reading.get_untracked() {
@@ -689,6 +700,7 @@ fn ForgetPreview(
         });
     });
     let previewing = text(&localizer, msg::UI_PROPOSAL_FORGET_PREVIEWING);
+    let alert_localizer = Arc::clone(&localizer);
     let view_localizer = Arc::clone(&localizer);
     let preview = move || {
         shown.get().map(|repositories| {
@@ -713,15 +725,18 @@ fn ForgetPreview(
             />
         </p>
         {move || reading.get().then(|| view! { <p>{previewing.clone()}</p> })}
-        {move || {
-            alert.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
-        }}
+        {move || alert.get().map(|sentence| refusal_alert(&alert_localizer, sentence))}
         {preview}
     }
 }
 
-/// One repository of a forget preview, under its heading.
-fn repository_view(localizer: &Localizer, repository: RepositoryShown) -> AnyView {
+/// One repository of a forget preview, under its heading: what retention
+/// would forget there, or why it couldn't be read, as an Error alert. That
+/// alert is no live region, so why is said assertively too, as the preview
+/// is drawn: once for each answer, since the preview is drawn again only
+/// when a read answers (a second, rarer way than `say_refusals`, for a
+/// refusal that is part of a list rather than a signal of its own).
+fn repository_view(localizer: &Arc<Localizer>, repository: RepositoryShown) -> AnyView {
     let heading = |repository: String| {
         say(
             localizer,
@@ -755,9 +770,10 @@ fn repository_view(localizer: &Localizer, repository: RepositoryShown) -> AnyVie
         RepositoryShown::Refused { repository, error } => {
             let args: Vec<(String, MsgArg)> = error.args.into_iter().collect();
             let sentence = refused_sentence(localizer, error.code, &args, error.detail.as_deref());
+            reply(Politeness::Assertive, &sentence.plain());
             view! {
                 <h4>{heading(repository)}</h4>
-                <p role="alert">{sentence_view(sentence)}</p>
+                {refusal_alert(localizer, sentence)}
             }
             .into_any()
         }
