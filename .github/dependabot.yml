@@ -7,7 +7,7 @@ updates:
   # be a week old before it is proposed, so a compromised release that is
   # pulled within days never reaches a pull request. These pull requests edit
   # `.github/`, so the maintainer merges them. The local composite
-  # actions pin actions too (the mbx build cache is in rust-cache), and a
+  # actions pin actions too (the mbx build cache is in setup-rust), and a
   # `directory` of `/` reaches only the workflows and a root action.yml.
   - package-ecosystem: github-actions
     directories:
