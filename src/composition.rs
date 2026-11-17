@@ -1266,7 +1266,7 @@ fn recovery_refused(database: &std::path::Path, error: &app::ports::StoreError) 
 }
 
 /// A configuration the daemon cannot use, as the message for whoever wrote it.
-fn config_refused(error: ConfigError) -> Refused {
+pub(crate) fn config_refused(error: ConfigError) -> Refused {
     fn refused(message: MessageId, args: Vec<(&'static str, MsgArg)>) -> Refused {
         Refused { message, args }
     }

@@ -9,16 +9,98 @@
 //! holds is dropped as soon as it is read (I4). What was read goes to
 //! stdout; what couldn't be, to stderr, and it then ends with 1.
 
-use std::io::{self, Write};
+use std::io::{self, Read as _, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
-use app::keyring_check::KeyringCheck;
-use l10n::Localizer;
+use api::MsgArg;
+use app::keyring_check::{KeyringCheck, check_keyring_entries};
+use app::ports::ConfigError;
+use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
+use domain::planning::AgentConfig;
+use l10n::{Localizer, msg};
+use platform::dirs;
+
+use crate::{finish, said, say, text};
 
 /// Reads the keyring entries and says what came of each.
 pub(crate) fn check_keyring(plain: bool) -> ExitCode {
-    let _ = plain;
-    todo!()
+    // Core dumps and debugger attach are off before any secret is read.
+    let localizer = crate::start_protected(plain, None);
+    finish(&localizer, run(&localizer))
+}
+
+fn run(localizer: &Localizer) -> io::Result<ExitCode> {
+    let Some(folder) = dirs::config_dir() else {
+        say(localizer, msg::CLI_NO_CONFIG_DIR, &[])?;
+        return Ok(ExitCode::FAILURE);
+    };
+    let config = match read_config(&folder.join("config.toml")) {
+        Ok(config) => config,
+        Err(error) => {
+            let refused = crate::composition::config_refused(error);
+            say(localizer, refused.message, &refused.args)?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            say(
+                localizer,
+                msg::CLI_CANNOT_START_RUNTIME,
+                &[("detail", text(error))],
+            )?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    let checked = runtime.block_on(check_keyring_entries(
+        &config,
+        &secrets::SystemSecrets::new(),
+    ));
+    report(
+        localizer,
+        &checked,
+        &mut io::stdout().lock(),
+        &mut io::stderr().lock(),
+    )
+}
+
+/// The configuration in `file`, only read, never migrated: a daemon may be
+/// running on it, and only the one that holds the data folder's lock may
+/// rewrite it. No file is a configuration with no repository.
+fn read_config(file: &Path) -> Result<AgentConfig, ConfigError> {
+    let shown = file.display().to_string();
+    let opened = match std::fs::File::open(file) {
+        Ok(opened) => opened,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(AgentConfig::default());
+        }
+        Err(error) => {
+            return Err(ConfigError::Unavailable {
+                file: shown,
+                detail: error.to_string(),
+            });
+        }
+    };
+    let mut contents = String::new();
+    opened
+        .take(MAX_CONFIG_BYTES.saturating_add(1))
+        .read_to_string(&mut contents)
+        .map_err(|error| ConfigError::Unavailable {
+            file: shown.clone(),
+            detail: error.to_string(),
+        })?;
+    if u64::try_from(contents.len()).unwrap_or(u64::MAX) > MAX_CONFIG_BYTES {
+        return Err(ConfigError::TooLarge {
+            file: shown,
+            limit: MAX_CONFIG_BYTES,
+        });
+    }
+    parse(file, &contents, &Schemas::production()).map(|parsed| parsed.config)
 }
 
 /// Says what `checked` came to: each entry read on `out`, each refused on
@@ -29,8 +111,36 @@ fn report(
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> io::Result<ExitCode> {
-    let _ = (localizer, checked, out, err);
-    todo!()
+    if checked.reads.is_empty() {
+        out.write_all(said(localizer, msg::CLI_CHECK_KEYRING_NONE, &[]).as_bytes())?;
+    }
+    for read in &checked.reads {
+        let repository = ("repository", text(read.repository.as_str()));
+        let entry = ("entry", text(&read.entry));
+        match &read.refused {
+            None => out.write_all(
+                said(localizer, msg::CLI_CHECK_KEYRING_READ, &[repository, entry]).as_bytes(),
+            )?,
+            Some(refusal) => {
+                let (code, args, detail) = app::announce::refused("password", refusal);
+                let reason = localizer.error(code, &args, detail.as_deref());
+                let args = [
+                    repository,
+                    entry,
+                    ("code", MsgArg::Text(refusal.code().to_owned())),
+                    ("reason", text(reason)),
+                ];
+                err.write_all(said(localizer, msg::CLI_CHECK_KEYRING_REFUSED, &args).as_bytes())?;
+            }
+        }
+    }
+    out.flush()?;
+    err.flush()?;
+    Ok(if checked.passed() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 #[cfg(test)]

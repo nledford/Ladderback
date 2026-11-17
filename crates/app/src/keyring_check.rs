@@ -10,9 +10,10 @@
 use domain::RepositoryAlias;
 use domain::execution::refusal::SettingRefusal;
 use domain::planning::AgentConfig;
-use domain::secrets::KeyringEntry;
+use domain::secrets::{KeyringEntry, Redactor, SecretRef};
 
 use crate::ports::SecretResolver;
+use crate::secrets::unresolved_refusal;
 
 /// One repository whose password is in the keyring, and whether its entry
 /// could be read.
@@ -35,7 +36,7 @@ pub struct KeyringCheck {
 impl KeyringCheck {
     /// Whether every entry was read.
     pub fn passed(&self) -> bool {
-        todo!()
+        self.reads.iter().all(|read| read.refused.is_none())
     }
 }
 
@@ -45,6 +46,32 @@ pub async fn check_keyring_entries(
     config: &AgentConfig,
     secrets: &dyn SecretResolver,
 ) -> KeyringCheck {
-    let _ = (config, secrets);
-    todo!()
+    // Nothing was read, so there is no secret to mask.
+    let redactor = Redactor::new([]);
+    let mut read: Vec<(KeyringEntry, Option<SettingRefusal>)> = Vec::new();
+    let mut reads = Vec::new();
+    for (alias, repository) in config.repositories() {
+        let SecretRef::Keyring(entry) = &repository.settings.password else {
+            continue;
+        };
+        let refused = match read.iter().find(|(seen, _)| seen == entry) {
+            Some((_, refused)) => refused.clone(),
+            None => {
+                // The value is dropped here, unread by anything.
+                let refused = secrets
+                    .resolve(&repository.settings.password)
+                    .await
+                    .err()
+                    .map(|error| unresolved_refusal(&error, &redactor));
+                read.push((entry.clone(), refused.clone()));
+                refused
+            }
+        };
+        reads.push(KeyringRead {
+            repository: alias.clone(),
+            entry: entry.clone(),
+            refused,
+        });
+    }
+    KeyringCheck { reads }
 }
