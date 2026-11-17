@@ -885,8 +885,21 @@ fn digest_of(key: u8, proposal: u8, repositories: &[(&str, ForgetComparison)]) -
     )
 }
 
+/// `side` with the plan `name` forgetting the snapshots `remove` too.
+fn and_plan(side: ForgetSide, name: &str, remove: &[u8]) -> ForgetSide {
+    let ForgetSide::Forgets(mut preview) = side else {
+        panic!("only a side that forgets takes another plan");
+    };
+    preview.plans.push(PlanForget {
+        plan: id(name),
+        total: remove.len(),
+        remove: remove.iter().map(|n| snapshot(*n)).collect(),
+    });
+    ForgetSide::Forgets(preview)
+}
+
 #[test]
-fn a_forget_digest_binds_the_key_the_proposal_and_what_each_side_would_forget() {
+fn a_forget_digest_binds_the_key_the_proposal_and_the_snapshots_whose_fate_it_changes() {
     let shown = || {
         vec![(
             "nas",
@@ -905,11 +918,6 @@ fn a_forget_digest_binds_the_key_the_proposal_and_what_each_side_would_forget() 
     let with = |before: ForgetSide, after: ForgetSide| {
         digest_of(3, 7, &[("nas", compared(before, after))])
     };
-    let keeps_nothing = |name: &str| ForgetSide::KeepsNothing { plan: id(name) };
-    let mut left_alone = forgets("home", 4, &[1, 2, 3]);
-    if let ForgetSide::Forgets(preview) = &mut left_alone {
-        preview.left_alone.orphaned.snapshots = 9;
-    }
     let others = [
         other("another daemon start", digest_of(4, 7, &shown())),
         other("another proposal", digest_of(3, 8, &shown())),
@@ -918,12 +926,16 @@ fn a_forget_digest_binds_the_key_the_proposal_and_what_each_side_would_forget() 
             digest_of(3, 7, &[("usb", shown().remove(0).1)]),
         ),
         other(
-            "a new snapshot",
-            with(forgets("home", 5, &[1]), forgets("home", 5, &[1, 2, 3])),
-        ),
-        other(
             "another snapshot forgotten",
             with(forgets("home", 4, &[1]), forgets("home", 4, &[1, 2, 4])),
+        ),
+        other(
+            "a snapshot more forgotten",
+            with(forgets("home", 4, &[1]), forgets("home", 4, &[1, 2, 3, 4])),
+        ),
+        other(
+            "a snapshot forgotten now and no longer after",
+            with(forgets("home", 4, &[1, 4]), forgets("home", 4, &[1, 2, 3])),
         ),
         other(
             "another plan",
@@ -936,14 +948,6 @@ fn a_forget_digest_binds_the_key_the_proposal_and_what_each_side_would_forget() 
         other(
             "not maintained after",
             with(forgets("home", 4, &[1]), ForgetSide::NotMaintained),
-        ),
-        other(
-            "refused after",
-            with(forgets("home", 4, &[1]), keeps_nothing("home")),
-        ),
-        other(
-            "refused after for another plan",
-            with(forgets("home", 4, &[1]), keeps_nothing("photos")),
         ),
         other(
             "a second repository",
@@ -973,11 +977,52 @@ fn a_forget_digest_binds_the_key_the_proposal_and_what_each_side_would_forget() 
                 ],
             ),
         ),
-        other(
+    ];
+    let distinct: std::collections::BTreeSet<&String> = others.iter().collect();
+    assert_eq!(distinct.len(), others.len(), "{others:?}");
+
+    // What the proposal doesn't change the fate of is no part of it.
+    let mut left_alone = forgets("home", 4, &[1, 2, 3]);
+    if let ForgetSide::Forgets(preview) = &mut left_alone {
+        preview.left_alone.orphaned.snapshots = 9;
+    }
+    let same = [
+        (
+            "a new snapshot neither side forgets",
+            with(forgets("home", 5, &[1]), forgets("home", 5, &[1, 2, 3])),
+        ),
+        (
+            "a snapshot both sides forget",
+            with(
+                forgets("home", 5, &[1, 5]),
+                forgets("home", 5, &[1, 2, 3, 5]),
+            ),
+        ),
+        (
+            "another plan's snapshot both sides forget",
+            with(
+                and_plan(forgets("home", 4, &[1]), "photos", &[6]),
+                and_plan(forgets("home", 4, &[1, 2, 3]), "photos", &[6]),
+            ),
+        ),
+        (
+            "the snapshots listed in another order",
+            with(forgets("home", 4, &[1]), forgets("home", 4, &[3, 1, 2])),
+        ),
+        (
             "a snapshot more left alone",
             with(forgets("home", 4, &[1]), left_alone),
         ),
     ];
-    let distinct: std::collections::BTreeSet<&String> = others.iter().collect();
-    assert_eq!(distinct.len(), others.len(), "{others:?}");
+    for (label, same) in same {
+        assert_eq!(digest, same, "{label}");
+    }
+    assert_eq!(
+        with(forgets("home", 4, &[1]), ForgetSide::NotMaintained),
+        with(
+            forgets("home", 4, &[1]),
+            ForgetSide::KeepsNothing { plan: id("home") }
+        ),
+        "after, nothing forgotten either way",
+    );
 }

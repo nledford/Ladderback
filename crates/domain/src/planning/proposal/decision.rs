@@ -3,11 +3,13 @@
 //! its changes, the warnings it sends back, what an approval is bound to,
 //! a rejection's reasons, and how often a proposer may propose.
 
+use std::collections::BTreeSet;
+
 use jiff::{SignedDuration, Timestamp};
 use subtle::ConstantTimeEq as _;
 
 use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex, sha256_hex_of};
-use crate::maintenance::{ForgetComparison, ForgetSide, LeftAlone};
+use crate::maintenance::{ForgetComparison, PlanForget};
 use crate::planning::{AgentConfig, Plan, Source};
 use crate::{PlanId, RepositoryAlias};
 
@@ -237,13 +239,16 @@ pub struct Shown {
 /// The forget preview a person was shown of a proposal (decision 89, point
 /// 8), as the page holds it: the SHA-256, in lower-case hex, of the
 /// daemon's [`RevisionKey`] followed by the proposal's ID and, for each
-/// repository in the order the preview names them, its alias and each side
-/// as the preview shows it: whether it forgets, and if it does, per plan its
-/// ID, how many snapshots it owns and the IDs it would forget, and the
-/// groups and snapshots it leaves alone. An approval of a proposal that
-/// could delete snapshots holds only while a preview read again gives the
-/// same digest. Keyed, so only a preview this daemon answered since it
-/// started gives one, and compared in constant time.
+/// repository in the order the preview names them, its alias and the
+/// snapshots whose fate the proposal changes, as the preview's difference
+/// shows them: each plan's IDs only the proposal would forget, then each
+/// plan's IDs it would no longer forget. What the proposal leaves as it is, a snapshot
+/// neither side forgets or both do, a plan's count of snapshots, what is
+/// left alone, is no part of it, so a backup that changes none of those
+/// sets leaves an approval standing. An approval of a proposal that could
+/// delete snapshots holds only while a preview read again gives the same
+/// digest. Keyed, so only a preview this daemon answered since it started
+/// gives one, and compared in constant time.
 #[derive(Clone, Debug)]
 pub struct ForgetDigest(String);
 
@@ -255,16 +260,16 @@ impl ForgetDigest {
         proposal: &ProposalId,
         repositories: impl IntoIterator<Item = (&'a RepositoryAlias, &'a ForgetComparison)>,
     ) -> Self {
-        // Each text ends in a newline no ID or alias holds, and each count
-        // is written whole, so no two previews write the same bytes.
+        // Each line ends in a newline no ID or alias holds, and opens with
+        // a word that says what it is, so no two previews write the same
+        // bytes.
         let mut text = format!("{}\n", proposal.as_str());
         for (alias, comparison) in repositories {
             text.push_str("repository ");
             text.push_str(alias.as_str());
             text.push('\n');
-            for side in [&comparison.before, &comparison.after] {
-                write_side(&mut text, side);
-            }
+            write_fates(&mut text, "more", &comparison.forgets_more());
+            write_fates(&mut text, "less", &comparison.forgets_less());
         }
         Self(sha256_hex_of(&[&key.0, text.as_bytes()]))
     }
@@ -279,31 +284,26 @@ impl ForgetDigest {
     }
 }
 
-/// Writes `side` to `text` for [`ForgetDigest::of`], line by line.
-fn write_side(text: &mut String, side: &ForgetSide) {
-    use std::fmt::Write as _;
-    // Writing to a `String` can't fail.
-    let _ = match side {
-        ForgetSide::NotMaintained => writeln!(text, "not-maintained"),
-        ForgetSide::KeepsNothing { plan } => writeln!(text, "keeps-nothing {}", plan.as_str()),
-        ForgetSide::Forgets(preview) => {
-            for plan in &preview.plans {
-                let _ = writeln!(text, "plan {} {}", plan.plan.as_str(), plan.total);
-                for snapshot in &plan.remove {
-                    let _ = writeln!(text, "remove {}", snapshot.id.as_str());
-                }
-            }
-            let LeftAlone {
-                orphaned,
-                unmanaged,
-            } = preview.left_alone;
-            writeln!(
-                text,
-                "left-alone {} {} {} {}",
-                orphaned.groups, orphaned.snapshots, unmanaged.groups, unmanaged.snapshots
-            )
+/// Writes `plans`, a side of a forget preview's difference, to `text` for
+/// [`ForgetDigest::of`] under `label`: per plan its ID, then its snapshots'
+/// IDs in order, however the repository listed them.
+fn write_fates(text: &mut String, label: &str, plans: &[PlanForget]) {
+    for plan in plans {
+        text.push_str(label);
+        text.push(' ');
+        text.push_str(plan.plan.as_str());
+        text.push('\n');
+        let ids: BTreeSet<&str> = plan
+            .remove
+            .iter()
+            .map(|snapshot| snapshot.id.as_str())
+            .collect();
+        for id in ids {
+            text.push_str("snapshot ");
+            text.push_str(id);
+            text.push('\n');
         }
-    };
+    }
 }
 
 impl PartialEq for ForgetDigest {

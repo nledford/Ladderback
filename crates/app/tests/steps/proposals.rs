@@ -123,9 +123,7 @@ pub(crate) fn proposals(agent: &Agent) -> Proposals {
         events: agent.proposals.events.clone(),
         clock: agent.clock.clone(),
         random: agent.proposals.random.clone(),
-        revision_key: Ok(domain::planning::RevisionKey::new(
-            [5; domain::planning::REVISION_KEY_BYTES],
-        )),
+        revision_key: Ok(scenario_key()),
     })
 }
 
@@ -1130,8 +1128,7 @@ async fn approves_with_another_preview(agent: &mut Agent) {
 async fn backed_up_since(agent: &mut Agent, name: String, count: u64) {
     agent
         .forget
-        .snapshots(count, Some((name, super::forget_steps::self_agent())))
-        .await;
+        .backed_up(count, &name, &super::forget_steps::self_agent());
 }
 
 #[when(

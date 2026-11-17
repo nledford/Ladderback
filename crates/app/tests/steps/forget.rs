@@ -362,6 +362,19 @@ impl ForgetWorld {
         self.snapshots_of_folder(count, plan, "/home/demo").await;
     }
 
+    /// Adds `count` snapshots of the plan `plan` of `agent`, as backups
+    /// taken since do: each newer than every snapshot the repository holds.
+    pub fn backed_up(&mut self, count: u64, plan: &str, agent: &AgentId) {
+        let tags = [
+            format!("{PLAN_TAG_PREFIX}{plan}"),
+            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+        ];
+        for _ in 0..count {
+            let time = at(i64::try_from((self.made + 1) * 3_600).expect("an hour"));
+            self.snapshot_at(time, &tags, "/home/demo", MACHINE);
+        }
+    }
+
     /// Adds `count` snapshots of `folder`, tagged as the plan's or none at
     /// all. The first added is the newest.
     pub async fn snapshots_of_folder(
