@@ -2132,7 +2132,8 @@ Then("the link {string} wraps onto more than one line", async function (this: Br
 // logging demoSection(page, name).ariaSnapshot() and pasting it here.
 const SNAPSHOTS: Record<string, string> = {
   Dialog: `- heading "Dialog" [level=2]
-- button "Open the demo dialog"`,
+- button "Open the demo dialog"
+- button "Open the demo warning"`,
   Table: `- heading "Table" [level=2]
 - group "Demo table shows":
   - text: Demo table shows
