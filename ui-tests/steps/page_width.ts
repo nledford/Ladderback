@@ -86,7 +86,10 @@ Then("the table {string} is at least {int} pixels wide", async function (this: B
 
 // A readable line length: each paragraph's and each form's text runs no wider
 // than `limit` characters of its own font, measured as CSS measures them, by
-// the width of "0" (`ch`): a probe 1ch wide, placed in the element, gives it.
+// the width of "0" (`ch`): a probe `limit`ch wide, placed in the element, gives
+// it. One probe of the whole measure, not `limit` times a 1ch probe: layout
+// snaps a box's width to a fraction of a pixel, and multiplying a snapped 1ch
+// by 70 can miss `max-inline-size: 70ch` by more than a pixel.
 Then(
   "no paragraph or form of the main content is wider than {int} characters",
   async function (this: BrowserWorld, limit: number) {
@@ -95,17 +98,17 @@ Then(
       for (const element of main.querySelectorAll<HTMLElement>("p, form")) {
         if (element.getClientRects().length === 0) continue;
         const probe = document.createElement("span");
-        probe.style.cssText = "position: absolute; inline-size: 1ch; block-size: 0; visibility: hidden";
+        probe.style.cssText = `position: absolute; inline-size: ${limit}ch; block-size: 0; visibility: hidden`;
         element.append(probe);
-        const ch = probe.getBoundingClientRect().width;
+        const measure = probe.getBoundingClientRect().width;
         probe.remove();
         const style = getComputedStyle(element);
         const edges = ["padding-inline-start", "padding-inline-end", "border-inline-start-width", "border-inline-end-width"]
           .map((property) => Number.parseFloat(style.getPropertyValue(property)) || 0)
           .reduce((sum, width) => sum + width, 0);
         const inner = element.getBoundingClientRect().width - edges;
-        if (inner > limit * ch + 0.5) {
-          wide.push(`<${element.localName}> "${(element.textContent ?? "").trim().slice(0, 40)}…" is ${Math.round(inner / ch)} characters wide`);
+        if (inner > measure + 0.5) {
+          wide.push(`<${element.localName}> "${(element.textContent ?? "").trim().slice(0, 40)}…" is ${(inner / (measure / limit)).toFixed(2)} characters wide`);
         }
       }
       return wide;
