@@ -106,16 +106,23 @@ Feature: Update the service from a checkout without interrupting an operation
   Rule: It reads the keyring entries with the new program before it restarts
 
     On macOS the keychain asks once for each new build before it lets the
-    build read a `password-keyring` entry. The new program reads each entry
-    once (`ladderback check-keyring`), in the terminal, before the wait and
-    the restart, so the keychain asks while someone is there and not at the
-    next scheduled backup.
+    build read a keyring entry. The new program reads each entry once
+    (`ladderback check-keyring`), in the terminal, before the wait and the
+    restart, so the keychain asks while someone is there and not at the
+    next scheduled backup or notification.
 
     Scenario: The new program reads the keyring entries before the service restarts
       When the owner runs install-restart
       Then the command exits with status 0
       And the installed program read the keyring entries before the service was restarted
-      And standard output says "no repository reads its password from the keyring"
+      And standard output says "no repository or notification channel takes a secret from the keyring"
+
+    Scenario: The keyring entries are read before the wait for a busy daemon
+      Given the operation log shows a backup running
+      When the owner runs install-restart with "--wait 0"
+      Then the command exits with status 1
+      And the installed program read the keyring entries
+      And the installed program never restarted the service
 
     Scenario: A keyring entry the new program can't read stops it before the restart
       Given the installed program can't read a keyring entry

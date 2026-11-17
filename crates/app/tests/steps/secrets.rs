@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use app::execution::RunOperation;
 use app::fakes::{FakeClock, FakeSecrets, Script};
-use app::keyring_check::{KeyringCheck, check_keyring_entries};
+use app::keyring_check::{KeyringCheck, KeyringRead, KeyringUser, check_keyring_entries};
 use app::ports::Clock;
 use app::retry::{RunEnd, RunOutcome};
 use app::secrets::ResolvedRepository;
@@ -14,6 +14,7 @@ use app::secrets::{Cause, Field, KeyringWait, ResolveError, ResolveRepository};
 use cucumber::{given, then, when};
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{FailureReason, OperationStatus, Target, Trigger};
+use domain::notifications::{Auth, Channel, ChannelKind, ChannelName, Notifications};
 use domain::planning::{GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings};
 use domain::secrets::{
     CommandLine, FileRead, KeyringCause, KeyringEntry, MAX_MASKED_BYTES, MAX_SECRET_BYTES, Problem,
@@ -40,6 +41,8 @@ pub struct SecretsWorld {
     stopped_at: Option<Timestamp>,
     /// The repositories whose keyring entries a check reads, by alias.
     checked_repositories: std::collections::BTreeMap<RepositoryAlias, RepositoryConfig>,
+    /// The notification channels whose keyring entries a check reads.
+    checked_channels: std::collections::BTreeMap<ChannelName, Channel>,
     /// What the check of the keyring entries came to.
     keyring_check: Option<KeyringCheck>,
 }
@@ -63,6 +66,7 @@ impl Default for SecretsWorld {
             waited: Arc::default(),
             stopped_at: None,
             checked_repositories: Default::default(),
+            checked_channels: Default::default(),
             keyring_check: None,
         }
     }
@@ -1138,17 +1142,26 @@ impl SecretsWorld {
     }
 
     /// What the check reported of the repository `name`.
-    fn read_of(&self, name: &str) -> &app::keyring_check::KeyringRead {
-        self.keyring_check()
+    fn read_of(&self, name: &str) -> &KeyringRead {
+        let repository = RepositoryAlias::parse(name).expect("the scenario's alias is valid");
+        self.reported(|read| read.user == KeyringUser::Repository(repository.clone()))
+    }
+
+    /// What the check reported of the channel `name`'s entry `entry`.
+    fn channel_read_of(&self, name: &str, entry: &str) -> &KeyringRead {
+        let channel = ChannelName::parse(name).expect("the scenario's channel is valid");
+        self.reported(|read| {
+            read.user == KeyringUser::Channel(channel.clone()) && read.entry.to_string() == entry
+        })
+    }
+
+    fn reported(&self, which: impl Fn(&KeyringRead) -> bool) -> &KeyringRead {
+        let check = self.keyring_check();
+        check
             .reads
             .iter()
-            .find(|read| read.repository.as_str() == name)
-            .unwrap_or_else(|| {
-                panic!(
-                    "the check reported nothing of {name:?}: {:?}",
-                    self.keyring_check()
-                )
-            })
+            .find(|read| which(read))
+            .unwrap_or_else(|| panic!("the check reported no such read: {check:?}"))
     }
 }
 
@@ -1176,6 +1189,30 @@ fn repository_from_file(agent: &mut Agent, name: String, path: String) {
         .checked_repository(&name, SecretRef::File { path, read });
 }
 
+#[given(
+    expr = "the notification channel {string} takes its address from the keyring entry {string} and its token from the keyring entry {string}"
+)]
+fn channel_in_keyring(agent: &mut Agent, name: String, address: String, token: String) {
+    let entry = |text: &str| KeyringEntry::parse(text).expect("the scenario's entry is valid");
+    let channel = Channel::new(
+        ChannelKind::Ntfy,
+        SecretRef::Keyring(entry(&address)),
+        Some(Auth::Bearer(SecretRef::Keyring(entry(&token)))),
+    )
+    .expect("the scenario's channel is valid");
+    let name = ChannelName::parse(&name).expect("the scenario's channel is valid");
+    agent.secrets.checked_channels.insert(name, channel);
+}
+
+#[given(expr = "the notification channel {string} takes its address from the command {string}")]
+fn channel_from_command(agent: &mut Agent, name: String, command: String) {
+    let command = agent.secrets.command(&command);
+    let channel = Channel::new(ChannelKind::Webhook, SecretRef::Command(command), None)
+        .expect("the scenario's channel is valid");
+    let name = ChannelName::parse(&name).expect("the scenario's channel is valid");
+    agent.secrets.checked_channels.insert(name, channel);
+}
+
 #[given(expr = "the keyring has no entry {string}")]
 fn keyring_has_no_entry(_agent: &mut Agent, _entry: String) {
     // The keyring holds nothing until a scenario puts an entry in it.
@@ -1183,12 +1220,16 @@ fn keyring_has_no_entry(_agent: &mut Agent, _entry: String) {
 
 #[when("the keyring entries are checked")]
 async fn check_entries(agent: &mut Agent) {
+    let notifications =
+        Notifications::new(agent.secrets.checked_channels.clone(), Default::default())
+            .expect("the scenario's channels are valid");
     let config = domain::planning::AgentConfig::new(
         domain::planning::AgentSettings::default(),
         Hooks::default(),
         agent.secrets.checked_repositories.clone(),
         Vec::new(),
     )
+    .and_then(|config| config.with_notifications(notifications))
     .expect("the scenario's configuration is valid");
     agent.secrets.keyring_check =
         Some(check_keyring_entries(&config, agent.secrets.store.as_ref()).await);
@@ -1211,14 +1252,37 @@ fn check_reports_refused(agent: &mut Agent, name: String, code: String) {
     assert_eq!(refused.code(), code, "{refused:?}");
 }
 
+#[then(
+    expr = "the check reports the notification channel {string} and its keyring entry {string} read"
+)]
+fn check_reports_channel_read(agent: &mut Agent, name: String, entry: String) {
+    let read = agent.secrets.channel_read_of(&name, &entry);
+    assert_eq!(read.refused, None, "{read:?}");
+}
+
+#[then(
+    expr = "the check reports the notification channel {string} and its keyring entry {string} refused with {string}"
+)]
+fn check_reports_channel_refused(agent: &mut Agent, name: String, entry: String, code: String) {
+    let read = agent.secrets.channel_read_of(&name, &entry);
+    let refused = read
+        .refused
+        .as_ref()
+        .unwrap_or_else(|| panic!("{entry:?} was read: {read:?}"));
+    assert_eq!(refused.code(), code, "{refused:?}");
+}
+
 #[then(expr = "the check reports the repositories {string} alone")]
 fn check_reports_alone(agent: &mut Agent, names: String) {
-    let reported: Vec<&str> = agent
+    let reported: Vec<String> = agent
         .secrets
         .keyring_check()
         .reads
         .iter()
-        .map(|read| read.repository.as_str())
+        .map(|read| match &read.user {
+            KeyringUser::Repository(alias) => alias.as_str().to_owned(),
+            KeyringUser::Channel(name) => format!("channel {}", name.as_str()),
+        })
         .collect();
     assert_eq!(reported, names.split(", ").collect::<Vec<_>>());
 }

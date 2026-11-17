@@ -3,31 +3,44 @@
 //! the keychain asks once for each new build of the program before it lets
 //! that build read an entry; `ladderback check-keyring` reads them with the
 //! program that runs it, so the question comes at the terminal and not at
-//! the next backup nobody watches. Only `password-keyring` entries are
-//! read: no other source asks, and a `password-command` is never run. What
-//! an entry holds is dropped as soon as it is read, and never reported.
+//! the next backup or notification nobody watches. Only keyring entries
+//! are read, a repository's password and a notification channel's address,
+//! token or password: no other source asks, and a command is never run.
+//! What an entry holds is dropped as soon as it is read, and never reported.
 
 use domain::RepositoryAlias;
 use domain::execution::refusal::SettingRefusal;
+use domain::notifications::ChannelName;
 use domain::planning::AgentConfig;
 use domain::secrets::{KeyringEntry, Redactor, SecretRef};
 
 use crate::ports::SecretResolver;
 use crate::secrets::unresolved_refusal;
 
-/// One repository whose password is in the keyring, and whether its entry
-/// could be read.
+/// What takes a secret from a keyring entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeyringUser {
+    /// A repository, its password.
+    Repository(RepositoryAlias),
+    /// A notification channel, its address, its token or its password.
+    Channel(ChannelName),
+}
+
+/// One keyring entry a repository or a channel takes a secret from, and
+/// whether it could be read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyringRead {
-    pub repository: RepositoryAlias,
+    pub user: KeyringUser,
     pub entry: KeyringEntry,
     /// `None` when the entry was read; otherwise why it couldn't be, as a
-    /// run of the repository would be refused.
+    /// run of a repository would be refused.
     pub refused: Option<SettingRefusal>,
 }
 
 /// What a check of the keyring entries came to: one read for each
-/// repository whose password is in the keyring, in the aliases' order.
+/// repository whose password is in the keyring, in the aliases' order, then
+/// one for each keyring entry of a channel, in the channels' order, its
+/// address first.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeyringCheck {
     pub reads: Vec<KeyringRead>,
@@ -68,7 +81,7 @@ pub async fn check_keyring_entries(
             }
         };
         reads.push(KeyringRead {
-            repository: alias.clone(),
+            user: KeyringUser::Repository(alias.clone()),
             entry: entry.clone(),
             refused,
         });

@@ -14,7 +14,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use api::MsgArg;
-use app::keyring_check::{KeyringCheck, check_keyring_entries};
+use app::keyring_check::{KeyringCheck, KeyringUser, check_keyring_entries};
 use app::ports::ConfigError;
 use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
 use domain::planning::AgentConfig;
@@ -115,7 +115,10 @@ fn report(
         out.write_all(said(localizer, msg::CLI_CHECK_KEYRING_NONE, &[]).as_bytes())?;
     }
     for read in &checked.reads {
-        let repository = ("repository", text(read.repository.as_str()));
+        let repository = match &read.user {
+            KeyringUser::Repository(alias) => ("repository", text(alias.as_str())),
+            KeyringUser::Channel(_) => todo!(),
+        };
         let entry = ("entry", text(&read.entry));
         match &read.refused {
             None => out.write_all(
@@ -148,9 +151,10 @@ mod tests {
     use std::sync::Arc;
 
     use app::fakes::FakeSecrets;
-    use app::keyring_check::{KeyringRead, check_keyring_entries};
+    use app::keyring_check::{KeyringRead, KeyringUser, check_keyring_entries};
     use domain::RepositoryAlias;
     use domain::execution::refusal::SettingRefusal;
+    use domain::notifications::ChannelName;
     use domain::planning::{
         AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig,
         RepositorySettings,
@@ -165,7 +169,19 @@ mod tests {
 
     fn read(alias: &str, entry_text: &str, refused: Option<SettingRefusal>) -> KeyringRead {
         KeyringRead {
-            repository: RepositoryAlias::parse(alias).expect("an alias"),
+            user: KeyringUser::Repository(RepositoryAlias::parse(alias).expect("an alias")),
+            entry: entry(entry_text),
+            refused,
+        }
+    }
+
+    fn channel_read(
+        channel: &str,
+        entry_text: &str,
+        refused: Option<SettingRefusal>,
+    ) -> KeyringRead {
+        KeyringRead {
+            user: KeyringUser::Channel(ChannelName::parse(channel).expect("a channel name")),
             entry: entry(entry_text),
             refused,
         }
@@ -224,8 +240,45 @@ mod tests {
         );
         assert!(err.contains("(secret-keyring-unavailable)"), "{err:?}");
         // The refusal's own message, with what the platform said.
-        assert!(err.contains("could not read the keyring entry"), "{err:?}");
+        assert!(err.contains("no keyring service it can use"), "{err:?}");
         assert!(err.contains("the keychain said no"), "{err:?}");
+        assert_eq!(err.lines().count(), 1, "{err:?}");
+        assert_eq!(status, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn a_channels_entries_are_said_by_the_channel_and_entry() {
+        let checked = KeyringCheck {
+            reads: vec![
+                channel_read("alerts", "ladderback/alerts", None),
+                channel_read(
+                    "alerts",
+                    "ladderback/alerts-token",
+                    Some(SettingRefusal::SecretMissing {
+                        source: "ladderback/alerts-token".to_owned(),
+                    }),
+                ),
+            ],
+        };
+        let (out, err, status) = reported(&checked);
+        assert!(
+            out.starts_with("ladderback: notification channel"),
+            "{out:?}"
+        );
+        assert!(out.contains("alerts"), "{out:?}");
+        assert!(out.contains(": read the keyring entry"), "{out:?}");
+        assert!(out.contains("ladderback/alerts"), "{out:?}");
+        assert_eq!(out.lines().count(), 1, "{out:?}");
+        assert!(
+            err.starts_with("ladderback: notification channel"),
+            "{err:?}"
+        );
+        assert!(
+            err.contains(": could not read the keyring entry"),
+            "{err:?}"
+        );
+        assert!(err.contains("ladderback/alerts-token"), "{err:?}");
+        assert!(err.contains("(secret-missing)"), "{err:?}");
         assert_eq!(err.lines().count(), 1, "{err:?}");
         assert_eq!(status, ExitCode::FAILURE);
     }
@@ -234,7 +287,7 @@ mod tests {
     fn a_configuration_with_no_keyring_entry_says_there_is_nothing_to_read() {
         let (out, err, status) = reported(&KeyringCheck::default());
         assert!(
-            out.contains("no repository reads its password from the keyring"),
+            out.contains("no repository or notification channel takes a secret from the keyring"),
             "{out:?}"
         );
         assert_eq!(err, "");

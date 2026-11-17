@@ -1,15 +1,15 @@
 Feature: Reading each keyring entry once, while someone is there
   On macOS the keychain asks once for each new build of the program before
-  it lets that build read a `password-keyring` entry, so after a rebuild
-  the first read waits for an answer, and at a scheduled backup nobody may
-  be there to give it (#892). `ladderback check-keyring` reads, with the
-  program that runs it, each keyring entry the configuration's repositories
-  take their password from, once, so that the keychain asks while someone
-  is at the terminal. For each repository it says the entry and whether it
-  was read, or the refusal's code; never what the entry holds. A password
-  kept anywhere else is left alone: no other source asks, and a command is
-  never run. It fails when any entry couldn't be read (technical design
-  §10.2).
+  it lets that build read a keyring entry, so after a rebuild the first
+  read waits for an answer, and at a scheduled backup or notification
+  nobody may be there to give it (#892). `ladderback check-keyring` reads,
+  with the program that runs it, each keyring entry the configuration's
+  repositories and notification channels take a secret from, once, so that
+  the keychain asks while someone is at the terminal. For each repository
+  and channel it says the entry and whether it was read, or the refusal's
+  code; never what the entry holds. A secret kept anywhere else is left
+  alone: no other source asks, and a command is never run. It fails when
+  any entry couldn't be read (technical design §10.2).
 
   Rule: Each keyring entry is read once, and only keyring entries are read
 
@@ -52,13 +52,25 @@ Feature: Reading each keyring entry once, while someone is there
       And the check reports the repository "usb" and its keyring entry "ladderback/usb" read
       And the check fails
 
-    Scenario: Passwords kept elsewhere are left alone, and no command is run
+    Scenario: Secrets kept elsewhere are left alone, and no command is run
       Given the keyring holds "CANARY-nas-password" under "ladderback/nas"
       And the repository "usb" takes its password from the command "/usr/local/bin/demo-password"
       And the repository "cloud" takes its password from the file "/home/demo/cloud.password"
+      And the notification channel "alerts" takes its address from the command "/usr/local/bin/demo-address"
       When the keyring entries are checked
       Then the check reports the repositories "nas" alone
       And nothing but the keyring entry "ladderback/nas" was read
+
+    Scenario: A notification channel's keyring entries are read too
+      Given the keyring holds "CANARY-nas-password" under "ladderback/nas"
+      And the keyring holds "CANARY-alerts-address" under "ladderback/alerts"
+      And the notification channel "alerts" takes its address from the keyring entry "ladderback/alerts" and its token from the keyring entry "ladderback/alerts-token"
+      When the keyring entries are checked
+      Then the check reports the repository "nas" and its keyring entry "ladderback/nas" read
+      And the check reports the notification channel "alerts" and its keyring entry "ladderback/alerts" read
+      And the check reports the notification channel "alerts" and its keyring entry "ladderback/alerts-token" refused with "secret-missing"
+      And the keyring entry "ladderback/alerts" was read 1 time
+      And the check fails
 
   Rule: The command reads the configuration the daemon reads
 
@@ -70,7 +82,7 @@ Feature: Reading each keyring entry once, while someone is there
       Given a repository reads its password from a command that leaves a mark
       When the owner runs "check-keyring"
       Then the command exits with status 0
-      And standard output says "no repository reads its password from the keyring"
+      And standard output says "no repository or notification channel takes a secret from the keyring"
       And the repository's password command never ran
 
     @e2e

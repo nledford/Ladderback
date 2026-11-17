@@ -265,6 +265,15 @@ fn calls(agent: &Agent) -> Vec<String> {
         .collect()
 }
 
+#[then("the installed program read the keyring entries")]
+fn keyring_read(agent: &mut Agent) {
+    let calls = calls(agent);
+    assert!(
+        calls.iter().any(|call| call == "check-keyring"),
+        "the installed program ran {calls:?}"
+    );
+}
+
 #[then("the installed program read the keyring entries before the service was restarted")]
 fn keyring_read_before_restart(agent: &mut Agent) {
     let calls = calls(agent);
