@@ -35,13 +35,14 @@ Feature: The shared components in the gallery
   once and a resting pointer after a moment, which Escape dismisses, which
   stays while the pointer is over it, which stands on the side its control
   asks for where there is room and never covers the control, and which
-  describes the control, or shows an icon-only control's name, and a
-  link, always underlined, which goes to a page of the app without
-  reloading, says in words when it goes to another site and marks the page
-  the reader is on, and a skeleton, the still shape of content on its way,
-  which a screen reader and Tab both skip, beside the words that say the
-  wait in a region that is busy until the content takes its place, as tall
-  as it was.
+  describes the control, or shows an icon-only control's name, a link,
+  always underlined, which goes to a page of the app without reloading,
+  says in words when it goes to another site and marks the page the reader
+  is on, a skeleton, the still shape of content on its way, which a screen
+  reader and Tab both skip, beside the words that say the wait in a region
+  that is busy until the content takes its place, as tall as it was, and a
+  set of tabs, one stop for Tab, whose arrow keys follow the page's
+  direction, each panel kept as it was while another is shown.
   Every demo state a component can show (loading, empty, error, success,
   on and off) stays clear
   of accessibility violations, and each component's structure is pinned by an
@@ -423,6 +424,146 @@ Feature: The shared components in the gallery
     When I press ArrowRight
     Then the focused tree item is collapsed
 
+  Scenario: A tab list is one stop for Tab, on its selected tab, and Tab from it goes into that tab's panel
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo overview"
+    Then the tab "Demo overview" is selected and the one Tab stop of its list
+    And the tab "Demo overview" shows its panel, and every other panel of its list is drawn but hidden
+    When I press Tab
+    Then focus is on the panel of the tab "Demo overview", which the tab names
+    When I press Shift+Tab
+    Then focus is on the tab "Demo overview"
+
+  Scenario: The arrow keys move between the tabs and wrap at either end, Home and End go to the first and last, and each tab arrived at is selected
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo overview"
+    And I press ArrowRight
+    Then focus is on the tab "Demo note"
+    And the tab "Demo note" is selected and the one Tab stop of its list
+    And the tab "Demo note" shows its panel, and every other panel of its list is drawn but hidden
+    When I press ArrowRight
+    Then focus is on the tab "Demo history"
+    When I press ArrowRight
+    Then focus is on the tab "Demo overview"
+    And the tab "Demo overview" is selected and the one Tab stop of its list
+    When I press ArrowLeft
+    Then focus is on the tab "Demo history"
+    And the tab "Demo history" is selected and the one Tab stop of its list
+    When I press Home
+    Then focus is on the tab "Demo overview"
+    When I press End
+    Then focus is on the tab "Demo history"
+    And the tab "Demo history" shows its panel, and every other panel of its list is drawn but hidden
+    And the live regions stay silent
+
+  Scenario: Tabs that are chosen by hand move focus with the arrow keys, select a tab only on Enter or Space, and tell the page which tab is chosen
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo log"
+    Then the tab list of the tab "Demo log" is described by "These demo tabs are chosen with Enter or Space. The arrow keys only move between them."
+    And the demo says "Chosen demo tab: Demo log"
+    When I press ArrowRight
+    Then focus is on the tab "Demo stats"
+    And the tab "Demo log" is selected and the one Tab stop of its list
+    And the tab "Demo log" shows its panel, and every other panel of its list is drawn but hidden
+    And the demo says "Chosen demo tab: Demo log"
+    When I press Tab
+    Then focus is on the panel of the tab "Demo log", which the tab names
+    When I press Shift+Tab
+    Then focus is on the tab "Demo log"
+    When I press ArrowRight
+    And I press Enter
+    Then the tab "Demo stats" is selected and the one Tab stop of its list
+    And the tab "Demo stats" shows its panel, and every other panel of its list is drawn but hidden
+    And the demo says "Chosen demo tab: Demo stats"
+    When I press End
+    Then focus is on the tab "Demo plans"
+    And the tab "Demo stats" is selected and the one Tab stop of its list
+    And the demo says "Chosen demo tab: Demo stats"
+    When I press Space
+    Then the tab "Demo plans" is selected and the one Tab stop of its list
+    And focus is on the tab "Demo plans"
+    And the demo says "Chosen demo tab: Demo plans"
+    And the live regions stay silent
+
+  Scenario: In tabs that run right to left, the left arrow goes to the next tab and the right arrow to the one before
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "First demo tab"
+    Then the tab "Second demo tab" stands to the left of the tab "First demo tab"
+    When I press ArrowLeft
+    Then focus is on the tab "Second demo tab"
+    And the tab "Second demo tab" is selected and the one Tab stop of its list
+    When I press ArrowRight
+    Then focus is on the tab "First demo tab"
+    When I press ArrowRight
+    Then focus is on the tab "Third demo tab"
+    When I press ArrowLeft
+    Then focus is on the tab "First demo tab"
+
+  Scenario: What is typed in a panel stays while another tab is shown, and a panel holding a field is no Tab stop of its own
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the tab "Demo overview"
+    And I press ArrowRight
+    Then the panel of the tab "Demo note" is no Tab stop of its own
+    When I press Tab
+    Then focus is on the textbox "Demo note text"
+    When I type "Kept while another tab shows"
+    And I press Shift+Tab
+    Then focus is on the tab "Demo note"
+    When I press ArrowRight
+    Then the tab "Demo history" shows its panel, and every other panel of its list is drawn but hidden
+    When I press ArrowLeft
+    Then the textbox "Demo note text" still holds "Kept while another tab shows"
+
+  Scenario Outline: The selected tab is bold with a bar in Ladder Blue on the rule under the list, and the others stand on the rule, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then the tab "Demo overview" is bold, with a 3 pixel bar in --accent on the rule under its list
+    And the tab "Demo note" is in the text's weight and color, with no bar, on a 1 pixel rule in --muted
+    And the tab list of the tab "Demo overview" stands on a 1 pixel rule in --muted
+    And the tabs of the list of the tab "Demo overview" touch their neighbours on each line
+    And the "Tabs" demo has no accessibility violations
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors the selected tab keeps its weight and its bar, and the others stand on the rule, in the system's text color
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then the tab "Demo overview" is bold, with a 3 pixel bar in the system's text color on the rule under its list
+    And the tab "Demo note" is in the text's weight and color, with no bar, on a 1 pixel rule in the system's text color
+    And the tab list of the tab "Demo overview" stands on a 1 pixel rule in the system's text color
+
+  Scenario: On a small screen with larger text the tabs wrap onto more lines, every tab whole and in view on its own rule, above the list's rule
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then every tab of the list of the tab "Demo overview" shows whole inside the window, on more than one line, above the list's rule
+    And the tab "Demo overview" stands on a line above the last of its list
+    And every tab of the list of the tab "Demo overview" stands on its own rule: the selected one on a 3 pixel bar in --accent, the others on a 1 pixel rule in --muted
+    And the page doesn't scroll sideways
+
   Scenario Outline: Each component's demo states have no accessibility violations
     When I open the component gallery
     Then the "<component>" demo has no accessibility violations
@@ -440,6 +581,7 @@ Feature: The shared components in the gallery
       | Review dialog |
       | Pause control |
       | Tree        |
+      | Tabs        |
       | Shared vocabulary |
       | Spinner     |
       | Icon        |
@@ -466,6 +608,7 @@ Feature: The shared components in the gallery
       | Review dialog |
       | Pause control |
       | Tree        |
+      | Tabs        |
       | Shared vocabulary |
       | Spinner     |
       | Icon        |
