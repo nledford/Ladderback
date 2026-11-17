@@ -498,6 +498,20 @@ ui-gallery-demo-unknown-progress = Demo progress of unknown size
 # running operation is in.
 ui-gallery-demo-step-progress = Demo progress of a step
 
+# The names of the demo's progress bars, each 60% done, one for each size of
+# the shared vocabulary (Small, Medium, Large, Extra large), then one for each
+# of its tones. The size and tone names match the vocabulary demo's.
+ui-gallery-progress-small = Demo progress at the Small size
+ui-gallery-progress-medium = Demo progress at the Medium size
+ui-gallery-progress-large = Demo progress at the Large size
+ui-gallery-progress-xlarge = Demo progress at the Extra large size
+ui-gallery-progress-primary = Demo progress in the Primary tone
+ui-gallery-progress-secondary = Demo progress in the Secondary tone
+ui-gallery-progress-success = Demo progress in the Success tone
+ui-gallery-progress-warning = Demo progress in the Warning tone
+ui-gallery-progress-error = Demo progress in the Error tone
+ui-gallery-progress-inherit = Demo progress in the Inherit tone
+
 # The heading of the gallery's toast demo.
 ui-gallery-toast-heading = Toast
 

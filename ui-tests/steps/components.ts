@@ -2317,7 +2317,17 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - button "Advance the demo progress"
 - progressbar "Demo progress of unknown size": Working…
-- progressbar "Demo progress of a step": Reading the index…`,
+- progressbar "Demo progress of a step": Reading the index…
+- progressbar "Demo progress at the Small size": Backing up… 60%
+- progressbar "Demo progress at the Medium size": Backing up… 60%
+- progressbar "Demo progress at the Large size": Backing up… 60%
+- progressbar "Demo progress at the Extra large size": Backing up… 60%
+- progressbar "Demo progress in the Primary tone": Backing up… 60%
+- progressbar "Demo progress in the Secondary tone": Backing up… 60%
+- progressbar "Demo progress in the Success tone": Backing up… 60%
+- progressbar "Demo progress in the Warning tone": Backing up… 60%
+- progressbar "Demo progress in the Error tone": Backing up… 60%
+- progressbar "Demo progress in the Inherit tone": Backing up… 60%`,
   Toast: `- heading "Toast" [level=2]
 - paragraph:
   - button "Save the demo settings"`,
