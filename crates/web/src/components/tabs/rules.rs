@@ -95,7 +95,11 @@ impl Orientation {
     /// The layout a list of this orientation always shows, or `None` for
     /// `Responsive`, whose layout is the one its container's room draws.
     pub fn fixed(self) -> Option<Layout> {
-        todo!("{self:?}")
+        match self {
+            Self::Horizontal => Some(Layout::Horizontal),
+            Self::Vertical => Some(Layout::Vertical),
+            Self::Responsive => None,
+        }
     }
 }
 
@@ -113,12 +117,19 @@ impl Layout {
     /// The layout of a list drawn with the CSS `flex-direction` `drawn`, its
     /// computed value: a column is vertical, anything else a row.
     pub fn drawn(drawn: &str) -> Self {
-        todo!("{drawn}")
+        if drawn.starts_with("column") {
+            Self::Vertical
+        } else {
+            Self::Horizontal
+        }
     }
 
     /// The list's `aria-orientation`.
     pub fn aria_orientation(self) -> &'static str {
-        todo!("{self:?}")
+        match self {
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
+        }
     }
 }
 
@@ -139,10 +150,10 @@ pub fn arrival(
     direction: Direction,
     layout: Layout,
 ) -> Option<usize> {
-    let _ = layout;
-    let (next, previous) = match direction {
-        Direction::Ltr => ("ArrowRight", "ArrowLeft"),
-        Direction::Rtl => ("ArrowLeft", "ArrowRight"),
+    let (next, previous) = match (layout, direction) {
+        (Layout::Horizontal, Direction::Ltr) => ("ArrowRight", "ArrowLeft"),
+        (Layout::Horizontal, Direction::Rtl) => ("ArrowLeft", "ArrowRight"),
+        (Layout::Vertical, _) => ("ArrowDown", "ArrowUp"),
     };
     match key {
         "Home" => Some(0),
