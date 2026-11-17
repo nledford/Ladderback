@@ -308,6 +308,37 @@ ui-gallery-table-sorted-files-up = Sorted by files, fewest first.
 # Announced politely when the table demo is sorted by files, the most first.
 ui-gallery-table-sorted-files-down = Sorted by files, most first.
 
+# The heading of the gallery's link demo (§4.5): a link to a page of the
+# app, to the page it is on, to another site, inside a sentence and inside a
+# status sentence, and right to left.
+ui-gallery-link-heading = Link
+
+# The demo link to the start page, a page of the app.
+ui-gallery-link-start = Demo link to the start page
+
+# The demo link to the gallery itself, the page the reader is on.
+ui-gallery-link-here = Demo link to this page
+
+# The demo link to another site, rustic's documentation.
+ui-gallery-link-outside = Demo rustic documentation
+
+# The demo link to another site, in a line set right to left.
+ui-gallery-link-outside-rtl = Demo rustic documentation, right to left
+
+# A sentence with a link inside it; $link is the link's words
+# (ui-gallery-link-in-sentence-link).
+ui-gallery-link-in-sentence = Read { $link } before you write a demo plan.
+
+# The words of the link inside ui-gallery-link-in-sentence.
+ui-gallery-link-in-sentence-link = the demo plan format
+
+# A status sentence in the Error tone with a link inside it, drawn in the
+# sentence's color; $link is the link's words (ui-gallery-link-status-link).
+ui-gallery-link-status = The demo check failed: { $link } says why.
+
+# The words of the link inside ui-gallery-link-status.
+ui-gallery-link-status-link = the demo log
+
 # The heading of the gallery's text field demo (§4.5): every kind, size and
 # state of the shared text field.
 ui-gallery-text-field-heading = Text field
@@ -1628,6 +1659,14 @@ ui-review-adopt-caption = Snapshots adopted into plan { $plan }
 # Announced politely when the settle-poll after a start or a cancel ran out
 # of its budget without the store ever saying how the run ended.
 ui-still-waiting = Still waiting for Ladderback to say how the run ended.
+
+## The link (§4.5): what it says of itself, the same on every page.
+
+# What a link to another site says after its own words, heard by a screen
+# reader and not shown: an icon shows it. It begins with the space between
+# it and the link's words, { " " }, which a language that writes none there
+# leaves out. A whole phrase of its own, never part of the link's words.
+ui-link-outside = { " " }(goes to another site)
 
 ## The text field (§4.5): what it says of itself, the same on every page.
 

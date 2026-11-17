@@ -17,11 +17,12 @@ use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
+use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Align, Button, Checkbox, Column, Confirmation, FolderLoader, FolderPage, Footer, Icon,
-    LabelLanguage, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, Rem, ReviewDialog,
+    LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, Rem, ReviewDialog,
     Sentences, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Table, TextField,
     Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
@@ -998,6 +999,50 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             </p>
         </section>
         <section>
+            <h2>{t(msg::UI_GALLERY_LINK_HEADING)}</h2>
+            // A page of the app, and the page the reader is on, which is the
+            // current page and bold.
+            <p>
+                {demo_link(&localizer, route("/", Matching::Exact), t(msg::UI_GALLERY_LINK_START))}
+            </p>
+            <p>
+                {demo_link(
+                    &localizer,
+                    route("/_gallery", Matching::Exact),
+                    t(msg::UI_GALLERY_LINK_HERE),
+                )}
+            </p>
+            // Another site: its icon after its words, and words for a
+            // screen reader after them. Long enough to wrap at 320 px with
+            // 200 % text.
+            <p>{demo_link(&localizer, outside(RUSTIC_DOCS), t(msg::UI_GALLERY_LINK_OUTSIDE))}</p>
+            // A link inside a sentence, and one inside a status sentence in
+            // the Error tone, drawn in the sentence's color (Inherit).
+            <p>
+                {sentence_link(
+                    &localizer,
+                    route("/plans", Matching::Section),
+                    msg::UI_GALLERY_LINK_IN_SENTENCE,
+                    t(msg::UI_GALLERY_LINK_IN_SENTENCE_LINK),
+                    LinkTone::Primary,
+                )}
+            </p>
+            <p class="text-error">
+                {sentence_link(
+                    &localizer,
+                    route("/log", Matching::Section),
+                    msg::UI_GALLERY_LINK_STATUS,
+                    t(msg::UI_GALLERY_LINK_STATUS_LINK),
+                    LinkTone::Inherit,
+                )}
+            </p>
+            // Another site in a line set right to left: its icon on the
+            // words' left.
+            <p dir="rtl">
+                {demo_link(&localizer, outside(RUSTIC_DOCS), t(msg::UI_GALLERY_LINK_OUTSIDE_RTL))}
+            </p>
+        </section>
+        <section>
             <h2>{t(msg::UI_GALLERY_TEXT_FIELD_HEADING)}</h2>
             <TextField
                 id="form-field-input"
@@ -1244,6 +1289,65 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 )}
             </p>
         </section>
+    }
+}
+
+/// rustic's documentation, the demo's other site.
+const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
+
+/// A demo route. The gallery's literal paths all parse (the link's rules
+/// test their shapes); one that didn't would show no link, which the link
+/// demo's scenarios would catch.
+fn route(href: &str, matching: Matching) -> Option<Destination> {
+    Route::parse(href, matching).ok().map(Destination::Route)
+}
+
+/// A demo address on another site, which parses as [`route`]'s paths do.
+fn outside(address: &str) -> Option<Destination> {
+    Outside::parse(address).ok().map(Destination::Outside)
+}
+
+/// A demo link of its own, in its default tone.
+fn demo_link(
+    localizer: &Arc<Localizer>,
+    to: Option<Destination>,
+    words: String,
+) -> impl IntoView + use<> {
+    let localizer = Arc::clone(localizer);
+    to.map(|to| {
+        view! {
+            <Link to=to localizer=localizer>
+                {words}
+            </Link>
+        }
+    })
+}
+
+/// The sentence `message` with a link inside it, its `words` the catalog's
+/// `$link`, found between the marks the catalog puts around a placeable
+/// (`Sentence::new`), so no sentence is built from pieces.
+fn sentence_link(
+    localizer: &Arc<Localizer>,
+    to: Option<Destination>,
+    message: MessageId,
+    words: String,
+    tone: LinkTone,
+) -> impl IntoView + use<> {
+    let text = text_with(localizer, message, &[("link", MsgArg::Text(words.clone()))]);
+    let sentence = Sentence::new(&text, Some(&words));
+    match (to, sentence.detail.clone()) {
+        (Some(to), Some((words, after))) => {
+            let localizer = Arc::clone(localizer);
+            view! {
+                {sentence.before}
+                <Link to=to localizer=localizer tone=tone>
+                    {words}
+                </Link>
+                {after}
+            }
+            .into_any()
+        }
+        _ => sentence.plain().into_any(),
     }
 }
 

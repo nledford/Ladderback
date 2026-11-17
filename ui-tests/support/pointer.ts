@@ -1,7 +1,8 @@
-// Pointer moves, for the one contract a keyboard can't reach: what a resting
-// pointer shows (WCAG 1.4.13, Content on Hover or Focus). A tooltip shows
-// when the pointer rests on its control and stays while the pointer moves
-// onto it; that is pointer behaviour, so its scenarios move the pointer.
+// Pointer moves, for what a keyboard can't reach: what a resting pointer
+// shows. A tooltip shows when the pointer rests on its control and stays
+// while the pointer moves onto it (WCAG 1.4.13, Content on Hover or Focus),
+// and a link's underline grows thicker under it (§4.5); that is pointer
+// behaviour, so their scenarios move the pointer.
 // This helper only moves it and never presses: every control is still
 // reached and used by keyboard alone (support/keyboard.ts), so no journey
 // can pass by clicking (A1). `npm run lint` keeps pointer actions out of
