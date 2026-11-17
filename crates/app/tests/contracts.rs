@@ -16,7 +16,8 @@ use app::fakes::{
 };
 use app::fakes::{InMemoryConfigStore, InMemoryScheduleStore, SeededRandom};
 use app::ports::{
-    Clock, Engine, EventBus, HookOutcome, HookOutput, HookStatus, ScheduleStore, SecretResolver,
+    Clock, Engine, EventBus, HookOutcome, HookOutput, HookStatus, KeyringActivation, ScheduleStore,
+    SecretResolver,
 };
 use async_trait::async_trait;
 use domain::execution::full_disk_access::FullDiskAccess;
@@ -315,6 +316,12 @@ impl SecretsHarness for FakeSecretsHarness {
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
         let secrets = FakeSecrets::new();
         secrets.lock_keyring();
+        Arc::new(secrets)
+    }
+
+    fn keyring_activated(&self, activation: KeyringActivation) -> Arc<dyn app::ports::Keyring> {
+        let secrets = FakeSecrets::new();
+        secrets.set_keyring_activation(activation);
         Arc::new(secrets)
     }
 

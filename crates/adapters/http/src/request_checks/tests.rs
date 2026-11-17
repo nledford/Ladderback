@@ -114,6 +114,10 @@ impl crate::Repositories for NoRepositories {
     ) -> Result<(), crate::RepositoriesError> {
         Err(crate::RepositoriesError::InvalidBody)
     }
+
+    async fn notes(&self) -> api::RepositoryNotesDto {
+        api::RepositoryNotesDto::default()
+    }
 }
 
 /// Does nothing: the checks never reach a route.

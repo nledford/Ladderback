@@ -107,6 +107,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 // Logged as a process starts, never an event.
                 | WarningCode::CoreDumpsOn
                 | WarningCode::DebuggerAttachAllowed
+                // The Repositories page's note, never a worker's.
+                | WarningCode::KeyringNotActivatable
                 | WarningCode::Unknown => WarningKind::Other,
             },
             item: item.map(|item| redactor.redact_clipped(&item, TRUNCATED)),

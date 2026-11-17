@@ -50,7 +50,7 @@ pub use hooks::{
     HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,
     HookStatus, MAX_HOOK_OUTPUT_BYTES,
 };
-pub use keyring::{Kept, Keyring, KeyringError};
+pub use keyring::{Kept, Keyring, KeyringActivation, KeyringError};
 pub use notifier::{
     Credentials, DELIVERY_TIMEOUT, Destination, Message, Notification, Notifier, NotifyError,
 };
