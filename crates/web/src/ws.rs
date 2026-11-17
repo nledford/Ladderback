@@ -16,9 +16,10 @@ use crate::backend::{
     reconnect_backoff, succeeded,
 };
 use crate::maintenance::{self, Awaited, Beat, Kind, Pace, Watched};
+use crate::repositories::Sentence;
 use crate::session::{
-    Answer, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered, signed_out_all_the_same,
-    wait_ms,
+    Answer, Asked, Dismissals, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered,
+    signed_out_all_the_same, wait_ms,
 };
 use crate::visit::Visit;
 use api::{
@@ -30,7 +31,7 @@ use futures::{FutureExt, Sink, StreamExt};
 use gloo_net::http::{Request, RequestBuilder};
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::{Message, State};
-use leptos::prelude::{RwSignal, Set, Update};
+use leptos::prelude::{GetUntracked, RwSignal, Set, Update};
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -114,6 +115,7 @@ struct Session {
     keep_offered: Option<RwSignal<bool>>,
     waiting: Vec<oneshot::Sender<bool>>,
     signed_out: bool,
+    dismissals: Dismissals,
 }
 
 thread_local! {
@@ -178,6 +180,7 @@ pub(crate) fn signed_in(signed: Option<Signed>) {
         session.csrf = signed.as_ref().map(|signed| signed.csrf.clone());
         session.lease = signed.map(|signed| signed.lease);
         session.signed_out = false;
+        session.dismissals = session.dismissals.signed_in();
         (std::mem::take(&mut session.waiting), session.ended)
     });
     look_again();
@@ -244,25 +247,35 @@ fn look_again() {
 }
 
 /// The reader closed the dialog without signing in: the requests that waited
-/// for it end with the refusal they had, which their pages say.
+/// for it end with the refusal they had, which their pages say, and so do
+/// those still on their way and the page's own reads after it
+/// (`Dismissals` decides).
 pub(crate) fn gave_up() {
-    let waiting = SESSION.with_borrow_mut(|session| std::mem::take(&mut session.waiting));
+    let waiting = SESSION.with_borrow_mut(|session| {
+        session.dismissals = session.dismissals.one_more();
+        std::mem::take(&mut session.waiting)
+    });
     for request in waiting {
         let _ = request.send(false);
     }
 }
 
-/// A request was refused for want of a session: asks the reader to sign in
-/// again, and waits. `true` is a sign-in, after which the request is sent
-/// again; `false` is the reader closing the dialog, a page that shows none,
-/// or a reader who signed out: the sign-in page asks then, and a request
-/// still on its way when they did ends with its refusal.
-async fn session_ended() -> bool {
+/// A request `asked` so and sent while the reader stood at `sent` was
+/// refused for want of a session: asks the reader to sign in again, and
+/// waits. `true` is a sign-in, after which the request is sent again;
+/// `false` is the reader closing the dialog, a page that shows none, a
+/// reader who signed out, or a request the dialog's closing ended, as one
+/// on its way then is (`Dismissals` decides): the sign-in page asks then,
+/// and a request still on its way when they did ends with its refusal.
+async fn session_ended(sent: Dismissals, asked: Asked) -> bool {
     let (sender, signed_in) = oneshot::channel();
     let (ended, warning) = SESSION.with_borrow_mut(|session| {
         session.lease = None;
         session.timer = None;
-        let ended = session.ended.filter(|_| !session.signed_out);
+        let ended = session.ended.filter(|ended| {
+            let open = ended.try_get_untracked().unwrap_or(false);
+            !session.signed_out && session.dismissals.waits_for_sign_in(sent, asked, open)
+        });
         (
             ended.inspect(|_| session.waiting.push(sender)),
             session.warning,
@@ -276,17 +289,6 @@ async fn session_ended() -> bool {
     };
     ended.try_set(true);
     signed_in.await.unwrap_or(false)
-}
-
-/// Who caused a request (security §10.1): a person, by opening a page, a
-/// form's action or "Stay signed in", or the page on its own, as a re-read
-/// after an event or a poll is. Only a person's request uses the session,
-/// so a page left open lets it end unused; the page marks its own with
-/// `api::BACKGROUND_HEADER` so the daemon doesn't count them either.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Asked {
-    ByPerson,
-    OnItsOwn,
 }
 
 /// Sends the request `make` builds, with the CSRF token and the abort signal
@@ -316,14 +318,15 @@ async fn send(
             let millis = u32::try_from(patience.as_millis()).unwrap_or(u32::MAX);
             gloo_timers::callback::Timeout::new(millis, move || controller.abort())
         });
-        let csrf = SESSION.with_borrow(|session| session.csrf.clone());
+        let (csrf, standing) =
+            SESSION.with_borrow(|session| (session.csrf.clone(), session.dismissals));
         let sent = now_ms();
         let response = make(csrf.as_deref(), signal.as_ref())?.send().await.ok()?;
         let status = response.status();
         let text = response.text().await.ok()?;
         match Resend::after(status, &text, token_read) {
             Resend::OnceSignedIn => {
-                if session_ended().await {
+                if session_ended(standing, asked).await {
                     continue;
                 }
             }
@@ -353,19 +356,10 @@ async fn read_as<T: DeserializeOwned>(
     asked: Asked,
     patience: Option<Duration>,
 ) -> Option<T> {
-    let (status, text) = send(patience, asked, |_, signal| {
-        let builder = Request::get(url).abort_signal(signal);
-        let builder = match asked {
-            Asked::OnItsOwn => builder.header(api::BACKGROUND_HEADER, "1"),
-            Asked::ByPerson => builder,
-        };
-        builder.build().ok()
-    })
-    .await?;
-    if status != 200 {
-        return None;
+    match got_as(url, asked, patience).await? {
+        Got::Read(read) => Some(read),
+        Got::Refused(..) => None,
     }
-    serde_json::from_str::<T>(&text).ok()
 }
 
 /// What a GET came back with: the typed answer, or a typed refusal, which
@@ -378,8 +372,20 @@ pub(crate) enum Got<T> {
 /// Reads `url` as typed JSON like `read_as`, but tells a refusal from a daemon
 /// that did not answer: `None` is the daemon not answering, or an answer that
 /// is neither the JSON asked for nor a typed refusal.
-pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
-    let (status, text) = send(None, Asked::ByPerson, |_, _| Request::get(url).build().ok()).await?;
+async fn got_as<T: DeserializeOwned>(
+    url: &str,
+    asked: Asked,
+    patience: Option<Duration>,
+) -> Option<Got<T>> {
+    let (status, text) = send(patience, asked, |_, signal| {
+        let builder = Request::get(url).abort_signal(signal);
+        let builder = match asked {
+            Asked::OnItsOwn => builder.header(api::BACKGROUND_HEADER, "1"),
+            Asked::ByPerson => builder,
+        };
+        builder.build().ok()
+    })
+    .await?;
     if succeeded(status) {
         return serde_json::from_str::<T>(&text).ok().map(Got::Read);
     }
@@ -389,6 +395,12 @@ pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
         refusal.args.into_iter().collect::<Vec<_>>(),
         refusal.detail,
     ))
+}
+
+/// Reads `url` as typed JSON, as a person's request, telling a refusal from a
+/// daemon that did not answer as `got_as` does.
+pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
+    got_as(url, Asked::ByPerson, None).await
 }
 
 /// Reads `url` as typed JSON, as the page's own read (a poll), which keeps
@@ -618,8 +630,11 @@ pub(crate) fn forget_session() {
 /// When the stream drops, it waits `backend::reconnect_backoff` and starts
 /// over with the fetch: the history is the source of truth a reconnect
 /// returns to, never a guess at what was missed. Each stream that opens
-/// reads the history once more (`stream`). A fetch that fails at any point
-/// of the loop leaves the page in `Phase::Unreachable`, and the loop keeps
+/// reads the history once more (`stream`). A fetch that gets no answer at
+/// any point of the loop leaves the page in `Phase::Unreachable`; one the
+/// daemon refuses, such as a page's own read after the reader closed Sign in
+/// again (§4.5), leaves it ready with the refusal in `refused`, in the words
+/// `say` gives it, until a read gets the history. Either way the loop keeps
 /// trying with the same backoff, so a daemon that comes back is a page that
 /// heals. All of it, the re-reads too, lasts as long as `visit`: once the
 /// reader has left the page, the loop ends at its next await, and the
@@ -628,6 +643,8 @@ pub(crate) fn watch(
     base: &str,
     state: RwSignal<OperationsState>,
     phase: RwSignal<Phase>,
+    refused: RwSignal<Option<Sentence>>,
+    say: impl Fn(ErrorCode, &[(String, MsgArg)], Option<&str>) -> Sentence + 'static,
     visit: &Visit,
 ) {
     let base = base.to_owned();
@@ -650,11 +667,12 @@ pub(crate) fn watch(
                 let mut asked = Asked::ByPerson;
                 loop {
                     let url = format!("{base}/api/v1/operations");
-                    let read = read_as::<OperationsPageDto>(&url, asked, None).await;
+                    let read = got_as::<OperationsPageDto>(&url, asked, None).await;
                     asked = Asked::OnItsOwn;
                     match read {
-                        Some(page) => {
+                        Some(Got::Read(page)) => {
                             attempt = 0;
+                            refused.set(None);
                             phase.set(Phase::Ready);
                             if first {
                                 first = false;
@@ -667,6 +685,12 @@ pub(crate) fn watch(
                             // The stream ended: a closed socket is a failure like any
                             // other, and the next round waits for it.
                             attempt += 1;
+                            sleep(reconnect_backoff(attempt)).await;
+                        }
+                        Some(Got::Refused(code, args, detail)) => {
+                            attempt += 1;
+                            refused.set(Some(say(code, &args, detail.as_deref())));
+                            phase.set(Phase::Ready);
                             sleep(reconnect_backoff(attempt)).await;
                         }
                         None => {

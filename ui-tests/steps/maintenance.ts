@@ -525,6 +525,18 @@ Then("the dialog {string} is closed", async function (this: BrowserWorld, name: 
   await dialogOf(this, name).waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
 });
 
+// What the page does on its own after the dialog closed, such as hearing a
+// request refused, lands a moment after the step that caused it: the dialog
+// stays closed the whole second after.
+Then("the dialog {string} stays closed", async function (this: BrowserWorld, name: string) {
+  const dialog = dialogOf(this, name);
+  const end = Date.now() + 1_000;
+  while (Date.now() < end) {
+    assert.ok(await dialog.isHidden(), `the dialog "${name}" opened again`);
+    await sleep(100);
+  }
+});
+
 // A control that cannot be used for now is still on the page, and says so
 // with `aria-disabled`, which keeps it where a keyboard and a screen reader
 // find it.
