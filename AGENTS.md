@@ -169,7 +169,7 @@ Several agents may work on the repository at once (§13.5). Whoever starts them 
 - never uses `git stash`: one stash serves every worktree, so a `pop` can take another agent's entry. For a clean tree, commit to the branch (a `wip:` commit, reset later) or check out a detached copy with `git worktree add --detach`;
 - keeps every `Cargo.toml` valid at all times: one broken manifest breaks every build in the workspace;
 - runs the `rustic` CLI itself (a fixture repository, a measurement) with `--no-cache` or a `--cache-dir` inside its scratch folder: otherwise rustic writes to the developer's real cache folder, which `just try` and the tests keep out of (§16, decision 59);
-- adds a new §16 decision as `docs/design/decisions/NN-<slug>.md`, then runs `just decision-index`, which writes its row in §16 (never edit the table by hand; on a conflict in it, take either side and run the recipe again), and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5).
+- adds a new §16 decision as `docs/design/decisions/NN-<slug>.md`, then runs `just decision-index`, which writes its row in §16 (never edit the table by hand; on a conflict in it, take either side and run the recipe again), and numbers it only when it rebases before merging, onto the highest number on `main`; when two open branches have both claimed a number, the one that merges second renumbers (§13.5, rule 8).
 
 ## Conventions
 
