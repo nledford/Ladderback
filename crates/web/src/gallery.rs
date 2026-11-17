@@ -12,6 +12,7 @@ use api::{EntryDto, EntryKindDto, FolderDto, MsgArg};
 use l10n::{Direction, Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
+use leptos::task::{spawn_local, tick};
 use leptos_router::components::A;
 
 use crate::announcer::Politeness;
@@ -125,6 +126,27 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
+    let dialog_open = RwSignal::new(false);
+    // The demo warning, which hands Escape to the page as the idle warning
+    // does: whether it is open, the button it starts on, and whether the page
+    // has said it keeps the warning open, cleared first on each keep so a
+    // second one is said again.
+    let warning_open = RwSignal::new(false);
+    let warning_keep = NodeRef::<leptos::html::Button>::new();
+    let warning_kept = RwSignal::new(false);
+    let keep_warning = move || {
+        warning_kept.set(false);
+        spawn_local(async move {
+            tick().await;
+            warning_kept.try_set(true);
+        });
+    };
+    let (warning_body, warning_kept_text, warning_answer, warning_keep_label) = (
+        t(msg::UI_GALLERY_DEMO_WARNING_BODY),
+        t(msg::UI_GALLERY_DEMO_WARNING_KEPT),
+        t(msg::UI_GALLERY_ANSWER_DEMO_WARNING),
+        t(msg::UI_GALLERY_KEEP_DEMO_WARNING),
+    );
     // The pause control's demo: whether it is paused, and the demo runs that
     // finished meanwhile, each a change the banner counts.
     let demo_paused = RwSignal::new(false);
@@ -297,9 +319,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_DIALOG_HEADING)}</h2>
+            <Button
+                content=Content::Text(t(msg::UI_GALLERY_OPEN_DEMO_DIALOG).into())
+                on_press=Callback::new(move |()| dialog_open.set(true))
+            />
             <ModalDialog
-                label=t(msg::UI_GALLERY_DEMO_DIALOG)
-                open_label=t(msg::UI_GALLERY_OPEN_DEMO_DIALOG)
+                open=dialog_open
+                id="gallery-demo-dialog"
+                title=t(msg::UI_GALLERY_DEMO_DIALOG)
                 close_label=t(msg::UI_GALLERY_CLOSE_DEMO_DIALOG)
             >
                 <p>{dialog_body.clone()}</p>
@@ -309,6 +336,42 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                         on_press=Callback::new(move |()| {
                             say(Politeness::Polite, &dialog_polite_text);
                         })
+                    />
+                </p>
+            </ModalDialog>
+            <Button
+                content=Content::Text(t(msg::UI_GALLERY_OPEN_DEMO_WARNING).into())
+                on_press=Callback::new(move |()| {
+                    warning_kept.set(false);
+                    warning_open.set(true);
+                })
+            />
+            // Escape and Keep the demo warning keep it open; Answer the demo
+            // warning closes it from outside, as the daemon's answer closes
+            // the idle warning.
+            <ModalDialog
+                open=warning_open
+                id="gallery-demo-warning"
+                title=t(msg::UI_GALLERY_DEMO_WARNING)
+                described_by="gallery-demo-warning-body"
+                starts_on=warning_keep
+                on_cancel=Callback::new(move |()| keep_warning())
+            >
+                <p id="gallery-demo-warning-body">{warning_body}</p>
+                <p aria-live="polite" aria-atomic="true">
+                    {move || warning_kept.get().then(|| warning_kept_text.clone())}
+                </p>
+                <p class="actions">
+                    <Button
+                        content=Content::Text(warning_answer.into())
+                        on_press=Callback::new(move |()| warning_open.set(false))
+                    />
+                    <Button
+                        content=Content::Text(warning_keep_label.into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        node_ref=warning_keep
+                        on_press=Callback::new(move |()| keep_warning())
                     />
                 </p>
             </ModalDialog>
