@@ -222,7 +222,7 @@ The badge's own pairs, for the states that tell no result: Loading (dark blue on
 
 ## Layout
 
-One column, `main` centered at up to 60rem with 1rem padding. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
+One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main` (`page_width.rs`), never a `style.css` rule. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
 
 Spacing steps are 0.25, 0.5, 0.75 and 1rem; forms stack fields 1rem apart, and an `.actions` row puts its buttons 0.5rem apart, wrapping. Inputs fill their line up to 32rem (40rem for a token).
 
@@ -339,7 +339,7 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 
 ### Alerts
 
-- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. Pages move onto it in #929.
+- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. The Log and Plans pages show their refusals with it, as Error alerts; the other pages move onto it in #929.
 - **Look:** Ledger Gray with the small corner, the words and any link in them in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a failure is not a red banner.
 - **Tone:** Primary (information, the default), Success, Warning and Error, each with its own icon: Info, CircleCheck, TriangleAlert and CircleX, the icon named by its tone in words for a screen reader. No Secondary and no Inherit: an alert always says its tone.
 - **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page takes the alert away and names where focus goes.

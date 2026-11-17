@@ -13,7 +13,7 @@ use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::button::Content;
-use crate::components::{Button, RadioGroup, sentence_view, write_clipboard};
+use crate::components::{Button, RadioGroup, refusal_alert, say_refusals, write_clipboard};
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -24,13 +24,15 @@ use crate::ws::{self, Got, Phase};
 
 /// The Log page at `/log`: the recent log, newest line first, with the
 /// choice of levels and the button that copies the lines listed. A read the
-/// daemon refuses is said in the lines' place as an alert, as the daemon said
-/// it; one that reaches no daemon is said as on every page.
+/// daemon refuses is an Error alert in the lines' place, as the daemon said
+/// it, and said assertively; one that reaches no daemon is said as on every
+/// page.
 #[component]
 pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
     let phase = RwSignal::new(Phase::Loading);
     let lines = RwSignal::new(Vec::<LogLineDto>::new());
     let refused = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(refused);
     let url = format!("{}{LOG_PATH}", ws::origin());
     let load_localizer = Arc::clone(&localizer);
     spawn_local(async move {
@@ -80,9 +82,7 @@ pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
             Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match refused.get() {
-                    Some(sentence) => {
-                        view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
-                    }
+                    Some(sentence) => refusal_alert(&lines_localizer, sentence).into_any(),
                     None if lines.with(Vec::is_empty) => view! { <p>{none.clone()}</p> }.into_any(),
                     None => {
                         view! { <Lines localizer=Arc::clone(&lines_localizer) lines=lines /> }

@@ -19,6 +19,9 @@ import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
+/** What makes an element a live region, by role or by attribute. */
+export const LIVE_REGION = "[aria-live], [role~='status'], [role~='alert'], [role~='log'], [role~='marquee'], [role~='timer'], output";
+
 /** The gallery section of a component, found by its heading, not by a test id. */
 export function demoSection(page: Page, component: string): Locator {
   return page.locator("section", {
@@ -798,13 +801,13 @@ Then("the {string} demo shows no text {string}", async function (this: BrowserWo
 Then("the {string} demo has spinners but no live region", async function (this: BrowserWorld, component: string) {
   const section = demoSection(this.page, component);
   await section.waitFor({ timeout: 5_000 });
-  const found = await section.evaluate((element) => ({
-    spinners: element.querySelectorAll(".spinner").length,
-    live: Array.from(
-      element.querySelectorAll("[aria-live], [role~='status'], [role~='alert'], [role~='log'], [role~='marquee'], [role~='timer'], output"),
-      (region) => region.outerHTML,
-    ),
-  }));
+  const found = await section.evaluate(
+    (element, live) => ({
+      spinners: element.querySelectorAll(".spinner").length,
+      live: Array.from(element.querySelectorAll(live), (region) => region.outerHTML),
+    }),
+    LIVE_REGION,
+  );
   assert.ok(found.spinners > 0, `the ${component} demo has no spinner`);
   assert.deepEqual(found.live, []);
 });
