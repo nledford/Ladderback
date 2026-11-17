@@ -2954,8 +2954,11 @@ ui-proposal-rejected-before = { $count ->
 # The heading of the exact changes to the configuration file, with each secret it holds shown as ***.
 ui-proposal-diff-heading = Changes to the configuration file
 
-# Said in the place of Approve for a proposal that could delete snapshots: the forget preview shows which ones would go, and approving such a proposal comes in a later version.
-ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. The forget preview shows which ones would go. Approving changes that can delete { -snapshot(form: "other") } comes in a later version, so for now you can only reject it.
+# Said in the place of Approve for a proposal that could delete snapshots, until the person shows its forget preview: approving it comes with that preview.
+ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. Show what it would forget first: you can approve it once the forget preview shows which ones would go.
+
+# Said in the place of Approve once the forget preview couldn't read a repository the proposal touches: it can be approved only from a preview that read them all.
+ui-proposal-forget-preview-unread = A repository this proposal touches couldn't be read, so it can't be approved from this preview. Show what it would forget again once the repository can be read.
 
 # The button that reads what the open proposal would change about the snapshots retention forgets, in each repository it touches.
 ui-proposal-forget-preview = Show what it would forget
