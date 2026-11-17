@@ -6,20 +6,24 @@ import assert from "node:assert/strict";
 
 import type { Locator, Page } from "playwright";
 
-import { engine } from "./world.ts";
+import { focusProbes } from "./focus-probes.ts";
 
-// WebKit on macOS moves Tab only between text fields and lists, as Safari does
-// until its reader turns on "Press Tab to highlight each item"; Option+Tab
-// moves to every control there. WebKit on Linux, where CI runs, moves Tab to
-// every control.
-const tabModifier = engine === "webkit" && process.platform === "darwin" ? "Alt+" : "";
+/** Playwright's name for the engine that drives `page`: `chromium`, `firefox`
+ *  or `webkit`. It comes from the page, not from `world.ts`'s `engine`: only
+ *  cucumber-js can load `world.ts`, and the check's own browser test
+ *  (`focus-check.browser.test.ts`) runs this file under `node --test`. */
+function engineOf(page: Page): string {
+  const browser = page.context().browser();
+  if (browser === null) throw new Error("the page's context has no browser, so its engine is unknown");
+  return browser.browserType().name();
+}
 
 // WebKit on macOS, as Playwright drives it, scrolls neither the page nor a
 // focused frame on a bare arrow key, though it does on Page Down and on
 // Option+arrow, which scrolls by most of the frame's width. WebKit on Linux,
 // where CI runs, scrolls on the bare arrows, as Chromium and Firefox do.
-export const scrollKey = (key: string): string =>
-  engine === "webkit" && process.platform === "darwin" ? `Alt+${key}` : key;
+export const scrollKey = (page: Page, key: string): string =>
+  engineOf(page) === "webkit" && process.platform === "darwin" ? `Alt+${key}` : key;
 
 // A name the page built from fetched text carries bidi isolation marks
 // around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
@@ -35,6 +39,11 @@ export const namePattern = (name: string): RegExp =>
 
 
 export function journey(page: Page) {
+  // WebKit on macOS moves Tab only between text fields and lists, as Safari
+  // does until its reader turns on "Press Tab to highlight each item";
+  // Option+Tab moves to every control there. WebKit on Linux, where CI runs,
+  // moves Tab to every control.
+  const tabModifier = engineOf(page) === "webkit" && process.platform === "darwin" ? "Alt+" : "";
   return {
     async press(key: string): Promise<void> {
       await page.keyboard.press(key === "Tab" || key === "Shift+Tab" ? tabModifier + key : key);
@@ -137,92 +146,18 @@ function isAboveTheContent(target: Locator): Promise<boolean> {
   });
 }
 
-// WebKit scrolls a newly focused element into view at its next rendering
-// update, not inside the key press as Chromium and Firefox do, so the check
-// waits two frames there to see the page as its reader does.
-const revealsFocusAtNextFrame = engine === "webkit";
-
-// Firefox scrolls a focused element only until part of it shows, Chromium and
-// WebKit until all of it does: on a small screen with larger text the
-// element's center can lie past the viewport's edge, where nothing covers it.
-// There the check looks at the center of the part in view; an element wholly
-// out of view still fails it.
-const revealsFocusInPart = engine === "firefox";
-
 // WCAG 2.4.7 and 2.4.13: the focused element shows an indicator that is at
 // least 2 px thick, differs from the unfocused look and has 3:1 contrast
-// against what it sits on (1.4.11). WCAG 2.4.11: nothing else covers it,
-// checked at its center.
+// against what it sits on (1.4.11). WCAG 2.4.11: it is at least partly in
+// sight, checked at the center of each line it stands on (`focusProbes`):
+// what lies over every one of them covers it.
 async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise<void> {
-  const state = await page.evaluate(async ({ atNextFrame, inPart }) => {
-    if (atNextFrame) {
-      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-    }
-    // HTML, SVG and MathML elements, the ones that take focus, can all blur
-    // and focus again (the HTMLOrSVGElement mixin).
-    const el = document.activeElement as (Element & HTMLOrSVGElement) | null;
-    if (!el || el === document.body || el === document.documentElement) {
-      return { focused: false };
-    }
-    const look = () => {
-      const s = getComputedStyle(el);
-      return {
-        outlineStyle: s.outlineStyle,
-        outlineWidth: s.outlineWidth,
-        outlineColor: s.outlineColor,
-        outlineOffset: s.outlineOffset,
-        boxShadow: s.boxShadow,
-      };
-    };
-    // Layers a ring can sit on, nearest first. A ring outside the element
-    // sits on the parent's background; one drawn inward sits on the element.
-    const backgrounds = (from: Element | null) => {
-      const layers: string[] = [];
-      for (let node = from; node; node = node.parentElement) {
-        layers.push(getComputedStyle(node).backgroundColor);
-      }
-      return layers;
-    };
-    const focusedLook = look();
-    const box = el.getBoundingClientRect();
-    // The part of the box in the viewport, or the whole box.
-    const seen = inPart
-      ? {
-          left: Math.max(box.left, 0),
-          right: Math.min(box.right, document.documentElement.clientWidth),
-          top: Math.max(box.top, 0),
-          bottom: Math.min(box.bottom, document.documentElement.clientHeight),
-        }
-      : box;
-    const hit =
-      seen.left < seen.right && seen.top < seen.bottom
-        ? document.elementFromPoint((seen.left + seen.right) / 2, (seen.top + seen.bottom) / 2)
-        : null;
-    const inward = parseFloat(focusedLook.outlineOffset) < 0;
-    const focusedBackgrounds = backgrounds(inward ? el : el.parentElement);
-    const name = el.outerHTML.slice(0, 80);
-    const unobscured = hit !== null && (hit === el || el.contains(hit));
-
-    // Compare with the same element unfocused, then put focus back.
-    el.blur();
-    const unfocusedLook = look();
-    el.focus({ focusVisible: true });
-    return {
-      focused: true,
-      name,
-      unobscured,
-      focusedLook,
-      unfocusedLook,
-      focusedBackgrounds,
-      restored: document.activeElement === el,
-    };
-  }, { atNextFrame: revealsFocusAtNextFrame, inPart: revealsFocusInPart });
-  assert.ok(
-    state.focused,
-    `after ${key} focus is on the page body or nowhere, so a keyboard user has no focus to see`,
-  );
+  const state = await lookAtFocus(page, key);
   assert.ok(state.restored, `could not restore focus to ${state.name}`);
-  assert.ok(state.unobscured, `focused element is covered: ${state.name}`);
+  assert.ok(
+    state.unobscured,
+    `focused element is covered: ${state.name} (its lines' centers find ${state.found || "nothing, out of view"})`,
+  );
 
   const { focusedLook: now, unfocusedLook: before } = state;
   const indicators: { kind: string; color: Color }[] = [];
@@ -255,6 +190,102 @@ async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise
       .map((r) => `${r.kind} ${r.ratio.toFixed(2)}:1`)
       .join(", ")}`,
   );
+}
+
+/** The focused element's look, focused and not, and whether any of
+ *  `focusProbes`' points finds it. The page is read twice, the points worked
+ *  out between the reads; both read the one element focused after `key`, and
+ *  the check fails if focus has left it in between. */
+async function lookAtFocus(page: Page, key: string) {
+  const engine = engineOf(page);
+  // WebKit scrolls a newly focused element into view from a timer that the
+  // focus starts with no delay, not inside the key press as Chromium and
+  // Firefox do, and a busy page can draw frames before that timer runs: two
+  // frames alone left the gallery's progress bar out of view on CI (#973).
+  // WebKit runs due timers in the order they fell due, so a timeout of 0 set
+  // after the press runs after that scroll; the check waits for one, then for
+  // two frames, to see the page as its reader does.
+  const revealsFocusFromATimer = engine === "webkit";
+  // Firefox scrolls a focused element only until part of it shows, Chromium
+  // and WebKit until all of it does: on a small screen with larger text the
+  // element's center can lie past the viewport's edge, where nothing covers
+  // it. There the check looks at the part of it in view; an element wholly
+  // out of view still fails it.
+  const revealsFocusInPart = engine === "firefox";
+  const focused = await page.evaluateHandle(async (fromATimer) => {
+    if (fromATimer) {
+      await new Promise((done) => setTimeout(done, 0));
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    }
+    const el = document.activeElement;
+    return el === null || el === document.body || el === document.documentElement ? null : el;
+  }, revealsFocusFromATimer);
+  try {
+    const measured = await focused.evaluate((el) => {
+      if (el === null) return null;
+      const box = ({ left, top, right, bottom }: DOMRect) => ({ left, top, right, bottom });
+      return {
+        fragments: [...el.getClientRects()].map(box),
+        whole: box(el.getBoundingClientRect()),
+        viewport: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
+      };
+    });
+    assert.ok(
+      measured !== null,
+      `after ${key} focus is on the page body or nowhere, so a keyboard user has no focus to see`,
+    );
+    const probes = focusProbes(measured.fragments, measured.whole, measured.viewport, revealsFocusInPart);
+    const state = await focused.evaluate((measuredEl, probes) => {
+      if (measuredEl === null || document.activeElement !== measuredEl) return null;
+      // HTML, SVG and MathML elements, the ones that take focus, can all blur
+      // and focus again (the HTMLOrSVGElement mixin).
+      const el = measuredEl as Element & HTMLOrSVGElement;
+      const look = () => {
+        const s = getComputedStyle(el);
+        return {
+          outlineStyle: s.outlineStyle,
+          outlineWidth: s.outlineWidth,
+          outlineColor: s.outlineColor,
+          outlineOffset: s.outlineOffset,
+          boxShadow: s.boxShadow,
+        };
+      };
+      // Layers a ring can sit on, nearest first. A ring outside the element
+      // sits on the parent's background; one drawn inward sits on the element.
+      const backgrounds = (from: Element | null) => {
+        const layers: string[] = [];
+        for (let node = from; node; node = node.parentElement) {
+          layers.push(getComputedStyle(node).backgroundColor);
+        }
+        return layers;
+      };
+      const focusedLook = look();
+      const hits = probes.map(({ x, y }) => document.elementFromPoint(x, y));
+      const inward = parseFloat(focusedLook.outlineOffset) < 0;
+      const focusedBackgrounds = backgrounds(inward ? el : el.parentElement);
+      const name = el.outerHTML.slice(0, 80);
+      const unobscured = hits.some((hit) => hit !== null && (hit === el || el.contains(hit)));
+      const found = hits.map((hit) => (hit === null ? "nothing, out of view" : `<${hit.localName}>`)).join(", ");
+
+      // Compare with the same element unfocused, then put focus back.
+      el.blur();
+      const unfocusedLook = look();
+      el.focus({ focusVisible: true });
+      return {
+        name,
+        unobscured,
+        found,
+        focusedLook,
+        unfocusedLook,
+        focusedBackgrounds,
+        restored: document.activeElement === el,
+      };
+    }, probes);
+    assert.ok(state !== null, `after ${key} focus moved while the check looked at it, ${await whereFocusIs(page)}`);
+    return state;
+  } finally {
+    await focused.dispose();
+  }
 }
 
 const COLOR = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)/g;
