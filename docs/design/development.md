@@ -327,6 +327,8 @@ Keep the chain short: at most three pull requests, and two where possible. Every
 
 **Hotfixes go through pull requests too.** Nobody pushes to `main` directly; the ruleset allows no direct push. A bad merge is first undone with a revert pull request, then fixed properly. A hotfix is an ordinary pull request with every required check.
 
+**Up to date before merging.** The ruleset requires a pull request's branch to contain `main` before it merges, and its required checks to have passed on that head (maintainer, 2026-11-17). Two pull requests that each pass alone can break `main` together, as #905 with #909 and #914 with #922 did. Bring a branch up to date with `gh pr update-branch <n>` or a rebase, and let its checks run again.
+
 **Break-glass.** Only the maintainer may merge a pull request whose required checks fail, through the ruleset's pull-request-only bypass, and only when a check can't pass for a reason outside the change: a GitHub Actions outage, a broken action or toolchain release, or a yanked crate. Each use gets an issue that says why, and fixing that check comes next. Agents never use the bypass.
 
 **Required check names.** The "Protect main" ruleset requires checks by job name:
