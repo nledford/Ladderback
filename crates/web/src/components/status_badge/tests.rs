@@ -7,6 +7,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 use super::rules::BadgeState;
 use crate::components::StatusBadge;
+use crate::components::badge::rules::badge_class;
 
 /// The badge for `state`, labeled `label`, as HTML.
 fn rendered(state: BadgeState, label: &str) -> String {
@@ -59,7 +60,7 @@ fn each_state_draws_an_icon_of_its_own_in_its_texts_color_which_a_screen_reader_
 fn the_label_stands_beside_the_icon_on_the_states_pill() {
     for state in BadgeState::ALL {
         let html = rendered(state, "Demo label");
-        let pill = format!(r#"class="badge {}""#, state.pill());
+        let pill = format!(r#"class="{}""#, badge_class(state.tone()));
         assert!(html.contains(&pill), "{state:?}: {html}");
         let after_icon = html.split("</svg>").nth(1).unwrap_or_default();
         assert!(after_icon.contains("Demo label"), "{state:?}: {html}");

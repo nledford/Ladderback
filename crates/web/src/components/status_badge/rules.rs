@@ -9,6 +9,8 @@
 use crate::variants::StatusTone;
 use lepticons_data::LucideGlyph;
 
+use crate::components::badge::rules::BadgeTone;
+
 /// A state a status badge shows: one an operation is in, or none to tell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BadgeState {
@@ -52,6 +54,12 @@ impl BadgeState {
             Self::Failed => StatusTone::Error.pair(),
             Self::Queued | Self::Cancelled | Self::Empty => "text-badge-empty-fg bg-badge-empty-bg",
         }
+    }
+
+    /// The badge's tone, whose pair of tokens the pill is drawn in, the same
+    /// pair `pill` names.
+    pub fn tone(self) -> BadgeTone {
+        todo!()
     }
 
     /// The icon beside the label, its shape the state's own (the
@@ -104,27 +112,18 @@ mod tests {
     }
 
     #[test]
-    fn each_state_is_drawn_on_its_pill_a_succeeded_or_failed_one_in_its_status_tones_pair() {
-        let pills = [
-            (BadgeState::Queued, "text-badge-empty-fg bg-badge-empty-bg"),
-            (
-                BadgeState::Running,
-                "text-badge-loading-fg bg-badge-loading-bg",
-            ),
-            (BadgeState::Succeeded, StatusTone::Success.pair()),
-            (
-                BadgeState::SucceededWithWarnings,
-                StatusTone::Success.pair(),
-            ),
-            (BadgeState::Failed, StatusTone::Error.pair()),
-            (
-                BadgeState::Cancelled,
-                "text-badge-empty-fg bg-badge-empty-bg",
-            ),
-            (BadgeState::Empty, "text-badge-empty-fg bg-badge-empty-bg"),
+    fn each_state_is_drawn_in_the_badge_tone_of_its_kind() {
+        let tones = [
+            (BadgeState::Queued, BadgeTone::Secondary),
+            (BadgeState::Running, BadgeTone::Primary),
+            (BadgeState::Succeeded, BadgeTone::Success),
+            (BadgeState::SucceededWithWarnings, BadgeTone::Success),
+            (BadgeState::Failed, BadgeTone::Error),
+            (BadgeState::Cancelled, BadgeTone::Secondary),
+            (BadgeState::Empty, BadgeTone::Secondary),
         ];
-        for (state, pill) in pills {
-            assert_eq!(state.pill(), pill, "{state:?}");
+        for (state, tone) in tones {
+            assert_eq!(state.tone(), tone, "{state:?}");
         }
     }
 }
