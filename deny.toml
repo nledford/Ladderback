@@ -37,12 +37,12 @@ ignore = [
     { id = "RUSTSEC-2026-0542", reason = "`humantime` 2.4.0 is unmaintained because it wraps `chrono` (RUSTSEC-2026-0543); no vulnerability is reported. It comes only through `cucumber`, a dev-dependency of the acceptance and e2e runners, so it is in no binary Ladderback ships. Nothing to upgrade to: every version is affected. Remove this entry when `cucumber` moves off `humantime`." },
 ]
 
-# Ladderback is MIT OR Apache-2.0, so every dependency's licence must let a
+# Ladderback is MIT OR Apache-2.0, so every dependency's license must let a
 # binary under those terms ship. `cargo deny list` shows what the tree uses.
 # An expression with OR is satisfied by any one of its terms: `self_cell` is
 # `Apache-2.0 OR GPL-2.0-only`, and we use it under Apache-2.0, so GPL is not on
-# the list. A crate with only a copyleft licence fails, and a new
-# licence is a decision for the maintainer (§16, decision 43), not an edit made
+# the list. A crate with only a copyleft license fails, and a new
+# license is a decision for the maintainer (§16, decision 43), not an edit made
 # to turn the check green.
 [licenses]
 confidence-threshold = 0.93
@@ -70,7 +70,7 @@ exceptions = [
 ]
 
 # The workspace crates are unpublished (`publish = false`) and carry the
-# workspace's own licence.
+# workspace's own license.
 [licenses.private]
 ignore = true
 

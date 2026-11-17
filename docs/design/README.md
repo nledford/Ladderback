@@ -62,7 +62,7 @@ The design is split by topic. A `§N` or `§N.N` mentioned anywhere in the repos
   - [13.6 Dependency checks](development.md#136-dependency-checks)
   - [13.7 Changes that touch several places](development.md#137-changes-that-touch-several-places)
   - [13.8 Pull requests and merging](development.md#138-pull-requests-and-merging)
-  - [13.9 Dependencies, licence and fixtures](development.md#139-dependencies-licence-and-fixtures)
+  - [13.9 Dependencies, license and fixtures](development.md#139-dependencies-license-and-fixtures)
   - [13.10 Keeping AGENTS.md useful](development.md#1310-keeping-agentsmd-useful)
   - [13.11 Build profiles](development.md#1311-build-profiles)
   - [13.12 The Rust toolchain](development.md#1312-the-rust-toolchain)
