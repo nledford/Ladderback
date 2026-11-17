@@ -17,7 +17,7 @@ use crate::backend::{
 };
 use crate::maintenance::{self, Awaited, Beat, Kind, Pace, Watched};
 use crate::session::{
-    Answer, Asked, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered,
+    Answer, Asked, Dismissals, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered,
     signed_out_all_the_same, wait_ms,
 };
 use crate::visit::Visit;
@@ -30,7 +30,7 @@ use futures::{FutureExt, Sink, StreamExt};
 use gloo_net::http::{Request, RequestBuilder};
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::{Message, State};
-use leptos::prelude::{RwSignal, Set, Update};
+use leptos::prelude::{GetUntracked, RwSignal, Set, Update};
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -114,6 +114,7 @@ struct Session {
     keep_offered: Option<RwSignal<bool>>,
     waiting: Vec<oneshot::Sender<bool>>,
     signed_out: bool,
+    dismissals: Dismissals,
 }
 
 thread_local! {
@@ -178,6 +179,7 @@ pub(crate) fn signed_in(signed: Option<Signed>) {
         session.csrf = signed.as_ref().map(|signed| signed.csrf.clone());
         session.lease = signed.map(|signed| signed.lease);
         session.signed_out = false;
+        session.dismissals = session.dismissals.signed_in();
         (std::mem::take(&mut session.waiting), session.ended)
     });
     look_again();
@@ -244,25 +246,35 @@ fn look_again() {
 }
 
 /// The reader closed the dialog without signing in: the requests that waited
-/// for it end with the refusal they had, which their pages say.
+/// for it end with the refusal they had, which their pages say, and so do
+/// those still on their way and the page's own reads after it
+/// (`Dismissals` decides).
 pub(crate) fn gave_up() {
-    let waiting = SESSION.with_borrow_mut(|session| std::mem::take(&mut session.waiting));
+    let waiting = SESSION.with_borrow_mut(|session| {
+        session.dismissals = session.dismissals.one_more();
+        std::mem::take(&mut session.waiting)
+    });
     for request in waiting {
         let _ = request.send(false);
     }
 }
 
-/// A request was refused for want of a session: asks the reader to sign in
-/// again, and waits. `true` is a sign-in, after which the request is sent
-/// again; `false` is the reader closing the dialog, a page that shows none,
-/// or a reader who signed out: the sign-in page asks then, and a request
-/// still on its way when they did ends with its refusal.
-async fn session_ended() -> bool {
+/// A request `asked` so and sent while the reader stood at `sent` was
+/// refused for want of a session: asks the reader to sign in again, and
+/// waits. `true` is a sign-in, after which the request is sent again;
+/// `false` is the reader closing the dialog, a page that shows none, a
+/// reader who signed out, or a request the dialog's closing ended, as one
+/// on its way then is (`Dismissals` decides): the sign-in page asks then,
+/// and a request still on its way when they did ends with its refusal.
+async fn session_ended(sent: Dismissals, asked: Asked) -> bool {
     let (sender, signed_in) = oneshot::channel();
     let (ended, warning) = SESSION.with_borrow_mut(|session| {
         session.lease = None;
         session.timer = None;
-        let ended = session.ended.filter(|_| !session.signed_out);
+        let ended = session.ended.filter(|ended| {
+            let open = ended.try_get_untracked().unwrap_or(false);
+            !session.signed_out && session.dismissals.waits_for_sign_in(sent, asked, open)
+        });
         (
             ended.inspect(|_| session.waiting.push(sender)),
             session.warning,
@@ -305,14 +317,15 @@ async fn send(
             let millis = u32::try_from(patience.as_millis()).unwrap_or(u32::MAX);
             gloo_timers::callback::Timeout::new(millis, move || controller.abort())
         });
-        let csrf = SESSION.with_borrow(|session| session.csrf.clone());
+        let (csrf, standing) =
+            SESSION.with_borrow(|session| (session.csrf.clone(), session.dismissals));
         let sent = now_ms();
         let response = make(csrf.as_deref(), signal.as_ref())?.send().await.ok()?;
         let status = response.status();
         let text = response.text().await.ok()?;
         match Resend::after(status, &text, token_read) {
             Resend::OnceSignedIn => {
-                if session_ended().await {
+                if session_ended(standing, asked).await {
                     continue;
                 }
             }

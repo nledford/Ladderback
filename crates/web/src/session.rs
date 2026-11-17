@@ -222,19 +222,25 @@ pub(crate) struct Dismissals {
 impl Dismissals {
     /// Where the reader stands after closing the dialog once more.
     pub(crate) fn one_more(self) -> Self {
-        todo!()
+        Self {
+            count: self.count.wrapping_add(1),
+            since_sign_in: true,
+        }
     }
 
     /// Where the reader stands after the page signed in.
     pub(crate) fn signed_in(self) -> Self {
-        todo!()
+        Self {
+            since_sign_in: false,
+            ..self
+        }
     }
 
     /// Whether a request `asked` so and sent while the reader stood at
     /// `sent`, refused now because its session ended, waits for a sign-in:
     /// in the dialog, `open` already or opened for it.
     pub(crate) fn waits_for_sign_in(self, sent: Self, asked: Asked, open: bool) -> bool {
-        todo!()
+        open || (self.count == sent.count && (asked == Asked::ByPerson || !self.since_sign_in))
     }
 }
 

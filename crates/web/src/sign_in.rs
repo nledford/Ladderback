@@ -228,8 +228,9 @@ pub(crate) fn SignInPage(localizer: Arc<Localizer>, standing: RwSignal<Standing>
 /// the page, which stays as it was, so nothing typed there is lost, and the
 /// requests that were refused wait for the sign-in, then go again. Escape
 /// closes it, as any dialog (§4.5): the requests that waited then end with
-/// their refusal, and the next request refused opens it again. Focus returns
-/// where it was when it opened.
+/// their refusal, as do those still on their way and the page's own reads,
+/// and the next request the reader asks for that is refused opens it again
+/// (`session::Dismissals`). Focus returns where it was when it opened.
 #[component]
 pub(crate) fn SessionEnded(localizer: Arc<Localizer>, ended: RwSignal<bool>) -> impl IntoView {
     let dialog = NodeRef::<leptos::html::Dialog>::new();
