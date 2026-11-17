@@ -1489,6 +1489,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the textbox "Demo password"
     And I type "demo-secret"
     And I press ArrowLeft
@@ -1515,6 +1516,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the textbox "Demo copies to keep"
     Then the textbox "Demo copies to keep" asks for the keyboard of digits, and is a text input
     When I type "1a2"
