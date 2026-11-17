@@ -3824,9 +3824,10 @@ pub struct OperationSummaryDto {
     pub failure: Option<ErrorDto>,
     /// What the engine reported when the operation succeeded.
     pub result: Option<OperationResultDto>,
-    /// The alias of the repository a maintenance operation ran on, as it
-    /// stood when the run started. Absent for a backup, which `plan` names,
-    /// and for an operation an earlier version logged.
+    /// The alias of the repository a maintenance operation ran on, or a
+    /// restore or a download read, as it stood when the log first wrote the
+    /// run. Absent for a backup, which `plan` names, and for an operation an
+    /// earlier version logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
     /// For a repository reached at several locations: every location as the
