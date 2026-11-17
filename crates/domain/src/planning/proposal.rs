@@ -121,8 +121,10 @@ const REVISION_CHARS: usize = 64;
 
 /// The configuration a proposal was drafted against: the SHA-256 of the
 /// file's bytes, in lower-case hex (decision 89). No file is the revision
-/// of no text.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// of no text. With the rest of the file, the plain hash lets someone test
+/// guesses at a short inline secret offline, so its `Debug` hides it (I4);
+/// the page is shown a keyed one, [`ShownRevision`].
+#[derive(Clone, PartialEq, Eq)]
 pub struct ConfigRevision(String);
 
 impl ConfigRevision {
@@ -143,6 +145,12 @@ impl ConfigRevision {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl std::fmt::Debug for ConfigRevision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ConfigRevision([hidden])")
     }
 }
 
