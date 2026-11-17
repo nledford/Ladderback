@@ -18,6 +18,8 @@ The measure that keeps Warning and Error apart: their fills differ by at least 0
 
 Success is not held to the measure: #941 asked that Warning and Error be told apart, though the same argument reaches green. In light colors Success's fill sits between the other two, 0.025 from Warning's in lightness, so a Success part beside a Warning one can read alike; holding it apart too means retuning Success's fill, a choice for the first component that sets the two side by side (the toast, #789). Until then, as for every tone, a part's words and its icon tell its status, never its fill alone (1.4.1).
 
+**Amended 2026-11-17 (the maintainer, #794):** the progress bar takes no status pair. A pair is for words on a tinted fill, and the bar's fill carries no words, so the bar fills with its tone's own token (`--accent`, `--muted`, `--success`, `--warning` or `--error`, or the text's color for Inherit) on its Ledger Gray track (`--surface`). The fill is a part, not text, so the contrast gate holds it to 3:1 (1.4.11) against the track and against the page, for each tone in both schemes. The step and the percentage keep the text's color, so a bar's tone never tells how a run goes alone (1.4.1). Where the #941 amendment above names the progress bar among the parts that take one pair, this replaces it.
+
 ## Why
 
 - **One set of words for every component.** The shared component set (#776) grows by some twenty components. Without one vocabulary each would name its colors, sizes and sides its own way, and a page would learn each one. Each value is a class of `style.css`, so a component names a value of the module and never a color, a length or a side.

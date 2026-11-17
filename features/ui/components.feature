@@ -7,8 +7,9 @@ Feature: The shared components in the gallery
   frame of its own on a small screen, a checkbox, a
   radio group, which marks a choice's label written in another language with
   that language and its direction, a progress bar a keyboard user can reach, whose changes
-  are never announced and are told at most every 30 seconds, and which shows
-  no percentage while its size isn't known, a toast, the
+  are never announced and are told at most every 30 seconds, which shows
+  no percentage while its size isn't known, and whose fill takes its tone
+  and whose track its thickness from the shared vocabulary, a toast, the
   control that pauses live updates, a status badge for every state an
   operation can be in, whose icon tells the state by its shape, a
   snapshot's tree, one stop for Tab, whose folders are read as they are
@@ -55,6 +56,10 @@ Feature: The shared components in the gallery
   ARIA snapshot. The text of a control, such as a button's label, grows with
   the reader's text size as the page's does, and the gallery still fits a
   small screen when the text has grown (A4).
+  A banner, a page-wide notice above a page's content, shows its tone by an
+  icon named in words, is no live region and no stop for Tab, and its
+  Dismiss button takes it away, leaves focus where its page names and is
+  remembered in this browser until a newer edition of it comes.
 
   Scenario: A dialog opens from a button, traps focus, closes on Escape and returns focus
     When I open the component gallery
@@ -67,6 +72,24 @@ Feature: The shared components in the gallery
     Then focus is on the first control of the dialog "Demo dialog"
     When I press Escape
     Then focus is on the button "Open the demo dialog"
+
+  Scenario: A dialog can start on a button of its own, hand Escape to its page, and close once its page has answered
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Open the demo warning"
+    And I press Enter
+    Then the dialog "Demo warning" opens with focus on the button "Keep the demo warning"
+    And the dialog "Demo warning" is described as saying "Escape keeps this warning open"
+    And the page has no accessibility violations
+    When I press Escape
+    Then the dialog "Demo warning" politely says "The page keeps the demo warning open."
+    And the dialog "Demo warning" stays open
+    When I press Tab
+    Then focus is on the first control of the dialog "Demo warning"
+    And focus is on the button "Answer the demo warning"
+    When I press Enter
+    Then the dialog "Demo warning" is closed
+    And focus is on the button "Open the demo warning"
 
   Scenario: The step-up field takes a password from a password manager or paste
     When I open the component gallery
@@ -244,6 +267,11 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
+    And I press Tab until focus is on the button "Check the demo folders"
     And I press Tab until focus is on the progressbar "Demo backup progress"
     Then the progress bar "Demo backup progress" reads "Backing up… 40%, 4 GiB of 10 GiB"
     When I press Tab until focus is on the button "Advance the demo progress"
@@ -262,6 +290,77 @@ Feature: The shared components in the gallery
     And the progress bar "Demo progress of unknown size" reads "Working…"
     And the progress bar "Demo progress of a step" reads "Reading the index…"
     And the "Progress" demo has no accessibility violations
+
+  Scenario: Every progress bar is a stop for Tab whatever its size and tone, its focus ring around all it draws, and reads its value
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
+    And I press Tab until focus is on the button "Check the demo folders"
+    And I press Tab until focus is on the progressbar "Demo progress of a step"
+    Then pressing Tab moves focus to these progress bars in turn, each holding its track and its words inside its focus ring:
+      | bar                                   |
+      | Demo progress at the Small size       |
+      | Demo progress at the Medium size      |
+      | Demo progress at the Large size       |
+      | Demo progress at the Extra large size |
+      | Demo progress in the Primary tone     |
+      | Demo progress in the Secondary tone   |
+      | Demo progress in the Success tone     |
+      | Demo progress in the Warning tone     |
+      | Demo progress in the Error tone       |
+      | Demo progress in the Inherit tone     |
+    And the progress bar "Demo progress in the Inherit tone" reads "Backing up… 60%, 6 GiB of 10 GiB"
+    And the live regions stay silent
+
+  Scenario Outline: A progress bar's track is half its size on the shared scale thick, a multiple of the reader's text size, Small unless its page names another
+    Given the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then the track of the progress bar "<bar>" is <times> times as thick as the page's text
+
+    Examples:
+      | bar                                   | times |
+      | Demo progress at the Small size       | 0.5   |
+      | Demo progress at the Medium size      | 0.75  |
+      | Demo progress at the Large size       | 1     |
+      | Demo progress at the Extra large size | 1.5   |
+
+  Scenario Outline: A progress bar's tone colors its fill only, Primary unless its page names another, on a Ledger Gray track, its words in the text's color, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then each progress bar fills its track in its tone, the track in --surface and its words in the color of the text around it:
+      | bar                                 | tone               |
+      | Demo progress in the Primary tone   | --accent           |
+      | Demo progress in the Secondary tone | --muted            |
+      | Demo progress in the Success tone   | --success          |
+      | Demo progress in the Warning tone   | --warning          |
+      | Demo progress in the Error tone     | --error            |
+      | Demo progress in the Inherit tone   | the text around it |
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors, every progress bar fills its track in the text's color, as every tone is, and its track is GrayText
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then every progress bar of the gallery fills its track in the color of the text around it, and its track is GrayText
+
+  Scenario Outline: On a small screen with larger text, every progress bar keeps its track and its words inside it, its fill at the track's start, in a page that runs <direction>
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery asking for the locale "<locale>"
+    Then every progress bar of the gallery holds its track and its words inside it, its fill at the track's start, in a page that runs <direction>
+    And the page doesn't scroll sideways
+    And no text is clipped
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
 
   Scenario: A toast appears and is announced politely, and its going is not announced
     When I open the component gallery
@@ -752,6 +851,7 @@ Feature: The shared components in the gallery
       | Status badge |
       | Progress    |
       | Toast       |
+      | Banner      |
       | Review dialog |
       | Pause control |
       | Tree        |
@@ -782,6 +882,7 @@ Feature: The shared components in the gallery
       | Status badge |
       | Progress    |
       | Toast       |
+      | Banner      |
       | Review dialog |
       | Pause control |
       | Tree        |
@@ -903,9 +1004,22 @@ Feature: The shared components in the gallery
     Examples:
       | button                    |
       | Open the demo dialog      |
-      | Advance the demo progress |
       | Pause the demo updates    |
       | Filled Primary            |
+
+  # The progress demo sits past the tabs demos, so its walk stops on the way.
+  Scenario: The progress demo's button label grows with the reader's text size
+    Given the reader sets the text size to 200 percent
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
+    And I press Tab until focus is on the button "Check the demo folders"
+    And I press Tab until focus is on the button "Advance the demo progress"
+    Then the label of the button "Advance the demo progress" is as large as the page's text
+    And the page has no accessibility violations
 
   # The table's sort button sits past the 40 Tab presses a journey allows
   # from the page's start, but within them by Shift+Tab.
@@ -1350,6 +1464,99 @@ Feature: The shared components in the gallery
     When I open the component gallery
     Then every skeleton of the "Skeleton" demo is edged 1 pixel wide in GrayText
 
+  Scenario: A banner is no live region and no stop for Tab, and its icon names its tone in words
+    When I open the component gallery
+    Then no banner of the "Banner" demo is a live region, nor holds one
+    And the banners of the "Banner" demo show these icons, each named for its tone, one shape per tone, in this order:
+      | tone    | name        |
+      | primary | Information |
+      | warning | Warning     |
+      | primary | Information |
+    When I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab
+    Then focus is on the button "Dismiss" of the "Banner" demo
+
+  Scenario Outline: <key> on a banner's Dismiss button takes the banner away, says nothing, leaves focus on the control its page names and keeps it away on the next load
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
+    And I press <key>
+    Then the "Banner" demo shows no banner with the words "A demo update is ready."
+    And focus is on the button "Show a newer demo notice"
+    And the polite region stays empty
+    And the assertive region stays empty
+    When I reload the page
+    Then the "Banner" demo shows 2 banners, none with the words "A demo update is ready."
+
+    Examples:
+      | key   |
+      | Enter |
+      | Space |
+
+  Scenario: A newer edition of a dismissed banner shows again
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
+    And I press Enter
+    And I press Enter
+    Then the "Banner" demo shows a banner with the words "A demo update is ready."
+    And focus stays on the button "Show a newer demo notice"
+
+  Scenario: A banner dismissed in a browser that keeps nothing goes for now and shows again on the next load
+    Given this browser keeps nothing a page stores
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
+    And I press Enter
+    Then the "Banner" demo shows no banner with the words "A demo update is ready."
+    And focus is on the button "Show a newer demo notice"
+    When I reload the page
+    Then the "Banner" demo shows a banner with the words "A demo update is ready."
+
+  Scenario Outline: A banner lies on Ledger Gray, square, its words in the text's color and its icon and start edge in its tone, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then every banner of the "Banner" demo lies square on --surface with its words in --fg, its icon and its 0.25 rem start edge in its tone's color
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors a banner is edged all round in the text's color, its start edge thicker, and its icon in the text's color
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then every banner of the "Banner" demo is edged 1 pixel wide in CanvasText, its start edge 0.25 rem, and its icon in the text's color
+
+  Scenario Outline: A banner's edge and icon stand at the start of its line and its Dismiss button at the end, in a page that runs <direction>
+    When I open the component gallery asking for the locale "<locale>"
+    Then every banner of the banner demo has its edge on its start side, its icon before its words and its Dismiss button after them, in a page that runs <direction>
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
+
+  Scenario: On a small screen with larger text, a banner's words wrap inside it, its icon and Dismiss button inside it too
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then every banner of the "Banner" demo holds its icon, its words and its Dismiss button inside its edge
+    And the page doesn't scroll sideways
+    And no text is clipped
+
   Scenario: Keyboard focus on a control shows its tooltip at once, beside the control, which it describes
     When I open the component gallery
     And I press Shift+Tab until focus is on the button "Prune the demo repository"
@@ -1711,7 +1918,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Show the demo plan"
     And I press Tab until focus is on the link "the demo operations"
     And I press Tab
-    Then focus is on the button "Dismiss"
+    Then focus is on the button "Dismiss" of the "Alert" demo
 
   Scenario Outline: <key> on an alert's Dismiss button takes the alert away, says nothing and leaves focus on the control its page names
     When I open the component gallery
@@ -1719,7 +1926,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
-    And I press Tab until focus is on the button "Dismiss"
+    And I press Tab until focus is on the button "Dismiss" of the "Alert" demo
     And I press <key>
     Then the "Alert" demo shows no alert with the words "This demo notice goes when you dismiss it."
     And focus is on the button "Show the demo notice again"

@@ -82,6 +82,13 @@ Feature: Hooks
     Then the operation ends as failed because a hook timed out
     And the operation never started
 
+  @e2e @serial
+  Scenario: A hook that can't start in time is timed out
+    Given a before hook at the plan level that can't start in time, with on-failure error
+    When the agent runs the operation
+    Then the operation ends as failed because a hook timed out
+    And the operation never started
+
   @e2e
   Scenario: A hook sees its context but no secret of the daemon
     Given a before hook at the plan level that writes its environment to the scratch dir

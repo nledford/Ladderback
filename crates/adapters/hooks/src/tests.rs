@@ -18,7 +18,7 @@ use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 use tempfile::TempDir;
 
-use crate::{ProcessHookRunner, READ_CHUNK, Stop, read_capped, signal_group};
+use crate::{ProcessHookRunner, READ_CHUNK, Stop, hand_over, read_capped, signal_group, start};
 
 /// A stop's signals, sent for real, by the runner's own `signal_group`, and
 /// remembered, each with whether the leader of the group was there (not
@@ -852,6 +852,209 @@ async fn a_runner_built_with_a_timeout_stops_the_hook_at_it() {
         "the hook was stopped before its timeout: {:?}",
         started.elapsed()
     );
+}
+
+/// A hook whose start can't happen within its gate limit, here because a
+/// stalled start holds the spawn gate, is timed out at the limit as one that
+/// ran too long is, rather than waiting for the gate for as long as the
+/// stall lasts (#968), and once the gate comes free, it doesn't run.
+#[tokio::test]
+async fn a_hook_that_cannot_start_within_its_limit_is_timed_out_and_never_runs() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let entry = sh(r#"echo ran >> "$1""#, &log);
+    let limit = Duration::from_millis(300);
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10)).with_gate_limit(limit);
+    let (release, stalled) = testkit::inheritable::stalled_start(Duration::from_secs(5));
+    let started = Instant::now();
+    let outcome = within(
+        Duration::from_secs(3),
+        runner.run(&entry, &context(), &Redactor::default()),
+    )
+    .await;
+    let elapsed = started.elapsed();
+    let _ = release.send(());
+    stalled.join().unwrap();
+    assert_eq!(outcome.status, HookStatus::TimedOut);
+    assert!(
+        elapsed >= limit,
+        "the hook was given up on before its limit: {elapsed:?}"
+    );
+    // The start the call gave up on has the gate moments after it is free.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        lines(&log),
+        Vec::<String>::new(),
+        "the hook ran after its call gave up on it"
+    );
+}
+
+/// What the stop given to the start in
+/// `a_start_given_up_on_before_the_gate_came_free_is_never_made` sent: a
+/// start it made would be killed through it.
+static GIVEN_UP: Signals = Signals(Mutex::new(Vec::new()));
+
+fn given_up_signal(group: Pid, signal: Signal) {
+    GIVEN_UP.send(group, signal);
+}
+
+const GIVEN_UP_STOP: Stop<'static> = Stop {
+    grace: Duration::from_secs(5),
+    reap_limit: Duration::from_secs(5),
+    signal: &given_up_signal,
+};
+
+/// A start the call gave up on before the gate came free is never made, not
+/// made and then killed: a hook whose start stalled behind another doesn't
+/// run once the gate is free, nor stall the gate a second time.
+#[tokio::test]
+async fn a_start_given_up_on_before_the_gate_came_free_is_never_made() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let mut command = tokio::process::Command::new("sh");
+    command
+        .args([
+            "-c",
+            r#"echo ran >> "$1""#,
+            "sh",
+            &log.display().to_string(),
+        ])
+        .kill_on_drop(true)
+        .process_group(0);
+    let (release, stalled) = testkit::inheritable::stalled_start(Duration::from_secs(5));
+    let started = within(
+        Duration::from_secs(3),
+        start(command, Duration::from_millis(300), &GIVEN_UP_STOP),
+    )
+    .await;
+    let _ = release.send(());
+    stalled.join().unwrap();
+    assert!(
+        matches!(started, Ok(None)),
+        "the start given up on was made or refused"
+    );
+    // The start the call gave up on has the gate moments after it is free.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        GIVEN_UP.sent(),
+        Vec::new(),
+        "the start given up on was made"
+    );
+    assert_eq!(
+        lines(&log),
+        Vec::<String>::new(),
+        "the hook given up on ran"
+    );
+}
+
+/// A hook started through the gate, as every start of this binary is, that
+/// has started `TICKER`'s loop, which runs for as long as `log` is there.
+async fn a_hook_that_started_a_ticker(log: &Path) -> tokio::process::Child {
+    fs::write(log, "").unwrap();
+    let mut command = tokio::process::Command::new("sh");
+    command
+        .args([
+            "-c",
+            &format!("{TICKER}echo ready >> \"$1\"\nwait"),
+            "sh",
+            &log.display().to_string(),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .process_group(0);
+    let child = spawn_gate::hold_blocking(move || command.spawn())
+        .await
+        .unwrap()
+        .unwrap();
+    logged(log, "ready").await;
+    child
+}
+
+/// A start handed over after the call gave up on it is killed with its
+/// group: by then the hook may have started something, which `kill_on_drop`,
+/// reaching the hook alone, would leave running.
+#[tokio::test]
+async fn a_start_handed_over_too_late_is_killed_with_what_it_started() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let child = a_hook_that_started_a_ticker(&log).await;
+    let (to, given_up) = tokio::sync::oneshot::channel();
+    drop(given_up);
+    hand_over(Ok(child), to, &Stop::REAL);
+    assert!(
+        ticks_stop(&log).await,
+        "what the hook started is still running"
+    );
+}
+
+/// A start handed over in time to a call that is dropped before it takes
+/// it, as the call's own future is dropped, is killed with its group too.
+#[tokio::test]
+async fn a_start_handed_over_to_a_call_dropped_before_it_took_it_is_killed_with_what_it_started() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let child = a_hook_that_started_a_ticker(&log).await;
+    let (to, taken) = tokio::sync::oneshot::channel();
+    hand_over(Ok(child), to, &Stop::REAL);
+    drop(taken);
+    assert!(
+        ticks_stop(&log).await,
+        "what the hook started is still running"
+    );
+}
+
+/// A start the runtime shut down before it ran can't start, rather than
+/// being timed out: it never waited for the gate.
+#[test]
+fn a_start_the_runtime_shut_down_before_it_ran_cannot_start() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let handle = runtime.handle().clone();
+    drop(runtime);
+    let command = tokio::process::Command::new("true");
+    let started = handle.block_on(start(command, Duration::from_secs(5), &Stop::REAL));
+    assert!(started.is_err(), "the start was not refused");
+}
+
+/// The call waits for the gate to let go of the hook's pipes for at most its
+/// gate limit too: here a stalled start holds the gate from before the hook
+/// ends until well after the limit, and the call returns with the hook's
+/// outcome all the same. (The wait for the call leaves room for the gate
+/// that other tests of this binary hold a while, at the hook's start, and for
+/// a busy machine: twice the two limits; the stall outlasts it.)
+#[tokio::test]
+async fn the_call_waits_to_let_go_of_the_pipes_no_longer_than_its_limit() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let go = scratch.path().join("log.go");
+    let runner = ProcessHookRunner::with_timeout(Duration::from_secs(10))
+        .with_gate_limit(Duration::from_secs(2));
+    let entry = sh(
+        r#"echo started >> "$1"; while [ ! -e "$1.go" ]; do sleep 0.01; done"#,
+        &log,
+    );
+    let context = context();
+    let redactor = Redactor::default();
+    let stall = async {
+        logged(&log, "started").await;
+        let stalled = testkit::inheritable::stalled_start(Duration::from_secs(12));
+        fs::write(&go, "").unwrap();
+        stalled
+    };
+    let (outcome, (release, stalled)) = tokio::join!(
+        within(
+            Duration::from_secs(8),
+            runner.run(&entry, &context, &redactor)
+        ),
+        stall
+    );
+    let _ = release.send(());
+    stalled.join().unwrap();
+    assert_eq!(outcome.status, HookStatus::Succeeded);
 }
 
 /// What `read_capped` keeps of `input` when it keeps at most `keep` bytes,

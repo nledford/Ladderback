@@ -12,7 +12,8 @@ app.workspace = true
 domain.workspace = true
 spawn-gate.workspace = true
 async-trait.workspace = true
-tokio = { workspace = true, features = ["io-util", "process", "rt", "time"] }
+# `sync` hands a hook's start over from the spawn gate, or back to it.
+tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 # `signal` stops a hook's process group, as the password-command runner's.

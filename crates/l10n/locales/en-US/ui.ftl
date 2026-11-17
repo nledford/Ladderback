@@ -190,6 +190,26 @@ ui-gallery-demo-dialog-body = A dialog traps focus and returns it on close.
 # The button inside the demo dialog that closes it.
 ui-gallery-close-demo-dialog = Close the demo dialog
 
+# The button that opens the demo warning, a dialog that hands Escape to the
+# page, as the warning before a session ends unused does.
+ui-gallery-open-demo-warning = Open the demo warning
+
+# The demo warning's accessible name and heading.
+ui-gallery-demo-warning = Demo warning
+
+# What the demo warning says, which describes it.
+ui-gallery-demo-warning-body = Escape keeps this warning open, as Keep the demo warning does. Answer the demo warning, and the page closes it.
+
+# What the demo warning says when Escape or Keep the demo warning has kept it
+# open.
+ui-gallery-demo-warning-kept = The page keeps the demo warning open.
+
+# The demo warning's button that has the page close it.
+ui-gallery-answer-demo-warning = Answer the demo warning
+
+# The demo warning's button that keeps it open, which it opens on.
+ui-gallery-keep-demo-warning = Keep the demo warning
+
 # The heading of the gallery's table demo.
 ui-gallery-table-heading = Table
 
@@ -498,6 +518,20 @@ ui-gallery-demo-unknown-progress = Demo progress of unknown size
 # running operation is in.
 ui-gallery-demo-step-progress = Demo progress of a step
 
+# The names of the demo's progress bars, each 60% done, one for each size of
+# the shared vocabulary (Small, Medium, Large, Extra large), then one for each
+# of its tones. The size and tone names match the vocabulary demo's.
+ui-gallery-progress-small = Demo progress at the Small size
+ui-gallery-progress-medium = Demo progress at the Medium size
+ui-gallery-progress-large = Demo progress at the Large size
+ui-gallery-progress-xlarge = Demo progress at the Extra large size
+ui-gallery-progress-primary = Demo progress in the Primary tone
+ui-gallery-progress-secondary = Demo progress in the Secondary tone
+ui-gallery-progress-success = Demo progress in the Success tone
+ui-gallery-progress-warning = Demo progress in the Warning tone
+ui-gallery-progress-error = Demo progress in the Error tone
+ui-gallery-progress-inherit = Demo progress in the Inherit tone
+
 # The heading of the gallery's toast demo.
 ui-gallery-toast-heading = Toast
 
@@ -670,6 +704,27 @@ ui-gallery-skeleton-keeps = Keeps a week of snapshots.
 # A demo toggle button that brings the demo plan in place of its skeleton,
 # pressed while the plan shows; pressing it again shows the wait again.
 ui-gallery-skeleton-show = Show the demo plan
+
+# The heading of the gallery's banner demo (§4.5): a page-wide notice in
+# each tone it takes, one with a long path in it and one the reader can
+# dismiss, which this browser then remembers.
+ui-gallery-banner-heading = Banner
+
+# The demo banner in the Primary tone, information.
+ui-gallery-banner-information = The demo daemon looks for a newer release once a day.
+
+# The demo banner in the Warning tone, with a long path in it that wraps on
+# a small screen.
+ui-gallery-banner-warning = The demo data folder at /srv/demo-data/ladderback-demo-data-folder is almost full, so the demo backups may soon stop.
+
+# The demo banner the reader can dismiss with its button. The browser keeps
+# the last edition dismissed, and the demo shows any other edition again.
+ui-gallery-banner-dismissible = A demo update is ready. This browser remembers the last edition dismissed, and shows any other.
+
+# A demo button that shows a newer edition of the dismissible demo notice,
+# which a dismissal of the one before doesn't hide; focus moves to it when
+# the notice is dismissed.
+ui-gallery-banner-newer = Show a newer demo notice
 
 # The heading of the gallery's icon demo (§4.5): one Lucide glyph, beside
 # words or inside a control.
@@ -1869,6 +1924,17 @@ ui-text-field-read-only = Read only: you can select and copy it, but not change 
 # Under a disabled text field's label: it can't be used now. The field's
 # own hint says why, where there is a reason.
 ui-text-field-disabled = Unavailable: it can't be changed now.
+
+## The banner (§4.5): what it says of itself, the same on every page.
+
+# The name of a banner's icon, heard by a screen reader before the banner's
+# words: the banner's tone in one word, which its icon's shape shows.
+ui-banner-information = Information
+ui-banner-warning = Warning
+
+# The name of the icon-only button that takes a banner away, which its
+# tooltip shows. The browser remembers the choice.
+ui-banner-dismiss = Dismiss
 
 ## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
 ## admin password with sign-in on, the short ID of what it confirms with

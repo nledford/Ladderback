@@ -12,11 +12,13 @@ use api::{EntryDto, EntryKindDto, FolderDto, MsgArg};
 use l10n::{Direction, Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
+use leptos::task::{spawn_local, tick};
 use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
 use crate::components::alert::rules::AlertTone;
+use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
 use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
@@ -25,10 +27,11 @@ use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
 use crate::components::{
-    Alert, Align, Button, Checkbox, Column, Confirmation, Dismissal, FolderLoader, FolderPage,
-    Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup,
-    ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp,
-    StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
+    Alert, Align, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation, Dismissal,
+    FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates,
+    Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State,
+    StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree,
+    show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -95,6 +98,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         current: 4 * GIB,
         total: Some(10 * GIB),
     });
+    // The reading of the progress demo's bars at each size and tone.
+    let sixty = Reading {
+        current: 6 * GIB,
+        ..progress.get_untracked()
+    };
     let toast = RwSignal::<Option<String>>::new(None);
     let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
     // Whether the icon demo's notifications are on, which its icon-only
@@ -120,6 +128,27 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
+    let dialog_open = RwSignal::new(false);
+    // The demo warning, which hands Escape to the page as the idle warning
+    // does: whether it is open, the button it starts on, and whether the page
+    // has said it keeps the warning open, cleared first on each keep so a
+    // second one is said again.
+    let warning_open = RwSignal::new(false);
+    let warning_keep = NodeRef::<leptos::html::Button>::new();
+    let warning_kept = RwSignal::new(false);
+    let keep_warning = move || {
+        warning_kept.set(false);
+        spawn_local(async move {
+            tick().await;
+            warning_kept.try_set(true);
+        });
+    };
+    let (warning_body, warning_kept_text, warning_answer, warning_keep_label) = (
+        t(msg::UI_GALLERY_DEMO_WARNING_BODY),
+        t(msg::UI_GALLERY_DEMO_WARNING_KEPT),
+        t(msg::UI_GALLERY_ANSWER_DEMO_WARNING),
+        t(msg::UI_GALLERY_KEEP_DEMO_WARNING),
+    );
     // The pause control's demo: whether it is paused, and the demo runs that
     // finished meanwhile, each a change the banner counts.
     let demo_paused = RwSignal::new(false);
@@ -218,6 +247,16 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             last: Share::percent(40),
         },
     );
+    // The banner demo: its words in each tone it takes, and the edition of
+    // its dismissible notice, which the button after it makes newer, so the
+    // dismissal of the one before doesn't keep it away.
+    let (banner_information, banner_warning, banner_notice) = (
+        t(msg::UI_GALLERY_BANNER_INFORMATION),
+        t(msg::UI_GALLERY_BANNER_WARNING),
+        t(msg::UI_GALLERY_BANNER_DISMISSIBLE),
+    );
+    let banner_edition = RwSignal::new(0_u32);
+    let banner_demo_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>
@@ -292,9 +331,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_DIALOG_HEADING)}</h2>
+            <Button
+                content=Content::Text(t(msg::UI_GALLERY_OPEN_DEMO_DIALOG).into())
+                on_press=Callback::new(move |()| dialog_open.set(true))
+            />
             <ModalDialog
-                label=t(msg::UI_GALLERY_DEMO_DIALOG)
-                open_label=t(msg::UI_GALLERY_OPEN_DEMO_DIALOG)
+                open=dialog_open
+                id="gallery-demo-dialog"
+                title=t(msg::UI_GALLERY_DEMO_DIALOG)
                 close_label=t(msg::UI_GALLERY_CLOSE_DEMO_DIALOG)
             >
                 <p>{dialog_body.clone()}</p>
@@ -304,6 +348,42 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                         on_press=Callback::new(move |()| {
                             say(Politeness::Polite, &dialog_polite_text);
                         })
+                    />
+                </p>
+            </ModalDialog>
+            <Button
+                content=Content::Text(t(msg::UI_GALLERY_OPEN_DEMO_WARNING).into())
+                on_press=Callback::new(move |()| {
+                    warning_kept.set(false);
+                    warning_open.set(true);
+                })
+            />
+            // Escape and Keep the demo warning keep it open; Answer the demo
+            // warning closes it from outside, as the daemon's answer closes
+            // the idle warning.
+            <ModalDialog
+                open=warning_open
+                id="gallery-demo-warning"
+                title=t(msg::UI_GALLERY_DEMO_WARNING)
+                described_by="gallery-demo-warning-body"
+                starts_on=warning_keep
+                on_cancel=Callback::new(move |()| keep_warning())
+            >
+                <p id="gallery-demo-warning-body">{warning_body}</p>
+                <p aria-live="polite" aria-atomic="true">
+                    {move || warning_kept.get().then(|| warning_kept_text.clone())}
+                </p>
+                <p class="actions">
+                    <Button
+                        content=Content::Text(warning_answer.into())
+                        on_press=Callback::new(move |()| warning_open.set(false))
+                    />
+                    <Button
+                        content=Content::Text(warning_keep_label.into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        node_ref=warning_keep
+                        on_press=Callback::new(move |()| keep_warning())
                     />
                 </p>
             </ModalDialog>
@@ -478,36 +558,6 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     })
                     .collect_view()}
             </ul>
-        </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
-                reading=progress
-            />
-            <p>
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_ADVANCE_PROGRESS).into())
-                    on_press=Callback::new(move |()| {
-                        progress
-                            .update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
-                    })
-                />
-            </p>
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
-                reading=Signal::stored(Reading::default())
-            />
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_STEP_PROGRESS)
-                reading=Signal::stored(Reading {
-                    step: Some(api::OperationStep::ReadingIndex),
-                    ..Reading::default()
-                })
-            />
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
@@ -1129,6 +1179,45 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
+        // Its id finds the demo under a pseudolocale too, which renames its
+        // heading.
+        <section id="banner-demo">
+            <h2>{t(msg::UI_GALLERY_BANNER_HEADING)}</h2>
+            // Each tone it takes, information first, which is the default.
+            <Banner localizer=Arc::clone(&localizer)>{banner_information}</Banner>
+            // A long path, which wraps inside the banner on a small screen.
+            <Banner localizer=Arc::clone(&localizer) tone=BannerTone::Warning>
+                {banner_warning}
+            </Banner>
+            // A notice the reader dismisses: it goes, focus goes to the
+            // button that brings a newer one, and this browser keeps this
+            // edition away on every later load.
+            {move || {
+                let edition = banner_edition.get().to_string();
+                let notice = banner_notice.clone();
+                view! {
+                    <Banner
+                        localizer=Arc::clone(&banner_demo_localizer)
+                        dismissal=BannerDismissal {
+                            remember_as: BANNER_DEMO,
+                            edition,
+                            then_focus: BANNER_DEMO_NEWER.to_owned(),
+                        }
+                    >
+                        {notice}
+                    </Banner>
+                }
+            }}
+            <p>
+                <Button
+                    id=BANNER_DEMO_NEWER
+                    content=Content::Text(t(msg::UI_GALLERY_BANNER_NEWER).into())
+                    on_press=Callback::new(move |()| {
+                        banner_edition.update(|edition| *edition = edition.saturating_add(1));
+                    })
+                />
+            </p>
+        </section>
         <section>
             <h2>{t(msg::UI_GALLERY_LINK_HEADING)}</h2>
             // A page of the app, and the page the reader is on, which is the
@@ -1620,6 +1709,87 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 })
                 .collect_view()}
         </section>
+        // After the text field's, so the walks from the page's start to
+        // the Toast demo and the sections after it pass none of its bars.
+        <section>
+            <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
+                reading=progress
+            />
+            <p>
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_ADVANCE_PROGRESS).into())
+                    on_press=Callback::new(move |()| {
+                        progress
+                            .update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
+                    })
+                />
+            </p>
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
+                reading=Signal::stored(Reading::default())
+            />
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_DEMO_STEP_PROGRESS)
+                reading=Signal::stored(Reading {
+                    step: Some(api::OperationStep::ReadingIndex),
+                    ..Reading::default()
+                })
+            />
+            // Every size, then every tone, each 60% done. The Small one and
+            // the Primary one name no size or tone, so they show the
+            // defaults.
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_PROGRESS_SMALL)
+                reading=Signal::stored(sixty)
+            />
+            {[
+                (Size::Medium, msg::UI_GALLERY_PROGRESS_MEDIUM),
+                (Size::Large, msg::UI_GALLERY_PROGRESS_LARGE),
+                (Size::XLarge, msg::UI_GALLERY_PROGRESS_XLARGE),
+            ]
+                .into_iter()
+                .map(|(size, name)| {
+                    view! {
+                        <Progress
+                            localizer=Arc::clone(&localizer)
+                            label=t(name)
+                            reading=Signal::stored(sixty)
+                            size=size
+                        />
+                    }
+                })
+                .collect_view()}
+            <Progress
+                localizer=Arc::clone(&localizer)
+                label=t(msg::UI_GALLERY_PROGRESS_PRIMARY)
+                reading=Signal::stored(sixty)
+            />
+            {[
+                (Tone::Secondary, msg::UI_GALLERY_PROGRESS_SECONDARY),
+                (Tone::Success, msg::UI_GALLERY_PROGRESS_SUCCESS),
+                (Tone::Warning, msg::UI_GALLERY_PROGRESS_WARNING),
+                (Tone::Error, msg::UI_GALLERY_PROGRESS_ERROR),
+                (Tone::Inherit, msg::UI_GALLERY_PROGRESS_INHERIT),
+            ]
+                .into_iter()
+                .map(|(tone, name)| {
+                    view! {
+                        <Progress
+                            localizer=Arc::clone(&localizer)
+                            label=t(name)
+                            reading=Signal::stored(sixty)
+                            tone=tone
+                        />
+                    }
+                })
+                .collect_view()}
+        </section>
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <section>
@@ -1715,6 +1885,14 @@ const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
 /// The ID of the alert demo's button that brings its dismissed notice back,
 /// where focus goes when the notice is dismissed.
 const ALERT_DEMO_SHOW: &str = "alert-demo-show";
+
+/// The name the gallery's dismissible demo banner is remembered under in
+/// the browser's local storage.
+const BANNER_DEMO: &str = "gallery-demo";
+
+/// The ID of the banner demo's button that brings a newer edition of its
+/// notice, where focus goes when the notice is dismissed.
+const BANNER_DEMO_NEWER: &str = "banner-demo-newer";
 
 /// A demo route. The gallery's literal paths all parse (the link's rules
 /// test their shapes); one that didn't would show no link, which the link
