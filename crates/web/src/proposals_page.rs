@@ -341,15 +341,21 @@ fn Review(
         },
     };
     let shown = StoredValue::new(review.clone());
+    // The forget preview shown: its digest, which Approve sends, once a
+    // preview read every repository; and whether one was shown at all.
+    let forget_digest = RwSignal::new(None::<String>);
+    let forget_shown = RwSignal::new(false);
     let approve_url = list.url(&approve_path(&id));
     let approve_localizer = Arc::clone(&localizer);
     let approve_id = id.clone();
-    let approve = move || {
+    let approve = Callback::new(move |()| {
         if working.get_untracked().is_some() {
             return;
         }
-        let Some(sent) = shown.with_value(|review| approval(review, None, value.get_untracked()))
-        else {
+        let Some(sent) = shown.with_value(|review| {
+            forget_digest
+                .with_untracked(|digest| approval(review, digest.as_deref(), value.get_untracked()))
+        }) else {
             return;
         };
         working.set(Some(Deciding::Approving));
@@ -392,7 +398,7 @@ fn Review(
                 None => approve_alert.set(Some(unanswered(&localizer))),
             }
         });
-    };
+    });
 
     // Reject, with a reason field for each change, counted from 1.
     let reasons: Vec<RwSignal<String>> = review
@@ -474,21 +480,24 @@ fn Review(
     let changed_since = review
         .changed_since_drafted
         .then(|| view! { <p>{text(&localizer, msg::UI_PROPOSAL_CHANGED_SINCE)}</p> });
-    let approve_part = if can_approve(&review, None) {
-        let approving = text(&localizer, msg::UI_PROPOSAL_APPROVING);
+    let approving = text(&localizer, msg::UI_PROPOSAL_APPROVING);
+    let form_localizer = Arc::clone(&localizer);
+    let approve_form = move || {
+        let localizer = Arc::clone(&form_localizer);
+        let approving = approving.clone();
         view! {
             <form
                 aria-labelledby="proposal-approve-heading"
                 novalidate
                 on:submit=move |event| {
                     event.prevent_default();
-                    approve();
+                    approve.run(());
                 }
             >
                 <StepUpField
                     id=STEP_UP_ID
                     localizer=Arc::clone(&localizer)
-                    step_up=step_up
+                    step_up=step_up.clone()
                     value=value
                     error=error
                 />
@@ -513,16 +522,34 @@ fn Review(
                     .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
             }}
         }
-        .into_any()
+    };
+    let approve_part = if can_approve(&review, None) {
+        approve_form().into_any()
     } else {
         let url = list.url(&forget_preview_path(&id));
+        let unread = text(&localizer, msg::UI_PROPOSAL_FORGET_PREVIEW_UNREAD);
+        let needs = review.clone();
+        // Approve, once a forget preview that read every repository shows;
+        // why not, once one that couldn't does.
+        let from_preview = move || {
+            if forget_digest.with(|digest| can_approve(&needs, digest.as_deref())) {
+                Some(approve_form().into_any())
+            } else {
+                forget_shown
+                    .get()
+                    .then(|| view! { <p>{unread.clone()}</p> }.into_any())
+            }
+        };
         view! {
             <p>{text(&localizer, msg::UI_PROPOSAL_NEEDS_FORGET_PREVIEW)}</p>
             <ForgetPreview
                 localizer=Arc::clone(&localizer)
                 url=url
                 disabled=Signal::derive(move || working.get() == Some(Deciding::Rejecting))
+                digest=forget_digest
+                shown_any=forget_shown
             />
+            {from_preview}
         }
         .into_any()
     };
@@ -585,9 +612,17 @@ fn Review(
 /// person asks, since it reads every repository the proposal touches: under
 /// its heading, each repository's lines and differences, or why it couldn't
 /// be read. While it reads, its button is busy and the page says so; while
-/// `disabled`, as while a rejection waits, its button is unavailable.
+/// `disabled`, as while a rejection waits, its button is unavailable. Once
+/// read, `shown_any` is set and `digest` holds what an approval of the
+/// preview shown brings, none while a repository couldn't be read.
 #[component]
-fn ForgetPreview(localizer: Arc<Localizer>, url: String, disabled: Signal<bool>) -> impl IntoView {
+fn ForgetPreview(
+    localizer: Arc<Localizer>,
+    url: String,
+    disabled: Signal<bool>,
+    digest: RwSignal<Option<String>>,
+    shown_any: RwSignal<bool>,
+) -> impl IntoView {
     let reading = RwSignal::new(false);
     let shown = RwSignal::new(None::<Vec<RepositoryShown>>);
     let alert = RwSignal::new(None::<Sentence>);
@@ -600,6 +635,8 @@ fn ForgetPreview(localizer: Arc<Localizer>, url: String, disabled: Signal<bool>)
         alert.set(None);
         // A preview read before is no longer shown as current.
         shown.set(None);
+        digest.set(None);
+        shown_any.set(false);
         reply(
             Politeness::Polite,
             &text(&read_localizer, msg::UI_PROPOSAL_FORGET_PREVIEWING),
@@ -631,6 +668,8 @@ fn ForgetPreview(localizer: Arc<Localizer>, url: String, disabled: Signal<bool>)
                     shown.set(Some(
                         preview.repositories.iter().map(repository_shown).collect(),
                     ));
+                    digest.set(preview.digest);
+                    shown_any.set(true);
                     reply(
                         Politeness::Polite,
                         &text(&localizer, msg::UI_PROPOSAL_FORGET_HEADING),

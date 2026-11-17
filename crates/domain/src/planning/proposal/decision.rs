@@ -7,7 +7,7 @@ use jiff::{SignedDuration, Timestamp};
 use subtle::ConstantTimeEq as _;
 
 use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex, sha256_hex_of};
-use crate::maintenance::ForgetComparison;
+use crate::maintenance::{ForgetComparison, ForgetSide, LeftAlone};
 use crate::planning::{AgentConfig, Plan, Source};
 use crate::{PlanId, RepositoryAlias};
 
@@ -255,7 +255,18 @@ impl ForgetDigest {
         proposal: &ProposalId,
         repositories: impl IntoIterator<Item = (&'a RepositoryAlias, &'a ForgetComparison)>,
     ) -> Self {
-        todo!("{key:?} {proposal} {}", repositories.into_iter().count())
+        // Each text ends in a newline no ID or alias holds, and each count
+        // is written whole, so no two previews write the same bytes.
+        let mut text = format!("{}\n", proposal.as_str());
+        for (alias, comparison) in repositories {
+            text.push_str("repository ");
+            text.push_str(alias.as_str());
+            text.push('\n');
+            for side in [&comparison.before, &comparison.after] {
+                write_side(&mut text, side);
+            }
+        }
+        Self(sha256_hex_of(&[&key.0, text.as_bytes()]))
     }
 
     /// The digest `text` names, as [`ForgetDigest::as_str`] gives it.
@@ -266,6 +277,33 @@ impl ForgetDigest {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Writes `side` to `text` for [`ForgetDigest::of`], line by line.
+fn write_side(text: &mut String, side: &ForgetSide) {
+    use std::fmt::Write as _;
+    // Writing to a `String` can't fail.
+    let _ = match side {
+        ForgetSide::NotMaintained => writeln!(text, "not-maintained"),
+        ForgetSide::KeepsNothing { plan } => writeln!(text, "keeps-nothing {}", plan.as_str()),
+        ForgetSide::Forgets(preview) => {
+            for plan in &preview.plans {
+                let _ = writeln!(text, "plan {} {}", plan.plan.as_str(), plan.total);
+                for snapshot in &plan.remove {
+                    let _ = writeln!(text, "remove {}", snapshot.id.as_str());
+                }
+            }
+            let LeftAlone {
+                orphaned,
+                unmanaged,
+            } = preview.left_alone;
+            writeln!(
+                text,
+                "left-alone {} {} {} {}",
+                orphaned.groups, orphaned.snapshots, unmanaged.groups, unmanaged.snapshots
+            )
+        }
+    };
 }
 
 impl PartialEq for ForgetDigest {

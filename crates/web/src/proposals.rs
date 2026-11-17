@@ -261,8 +261,7 @@ pub(crate) fn rejected_before(review: &ProposalReviewDto) -> Said {
 /// repository it touches (decision 89, point 8); until then it is only
 /// rejected, and the page says why.
 pub(crate) fn can_approve(review: &ProposalReviewDto, forget_digest: Option<&str>) -> bool {
-    let _ = forget_digest;
-    !review.needs_forget_preview
+    !review.needs_forget_preview || forget_digest.is_some()
 }
 
 /// The request Approve sends: what the page showed, the file's revision,
@@ -276,7 +275,7 @@ pub(crate) fn approval(
     can_approve(review, forget_digest).then(|| ApproveProposalDto {
         revision: review.revision.clone(),
         diff_hash: review.diff_hash.clone(),
-        forget_digest: None,
+        forget_digest: forget_digest.map(str::to_owned),
         confirmation,
     })
 }

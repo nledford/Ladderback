@@ -403,7 +403,11 @@ fn refusal(error: &ProposalsError) -> Response {
             ErrorCode::ProposalNeedsForgetPreview,
             Vec::new(),
         ),
-        ProposalsError::ForgetPreviewChanged => todo!(),
+        ProposalsError::ForgetPreviewChanged => (
+            StatusCode::CONFLICT,
+            ErrorCode::ProposalForgetPreviewChanged,
+            Vec::new(),
+        ),
         ProposalsError::ReasonCount { changes } => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::ProposalReasons,

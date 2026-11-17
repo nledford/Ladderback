@@ -410,9 +410,19 @@ impl Proposals {
                 .await;
             repositories.push(RepositoryForget { repository, forget });
         }
+        let read = repositories.iter().map(|one| {
+            one.forget
+                .as_ref()
+                .ok()
+                .map(|comparison| (&one.repository, comparison))
+        });
+        let digest = match read.collect::<Option<Vec<_>>>() {
+            Some(read) => Some(ForgetDigest::of(self.revision_key()?, &proposal.id, read)),
+            None => None,
+        };
         Ok(ForgetPreviewed {
             repositories,
-            digest: None,
+            digest,
         })
     }
 
@@ -460,10 +470,14 @@ impl Proposals {
             return Err(ProposalError::Changed);
         }
         if let Some(shown) = forget {
+            // Read again under the lock this apply holds, so what the
+            // person saw is what holds when the file is saved.
             let read = self
                 .read_forget(&proposal, &config, &after, op, maintenance)
                 .await?;
-            todo!("{shown:?} {read:?}")
+            if read.digest.as_ref() != Some(shown) {
+                return Err(ProposalError::ForgetPreviewChanged);
+            }
         }
         let now = to_the_millisecond(self.ports.clock.now());
         let approved = self
@@ -602,10 +616,14 @@ impl Proposals {
     /// `revision` as a page is shown it: keyed with this daemon's key, so
     /// the file's plain revision never leaves it.
     fn shown_revision(&self, revision: &ConfigRevision) -> Result<ShownRevision, ProposalError> {
+        Ok(ShownRevision::of(self.revision_key()?, revision))
+    }
+
+    /// This daemon's key for what a page is shown.
+    fn revision_key(&self) -> Result<&RevisionKey, ProposalError> {
         self.ports
             .revision_key
             .as_ref()
-            .map(|key| ShownRevision::of(key, revision))
             .map_err(|error| ProposalError::Random(error.clone()))
     }
 
