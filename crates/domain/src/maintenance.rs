@@ -565,6 +565,57 @@ impl ForgetPreview {
     }
 }
 
+/// What this agent's forget would do to one repository before a proposal
+/// and after it (§16, decision 89, point 8), each side as
+/// [`ForgetSide`] tells it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgetComparison {
+    pub before: ForgetSide,
+    pub after: ForgetSide,
+}
+
+/// What this agent's forget would do to one repository under one
+/// configuration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ForgetSide {
+    /// This agent doesn't maintain the repository under it: no forget of
+    /// this agent's runs there, so its retention forgets nothing.
+    NotMaintained,
+    /// What a forget would remove.
+    Forgets(ForgetPreview),
+    /// A forget would be refused, and so remove nothing: the policy of
+    /// `plan`, which has history there, keeps nothing.
+    KeepsNothing { plan: PlanId },
+}
+
+impl ForgetSide {
+    /// What a forget would remove under this side; none when it wouldn't
+    /// run, or would be refused.
+    pub fn preview(&self) -> Option<&ForgetPreview> {
+        match self {
+            Self::Forgets(preview) => Some(preview),
+            Self::NotMaintained | Self::KeepsNothing { .. } => None,
+        }
+    }
+}
+
+impl ForgetComparison {
+    /// What a forget would remove after the proposal and not before: per
+    /// plan of the after side that removes any, in its order, the plan's
+    /// total snapshots after the proposal and those it removes only then,
+    /// newest first.
+    pub fn forgets_more(&self) -> Vec<PlanForget> {
+        todo!()
+    }
+
+    /// What a forget would remove before the proposal and not after: per
+    /// plan of the before side, as [`forgets_more`](Self::forgets_more)
+    /// tells the other way.
+    pub fn forgets_less(&self) -> Vec<PlanForget> {
+        todo!()
+    }
+}
+
 /// Who may maintain a repository from this agent: exactly one party does
 /// (I1, §7.3). Forget, prune, check and adoption, which rewrites snapshots,
 /// are the owner's alone, and so are their previews.
@@ -1327,6 +1378,82 @@ mod tests {
             2,
             "a plan with no snapshots is not listed"
         );
+    }
+
+    fn differing(planned: &[PlanForget]) -> Vec<(PlanId, usize, Vec<SnapshotId>)> {
+        planned
+            .iter()
+            .map(|one| (one.plan.clone(), one.total, removed_ids(one)))
+            .collect()
+    }
+
+    #[test]
+    fn a_comparison_names_what_only_the_after_side_forgets_and_what_only_the_before_side_does() {
+        let comparison = ForgetComparison {
+            before: ForgetSide::Forgets(ForgetPreview::new(
+                &busy_repository(),
+                removals(&[("home", &[4]), ("photos", &[5])]),
+            )),
+            after: ForgetSide::Forgets(ForgetPreview::new(
+                &busy_repository(),
+                removals(&[("home", &[2, 3, 4]), ("photos", &[])]),
+            )),
+        };
+        assert_eq!(
+            differing(&comparison.forgets_more()),
+            [(plan("home"), 4, vec![id(2), id(3)])],
+            "only the plans whose removals grew, with only what they add"
+        );
+        assert_eq!(
+            differing(&comparison.forgets_less()),
+            [(plan("photos"), 1, vec![id(5)])]
+        );
+    }
+
+    /// A side where no forget runs, or where one would be refused, removes
+    /// nothing.
+    #[test]
+    fn a_side_this_agent_does_not_maintain_or_would_refuse_forgets_nothing() {
+        let preview = ForgetPreview::new(&busy_repository(), removals(&[("home", &[3, 4])]));
+        for nothing in [
+            ForgetSide::NotMaintained,
+            ForgetSide::KeepsNothing { plan: plan("home") },
+        ] {
+            let taken_over = ForgetComparison {
+                before: nothing.clone(),
+                after: ForgetSide::Forgets(preview.clone()),
+            };
+            assert_eq!(
+                differing(&taken_over.forgets_more()),
+                [(plan("home"), 4, vec![id(3), id(4)])]
+            );
+            assert!(taken_over.forgets_less().is_empty());
+            let given_up = ForgetComparison {
+                before: ForgetSide::Forgets(preview.clone()),
+                after: nothing,
+            };
+            assert!(given_up.forgets_more().is_empty());
+            assert_eq!(
+                differing(&given_up.forgets_less()),
+                [(plan("home"), 4, vec![id(3), id(4)])]
+            );
+        }
+    }
+
+    #[test]
+    fn a_snapshot_forgotten_on_both_sides_is_no_difference() {
+        let comparison = ForgetComparison {
+            before: ForgetSide::Forgets(ForgetPreview::new(
+                &busy_repository(),
+                removals(&[("home", &[4]), ("photos", &[5])]),
+            )),
+            after: ForgetSide::Forgets(ForgetPreview::new(
+                &busy_repository(),
+                removals(&[("home", &[4]), ("photos", &[5])]),
+            )),
+        };
+        assert!(comparison.forgets_more().is_empty());
+        assert!(comparison.forgets_less().is_empty());
     }
 
     #[test]

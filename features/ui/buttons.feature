@@ -149,3 +149,15 @@ Feature: Buttons on every page
     And focus is on the button "Reject the proposal"
     And the button "Approve the proposal" is unavailable
     And the polite region comes to contain "is rejected. The AI agent can read your reasons."
+
+  Scenario: Rejecting a proposal that could delete snapshots leaves its forget preview unavailable meanwhile
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to remove it
+    And the daemon answers the next rejection of a proposal 2 seconds late
+    When I open the address "/proposals"
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the button "Reject the proposal"
+    And I press Enter
+    Then the button "Reject the proposal" is busy, a spinner a screen reader skips before its label
+    And the button "Show what it would forget" is unavailable
+    And the polite region comes to contain "is rejected. The AI agent can read your reasons."

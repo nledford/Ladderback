@@ -24,8 +24,8 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 
 use domain::maintenance::{
-    AdoptSelection, AdoptionRefusal, ForgetPreview, ForgetSelection, ManagedPlan, OrphanedGroup,
-    OtherHosts, Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
+    AdoptSelection, AdoptionRefusal, ForgetComparison, ForgetPreview, ForgetSelection, ManagedPlan,
+    OrphanedGroup, OtherHosts, Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -709,6 +709,23 @@ impl RunMaintenance {
             preview,
             other_hosts,
         })
+    }
+
+    /// What a forget would do to the repository `alias` under the
+    /// configuration `before` and under `after`, from one listing of it, as
+    /// a proposal's forget preview tells it (§16, decision 89, point 8). A
+    /// side under which this agent doesn't maintain the repository forgets
+    /// nothing and isn't evaluated; with neither, the repository isn't
+    /// read. A read like [`preview`](Self::preview): no I7 slot, nothing in
+    /// the operation log, nothing removed.
+    pub async fn compare_forget(
+        &self,
+        op: OperationId,
+        before: &AgentConfig,
+        after: &AgentConfig,
+        alias: &RepositoryAlias,
+    ) -> Result<ForgetComparison, MaintenanceError> {
+        todo!()
     }
 
     /// The repository's snapshots grouped by who owns them (§7.3), as a

@@ -16,14 +16,17 @@ use std::sync::Arc;
 
 use api::{ProposalStatusDto, UiEvent};
 use domain::access::step_up::{StepUpConfirmation, StepUpFor};
+use domain::maintenance::ForgetComparison;
 use domain::planning::{
     AgentConfig, ConfigChange, ConfigRevision, DiffHash, MAX_ENDED, MAX_PENDING, Proposal,
     ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale, Rejection,
     RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon,
 };
 use domain::secrets::Redactor;
+use domain::{OperationId, RepositoryAlias};
 
 use crate::access::{Access, StepUpRefused, confirm_step_up};
+use crate::maintenance::{MaintenanceError, RunMaintenance};
 use crate::ports::{
     Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError, ConfigStore,
     EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError, StoredProposal,
@@ -117,6 +120,15 @@ pub struct Review {
     pub needs_forget_preview: bool,
     /// How many of its proposer's kept proposals a person rejected.
     pub rejected: usize,
+}
+
+/// What a pending proposal would change about the snapshots retention
+/// forgets in one repository it touches (decision 89, point 8; I6), or
+/// why that repository couldn't be read.
+#[derive(Debug, PartialEq)]
+pub struct RepositoryForget {
+    pub repository: RepositoryAlias,
+    pub forget: Result<ForgetComparison, MaintenanceError>,
 }
 
 /// A person's approval of a proposal, as the page sends it.
@@ -332,6 +344,23 @@ impl Proposals {
             diff,
             rejected,
         })
+    }
+
+    /// The forget preview of the pending proposal `id` (decision 89, point
+    /// 8): for each repository its changes touch, in the order they name
+    /// them, what `maintenance`'s forget would remove under the
+    /// configuration as it is and under the configuration its changes
+    /// make, read under the operation `op`. A person's action on the page:
+    /// it reads the repositories, so their secrets are resolved and their
+    /// locations contacted, and it changes nothing. A repository that
+    /// couldn't be read is answered with why, the others all the same.
+    pub async fn forget_preview(
+        &self,
+        id: &ProposalId,
+        op: OperationId,
+        maintenance: &RunMaintenance,
+    ) -> Result<Vec<RepositoryForget>, ProposalError> {
+        todo!()
     }
 
     /// Approves the pending proposal `id` as `ask` says the page showed it,

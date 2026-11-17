@@ -57,6 +57,14 @@ pub trait Proposals: Send + Sync {
     /// The proposal `id` as the "Pending changes" page shows it.
     async fn review(&self, id: String) -> Result<api::ProposalReviewDto, ProposalsError>;
 
+    /// The forget preview of the pending proposal `id` (decision 89, point
+    /// 8): what it would change about the snapshots retention forgets in
+    /// each repository it touches. A read: it changes nothing.
+    async fn forget_preview(
+        &self,
+        id: String,
+    ) -> Result<api::ProposalForgetPreviewDto, ProposalsError>;
+
     /// Confirms `approval` of the pending proposal `id` by step-up and
     /// applies it, answering it applied.
     async fn approve(
