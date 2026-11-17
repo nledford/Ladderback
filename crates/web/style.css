@@ -1624,3 +1624,91 @@ table.repositories :is(th, td) {
 .tree-row[aria-selected="true"] {
   font-weight: 700;
 }
+
+/* Tabs (§4.5): a row of tabs on one Slate Note rule, each tab its words in
+   the text's color, no fill and no box. The selected tab is bold with a
+   3px Ladder Blue bar over the rule under it, told by weight and a shape,
+   never by color alone (1.4.1, The Weight Not Color Rule). Flat. On a
+   narrow screen the row wraps onto more lines, each tab whole (The 320
+   Rule). Each tab draws its own stretch of the rule, its 1px bottom edge,
+   so the rule shows under every tab on every line, and the list's own
+   rule runs on under the last line to the row's end; the tabs stand edge
+   to edge, so a line's rule doesn't break between them. A tab's edge
+   reaches one pixel into the list's rule, so on the last line the two are
+   one. The selected tab's edge is its bar, 3px, its padding 2px less, so
+   choosing a tab moves nothing. */
+.tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  border-block-end: 1px solid var(--muted);
+}
+
+.tab {
+  min-block-size: 1.5rem;
+  margin-block-end: -1px;
+  padding-block: 0.25rem;
+  padding-inline: 0.75rem;
+  border: 0;
+  border-block-end: 1px solid var(--muted);
+  background: none;
+  color: var(--fg);
+  font-weight: 400;
+}
+
+.tab[aria-selected="true"] {
+  padding-block-end: calc(0.25rem - 2px);
+  border-block-end: 3px solid var(--accent);
+  font-weight: 700;
+}
+
+/* A tab is as wide bold as it is not, so the row stays still as the
+   selection moves along it: an unseen bold copy of its words, which a
+   screen reader skips, sets its width. */
+.tab-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tab-label::after {
+  content: attr(data-label);
+  content: attr(data-label) / "";
+  block-size: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 700;
+}
+
+/* Hover: the bar's place shows a Slate Note line, as thick as the bar,
+   under a tab that isn't selected. */
+@media (forced-colors: none) {
+  .tab:not([aria-selected="true"]):hover {
+    padding-block-end: calc(0.25rem - 2px);
+    border-block-end-width: 3px;
+  }
+}
+
+/* A panel keeps the room of the tabs' row between it and the list. */
+.tab-panel {
+  padding-block: 0.75rem;
+}
+
+/* Forced colors: the tabs are text on the reader's page colors, the rule
+   under each in the text's color as the list's is, and the selected bar in
+   it too, as the focus ring is: Highlight need not reach 3:1 on Canvas
+   (Firefox's own is 2.9:1 on white, 1.4.11). The bar stands apart from the
+   rule by its thickness and from the ring by its place, under the tab
+   inside the ring's offset, and the selected tab keeps its weight. */
+@media (forced-colors: active) {
+  .tab-list {
+    border-block-end-color: CanvasText;
+  }
+
+  .tab,
+  .tab[aria-selected="true"] {
+    background-color: Canvas;
+    border-block-end-color: CanvasText;
+    color: CanvasText;
+  }
+}

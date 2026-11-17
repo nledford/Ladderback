@@ -224,7 +224,7 @@ fn stand(anchor: NodeRef<leptos::html::Span>, note: &web_sys::HtmlElement, side:
         return;
     };
     let direction =
-        rules::direction_of(&computed.get_property_value("direction").unwrap_or_default());
+        l10n::Direction::of_computed(&computed.get_property_value("direction").unwrap_or_default());
     let room = Room {
         width: f64::from(viewport.client_width()),
         height: f64::from(viewport.client_height()),
