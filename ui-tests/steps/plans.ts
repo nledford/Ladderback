@@ -82,6 +82,27 @@ Given("the daemon refuses each read of the plans list after the first", function
   );
 });
 
+// The read of one plan, the one its Change button makes, is refused as the
+// list's is when the daemon can't read the configuration file.
+Given("the daemon refuses the read of the plan {string}", function (this: BrowserWorld, id: string) {
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname === `/api/v1/plans/${encodeURIComponent(id)}`,
+      async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "config-unavailable",
+            args: { file: { type: "text", value: "/etc/ladderback/config.toml" } },
+          }),
+        });
+      },
+    );
+  });
+});
+
 // The read is lost on its way, as when the daemon has stopped.
 Given("each read of the plans list after the first reaches no daemon", function (this: BrowserWorld) {
   answerReadsAfterFirst(this, (route) => route.abort("connectionrefused"));
