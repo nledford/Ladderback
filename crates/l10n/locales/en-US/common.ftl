@@ -664,8 +664,8 @@ error-secret-command-timed-out = { $seconds ->
 # "Always Allow" is the label of the button in the macOS keychain prompt: use
 # the label macOS shows in your language.
 error-secret-keyring-timed-out = { $seconds ->
-    [one] The keyring did not answer within { $seconds } second when asked for the keyring entry { $source }, which the repository's { $field } refers to. On macOS, the keychain may be waiting for you to allow access in a prompt: answer it with Always Allow, then run again.
-   *[other] The keyring did not answer within { $seconds } seconds when asked for the keyring entry { $source }, which the repository's { $field } refers to. On macOS, the keychain may be waiting for you to allow access in a prompt: answer it with Always Allow, then run again.
+    [one] The keyring did not answer within { $seconds } second when asked for the keyring entry { $source }, which the repository's { $field } refers to. On macOS, the keychain may be waiting for you to allow access in a prompt: answer it with Always Allow, then try again.
+   *[other] The keyring did not answer within { $seconds } seconds when asked for the keyring entry { $source }, which the repository's { $field } refers to. On macOS, the keychain may be waiting for you to allow access in a prompt: answer it with Always Allow, then try again.
   }
 
 # A repository's secret file could not be read within the time limit, as when
@@ -674,8 +674,8 @@ error-secret-keyring-timed-out = { $seconds ->
 # $source (text): the file's path.
 # $seconds (count): the seconds it was given.
 error-secret-file-timed-out = { $seconds ->
-    [one] { -brand-name } could not read the file { $source }, which the repository's { $field } refers to, within { $seconds } second. A file on a network share that stopped answering can hang this way: check that the share can be reached, then run again.
-   *[other] { -brand-name } could not read the file { $source }, which the repository's { $field } refers to, within { $seconds } seconds. A file on a network share that stopped answering can hang this way: check that the share can be reached, then run again.
+    [one] { -brand-name } could not read the file { $source }, which the repository's { $field } refers to, within { $seconds } second. A file on a network share that stopped answering can hang this way: check that the share can be reached, then try again.
+   *[other] { -brand-name } could not read the file { $source }, which the repository's { $field } refers to, within { $seconds } seconds. A file on a network share that stopped answering can hang this way: check that the share can be reached, then try again.
   }
 
 # A setting that a program is started with refers to a secret.
