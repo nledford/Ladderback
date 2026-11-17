@@ -9,8 +9,8 @@ Feature: Pending changes page
   off, the proposal's short ID, and the page says that approval is then no
   safety boundary. A proposal that could delete snapshots shows, on request,
   its forget preview: what retention would forget before and after it, and
-  the difference (decision 89, point 8). It is only rejected until approving
-  with the preview comes, and the page says why. Rejecting takes a reason for
+  the difference (decision 89, point 8), and is approved only from that
+  preview; until then it is only rejected, and the page says why. Rejecting takes a reason for
   each change, which the AI agent reads.
 
   Scenario: Approving a proposal by keyboard alone applies it
@@ -46,7 +46,7 @@ Feature: Pending changes page
     Then focus is on the proposal's heading
     And the proposal says "Removes the plan demo-home. Its snapshots stay in the repository."
     And the changes to the configuration file show the repository's password masked
-    And the proposal says "This proposal could delete snapshots. The forget preview shows which ones would go. Approving changes that can delete snapshots comes in a later version, so for now you can only reject it."
+    And the proposal says "This proposal could delete snapshots. Show what it would forget first: you can approve it once the forget preview shows which ones would go."
     And the page offers no button "Approve the proposal"
     And the page has no accessibility violations
     When I press Tab until focus is on the textbox "Reason for change 1 (optional)"
@@ -58,7 +58,7 @@ Feature: Pending changes page
     And the page says "No proposal is pending."
     And the daemon lists the plan "demo-home"
 
-  Scenario: The forget preview shows the snapshots a proposal would no longer forget
+  Scenario: A proposal that could delete snapshots is approved from its forget preview
     Given a demo plan "demo-home" with a tiny scratch repository
     And the plan "demo-home" has been backed up 3 times
     And the plan "demo-home" keeps the last 1 snapshots
@@ -67,11 +67,16 @@ Feature: Pending changes page
     And I skip to the content
     And I press Tab until focus is on the proposal's Review button
     And I press Enter
-    And I press Tab until focus is on the button "Show what it would forget"
+    Then the page offers no button "Approve the proposal"
+    When I press Tab until focus is on the button "Show what it would forget"
     And I press Enter
     Then the proposal says "After the proposal, retention would no longer forget 2 snapshots of the plan demo-home"
     And the proposal says "Now, retention forgets 2 of the 3 snapshots of the plan demo-home."
     And the proposal says "After the proposal, no plan would own any snapshots in this repository, so retention would forget nothing there."
-    And the page offers no button "Approve the proposal"
     And the page has no accessibility violations
-    And the daemon lists the plan "demo-home"
+    When I press Tab until focus is on the textbox "Proposal ID"
+    And I type the proposal's short ID
+    And I press Tab until focus is on the button "Approve the proposal"
+    And I press Enter
+    Then the polite region comes to contain "is applied, and the configuration file is saved."
+    And the daemon no longer lists the plan "demo-home"

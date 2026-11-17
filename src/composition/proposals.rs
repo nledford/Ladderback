@@ -18,9 +18,10 @@ use app::schedule::ConfigChanged;
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::planning::{
-    ChangeRefused, ConfigChange, DiffHash, MAX_CHANGES, MAX_PENDING, MAX_RATIONALE_CHARS,
-    PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalWarning, Proposer, Rationale,
-    RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon, short_proposal_id,
+    ChangeRefused, ConfigChange, DiffHash, ForgetDigest, MAX_CHANGES, MAX_PENDING,
+    MAX_RATIONALE_CHARS, PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalWarning,
+    Proposer, Rationale, RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon,
+    short_proposal_id,
 };
 use domain::{OperationId, PlanId};
 use http_adapter::{Approval, PlansError, ProposalsError, SignIn};
@@ -83,8 +84,9 @@ pub(super) struct ProposalService {
     /// Shared with each approval's own task, which a browser that hangs up
     /// doesn't stop.
     proposals: Arc<Proposals>,
-    /// What reads the repositories a proposal's forget preview covers.
-    maintenance: RunMaintenance,
+    /// What reads the repositories a proposal's forget preview covers, as
+    /// the preview and as an approval reads it again.
+    maintenance: Arc<RunMaintenance>,
     /// The configuration, whose secrets a refused read masks (I4).
     config: Arc<dyn ConfigStore>,
 }
@@ -107,7 +109,7 @@ impl ProposalService {
         Self {
             file: Arc::clone(&parts.file),
             proposals: Arc::new(proposals),
-            maintenance,
+            maintenance: Arc::new(maintenance),
             config: Arc::clone(&parts.config),
         }
     }
@@ -223,8 +225,8 @@ impl http_adapter::Proposals for ProposalService {
             .forget_preview(&named, operation, &self.maintenance)
             .await
             .map_err(|error| refused(error, &id))?;
-        let mut repositories = Vec::with_capacity(previewed.len());
-        for RepositoryForget { repository, forget } in previewed {
+        let mut repositories = Vec::with_capacity(previewed.repositories.len());
+        for RepositoryForget { repository, forget } in previewed.repositories {
             repositories.push(match forget {
                 Ok(comparison) => super::maintenance::compared_dto(&repository, &comparison),
                 // Told as the maintenance routes tell it, each secret of
@@ -237,7 +239,10 @@ impl http_adapter::Proposals for ProposalService {
                 },
             });
         }
-        Ok(api::ProposalForgetPreviewDto { repositories })
+        Ok(api::ProposalForgetPreviewDto {
+            repositories,
+            digest: previewed.digest.map(|digest| digest.as_str().to_owned()),
+        })
     }
 
     async fn approve(
@@ -254,30 +259,43 @@ impl http_adapter::Proposals for ProposalService {
         ) else {
             return Err(ProposalsError::Changed);
         };
+        // Nor does a forget preview read again give a digest that is none.
+        let forget = match approval.forget_digest.as_deref().map(ForgetDigest::parse) {
+            None => None,
+            Some(Some(digest)) => Some(digest),
+            Some(None) => return Err(ProposalsError::ForgetPreviewChanged),
+        };
         let ask = ApprovalAsk {
             shown: Shown { revision, diff },
+            forget,
             confirmation: approval.confirmation,
             address: approval.address,
         };
+        let operation = OperationId::from_uuid(Uuid::now_v7());
         // In a task of its own: a browser that hangs up drops this future,
         // never an apply halfway (decision 89).
         let proposals = Arc::clone(&self.proposals);
-        let approved = tokio::spawn(async move { proposals.approve(&named, ask).await })
-            .await
-            .map_err(|ended| {
-                let how = if ended.is_panic() {
-                    "panicked"
-                } else {
-                    "was cancelled"
-                };
-                log::warn!("the approval of proposal {id} {how}");
-                ProposalsError::Unavailable {
-                    code: ErrorCode::ProposalsUnavailable,
-                    args: Vec::new(),
-                    detail: None,
-                }
-            })?
-            .map_err(|error| refused(error, &id))?;
+        let maintenance = Arc::clone(&self.maintenance);
+        let approved = tokio::spawn(async move {
+            proposals
+                .approve(&named, ask, operation, &maintenance)
+                .await
+        })
+        .await
+        .map_err(|ended| {
+            let how = if ended.is_panic() {
+                "panicked"
+            } else {
+                "was cancelled"
+            };
+            log::warn!("the approval of proposal {id} {how}");
+            ProposalsError::Unavailable {
+                code: ErrorCode::ProposalsUnavailable,
+                args: Vec::new(),
+                detail: None,
+            }
+        })?
+        .map_err(|error| refused(error, &id))?;
         if let Some(error) = &approved.unrecorded {
             // Its code only: the store's own words are unchecked (I4).
             log::warn!(
@@ -545,6 +563,7 @@ fn refused(error: ProposalError, id: &str) -> ProposalsError {
         }
         ProposalError::Changed => ProposalsError::Changed,
         ProposalError::NeedsForgetPreview => ProposalsError::NeedsForgetPreview,
+        ProposalError::ForgetPreviewChanged => ProposalsError::ForgetPreviewChanged,
         ProposalError::StepUpFailed => ProposalsError::StepUpFailed,
         ProposalError::StepUpWait { seconds } => ProposalsError::StepUpWait { seconds },
         ProposalError::StepUpUnavailable(detail) => ProposalsError::StepUpUnavailable(detail),
@@ -696,10 +715,13 @@ sources = ["/home/demo"]
                 id,
                 ApprovalAsk {
                     shown: review.shown,
+                    forget: None,
                     confirmation: StepUpConfirmation::parse(confirmation.to_owned())
                         .expect("a confirmation"),
                     address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
                 },
+                OperationId::from_uuid(Uuid::now_v7()),
+                &service.maintenance,
             )
             .await
             .map(|applied| applied.proposal)
@@ -774,6 +796,7 @@ sources = ["/home/demo"]
         let approval = Approval {
             revision: review.revision,
             diff_hash: review.diff_hash,
+            forget_digest: None,
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
             confirmation: StepUpConfirmation::parse(short_proposal_id(&id).to_owned())
                 .expect("a confirmation"),

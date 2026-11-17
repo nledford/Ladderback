@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use super::*;
 use crate::RepositoryAlias;
 use crate::execution::plan_tags::UserTag;
+use crate::maintenance::{ForgetComparison, ForgetPreview, ForgetSide, LeftAlone, PlanForget};
 use crate::planning::{
     GroupBy, Hooks, Hostname, KeepCount, Maintenance, RepositoryConfig, RepositorySettings, Source,
     Violation,
@@ -841,4 +842,142 @@ fn a_change_that_no_longer_applies_still_names_its_repository() {
         proposal.repositories(&config_over(&["nas", "usb"], &["home"])),
         [alias("usb")]
     );
+}
+
+/// A snapshot of the forget previews below, by its ID's last digit.
+fn snapshot(n: u8) -> crate::maintenance::Snapshot {
+    crate::maintenance::Snapshot {
+        id: crate::SnapshotId::parse(&format!("{n:064x}")).unwrap(),
+        time: at(1_800_000_000),
+        offset: crate::Offset::UTC,
+        hostname: "demo-host".to_owned(),
+        label: String::new(),
+        tags: Vec::new(),
+        paths: vec!["/home/demo".to_owned()],
+    }
+}
+
+/// A side that forgets, of the plan `name` owning `total` snapshots, the
+/// snapshots `remove`.
+fn forgets(name: &str, total: usize, remove: &[u8]) -> ForgetSide {
+    ForgetSide::Forgets(ForgetPreview {
+        plans: vec![PlanForget {
+            plan: id(name),
+            total,
+            remove: remove.iter().map(|n| snapshot(*n)).collect(),
+        }],
+        left_alone: LeftAlone::default(),
+    })
+}
+
+fn compared(before: ForgetSide, after: ForgetSide) -> ForgetComparison {
+    ForgetComparison { before, after }
+}
+
+fn digest_of(key: u8, proposal: u8, repositories: &[(&str, ForgetComparison)]) -> ForgetDigest {
+    let aliases: Vec<RepositoryAlias> = repositories.iter().map(|(name, _)| alias(name)).collect();
+    ForgetDigest::of(
+        &RevisionKey::new([key; REVISION_KEY_BYTES]),
+        &ProposalId::from_bytes(&[proposal; TOKEN_BYTES]),
+        aliases
+            .iter()
+            .zip(repositories.iter().map(|(_, comparison)| comparison)),
+    )
+}
+
+#[test]
+fn a_forget_digest_binds_the_key_the_proposal_and_what_each_side_would_forget() {
+    let shown = || {
+        vec![(
+            "nas",
+            compared(forgets("home", 4, &[1]), forgets("home", 4, &[1, 2, 3])),
+        )]
+    };
+    let digest = digest_of(3, 7, &shown());
+    assert_eq!(digest, digest_of(3, 7, &shown()), "read again, the same");
+    assert_eq!(digest.as_str().len(), 64);
+    assert_eq!(ForgetDigest::parse(digest.as_str()), Some(digest.clone()));
+    assert_eq!(ForgetDigest::parse("not a digest"), None);
+    let other = |label: &str, other: ForgetDigest| {
+        assert_ne!(digest, other, "{label}");
+        other.as_str().to_owned()
+    };
+    let with = |before: ForgetSide, after: ForgetSide| {
+        digest_of(3, 7, &[("nas", compared(before, after))])
+    };
+    let keeps_nothing = |name: &str| ForgetSide::KeepsNothing { plan: id(name) };
+    let mut left_alone = forgets("home", 4, &[1, 2, 3]);
+    if let ForgetSide::Forgets(preview) = &mut left_alone {
+        preview.left_alone.orphaned.snapshots = 9;
+    }
+    let others = [
+        other("another daemon start", digest_of(4, 7, &shown())),
+        other("another proposal", digest_of(3, 8, &shown())),
+        other(
+            "another repository",
+            digest_of(3, 7, &[("usb", shown().remove(0).1)]),
+        ),
+        other(
+            "a new snapshot",
+            with(forgets("home", 5, &[1]), forgets("home", 5, &[1, 2, 3])),
+        ),
+        other(
+            "another snapshot forgotten",
+            with(forgets("home", 4, &[1]), forgets("home", 4, &[1, 2, 4])),
+        ),
+        other(
+            "another plan",
+            with(forgets("home", 4, &[1]), forgets("photos", 4, &[1, 2, 3])),
+        ),
+        other(
+            "the sides swapped",
+            with(forgets("home", 4, &[1, 2, 3]), forgets("home", 4, &[1])),
+        ),
+        other(
+            "not maintained after",
+            with(forgets("home", 4, &[1]), ForgetSide::NotMaintained),
+        ),
+        other(
+            "refused after",
+            with(forgets("home", 4, &[1]), keeps_nothing("home")),
+        ),
+        other(
+            "refused after for another plan",
+            with(forgets("home", 4, &[1]), keeps_nothing("photos")),
+        ),
+        other(
+            "a second repository",
+            digest_of(
+                3,
+                7,
+                &[
+                    shown().remove(0),
+                    (
+                        "usb",
+                        compared(ForgetSide::NotMaintained, ForgetSide::NotMaintained),
+                    ),
+                ],
+            ),
+        ),
+        other(
+            "the repositories in another order",
+            digest_of(
+                3,
+                7,
+                &[
+                    (
+                        "usb",
+                        compared(ForgetSide::NotMaintained, ForgetSide::NotMaintained),
+                    ),
+                    shown().remove(0),
+                ],
+            ),
+        ),
+        other(
+            "a snapshot more left alone",
+            with(forgets("home", 4, &[1]), left_alone),
+        ),
+    ];
+    let distinct: std::collections::BTreeSet<&String> = others.iter().collect();
+    assert_eq!(distinct.len(), others.len(), "{others:?}");
 }

@@ -138,6 +138,7 @@ fn forget_preview() -> api::ProposalForgetPreviewDto {
             forgets_more: Vec::new(),
             forgets_less: vec![forgotten],
         }],
+        digest: Some("c".repeat(64)),
     }
 }
 
@@ -206,13 +207,15 @@ impl Proposals for Scripted {
         let Approval {
             revision,
             diff_hash,
+            forget_digest,
             address,
             confirmation,
         } = approval;
         self.decide(Decision::Approve(
             id,
             format!(
-                "{revision}:{diff_hash}:{address}:{}",
+                "{revision}:{diff_hash}:{}:{address}:{}",
+                forget_digest.as_deref().unwrap_or("none"),
                 confirmation.as_password().expose()
             ),
         ))
@@ -557,7 +560,7 @@ fn borrowed(headers: &[(String, String)]) -> Vec<(&str, &str)> {
         .collect()
 }
 
-const APPROVAL: &str = r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"demo-admin-pass"}"#;
+const APPROVAL: &str = r#"{"revision":"aaaa","diff-hash":"bbbb","forget-digest":"cccc","confirmation":"demo-admin-pass"}"#;
 
 #[tokio::test]
 async fn no_token_reviews_approves_or_rejects_whatever_its_scopes() {
@@ -625,7 +628,7 @@ async fn a_session_reviews_approves_and_rejects_as_its_requests_say() {
             Decision::Review("abcdefghijkl".to_owned()),
             Decision::Approve(
                 "abcdefghijkl".to_owned(),
-                format!("aaaa:bbbb:{}:{PASSWORD}", HOME.ip())
+                format!("aaaa:bbbb:cccc:{}:{PASSWORD}", HOME.ip())
             ),
             Decision::Reject(
                 "abcdefghijkl".to_owned(),
@@ -658,6 +661,7 @@ async fn a_session_previews_what_a_proposal_would_forget() {
         Some(forget_preview()),
         "{previewed}"
     );
+    assert_eq!(previewed["digest"], "c".repeat(64));
     let repository = &previewed["repositories"][0];
     assert_eq!(repository["kind"], "compared");
     assert_eq!(repository["forgets-less"][0]["remove"], 1);
@@ -746,6 +750,12 @@ async fn each_refusal_of_a_decision_is_answered_with_the_status_and_code_of_its_
             ProposalsError::NeedsForgetPreview,
             StatusCode::CONFLICT,
             serde_json::json!({ "code": "proposal-needs-forget-preview" }),
+            None,
+        ),
+        (
+            ProposalsError::ForgetPreviewChanged,
+            StatusCode::CONFLICT,
+            serde_json::json!({ "code": "proposal-forget-preview-changed" }),
             None,
         ),
         (

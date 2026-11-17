@@ -12,7 +12,7 @@ use api::{ProposalStatusDto, UiEvent};
 use app::fakes::{FakeChangeCodec, InMemoryConfigStore, InMemoryProposalStore, SeededRandom};
 use app::ports::{ConfigDrafts, ConfigStore, ProposalStore};
 use app::proposals::{
-    ApprovalAsk, Made, ProposalError, ProposalPorts, Proposals, RepositoryForget, Review,
+    ApprovalAsk, ForgetPreviewed, Made, ProposalError, ProposalPorts, Proposals, Review,
 };
 use cucumber::{given, then, when};
 use domain::access::TOKEN_BYTES;
@@ -20,10 +20,11 @@ use domain::access::api_token::{ApiTokenId, ApiTokenLabel};
 use domain::maintenance::{ForgetComparison, ForgetPreview, ForgetSide, PlanForget};
 use domain::planning::KeepCount;
 use domain::planning::{
-    ChangeRefused, ConfigChange, ConfigRevision, HookEntry, MAX_PER_HOUR, Plan, Proposal,
-    ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, QUIET_AFTER_REJECTION,
-    Rationale, Source, SummaryLine, TooSoon, short_proposal_id,
+    ChangeRefused, ConfigChange, ConfigRevision, ForgetDigest, HookEntry, MAX_PER_HOUR, Plan,
+    Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer,
+    QUIET_AFTER_REJECTION, Rationale, RevisionKey, Source, SummaryLine, TooSoon, short_proposal_id,
 };
+use domain::secrets::SecretRef;
 use domain::{OperationId, RepositoryAlias, SignedDuration, Timestamp};
 
 use super::Agent;
@@ -52,7 +53,7 @@ pub struct ProposalsWorld {
     /// world's, whose repository the scripted engine lists.
     config: Option<Arc<InMemoryConfigStore>>,
     /// What the person's last forget preview came to.
-    forget: Option<Result<Vec<RepositoryForget>, ProposalError>>,
+    forget: Option<Result<ForgetPreviewed, ProposalError>>,
 }
 
 impl Default for ProposalsWorld {
@@ -477,28 +478,38 @@ async fn opens(agent: &mut Agent) {
     agent.proposals.review = Some(review);
 }
 
-/// Approves the AI agent's last proposal as the page showed it, confirmed
-/// by `confirmation`.
-async fn approve(agent: &mut Agent, confirmation: String) {
+/// Approves the AI agent's last proposal as the page showed it, with the
+/// forget preview `forget` when it showed one, confirmed by `confirmation`.
+async fn approve(agent: &mut Agent, confirmation: String, forget: Option<ForgetDigest>) {
     let id = agent.proposals.kept().id.clone();
     let ask = ApprovalAsk {
         shown: agent.proposals.shown().shown.clone(),
+        forget,
         confirmation: domain::access::step_up::StepUpConfirmation::parse(confirmation)
             .expect("a confirmation"),
         address: HOME,
     };
+    // The forget world's repository, as the engine lists it now.
+    let maintenance = super::forget_steps::use_case(agent);
     agent.proposals.approved = Some(
         proposals(agent)
-            .approve(&id, ask)
+            .approve(&id, ask, approval_op(), &maintenance)
             .await
             .map(|applied| applied.proposal),
     );
 }
 
+/// The operation an approval reads the forget preview again under.
+fn approval_op() -> OperationId {
+    OperationId::from_uuid(domain::Uuid::from_u128(
+        0x018f_0000_0000_7000_8000_0000_0000_0a0a,
+    ))
+}
+
 #[when("the person approves the proposal as it was shown")]
 async fn approves(agent: &mut Agent) {
     let short = short_proposal_id(&agent.proposals.kept().id).to_owned();
-    approve(agent, short).await;
+    approve(agent, short, None).await;
 }
 
 #[when("the person approves the proposal confirming it with another proposal's ID")]
@@ -509,7 +520,7 @@ async fn approves_with_another_id(agent: &mut Agent) {
         short_proposal_id(&agent.proposals.kept().id),
         "the scenario's proposals differ in their short IDs"
     );
-    approve(agent, short_proposal_id(&other).to_owned()).await;
+    approve(agent, short_proposal_id(&other).to_owned(), None).await;
 }
 
 #[then("the proposal is applied")]
@@ -797,7 +808,7 @@ fn compared(agent: &Agent) -> &ForgetComparison {
         Some(Ok(previewed)) => previewed,
         other => panic!("the forget preview was answered, not {other:?}"),
     };
-    let [only] = previewed.as_slice() else {
+    let [only] = previewed.repositories.as_slice() else {
         panic!("the preview covers the one repository: {previewed:?}");
     };
     match &only.forget {
@@ -910,17 +921,32 @@ fn forgets_less(agent: &mut Agent, count: usize, name: String) {
 
 #[then(expr = "the preview covers the repository {string}")]
 fn covers(agent: &mut Agent, repository: String) {
+    assert_eq!(covered(agent), [repository]);
+}
+
+#[then(expr = "the preview covers the repositories {string} and {string}")]
+fn covers_two(agent: &mut Agent, first: String, second: String) {
+    assert_eq!(covered(agent), [first, second]);
+}
+
+/// The forget preview, answered.
+fn previewed(agent: &Agent) -> &ForgetPreviewed {
     let Some(Ok(previewed)) = &agent.proposals.forget else {
         panic!(
             "the forget preview was answered: {:?}",
             agent.proposals.forget
         );
     };
-    let covered: Vec<&str> = previewed
+    previewed
+}
+
+/// The repositories the forget preview covers, in its order.
+fn covered(agent: &Agent) -> Vec<String> {
+    previewed(agent)
+        .repositories
         .iter()
-        .map(|one| one.repository.as_str())
-        .collect();
-    assert_eq!(covered, [repository.as_str()]);
+        .map(|one| one.repository.as_str().to_owned())
+        .collect()
 }
 
 #[then("the proposal changes nothing retention forgets")]
@@ -1036,5 +1062,133 @@ async fn stale_unread(agent: &mut Agent) {
             proposal: id.to_string(),
             status: ProposalStatusDto::Stale,
         })
+    );
+}
+
+#[given(expr = "a second repository {string}")]
+async fn second_repository(agent: &mut Agent, name: String) {
+    let password = SecretRef::Inline(domain::secrets::SecretValue::new("demo-password"));
+    agent.forget.another_repository(&name, password).await;
+}
+
+#[given(
+    expr = "a second repository {string} whose password is in the environment variable {string}"
+)]
+async fn second_repository_from_env(agent: &mut Agent, name: String, variable: String) {
+    agent
+        .forget
+        .env
+        .insert(variable.clone(), "demo-password".to_owned());
+    let password = SecretRef::Env(variable);
+    agent.forget.another_repository(&name, password).await;
+}
+
+#[when(expr = "the environment variable {string} has since been unset")]
+async fn env_unset(agent: &mut Agent, variable: String) {
+    agent.forget.env.remove(&variable);
+}
+
+#[given(expr = "an AI agent has proposed moving the plan {string} to the repository {string}")]
+async fn has_proposed_moving(agent: &mut Agent, name: String, repository: String) {
+    let mut plan = forget_plan(agent, &name).await;
+    plan.repository = RepositoryAlias::parse(&repository).expect("an alias");
+    propose_to_the_forget_world(agent, vec![ConfigChange::ChangePlan(plan)]).await;
+}
+
+#[when("the person approves the proposal as its forget preview showed it")]
+async fn approves_as_previewed(agent: &mut Agent) {
+    let short = short_proposal_id(&agent.proposals.kept().id).to_owned();
+    let digest = previewed(agent).digest.clone();
+    approve(agent, short, digest).await;
+}
+
+/// The key the scenarios' proposals key what a page is shown with.
+fn scenario_key() -> RevisionKey {
+    RevisionKey::new([5; domain::planning::REVISION_KEY_BYTES])
+}
+
+#[when(
+    "the person approves the proposal with the forget preview of another proposal that would forget the same"
+)]
+async fn approves_with_another_preview(agent: &mut Agent) {
+    let short = short_proposal_id(&agent.proposals.kept().id).to_owned();
+    let other = ProposalId::from_bytes(&[0; TOKEN_BYTES]);
+    assert_ne!(other, agent.proposals.kept().id);
+    let shown = previewed(agent);
+    let forged = ForgetDigest::of(
+        &scenario_key(),
+        &other,
+        shown.repositories.iter().map(|one| {
+            let comparison = one.forget.as_ref().expect("the repository was read");
+            (&one.repository, comparison)
+        }),
+    );
+    approve(agent, short, Some(forged)).await;
+}
+
+#[when(expr = "a backup of the plan {string} has since added {int} snapshot(s)")]
+async fn backed_up_since(agent: &mut Agent, name: String, count: u64) {
+    agent
+        .forget
+        .snapshots(count, Some((name, super::forget_steps::self_agent())))
+        .await;
+}
+
+#[when(
+    expr = "the repository has since been replaced by one holding {int} other snapshots of the plan {string}"
+)]
+async fn replaced_since(agent: &mut Agent, count: u64, name: String) {
+    agent.forget.drop_snapshots();
+    agent
+        .forget
+        .snapshots(count, Some((name, super::forget_steps::self_agent())))
+        .await;
+}
+
+#[then(
+    "the approval is refused because what the proposal would forget has changed since the preview"
+)]
+fn refused_forget_changed(agent: &mut Agent) {
+    assert_eq!(
+        agent.proposals.approval_refusal(),
+        &ProposalError::ForgetPreviewChanged
+    );
+}
+
+#[then(
+    expr = "the preview says the repository {string} couldn't be read, so it offers no approval"
+)]
+fn preview_unreadable(agent: &mut Agent, repository: String) {
+    let shown = previewed(agent);
+    let refused: Vec<&str> = shown
+        .repositories
+        .iter()
+        .filter(|one| one.forget.is_err())
+        .map(|one| one.repository.as_str())
+        .collect();
+    assert_eq!(refused, [repository.as_str()]);
+    assert_eq!(shown.digest, None);
+}
+
+#[then(expr = "the forget preview of the {int} repositories offers an approval")]
+fn preview_offers_approval(agent: &mut Agent, count: usize) {
+    let shown = previewed(agent);
+    assert_eq!(shown.repositories.len(), count);
+    assert!(shown.digest.is_some(), "{shown:?}");
+}
+
+#[then(expr = "the plan {string} keeps the last {int} snapshot(s)")]
+async fn plan_keeps(agent: &mut Agent, name: String, keep: i64) {
+    assert_eq!(
+        forget_plan(agent, &name).await.retention.keep_last,
+        Some(KeepCount::new(keep).expect("a count"))
+    );
+}
+
+#[then(expr = "the plan {string} backs up to the repository {string}")]
+async fn plan_backs_up_to(agent: &mut Agent, name: String, repository: String) {
+    assert_eq!(
+        forget_plan(agent, &name).await.repository.as_str(),
+        repository
     );
 }

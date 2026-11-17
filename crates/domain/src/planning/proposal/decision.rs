@@ -7,6 +7,7 @@ use jiff::{SignedDuration, Timestamp};
 use subtle::ConstantTimeEq as _;
 
 use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex, sha256_hex_of};
+use crate::maintenance::ForgetComparison;
 use crate::planning::{AgentConfig, Plan, Source};
 use crate::{PlanId, RepositoryAlias};
 
@@ -232,6 +233,48 @@ pub struct Shown {
     pub revision: ShownRevision,
     pub diff: DiffHash,
 }
+
+/// The forget preview a person was shown of a proposal (decision 89, point
+/// 8), as the page holds it: the SHA-256, in lower-case hex, of the
+/// daemon's [`RevisionKey`] followed by the proposal's ID and, for each
+/// repository in the order the preview names them, its alias and each side
+/// as the preview shows it: whether it forgets, and if it does, per plan its
+/// ID, how many snapshots it owns and the IDs it would forget, and the
+/// groups and snapshots it leaves alone. An approval of a proposal that
+/// could delete snapshots holds only while a preview read again gives the
+/// same digest. Keyed, so only a preview this daemon answered since it
+/// started gives one, and compared in constant time.
+#[derive(Clone, Debug)]
+pub struct ForgetDigest(String);
+
+impl ForgetDigest {
+    /// The digest of the forget preview of `proposal` over `repositories`,
+    /// under `key`.
+    pub fn of<'a>(
+        key: &RevisionKey,
+        proposal: &ProposalId,
+        repositories: impl IntoIterator<Item = (&'a RepositoryAlias, &'a ForgetComparison)>,
+    ) -> Self {
+        todo!("{key:?} {proposal} {}", repositories.into_iter().count())
+    }
+
+    /// The digest `text` names, as [`ForgetDigest::as_str`] gives it.
+    pub fn parse(text: &str) -> Option<Self> {
+        ConfigRevision::parse(text).map(|_| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq for ForgetDigest {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_bytes().ct_eq(other.0.as_bytes()).into()
+    }
+}
+
+impl Eq for ForgetDigest {}
 
 /// The short ID of `id`, which confirms its approval while sign-in is off.
 pub fn short_proposal_id(id: &ProposalId) -> &str {

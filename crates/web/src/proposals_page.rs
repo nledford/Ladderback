@@ -348,7 +348,8 @@ fn Review(
         if working.get_untracked().is_some() {
             return;
         }
-        let Some(sent) = shown.with_value(|review| approval(review, value.get_untracked())) else {
+        let Some(sent) = shown.with_value(|review| approval(review, None, value.get_untracked()))
+        else {
             return;
         };
         working.set(Some(Deciding::Approving));
@@ -473,7 +474,7 @@ fn Review(
     let changed_since = review
         .changed_since_drafted
         .then(|| view! { <p>{text(&localizer, msg::UI_PROPOSAL_CHANGED_SINCE)}</p> });
-    let approve_part = if can_approve(&review) {
+    let approve_part = if can_approve(&review, None) {
         let approving = text(&localizer, msg::UI_PROPOSAL_APPROVING);
         view! {
             <form

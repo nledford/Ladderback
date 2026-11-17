@@ -18,9 +18,9 @@ use api::{ProposalStatusDto, UiEvent};
 use domain::access::step_up::{StepUpConfirmation, StepUpFor};
 use domain::maintenance::ForgetComparison;
 use domain::planning::{
-    AgentConfig, ConfigChange, ConfigRevision, DiffHash, MAX_ENDED, MAX_PENDING, Proposal,
-    ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale, Rejection,
-    RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon,
+    AgentConfig, ConfigChange, ConfigRevision, DiffHash, ForgetDigest, MAX_ENDED, MAX_PENDING,
+    Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale,
+    Rejection, RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon,
 };
 use domain::secrets::Redactor;
 use domain::{OperationId, RepositoryAlias};
@@ -60,9 +60,15 @@ pub enum ProposalError {
     /// pending, for a person to review and approve again.
     Changed,
     /// The proposal holds a change that could delete snapshots, which is
-    /// approved only with the forget preview (decision 89, point 8): it
-    /// is still pending.
+    /// approved only with the forget preview the person was shown
+    /// (decision 89, point 8), and the approval brought none: it is still
+    /// pending.
     NeedsForgetPreview,
+    /// What the proposal would forget, read again as it is applied, is
+    /// not what the forget preview the approval brought showed, or a
+    /// repository it touches couldn't be read: nothing was applied, and it
+    /// is pending, for a person to preview again.
+    ForgetPreviewChanged,
     /// The step-up confirmation wasn't the admin password, or the
     /// proposal's ID with sign-in off.
     StepUpFailed,
@@ -115,8 +121,8 @@ pub struct Review {
     pub shown: Shown,
     /// Whether the file has changed since the proposal was drafted.
     pub changed_since_drafted: bool,
-    /// Whether a change of it could delete snapshots, so that only the
-    /// forget preview lets a person approve it; until then, it is rejected.
+    /// Whether a change of it could delete snapshots, so that a person
+    /// approves it only with its forget preview.
     pub needs_forget_preview: bool,
     /// How many of its proposer's kept proposals a person rejected.
     pub rejected: usize,
@@ -131,11 +137,23 @@ pub struct RepositoryForget {
     pub forget: Result<ForgetComparison, MaintenanceError>,
 }
 
+/// The forget preview of a pending proposal: each repository it touches,
+/// and what an approval of it binds to, when every one was read.
+#[derive(Debug, PartialEq)]
+pub struct ForgetPreviewed {
+    pub repositories: Vec<RepositoryForget>,
+    /// The preview as shown, for an approval to bring; none while a
+    /// repository couldn't be read, so no approval holds.
+    pub digest: Option<ForgetDigest>,
+}
+
 /// A person's approval of a proposal, as the page sends it.
 #[derive(Debug)]
 pub struct ApprovalAsk {
     /// What the page showed.
     pub shown: Shown,
+    /// The forget preview the page showed, when it showed one.
+    pub forget: Option<ForgetDigest>,
     /// The step-up confirmation: the admin password with sign-in on, the
     /// proposal's ID with it off. Never shown (I4).
     pub confirmation: StepUpConfirmation,
@@ -350,16 +368,17 @@ impl Proposals {
     /// 8): for each repository its changes touch, in the order they name
     /// them, what `maintenance`'s forget would remove under the
     /// configuration as it is and under the configuration its changes
-    /// make, read under the operation `op`. A person's action on the page:
-    /// it reads the repositories, so their secrets are resolved and their
-    /// locations contacted, and it changes nothing. A repository that
-    /// couldn't be read is answered with why, the others all the same.
+    /// make, read under the operation `op`, and the digest an approval of
+    /// it brings. A person's action on the page: it reads the
+    /// repositories, so their secrets are resolved and their locations
+    /// contacted, and it changes nothing. A repository that couldn't be
+    /// read is answered with why, the others all the same, and no digest.
     pub async fn forget_preview(
         &self,
         id: &ProposalId,
         op: OperationId,
         maintenance: &RunMaintenance,
-    ) -> Result<Vec<RepositoryForget>, ProposalError> {
+    ) -> Result<ForgetPreviewed, ProposalError> {
         let proposal = self.get(&Proposer::NoToken, id).await?;
         if proposal.status != ProposalStatus::Pending {
             return Err(ProposalError::NotPending(proposal.status));
@@ -369,25 +388,49 @@ impl Proposals {
         // the file the page showed.
         let after =
             Proposal::check(&config, &proposal.changes).map_err(|_| ProposalError::Changed)?;
-        let mut previewed = Vec::new();
-        for repository in proposal.repositories(&config) {
+        self.read_forget(&proposal, &config, &after, op, maintenance)
+            .await
+    }
+
+    /// What the forget of each repository `proposal` touches would remove
+    /// under `config` and under `after`, its changes made, and the digest
+    /// of that preview when every repository was read.
+    async fn read_forget(
+        &self,
+        proposal: &Proposal,
+        config: &AgentConfig,
+        after: &AgentConfig,
+        op: OperationId,
+        maintenance: &RunMaintenance,
+    ) -> Result<ForgetPreviewed, ProposalError> {
+        let mut repositories = Vec::new();
+        for repository in proposal.repositories(config) {
             let forget = maintenance
-                .compare_forget(op, &config, &after, &repository)
+                .compare_forget(op, config, after, &repository)
                 .await;
-            previewed.push(RepositoryForget { repository, forget });
+            repositories.push(RepositoryForget { repository, forget });
         }
-        Ok(previewed)
+        Ok(ForgetPreviewed {
+            repositories,
+            digest: None,
+        })
     }
 
     /// Approves the pending proposal `id` as `ask` says the page showed it,
     /// once step-up confirms it, and applies it: under the configuration's
     /// write lock, rebuilt against the file as it is, and saved only over
-    /// that file. A rebuild that isn't what the page showed, or a file
-    /// edited by hand meanwhile, leaves the proposal pending.
+    /// that file. A proposal that could delete snapshots is approved only
+    /// with the digest of its forget preview, which is read again through
+    /// `maintenance` under the operation `op`, under the same lock: a
+    /// preview that isn't the one the page showed leaves it pending, as do
+    /// a rebuild that isn't what the page showed and a file edited by hand
+    /// meanwhile.
     pub async fn approve(
         &self,
         id: &ProposalId,
         ask: ApprovalAsk,
+        op: OperationId,
+        maintenance: &RunMaintenance,
     ) -> Result<Applied, ProposalError> {
         self.step_up(id, &ask).await?;
         let _writes = self.ports.writes.lock().await;
@@ -400,9 +443,14 @@ impl Proposals {
         // the file the page showed.
         let after =
             Proposal::check(&config, &proposal.changes).map_err(|_| ProposalError::Changed)?;
-        if proposal.needs_forget_preview(&config) {
-            return Err(ProposalError::NeedsForgetPreview);
-        }
+        let forget = if proposal.needs_forget_preview(&config) {
+            let Some(shown) = &ask.forget else {
+                return Err(ProposalError::NeedsForgetPreview);
+            };
+            Some(shown)
+        } else {
+            None
+        };
         let draft = self.draft(&after).await?;
         let rebuilt = Shown {
             revision: self.shown_revision(&draft.revision)?,
@@ -410,6 +458,12 @@ impl Proposals {
         };
         if rebuilt != ask.shown {
             return Err(ProposalError::Changed);
+        }
+        if let Some(shown) = forget {
+            let read = self
+                .read_forget(&proposal, &config, &after, op, maintenance)
+                .await?;
+            todo!("{shown:?} {read:?}")
         }
         let now = to_the_millisecond(self.ports.clock.now());
         let approved = self
