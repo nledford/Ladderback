@@ -163,14 +163,14 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 
 ### Primary
 
-- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's icon and edge (the Primary tone, which covers Info) and the selected tab's bar. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
+- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's and an information banner's icon and edge (the Primary tone, which covers Info) and the selected tab's bar. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
 
 ### Neutral
 
 - **Paper** (`--bg`): the page.
 - **Graphite Ink** (`--fg`): all body text and headings.
 - **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and between a list of tabs and its panel, and the line around the pause banner.
-- **Ledger Gray** (`--surface`): the site header, toasts, alerts, the pause banner, a progress bar's empty track and an unavailable text field.
+- **Ledger Gray** (`--surface`): the site header, toasts, alerts, banners, the pause banner, a progress bar's empty track and an unavailable text field.
 - **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 - **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
 
@@ -318,6 +318,16 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 ### Progress Bar
 
 A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, with a Ladder Blue fill that eases to each report (0.4 s) and jumps under reduced motion. The current step sits on its own line above it.
+
+### Banners
+
+- **The component:** `Banner`, a page-wide notice above a page's content: an icon, then its words. Pages move onto it in #930.
+- **Look:** a square strip of Ledger Gray across the content, the words in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a warning is not a colored banner.
+- **Tone:** Primary (information, the default) and Warning, each with its own icon, Info and TriangleAlert, named by its tone in words for a screen reader. No Success (a toast says it once), no Error (no red banners), no Secondary and no Inherit.
+- **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page names where focus goes, and the browser remembers the dismissal of that edition, so a newer one shows again.
+- **Not a live region and not a landmark:** what is urgent goes through the announcer too.
+- **Forced colors:** a 1px `CanvasText` edge all round, the start edge still thick; the icon in the text's color.
+- **No size and no placement:** its words are the page's text, and it spans the content.
 
 ### Spinner
 
