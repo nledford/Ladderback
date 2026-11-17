@@ -1,9 +1,11 @@
 //! The page the app runs in (technical design §8.4): which language it is
-//! shown in, and what it tells the browser about it. This is DOM glue and
-//! nothing else. The choice of language is `l10n`'s, and is tested there, and
-//! which choice of Settings' is kept is `language_choice.rs`'s; the scenarios
-//! of `features/ui/pseudolocales.feature`, `features/ui/language.feature` and
-//! `features/ui/accessibility.feature` run this in a browser.
+//! shown in, and what it tells the browser about it, and how wide its content
+//! is (§4.5). This is DOM glue and nothing else. The choice of language is
+//! `l10n`'s, and is tested there, and which choice of Settings' is kept is
+//! `language_choice.rs`'s, and `page_width.rs`'s for the width; the scenarios
+//! of `features/ui/pseudolocales.feature`, `features/ui/language.feature`,
+//! `features/ui/page_width.feature` and `features/ui/accessibility.feature`
+//! run this in a browser.
 
 use std::cell::Cell;
 
@@ -16,6 +18,11 @@ use crate::session::Title;
 /// Where the browser keeps the language chosen in Settings, in its local
 /// storage: this browser's choice, not Ladderback's (decision 101).
 const CHOSEN_KEY: &str = "ladderback-language";
+
+/// Where the browser keeps the page width chosen in Settings, in its local
+/// storage: a viewing preference of this browser and its screen, as the
+/// language is.
+const WIDTH_KEY: &str = "ladderback-page-width";
 
 /// The localizer of this page: the language its address asks for (`?locale=`,
 /// a development override), then the language chosen in this browser, then
@@ -95,6 +102,25 @@ pub(crate) fn choose_language(tag: Option<&str>, section: &str) -> bool {
         let _ = window.location().reload();
     }
     true
+}
+
+/// The page width this browser keeps as chosen, if any. Outside input:
+/// `PageWidth::from_kept` holds it to the widths offered.
+pub(crate) fn stored_page_width() -> Option<String> {
+    storage()?.get_item(WIDTH_KEY).ok().flatten()
+}
+
+/// Keeps `kept` as the page width chosen in this browser, or forgets the one
+/// kept for `None`. `false` when the browser refused to keep it.
+pub(crate) fn keep_page_width(kept: Option<&str>) -> bool {
+    let Some(storage) = storage() else {
+        return false;
+    };
+    match kept {
+        Some(kept) => storage.set_item(WIDTH_KEY, kept),
+        None => storage.remove_item(WIDTH_KEY),
+    }
+    .is_ok()
 }
 
 /// Tells the browser what the page is written in: the `lang` and `dir` of
