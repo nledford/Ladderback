@@ -467,37 +467,6 @@ main:focus {
   block-size: var(--size, 1em);
 }
 
-/*
- * Status badges (§4.5): a short labeled state on a colored pill, its words
- * and its fill Tailwind utilities that `status_badge/rules.rs` picks (the
- * pairs scripts/check-contrast.ts checks), with the state's icon before the
- * text, stroked in the text's color.
- *
- * The icon and the label are two flex items, apart by a gap that stands only
- * between them on one line: where the two don't fit side by side (a narrow
- * column with larger text), the label wraps onto a line of its own below the
- * icon, whole where it fits there, rather than a letter a line beside it. As
- * an inline-block the icon kept its trailing margin on its line when the
- * label wrapped, so the badge's narrowest width was the icon, that margin and
- * its padding: wider than a Status cell at 320 px with 200 % text. The badge
- * sits on its label's baseline, as the plain text did.
- */
-.badge {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 0.25em;
-  border-radius: 9999px;
-  padding-block: 0.125rem;
-  padding-inline: 0.5rem;
-}
-
-/* The icon (an `Icon`, as tall as the text, in its color) is centered on
-   the label's line. */
-.badge > .icon {
-  align-self: center;
-}
-
 /* A spinner (§4.5): a faint track and an arc of one circle, beside its label
    or alone, inside its line, the element around it its placement goes on
    (the shared vocabulary above: Inline keeps it in the line of text; Start,

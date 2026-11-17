@@ -93,9 +93,9 @@ ladderback/
 
 ### 8.4 Internationalization and localization (Project Fluent)
 
-**Scope.** Until M4, releases ship **American English (`en-US`) only**, but Ladderback is localization-ready from the first user-facing string. Adding a language touches only the `l10n` crate: drop `.ftl` files into `locales/<tag>/`. Its `build.rs` regenerates the locale table and the embedded catalogs. ICU4X's data is compiled in for every locale, so a new language needs nothing there (its size is under *Host formatters*). Retrofitting this after the UI exists would mean touching every view, so it starts in M1b with the first real screen.
+**Scope.** Until M7, releases ship **American English (`en-US`) only**, but Ladderback is localization-ready from the first user-facing string. Adding a language touches only the `l10n` crate: drop `.ftl` files into `locales/<tag>/`. Its `build.rs` regenerates the locale table and the embedded catalogs. ICU4X's data is compiled in for every locale, so a new language needs nothing there (its size is under *Host formatters*). Retrofitting this after the UI exists would mean touching every view, so it starts in M1b with the first real screen.
 
-**Japanese** (`ja`) is the first language after it, in M4 (§16, decision 101). An AI drafts the messages and the maintainer, who is learning to read and write Japanese, reviews them before each release. A release offers only the languages listed in `crates/l10n/offered-locales.txt`, and the release pull request's checks refuse a listed language with a message that is missing or stale (translated from `en-US` text that has changed since). Default builds offer every catalog, for review; builds without the default features, the ones a release is, offer only the listed ones.
+**Japanese** (`ja`) is the first language after it, in M7 (§16, decision 101). An AI drafts the messages and the maintainer, who is learning to read and write Japanese, reviews them before each release. A release offers only the languages listed in `crates/l10n/offered-locales.txt`, and the release pull request's checks refuse a listed language with a message that is missing or stale (translated from `en-US` text that has changed since). Default builds offer every catalog, for review; builds without the default features, the ones a release is, offer only the listed ones.
 
 | Text | Localized? |
 |---|---|
