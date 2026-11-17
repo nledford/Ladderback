@@ -455,30 +455,28 @@ async fn a_removal_whose_agent_launchd_never_lets_go_keeps_the_file_and_says_so(
 #[tokio::test]
 async fn a_removal_whose_check_on_the_stopping_agent_fails_keeps_the_file_and_says_so() {
     let faked = Faked::new(Which::Launchd).stopping_within(PATIENT);
+    let agent = format!("gui/501/{LAUNCHD_LABEL}");
     faked.service.install(&faked.program("bin")).await.unwrap();
     let before = faked.fakes.commands().len();
     faked.fakes.stop_slowly(NEVER);
     // launchd stops answering once it has been told to boot the agent out.
-    let mut removal = std::pin::pin!(faked.service.remove());
-    let mut refused = false;
-    let removed = loop {
-        tokio::select! {
-            removed = &mut removal => break removed,
-            () = tokio::time::sleep(Duration::from_millis(10)), if !refused => {
-                if commands_after(&faked, before)
-                    .iter()
-                    .any(|call| call.contains(" bootout "))
-                {
-                    faked.fakes.refuse("Could not talk to launchd");
-                    refused = true;
-                }
-            }
-        }
-    };
+    faked
+        .fakes
+        .refuse_after_bootout("Could not talk to launchd");
+    let removed = faked.service.remove().await;
     assert_matches!(
         removed.unwrap_err().problem,
         ServiceProblem::ManagerRefused { ref command, .. }
-            if *command == format!("launchctl print gui/501/{LAUNCHD_LABEL}")
+            if *command == format!("launchctl print {agent}")
+    );
+    // The check refused is the one on the stopping agent, after the boot-out.
+    assert_eq!(
+        commands_after(&faked, before),
+        [
+            format!("launchctl print {agent}"),
+            format!("launchctl bootout {agent}"),
+            format!("launchctl print {agent}"),
+        ]
     );
     assert!(faked.service.file().exists());
 }
