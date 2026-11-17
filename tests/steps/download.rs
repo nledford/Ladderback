@@ -17,7 +17,7 @@ use app::ports::ConfigStore;
 use app::secrets::ResolveRepository;
 use cucumber::{given, then, when};
 use domain::RepositoryAlias;
-use domain::access::step_up::short_id;
+use domain::access::step_up::{StepUpConfirmation, short_id};
 use domain::planning::{AgentConfig, AgentSettings, Hooks};
 use domain::restore::download::ArchiveFormat;
 use futures::StreamExt;
@@ -93,7 +93,8 @@ impl Agent {
             entry: self.snapshot_path(entry),
             format,
             address: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            confirmation: short_id(&snapshot).to_owned(),
+            confirmation: StepUpConfirmation::parse(short_id(&snapshot).to_owned())
+                .expect("a confirmation"),
         };
         let op = self.next_snapshot_op();
         let ticket = match downloads.start(op, ask).await {

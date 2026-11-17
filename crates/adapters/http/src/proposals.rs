@@ -16,14 +16,16 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use domain::access::step_up::StepUpConfirmation;
 use domain::planning::{ProposalStatus, Proposer};
 
 use crate::api_tokens::TokenOf;
 use crate::{AppState, refused_detailed as refused};
 
 /// What the proposal routes ask of the daemon, each from a request as it
-/// came, before anything in it was read as a domain value. `asker` is who
-/// asks: the API token the request presented, or no token.
+/// came, before anything in it but a step-up confirmation was read as a
+/// domain value. `asker` is who asks: the API token the request presented,
+/// or no token.
 #[async_trait]
 pub trait Proposals: Send + Sync {
     /// Keeps the proposal, once its changes apply to the configuration, and
@@ -74,7 +76,7 @@ pub trait Proposals: Send + Sync {
 
 /// An approval a request asks for: what the page showed, as the review
 /// gave it, and the step-up confirmation.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Approval {
     /// The file's revision the diff was rebuilt against.
     pub revision: String,
@@ -84,19 +86,8 @@ pub struct Approval {
     /// password counts against.
     pub address: IpAddr,
     /// The admin password with sign-in on, the proposal's short ID
-    /// otherwise. Never logged or shown (I4): `Debug` hides it.
-    pub confirmation: String,
-}
-
-impl std::fmt::Debug for Approval {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Approval")
-            .field("revision", &self.revision)
-            .field("diff_hash", &self.diff_hash)
-            .field("address", &self.address)
-            .field("confirmation", &"[hidden]")
-            .finish()
-    }
+    /// otherwise. Never shown (I4).
+    pub confirmation: StepUpConfirmation,
 }
 
 /// Why a proposal request was refused; nothing was kept or changed. None
@@ -261,6 +252,11 @@ pub(crate) async fn approve(
     }) = serde_json::from_slice(&body)
     else {
         return refusal(&ProposalsError::InvalidBody);
+    };
+    // Nothing typed, or more than any password, is no confirmation: refused
+    // as a wrong one, before the daemon is asked and in no sign-in wait.
+    let Ok(confirmation) = StepUpConfirmation::parse(confirmation) else {
+        return refusal(&ProposalsError::StepUpFailed);
     };
     let approval = Approval {
         revision,

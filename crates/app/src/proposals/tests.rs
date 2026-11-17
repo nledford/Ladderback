@@ -325,34 +325,20 @@ async fn a_token_sees_only_its_own_proposals_and_no_token_sees_them_all() {
 
 const HOME: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
+/// `text` as a step-up confirmation.
+fn typed(text: &str) -> StepUpConfirmation {
+    StepUpConfirmation::parse(text.to_owned()).unwrap()
+}
+
 /// The approval of what the page shows of `id` now, confirmed by its short
 /// ID, as with sign-in off.
 async fn as_shown(world: &World, id: &ProposalId) -> ApprovalAsk {
     let review = world.proposals.review(id).await.unwrap();
     ApprovalAsk {
         shown: review.shown,
-        confirmation: short_proposal_id(id).to_owned(),
+        confirmation: typed(short_proposal_id(id)),
         address: HOME,
     }
-}
-
-#[test]
-fn an_approval_ask_never_shows_its_confirmation() {
-    let ask = ApprovalAsk {
-        shown: Shown {
-            revision: ShownRevision::of(
-                &RevisionKey::new([7; domain::planning::REVISION_KEY_BYTES]),
-                &ConfigRevision::of(b""),
-            ),
-            diff: DiffHash::of(""),
-        },
-        confirmation: "canary-admin-password".to_owned(),
-        address: HOME,
-    };
-    let shown = format!("{ask:?}");
-    assert!(shown.starts_with("ApprovalAsk"), "{shown}");
-    assert!(shown.contains("confirmation: \"[hidden]\""), "{shown}");
-    assert!(!shown.contains("canary-admin-password"), "{shown}");
 }
 
 #[tokio::test]
@@ -627,7 +613,7 @@ async fn an_approval_not_confirmed_changes_nothing() {
         .await
         .unwrap();
     let mut ask = as_shown(&world, &made.id).await;
-    ask.confirmation = "aaaaaa".to_owned();
+    ask.confirmation = typed("aaaaaa");
     assert_eq!(
         world.proposals.approve(&made.id, ask).await,
         Err(ProposalError::StepUpFailed)
@@ -663,7 +649,7 @@ async fn with_sign_in_on_an_approval_is_confirmed_by_the_admin_password_not_the_
     // Past the wait a wrong password asks for.
     world.clock.advance(SignedDuration::from_mins(1));
     let mut ask = as_shown(&world, &made.id).await;
-    ask.confirmation = "demo-admin-pass".to_owned();
+    ask.confirmation = typed("demo-admin-pass");
     let applied = proposals.approve(&made.id, ask).await;
     assert_eq!(
         applied.map(|applied| applied.proposal.status),

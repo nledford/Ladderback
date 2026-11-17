@@ -88,8 +88,9 @@ impl Downloads for Scripted {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(format!(
-                "{alias}:{}:{entry}:{format:?}:{address}:{confirmation}",
-                snapshot.as_str()
+                "{alias}:{}:{entry}:{format:?}:{address}:{}",
+                snapshot.as_str(),
+                confirmation.as_password().expose()
             ));
         self.start.clone()
     }
@@ -304,6 +305,38 @@ async fn a_start_that_cannot_be_read_asks_the_daemon_nothing() {
         assert_eq!(response.status(), status, "{body}");
         assert_eq!(json_of(response).await["code"], code, "{body}");
         assert!(downloads.asked().is_empty(), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn a_confirmation_of_nothing_or_longer_than_any_password_fails_unasked() {
+    let longest = domain::access::PASSWORD_MAX_BYTES;
+    // The last is the snapshot's short ID, padded with spaces.
+    for confirmation in [
+        String::new(),
+        "a".repeat(longest + 1),
+        format!("{}3f2a1b4c", " ".repeat(longest)),
+    ] {
+        let body = serde_json::json!({
+            "path": "home/docs/notes.md",
+            "format": "zip",
+            "confirmation": confirmation,
+        })
+        .to_string();
+        let downloads = Scripted::answering(Ok(ticket()));
+        let response = send(
+            downloads.clone(),
+            request(Method::POST, &start_path(&snapshot()), &body),
+        )
+        .await;
+        let length = confirmation.len();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{length} bytes");
+        assert_eq!(
+            json_of(response).await["code"],
+            "step-up-failed",
+            "{length} bytes"
+        );
+        assert!(downloads.asked().is_empty(), "{length} bytes");
     }
 }
 

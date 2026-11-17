@@ -328,7 +328,10 @@ impl Agent {
             entry,
             format,
             address: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            confirmation: confirmation.to_owned(),
+            confirmation: domain::access::step_up::StepUpConfirmation::parse(
+                confirmation.to_owned(),
+            )
+            .expect("a confirmation"),
         };
         let confirmed = downloads.start(op, ask).await;
         self.download.confirmed.push(confirmed);

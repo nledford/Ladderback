@@ -47,7 +47,7 @@ pub use proposal::{
     Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer,
     ProposerRecord, QUIET_AFTER_REJECTION, RATE_WINDOW, REVISION_KEY_BYTES, Rationale,
     RejectReason, Rejection, RejectionRefused, RevisionKey, SHORT_PROPOSAL_ID_CHARS, Shown,
-    ShownRevision, SummaryLine, TooSoon, confirms_proposal, short_proposal_id,
+    ShownRevision, SummaryLine, TooSoon, short_proposal_id,
 };
 pub use repository::{
     GroupBy, Maintenance, RepositoryConfig, RepositorySettings, check_location, check_option_value,

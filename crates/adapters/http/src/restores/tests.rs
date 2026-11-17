@@ -86,8 +86,9 @@ impl Restores for Scripted {
             .push((
                 alias,
                 format!(
-                    "{}:{entry}:{destination:?}:{address}:{confirmation}",
-                    snapshot.as_str()
+                    "{}:{entry}:{destination:?}:{address}:{}",
+                    snapshot.as_str(),
+                    confirmation.as_password().expose()
                 ),
             ));
         self.start.clone()
@@ -295,6 +296,40 @@ async fn what_no_restore_could_name_is_refused_unasked() {
     assert!(restores.asked().is_empty());
 }
 
+/// What no step-up confirmation can be: nothing, and more than any
+/// password, even when it is the snapshot's short ID padded with spaces.
+fn no_confirmation() -> [String; 3] {
+    let longest = domain::access::PASSWORD_MAX_BYTES;
+    [
+        String::new(),
+        "a".repeat(longest + 1),
+        format!("{}3f2a1b4c", " ".repeat(longest)),
+    ]
+}
+
+#[tokio::test]
+async fn a_confirmation_of_nothing_or_longer_than_any_password_fails_unasked() {
+    let restores = Scripted::answering(started(Some(FOLDER)));
+    for confirmation in no_confirmation() {
+        let body = serde_json::json!({
+            "path": "home",
+            "destination": "new-folder",
+            "confirmation": confirmation,
+        })
+        .to_string();
+        let (status, response) =
+            send(Arc::clone(&restores), post(&start_path(&snapshot()), &body)).await;
+        let length = confirmation.len();
+        assert_eq!(status, StatusCode::FORBIDDEN, "{length} bytes");
+        assert_eq!(
+            body_of(response).await["code"],
+            "step-up-failed",
+            "{length} bytes"
+        );
+    }
+    assert!(restores.asked().is_empty());
+}
+
 #[tokio::test]
 async fn a_start_without_its_connection_s_address_is_refused() {
     let restores = Scripted::answering(started(Some(FOLDER)));
@@ -336,17 +371,4 @@ async fn a_preview_answers_what_the_dry_run_found() {
         restores.asked(),
         [("demo".to_owned(), format!("{}:home/docs", snapshot()))]
     );
-}
-
-#[test]
-fn a_restore_start_never_shows_its_confirmation() {
-    let start = RestoreStart {
-        snapshot: SnapshotId::parse(&snapshot()).unwrap(),
-        entry: FolderPath::top(),
-        destination: Destination::NewFolder,
-        address: HOME.ip(),
-        confirmation: "canary-admin-password".to_owned(),
-    };
-    let shown = format!("{start:?}");
-    assert!(!shown.contains("canary-admin-password"), "{shown}");
 }

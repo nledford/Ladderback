@@ -389,6 +389,15 @@ fn a_revision_reads_back_from_its_hex() {
     );
 }
 
+/// With the rest of the file, the plain hash lets someone test guesses at a
+/// short inline secret offline, so debug output never shows it (I4).
+#[test]
+fn a_revision_never_shows_its_hash_in_debug_output() {
+    let revision = ConfigRevision::of(b"");
+    assert_eq!(format!("{revision:?}"), "ConfigRevision([hidden])");
+    assert_eq!(format!("{revision:#?}"), "ConfigRevision([hidden])");
+}
+
 #[test]
 fn a_shown_revision_is_the_sha256_of_the_key_then_the_revision() {
     let key = RevisionKey::new([7; REVISION_KEY_BYTES]);
@@ -535,23 +544,6 @@ fn a_rejection_a_store_kept_gives_its_reasons_in_order() {
         .map(|text| RejectReason::parse(text.to_owned()).unwrap());
     let kept = Rejection::kept(reasons.to_vec());
     assert_eq!(kept.reasons(), reasons);
-}
-
-#[test]
-fn an_approval_with_sign_in_off_is_confirmed_by_the_short_or_whole_id() {
-    let id = proposal_id();
-    let short = short_proposal_id(&id);
-    assert_eq!(short.len(), SHORT_PROPOSAL_ID_CHARS);
-    assert!(id.as_str().starts_with(short));
-    assert!(confirms_proposal(
-        &format!(" {} ", short.to_uppercase()),
-        &id
-    ));
-    assert!(confirms_proposal(id.as_str(), &id));
-    let other = ProposalId::from_bytes(&[9; TOKEN_BYTES]);
-    assert!(!confirms_proposal(short_proposal_id(&other), &id));
-    assert!(!confirms_proposal("", &id));
-    assert!(!confirms_proposal(id.as_str().get(..5).unwrap(), &id));
 }
 
 #[test]
