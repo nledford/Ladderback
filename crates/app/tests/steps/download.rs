@@ -57,6 +57,9 @@ pub struct DownloadWorld {
     runs: u128,
     /// The writes of how each fetched download ended, run beside it.
     recording: Vec<JoinHandle<()>>,
+    /// Confirmations running beside the scenario, oldest first, while the
+    /// history is slow to write.
+    asking: Vec<JoinHandle<Result<DownloadTicket, DownloadError>>>,
     /// While it holds `true`, the operation log answers no write: one is
     /// under way, and answers once it is let go.
     log_held: Arc<tokio::sync::watch::Sender<bool>>,
@@ -319,14 +322,14 @@ impl Agent {
         downloads
     }
 
-    /// Confirms a download of `entry` as `format`, keeping how it answered.
-    async fn confirm_download(
+    /// What the person asks for when they confirm a download of `entry`
+    /// as `format`, under a new operation's ID.
+    fn download_ask(
         &mut self,
         entry: FolderPath,
         format: ArchiveFormat,
         confirmation: &str,
-    ) {
-        let downloads = self.downloads().await;
+    ) -> (OperationId, DownloadAsk) {
         self.download.runs += 1;
         let op = OperationId::from_uuid(Uuid::from_u128(
             0x018f_0000_0000_7000_8000_0000_0000_7000 | self.download.runs,
@@ -344,8 +347,40 @@ impl Agent {
             address: IpAddr::V4(Ipv4Addr::LOCALHOST),
             confirmation: confirmation.to_owned(),
         };
+        (op, ask)
+    }
+
+    /// Confirms a download of `entry` as `format`, keeping how it answered.
+    async fn confirm_download(
+        &mut self,
+        entry: FolderPath,
+        format: ArchiveFormat,
+        confirmation: &str,
+    ) {
+        let downloads = self.downloads().await;
+        let (op, ask) = self.download_ask(entry, format, confirmation);
         let confirmed = downloads.start(op, ask).await;
         self.download.confirmed.push(confirmed);
+    }
+
+    /// Confirms a download of `entry` beside the scenario, as a browser's
+    /// request runs while the history is slow to write, and waits until it
+    /// has gone as far as the log lets it: answered, or held on a write.
+    async fn start_confirming(&mut self, entry: FolderPath, confirmation: &str) {
+        let downloads = self.downloads().await;
+        let (op, ask) = self.download_ask(entry, ArchiveFormat::Tar, confirmation);
+        let log = self.download.log_held.clone();
+        // Each write the log holds waits on a receiver of its own.
+        let held = log.receiver_count();
+        let asking = tokio::spawn(async move { downloads.start(op, ask).await });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !asking.is_finished() && log.receiver_count() == held {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the confirmation goes as far as the held log lets it");
+        self.download.asking.push(asking);
     }
 
     /// The ticket the confirmation at `index` answered.
@@ -595,6 +630,21 @@ fn log_let_go(agent: &mut Agent) {
 }
 
 #[when(
+    expr = "the person asks for downloads of {string}, {string} and {string} of the snapshot, one after another, confirming with {string}"
+)]
+async fn asks_for_three(
+    agent: &mut Agent,
+    first: String,
+    second: String,
+    third: String,
+    confirmation: String,
+) {
+    for entry in [first, second, third] {
+        agent.start_confirming(path(&entry), &confirmation).await;
+    }
+}
+
+#[when(
     expr = "the person downloads {string} of the snapshot as {word}, confirming with {string}, and the browser goes away after the first piece"
 )]
 async fn goes_away(agent: &mut Agent, entry: String, as_format: String, confirmation: String) {
@@ -747,6 +797,29 @@ fn refused_unknown_entry(agent: &mut Agent) {
 fn refused_busy(agent: &mut Agent) {
     let refusal = agent.download_refusal();
     assert!(matches!(refusal, DownloadError::Busy), "{refusal:?}");
+}
+
+#[then(
+    "the first of the three is confirmed, and one of the other two is refused because two downloads are under way"
+)]
+async fn first_of_three_confirmed(agent: &mut Agent) {
+    let mut answers = Vec::new();
+    for asking in agent.download.asking.drain(..) {
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(5), asking)
+            .await
+            .expect("the confirmation answers once the history takes its writes")
+            .expect("the confirmation ran");
+        answers.push(answer);
+    }
+    assert!(
+        answers.first().is_some_and(Result::is_ok),
+        "the download that gave the expired turns back took one: {answers:?}"
+    );
+    let refused = answers
+        .iter()
+        .filter(|answer| matches!(answer, Err(DownloadError::Busy)))
+        .count();
+    assert_eq!((answers.len(), refused), (3, 1), "{answers:?}");
 }
 
 #[then("the second hand-over is refused because the download is unknown")]

@@ -128,6 +128,19 @@ Feature: Downloading files from a snapshot
     When the history takes its writes again
     Then the history shows both downloads, started by hand, as cancelled
 
+  # A download being confirmed first gives up the downloads whose minute
+  # ran out. It takes its own turn before their history is written, so a
+  # download asked for while the history is slow can't take that turn.
+  Scenario: The download that gives the expired turns back takes one while the history is slow
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And sign-in is off
+    And the history can be slow to write
+    When the person confirms downloads of "home/docs" and "home/photos" of the snapshot as tar, confirming with "3f2a1b4c"
+    And 61 seconds pass while the history is slow to write
+    And the person asks for downloads of "home/docs", "home/photos" and "home" of the snapshot, one after another, confirming with "3f2a1b4c"
+    And the history takes its writes again
+    Then the first of the three is confirmed, and one of the other two is refused because two downloads are under way
+
   Scenario: A reader that goes away midway stops the download
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
     And sign-in is off
