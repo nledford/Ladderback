@@ -345,6 +345,16 @@ jobs:
         with:
           engines: chromium
       - run: just test-ui
+      # The JUnit report and each failed scenario's trace and screenshot
+      # (ui-tests/support/world.ts), only when the run failed, kept 14 days as
+      # the JUnit and `mutants.out` uploads are. The attempt in the name keeps
+      # a rerun's upload from colliding with the first's.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-reports-chromium-attempt-${{ github.run_attempt }}
+          path: ui-tests/reports/
+          retention-days: 14
       # Saved here, not as the job starts, so that a build that failed leaves
       # nothing behind, and only from main: a pull request's entry would be
       # one no other pull request reads.
@@ -404,6 +414,13 @@ jobs:
           engines: ${{ matrix.engine }}
       # `LADDERBACK_UI_BROWSER` (above) picks the engine.
       - run: just test-ui
+      # As in the `ui` job.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-reports-${{ matrix.engine }}-attempt-${{ github.run_attempt }}
+          path: ui-tests/reports/
+          retention-days: 14
       # Also after a failed run: these jobs are expected to fail more often, and
       # a target left behind could be saved under the shared Linux build key.
       - if: ${{ !cancelled() && github.event_name == 'push' }}

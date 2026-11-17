@@ -336,13 +336,15 @@ try *args: build
 # the same engine; a failure there stops the recipe, and so does a pattern that
 # matches no file (`failglob`), which `node --test` would read as its own glob
 # and pass with no test run. `just lint` runs only `scripts/*.test.ts`, so it
-# starts no browser.
+# starts no browser. The run writes `ui-tests/reports/`: the JUnit report, and
+# a trace and a screenshot of each failed scenario (`ui-tests/support/world.ts`);
+# the recipe empties it first, so what is there is this run's.
 [doc('Run the UI tooling browser tests, then the @ui scenarios, in a browser engine (default chromium) against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: web-test _ui-deps
     cargo build
-    shopt -s failglob && cd ui-tests && case "${1:-}" in chromium | firefox | webkit) export LADDERBACK_UI_BROWSER="$1"; shift ;; esac && node --test support/*.browser.test.ts && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
+    shopt -s failglob && cd ui-tests && rm -rf reports && case "${1:-}" in chromium | firefox | webkit) export LADDERBACK_UI_BROWSER="$1"; shift ;; esac && node --test support/*.browser.test.ts && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
 
 # Installs the UI test dependencies when they are missing or older than the
 # lockfile, as in a new worktree: node_modules isn't tracked.
