@@ -56,7 +56,7 @@ schema = 1                       # config schema version (see below)
 [agent]
 hostname = "demo-laptop"         # defaults to system hostname; must be unique on the hub
 concurrency = 1
-maintenance-concurrency = 1      # forget, prune, check, adopt; decision 75, point 8
+maintenance-concurrency = 1      # forget, prune, check, adopt; decision 75, point 8 (not read yet, #970)
 nice = 10
 allow-hub-restore = false        # §10.4
 locale = "en-US"                 # notification text (§8.4); defaults to the POSIX locale, then en-US
