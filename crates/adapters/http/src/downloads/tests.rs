@@ -88,8 +88,9 @@ impl Downloads for Scripted {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(format!(
-                "{alias}:{}:{entry}:{format:?}:{address}:{confirmation}",
-                snapshot.as_str()
+                "{alias}:{}:{entry}:{format:?}:{address}:{}",
+                snapshot.as_str(),
+                confirmation.as_password().expose()
             ));
         self.start.clone()
     }

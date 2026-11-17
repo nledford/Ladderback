@@ -296,7 +296,10 @@ impl RestoreWorld {
             destination,
             origin,
             address: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            confirmation: confirmation.to_owned(),
+            confirmation: domain::access::step_up::StepUpConfirmation::parse(
+                confirmation.to_owned(),
+            )
+            .expect("a confirmation"),
         }
     }
 

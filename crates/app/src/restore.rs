@@ -8,6 +8,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use domain::access::step_up::{StepUpConfirmation, StepUpFor};
 use domain::browse::FolderPath;
 use domain::execution::Trigger;
 use domain::execution::deadline::backup_budget;
@@ -38,9 +39,8 @@ pub struct RestoreSetup {
     pub zone: TimeZone,
 }
 
-/// One restore a person asked for, as it reached the agent. The
-/// confirmation is never logged or shown (I4): its `Debug` hides it.
-#[derive(Clone)]
+/// One restore a person asked for, as it reached the agent.
+#[derive(Debug)]
 pub struct RestoreAsk {
     pub alias: RepositoryAlias,
     pub snapshot: SnapshotId,
@@ -52,22 +52,8 @@ pub struct RestoreAsk {
     /// step-up password counts against.
     pub address: IpAddr,
     /// What the person typed to confirm: the admin password with sign-in
-    /// on, the snapshot's short ID otherwise.
-    pub confirmation: String,
-}
-
-impl std::fmt::Debug for RestoreAsk {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RestoreAsk")
-            .field("alias", &self.alias)
-            .field("snapshot", &self.snapshot)
-            .field("entry", &self.entry)
-            .field("destination", &self.destination)
-            .field("origin", &self.origin)
-            .field("address", &self.address)
-            .field("confirmation", &"[hidden]")
-            .finish()
-    }
+    /// on, the snapshot's short ID otherwise. Never shown (I4).
+    pub confirmation: StepUpConfirmation,
 }
 
 /// Why a restore didn't start. A typed code, never a sentence (§8.4).
@@ -296,7 +282,7 @@ impl Restores {
             self.access.as_deref(),
             ask.address,
             &ask.confirmation,
-            &ask.snapshot,
+            StepUpFor::Snapshot(&ask.snapshot),
         )
         .await
         .map_err(|refused| match refused {
@@ -389,27 +375,4 @@ fn repository<'a>(
         .repositories()
         .get(alias)
         .ok_or(RestoreError::UnknownRepository)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::Ipv4Addr;
-
-    use super::*;
-
-    #[test]
-    fn a_restore_ask_never_shows_its_confirmation() {
-        let ask = RestoreAsk {
-            alias: RepositoryAlias::parse("demo").unwrap(),
-            snapshot: SnapshotId::parse(&"3f2a1b4c".repeat(8)).unwrap(),
-            entry: FolderPath::parse("home/docs").unwrap(),
-            destination: Destination::NewFolder,
-            origin: RestoreOrigin::LocalUi,
-            address: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            confirmation: "canary-admin-password".to_owned(),
-        };
-        let shown = format!("{ask:?}");
-        assert!(!shown.contains("canary-admin-password"), "{shown}");
-        assert!(shown.contains("[hidden]"), "{shown}");
-    }
 }

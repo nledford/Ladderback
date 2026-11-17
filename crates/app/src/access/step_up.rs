@@ -1,17 +1,16 @@
-//! Step-up confirmation (§10.4), as a restore and a download ask for it.
+//! Step-up confirmation (§10.4), as a restore, a download and the approval
+//! of a proposal ask for it.
 
 use std::net::IpAddr;
 
-use domain::SnapshotId;
-use domain::access::Password;
-use domain::access::step_up::confirms_snapshot;
+use domain::access::step_up::{StepUpConfirmation, StepUpFor};
 
 use super::{Access, PasswordRefused};
 
 /// Why a step-up confirmation wasn't taken.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum StepUpRefused {
-    /// It wasn't the admin password, or the snapshot's ID.
+    /// It wasn't the admin password, or the ID of what it is for.
     Failed,
     /// The address's wait after failed sign-ins has `seconds` left; the
     /// password wasn't checked.
@@ -20,26 +19,24 @@ pub(crate) enum StepUpRefused {
     Unavailable(String),
 }
 
-/// Checks `confirmation` for something done to `snapshot`: the admin
-/// password, in `address`'s sign-in waits, when `access` says sign-in is on;
-/// the snapshot's ID otherwise.
+/// Checks `confirmation` for `what`: the admin password, in `address`'s
+/// sign-in waits, when `access` says sign-in is on; the ID of `what`
+/// otherwise.
 pub(crate) async fn confirm_step_up(
     access: Option<&Access>,
     address: IpAddr,
-    confirmation: &str,
-    snapshot: &SnapshotId,
+    confirmation: &StepUpConfirmation,
+    what: StepUpFor<'_>,
 ) -> Result<(), StepUpRefused> {
     let Some(access) = access else {
-        return if confirms_snapshot(confirmation, snapshot) {
+        return if confirmation.names(what) {
             Ok(())
         } else {
             Err(StepUpRefused::Failed)
         };
     };
-    // Nothing typed, or more than any password, is no attempt at it.
-    let attempt = Password::parse(confirmation.to_owned()).map_err(|_| StepUpRefused::Failed)?;
     access
-        .step_up(address, &attempt)
+        .step_up(address, confirmation.as_password())
         .await
         .map(|_| ())
         .map_err(|refused| match refused {

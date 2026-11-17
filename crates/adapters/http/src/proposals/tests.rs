@@ -31,11 +31,13 @@ struct Scripted {
     decisions: Mutex<Vec<Decision>>,
 }
 
-/// What a route asked of the proposals beyond a proposer's requests.
+/// What a route asked of the proposals beyond a proposer's requests; an
+/// approval as its revision, its diff's hash, its address and its
+/// confirmation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Decision {
     Review(String),
-    Approve(String, Approval),
+    Approve(String, String),
     Reject(String, Vec<String>),
 }
 
@@ -160,7 +162,19 @@ impl Proposals for Scripted {
         id: String,
         approval: Approval,
     ) -> Result<api::ProposalDto, ProposalsError> {
-        self.decide(Decision::Approve(id, approval))
+        let Approval {
+            revision,
+            diff_hash,
+            address,
+            confirmation,
+        } = approval;
+        self.decide(Decision::Approve(
+            id,
+            format!(
+                "{revision}:{diff_hash}:{address}:{}",
+                confirmation.as_password().expose()
+            ),
+        ))
     }
 
     async fn reject(
@@ -559,12 +573,7 @@ async fn a_session_reviews_approves_and_rejects_as_its_requests_say() {
             Decision::Review("abcdefghijkl".to_owned()),
             Decision::Approve(
                 "abcdefghijkl".to_owned(),
-                Approval {
-                    revision: "aaaa".to_owned(),
-                    diff_hash: "bbbb".to_owned(),
-                    address: HOME.ip(),
-                    confirmation: PASSWORD.to_owned(),
-                }
+                format!("aaaa:bbbb:{}:{PASSWORD}", HOME.ip())
             ),
             Decision::Reject(
                 "abcdefghijkl".to_owned(),
@@ -636,28 +645,6 @@ async fn an_approval_confirmed_by_nothing_or_more_than_any_password_fails_unaske
         );
     }
     assert!(daemon.proposals.decisions().is_empty());
-}
-
-#[test]
-fn an_approval_never_shows_its_confirmation() {
-    let approval = Approval {
-        revision: "aaaa".to_owned(),
-        diff_hash: "bbbb".to_owned(),
-        address: HOME.ip(),
-        confirmation: "canary-step-up".to_owned(),
-    };
-    let shown = format!("{approval:?}");
-    assert!(shown.starts_with("Approval "), "{shown}");
-    assert!(shown.contains("confirmation: \"[hidden]\""), "{shown}");
-    assert!(!shown.contains("canary"), "{shown}");
-    let body: api::ApproveProposalDto = serde_json::from_str(
-        r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"canary-step-up"}"#,
-    )
-    .unwrap();
-    let shown = format!("{body:?}");
-    assert!(shown.starts_with("ApproveProposalDto"), "{shown}");
-    assert!(shown.contains("confirmation: \"[hidden]\""), "{shown}");
-    assert!(!shown.contains("canary"), "{shown}");
 }
 
 #[tokio::test]

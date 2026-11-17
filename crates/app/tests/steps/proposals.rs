@@ -462,7 +462,8 @@ async fn approve(agent: &mut Agent, confirmation: String) {
     let id = agent.proposals.kept().id.clone();
     let ask = ApprovalAsk {
         shown: agent.proposals.shown().shown.clone(),
-        confirmation,
+        confirmation: domain::access::step_up::StepUpConfirmation::parse(confirmation)
+            .expect("a confirmation"),
         address: HOME,
     };
     agent.proposals.approved = Some(

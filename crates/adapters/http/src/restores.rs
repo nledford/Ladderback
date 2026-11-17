@@ -12,6 +12,7 @@ use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use domain::SnapshotId;
+use domain::access::step_up::StepUpConfirmation;
 use domain::browse::FolderPath;
 use domain::restore::Destination;
 
@@ -43,7 +44,7 @@ pub trait Restores: Send + Sync {
 }
 
 /// A restore a request asks for, read from its path and body.
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct RestoreStart {
     pub snapshot: SnapshotId,
     pub entry: FolderPath,
@@ -52,20 +53,8 @@ pub struct RestoreStart {
     /// password counts against.
     pub address: IpAddr,
     /// The admin password with sign-in on, the snapshot's short ID
-    /// otherwise. Never logged or shown (I4): `Debug` hides it.
-    pub confirmation: String,
-}
-
-impl std::fmt::Debug for RestoreStart {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RestoreStart")
-            .field("snapshot", &self.snapshot)
-            .field("entry", &self.entry)
-            .field("destination", &self.destination)
-            .field("address", &self.address)
-            .field("confirmation", &"[hidden]")
-            .finish()
-    }
+    /// otherwise. Never shown (I4).
+    pub confirmation: StepUpConfirmation,
 }
 
 /// Why a restore wasn't started or previewed. None holds a secret.
@@ -155,11 +144,18 @@ pub(crate) async fn start(
     else {
         return refused(StatusCode::BAD_REQUEST, api::ErrorCode::InvalidBody);
     };
+    // Read at once, so the text is wiped on every way out. Nothing typed,
+    // or more than any password, is no confirmation: refused as a wrong one,
+    // before the daemon is asked and in no sign-in wait.
+    let confirmation = StepUpConfirmation::parse(confirmation);
     let Ok(id) = SnapshotId::parse(&snapshot) else {
         return snapshot_unknown(snapshot);
     };
     let Ok(entry) = FolderPath::parse(&path) else {
         return folder_unknown(path);
+    };
+    let Ok(confirmation) = confirmation else {
+        return refusal(&alias, &snapshot, RestoreRefusal::StepUpFailed);
     };
     let start = RestoreStart {
         snapshot: id,

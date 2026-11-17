@@ -542,6 +542,7 @@ mod tests {
         InMemorySessionStore, SeededRandom,
     };
     use app::proposals::ApprovalAsk;
+    use domain::access::step_up::StepUpConfirmation;
     use domain::planning::{ProposalStatus, short_proposal_id};
     use http_adapter::Proposals as _;
     use serde_json::json;
@@ -626,7 +627,8 @@ sources = ["/home/demo"]
                 id,
                 ApprovalAsk {
                     shown: review.shown,
-                    confirmation: confirmation.to_owned(),
+                    confirmation: StepUpConfirmation::parse(confirmation.to_owned())
+                        .expect("a confirmation"),
                     address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
                 },
             )
@@ -704,7 +706,8 @@ sources = ["/home/demo"]
             revision: review.revision,
             diff_hash: review.diff_hash,
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
-            confirmation: short_proposal_id(&id).to_owned(),
+            confirmation: StepUpConfirmation::parse(short_proposal_id(&id).to_owned())
+                .expect("a confirmation"),
         };
         // Another write of the configuration holds its lock, so the
         // approval waits for it; the browser hangs up meanwhile.

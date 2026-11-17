@@ -547,23 +547,6 @@ fn a_rejection_a_store_kept_gives_its_reasons_in_order() {
 }
 
 #[test]
-fn an_approval_with_sign_in_off_is_confirmed_by_the_short_or_whole_id() {
-    let id = proposal_id();
-    let short = short_proposal_id(&id);
-    assert_eq!(short.len(), SHORT_PROPOSAL_ID_CHARS);
-    assert!(id.as_str().starts_with(short));
-    assert!(confirms_proposal(
-        &format!(" {} ", short.to_uppercase()),
-        &id
-    ));
-    assert!(confirms_proposal(id.as_str(), &id));
-    let other = ProposalId::from_bytes(&[9; TOKEN_BYTES]);
-    assert!(!confirms_proposal(short_proposal_id(&other), &id));
-    assert!(!confirms_proposal("", &id));
-    assert!(!confirms_proposal(id.as_str().get(..5).unwrap(), &id));
-}
-
-#[test]
 fn a_diff_hash_is_the_sha256_of_the_text() {
     let hash = DiffHash::of("+[plans.home]\n");
     assert_eq!(hash.as_str().len(), 64);

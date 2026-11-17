@@ -240,13 +240,6 @@ pub fn short_proposal_id(id: &ProposalId) -> &str {
         .unwrap_or(id.as_str())
 }
 
-/// Whether `typed` confirms the approval of `id` while sign-in is off: its
-/// short ID or its whole ID, in either case, the spaces around it dropped.
-pub fn confirms_proposal(typed: &str, id: &ProposalId) -> bool {
-    let typed = typed.trim().to_ascii_lowercase();
-    typed == short_proposal_id(id) || typed == id.as_str()
-}
-
 /// A plan's setting, as the summary names what a change changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlanSetting {

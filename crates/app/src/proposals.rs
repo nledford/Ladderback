@@ -15,15 +15,15 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use api::{ProposalStatusDto, UiEvent};
-use domain::access::Password;
+use domain::access::step_up::{StepUpConfirmation, StepUpFor};
 use domain::planning::{
     AgentConfig, ConfigChange, ConfigRevision, DiffHash, MAX_ENDED, MAX_PENDING, Proposal,
     ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, Rationale, Rejection,
-    RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon, confirms_proposal,
+    RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon,
 };
 use domain::secrets::Redactor;
 
-use crate::access::{Access, PasswordRefused};
+use crate::access::{Access, StepUpRefused, confirm_step_up};
 use crate::ports::{
     Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError, ConfigStore,
     EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError, StoredProposal,
@@ -119,28 +119,17 @@ pub struct Review {
     pub rejected: usize,
 }
 
-/// A person's approval of a proposal, as the page sends it. The
-/// confirmation is never logged or shown (I4): its `Debug` hides it.
-#[derive(Clone, PartialEq, Eq)]
+/// A person's approval of a proposal, as the page sends it.
+#[derive(Debug)]
 pub struct ApprovalAsk {
     /// What the page showed.
     pub shown: Shown,
     /// The step-up confirmation: the admin password with sign-in on, the
-    /// proposal's ID with it off.
-    pub confirmation: String,
+    /// proposal's ID with it off. Never shown (I4).
+    pub confirmation: StepUpConfirmation,
     /// The browser's address, whose sign-in waits a wrong password counts
     /// against.
     pub address: IpAddr,
-}
-
-impl std::fmt::Debug for ApprovalAsk {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ApprovalAsk")
-            .field("shown", &self.shown)
-            .field("confirmation", &"[hidden]")
-            .field("address", &self.address)
-            .finish()
-    }
 }
 
 /// What [`Proposals`] works with.
@@ -474,25 +463,18 @@ impl Proposals {
     /// address's sign-in waits, with sign-in on; the proposal's short ID
     /// otherwise.
     async fn step_up(&self, id: &ProposalId, ask: &ApprovalAsk) -> Result<(), ProposalError> {
-        let Some(access) = &self.access else {
-            return if confirms_proposal(&ask.confirmation, id) {
-                Ok(())
-            } else {
-                Err(ProposalError::StepUpFailed)
-            };
-        };
-        // Nothing typed, or more than any password, is no attempt at it.
-        let attempt =
-            Password::parse(ask.confirmation.clone()).map_err(|_| ProposalError::StepUpFailed)?;
-        access
-            .step_up(ask.address, &attempt)
-            .await
-            .map(|_| ())
-            .map_err(|refused| match refused {
-                PasswordRefused::WrongPassword => ProposalError::StepUpFailed,
-                PasswordRefused::Wait { seconds } => ProposalError::StepUpWait { seconds },
-                PasswordRefused::Unavailable(text) => ProposalError::StepUpUnavailable(text),
-            })
+        confirm_step_up(
+            self.access.as_deref(),
+            ask.address,
+            &ask.confirmation,
+            StepUpFor::Proposal(id),
+        )
+        .await
+        .map_err(|refused| match refused {
+            StepUpRefused::Failed => ProposalError::StepUpFailed,
+            StepUpRefused::Wait { seconds } => ProposalError::StepUpWait { seconds },
+            StepUpRefused::Unavailable(text) => ProposalError::StepUpUnavailable(text),
+        })
     }
 
     /// Ends the apply of `id` with `status`, and announces it.

@@ -11,6 +11,7 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use domain::access::step_up::{StepUpConfirmation, StepUpFor};
 use domain::browse::{DisplayName, FolderPath};
 use domain::execution::deadline::backup_budget;
 use domain::execution::{FailureReason, Operation, OperationKind, Trigger};
@@ -35,9 +36,8 @@ use crate::ports::{
 };
 use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
 
-/// One download a person asked for, as it reached the agent. The
-/// confirmation is never logged or shown (I4): its `Debug` hides it.
-#[derive(Clone)]
+/// One download a person asked for, as it reached the agent.
+#[derive(Debug)]
 pub struct DownloadAsk {
     pub alias: RepositoryAlias,
     pub snapshot: SnapshotId,
@@ -49,21 +49,8 @@ pub struct DownloadAsk {
     /// step-up password counts against.
     pub address: IpAddr,
     /// The admin password with sign-in on, the snapshot's short ID
-    /// otherwise.
-    pub confirmation: String,
-}
-
-impl std::fmt::Debug for DownloadAsk {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DownloadAsk")
-            .field("alias", &self.alias)
-            .field("snapshot", &self.snapshot)
-            .field("entry", &self.entry)
-            .field("format", &self.format)
-            .field("address", &self.address)
-            .field("confirmation", &"[hidden]")
-            .finish()
-    }
+    /// otherwise. Never shown (I4).
+    pub confirmation: StepUpConfirmation,
 }
 
 /// Why a download wasn't confirmed or handed over. A typed code, never a
@@ -176,7 +163,7 @@ impl Downloads {
             self.access.as_deref(),
             ask.address,
             &ask.confirmation,
-            &ask.snapshot,
+            StepUpFor::Snapshot(&ask.snapshot),
         )
         .await
         .map_err(|refused| match refused {
@@ -521,30 +508,5 @@ impl Drop for Handing {
             let _ = self.operation.cancel(self.clock.now());
             self.end(None);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A download's ask names what it asks for in debug output, and never
-    /// the step-up confirmation it carries (I4).
-    #[test]
-    fn an_ask_names_itself_in_debug_output_and_hides_its_confirmation() {
-        let ask = DownloadAsk {
-            alias: RepositoryAlias::parse("demo").unwrap_or_else(|e| panic!("an alias: {e:?}")),
-            snapshot: SnapshotId::parse(&"3f".repeat(32))
-                .unwrap_or_else(|e| panic!("a snapshot ID: {e:?}")),
-            entry: FolderPath::top(),
-            format: ArchiveFormat::Zip,
-            address: IpAddr::from([127, 0, 0, 1]),
-            confirmation: "canary-admin-password".to_owned(),
-        };
-        let shown = format!("{ask:?}");
-        assert!(shown.starts_with("DownloadAsk {"), "{shown}");
-        assert!(shown.contains(r#"confirmation: "[hidden]""#), "{shown}");
-        assert!(shown.contains("Zip"), "{shown}");
-        assert!(!shown.contains("canary-admin-password"), "{shown}");
     }
 }

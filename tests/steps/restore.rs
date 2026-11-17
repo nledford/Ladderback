@@ -19,7 +19,7 @@ use app::ports::{ConfigStore, RestorePlanSummary};
 use app::restore::{RestoreAsk, RestoreError, RestoreSetup, Restores};
 use app::secrets::ResolveRepository;
 use cucumber::{given, then, when};
-use domain::access::step_up::short_id;
+use domain::access::step_up::{StepUpConfirmation, short_id};
 use domain::browse::FolderPath;
 use domain::execution::{FailureReason, OperationStatus};
 use domain::planning::{AgentConfig, AgentSettings, Hooks};
@@ -145,7 +145,8 @@ impl Agent {
     async fn restore_entry(&mut self, entry: FolderPath, destination: Destination) {
         let restores = self.restores().await;
         let snapshot = self.snapshot_made();
-        let confirmation = short_id(&snapshot).to_owned();
+        let confirmation =
+            StepUpConfirmation::parse(short_id(&snapshot).to_owned()).expect("a confirmation");
         let ask = RestoreAsk {
             alias: alias(),
             snapshot,
