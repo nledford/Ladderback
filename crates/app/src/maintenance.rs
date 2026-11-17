@@ -45,6 +45,7 @@ use crate::ports::{
     RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
     SourcesError, Start, StoreError,
 };
+use crate::reads::ReadTurns;
 use crate::repositories::ConfigWrites;
 use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
 use domain::execution::deadline::KeepDelete;
@@ -720,13 +721,15 @@ impl RunMaintenance {
     /// read. A side whose forget a policy keeping nothing would refuse is
     /// told as such, beside the other side. A read like
     /// [`preview`](Self::preview): no I7 slot, nothing in the operation
-    /// log, nothing removed.
+    /// log, nothing removed. Its listing and retention reads hold one of
+    /// `turns`, the daemon's turns to list a repository (#710).
     pub async fn compare_forget(
         &self,
         op: OperationId,
         before: &AgentConfig,
         after: &AgentConfig,
         alias: &RepositoryAlias,
+        _turns: &ReadTurns,
     ) -> Result<ForgetComparison, MaintenanceError> {
         let maintains = |config: &AgentConfig| {
             config
@@ -2687,5 +2690,210 @@ mod start_tests {
             "nothing was stored: {:?}",
             logged.operations
         );
+    }
+}
+
+/// A forget preview's read of a repository takes its turn from the turns
+/// every listing of the daemon shares (#967, #710), as a listing does.
+#[cfg(test)]
+#[cfg(feature = "fakes")]
+mod turn_tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use domain::planning::{
+        AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
+    };
+    use domain::secrets::{SecretRef, SecretValue};
+    use domain::{AgentId, Timestamp, Uuid};
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore,
+        InMemoryOperationStore,
+    };
+    use crate::ports::JobControl;
+
+    const OP: OperationId = OperationId::from_uuid(Uuid::from_u128(0x0967));
+
+    struct Ended;
+
+    #[async_trait]
+    impl JobControl for Ended {
+        async fn stop(&mut self) {}
+    }
+
+    /// Lists no snapshots, at once, and counts the listings it starts.
+    #[derive(Default)]
+    struct Lists(AtomicUsize);
+
+    impl Lists {
+        fn started(&self) -> usize {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl Engine for Lists {
+        async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
+            if matches!(job, Job::Ls(_)) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(RunningJob {
+                events: Box::pin(futures::stream::iter([EngineEvent::Succeeded(
+                    EngineResult::Snapshots(Vec::new()),
+                )])),
+                control: Box::new(Ended),
+            })
+        }
+    }
+
+    fn alias() -> RepositoryAlias {
+        RepositoryAlias::parse("demo").expect("an alias")
+    }
+
+    /// A configuration under which this agent maintains the repository, so
+    /// a comparison reads it.
+    fn maintained() -> AgentConfig {
+        let repository = RepositoryConfig {
+            locations: Default::default(),
+            id: None,
+            settings: RepositorySettings {
+                repository: "/srv/demo/repo".to_owned(),
+                repo_hot: None,
+                password: SecretRef::Inline(SecretValue::new("demo-password")),
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+            },
+            maintenance: Maintenance::Local,
+            group_by: GroupBy::default(),
+            hooks: Hooks::default(),
+        };
+        AgentConfig::new(
+            AgentSettings::default(),
+            Hooks::default(),
+            BTreeMap::from([(alias(), repository)]),
+            Vec::new(),
+        )
+        .expect("a valid configuration")
+    }
+
+    /// The use case over `engine`, on a clock that moves only when told.
+    fn use_case(engine: Arc<dyn Engine>, clock: Arc<FakeClock>) -> RunMaintenance {
+        RunMaintenance::new(
+            engine,
+            clock,
+            Arc::new(InMemoryOperationStore::new()),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            Arc::new(InMemoryConfigStore::new()),
+            Arc::default(),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+    }
+
+    fn clock() -> Arc<FakeClock> {
+        Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH))
+    }
+
+    #[tokio::test]
+    async fn a_comparison_waits_its_turn_while_two_listings_hold_the_turns() {
+        let engine = Arc::new(Lists::default());
+        let use_case = use_case(engine.clone(), clock());
+        let turns = ReadTurns::default();
+        let first = turns.turn().await;
+        let _second = turns.turn().await;
+        let (config, alias) = (maintained(), alias());
+        let mut comparing = Box::pin(use_case.compare_forget(OP, &config, &config, &alias, &turns));
+        assert!(
+            (&mut comparing).now_or_never().is_none(),
+            "the comparison waits for a turn"
+        );
+        assert_eq!(engine.started(), 0, "and lists nothing while it waits");
+        drop(first);
+        assert!(comparing.await.is_ok(), "a turn came free, so it is read");
+        assert_eq!(engine.started(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_comparison_waiting_its_turn_is_given_up_when_the_read_timeout_ends() {
+        let engine = Arc::new(Lists::default());
+        let clock = clock();
+        let use_case = use_case(engine.clone(), Arc::clone(&clock));
+        let turns = ReadTurns::default();
+        let _first = turns.turn().await;
+        let _second = turns.turn().await;
+        let (config, alias) = (maintained(), alias());
+        let mut comparing = Box::pin(use_case.compare_forget(OP, &config, &config, &alias, &turns));
+        assert!((&mut comparing).now_or_never().is_none());
+        clock.advance(READ_TIMEOUT);
+        assert_eq!(
+            (&mut comparing).now_or_never(),
+            Some(Err(MaintenanceError::TimedOut))
+        );
+        assert_eq!(engine.started(), 0, "the given-up read listed nothing");
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_comes_once_the_read_timeout_ended_starts_no_listing() {
+        let engine = Arc::new(Lists::default());
+        let clock = clock();
+        let use_case = use_case(engine.clone(), Arc::clone(&clock));
+        let turns = ReadTurns::default();
+        let first = turns.turn().await;
+        let _second = turns.turn().await;
+        let (config, alias) = (maintained(), alias());
+        let mut comparing = Box::pin(use_case.compare_forget(OP, &config, &config, &alias, &turns));
+        assert!((&mut comparing).now_or_never().is_none());
+        clock.advance(READ_TIMEOUT);
+        drop(first);
+        assert_eq!(
+            (&mut comparing).now_or_never(),
+            Some(Err(MaintenanceError::TimedOut))
+        );
+        assert_eq!(engine.started(), 0, "the turn came too late to list");
+    }
+
+    /// Lists forever: a listing still running.
+    struct Hangs;
+
+    #[async_trait]
+    impl Engine for Hangs {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            Ok(RunningJob {
+                events: Box::pin(futures::stream::pending()),
+                control: Box::new(Ended),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_comparison_holds_its_turn_while_its_listing_runs() {
+        let clock = clock();
+        let hanging = use_case(Arc::new(Hangs), Arc::clone(&clock));
+        let engine = Arc::new(Lists::default());
+        let waiting = use_case(engine.clone(), clock);
+        let turns = ReadTurns::default();
+        let _held = turns.turn().await;
+        let (config, alias) = (maintained(), alias());
+        let mut listing = Box::pin(hanging.compare_forget(OP, &config, &config, &alias, &turns));
+        assert!((&mut listing).now_or_never().is_none(), "it is listing");
+        let mut comparing = Box::pin(waiting.compare_forget(OP, &config, &config, &alias, &turns));
+        assert!(
+            (&mut comparing).now_or_never().is_none(),
+            "the other comparison waits for the listing's turn"
+        );
+        assert_eq!(engine.started(), 0);
+        drop(listing);
+        assert!(
+            comparing.await.is_ok(),
+            "the dropped listing gave its turn back"
+        );
+        assert_eq!(engine.started(), 1);
     }
 }

@@ -31,6 +31,7 @@ use crate::ports::{
     Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError, ConfigStore,
     EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError, StoredProposal,
 };
+use crate::reads::ReadTurns;
 use crate::repositories::ConfigWrites;
 use crate::schedule::ConfigChanged;
 
@@ -180,6 +181,10 @@ pub struct ProposalPorts {
     /// The key the revisions a page is shown are keyed with, drawn once
     /// each daemon start, or why the platform gave none.
     pub revision_key: Result<RevisionKey, RandomUnavailable>,
+    /// The turns to list a repository's snapshots, which every listing of
+    /// the daemon shares (#710): each repository a forget preview reads
+    /// takes one.
+    pub listings: Arc<ReadTurns>,
 }
 
 /// Makes, reads, withdraws, approves and rejects proposals.
@@ -406,7 +411,7 @@ impl Proposals {
         let mut repositories = Vec::new();
         for repository in proposal.repositories(config) {
             let forget = maintenance
-                .compare_forget(op, config, after, &repository)
+                .compare_forget(op, config, after, &repository, &self.ports.listings)
                 .await;
             repositories.push(RepositoryForget { repository, forget });
         }

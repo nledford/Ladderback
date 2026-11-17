@@ -39,6 +39,11 @@ fn plan(name: &str) -> Plan {
 }
 
 async fn world() -> World {
+    world_under(Maintenance::None).await
+}
+
+/// A world whose one repository this agent maintains as `maintenance`.
+async fn world_under(maintenance: Maintenance) -> World {
     let entry = RepositoryConfig {
         locations: Default::default(),
         id: None,
@@ -50,7 +55,7 @@ async fn world() -> World {
             options_hot: BTreeMap::new(),
             options_cold: BTreeMap::new(),
         },
-        maintenance: Maintenance::None,
+        maintenance,
         group_by: GroupBy::default(),
         hooks: Hooks::default(),
     };
@@ -85,6 +90,7 @@ async fn world() -> World {
             clock: clock.clone(),
             random: Arc::new(SeededRandom::new(7)),
             revision_key: Ok(key(3)),
+            listings: Arc::default(),
         })),
         store,
         codec,
@@ -121,6 +127,7 @@ fn over(
         clock: world.clock.clone(),
         random: Arc::new(SeededRandom::new(7)),
         revision_key,
+        listings: Arc::default(),
     })
 }
 
@@ -740,6 +747,61 @@ async fn an_approval_of_a_proposal_that_could_delete_snapshots_changes_nothing()
             .unwrap()
             .needs_forget_preview
     );
+}
+
+/// A forget preview reads each repository in one of the turns the daemon's
+/// snapshot listings take (#967, #710): while they are all held, it waits.
+#[tokio::test]
+async fn a_forget_preview_waits_while_the_daemon_s_listings_hold_every_turn() {
+    use futures::FutureExt as _;
+
+    let world = world_under(Maintenance::Local).await;
+    let listings: Arc<ReadTurns> = Arc::default();
+    let proposals = Proposals::new(ProposalPorts {
+        store: world.store.clone(),
+        codec: world.codec.clone(),
+        config: world.config.clone(),
+        drafts: world.config.clone(),
+        writes: Arc::default(),
+        changed: crate::schedule::config_changes().0,
+        events: world.events.clone(),
+        clock: world.clock.clone(),
+        random: Arc::new(SeededRandom::new(7)),
+        revision_key: Ok(key(3)),
+        listings: Arc::clone(&listings),
+    });
+    let mut kept = plan("home");
+    kept.retention.keep_daily = Some(domain::planning::KeepCount::new(7).unwrap());
+    let made = propose(&world, ConfigChange::AddPlan(kept)).await.unwrap();
+    let secrets = crate::fakes::FakeSecrets::default();
+    secrets.set_env("DEMO_PASSWORD", "demo-password");
+    // A clock that moves only when told, so no read times out meanwhile.
+    let clock: Arc<dyn Clock> = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+    let maintenance = RunMaintenance::new(
+        Arc::new(crate::fakes::SimulatedEngine::new(Arc::clone(&clock))),
+        clock,
+        Arc::new(crate::fakes::InMemoryOperationStore::new()),
+        crate::secrets::ResolveRepository::new(Arc::new(secrets)),
+        Arc::new(crate::fakes::FakeRetention),
+        Arc::new(InMemoryConfigStore::new()),
+        Arc::default(),
+        domain::AgentId::from_uuid(domain::Uuid::from_u128(1)),
+        "demo-host".to_owned(),
+        Arc::new(crate::fakes::FakeSources),
+    );
+    let first = listings.turn().await;
+    let _second = listings.turn().await;
+    let mut previewing = Box::pin(proposals.forget_preview(&made.id, OP, &maintenance));
+    assert!(
+        (&mut previewing).now_or_never().is_none(),
+        "the preview waits for a turn"
+    );
+    drop(first);
+    let previewed = (&mut previewing)
+        .now_or_never()
+        .expect("a turn came free, so the repository is read")
+        .unwrap();
+    assert_eq!(previewed.repositories.len(), 1);
 }
 
 #[tokio::test]
