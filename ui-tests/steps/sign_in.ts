@@ -115,6 +115,71 @@ When("the admin password is set anew to {string}", async function (this: Browser
   this.scriptedDaemon?.endSessions();
 });
 
+// The start page's reading of the plans list the daemon holds back: whether
+// it has reached the daemon, and how to let it through.
+interface HeldReading {
+  arrived: Promise<void>;
+  letThrough: () => void;
+}
+
+// One per scenario: the world is new for each.
+const heldReadings = new WeakMap<BrowserWorld, HeldReading>();
+
+// The first reading of the plans list waits at the daemon's door until the
+// scenario lets it through, so the daemon answers it only after what the
+// scenario does meanwhile. Every later reading goes through at once.
+Given(
+  "the daemon holds back its answer to the start page's reading of the plans list",
+  function (this: BrowserWorld) {
+    const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
+    const { promise: through, resolve: letThrough } = Promise.withResolvers<void>();
+    heldReadings.set(this, { arrived, letThrough });
+    let readings = 0;
+    this.contextRoutes.push(async (context) => {
+      await context.route(
+        (url) => url.pathname === "/api/v1/plans",
+        async (route) => {
+          if (route.request().method() === "GET") {
+            readings += 1;
+            if (readings === 1) {
+              arrive();
+              await through;
+            }
+          }
+          await route.continue();
+        },
+      );
+    });
+  },
+);
+
+When(
+  "the daemon gives the answer it held back to the start page's reading of the plans list",
+  async function (this: BrowserWorld) {
+    const held = heldReadings.get(this);
+    assert.ok(held, "no Given held back the start page's reading of the plans list");
+    const { promise: late, resolve: tooLate } = Promise.withResolvers<"late">();
+    const timer = setTimeout(() => tooLate("late"), PAGE_PATIENCE_MS);
+    const outcome = await Promise.race([held.arrived.then(() => "arrived" as const), late]);
+    clearTimeout(timer);
+    assert.equal(outcome, "arrived", "the start page never read the plans list");
+    held.letThrough();
+  },
+);
+
+// A page that lost its session reads the history again on its own, a back-off
+// after the reading the dialog was closed on: this waits for the daemon's
+// refusal of it to reach the page.
+When("the daemon refuses the page's own next reading of the history", async function (this: BrowserWorld) {
+  await this.page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/v1/operations" &&
+      response.request().headers()["x-ladderback-background"] === "1" &&
+      response.status() === 401,
+    { timeout: PAGE_PATIENCE_MS },
+  );
+});
+
 // A second tab of the same browser shares the first's cookie, and so its
 // session, as a reader's tabs do.
 When("I open the address {string} in a second tab", async function (this: BrowserWorld, address: string) {

@@ -449,6 +449,51 @@ Feature: Sign-in
       And the page shows a message containing "Sign in to Ladderback with the admin password to go on."
       And the page has no accessibility violations
 
+    Scenario: A reading refused after the dialog was closed doesn't open it again, and the next page asked for does
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the daemon holds back its answer to the start page's reading of the plans list
+      When I open the address "/no-such-page"
+      And I skip to the content
+      And I press Tab until focus is on the textbox "Admin password"
+      And I type "demo-admin-pass"
+      And I press Enter
+      Then focus is on the heading "Page not found"
+      When the admin password is set anew to "another-admin-pass"
+      And I press Tab until focus is on the link "Go to the start page"
+      And I press Enter
+      Then the dialog "Sign in again" opens with focus inside it
+      When I press Escape
+      Then the dialog "Sign in again" is closed
+      When the daemon gives the answer it held back to the start page's reading of the plans list
+      Then the page shows a message containing "Sign in to Ladderback with the admin password to go on."
+      And the dialog "Sign in again" is closed
+      When I press Shift+Tab until focus is on the link "Repositories"
+      And I press Enter
+      Then the dialog "Sign in again" opens with focus inside it
+      And the page has no accessibility violations
+
+    Scenario: A page's own reading after the dialog was closed doesn't open it again, and the next page asked for does
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      When I open the address "/no-such-page"
+      And I skip to the content
+      And I press Tab until focus is on the textbox "Admin password"
+      And I type "demo-admin-pass"
+      And I press Enter
+      Then focus is on the heading "Page not found"
+      When the admin password is set anew to "another-admin-pass"
+      And I press Shift+Tab until focus is on the link "Operations"
+      And I press Enter
+      Then the dialog "Sign in again" opens with focus inside it
+      When I press Escape
+      Then the dialog "Sign in again" is closed
+      When the daemon refuses the page's own next reading of the history
+      Then the dialog "Sign in again" stays closed
+      And the main heading reads "Operations"
+      And the page shows a message containing "Sign in to Ladderback with the admin password to go on."
+      When I press Shift+Tab until focus is on the link "Repositories"
+      And I press Enter
+      Then the dialog "Sign in again" opens with focus inside it
+
   @ui
   Rule: Two minutes before a session would end unused, the web UI warns and offers to keep it
 

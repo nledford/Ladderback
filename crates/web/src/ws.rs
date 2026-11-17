@@ -17,8 +17,8 @@ use crate::backend::{
 };
 use crate::maintenance::{self, Awaited, Beat, Kind, Pace, Watched};
 use crate::session::{
-    Answer, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered, signed_out_all_the_same,
-    wait_ms,
+    Answer, Asked, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered,
+    signed_out_all_the_same, wait_ms,
 };
 use crate::visit::Visit;
 use api::{
@@ -276,17 +276,6 @@ async fn session_ended() -> bool {
     };
     ended.try_set(true);
     signed_in.await.unwrap_or(false)
-}
-
-/// Who caused a request (security §10.1): a person, by opening a page, a
-/// form's action or "Stay signed in", or the page on its own, as a re-read
-/// after an event or a poll is. Only a person's request uses the session,
-/// so a page left open lets it end unused; the page marks its own with
-/// `api::BACKGROUND_HEADER` so the daemon doesn't count them either.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Asked {
-    ByPerson,
-    OnItsOwn,
 }
 
 /// Sends the request `make` builds, with the CSRF token and the abort signal

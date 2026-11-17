@@ -192,6 +192,52 @@ impl Resend {
     }
 }
 
+/// Who caused a request (security §10.1): a person, by opening a page, a
+/// form's action or "Stay signed in", or the page on its own, as a re-read
+/// after an event or a poll is. Only a person's request uses the session,
+/// so a page left open lets it end unused; the page marks its own with
+/// `api::BACKGROUND_HEADER` so the daemon doesn't count them either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Asked {
+    ByPerson,
+    OnItsOwn,
+}
+
+/// Where the reader stands with the dialog asking to sign in again: how
+/// many times they have closed it without signing in, and whether they have
+/// since the page last signed in. A request refused because its session
+/// ended opens the dialog only when it was sent after the last of those
+/// closings: one still on its way when the dialog closed ends with its
+/// refusal, as the requests that waited do. Once the reader has closed the
+/// dialog, only a request the reader asked for opens it again; the reads the
+/// page sends on its own end with their refusal until it signs in (#903).
+/// While the dialog is open, every refused request waits in it: nothing new
+/// opens under the reader.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Dismissals {
+    count: u32,
+    since_sign_in: bool,
+}
+
+impl Dismissals {
+    /// Where the reader stands after closing the dialog once more.
+    pub(crate) fn one_more(self) -> Self {
+        todo!()
+    }
+
+    /// Where the reader stands after the page signed in.
+    pub(crate) fn signed_in(self) -> Self {
+        todo!()
+    }
+
+    /// Whether a request `asked` so and sent while the reader stood at
+    /// `sent`, refused now because its session ended, waits for a sign-in:
+    /// in the dialog, `open` already or opened for it.
+    pub(crate) fn waits_for_sign_in(self, sent: Self, asked: Asked, open: bool) -> bool {
+        todo!()
+    }
+}
+
 /// What the sign-in form lacks before it is sent: the admin password, when
 /// nothing was typed. What was typed is sent as it is, spaces and all: a
 /// password is never trimmed.
@@ -607,6 +653,56 @@ mod tests {
         );
         assert_eq!(Resend::after(200, csrf, false), Resend::No);
         assert_eq!(Resend::after(403, "not json", false), Resend::No);
+    }
+
+    #[test]
+    fn before_the_dialog_is_closed_every_refusal_asks_to_sign_in_again() {
+        let fresh = Dismissals::default();
+        assert!(fresh.waits_for_sign_in(fresh, Asked::ByPerson, false));
+        assert!(fresh.waits_for_sign_in(fresh, Asked::OnItsOwn, false));
+    }
+
+    #[test]
+    fn a_request_on_its_way_when_the_dialog_closed_ends_with_its_refusal() {
+        let sent = Dismissals::default();
+        let closed = sent.one_more();
+        assert!(!closed.waits_for_sign_in(sent, Asked::ByPerson, false));
+        assert!(!closed.waits_for_sign_in(sent, Asked::OnItsOwn, false));
+        // Closed twice: a request sent between the closings ends too.
+        assert!(
+            !closed
+                .one_more()
+                .waits_for_sign_in(closed, Asked::ByPerson, false)
+        );
+        // Signing in since doesn't bring it back.
+        assert!(
+            !closed
+                .signed_in()
+                .waits_for_sign_in(sent, Asked::ByPerson, false)
+        );
+    }
+
+    #[test]
+    fn after_the_dialog_closed_only_a_request_the_reader_asked_for_asks_again() {
+        let closed = Dismissals::default().one_more();
+        assert!(closed.waits_for_sign_in(closed, Asked::ByPerson, false));
+        assert!(!closed.waits_for_sign_in(closed, Asked::OnItsOwn, false));
+    }
+
+    #[test]
+    fn after_signing_in_the_pages_own_reads_ask_again() {
+        let signed_in = Dismissals::default().one_more().signed_in();
+        assert!(signed_in.waits_for_sign_in(signed_in, Asked::OnItsOwn, false));
+        assert!(signed_in.waits_for_sign_in(signed_in, Asked::ByPerson, false));
+    }
+
+    #[test]
+    fn while_the_dialog_is_open_every_refused_request_waits_in_it() {
+        let sent = Dismissals::default();
+        let closed = sent.one_more();
+        assert!(closed.waits_for_sign_in(sent, Asked::OnItsOwn, true));
+        assert!(closed.waits_for_sign_in(closed, Asked::OnItsOwn, true));
+        assert!(closed.waits_for_sign_in(sent, Asked::ByPerson, true));
     }
 
     #[test]
