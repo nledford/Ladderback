@@ -23,9 +23,10 @@ pub(crate) enum Name {
     Words(Words),
 }
 
-/// The name of `operation`'s row: a backup by its plan, and a maintenance run
-/// by what ran and the alias of its repository, or by what ran alone when the
-/// log has no alias for it (a run an earlier version logged).
+/// The name of `operation`'s row: a backup by its plan, and a maintenance
+/// run, a restore or a download by what ran and the alias of its repository,
+/// or by what ran alone when the log has no alias for it (a run an earlier
+/// version logged).
 pub(crate) fn name(operation: &OperationSummaryDto) -> Name {
     match plan_of(operation) {
         Some(plan) => Name::Plan(plan.to_owned()),
@@ -406,7 +407,7 @@ mod tests {
             ("prune", "Prune progress of demo"),
             ("forget", "Forget progress in demo"),
             ("adopt", "Adoption progress in demo"),
-            ("restore", "Operation progress on demo"),
+            ("init", "Operation progress on demo"),
         ] {
             let label = progress_label(&summary(kind, "home", Some("demo"), None));
             assert_eq!(english(&label), english_name, "{kind}");
@@ -415,7 +416,7 @@ mod tests {
         for (kind, english_name) in [
             ("backup", "Backup progress"),
             ("check", "Check progress"),
-            ("restore", "Operation progress"),
+            ("init", "Operation progress"),
         ] {
             let label = progress_label(&summary(kind, "", None, None));
             assert_eq!(english(&label), english_name, "{kind}");
@@ -440,6 +441,64 @@ mod tests {
             name(&planless),
             Name::Words(said(msg::UI_OPERATION, &[("kind", text("backup"))]))
         );
+    }
+
+    /// A restore's and a download's rows are named by what ran and the
+    /// repository it read, as a maintenance run's are, and so is the Cancel
+    /// button of each, never as a generic operation (#893).
+    #[test]
+    fn a_restore_and_a_download_are_named_by_what_ran_and_the_repository_they_read() {
+        for (kind, row, cancel) in [
+            (
+                "restore",
+                "Restore from demo",
+                "Cancel the restore from demo",
+            ),
+            (
+                "download",
+                "Download from demo",
+                "Cancel the download from demo",
+            ),
+        ] {
+            let run = summary(kind, "", Some("demo"), None);
+            let Name::Words(named) = name(&run) else {
+                panic!("a {kind} is named in words");
+            };
+            assert_eq!(english(&named), row, "{kind}");
+            assert_eq!(english(&cancel_label(&run)), cancel, "{kind}");
+        }
+    }
+
+    /// A restore an earlier version logged kept no alias: its row and its
+    /// Cancel button are named by what ran alone (#893).
+    #[test]
+    fn a_restore_or_a_download_the_log_names_no_repository_for_is_named_by_what_ran() {
+        for (kind, row, cancel) in [
+            ("restore", "Restore", "Cancel the restore"),
+            ("download", "Download", "Cancel the download"),
+        ] {
+            let run = summary(kind, "", None, None);
+            let Name::Words(named) = name(&run) else {
+                panic!("a {kind} is named in words");
+            };
+            assert_eq!(english(&named), row, "{kind}");
+            assert_eq!(english(&cancel_label(&run)), cancel, "{kind}");
+        }
+    }
+
+    /// A restore's and a download's progress bars are named as their rows
+    /// are (WCAG 2.4.6, #893).
+    #[test]
+    fn a_restores_and_a_downloads_progress_bars_are_named_for_what_ran() {
+        for (kind, repository, english_name) in [
+            ("restore", Some("demo"), "Restore progress from demo"),
+            ("download", Some("demo"), "Download progress from demo"),
+            ("restore", None, "Restore progress"),
+            ("download", None, "Download progress"),
+        ] {
+            let label = progress_label(&summary(kind, "", repository, None));
+            assert_eq!(english(&label), english_name, "{kind} {repository:?}");
+        }
     }
 
     #[test]
@@ -817,6 +876,24 @@ mod tests {
         assert_eq!(english_of("check", "succeeded"), "Check finished.");
         assert_eq!(english_of("prune", "failed"), "Prune failed.");
         assert_eq!(english_of("backup", "cancelled"), "Backup cancelled.");
+    }
+
+    /// The end of a restore or a download the page watched is told as a
+    /// restore's or a download's, not a generic operation's (#893).
+    #[test]
+    fn the_end_of_a_restore_or_a_download_is_announced_as_what_ran() {
+        for (kind, status, english_end) in [
+            ("restore", "succeeded", "Restore finished."),
+            ("restore", "cancelled", "Restore cancelled."),
+            ("restore", "failed", "Restore failed."),
+            ("download", "succeeded", "Download finished."),
+            ("download", "cancelled", "Download cancelled."),
+            ("download", "failed", "Download failed."),
+        ] {
+            let mut run = summary(kind, "", Some("demo"), None);
+            status.clone_into(&mut run.status);
+            assert_eq!(english(&end(&run).1), english_end, "{kind} {status}");
+        }
     }
 }
 

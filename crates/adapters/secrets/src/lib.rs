@@ -22,7 +22,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use app::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
+use app::ports::{Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver};
 use async_trait::async_trait;
 use domain::secrets::{
     FileRead, KeyringCause, KeyringEntry, Problem, SecretError, SecretRef, SecretValue, SourceName,
@@ -35,6 +35,10 @@ use keyring_store::{Failure, KeyringStore};
 /// How long a command may run unless told otherwise.
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long the question of how the keyring service is started may take
+/// before its answer is unknown: the Repositories page waits on it.
+const ACTIVATION_LIMIT: Duration = Duration::from_secs(2);
+
 /// Reads secrets from the machine: variables of the process environment,
 /// files, commands and the OS keyring.
 pub struct SystemSecrets {
@@ -43,6 +47,7 @@ pub struct SystemSecrets {
     command_timeout: Duration,
     keyring: Arc<dyn KeyringStore>,
     file_reader: FileReader,
+    activation: ActivationProbe,
 }
 
 impl SystemSecrets {
@@ -54,6 +59,7 @@ impl SystemSecrets {
             command_timeout: DEFAULT_COMMAND_TIMEOUT,
             keyring: keyring_store::os_store(),
             file_reader: Arc::new(file::read),
+            activation: Arc::new(keyring_store::os_activation),
         }
     }
 
@@ -91,11 +97,26 @@ impl SystemSecrets {
         self.file_reader = reader;
         self
     }
+
+    /// Asks `probe` how the keyring service is started, which a test makes
+    /// answer as it likes, or slowly.
+    #[cfg(test)]
+    pub(crate) fn with_activation(
+        mut self,
+        probe: impl Fn() -> KeyringActivation + Send + Sync + 'static,
+    ) -> Self {
+        self.activation = Arc::new(probe);
+        self
+    }
 }
 
 /// Reads the file at a path, given how it is read and `$CREDENTIALS_DIRECTORY`.
 pub(crate) type FileReader =
     Arc<dyn Fn(&str, FileRead, Option<&str>) -> Result<Resolved, SecretError> + Send + Sync>;
+
+/// Asks the platform how the keyring service is started. It may block, on
+/// D-Bus.
+pub(crate) type ActivationProbe = Arc<dyn Fn() -> KeyringActivation + Send + Sync>;
 
 impl Default for SystemSecrets {
     fn default() -> Self {
@@ -296,6 +317,21 @@ impl Keyring for SystemSecrets {
             Err(failure) => Err(refused(failure)),
         });
         self.within(removing).await.map_err(unanswered)?
+    }
+
+    /// Asks the platform within [`ACTIVATION_LIMIT`]; an answer that comes
+    /// later, or a question that was lost, is unknown.
+    async fn activation(&self) -> KeyringActivation {
+        let probe = Arc::clone(&self.activation);
+        let asking = tokio::task::spawn_blocking(move || probe());
+        match tokio::time::timeout(ACTIVATION_LIMIT, asking).await {
+            Ok(Ok(said)) => said,
+            // The question panicked or the runtime is ending, or the answer
+            // is late: the blocked call is left to end on its own, a call
+            // within its own limit, connecting to the bus within libdbus's
+            // default of 25 s.
+            Ok(Err(_)) | Err(_) => KeyringActivation::Unknown,
+        }
     }
 }
 

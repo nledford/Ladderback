@@ -22,11 +22,12 @@ use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, R
 use crate::components::skeleton::rules::{Shape, Share};
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
+use crate::components::tabs::{Activation, Holds, TabSet, TabsName};
 use crate::components::{
     Align, Button, Checkbox, Column, Confirmation, FolderLoader, FolderPage, Footer, Icon,
     LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, ReviewDialog,
-    Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Table,
-    TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
+    Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Tab,
+    Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -40,6 +41,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let localizer_t = Arc::clone(&localizer);
     let t = move |id| text(&localizer_t, id);
     let table_localizer = Arc::clone(&localizer);
+    // The tab the manual demo's set tells it is chosen.
+    let manual_chosen = RwSignal::new(0_usize);
     let (heading, announcer_heading) = (
         t(msg::UI_GALLERY_HEADING),
         t(msg::UI_GALLERY_ANNOUNCER_HEADING),
@@ -1125,6 +1128,121 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             <p dir="rtl">
                 {demo_link(&localizer, outside(RUSTIC_DOCS), t(msg::UI_GALLERY_LINK_OUTSIDE_RTL))}
             </p>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TABS_HEADING)}</h2>
+            // Each tab the arrow keys arrive at is selected, the set named by
+            // the heading above it. The middle panel holds a field, so it is
+            // no Tab stop of its own, and what is typed there stays while
+            // another panel shows.
+            <h3 id="gallery-tabs-repository">{t(msg::UI_GALLERY_TABS_REPOSITORY)}</h3>
+            <Tabs
+                id="gallery-tabs-automatic"
+                name=TabsName::LabelledBy("gallery-tabs-repository".to_owned())
+                tabs=TabSet::new(
+                    Tab::new(
+                        t(msg::UI_GALLERY_TABS_OVERVIEW),
+                        Holds::Text,
+                        view! { <p>{t(msg::UI_GALLERY_TABS_OVERVIEW_TEXT)}</p> },
+                    ),
+                    vec![
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_NOTE),
+                            Holds::Controls,
+                            view! {
+                                <TextField
+                                    id="gallery-tabs-note-text"
+                                    localizer=Arc::clone(&localizer)
+                                    value=RwSignal::new(String::new())
+                                    label=t(msg::UI_GALLERY_TABS_NOTE_FIELD)
+                                    description=t(msg::UI_GALLERY_TABS_NOTE_HINT)
+                                />
+                            },
+                        ),
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_HISTORY),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_HISTORY_TEXT)}</p> },
+                        ),
+                    ],
+                )
+            />
+            // Chosen by hand, as tabs whose panels read from the daemon
+            // would be: the arrow keys only move focus. The paragraph above
+            // says so and describes the list; the one below shows the tab
+            // the set tells its caller is chosen.
+            <p id="gallery-tabs-manual-hint">{t(msg::UI_GALLERY_TABS_MANUAL_HINT)}</p>
+            <Tabs
+                id="gallery-tabs-manual"
+                name=TabsName::Label(t(msg::UI_GALLERY_TABS_AGENT))
+                activation=Activation::Manual
+                described_by="gallery-tabs-manual-hint"
+                selected=manual_chosen
+                tabs=TabSet::new(
+                    Tab::new(
+                        t(msg::UI_GALLERY_TABS_LOG),
+                        Holds::Text,
+                        view! { <p>{t(msg::UI_GALLERY_TABS_LOG_TEXT)}</p> },
+                    ),
+                    vec![
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_STATS),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_STATS_TEXT)}</p> },
+                        ),
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_PLANS),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_PLANS_TEXT)}</p> },
+                        ),
+                    ],
+                )
+            />
+            <p>
+                {
+                    let localizer = Arc::clone(&localizer);
+                    let labels = [
+                        t(msg::UI_GALLERY_TABS_LOG),
+                        t(msg::UI_GALLERY_TABS_STATS),
+                        t(msg::UI_GALLERY_TABS_PLANS),
+                    ];
+                    move || {
+                        let tab = labels.get(manual_chosen.get()).cloned().unwrap_or_default();
+                        text_with(
+                            &localizer,
+                            msg::UI_GALLERY_TABS_CHOSEN,
+                            &[("tab", MsgArg::Text(tab))],
+                        )
+                    }
+                }
+            </p>
+            // In a part of the page that runs right to left: the first tab
+            // stands at the right, and the left arrow goes to the next.
+            <div dir="rtl">
+                <Tabs
+                    id="gallery-tabs-rtl"
+                    name=TabsName::Label(t(msg::UI_GALLERY_TABS_RTL))
+                    tabs=TabSet::new(
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_FIRST),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_FIRST_TEXT)}</p> },
+                        ),
+                        vec![
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_SECOND),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_SECOND_TEXT)}</p> },
+                            ),
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_THIRD),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_THIRD_TEXT)}</p> },
+                            ),
+                        ],
+                    )
+                />
+            </div>
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TEXT_FIELD_HEADING)}</h2>

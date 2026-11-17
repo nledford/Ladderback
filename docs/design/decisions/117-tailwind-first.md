@@ -5,7 +5,7 @@
 ## The rule
 
 - **Utilities first.** A component or page sets its layout, spacing, type, color and state with Tailwind utilities and variants (`hover:`, `focus-visible:`, `dark:`, `forced-colors:`, container queries). Colors come from the tokens through their Tailwind names (`text-muted`, `bg-surface`), never a palette color or an arbitrary hex value.
-- **Logical utilities only.** Use the utilities that follow the page's direction (`ms-`, `me-`, `ps-`, `pe-`, `start-`, `end-`, `border-s`, `rounded-s`, `text-start`), never the `left` and `right` ones, so a right-to-left page mirrors (§8.4).
+- **Logical utilities only.** Use the utilities that follow the page's direction (`ms-`, `me-`, `ps-`, `pe-`, `inset-s-`, `inset-e-`, `border-s`, `rounded-s`, `text-start`), never the `left` and `right` ones, so a right-to-left page mirrors (§8.4).
 - **Custom CSS is the exception.** `style.css` keeps the design tokens and their dark values, the base rules (no preflight, so `font: inherit` on form controls and similar), and the selectors or at-rules that no utility or variant covers. Each such rule carries a comment that says why a utility won't do.
 - **The vocabulary moves with it.** A tone, size or placement of decision 108 becomes a set of utilities that `variants.rs` returns, as each component moves; until then its class stays in `style.css`.
 

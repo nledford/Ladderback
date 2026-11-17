@@ -786,6 +786,49 @@ ui-gallery-text-field-add-medium = Add the demo tag at the Medium size
 ui-gallery-text-field-add-large = Add the demo tag at the Large size
 ui-gallery-text-field-add-xlarge = Add the demo tag at the Extra large size
 
+# The heading of the gallery's tabs demo (§4.5): a row of tabs, each showing
+# its panel below the row, one stop for Tab.
+ui-gallery-tabs-heading = Tabs
+
+# A set of demo tabs that selects each tab the arrow keys arrive at, named by
+# the heading above it. Its middle panel holds a field, to show that what is
+# typed in it stays while another tab shows.
+ui-gallery-tabs-repository = Demo repository
+ui-gallery-tabs-overview = Demo overview
+ui-gallery-tabs-overview-text = The demo repository holds 12 snapshots of two demo plans.
+ui-gallery-tabs-note = Demo note
+ui-gallery-tabs-note-field = Demo note text
+ui-gallery-tabs-note-hint = What you type here stays while another tab shows.
+ui-gallery-tabs-history = Demo history
+ui-gallery-tabs-history-text = The last demo check found nothing wrong.
+
+# A set of demo tabs chosen by hand, as tabs whose panels read from the daemon
+# would be: the paragraph says how, and the set is named by its own label. The
+# line after the set names the tab it says is chosen, as a page that reads that
+# tab's panel from the daemon would follow it; $tab is one of the tabs' names.
+ui-gallery-tabs-manual-hint = These demo tabs are chosen with Enter or Space. The arrow keys only move between them.
+ui-gallery-tabs-agent = Demo agent
+ui-gallery-tabs-log = Demo log
+ui-gallery-tabs-log-text = A demo panel that a page would read from the daemon once its tab is chosen.
+ui-gallery-tabs-stats = Demo stats
+ui-gallery-tabs-stats-text = The demo stats, read once their tab is chosen.
+ui-gallery-tabs-plans = Demo plans
+ui-gallery-tabs-plans-text = The demo plans, read once their tab is chosen.
+
+# The gallery's manual tabs demo says which tab is chosen.
+# $tab (text): the chosen tab's name.
+ui-gallery-tabs-chosen = Chosen demo tab: { $tab }
+
+# A set of demo tabs in a part of the page that runs right to left: the first
+# tab is at the right, and the left arrow goes to the next.
+ui-gallery-tabs-rtl = Demo tabs, right to left
+ui-gallery-tabs-first = First demo tab
+ui-gallery-tabs-first-text = The first demo panel.
+ui-gallery-tabs-second = Second demo tab
+ui-gallery-tabs-second-text = The second demo panel.
+ui-gallery-tabs-third = Third demo tab
+ui-gallery-tabs-third-text = The third demo panel.
+
 # The heading of the gallery's tooltip demo (§4.5): a short note beside a
 # control, shown on keyboard focus or a resting pointer.
 ui-gallery-tooltip-heading = Tooltip
@@ -915,10 +958,11 @@ ui-cancel-plan = Cancel { $plan }
 # ui-cancel-operation-of or ui-cancel-operation) begins with it.
 ui-cancel = Cancel
 
-# The row header of a maintenance run: what ran and the repository it ran on,
-# by the alias this agent gave the repository when the run started.
-# $kind is the wire text of what ran: forget, prune, check or adopt; any other
-# kind is an operation.
+# The row header of a maintenance run, a restore or a download: what ran and
+# the repository it ran on or read, by the alias this agent gave the repository
+# when the run was first logged.
+# $kind is the wire text of what ran: forget, prune, check, adopt, restore or
+# download; any other kind is an operation.
 # $repository (text): the repository's alias. It is shown as it came.
 ui-operation-of =
     { $kind ->
@@ -926,13 +970,15 @@ ui-operation-of =
         [prune] Prune of { $repository }
         [check] Check of { $repository }
         [adopt] Adoption in { $repository }
+        [restore] Restore from { $repository }
+        [download] Download from { $repository }
        *[other] Operation on { $repository }
     }
 
 # The row header of a run the log names no plan or repository for, such as a
-# maintenance run an earlier version logged: what ran.
-# $kind is the wire text of what ran: backup, forget, prune, check or adopt;
-# any other kind is an operation.
+# maintenance run or a restore an earlier version logged: what ran.
+# $kind is the wire text of what ran: backup, forget, prune, check, adopt,
+# restore or download; any other kind is an operation.
 ui-operation =
     { $kind ->
         [backup] Backup
@@ -940,13 +986,16 @@ ui-operation =
         [prune] Prune
         [check] Check
         [adopt] Adoption
+        [restore] Restore
+        [download] Download
        *[other] Operation
     }
 
-# The button that cancels a running or queued maintenance run, named as its
-# row is, so each Cancel says which run it stops. It begins with ui-cancel.
-# $kind is the wire text of what runs: forget, prune, check or adopt; any other
-# kind is an operation.
+# The button that cancels a running or queued maintenance run, restore or
+# download, named as its row is, so each Cancel says which run it stops. It
+# begins with ui-cancel.
+# $kind is the wire text of what runs: forget, prune, check, adopt, restore or
+# download; any other kind is an operation.
 # $repository (text): the repository's alias. It is shown as it came.
 ui-cancel-operation-of =
     { $kind ->
@@ -954,13 +1003,15 @@ ui-cancel-operation-of =
         [prune] Cancel the prune of { $repository }
         [check] Cancel the check of { $repository }
         [adopt] Cancel the adoption in { $repository }
+        [restore] Cancel the restore from { $repository }
+        [download] Cancel the download from { $repository }
        *[other] Cancel the operation on { $repository }
     }
 
 # The button that cancels a running or queued run the log names no plan or
 # repository for. It begins with ui-cancel.
-# $kind is the wire text of what runs: backup, forget, prune, check or adopt;
-# any other kind is an operation.
+# $kind is the wire text of what runs: backup, forget, prune, check, adopt,
+# restore or download; any other kind is an operation.
 ui-cancel-operation =
     { $kind ->
         [backup] Cancel the backup
@@ -968,12 +1019,14 @@ ui-cancel-operation =
         [prune] Cancel the prune
         [check] Cancel the check
         [adopt] Cancel the adoption
+        [restore] Cancel the restore
+        [download] Cancel the download
        *[other] Cancel the operation
     }
 
 # Announced politely on the Operations page when a run it watched ended well,
 # warnings or not. $kind is the wire text of what ran: backup, forget, prune,
-# check or adopt; any other kind is an operation.
+# check, adopt, restore or download; any other kind is an operation.
 ui-operation-finished =
     { $kind ->
         [backup] Backup finished.
@@ -981,12 +1034,14 @@ ui-operation-finished =
         [prune] Prune finished.
         [check] Check finished.
         [adopt] Adoption finished.
+        [restore] Restore finished.
+        [download] Download finished.
        *[other] Operation finished.
     }
 
 # Announced politely on the Operations page when a run it watched was
-# cancelled. $kind is the wire text of what ran: backup, forget, prune, check
-# or adopt; any other kind is an operation.
+# cancelled. $kind is the wire text of what ran: backup, forget, prune, check,
+# adopt, restore or download; any other kind is an operation.
 ui-operation-cancelled =
     { $kind ->
         [backup] Backup cancelled.
@@ -994,12 +1049,14 @@ ui-operation-cancelled =
         [prune] Prune cancelled.
         [check] Check cancelled.
         [adopt] Adoption cancelled.
+        [restore] Restore cancelled.
+        [download] Download cancelled.
        *[other] Operation cancelled.
     }
 
 # Announced assertively on the Operations page when a run it watched ended
-# badly. $kind is the wire text of what ran: backup, forget, prune, check or
-# adopt; any other kind is an operation.
+# badly. $kind is the wire text of what ran: backup, forget, prune, check,
+# adopt, restore or download; any other kind is an operation.
 ui-operation-failed =
     { $kind ->
         [backup] Backup failed.
@@ -1007,6 +1064,8 @@ ui-operation-failed =
         [prune] Prune failed.
         [check] Check failed.
         [adopt] Adoption failed.
+        [restore] Restore failed.
+        [download] Download failed.
        *[other] Operation failed.
     }
 
@@ -1131,11 +1190,12 @@ ui-progress-working = Working…
 # $plan (text): the plan's ID, as config.toml names it. It is shown as it came.
 ui-plan-progress = Backup progress of { $plan }
 
-# The name of a running maintenance run's progress bar: what it measures and
-# the repository it runs on, by the alias this agent gave the repository when
-# the run started, as its row is named.
-# $kind is the wire text of what runs: forget, prune, check or adopt; any other
-# kind is an operation.
+# The name of a running maintenance run's, restore's or download's progress
+# bar: what it measures and the repository it runs on or reads, by the alias
+# this agent gave the repository when the run was first logged, as its row is
+# named.
+# $kind is the wire text of what runs: forget, prune, check, adopt, restore or
+# download; any other kind is an operation.
 # $repository (text): the repository's alias. It is shown as it came.
 ui-operation-progress-of =
     { $kind ->
@@ -1143,13 +1203,15 @@ ui-operation-progress-of =
         [prune] Prune progress of { $repository }
         [check] Check progress of { $repository }
         [adopt] Adoption progress in { $repository }
+        [restore] Restore progress from { $repository }
+        [download] Download progress from { $repository }
        *[other] Operation progress on { $repository }
     }
 
 # The name of the progress bar of a run the log names no plan or repository
 # for, such as one an earlier version logged: what it measures.
-# $kind is the wire text of what runs: backup, forget, prune, check or adopt;
-# any other kind is an operation.
+# $kind is the wire text of what runs: backup, forget, prune, check, adopt,
+# restore or download; any other kind is an operation.
 ui-operation-progress =
     { $kind ->
         [backup] Backup progress
@@ -1157,6 +1219,8 @@ ui-operation-progress =
         [prune] Prune progress
         [check] Check progress
         [adopt] Adoption progress
+        [restore] Restore progress
+        [download] Download progress
        *[other] Operation progress
     }
 
@@ -2814,8 +2878,79 @@ ui-proposal-rejected-before = { $count ->
 # The heading of the exact changes to the configuration file, with each secret it holds shown as ***.
 ui-proposal-diff-heading = Changes to the configuration file
 
-# Said in the place of Approve for a proposal that could delete snapshots: approving such a proposal comes with the forget preview, a later version.
-ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. Approving changes that can delete { -snapshot(form: "other") } comes with the forget preview, which shows which ones would go, so for now you can only reject it.
+# Said in the place of Approve for a proposal that could delete snapshots: the forget preview shows which ones would go, and approving such a proposal comes in a later version.
+ui-proposal-needs-forget-preview = This proposal could delete { -snapshot(form: "other") }. The forget preview shows which ones would go. Approving changes that can delete { -snapshot(form: "other") } comes in a later version, so for now you can only reject it.
+
+# The button that reads what the open proposal would change about the snapshots retention forgets, in each repository it touches.
+ui-proposal-forget-preview = Show what it would forget
+
+# Said while the forget preview reads the repositories.
+ui-proposal-forget-previewing = Reading what it would forget…
+
+# The heading of the forget preview.
+ui-proposal-forget-heading = What it would forget
+
+# The heading of one repository in the forget preview.
+# $repository (text): the repository's alias, such as demo.
+ui-proposal-forget-repository = Repository { $repository }
+
+# Said of a repository this agent maintains neither before nor after the proposal.
+ui-proposal-forget-not-maintained = { -brand-name } doesn't maintain this { -repository }, before or after the proposal, so its retention forgets nothing there.
+
+# Said of a repository this agent doesn't maintain now.
+ui-proposal-forget-before-not-maintained = Now, { -brand-name } doesn't maintain this { -repository }, so its retention forgets nothing there.
+
+# Said of a repository this agent wouldn't maintain after the proposal.
+ui-proposal-forget-after-not-maintained = After the proposal, { -brand-name } wouldn't maintain this { -repository }, so its retention would forget nothing there.
+
+# Said of a repository where no plan owns any snapshots now.
+ui-proposal-forget-before-no-snapshots = Now, no plan owns any { -snapshot(form: "other") } in this { -repository }, so retention forgets nothing there.
+
+# Said of a repository where no plan would own any snapshots after the proposal.
+ui-proposal-forget-after-no-snapshots = After the proposal, no plan would own any { -snapshot(form: "other") } in this { -repository }, so retention would forget nothing there.
+
+# Said of a repository where a forget is refused now, so it forgets nothing, because a plan's policy keeps nothing.
+# $plan (text): the plan's ID.
+ui-proposal-forget-before-keeps-nothing = Now, a forget in this { -repository } is refused, because the policy of the plan { $plan } keeps nothing, so retention forgets nothing there.
+
+# Said of a repository where a forget would be refused after the proposal, so it would forget nothing, because a plan's policy would keep nothing.
+# $plan (text): the plan's ID.
+ui-proposal-forget-after-keeps-nothing = After the proposal, a forget in this { -repository } would be refused, because the policy of the plan { $plan } would keep nothing, so retention would forget nothing there.
+
+# What retention forgets of one plan now.
+# $plan (text): the plan's ID. $remove (count): how many of its snapshots retention forgets. $total (count): how many it owns.
+ui-proposal-forget-before =
+    { $total ->
+        [one] Now, retention forgets { $remove } of the 1 { -snapshot(form: "one") } of the plan { $plan }.
+       *[other] Now, retention forgets { $remove } of the { $total } { -snapshot(form: "other") } of the plan { $plan }.
+    }
+
+# What retention would forget of one plan after the proposal.
+# $plan (text): the plan's ID. $remove (count): how many of its snapshots retention would forget. $total (count): how many it would own.
+ui-proposal-forget-after =
+    { $total ->
+        [one] After the proposal, retention would forget { $remove } of the 1 { -snapshot(form: "one") } of the plan { $plan }.
+       *[other] After the proposal, retention would forget { $remove } of the { $total } { -snapshot(form: "other") } of the plan { $plan }.
+    }
+
+# Said when the proposal forgets neither more nor less in the repository.
+ui-proposal-forget-same = The proposal changes nothing retention forgets in this { -repository }.
+
+# The caption of the snapshots the proposal would forget that retention keeps now.
+# $plan (text): the plan's ID. $count (count): how many.
+ui-proposal-forgets-more =
+    { $count ->
+        [one] After the proposal, retention would forget 1 { -snapshot(form: "one") } of the plan { $plan } that it keeps now
+       *[other] After the proposal, retention would forget { $count } { -snapshot(form: "other") } of the plan { $plan } that it keeps now
+    }
+
+# The caption of the snapshots retention forgets now and would keep after the proposal.
+# $plan (text): the plan's ID. $count (count): how many.
+ui-proposal-forgets-less =
+    { $count ->
+        [one] After the proposal, retention would no longer forget 1 { -snapshot(form: "one") } of the plan { $plan }
+       *[other] After the proposal, retention would no longer forget { $count } { -snapshot(form: "other") } of the plan { $plan }
+    }
 
 # The heading of the part of the page that approves the proposal.
 ui-proposal-approve-heading = Approve

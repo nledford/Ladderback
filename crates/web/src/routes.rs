@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use api::{
     ErrorCode, LocationDto, LocationTriedDto, MsgArg, PlanSummaryDto, PlansDto, RepositoriesDto,
-    RepositoryDto,
+    RepositoryDto, RepositoryNotesDto,
 };
 use l10n::{Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
@@ -22,9 +22,9 @@ use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, Checkbox, ErrorSummary, PauseUpdates, Progress, RadioGroup, StatusBadge, SummaryItem,
-    TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view, sentence_view,
-    text_field,
+    Button, Checkbox, ErrorSummary, Icon, PauseUpdates, Progress, RadioGroup, StatusBadge,
+    SummaryItem, TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view,
+    sentence_view, text_field,
 };
 use crate::full_disk_access_warning::FullDiskAccessWarning;
 use crate::live::{reply, say};
@@ -1340,6 +1340,17 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     // A list the daemon refused, as a configuration with a mistake in it is:
     // said in the list's place, naming where the mistake is (#347).
     let refused = RwSignal::<Option<Sentence>>::new(None);
+    // What the page notes of the machine above its list, as the catalog
+    // writes each code (#923). Read once; an answer that never came notes
+    // nothing.
+    let notes = RwSignal::<Vec<String>>::new(Vec::new());
+    let notes_localizer = Arc::clone(&localizer);
+    spawn_local(async move {
+        let url = format!("{}/api/v1/repositories/_notes", ws::origin());
+        if let Some(Got::Read(read)) = ws::get::<RepositoryNotesDto>(&url).await {
+            notes.try_set(repository_notes(&notes_localizer, &read.notes));
+        }
+    });
     let load_localizer = Arc::clone(&localizer);
     let load = Callback::new(move |()| {
         let url = format!("{}/api/v1/repositories", base.get_value());
@@ -1465,6 +1476,21 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             }}
         </PageHeading>
         <p>{body}</p>
+        {move || {
+            notes
+                .get()
+                .into_iter()
+                .map(|note| {
+                    view! {
+                        <p role="note" class="page-note">
+                            <Icon glyph=LucideGlyph::TriangleAlert tone=Tone::Warning />
+                            " "
+                            {note}
+                        </p>
+                    }
+                })
+                .collect_view()
+        }}
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),

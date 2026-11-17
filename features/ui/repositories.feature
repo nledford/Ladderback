@@ -526,3 +526,22 @@ Feature: Repositories page
     And the alert marks the sender's words as English
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
+
+  # What the agent notes is scripted: the computer that runs the scenario has
+  # its own keyring, or none (features/repositories/keyring_activation.feature
+  # says when the agent notes it, such as only while a repository keeps its
+  # password in the keyring).
+  Scenario: A keyring that can't be started on demand is noted, with the ways out
+    Given a demo plan "demo-home" with a scratch repository
+    And the agent finds the keyring running but not startable on demand
+    When I open the address "/repositories"
+    Then the table "Repositories" has a row "demo" that shows "Kept in the configuration file"
+    And the page notes that the keyring can't be started on demand
+    And the page has no accessibility violations
+
+  Scenario: A keyring that can be started on demand is noted nothing
+    Given a demo plan "demo-home" with a scratch repository
+    And the agent finds the keyring startable on demand
+    When I open the address "/repositories"
+    Then the table "Repositories" has a row "demo" that shows "Kept in the configuration file"
+    And the page notes nothing of the keyring

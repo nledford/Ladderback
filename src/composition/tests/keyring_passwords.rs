@@ -174,6 +174,10 @@ impl Keyring for Refusing {
     async fn remove(&self, _entry: &domain::secrets::KeyringEntry) -> Result<(), KeyringError> {
         Ok(())
     }
+
+    async fn activation(&self) -> app::ports::KeyringActivation {
+        app::ports::KeyringActivation::OnDemand
+    }
 }
 
 /// Each refusal names the entry and nothing else; what the platform said

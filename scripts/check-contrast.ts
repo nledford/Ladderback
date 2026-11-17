@@ -49,6 +49,11 @@ const PAIRS = [
   // information, so 1.4.11 doesn't apply, but it must still be seen.
   { name: "skeleton on page", fg: "--skeleton", bg: "--bg", min: 1.4 },
   { name: "skeleton on surface", fg: "--skeleton", bg: "--surface", min: 1.4 },
+  // The tabs (components §4.5): the selected tab's bar, the shape that
+  // tells it with its weight, against the page and a surface (1.4.11). A
+  // tab's words are the text on page; the list's rule the table rule.
+  { name: "selected tab's bar on page", fg: "--accent", bg: "--bg", min: 3 },
+  { name: "selected tab's bar on surface", fg: "--accent", bg: "--surface", min: 3 },
 ];
 
 // A button (components §4.5) in each tone but Inherit, whose colors are the

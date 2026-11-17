@@ -650,6 +650,11 @@ pub enum WarningCode {
     /// the grant explains why the item was left out. The detail is the
     /// engine's own message, as for `source-unreadable`.
     FullDiskAccessMissing,
+    /// On Linux, the keyring service, the Secret Service, runs now, but no
+    /// activation file names it, so nothing can start it on demand: a run
+    /// that asks for it before the desktop starts it finds no keyring
+    /// (#923). Said on the Repositories page only. No arguments.
+    KeyringNotActivatable,
     HookWarning,
     /// A forget or an adoption ended before its last engine job; the jobs
     /// that finished stay done.
@@ -1701,6 +1706,7 @@ impl WarningCode {
             | Self::CoreDumpsOn
             | Self::DebuggerAttachAllowed
             | Self::FullDiskAccessMissing
+            | Self::KeyringNotActivatable
             | Self::Unknown => &[],
         }
     }
@@ -3824,9 +3830,10 @@ pub struct OperationSummaryDto {
     pub failure: Option<ErrorDto>,
     /// What the engine reported when the operation succeeded.
     pub result: Option<OperationResultDto>,
-    /// The alias of the repository a maintenance operation ran on, as it
-    /// stood when the run started. Absent for a backup, which `plan` names,
-    /// and for an operation an earlier version logged.
+    /// The alias of the repository a maintenance operation ran on, or a
+    /// restore or a download read, as it stood when the log first wrote the
+    /// run. Absent for a backup, which `plan` names, and for an operation an
+    /// earlier version logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
     /// For a repository reached at several locations: every location as the
@@ -4215,6 +4222,63 @@ pub struct ProposalReviewDto {
     pub short_id: String,
 }
 
+/// `POST /api/v1/proposals/{id}/forget-preview`, a browser session's only:
+/// what the pending proposal would change about the snapshots retention
+/// forgets, for each repository its changes touch, in the order they name
+/// them (decision 89, point 8; I6). Computed when the person asks: it reads
+/// each repository as a forget's preview does, and changes nothing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ProposalForgetPreviewDto {
+    pub repositories: Vec<RepositoryForgetDto>,
+}
+
+/// What a proposal would change about what retention forgets in one
+/// repository, or why the repository couldn't be read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "kebab-case"
+)]
+pub enum RepositoryForgetDto {
+    /// What a forget of this agent's would do under the configuration as it
+    /// is (`before`) and as the proposal makes it (`after`).
+    Compared {
+        repository: String,
+        before: ForgetSideDto,
+        after: ForgetSideDto,
+        /// What `after` removes and `before` doesn't, per plan that removes
+        /// any such: `remove` counts them and `listed` names them.
+        forgets_more: Vec<ForgetPlanDto>,
+        /// What `before` removes and `after` doesn't, per plan, the same.
+        forgets_less: Vec<ForgetPlanDto>,
+    },
+    /// The repository couldn't be read: why, as the maintenance routes tell
+    /// it.
+    Refused { repository: String, error: ErrorDto },
+}
+
+/// What a forget of this agent's would do to a repository under one
+/// configuration.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "kebab-case"
+)]
+pub enum ForgetSideDto {
+    /// This agent doesn't maintain the repository: no forget of its runs
+    /// there, so its retention forgets nothing.
+    NotMaintained,
+    /// What it would remove: each plan with history there, as a forget's
+    /// preview tells it.
+    Forgets { plans: Vec<ForgetPlanDto> },
+    /// It would be refused, and so remove nothing: the policy of `plan`,
+    /// which has history there, keeps nothing.
+    KeepsNothing { plan: String },
+}
+
 /// `POST /api/v1/proposals/{id}/approve`, a browser session's only: what
 /// the page showed, from [`ProposalReviewDto`], and the step-up
 /// confirmation: the admin password with sign-in on, the proposal's short
@@ -4277,6 +4341,16 @@ impl ArgumentProblem {
 #[serde(rename_all = "kebab-case")]
 pub struct RepositoriesDto {
     pub repositories: Vec<RepositoryDto>,
+}
+
+/// What the Repositories page notes above its list, of the machine rather
+/// than of one repository: `keyring-not-activatable` while the keyring runs
+/// but can't be started on demand (#923). Left empty when there is nothing
+/// to note.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RepositoryNotesDto {
+    pub notes: Vec<WarningDto>,
 }
 
 /// One configured repository, as a list shows it: where it is, with any

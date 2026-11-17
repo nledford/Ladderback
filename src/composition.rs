@@ -650,6 +650,7 @@ pub(crate) async fn daemon(
     daemon.state.proposals = Arc::new(proposals::ProposalService::new(
         &daemon.background.proposals,
         &daemon.state.sign_in,
+        daemon.background.runner.maintenance(),
     ));
     // So is a download's, its tickets drawn from the daemon's one source.
     daemon.state.downloads = Arc::new(downloads::DownloadService::new(
@@ -933,8 +934,11 @@ async fn state_over(
         app::plans::EditPlans::new(Arc::clone(&config), writes, changed)
             .with_proposals(Arc::new(proposal_parts.proposals())),
     ));
-    let proposals: Arc<dyn http_adapter::Proposals> =
-        Arc::new(proposals::ProposalService::new(&proposal_parts, &sign_in));
+    let proposals: Arc<dyn http_adapter::Proposals> = Arc::new(proposals::ProposalService::new(
+        &proposal_parts,
+        &sign_in,
+        runner.maintenance(),
+    ));
     let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService::new(
         Arc::clone(&config),
         config_file,
@@ -3452,6 +3456,17 @@ impl Repositories for RepositoryService {
                 Some(detail),
             )),
         }
+    }
+
+    /// Asks the OS keyring the page's question, and only it: never a run. A
+    /// configuration that can't be read notes nothing; the page's list says
+    /// why it can't be read.
+    async fn notes(&self) -> api::RepositoryNotesDto {
+        let notes = match self.config.load().await {
+            Ok(config) => app::repositories::page_notes(&*self.keyring, &config).await,
+            Err(_) => Vec::new(),
+        };
+        api::RepositoryNotesDto { notes }
     }
 }
 

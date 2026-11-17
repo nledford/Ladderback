@@ -100,6 +100,17 @@ impl Direction {
             Self::Rtl => "rtl",
         }
     }
+
+    /// The direction an element's text runs, from its computed CSS
+    /// `direction` (`ltr` or `rtl`, the attribute's own values). Anything
+    /// else, such as no value at all, runs left to right, HTML's default.
+    pub fn of_computed(computed: &str) -> Self {
+        if computed == "rtl" {
+            Self::Rtl
+        } else {
+            Self::Ltr
+        }
+    }
 }
 
 /// What a web page asks for, in the order of its authority (technical design
@@ -657,5 +668,12 @@ mod tests {
     fn a_direction_is_spelled_as_the_dir_attribute_spells_it() {
         assert_eq!(Direction::Ltr.as_str(), "ltr");
         assert_eq!(Direction::Rtl.as_str(), "rtl");
+    }
+
+    #[test]
+    fn an_elements_direction_is_its_computed_one_left_to_right_unless_it_says_right_to_left() {
+        assert_eq!(Direction::of_computed("rtl"), Direction::Rtl);
+        assert_eq!(Direction::of_computed("ltr"), Direction::Ltr);
+        assert_eq!(Direction::of_computed(""), Direction::Ltr);
     }
 }

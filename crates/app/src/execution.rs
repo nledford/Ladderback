@@ -192,11 +192,17 @@ impl RunOperation {
     /// Queues the operation for `job` and records it, before the engine is
     /// asked for anything: an operation that never gets going is in the
     /// history too, and a caller that answers its client first can answer
-    /// with an operation the log already knows. [`Self::run_queued`] runs it.
+    /// with an operation the log already knows. The first write names the
+    /// repository by the alias the job keeps for the log ([`Job::logged_alias`]).
+    /// [`Self::run_queued`] runs it.
     pub async fn queue(&self, id: OperationId, trigger: Trigger, job: Job) -> Queued {
         let operation = Operation::queue(id, job.kind(), trigger, job.target(), self.clock.now());
         let operation = match job.entry() {
             Some(entry) => operation.with_entry(entry),
+            None => operation,
+        };
+        let operation = match job.logged_alias() {
+            Some(alias) => operation.with_repository_alias(alias),
             None => operation,
         };
         let mut run = Run {
