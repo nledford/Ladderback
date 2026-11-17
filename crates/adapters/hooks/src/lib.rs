@@ -10,6 +10,13 @@
 //! signalled only while the hook is unreaped, each signal at most once; the
 //! pipes stay open until the hook is reaped; and the whole wait is bounded.
 //!
+//! A hook waits for the gate for at most its gate limit (the timeout's
+//! length outside tests) too, for its start and to let go of its pipes at its
+//! end: a start that stalls (an `exec` on a hung mount) holds the gate as
+//! long. A hook not started by then is timed out, and its start is never
+//! made; one made as the call gave up is killed with its group inside the
+//! gate (#968).
+//!
 //! A hook that ends by itself is reaped when it ends, whatever still holds
 //! its stdout or stderr open: a process it started (a daemon, a background
 //! job) keeps a pipe's write end for as long as it runs. What is in the pipes
@@ -101,6 +108,10 @@ pub struct ProcessHookRunner {
     /// How long one hook may run before it is stopped: SIGTERM to its
     /// process group, then SIGKILL after [`KILL_GRACE`].
     timeout: Duration,
+    /// How long one hook waits for the spawn gate, for its start and to let
+    /// go of its pipes: a start in flight may stall, and holds the gate as
+    /// long.
+    gate_limit: Duration,
     /// The environment hooks are scrubbed from, when one was given; else
     /// this process's own.
     environment: Option<Vec<(OsString, OsString)>>,
@@ -112,6 +123,7 @@ impl ProcessHookRunner {
     pub fn new() -> Self {
         Self {
             timeout: HOOK_TIMEOUT,
+            gate_limit: HOOK_TIMEOUT,
             environment: None,
         }
     }
@@ -122,6 +134,14 @@ impl ProcessHookRunner {
             timeout,
             ..Self::new()
         }
+    }
+
+    /// A runner whose hooks wait for the spawn gate for at most `limit`
+    /// rather than [`HOOK_TIMEOUT`], for tests.
+    #[must_use]
+    pub fn with_gate_limit(mut self, limit: Duration) -> Self {
+        self.gate_limit = limit;
+        self
     }
 
     /// Starts hooks with `vars` as the environment they are scrubbed from,
@@ -205,14 +225,9 @@ impl ProcessHookRunner {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .process_group(0);
-        // Through the spawn gate: no other start inherits the hook's pipes,
-        // and the hook inherits none of theirs. Waited for on the blocking
-        // pool: a start in flight may stall (decision 58).
-        let started = spawn_gate::hold_blocking(move || command.spawn())
-            .await
-            .and_then(std::convert::identity);
-        let child = match started {
-            Ok(child) => child,
+        let mut running = match start(command, self.gate_limit, &Stop::REAL).await {
+            Ok(Some(running)) => running,
+            Ok(None) => return (HookStatus::TimedOut, Captured::default()),
             // The platform's message names the reason; the command line
             // itself may hold a secret and never appears.
             Err(error) => {
@@ -226,8 +241,8 @@ impl ProcessHookRunner {
         };
         // From here on, whatever ends this call early (the timeout, the
         // caller giving up) kills the hook, and its group while the hook is
-        // unreaped.
-        let mut running = Running::new(child, stop);
+        // unreaped, the way `stop` says.
+        running.stop = stop;
         // Held until the hook is reaped: a handler that writes to them when
         // it gets SIGTERM must find them open, or the SIGPIPE ends it before
         // it is done, and while it is being stopped they are read and
@@ -264,10 +279,60 @@ impl ProcessHookRunner {
         // the read ends into a child that has not run `exec` yet, and holds
         // the gate until it has. Once the gate is ours, no copy is left, so
         // what a descendant writes from here on fails (decision 58). The
-        // pool lets go even if this call is dropped while it waits.
-        let _ = spawn_gate::hold_blocking(move || drop(pipes)).await;
+        // pool lets go whenever it gets the gate, even if this call is
+        // dropped or stops waiting at the limit meanwhile.
+        let release = spawn_gate::hold_blocking(move || drop(pipes));
+        let _ = tokio::time::timeout(self.gate_limit, release).await;
         (status, captured)
     }
+}
+
+/// Starts `command` through the spawn gate, so no other start inherits the
+/// hook's pipes and the hook inherits none of theirs, waiting for it on the
+/// blocking pool, as a start in flight may stall (decision 58), and for at
+/// most `limit`. `None` is a start that had not happened by then.
+///
+/// A start the call gave up on, at the limit or by being dropped, before
+/// the gate came free is never made: a hook given up on doesn't run, nor
+/// stall the gate a second time. One made in the moment the call gave up is
+/// killed with `stop`, inside the gate (see [`hand_over`]).
+async fn start(
+    mut command: tokio::process::Command,
+    limit: Duration,
+    stop: &'static Stop<'static>,
+) -> std::io::Result<Option<Running<'static>>> {
+    let (handed, mut taken) = tokio::sync::oneshot::channel();
+    let gate = spawn_gate::hold_blocking(move || {
+        if !handed.is_closed() {
+            hand_over(command.spawn(), handed, stop);
+        }
+    });
+    let waited = tokio::time::timeout(limit, gate).await;
+    // A start handed over before this is the caller's, however late; one
+    // handed over after it is the gate's to kill.
+    taken.close();
+    if let Ok(started) = taken.try_recv() {
+        return started.map(Some);
+    }
+    // Nothing handed over: the limit passed first, or the runtime shut down
+    // before the start ran.
+    waited.unwrap_or(Ok(()))?;
+    Ok(None)
+}
+
+/// Hands a start to the call that waits for it, as a hook that is killed
+/// with its process group with `stop` wherever it is dropped: by now the
+/// hook may have started something, and `kill_on_drop` reaches the hook
+/// alone. One the call has given up on is killed here, and its pipes let go,
+/// while the gate is still held; one the call is dropped before it takes is
+/// killed where it is dropped.
+fn hand_over(
+    started: std::io::Result<Child>,
+    to: tokio::sync::oneshot::Sender<std::io::Result<Running<'static>>>,
+    stop: &'static Stop<'static>,
+) {
+    // A start that bounces is dropped, and so killed, right here.
+    let _ = to.send(started.map(|child| Running::new(child, stop)));
 }
 
 #[async_trait]
