@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
+import { expect } from "playwright/test";
 
 import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
@@ -133,6 +134,49 @@ Then("the header keeps the height noted", async function (this: BrowserWorld) {
   assert.ok(Math.abs(now - noted) <= ROUNDING_PX, `the header was ${Math.round(noted)}px tall, now ${Math.round(now)}px`);
 });
 
+// The running version's width depends on the commit the build names, whose
+// digits differ in width, so a layout measured with this build's own commit
+// would pass or fail by the commit (#908). Of the versions a build between
+// releases shows, the widest is the widest digit throughout, with changes
+// (`0.3.1+4444444.dirty` in Chromium on macOS); the narrowest, the narrowest
+// digit throughout, without. The digits are measured in the header's own
+// font, which differs by browser and system. From now on, every answer naming
+// the daemon's build names that one in place of its own.
+const shownCommits = new WeakMap<BrowserWorld, RegExp>();
+
+When("the running version is the {word} one a build between releases can show", async function (this: BrowserWorld, width: string) {
+  assert.ok(width === "widest" || width === "narrowest", `no version is the "${width}" one`);
+  const widest = width === "widest";
+  const digits = await this.page.getByRole("banner").evaluate((header) => {
+    const probe = document.createElement("span");
+    probe.style.cssText = "position: absolute; visibility: hidden; white-space: nowrap";
+    header.append(probe);
+    const range = document.createRange();
+    const measured = [..."0123456789abcdef"].map((digit) => {
+      probe.textContent = digit.repeat(10);
+      range.selectNodeContents(probe);
+      return { digit, width: range.getBoundingClientRect().width };
+    });
+    probe.remove();
+    return measured;
+  });
+  const { digit } = digits.reduce((best, next) => ((widest ? next.width > best.width : next.width < best.width) ? next : best));
+  const build = { commit: digit.repeat(40), dirty: widest, release: false };
+  await this.page.route(
+    (url) => url.pathname === "/api/v1/session",
+    async (route) => {
+      const answer = await route.fetch();
+      const body: unknown = await answer.json().catch(() => undefined);
+      if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>)["version"] === "string") {
+        await route.fulfill({ response: answer, json: { ...body, ...build } });
+      } else {
+        await route.fulfill({ response: answer });
+      }
+    },
+  );
+  shownCommits.set(this, new RegExp(`\\+${digit}+${widest ? "\\.dirty" : "(?!\\.dirty)"}\\b`));
+});
+
 // On a narrow screen the version and Sign out wrap under the pages' links.
 // Sign out ends its line at the header's inline end. Where the version's
 // words, the 1rem between the header's parts and the button fit in the
@@ -142,6 +186,8 @@ Then(
   "the running version and the button {string} share a line where they fit, at the header's inline end",
   async function (this: BrowserWorld, name: string) {
     const banner = this.page.getByRole("banner");
+    const shownCommit = shownCommits.get(this);
+    if (shownCommit) await expect(banner.getByText(/^Version\s/)).toHaveText(shownCommit);
     const version = await banner.getByText(/^Version\s/).elementHandle();
     const button = await banner.getByRole("button", { name: namePattern(name) }).elementHandle();
     assert.ok(version && button, `the banner shows no running version or no button "${name}"`);
@@ -153,25 +199,34 @@ Then(
         const right = box.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight);
         const rtl = style.direction === "rtl";
         const end = (rect: DOMRect) => (rtl ? left - rect.left : rect.right - right);
+        // Only the text's own boxes, as in `extent`: a range over an
+        // element's contents gives the boxes of the elements in it too, and
+        // a button's label is a box as tall as its line, half its leading
+        // under the words.
         const words = (el: Element) => {
-          const range = document.createRange();
-          range.selectNodeContents(el);
+          let [start, stop, bottom] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
           // The end of each line of the words, by the line's bottom.
           const ends = new Map<number, number>();
-          for (const rect of range.getClientRects()) {
-            if (rect.width > 0) {
-              const line = Math.round(rect.bottom);
-              ends.set(line, Math.max(ends.get(line) ?? Number.NEGATIVE_INFINITY, end(rect)));
+          const texts = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          for (let text = texts.nextNode(); text; text = texts.nextNode()) {
+            const range = document.createRange();
+            range.selectNodeContents(text);
+            for (const rect of range.getClientRects()) {
+              if (rect.width > 0) {
+                const line = Math.round(rect.bottom);
+                ends.set(line, Math.max(ends.get(line) ?? Number.NEGATIVE_INFINITY, end(rect)));
+                [start, stop, bottom] = [Math.min(start, rect.left), Math.max(stop, rect.right), Math.max(bottom, rect.bottom)];
+              }
             }
           }
-          return { rect: range.getBoundingClientRect(), ends: [...ends.values()] };
+          return { width: stop - start, bottom, ends: [...ends.values()] };
         };
         const [versionWords, buttonWords] = [words(shown), words(control)];
         const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
         const buttonBox = control.getBoundingClientRect();
         return {
-          fits: versionWords.ends.length === 1 && versionWords.rect.width + rem + buttonBox.width <= right - left - 1,
-          shared: Math.abs(versionWords.rect.bottom - buttonWords.rect.bottom) <= 1,
+          fits: versionWords.ends.length === 1 && versionWords.width + rem + buttonBox.width <= right - left - 1,
+          shared: Math.abs(versionWords.bottom - buttonWords.bottom) <= 1,
           buttonEnd: end(buttonBox),
           versionEnds: versionWords.ends,
         };
