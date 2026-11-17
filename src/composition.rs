@@ -656,6 +656,7 @@ pub(crate) async fn daemon(
         &daemon.background.runner,
         &daemon.state.sign_in,
         random,
+        Arc::new(SystemClock),
     ));
     daemon.state.exposure = exposure;
     daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
@@ -885,6 +886,7 @@ async fn state_over(
         &runner,
         &sign_in,
         Arc::new(OsRandom),
+        Arc::new(SystemClock),
     ));
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
     let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(

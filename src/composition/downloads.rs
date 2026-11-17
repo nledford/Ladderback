@@ -4,16 +4,14 @@
 //! the sweep that gives up the downloads nobody fetched in time.
 
 use std::sync::{Arc, Weak};
-use std::time::Duration;
 
 use app::download::{Download, DownloadAsk, DownloadError, Downloads};
 use app::maintenance::MaintenanceError;
-use app::ports::{ConfigStore, Random};
+use app::ports::{Clock, ConfigStore, Random};
 use async_trait::async_trait;
 use domain::restore::download::DownloadTicket;
-use domain::{OperationId, RepositoryAlias};
+use domain::{OperationId, RepositoryAlias, SignedDuration};
 use http_adapter::{DownloadRefusal, DownloadStart, Handover, MaintenanceRefusal, SignIn};
-use platform::SystemClock;
 use uuid::Uuid;
 
 use super::{PlanRunner, maintenance, runs};
@@ -21,7 +19,7 @@ use super::{PlanRunner, maintenance, runs};
 /// How often the downloads whose minute ran out are given up, when no
 /// other download asks first: their engine jobs stop and their turns are
 /// free again (§10.4).
-const SWEEP_EVERY: Duration = Duration::from_secs(10);
+const SWEEP_EVERY: SignedDuration = SignedDuration::from_secs(10);
 
 /// The downloads of the agent: one use case, so two at a time in all.
 pub(super) struct DownloadService {
@@ -33,12 +31,18 @@ pub(super) struct DownloadService {
 impl DownloadService {
     /// Downloads over `runner`'s parts, confirmed as `sign_in` says: by the
     /// admin password with sign-in on, by the snapshot's short ID with it
-    /// off, their tickets drawn from `random`. Starts the sweep, which ends
-    /// once the service is dropped.
-    pub(super) fn new(runner: &PlanRunner, sign_in: &SignIn, random: Arc<dyn Random>) -> Self {
+    /// off, their tickets drawn from `random` and their minutes kept by
+    /// `clock`. Starts the sweep, on `clock` too, which ends once the
+    /// service is dropped.
+    pub(super) fn new(
+        runner: &PlanRunner,
+        sign_in: &SignIn,
+        random: Arc<dyn Random>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         let downloads = Downloads::new(
             Arc::clone(&runner.engine),
-            Arc::new(SystemClock),
+            Arc::clone(&clock),
             Arc::clone(&runner.config),
             runner.resolve.as_ref().clone(),
             random,
@@ -48,7 +52,7 @@ impl DownloadService {
             SignIn::On(access) => downloads.with_access(Arc::clone(access)),
             SignIn::Off { .. } => downloads,
         });
-        tokio::spawn(sweep(Arc::downgrade(&downloads)));
+        tokio::spawn(sweep(Arc::downgrade(&downloads), clock));
         Self {
             downloads,
             config: Arc::clone(&runner.config),
@@ -57,13 +61,11 @@ impl DownloadService {
     }
 }
 
-/// Gives up the expired downloads every [`SWEEP_EVERY`] while `downloads`
-/// lives.
-async fn sweep(downloads: Weak<Downloads>) {
-    let mut every = tokio::time::interval(SWEEP_EVERY);
-    every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+/// Gives up the expired downloads every [`SWEEP_EVERY`] by `clock` while
+/// `downloads` lives.
+async fn sweep(downloads: Weak<Downloads>, clock: Arc<dyn Clock>) {
     loop {
-        every.tick().await;
+        clock.sleep(SWEEP_EVERY).await;
         let Some(downloads) = downloads.upgrade() else {
             return;
         };

@@ -4,7 +4,7 @@
 //! restore scenarios' (`restore.rs`), whose steps set them up.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use app::access::Access;
@@ -20,7 +20,7 @@ use app::ports::{
 };
 use app::secrets::ResolveRepository;
 use async_trait::async_trait;
-use cucumber::{then, when};
+use cucumber::{given, then, when};
 use domain::browse::{DisplayName, FolderPath};
 use domain::execution::{FailureReason, Operation, OperationKind, OperationStatus, Trigger};
 use domain::restore::download::{ArchiveFormat, DownloadShape, DownloadTicket};
@@ -57,15 +57,23 @@ pub struct DownloadWorld {
     runs: u128,
     /// The writes of how each fetched download ended, run beside it.
     recording: Vec<JoinHandle<()>>,
-    /// While set, the operation log answers no write: one is under way.
-    log_held: Arc<AtomicBool>,
+    /// Confirmations running beside the scenario, oldest first, while the
+    /// history is slow to write.
+    asking: Vec<JoinHandle<Result<DownloadTicket, DownloadError>>>,
+    /// While it holds `true`, the operation log answers no write: one is
+    /// under way, and answers once it is let go.
+    log_held: Arc<tokio::sync::watch::Sender<bool>>,
+    /// The clock the downloads read when time moves only as the scenario
+    /// says; the scenario's own, which jumps to each sleeper's deadline,
+    /// otherwise.
+    clock: Option<Arc<FakeClock>>,
 }
 
 /// The scenario's operation log, which can be held mid-write, as a log on
 /// a busy disk is.
 struct SlowLog {
     inner: Arc<InMemoryOperationStore>,
-    held: Arc<AtomicBool>,
+    held: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 #[async_trait]
@@ -75,9 +83,9 @@ impl OperationStore for SlowLog {
         operation: &Operation,
         result: Option<&EngineResult>,
     ) -> Result<(), StoreError> {
-        if self.held.load(Ordering::SeqCst) {
-            std::future::pending::<()>().await;
-        }
+        // A held write answers once the log is let go, as a busy disk
+        // catches up.
+        let _ = self.held.subscribe().wait_for(|held| !held).await;
         self.inner.save(operation, result).await
     }
 
@@ -262,6 +270,15 @@ fn path(text: &str) -> FolderPath {
 }
 
 impl Agent {
+    /// The clock the downloads read: the one the scenario moves by hand,
+    /// when it has one.
+    fn download_clock(&self) -> Arc<FakeClock> {
+        self.download
+            .clock
+            .clone()
+            .unwrap_or_else(|| self.clock.clone())
+    }
+
     /// The use case, made the first time it is asked for.
     async fn downloads(&mut self) -> Arc<Downloads> {
         if let Some(downloads) = &self.download.downloads {
@@ -272,7 +289,7 @@ impl Agent {
             .snapshot
             .clone()
             .expect("the scenario's snapshot");
-        let clock: Arc<FakeClock> = self.clock.clone();
+        let clock = self.download_clock();
         let engine: Arc<dyn Engine> = Arc::new(Scripted {
             snapshot,
             host,
@@ -305,14 +322,14 @@ impl Agent {
         downloads
     }
 
-    /// Confirms a download of `entry` as `format`, keeping how it answered.
-    async fn confirm_download(
+    /// What the person asks for when they confirm a download of `entry`
+    /// as `format`, under a new operation's ID.
+    fn download_ask(
         &mut self,
         entry: FolderPath,
         format: ArchiveFormat,
         confirmation: &str,
-    ) {
-        let downloads = self.downloads().await;
+    ) -> (OperationId, DownloadAsk) {
         self.download.runs += 1;
         let op = OperationId::from_uuid(Uuid::from_u128(
             0x018f_0000_0000_7000_8000_0000_0000_7000 | self.download.runs,
@@ -333,8 +350,40 @@ impl Agent {
             )
             .expect("a confirmation"),
         };
+        (op, ask)
+    }
+
+    /// Confirms a download of `entry` as `format`, keeping how it answered.
+    async fn confirm_download(
+        &mut self,
+        entry: FolderPath,
+        format: ArchiveFormat,
+        confirmation: &str,
+    ) {
+        let downloads = self.downloads().await;
+        let (op, ask) = self.download_ask(entry, format, confirmation);
         let confirmed = downloads.start(op, ask).await;
         self.download.confirmed.push(confirmed);
+    }
+
+    /// Confirms a download of `entry` beside the scenario, as a browser's
+    /// request runs while the history is slow to write, and waits until it
+    /// has gone as far as the log lets it: answered, or held on a write.
+    async fn start_confirming(&mut self, entry: FolderPath, confirmation: &str) {
+        let downloads = self.downloads().await;
+        let (op, ask) = self.download_ask(entry, ArchiveFormat::Tar, confirmation);
+        let log = self.download.log_held.clone();
+        // Each write the log holds waits on a receiver of its own.
+        let held = log.receiver_count();
+        let asking = tokio::spawn(async move { downloads.start(op, ask).await });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !asking.is_finished() && log.receiver_count() == held {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the confirmation goes as far as the held log lets it");
+        self.download.asking.push(asking);
     }
 
     /// The ticket the confirmation at `index` answered.
@@ -512,9 +561,24 @@ async fn confirms_one(agent: &mut Agent, entry: String, confirmation: String) {
         .await;
 }
 
+/// The scenario's clock jumps to each sleeper's deadline, so a write the
+/// log holds would be given up at once, at its 20 s bound: a history that
+/// can be slow to write keeps the downloads on a clock that moves only
+/// when the scenario says time passes.
+#[given("the history can be slow to write")]
+fn history_can_be_slow(agent: &mut Agent) {
+    assert!(
+        agent.download.downloads.is_none(),
+        "the clock is chosen before the first download"
+    );
+    agent.download.clock = Some(Arc::new(FakeClock::new(agent.clock.now())));
+}
+
 #[when(expr = "{int} seconds pass before the browser fetches it")]
 async fn seconds_pass(agent: &mut Agent, seconds: i64) {
-    agent.clock.advance(SignedDuration::from_secs(seconds));
+    agent
+        .download_clock()
+        .advance(SignedDuration::from_secs(seconds));
     let last = agent.download.confirmed.len() - 1;
     agent.fetch_download(last).await;
 }
@@ -525,20 +589,62 @@ async fn seconds_pass(agent: &mut Agent, seconds: i64) {
 async fn hangs_up_while_written(agent: &mut Agent, seconds: i64) {
     let downloads = agent.downloads().await;
     let ticket = agent.ticket(agent.download.confirmed.len() - 1);
-    agent.clock.advance(SignedDuration::from_secs(seconds));
+    agent
+        .download_clock()
+        .advance(SignedDuration::from_secs(seconds));
     // The browser's request runs while the log is busy, then hangs up.
     // Fetching waits for nothing (#846); were it to wait again, poll it
     // once here (`now_or_never`) and drop it, never `.await` it: the held
-    // log never answers.
-    agent.download.log_held.store(true, Ordering::SeqCst);
+    // log doesn't answer until it is let go.
+    agent.download.log_held.send_replace(true);
     let fetched = downloads.fetch(&ticket);
-    agent.download.log_held.store(false, Ordering::SeqCst);
+    agent.download.log_held.send_replace(false);
     agent.download.fetched = Some(fetched);
 }
 
 #[when("the agent gives up the downloads whose minute ran out")]
 async fn gives_up_expired(agent: &mut Agent) {
     agent.downloads().await.give_up_expired().await;
+}
+
+#[when(expr = "{int} seconds pass while the history is slow to write")]
+async fn pass_while_slow(agent: &mut Agent, seconds: i64) {
+    agent
+        .download_clock()
+        .advance(SignedDuration::from_secs(seconds));
+    agent.download.log_held.send_replace(true);
+}
+
+#[when("the agent starts giving up the downloads whose minute ran out")]
+async fn starts_giving_up(agent: &mut Agent) {
+    let downloads = agent.downloads().await;
+    let mut giving_up = async move { downloads.give_up_expired().await }.boxed();
+    // Taken as far as it goes before the held log answers; the rest runs
+    // beside the scenario, as the agent's sweep does, and the history's
+    // steps wait for it.
+    if futures::poll!(giving_up.as_mut()).is_pending() {
+        agent.download.recording.push(tokio::spawn(giving_up));
+    }
+}
+
+#[when("the history takes its writes again")]
+fn log_let_go(agent: &mut Agent) {
+    agent.download.log_held.send_replace(false);
+}
+
+#[when(
+    expr = "the person asks for downloads of {string}, {string} and {string} of the snapshot, one after another, confirming with {string}"
+)]
+async fn asks_for_three(
+    agent: &mut Agent,
+    first: String,
+    second: String,
+    third: String,
+    confirmation: String,
+) {
+    for entry in [first, second, third] {
+        agent.start_confirming(path(&entry), &confirmation).await;
+    }
 }
 
 #[when(
@@ -696,6 +802,29 @@ fn refused_busy(agent: &mut Agent) {
     assert!(matches!(refusal, DownloadError::Busy), "{refusal:?}");
 }
 
+#[then(
+    "the first of the three is confirmed, and one of the other two is refused because two downloads are under way"
+)]
+async fn first_of_three_confirmed(agent: &mut Agent) {
+    let mut answers = Vec::new();
+    for asking in agent.download.asking.drain(..) {
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(5), asking)
+            .await
+            .expect("the confirmation answers once the history takes its writes")
+            .expect("the confirmation ran");
+        answers.push(answer);
+    }
+    assert!(
+        answers.first().is_some_and(Result::is_ok),
+        "the download that gave the expired turns back took one: {answers:?}"
+    );
+    let refused = answers
+        .iter()
+        .filter(|answer| matches!(answer, Err(DownloadError::Busy)))
+        .count();
+    assert_eq!((answers.len(), refused), (3, 1), "{answers:?}");
+}
+
 #[then("the second hand-over is refused because the download is unknown")]
 fn second_refused(agent: &mut Agent) {
     let refusal = agent.fetch_refusal();
@@ -722,6 +851,23 @@ fn job_stopped(agent: &mut Agent) {
     );
 }
 
+#[then("the engine's jobs of both downloads were stopped before the history wrote either")]
+async fn both_stopped_before_written(agent: &mut Agent) {
+    assert_eq!(
+        agent.download.stopped.load(Ordering::SeqCst),
+        2,
+        "both downloads' jobs were stopped while the history's first write was held"
+    );
+    let history = agent.restore.history().await;
+    assert_eq!(history.len(), 2, "{history:?}");
+    assert!(
+        history
+            .iter()
+            .all(|record| record.status == OperationStatus::Running),
+        "the history wrote neither end yet: {history:?}"
+    );
+}
+
 #[then(
     regex = r"^the history shows the download, started by hand, as (succeeded|cancelled|failed)$"
 )]
@@ -743,6 +889,18 @@ async fn history_shows_download(agent: &mut Agent, ended: String) {
             "{:?}",
             record.status
         ),
+    }
+}
+
+#[then("the history shows both downloads, started by hand, as cancelled")]
+async fn history_shows_both_cancelled(agent: &mut Agent) {
+    agent.recorded().await;
+    let history = agent.restore.history().await;
+    assert_eq!(history.len(), 2, "{history:?}");
+    for record in &history {
+        assert_eq!(record.kind, OperationKind::Download);
+        assert_eq!(record.trigger, Trigger::Manual);
+        assert_eq!(record.status, OperationStatus::Cancelled, "{history:?}");
     }
 }
 

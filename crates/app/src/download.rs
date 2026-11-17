@@ -171,9 +171,13 @@ impl Downloads {
             StepUpRefused::Wait { seconds } => DownloadError::StepUpWait { seconds },
             StepUpRefused::Unavailable(text) => DownloadError::StepUpUnavailable(text),
         })?;
-        // Downloads whose minute ran out give their turns back first.
-        self.give_up_expired().await;
-        let turn = Turn::take(&self.under_way).ok_or(DownloadError::Busy)?;
+        // Downloads whose minute ran out give their turns back first. This
+        // one takes its own before their rows are written, so a slow log
+        // can't hand the turns it freed to one asked for after it (#888).
+        let cancelled = self.stop_expired();
+        let turn = Turn::take(&self.under_way);
+        self.write_cancelled(&cancelled).await;
+        let turn = turn.ok_or(DownloadError::Busy)?;
         let config = self
             .config
             .load()
@@ -246,8 +250,11 @@ impl Downloads {
         let held = lock(&self.pending).hold(ticket.clone(), self.clock.now(), confirmed);
         match held {
             Ok(()) => Ok(ticket),
+            // Unreachable while every waiting download holds one of the
+            // DOWNLOADS_AT_ONCE turns, fewer than MAX_PENDING; kept so a
+            // change to either still logs the refused download cancelled.
             Err(confirmed) => {
-                self.give_up(confirmed).await;
+                self.write_cancelled(&[self.stop(confirmed)]).await;
                 Err(DownloadError::Busy)
             }
         }
@@ -287,22 +294,40 @@ impl Downloads {
     }
 
     /// Gives up every confirmed download whose minute ran out: its job
-    /// stops, its turn is free again and the log records it cancelled. The
-    /// caller runs it to its end, on a task of its own: one dropped halfway
-    /// leaves the downloads it took running in the log.
+    /// stops, its turn is free again and the log records it cancelled. All
+    /// of them stop before the first is written, so a slow log holds no
+    /// worker or turn (#888). The caller runs it to its end, on a task of
+    /// its own: one dropped halfway leaves the downloads it took running in
+    /// the log.
     pub async fn give_up_expired(&self) {
+        let cancelled = self.stop_expired();
+        self.write_cancelled(&cancelled).await;
+    }
+
+    /// Stops every confirmed download whose minute ran out and frees its
+    /// turn, and returns their records, cancelled, for the log.
+    fn stop_expired(&self) -> Vec<Operation> {
         let expired = lock(&self.pending).expire(self.clock.now());
-        for confirmed in expired {
-            self.give_up(confirmed).await;
+        expired
+            .into_iter()
+            .map(|confirmed| self.stop(confirmed))
+            .collect()
+    }
+
+    /// Writes `cancelled` to the log, one after another.
+    async fn write_cancelled(&self, cancelled: &[Operation]) {
+        for operation in cancelled {
+            let _ = save_within_bound(&*self.clock, &*self.store, operation, None).await;
         }
     }
 
-    async fn give_up(&self, confirmed: Confirmed) {
+    /// Stops `confirmed`'s job and frees its turn, and returns its record,
+    /// cancelled from now, for the log.
+    fn stop(&self, confirmed: Confirmed) -> Operation {
         let mut operation = confirmed.handing.operation.clone();
-        // Its job stops and its turn is free from here.
         drop(confirmed);
         let _ = operation.cancel(self.clock.now());
-        let _ = save_within_bound(&*self.clock, &*self.store, &operation, None).await;
+        operation
     }
 
     /// Runs `job` until the engine says what it found at its entry, within
