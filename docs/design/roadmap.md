@@ -188,6 +188,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [114](decisions/114-download.md) | How an entry of a snapshot is downloaded from the web UI |
 | [115](decisions/115-detecting-full-disk-access.md) | Detecting a missing Full Disk Access grant |
 | [116](decisions/116-keyring-wait-at-start.md) | A scheduled run waits for the session's keyring service while the daemon starts |
+| [117](decisions/117-tailwind-first.md) | Tailwind first, custom CSS only when necessary |
 
 ## 17. Open questions
 
