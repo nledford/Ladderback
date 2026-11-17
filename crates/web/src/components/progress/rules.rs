@@ -997,8 +997,9 @@ mod tests {
         assert_eq!(percent(1, Some(3)), Some(33));
     }
 
-    /// A bar a page names no size for is Small, its track half a line of
-    /// text thick, as the bar was before it took a size.
+    /// A bar a page names no size for is Small: its track is 0.5em thick,
+    /// which is the 0.5rem the bar had before it took a size wherever the
+    /// text is 1rem.
     #[test]
     fn a_bar_is_small_unless_its_page_names_another_size() {
         assert_eq!(default_size(), Size::Small);
