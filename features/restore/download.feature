@@ -114,6 +114,20 @@ Feature: Downloading files from a snapshot
     Then the engine's download job was stopped
     And the history shows the download, started by hand, as cancelled
 
+  # A busy disk can be slow to take the history's writes. The downloads
+  # whose minute ran out are all stopped and their turns given back before
+  # any of them is written, so one slow write holds no other download.
+  Scenario: A slow history holds back no download whose minute ran out
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And sign-in is off
+    And the history can be slow to write
+    When the person confirms downloads of "home/docs" and "home/photos" of the snapshot as tar, confirming with "3f2a1b4c"
+    And 61 seconds pass while the history is slow to write
+    And the agent starts giving up the downloads whose minute ran out
+    Then the engine's jobs of both downloads were stopped before the history wrote either
+    When the history takes its writes again
+    Then the history shows both downloads, started by hand, as cancelled
+
   Scenario: A reader that goes away midway stops the download
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
     And sign-in is off
