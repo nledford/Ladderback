@@ -1595,8 +1595,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 })
                 .collect_view()}
         </section>
-        // After the text field's, so the walks that cross it to the table
-        // past the many progress bars below stay short.
+        // After the text field's, so the walks from the page's start to
+        // the Toast demo and the sections after it pass none of its bars.
         <section>
             <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
             <Progress

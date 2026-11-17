@@ -20,8 +20,9 @@ use crate::backend::Progress;
 use crate::variants::{Size, Tone};
 
 /// The size a bar is drawn at when its page names none: Small, its track
-/// half a line of text thick, as the bar was before it took a size. The
-/// vocabulary has no default size, so each component picks its own.
+/// half the text's size thick (0.5em; 0.5rem before it took a size, the
+/// same wherever the text is 1rem). The vocabulary has no default size, so
+/// each component picks its own.
 pub(crate) fn default_size() -> Size {
     Size::Small
 }
@@ -53,8 +54,8 @@ pub(crate) const TRACK: &str = "progress-track block-[calc(var(--size)/2)] inlin
 /// which eases to each report over 0.4 s; `style.css`'s reduced-motion rule
 /// takes every transition away, so the fill then jumps to the value. Under
 /// forced colors the mode would paint it the page's own background and
-/// leave the bar empty, so it opts out and takes the text's own color, as
-/// every tone does there.
+/// leave the bar empty, so it opts out and takes `CanvasText`, as the
+/// alert's border does: the text's color wherever a bar sits on Canvas.
 pub(crate) const FILL: &str = "progress-fill block-full rounded-[inherit] bg-(--tone) \
     transition-[inline-size] duration-400 ease-out \
     forced-colors:forced-color-adjust-none forced-colors:bg-[color:CanvasText]";
