@@ -1215,7 +1215,7 @@ Each call prints one JSON line on stdout: `{"tool", "ok": true, "result"}`, the 
 
 The exit status is 0 when every call worked, 1 when one failed or the session couldn't start, and 2 for a command line that can't be read (an unknown tool, a word that isn't `NAME=VALUE`, an argument given twice, `--args` that isn't an object, an address after `--connect` that isn't one) or a `run_plan` alone in a session of the command's own, before any session starts. It prints JSON lines whatever is asked, so it takes no `--json`, which is refused like any unknown flag. Proposal tools stay connect mode's, as over MCP (decision 95).
 
-**Hub.** M3 drives one agent. Connect mode against a hub, with an `agent` argument on the tools that need one (plan IDs are unique per agent only), arrives with remote control in M5.
+**Hub.** M3 drives one agent. Connect mode against a hub, with an `agent` argument on the tools that need one (plan IDs are unique per agent only), arrives with remote control in M9.
 
 **Known limits.** There is no `operation_log` tool: no per-operation log exists, and `get_operation` carries the failure and warnings (decision 95). `list_snapshots` has no tag, path or time filter. `status` sees queued and running operations only among the newest 200, so an older one still queued behind a long run isn't listed. A headless session leaves backups queued before it started, and those still queued when it ends, to the next `serve`. A headless session ended by SIGTERM rather than at EOF leaves what it ran to the next start's recovery. A cursor whose item has gone since (a plan removed, a snapshot forgotten) is `invalid-cursor`: start the list again.
 
