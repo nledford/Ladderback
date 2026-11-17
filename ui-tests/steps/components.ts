@@ -2283,6 +2283,28 @@ const SNAPSHOTS: Record<string, string> = {
   - treeitem "abc[U+202E]txt.exe" [level=1]
   - treeitem "הערות.txt" [level=1]
   - treeitem "readme.txt" [level=1]`,
+  Tabs: `- heading "Tabs" [level=2]
+- heading "Demo repository" [level=3]
+- tablist "Demo repository":
+  - tab "Demo overview" [selected]
+  - tab "Demo note"
+  - tab "Demo history"
+- tabpanel "Demo overview":
+  - paragraph: The demo repository holds 12 snapshots of two demo plans.
+- paragraph: These demo tabs are chosen with Enter or Space. The arrow keys only move between them.
+- tablist "Demo agent":
+  - tab "Demo log" [selected]
+  - tab "Demo stats"
+  - tab "Demo plans"
+- tabpanel "Demo log":
+  - paragraph: A demo panel that a page would read from the daemon once its tab is chosen.
+- paragraph: "Chosen demo tab: \u2068Demo log\u2069"
+- tablist "Demo tabs, right to left":
+  - tab "First demo tab" [selected]
+  - tab "Second demo tab"
+  - tab "Third demo tab"
+- tabpanel "First demo tab":
+  - paragraph: The first demo panel.`,
   "Shared vocabulary": `- heading "Shared vocabulary" [level=2]
 - heading "Tones" [level=3]
 - list "Tones":

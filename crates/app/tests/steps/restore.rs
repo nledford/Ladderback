@@ -678,6 +678,22 @@ async fn history_shows_none(agent: &mut Agent) {
     assert!(history.is_empty(), "{history:?}");
 }
 
+// The alias as this agent named the repository when the restore was queued,
+// which names its row on the Operations page (decision 52, #893).
+#[then(expr = "the history shows the restore queued, reading from the repository {string}")]
+async fn history_names_repository(agent: &mut Agent, alias: String) {
+    let history = agent.restore.history().await;
+    let [record] = history.as_slice() else {
+        panic!("one operation in {history:?}");
+    };
+    assert_eq!(record.kind, OperationKind::Restore);
+    assert_eq!(record.status, OperationStatus::Queued);
+    assert_eq!(
+        record.repository_alias,
+        Some(RepositoryAlias::parse(&alias).expect("the scenario's alias parses"))
+    );
+}
+
 #[then(
     regex = r"^the preview says (\d+) files? would be added, (\d+) overwritten and (\d+) left as they are$"
 )]

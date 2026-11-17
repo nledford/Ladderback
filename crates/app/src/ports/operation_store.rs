@@ -265,8 +265,9 @@ pub struct OperationRecord {
     pub warning_kinds: Vec<WarningKind>,
     /// What the engine reported when the operation succeeded.
     pub result: Option<EngineResult>,
-    /// The alias of the repository a maintenance operation ran on, as it
-    /// stood when the run started ([`Operation::repository_alias`]).
+    /// The alias of the repository a maintenance operation ran on, or a
+    /// restore or a download read, as it stood when the log first wrote the
+    /// run ([`Operation::repository_alias`]).
     pub repository_alias: Option<RepositoryAlias>,
     /// Every location of the entry as the run's choice saw it, for a
     /// repository reached at several ([`Operation::locations`], decision 80);

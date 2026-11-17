@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use app::contract::secrets::SecretsHarness;
-use app::ports::{Keyring, KeyringError, Resolved, SecretResolver};
+use app::ports::{Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver};
 use domain::secrets::{
     CommandLine, FileRead, KeyringCause, KeyringEntry, MAX_SECRET_BYTES, Problem, SecretError,
     SecretRef, SecretValue, SecretWarning, SourceName,
@@ -91,6 +91,10 @@ impl SecretsHarness for RealHarness {
 
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
         Arc::new(self.system().with_keyring(Arc::new(Refusing)))
+    }
+
+    fn keyring_activated(&self, activation: KeyringActivation) -> Arc<dyn Keyring> {
+        Arc::new(self.system().with_activation(move || activation))
     }
 
     fn set_env(&self, name: &str, value: &str) {
@@ -1668,6 +1672,53 @@ fn a_bus_error_names_a_missing_service_or_a_locked_keyring() {
     ] {
         assert_eq!(bus_error_cause(answered), None, "{answered}");
     }
+}
+
+// ------------------------------------------------- how the keyring is started
+
+/// A platform that doesn't say how its keyring service is started within the
+/// limit leaves it unknown, and the answer comes at the limit, not when the
+/// platform answers: the Repositories page waits on it.
+#[tokio::test]
+async fn a_keyring_that_does_not_say_in_time_how_it_is_started_is_unknown() {
+    let (answer, answered) = std::sync::mpsc::channel::<()>();
+    let answered = Mutex::new(answered);
+    let keyring = resolver(Duration::from_secs(1)).with_activation(move || {
+        // Blocks until the test has its answer, then says it starts on demand.
+        let _ = answered.lock().unwrap().recv();
+        app::ports::KeyringActivation::OnDemand
+    });
+    let started = Instant::now();
+    let said = within(
+        crate::ACTIVATION_LIMIT + SLACK,
+        Keyring::activation(&keyring),
+    )
+    .await;
+    assert_eq!(said, app::ports::KeyringActivation::Unknown);
+    assert!(started.elapsed() >= crate::ACTIVATION_LIMIT);
+    drop(answer);
+}
+
+/// A question the platform lost, as when it panicked, is unknown, never a
+/// panic of the page's request.
+#[tokio::test]
+async fn a_keyring_question_that_was_lost_is_unknown() {
+    let keyring = resolver(Duration::from_secs(1))
+        .with_activation(|| panic!("the platform's question was lost"));
+    assert_eq!(
+        within(SLACK, Keyring::activation(&keyring)).await,
+        app::ports::KeyringActivation::Unknown
+    );
+}
+
+/// The macOS keychain is there whenever a program asks for it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_macos_keychain_is_always_there_to_ask() {
+    assert_eq!(
+        crate::keyring_store::os_activation(),
+        app::ports::KeyringActivation::OnDemand
+    );
 }
 
 // The Secret Service's own answers, from a stand-in on a private bus.

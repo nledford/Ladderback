@@ -114,6 +114,10 @@ impl crate::Repositories for NoRepositories {
     ) -> Result<(), crate::RepositoriesError> {
         Err(crate::RepositoriesError::InvalidBody)
     }
+
+    async fn notes(&self) -> api::RepositoryNotesDto {
+        api::RepositoryNotesDto::default()
+    }
 }
 
 /// Does nothing: the checks never reach a route.
@@ -179,6 +183,13 @@ impl crate::Proposals for NoProposals {
     }
 
     async fn review(&self, _id: String) -> Result<api::ProposalReviewDto, crate::ProposalsError> {
+        Err(crate::ProposalsError::InvalidBody)
+    }
+
+    async fn forget_preview(
+        &self,
+        _id: String,
+    ) -> Result<api::ProposalForgetPreviewDto, crate::ProposalsError> {
         Err(crate::ProposalsError::InvalidBody)
     }
 

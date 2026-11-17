@@ -24,8 +24,9 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 
 use domain::maintenance::{
-    AdoptSelection, AdoptionRefusal, ForgetPreview, ForgetSelection, ManagedPlan, OrphanedGroup,
-    OtherHosts, Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
+    AdoptSelection, AdoptionRefusal, ForgetComparison, ForgetPreview, ForgetSelection, ForgetSide,
+    ManagedPlan, OrphanedGroup, OtherHosts, Ownership, Partition, SelectionToken, Snapshot,
+    UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -711,6 +712,75 @@ impl RunMaintenance {
         })
     }
 
+    /// What a forget would do to the repository `alias` under the
+    /// configuration `before` and under `after`, from one listing of it, as
+    /// a proposal's forget preview tells it (§16, decision 89, point 8). A
+    /// side under which this agent doesn't maintain the repository forgets
+    /// nothing and isn't evaluated; with neither, the repository isn't
+    /// read. A side whose forget a policy keeping nothing would refuse is
+    /// told as such, beside the other side. A read like
+    /// [`preview`](Self::preview): no I7 slot, nothing in the operation
+    /// log, nothing removed.
+    pub async fn compare_forget(
+        &self,
+        op: OperationId,
+        before: &AgentConfig,
+        after: &AgentConfig,
+        alias: &RepositoryAlias,
+    ) -> Result<ForgetComparison, MaintenanceError> {
+        let maintains = |config: &AgentConfig| {
+            config
+                .repository(alias)
+                .is_some_and(|entry| Ownership::owned_here(entry.maintenance))
+        };
+        let before_plans = maintains(before).then(|| plans_of(before, alias));
+        let after_plans = maintains(after).then(|| plans_of(after, alias));
+        // The repository is opened as the configuration a forget would
+        // then run under holds it.
+        let config = match (&before_plans, &after_plans) {
+            (None, None) => {
+                return Ok(ForgetComparison {
+                    before: ForgetSide::NotMaintained,
+                    after: ForgetSide::NotMaintained,
+                });
+            }
+            (_, Some(_)) => after,
+            (Some(_), None) => before,
+        };
+        let access = self.open(config, alias).await?;
+        // One listing, partitioned for each side's plans, then dropped
+        // before the retention reads.
+        let snapshots = self.listed(op, access.clone()).await?;
+        let partitioned = |plans: Vec<ManagedPlan>| {
+            let partition = ForgetSelection::partition(&snapshots, &self.agent, &plans);
+            (plans, partition)
+        };
+        let before_side = before_plans.map(partitioned);
+        let after_side = after_plans.map(partitioned);
+        drop(snapshots);
+        let mut opened = None;
+        let mut side = async |plans_side: Option<(Vec<ManagedPlan>, Partition)>| {
+            let Some((plans, partition)) = plans_side else {
+                return Ok(ForgetSide::NotMaintained);
+            };
+            // A policy keeping nothing refuses that side's forget, which
+            // then removes nothing; the other side is still told.
+            match self
+                .forget_over(op, &access, &mut opened, &plans, &partition)
+                .await
+            {
+                Ok(preview) => Ok(ForgetSide::Forgets(preview)),
+                Err(MaintenanceError::KeepsNothing { plan }) => {
+                    Ok(ForgetSide::KeepsNothing { plan })
+                }
+                Err(error) => Err(error),
+            }
+        };
+        let before = side(before_side).await?;
+        let after = side(after_side).await?;
+        Ok(ForgetComparison { before, after })
+    }
+
     /// The repository's snapshots grouped by who owns them (§7.3), as a
     /// read: every plan of this agent on the repository, the history no plan
     /// of this agent owns, and for each group of it the plans that could
@@ -862,6 +932,19 @@ impl RunMaintenance {
         ))
     }
 
+    /// The repository's snapshots, from one listing.
+    async fn listed(
+        &self,
+        op: OperationId,
+        access: RepositoryAccess,
+    ) -> Result<Vec<Snapshot>, MaintenanceError> {
+        Ok(list(self.engine.as_ref(), self.clock.as_ref(), op, access)
+            .await?
+            .iter()
+            .map(selected)
+            .collect())
+    }
+
     /// The repository's snapshots partitioned by who owns them, from one
     /// listing. The listing and the copies the partition is made from are
     /// dropped before this returns, so the long reads that follow (a plan's
@@ -872,11 +955,7 @@ impl RunMaintenance {
         access: RepositoryAccess,
         plans: &[ManagedPlan],
     ) -> Result<Partition, MaintenanceError> {
-        let snapshots: Vec<Snapshot> = list(self.engine.as_ref(), self.clock.as_ref(), op, access)
-            .await?
-            .iter()
-            .map(selected)
-            .collect();
+        let snapshots = self.listed(op, access).await?;
         Ok(ForgetSelection::partition(&snapshots, &self.agent, plans))
     }
 
@@ -892,9 +971,25 @@ impl RunMaintenance {
     ) -> Result<(Partition, ForgetPreview), MaintenanceError> {
         let plans = plans_of(config, alias);
         let partition = self.partitioned(op, access.clone(), &plans).await?;
+        let forget = self
+            .forget_over(op, access, &mut None, &plans, &partition)
+            .await?;
+        Ok((partition, forget))
+    }
+
+    /// What each of `plans`' policies would remove of its group in
+    /// `partition`. Retention opens the repository in process once, kept in
+    /// `opened` for the next evaluation.
+    async fn forget_over(
+        &self,
+        op: OperationId,
+        access: &RepositoryAccess,
+        opened: &mut Option<RepositoryAccess>,
+        plans: &[ManagedPlan],
+        partition: &Partition,
+    ) -> Result<ForgetPreview, MaintenanceError> {
         let mut removals = Vec::new();
-        let mut opened: Option<RepositoryAccess> = None;
-        for plan in &plans {
+        for plan in plans {
             let Some(group) = partition
                 .managed
                 .iter()
@@ -929,11 +1024,10 @@ impl RunMaintenance {
                     .map(|answer| answer.map_err(|error| retention_failed(error, &plan.plan))),
             )
             .await?;
-            opened = Some(at);
+            *opened = Some(at);
             removals.push((plan.plan.clone(), ids));
         }
-        let forget = ForgetPreview::new(&partition, removals);
-        Ok((partition, forget))
+        Ok(ForgetPreview::new(partition, removals))
     }
 
     /// The snapshots an adoption would rewrite, newest first, from one

@@ -18,13 +18,15 @@ use domain::planning::{AgentConfig, Maintenance, RepositoryConfig, RepositorySet
 use domain::secrets::{KeyringEntry, SecretRef, SecretValue};
 use domain::{OperationId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
 
+use api::{WarningCode, WarningDto};
 use app::fakes::{FakeSecrets, InMemoryConfigStore};
 use app::ports::{
     Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
-    KeyringError, OperationStore, RunningJob,
+    KeyringActivation, KeyringError, OperationStore, RunningJob,
 };
 use app::repositories::{
     ConnectRepository, InitOutcome, RepositoryError, SavedEntryError, SavedInit, TestRepository,
+    page_notes,
 };
 use app::secrets::ResolveRepository;
 
@@ -107,6 +109,8 @@ pub struct RepositoriesWorld {
     ended: Option<Vec<EngineEvent>>,
     /// The engine the last backup a scenario ran went through.
     runs: Option<Arc<Runs>>,
+    /// What the Repositories page noted, once it asked.
+    notes: Option<Vec<WarningDto>>,
 }
 
 impl Default for RepositoriesWorld {
@@ -136,6 +140,7 @@ impl Default for RepositoriesWorld {
             read: None,
             ended: None,
             runs: None,
+            notes: None,
         }
     }
 }
@@ -1299,4 +1304,89 @@ fn backup_failed_as_identified(agent: &mut super::Agent) {
             },
         }
     );
+}
+
+// ------------------------------------------------- the Repositories page's notes
+// (features/repositories/keyring_activation.feature)
+
+#[given("a repository whose password the keyring keeps")]
+async fn password_in_keyring(agent: &mut super::Agent) {
+    let settings = RepositorySettings {
+        password: SecretRef::Keyring(entry("ladderback/demo")),
+        ..agent.repositories.settings.clone()
+    };
+    configure_demo(agent, &settings).await;
+}
+
+#[given("a repository whose password the configuration file keeps")]
+async fn password_in_config(agent: &mut super::Agent) {
+    let settings = agent.repositories.settings.clone();
+    configure_demo(agent, &settings).await;
+}
+
+/// Configures `settings` as the repository `demo`.
+async fn configure_demo(agent: &mut super::Agent, settings: &RepositorySettings) {
+    agent
+        .repositories
+        .store
+        .save(&config_with("demo", settings))
+        .await
+        .expect("the configuration saves");
+}
+
+#[given("a keyring service that runs now and that nothing can start on demand")]
+fn keyring_running_only(agent: &mut super::Agent) {
+    agent
+        .repositories
+        .secrets
+        .set_keyring_activation(KeyringActivation::RunningOnly);
+}
+
+#[given("a keyring service that can be started on demand")]
+fn keyring_on_demand(agent: &mut super::Agent) {
+    agent
+        .repositories
+        .secrets
+        .set_keyring_activation(KeyringActivation::OnDemand);
+}
+
+#[given("a keyring service that can't be asked how it is started")]
+fn keyring_unanswered(agent: &mut super::Agent) {
+    agent
+        .repositories
+        .secrets
+        .set_keyring_activation(KeyringActivation::Unknown);
+}
+
+#[when("the Repositories page asks for its notes")]
+async fn page_asks_for_notes(agent: &mut super::Agent) {
+    let secrets = Arc::clone(&agent.repositories.secrets);
+    let config = agent
+        .repositories
+        .store
+        .load()
+        .await
+        .expect("the configuration loads");
+    agent.repositories.notes = Some(page_notes(&*secrets, &config).await);
+}
+
+fn notes(agent: &super::Agent) -> &[WarningDto] {
+    agent
+        .repositories
+        .notes
+        .as_deref()
+        .expect("the page asked for its notes")
+}
+
+#[then("the page notes that the keyring can't be started on demand")]
+fn notes_keyring_not_activatable(agent: &mut super::Agent) {
+    assert_eq!(
+        notes(agent),
+        [WarningDto::new(WarningCode::KeyringNotActivatable, [])]
+    );
+}
+
+#[then("the page notes nothing of the keyring")]
+fn notes_nothing(agent: &mut super::Agent) {
+    assert_eq!(notes(agent), []);
 }

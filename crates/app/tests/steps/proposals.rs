@@ -11,16 +11,20 @@ use std::sync::Arc;
 use api::{ProposalStatusDto, UiEvent};
 use app::fakes::{FakeChangeCodec, InMemoryConfigStore, InMemoryProposalStore, SeededRandom};
 use app::ports::{ConfigDrafts, ConfigStore, ProposalStore};
-use app::proposals::{ApprovalAsk, Made, ProposalError, ProposalPorts, Proposals, Review};
+use app::proposals::{
+    ApprovalAsk, Made, ProposalError, ProposalPorts, Proposals, RepositoryForget, Review,
+};
 use cucumber::{given, then, when};
 use domain::access::TOKEN_BYTES;
 use domain::access::api_token::{ApiTokenId, ApiTokenLabel};
+use domain::maintenance::{ForgetComparison, ForgetPreview, ForgetSide, PlanForget};
+use domain::planning::KeepCount;
 use domain::planning::{
     ChangeRefused, ConfigChange, ConfigRevision, HookEntry, MAX_PER_HOUR, Plan, Proposal,
     ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer, QUIET_AFTER_REJECTION,
     Rationale, Source, SummaryLine, TooSoon, short_proposal_id,
 };
-use domain::{SignedDuration, Timestamp};
+use domain::{OperationId, RepositoryAlias, SignedDuration, Timestamp};
 
 use super::Agent;
 use super::scheduler_steps::{RecordingEvents, plan_id, plan_named};
@@ -43,6 +47,12 @@ pub struct ProposalsWorld {
     approved: Option<Result<Proposal, ProposalError>>,
     /// What the person's last rejection came to.
     rejected: Option<Result<Proposal, ProposalError>>,
+    /// The configuration the proposals are checked against, when not the
+    /// scheduler world's: the forget preview's scenarios use the forget
+    /// world's, whose repository the scripted engine lists.
+    config: Option<Arc<InMemoryConfigStore>>,
+    /// What the person's last forget preview came to.
+    forget: Option<Result<Vec<RepositoryForget>, ProposalError>>,
 }
 
 impl Default for ProposalsWorld {
@@ -58,6 +68,8 @@ impl Default for ProposalsWorld {
             review: None,
             approved: None,
             rejected: None,
+            config: None,
+            forget: None,
         }
     }
 }
@@ -99,7 +111,7 @@ impl ProposalsWorld {
 /// loop reads, on the scenario's clock, with sign-in off. Built again for
 /// each step, as one daemon's: under the same revision key.
 pub(crate) fn proposals(agent: &Agent) -> Proposals {
-    let config = agent.scheduler.config();
+    let config = proposals_config(agent);
     Proposals::new(ProposalPorts {
         store: agent.proposals.store.clone(),
         codec: agent.proposals.codec.clone(),
@@ -114,6 +126,15 @@ pub(crate) fn proposals(agent: &Agent) -> Proposals {
             [5; domain::planning::REVISION_KEY_BYTES],
         )),
     })
+}
+
+/// The configuration the scenario's proposals are checked against.
+fn proposals_config(agent: &Agent) -> Arc<InMemoryConfigStore> {
+    agent
+        .proposals
+        .config
+        .clone()
+        .unwrap_or_else(|| agent.scheduler.config())
 }
 
 /// The AI agent `n`, by its own API token: 1 is the AI agent, 2 another.
@@ -143,7 +164,7 @@ async fn propose_with(
     changes: Vec<ConfigChange>,
     rationale: Rationale,
 ) -> Result<Made, ProposalError> {
-    let base = revision(&agent.scheduler.config()).await;
+    let base = revision(&proposals_config(agent)).await;
     proposals(agent)
         .propose(ai_agent(proposer), base, changes, rationale)
         .await
@@ -700,6 +721,244 @@ async fn has_proposed_removing(agent: &mut Agent, name: String, rationale: Strin
     let result = propose_with(agent, THE_AI_AGENT, changes, rationale).await;
     made(agent, result);
     agent.proposals.kept();
+}
+
+/// The plan `name` as the forget world's configuration holds it.
+async fn forget_plan(agent: &Agent, name: &str) -> Plan {
+    agent
+        .forget
+        .config()
+        .load()
+        .await
+        .expect("the configuration loads")
+        .plan(&plan_id(name))
+        .expect("the scenario gave the plan")
+        .clone()
+}
+
+/// The AI agent proposes `changes` to the forget world's configuration.
+async fn propose_to_the_forget_world(agent: &mut Agent, changes: Vec<ConfigChange>) {
+    agent.proposals.config = Some(agent.forget.config());
+    let result = propose_with(agent, THE_AI_AGENT, changes, Rationale::default()).await;
+    made(agent, result);
+    agent.proposals.kept();
+}
+
+fn keep_last(plan: &mut Plan, keep: i64) {
+    plan.retention.keep_last = Some(KeepCount::new(keep).expect("a count"));
+}
+
+#[given(expr = "an AI agent has proposed keeping the last {int} snapshot(s) of the plan {string}")]
+async fn has_proposed_keeping(agent: &mut Agent, keep: i64, name: String) {
+    let mut plan = forget_plan(agent, &name).await;
+    keep_last(&mut plan, keep);
+    propose_to_the_forget_world(agent, vec![ConfigChange::ChangePlan(plan)]).await;
+}
+
+#[given(
+    expr = "an AI agent has proposed adding the plan {string} keeping the last {int} snapshot(s)"
+)]
+async fn has_proposed_adding_keeping(agent: &mut Agent, name: String, keep: i64) {
+    let mut plan = Plan::new(
+        plan_id(&name),
+        RepositoryAlias::parse("demo").expect("an alias"),
+        vec![Source::parse(&format!("/home/demo/{name}")).expect("a source")],
+    );
+    keep_last(&mut plan, keep);
+    propose_to_the_forget_world(agent, vec![ConfigChange::AddPlan(plan)]).await;
+}
+
+#[given(expr = "an AI agent has proposed removing the plan {string}")]
+async fn has_proposed_removing_alone(agent: &mut Agent, name: String) {
+    propose_to_the_forget_world(agent, vec![ConfigChange::RemovePlan(plan_id(&name))]).await;
+}
+
+#[given(expr = "an AI agent has proposed giving the plan {string} the label {string}")]
+async fn has_proposed_labelling(agent: &mut Agent, name: String, label: String) {
+    let mut plan = forget_plan(agent, &name).await;
+    plan.label = Some(label);
+    propose_to_the_forget_world(agent, vec![ConfigChange::ChangePlan(plan)]).await;
+}
+
+#[when("a person previews what the proposal would forget")]
+async fn previews_forget(agent: &mut Agent) {
+    let id = agent.proposals.kept().id.clone();
+    let maintenance = super::forget_steps::use_case(agent);
+    let op = OperationId::from_uuid(domain::Uuid::from_u128(
+        0x018f_0000_0000_7000_8000_0000_0000_0f0f,
+    ));
+    agent.proposals.forget = Some(proposals(agent).forget_preview(&id, op, &maintenance).await);
+}
+
+/// The forget preview of the one repository the proposal touches, which
+/// was read.
+fn compared(agent: &Agent) -> &ForgetComparison {
+    let previewed = match &agent.proposals.forget {
+        Some(Ok(previewed)) => previewed,
+        other => panic!("the forget preview was answered, not {other:?}"),
+    };
+    let [only] = previewed.as_slice() else {
+        panic!("the preview covers the one repository: {previewed:?}");
+    };
+    match &only.forget {
+        Ok(comparison) => comparison,
+        Err(error) => panic!("the repository was read, not refused: {error:?}"),
+    }
+}
+
+/// What `side` of the comparison removes of the plan `name`, and how many
+/// snapshots it owns there; none of a plan with no history on that side.
+fn removes_of(side: Option<&ForgetPreview>, name: &str) -> Option<(usize, usize)> {
+    side.expect("this agent maintains the repository")
+        .plans
+        .iter()
+        .find(|plan| plan.plan.as_str() == name)
+        .map(|plan| (plan.remove.len(), plan.total))
+}
+
+fn side<'a>(comparison: &'a ForgetComparison, when: &str) -> Option<&'a ForgetPreview> {
+    side_named(comparison, when).preview()
+}
+
+fn side_named<'a>(comparison: &'a ForgetComparison, when: &str) -> &'a ForgetSide {
+    match when {
+        "before" => &comparison.before,
+        "after" => &comparison.after,
+        other => panic!("before or after, not {other}"),
+    }
+}
+
+#[then(
+    regex = r#"^(before|after) the proposal, a forget would be refused because the policy of the plan "([^"]*)" keeps nothing$"#
+)]
+fn would_be_refused(agent: &mut Agent, when: String, name: String) {
+    let comparison = compared(agent);
+    assert_eq!(
+        side_named(comparison, &when),
+        &ForgetSide::KeepsNothing {
+            plan: plan_id(&name)
+        },
+        "{comparison:?}"
+    );
+}
+
+#[then(
+    regex = r#"^(before|after) the proposal, retention would forget (\d+) of the (\d+) snapshots of the plan "([^"]*)"$"#
+)]
+fn would_forget(agent: &mut Agent, when: String, remove: usize, total: usize, name: String) {
+    let comparison = compared(agent);
+    assert_eq!(
+        removes_of(side(comparison, &when), &name),
+        Some((remove, total)),
+        "{comparison:?}"
+    );
+}
+
+#[then(
+    regex = r#"^(before|after) the proposal, retention would forget nothing of the plan "([^"]*)"$"#
+)]
+fn would_forget_nothing(agent: &mut Agent, when: String, name: String) {
+    let comparison = compared(agent);
+    let removes = removes_of(side(comparison, &when), &name);
+    assert!(
+        removes.is_none_or(|(remove, _)| remove == 0),
+        "{comparison:?}"
+    );
+}
+
+#[then(
+    expr = "after the proposal, the repository leaves alone {int} group(s) of orphaned history holding {int} snapshots"
+)]
+fn leaves_orphaned_alone_after(agent: &mut Agent, groups: usize, snapshots: usize) {
+    let after = compared(agent)
+        .after
+        .preview()
+        .expect("this agent maintains the repository");
+    assert_eq!(
+        (
+            after.left_alone.orphaned.groups,
+            after.left_alone.orphaned.snapshots
+        ),
+        (groups, snapshots)
+    );
+}
+
+/// How many snapshots of the plan `name` the difference `planned` names.
+fn of_the_plan(planned: &[PlanForget], name: &str) -> usize {
+    planned
+        .iter()
+        .filter(|plan| plan.plan.as_str() == name)
+        .map(|plan| plan.remove.len())
+        .sum()
+}
+
+#[then(
+    expr = "the proposal would forget {int} snapshots of the plan {string} that nothing forgets now"
+)]
+fn forgets_more(agent: &mut Agent, count: usize, name: String) {
+    let comparison = compared(agent);
+    assert_eq!(of_the_plan(&comparison.forgets_more(), &name), count);
+    assert!(comparison.forgets_less().is_empty(), "{comparison:?}");
+}
+
+#[then(expr = "the proposal would no longer forget {int} snapshots of the plan {string}")]
+fn forgets_less(agent: &mut Agent, count: usize, name: String) {
+    let comparison = compared(agent);
+    assert_eq!(of_the_plan(&comparison.forgets_less(), &name), count);
+    assert!(comparison.forgets_more().is_empty(), "{comparison:?}");
+}
+
+#[then(expr = "the preview covers the repository {string}")]
+fn covers(agent: &mut Agent, repository: String) {
+    let Some(Ok(previewed)) = &agent.proposals.forget else {
+        panic!(
+            "the forget preview was answered: {:?}",
+            agent.proposals.forget
+        );
+    };
+    let covered: Vec<&str> = previewed
+        .iter()
+        .map(|one| one.repository.as_str())
+        .collect();
+    assert_eq!(covered, [repository.as_str()]);
+}
+
+#[then("the proposal changes nothing retention forgets")]
+fn changes_nothing(agent: &mut Agent) {
+    let comparison = compared(agent);
+    assert!(comparison.forgets_more().is_empty(), "{comparison:?}");
+    assert!(comparison.forgets_less().is_empty(), "{comparison:?}");
+}
+
+#[then(
+    expr = "the preview says this agent doesn't maintain the repository {string}, so its retention forgets nothing there before or after the proposal"
+)]
+fn not_maintained_here(agent: &mut Agent, repository: String) {
+    covers(agent, repository);
+    assert_eq!(
+        compared(agent),
+        &ForgetComparison {
+            before: ForgetSide::NotMaintained,
+            after: ForgetSide::NotMaintained
+        }
+    );
+}
+
+#[then("the engine was never asked to list the repository")]
+fn never_listed(agent: &mut Agent) {
+    assert!(
+        agent.forget.jobs().is_empty(),
+        "the engine was given {:?}",
+        agent.forget.jobs()
+    );
+}
+
+#[then("the forget preview is refused because the proposal is withdrawn")]
+fn preview_refused_withdrawn(agent: &mut Agent) {
+    assert_eq!(
+        agent.proposals.forget,
+        Some(Err(ProposalError::NotPending(ProposalStatus::Withdrawn)))
+    );
 }
 
 #[then(expr = "the summary says the proposal removes the plan {string}")]

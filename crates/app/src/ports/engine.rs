@@ -257,6 +257,23 @@ impl Job {
         }
     }
 
+    /// The alias of the repository the job reads, as the operation log keeps
+    /// it from the queued row on, so the Operations page names the run by it
+    /// and a later rename leaves the row as it was (§16, decision 52, #893):
+    /// a restore's, made from a configuration entry. `None` for every other
+    /// job: a maintenance run and a download write their own, a backup's row
+    /// is named by its plan, and a dry run is never logged.
+    pub fn logged_alias(&self) -> Option<RepositoryAlias> {
+        match self {
+            Self::Restore(job) => job
+                .repository
+                .entry
+                .as_ref()
+                .map(|saved| saved.alias.clone()),
+            _ => None,
+        }
+    }
+
     /// What the job works on: a backup's plan, and the repository of any job
     /// that opens one whose ID is already known.
     pub fn target(&self) -> Target {

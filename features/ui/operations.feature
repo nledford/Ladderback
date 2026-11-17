@@ -1,14 +1,15 @@
 @ui
 Feature: Each row of the Operations page names its operation and says what it did
   The Operations page lists the operations of this agent: the backups of its
-  plans and the maintenance of its repositories, a forget, an adoption, a
-  prune and a check. A backup's row is named by its plan, and a maintenance
-  row by what ran and the repository it ran on, under the alias this agent
-  gave the repository. Once an operation has succeeded, its row lists what the
-  operation recorded: a backup its snapshot, how many files and how much data
-  it went through, what it added and how long it took, and a check what it
-  found, and a row that was open as its run ended says it without a reload,
-  even when the page lost its events stream on the way.
+  plans, the maintenance of its repositories, a forget, an adoption, a prune
+  and a check, and the restores and downloads read out of them. A backup's
+  row is named by its plan, and any other row by what ran and the repository
+  it ran on or read, under the alias this agent gave the repository. Once an
+  operation has succeeded, its row lists what the operation recorded: a
+  backup its snapshot, how many files and how much data it went through, what
+  it added and how long it took, and a check what it found, and a row that
+  was open as its run ended says it without a reload, even when the page lost
+  its events stream on the way.
   The journeys run against a daemon this run started with a demo plan and a
   scratch repository, so every row they read is a real operation, except the
   ones that watch a run end: there the journey plays the daemon, so the end
@@ -22,6 +23,43 @@ Feature: Each row of the Operations page names its operation and says what it di
     Then the table "Operations" has the row "Check of demo"
     And the row "Check of demo" of the table "Operations" shows "Succeeded" in its "Status" column
     And the row "Check of demo" of the table "Operations" lists "found nothing wrong" in its "Result" column
+    And the page has no accessibility violations
+
+  Scenario: A restore's row is named for the restore and the repository it read
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    When I open the newest snapshot of the plan "home"
+    And I skip to the content
+    And I press Tab until focus is on a tree item
+    And I press ArrowRight until focus is on the tree item "demo-1.txt"
+    And I press Tab until focus is on the button "Restore demo-1.txt"
+    And I press Enter
+    And I press Tab until focus is on the textbox "Snapshot ID"
+    And I type the newest snapshot's short ID of the plan "home"
+    And I press Tab until focus is on the button "Restore"
+    And I press Enter
+    Then the polite region comes to contain "Restore of demo-1.txt finished."
+    When I open the address "/operations"
+    Then the table "Operations" has the row "Restore from demo"
+    And the row "Restore from demo" of the table "Operations" shows "Succeeded" in its "Status" column
+    And the page has no accessibility violations
+
+  Scenario: A download's row is named for the download and the repository it read
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    When I open the newest snapshot of the plan "home"
+    And I skip to the content
+    And I press Tab until focus is on a tree item
+    And I press ArrowRight until focus is on the tree item "demo-1.txt"
+    And I press Tab until focus is on the button "Download demo-1.txt"
+    And I press Enter
+    And I press Tab until focus is on the textbox "Snapshot ID"
+    And I type the newest snapshot's short ID of the plan "home"
+    And I press Tab until focus is on the button "Download"
+    And I press Enter
+    Then the browser saves "demo-1.txt" holding what the plan backed up as "demo-1.txt"
+    When I open the address "/operations"
+    Then the table "Operations" has the row "Download from demo"
     And the page has no accessibility violations
 
   Scenario: A finished backup's row shows its snapshot and what it backed up

@@ -22,7 +22,9 @@ use dbus::message::{MatchRule, Message};
 use dbus::strings::{ErrorName, Path};
 use tempfile::TempDir;
 
-use crate::keyring_store::{Failure, os_store};
+use app::ports::KeyringActivation;
+
+use crate::keyring_store::{Failure, activation_on, os_activation, os_store};
 
 /// Set in the copy, to what it does: the state of the stand-in's keyring, or
 /// the step of the store's call.
@@ -33,6 +35,8 @@ const KEEPS: &str =
     "tests::secret_service::a_secret_set_in_the_keyring_reads_back_until_it_is_deleted";
 const NO_SERVICE: &str =
     "tests::secret_service::a_session_bus_with_no_secret_service_on_it_is_no_keyring_service";
+const ASKS_THE_SESSION: &str =
+    "tests::secret_service::the_session_bus_is_the_one_asked_how_the_keyring_is_started";
 
 /// Where the stand-in keeps its one collection, which the alias `default`
 /// names.
@@ -131,6 +135,105 @@ fn a_session_bus_with_no_secret_service_on_it_is_no_keyring_service() {
         testkit::skip!("no dbus-daemon to run a private bus with");
     };
     run_in_copy(NO_SERVICE, &bus.address, "no service");
+}
+
+/// How the Secret Service is started is what the session bus says: on
+/// demand when an activation file names it, running or not; running only
+/// when it owns its name and no file names it, the one answer the
+/// Repositories page notes (#923); absent when neither.
+#[test]
+fn how_the_keyring_is_started_is_what_the_session_bus_says() {
+    if PrivateBus::start().is_none() {
+        testkit::skip!("no dbus-daemon to run a private bus with");
+    }
+    for (activatable, running, said) in [
+        (true, true, KeyringActivation::OnDemand),
+        (true, false, KeyringActivation::OnDemand),
+        (false, true, KeyringActivation::RunningOnly),
+        (false, false, KeyringActivation::Absent),
+    ] {
+        let bus = PrivateBus::start_with(Setup {
+            activatable,
+            denied: &[],
+        })
+        .unwrap();
+        let service = running.then(|| {
+            StandIn::serve(
+                &bus.address,
+                Arc::new(Mutex::new(Held::new(Keyring::Unlocked))),
+            )
+        });
+        assert_eq!(
+            activation_on(&connect(&bus.address)),
+            said,
+            "activatable: {activatable}, running: {running}"
+        );
+        if let Some(service) = service {
+            service.stop();
+        }
+    }
+}
+
+/// A session bus that refuses either question leaves the answer unknown,
+/// which the Repositories page notes nothing of: never running only.
+#[test]
+fn a_session_bus_that_refuses_the_question_leaves_it_unknown() {
+    if PrivateBus::start().is_none() {
+        testkit::skip!("no dbus-daemon to run a private bus with");
+    }
+    for denied in [&["ListActivatableNames"], &["NameHasOwner"]] {
+        let bus = PrivateBus::start_with(Setup {
+            activatable: false,
+            denied,
+        })
+        .unwrap();
+        let service = StandIn::serve(
+            &bus.address,
+            Arc::new(Mutex::new(Held::new(Keyring::Unlocked))),
+        );
+        assert_eq!(
+            activation_on(&connect(&bus.address)),
+            KeyringActivation::Unknown,
+            "{denied:?} refused"
+        );
+        service.stop();
+    }
+}
+
+/// The session's own bus is the one asked, as `DBUS_SESSION_BUS_ADDRESS`
+/// names it, and a session with no bus there leaves the answer unknown.
+#[test]
+fn the_session_bus_is_the_one_asked_how_the_keyring_is_started() {
+    if let Some(expected) = std::env::var_os(IN_COPY) {
+        let said = if expected == "running only" {
+            KeyringActivation::RunningOnly
+        } else {
+            KeyringActivation::Unknown
+        };
+        assert_eq!(os_activation(), said);
+        return;
+    }
+    let Some(bus) = PrivateBus::start() else {
+        testkit::skip!("no dbus-daemon to run a private bus with");
+    };
+    let service = StandIn::serve(
+        &bus.address,
+        Arc::new(Mutex::new(Held::new(Keyring::Unlocked))),
+    );
+    run_in_copy(ASKS_THE_SESSION, &bus.address, "running only");
+    service.stop();
+    let nowhere = format!(
+        "unix:path={}",
+        bus._directory.path().join("no-bus").display()
+    );
+    run_in_copy(ASKS_THE_SESSION, &nowhere, "no bus");
+}
+
+/// A connection of its own to the bus at `address`.
+fn connect(address: &str) -> Connection {
+    let mut channel = Channel::open_private(address).unwrap();
+    channel.register().unwrap();
+    Connection::from(channel)
 }
 
 /// The stand-in's keyring.
@@ -253,9 +356,36 @@ struct PrivateBus {
 impl PrivateBus {
     /// `None` when this machine has no `dbus-daemon`.
     fn start() -> Option<Self> {
+        Self::start_with(Setup {
+            activatable: false,
+            denied: &[],
+        })
+    }
+
+    /// As `start`, set up as `setup` says.
+    fn start_with(setup: Setup) -> Option<Self> {
         let directory = TempDir::new().unwrap();
         let config = directory.path().join("bus.conf");
         let socket = directory.path().join("bus");
+        let services = directory.path().join("services");
+        fs::create_dir(&services).unwrap();
+        if setup.activatable {
+            fs::write(
+                services.join("org.freedesktop.secrets.service"),
+                "[D-BUS Service]\nName=org.freedesktop.secrets\nExec=/bin/false\n",
+            )
+            .unwrap();
+        }
+        let denied: String = setup
+            .denied
+            .iter()
+            .map(|member| {
+                format!(
+                    r#"    <deny send_destination="org.freedesktop.DBus" send_interface="org.freedesktop.DBus" send_member="{member}"/>
+"#
+                )
+            })
+            .collect();
         // dbus-daemon refuses a message no rule allows to be sent or
         // received, even the bus's own reply to a client's `Hello`.
         fs::write(
@@ -267,14 +397,16 @@ impl PrivateBus {
   <type>session</type>
   <listen>unix:path={}</listen>
   <auth>EXTERNAL</auth>
+  <servicedir>{}</servicedir>
   <policy context="default">
     <allow send_destination="*"/>
     <allow receive_sender="*"/>
     <allow own="*"/>
-  </policy>
+{denied}  </policy>
 </busconfig>
 "#,
-                socket.display()
+                socket.display(),
+                services.display()
             ),
         )
         .unwrap();
@@ -309,6 +441,14 @@ impl Drop for PrivateBus {
         let _ = self.daemon.kill();
         let _ = self.daemon.wait();
     }
+}
+
+/// How a private bus is set up.
+struct Setup {
+    /// An activation file names the Secret Service.
+    activatable: bool,
+    /// The methods of the bus itself that it refuses to answer.
+    denied: &'static [&'static str],
 }
 
 /// A Secret Service of one collection, which keeps the items created in it
