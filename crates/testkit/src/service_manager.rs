@@ -17,10 +17,11 @@
 //! it had ([`FakeServiceManagers::keep_process_on_restart`]). Told to, the
 //! `launchctl` keeps an agent it booted out for a while, as the real one does
 //! while the agent's program is still stopping
-//! ([`FakeServiceManagers::stop_slowly`]), the `systemctl` takes a while to
-//! return from a call that stops the unit, as the real one waits for the stop
-//! ([`FakeServiceManagers::stop_taking`]), and the `loginctl` says the user
-//! lingers ([`FakeServiceManagers::linger`]) or fails
+//! ([`FakeServiceManagers::stop_slowly`]), or stops answering once it has
+//! booted one out ([`FakeServiceManagers::refuse_after_bootout`]), the
+//! `systemctl` takes a while to return from a call that stops the unit, as the
+//! real one waits for the stop ([`FakeServiceManagers::stop_taking`]), and the
+//! `loginctl` says the user lingers ([`FakeServiceManagers::linger`]) or fails
 //! ([`FakeServiceManagers::refuse_linger_check`]).
 
 use std::fs;
@@ -105,7 +106,9 @@ const LAUNCHCTL: &str = r#"case "$1" in
       /bin/cp "$state/stop-slowly" "$state/stopping-${2##*/}"
     else
       /bin/rm -f "$state/runs-${2##*/}"
-    fi ;;
+    fi
+    # Armed as this call ends, so the refusal reaches only the calls after it.
+    [ ! -f "$state/refusal-after-bootout" ] || /bin/mv "$state/refusal-after-bootout" "$state/refusal" ;;
   *) echo "unknown command $1" >&2; exit 64 ;;
 esac
 "#;
@@ -240,6 +243,23 @@ impl FakeServiceManagers {
         fs::write(self.state().join("refusal-code"), format!("{code}\n"))
             .expect("the refusal's code");
         fs::write(self.state().join("refusal"), format!("{words}\n")).expect("the refusal");
+    }
+
+    /// Makes every call after the next `launchctl bootout` that boots an
+    /// agent out fail with exit code 1, saying `words` on its stderr, as a
+    /// launchd that stops answering once it has been told to boot the agent
+    /// out. The `bootout` itself answers as before.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn refuse_after_bootout(&self, words: &str) {
+        fs::write(self.state().join("refusal-code"), "1\n").expect("the refusal's code");
+        fs::write(
+            self.state().join("refusal-after-bootout"),
+            format!("{words}\n"),
+        )
+        .expect("the refusal after the boot-out");
     }
 
     /// Makes every call from now on hang for a minute.
