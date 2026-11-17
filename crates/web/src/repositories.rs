@@ -220,6 +220,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
         | ErrorCode::SecretKeyringUnavailable
+        | ErrorCode::SecretKeyringLocked
         | ErrorCode::SecretNotText
         | ErrorCode::SecretTooLarge
         | ErrorCode::SecretCommandFailed

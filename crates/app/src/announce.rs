@@ -195,7 +195,9 @@ pub fn refused(
             from(source),
             detail.clone(),
         ),
-        R::SecretKeyringLocked { .. } => todo!(),
+        R::SecretKeyringLocked { source, detail } => {
+            (ErrorCode::SecretKeyringLocked, from(source), detail.clone())
+        }
         R::SecretNotText { source } => (ErrorCode::SecretNotText, from(source), None),
         R::SecretTooLarge { source, limit } => (
             ErrorCode::SecretTooLarge,

@@ -79,7 +79,7 @@ impl SettingRefusal {
             Self::SecretMissing { .. } => "secret-missing",
             Self::SecretUnreadable { .. } => "secret-unreadable",
             Self::SecretKeyringUnavailable { .. } => "secret-keyring-unavailable",
-            Self::SecretKeyringLocked { .. } => todo!(),
+            Self::SecretKeyringLocked { .. } => "secret-keyring-locked",
             Self::SecretNotText { .. } => "secret-not-text",
             Self::SecretTooLarge { .. } => "secret-too-large",
             Self::SecretCommandFailed { .. } => "secret-command-failed",

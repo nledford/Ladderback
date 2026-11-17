@@ -214,11 +214,14 @@ impl SystemSecrets {
                 detail,
                 cause: KeyringCause::NoService,
             })),
+            Err(Failure::Locked(detail)) => Err(fail(Problem::KeyringUnavailable {
+                detail,
+                cause: KeyringCause::Locked,
+            })),
             Err(Failure::Refused(detail)) => Err(fail(Problem::KeyringUnavailable {
                 detail,
                 cause: KeyringCause::Refused,
             })),
-            Err(Failure::Locked(_)) => todo!(),
         }
     }
 

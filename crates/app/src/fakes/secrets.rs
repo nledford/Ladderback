@@ -415,7 +415,7 @@ fn keyring_unavailable(state: &State) -> Option<(&'static str, KeyringCause)> {
     if state.no_keyring_service || not_started {
         Some(("no session bus", KeyringCause::NoService))
     } else if state.keyring_locked {
-        Some(("the keyring is locked", KeyringCause::Refused))
+        Some(("the keyring is locked", KeyringCause::Locked))
     } else if state.unlock_prompt_dismissed {
         Some(("the unlock prompt was dismissed", KeyringCause::Refused))
     } else {
