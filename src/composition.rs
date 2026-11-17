@@ -650,6 +650,7 @@ pub(crate) async fn daemon(
     daemon.state.proposals = Arc::new(proposals::ProposalService::new(
         &daemon.background.proposals,
         &daemon.state.sign_in,
+        daemon.background.runner.maintenance(),
     ));
     // So is a download's, its tickets drawn from the daemon's one source.
     daemon.state.downloads = Arc::new(downloads::DownloadService::new(
@@ -933,8 +934,11 @@ async fn state_over(
         app::plans::EditPlans::new(Arc::clone(&config), writes, changed)
             .with_proposals(Arc::new(proposal_parts.proposals())),
     ));
-    let proposals: Arc<dyn http_adapter::Proposals> =
-        Arc::new(proposals::ProposalService::new(&proposal_parts, &sign_in));
+    let proposals: Arc<dyn http_adapter::Proposals> = Arc::new(proposals::ProposalService::new(
+        &proposal_parts,
+        &sign_in,
+        runner.maintenance(),
+    ));
     let profiles: Arc<dyn http_adapter::Profiles> = Arc::new(profiles::ProfileService::new(
         Arc::clone(&config),
         config_file,

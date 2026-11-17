@@ -7,8 +7,8 @@ use jiff::{SignedDuration, Timestamp};
 use subtle::ConstantTimeEq as _;
 
 use super::{ConfigChange, ConfigRevision, Proposal, ProposalId, sha256_hex, sha256_hex_of};
-use crate::PlanId;
 use crate::planning::{AgentConfig, Plan, Source};
+use crate::{PlanId, RepositoryAlias};
 
 /// The most proposals one proposer makes in [`RATE_WINDOW`].
 pub const MAX_PER_HOUR: usize = 30;
@@ -379,6 +379,31 @@ impl Proposal {
             }
         }
         false
+    }
+
+    /// The repositories its changes touch, which its forget preview covers
+    /// (decision 89, point 8): the repository of each plan a change adds,
+    /// changes or removes, as `config` holds it and as the change makes it,
+    /// in the order first named, each once. A plan an earlier change moved
+    /// is named in both its repositories already, so each change is read
+    /// against `config` itself.
+    pub fn repositories(&self, config: &AgentConfig) -> Vec<RepositoryAlias> {
+        let mut named: Vec<RepositoryAlias> = Vec::new();
+        for change in &self.changes {
+            let (id, to) = match change {
+                ConfigChange::AddPlan(plan) | ConfigChange::ChangePlan(plan) => {
+                    (&plan.id, Some(&plan.repository))
+                }
+                ConfigChange::RemovePlan(id) => (id, None),
+            };
+            let from = config.plan(id).map(|plan| &plan.repository);
+            for alias in from.into_iter().chain(to) {
+                if !named.contains(alias) {
+                    named.push(alias.clone());
+                }
+            }
+        }
+        named
     }
 }
 
