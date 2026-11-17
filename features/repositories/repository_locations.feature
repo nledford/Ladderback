@@ -631,7 +631,8 @@ Feature: A repository reached at several locations
     Scenario: The Repositories page lists the locations and tests each
       When I open the Repositories page
       Then the repository "nas" lists the location "lan" first and the location "public" second
-      When I press "Test" for the repository "nas"
+      When I skip to the content
+      And I press "Test" for the repository "nas"
       Then each location shows whether it answers
 
     @ui

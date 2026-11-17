@@ -38,6 +38,7 @@ Feature: Pending changes page
   Scenario: A proposal that removes a plan is only rejected, with a reason for its change
     Given a demo plan "demo-home" with a scratch repository, and a proposal to remove it
     When I open the address "/proposals"
+    And I skip to the content
     And I press Tab until focus is on the proposal's Review button
     And I press Enter
     Then focus is on the proposal's heading

@@ -20,6 +20,7 @@ Feature: A running operation's progress bar can be reached by keyboard and never
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
     And the daemon reports that the backup of "demo-home" is backing up, 2 GiB of 20 GiB done
+    And I skip to the content
     And I press Tab until focus is on the progressbar "Backup progress of demo-home"
     Then the progress bar "Backup progress of demo-home" reads "Backing up… 10%, 2 GiB of 20 GiB"
     When the page's clock moves on 60 seconds
@@ -74,6 +75,7 @@ Feature: A running operation's progress bar can be reached by keyboard and never
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
     And the daemon reports that the backup of "demo-home" is backing up, 2 GiB of 20 GiB done
+    And I skip to the content
     And I press Tab until focus is on the progressbar "Backup progress of demo-home"
     And the daemon reports that the backup of "demo-home" has succeeded with 3 files
     Then the table "Operations" shows no progress bar
@@ -105,6 +107,7 @@ Feature: A running operation's progress bar can be reached by keyboard and never
     When I open the address "/operations?locale=<locale>"
     And the page's one table has 1 row
     And the daemon reports that the backup of "demo-home" is backing up, 2 GiB of 20 GiB done
+    And I skip to the content
     And I press Tab until focus is on the page's one progress bar
     Then the page's one progress bar shows 10 percent
     And the value text of the page's one progress bar is transformed

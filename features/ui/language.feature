@@ -53,6 +53,7 @@ Feature: Choosing the language of the web UI
 
   Scenario: A language chosen by keyboard alone shows the page in it, now and after a reload
     When I open the address "/settings"
+    And I skip to the content
     And I press Tab until focus is on the radio "The browser's languages"
     And I press the down arrow until focus is on the radio "Ǝuƃʅısɥ"
     Then the radio "Ǝuƃʅısɥ" of the group "Show Ladderback in" is checked
@@ -69,6 +70,7 @@ Feature: Choosing the language of the web UI
   Scenario: Saving a language shows Settings again with focus on the Language heading, not at the top
     Given the language chosen in this browser is "ar-XB"
     When I open the address "/settings"
+    And I skip to the content
     And I press Tab until focus is on the radio "Ǝuƃʅısɥ"
     And I press the up arrow until focus is on the radio "English"
     And I press Tab
@@ -102,7 +104,8 @@ Feature: Choosing the language of the web UI
     Given the language chosen in this browser is "en-US"
     When I open the address "/settings"
     Then the radio "English" of the group "Show Ladderback in" is checked
-    When I press Tab until focus is on the radio "English"
+    When I skip to the content
+    And I press Tab until focus is on the radio "English"
     And I press the up arrow until focus is on the radio "The browser's languages"
     And I press Tab until focus is on the button "Save the language"
     And I press Enter, and the page loads again
@@ -123,6 +126,7 @@ Feature: Choosing the language of the web UI
   Scenario: A browser that keeps nothing says so, and the page stays as it was
     Given this browser keeps nothing a page stores
     When I open the address "/settings"
+    And I skip to the content
     And I press Tab until focus is on the radio "The browser's languages"
     And I press the down arrow until focus is on the radio "Ǝuƃʅısɥ"
     And I press Tab until focus is on the button "Save the language"

@@ -83,6 +83,7 @@ Feature: Restarting Ladderback from Settings
   Scenario: Restarting from Settings by keyboard alone says Ladderback is restarting
     Given a daemon run by a service manager
     When I open the address "/settings"
+    And I skip to the content
     And I press Tab until focus is on the button "Restart Ladderback"
     And I press Enter
     Then the dialog "Restart Ladderback?" opens with focus inside it

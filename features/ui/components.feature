@@ -45,6 +45,7 @@ Feature: The shared components in the gallery
 
   Scenario: A dialog opens from a button, traps focus, closes on Escape and returns focus
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the demo dialog"
     And I press Enter
     Then focus is inside the dialog "Demo dialog"
@@ -56,6 +57,7 @@ Feature: The shared components in the gallery
 
   Scenario: The step-up field takes a password from a password manager or paste
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the demo step-up"
     And I press Enter
     Then focus is inside the dialog "Demo step-up"
@@ -67,6 +69,7 @@ Feature: The shared components in the gallery
 
   Scenario: A password shown in the step-up field is hidden again when its dialog is opened again
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the demo step-up"
     And I press Enter
     And I press Tab until focus is on the textbox "Admin password"
@@ -86,6 +89,7 @@ Feature: The shared components in the gallery
   Scenario: The step-up field shows a short ID to copy and takes it back by paste
     Given the page may use the clipboard
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the demo short-ID step-up"
     And I press Enter
     Then focus is inside the dialog "Demo short-ID step-up"
@@ -190,6 +194,7 @@ Feature: The shared components in the gallery
 
   Scenario: A checkbox turns on and off by keyboard and is described by its hint
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the checkbox "Send a demo notification"
     Then the checkbox "Send a demo notification" is not checked
     And the checkbox "Send a demo notification" is described by "A demo choice: turning it on changes nothing."
@@ -200,6 +205,7 @@ Feature: The shared components in the gallery
 
   Scenario: A radio group is one stop for Tab, which lands on the choice made, and the arrow keys choose within it
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the radio "Every week"
     Then the radio "Every week" of the group "Demo check frequency" is checked
     And the group "Demo check frequency" is described by "A demo choice: choosing one changes nothing."
@@ -224,6 +230,7 @@ Feature: The shared components in the gallery
   Scenario: The progress bar is reached by keyboard and its value changes without any announcement
     Given the page's clock can be moved on
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the progressbar "Demo backup progress"
     Then the progress bar "Demo backup progress" reads "Backing up… 40%, 4 GiB of 10 GiB"
     When I press Tab until focus is on the button "Advance the demo progress"
@@ -245,6 +252,7 @@ Feature: The shared components in the gallery
 
   Scenario: A toast appears and is announced politely, and its going is not announced
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Save the demo settings"
     And I press Enter
     Then a toast reads "Settings saved."
@@ -254,6 +262,7 @@ Feature: The shared components in the gallery
 
   Scenario: The pause control holds the demo's updates and says once what changed when it resumes
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Pause the demo updates"
     Then the button "Pause the demo updates" is not pressed
     And the button "Pause the demo updates" has no description
@@ -277,6 +286,7 @@ Feature: The shared components in the gallery
 
   Scenario: A message nobody asked for waits while updates are paused and is said with the resume, once
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Pause the demo updates"
     And I press Enter
     And the polite region reads "Live updates are paused."
@@ -290,6 +300,7 @@ Feature: The shared components in the gallery
 
   Scenario: A finished run is said at once while updates are not paused
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Finish a demo run"
     And I press Enter
     Then the polite region reads "Backup finished."
@@ -297,6 +308,7 @@ Feature: The shared components in the gallery
 
   Scenario: The tree is one stop for Tab, and the arrow keys, Home and End move within it
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     Then the tree "Demo snapshot" has one tab stop
     And the tree item "documents" is item 1 of 10 at level 1
@@ -315,6 +327,7 @@ Feature: The shared components in the gallery
 
   Scenario: Right opens a folder, reading it as it opens, and Left closes it
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     Then the tree item "documents" is collapsed
     When I press ArrowRight
@@ -333,6 +346,7 @@ Feature: The shared components in the gallery
 
   Scenario: A folder holding nothing says it is empty
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     And I press ArrowDown
     And I press ArrowRight
@@ -341,6 +355,7 @@ Feature: The shared components in the gallery
 
   Scenario: A folder read in pages ends in a row that reads the next page, and focus moves to what it read
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     And I type "m" in the tree
     And I press ArrowRight
@@ -353,6 +368,7 @@ Feature: The shared components in the gallery
 
   Scenario: A folder still being read is marked busy
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     And I type "s" in the tree
     And I press ArrowRight
@@ -361,6 +377,7 @@ Feature: The shared components in the gallery
 
   Scenario: A folder that can't be read says why and stays closed
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     And I type "u" in the tree
     And I press ArrowRight
@@ -371,6 +388,7 @@ Feature: The shared components in the gallery
 
   Scenario: Typing the first letters of a name moves focus to it
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     And I type "re" in the tree
     Then focus is on the tree item "readme.txt"
@@ -380,16 +398,19 @@ Feature: The shared components in the gallery
 
   Scenario: A row is named by the name it shows, not by the key that opens it
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     Then the tree has the tree item "abc[U+202E]txt.exe"
 
   Scenario: A name written right to left keeps its direction in a left-to-right page
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the treeitem "documents"
     Then the tree item "הערות.txt" shows its name right to left
 
   Scenario: In a page that runs right to left, Left opens a folder and Right closes it
     When I open the component gallery asking for the locale "ar-XB"
+    And I skip to the content
     And I press Tab until focus is on a tree item
     And I press ArrowLeft
     Then the focused tree item is expanded
@@ -447,6 +468,7 @@ Feature: The shared components in the gallery
 
   Scenario: A review dialog opens on its dismiss button, keeps Tab inside and returns focus on Escape
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open a demo review"
     And I press Enter
     Then focus is inside the dialog "Demo review to confirm"
@@ -459,6 +481,7 @@ Feature: The shared components in the gallery
 
   Scenario: A review dialog's second way to go ahead comes after its confirm button
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open a demo review"
     And I press Enter
     Then focus is on the button "Cancel"
@@ -472,6 +495,7 @@ Feature: The shared components in the gallery
 
   Scenario: A confirmed review dialog closes, returns focus and announces after it closed
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open a demo review"
     And I press Enter
     And I press Tab until focus is on the button "Confirm the demo review"
@@ -481,6 +505,7 @@ Feature: The shared components in the gallery
 
   Scenario: A review dialog with nothing to do offers only to close
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open an empty demo review"
     And I press Enter
     Then focus is inside the dialog "Demo review with nothing to do"
@@ -491,6 +516,7 @@ Feature: The shared components in the gallery
 
   Scenario: A review dialog can open on a button of its own, and still closes on Escape and returns focus
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open a demo secret"
     And I press Enter
     Then focus is inside the dialog "Demo secret shown once"
@@ -503,6 +529,7 @@ Feature: The shared components in the gallery
 
   Scenario: A held review dialog says why beside its confirm button, and pressing it only says so
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open a held demo review"
     And I press Enter
     Then focus is on the button "Cancel"
@@ -518,6 +545,7 @@ Feature: The shared components in the gallery
 
   Scenario Outline: An open review dialog has no accessibility violations
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "<opener>"
     And I press Enter
     Then focus is inside the dialog "<dialog>"
@@ -533,6 +561,7 @@ Feature: The shared components in the gallery
   Scenario Outline: A button's label grows with the reader's text size
     Given the reader sets the text size to 200 percent
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "<button>"
     Then the label of the button "<button>" is as large as the page's text
@@ -680,6 +709,7 @@ Feature: The shared components in the gallery
 
   Scenario: An icon-only button is named by its own label, and the icon inside it is skipped by a screen reader
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Demo notifications"
     Then the button "Demo notifications" shows only an icon, which a screen reader skips
     And the button "Demo notifications" is not pressed
@@ -728,6 +758,7 @@ Feature: The shared components in the gallery
 
   Scenario: A button is pressed by Enter and by Space
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Enter
@@ -795,8 +826,10 @@ Feature: The shared components in the gallery
 
   Scenario: An unavailable button stays in the Tab order, says it is unavailable and ignores Enter and Space
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Delete the demo snapshot"
     Then the button "Delete the demo snapshot" says it is unavailable, and is not disabled
     When I press Enter
@@ -807,6 +840,7 @@ Feature: The shared components in the gallery
   Scenario: A busy button keeps its name and its place in the Tab order, shows a spinner a screen reader skips, and ignores presses
     When I open the component gallery
     And the widths of the buttons "Check the demo repository" and "Refresh the demo" are noted
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
@@ -828,8 +862,10 @@ Feature: The shared components in the gallery
 
   Scenario: A toggle button keeps its one name and says it is pressed, drawn bolder with an inset edge
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo's hidden files"
     Then the button "Show the demo's hidden files" is not pressed
     And the button "Show the demo's hidden files" is drawn at its resting weight and edge
@@ -843,8 +879,10 @@ Feature: The shared components in the gallery
 
   Scenario: A submit button sends its form from the keyboard
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Enter
     Then the polite region comes to contain "Demo form sent."
@@ -852,6 +890,7 @@ Feature: The shared components in the gallery
 
   Scenario: A busy submit button sends no form, from Enter or from Space
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
@@ -867,8 +906,10 @@ Feature: The shared components in the gallery
     Given the browser asks for "forced colors"
     When I open the component gallery
     Then every button of the "Button" demo is drawn in the reader's button colors, an unavailable one in the color of unavailable text
-    When I press Tab until focus is on the button "Open the modal stand-in"
+    When I skip to the content
+    And I press Tab until focus is on the button "Open the modal stand-in"
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo's hidden files"
     And I press Space
     Then the button "Show the demo's hidden files" is drawn bolder, with an inset edge
@@ -880,6 +921,7 @@ Feature: The shared components in the gallery
   Scenario: Under forced colors a busy button keeps the reader's button text, apart from an unavailable one
     Given the browser asks for "forced colors"
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Space
@@ -998,7 +1040,9 @@ Feature: The shared components in the gallery
 
   Scenario: A text field's error is shown above it, describes it, marks it invalid with a thicker edge in the Error tone, and is announced
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the button "Check the repository name"
     And I press Enter
@@ -1027,7 +1071,9 @@ Feature: The shared components in the gallery
 
   Scenario: A multi-line text field takes an entry a line and shows its error as a one-line field does
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the textbox "Demo folders"
     And I type "/srv/demo/photos"
@@ -1045,7 +1091,9 @@ Feature: The shared components in the gallery
 
   Scenario: A password's Show password button shows it and hides it again, keeping its value, its caret and focus, and says it is pressed
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the textbox "Demo password"
     And I type "demo-secret"
@@ -1069,7 +1117,9 @@ Feature: The shared components in the gallery
 
   Scenario: A number field asks for the keyboard of digits, is never a spin box, and takes what is typed for its form to check
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the textbox "Demo copies to keep"
     Then the textbox "Demo copies to keep" asks for the keyboard of digits, and is a text input
@@ -1078,7 +1128,9 @@ Feature: The shared components in the gallery
 
   Scenario: A read-only field stays in the Tab order behind a dashed edge, a disabled one is skipped with its Show password button, and each says so in words
     When I open the component gallery
+    And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
     And I press Tab until focus is on the textbox "Demo snapshot ID"
     Then the field "Demo snapshot ID" is described by "Read only: you can select and copy it, but not change it."

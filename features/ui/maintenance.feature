@@ -15,6 +15,7 @@ Feature: Maintenance of a repository on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Plan home"
@@ -26,6 +27,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" is now called "away"
     And the repository "demo" has no maintenance setting
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Orphaned history"
@@ -41,6 +43,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And the repository "demo" has no maintenance setting
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Maintain from this agent"
@@ -64,6 +67,7 @@ Feature: Maintenance of a repository on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Stop maintaining from this agent"
@@ -84,6 +88,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And the repository "demo" has no maintenance setting
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Maintain from this agent"
@@ -96,6 +101,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -114,6 +120,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -126,6 +133,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -142,6 +150,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" keeps the last 5 snapshots
     And the plan "home" has been backed up 2 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -159,6 +168,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "away" has been backed up 3 times
     And the plan "away" keeps the last 1 snapshots
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -173,6 +183,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And another machine called "demo-desktop" has backed up the plan "home" once
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the main content warns "This repository holds snapshots from another host, demo-desktop. Ladderback forgets and prunes it from here, and cannot tell whether that host does too. Make sure only one machine maintains it."
@@ -187,6 +198,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And the plan "home" is now called "away"
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Orphaned history"
@@ -196,6 +208,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And the plan "home" is now called "away"
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the adoption button into the plan "away"
@@ -212,6 +225,7 @@ Feature: Maintenance of a repository on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the repository holds data no snapshot uses
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Prune unused data"
@@ -224,6 +238,7 @@ Feature: Maintenance of a repository on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Check the repository"
@@ -240,6 +255,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 1 times
     And a backup killed before it saved its index left a pack in the repository that no index lists
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Check the repository"
@@ -257,6 +273,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 1 times
     And the plan "home" keeps the last 0 snapshots
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -269,6 +286,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" is now called "away"
     And the plan "away" has been backed up 1 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Plan away"
@@ -284,7 +302,8 @@ Feature: Maintenance of a repository on the Snapshots page
     And the daemon's answers to the UI are delayed by 3 seconds
     When I open the address "/snapshots"
     Then the page shows the button "Snapshots of demo"
-    When I press Tab until focus is on the button "Snapshots of demo"
+    When I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the paragraph "Loading…"
     When I press Tab until focus is on the button "Forget snapshots"
@@ -299,7 +318,8 @@ Feature: Maintenance of a repository on the Snapshots page
     And the daemon's answers to the UI are delayed by 3 seconds
     When I open the address "/snapshots"
     Then the page shows the button "Snapshots of demo"
-    When I press Tab until focus is on the button "Snapshots of demo"
+    When I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
     And I press Enter
@@ -319,6 +339,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -336,6 +357,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And the repository has been removed
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows an alert containing "No repository was found at this location"
@@ -347,6 +369,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -369,7 +392,8 @@ Feature: Maintenance of a repository on the Snapshots page
     And the daemon's answers to the UI are delayed by 4 seconds
     When I open the address "/snapshots"
     Then the page shows the button "Snapshots of demo"
-    When I press Tab until focus is on the button "Snapshots of demo"
+    When I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
     And I press Enter
@@ -390,7 +414,8 @@ Feature: Maintenance of a repository on the Snapshots page
     And the daemon's answers to the UI are delayed by 4 seconds
     When I open the address "/snapshots"
     Then the page shows the button "Snapshots of demo"
-    When I press Tab until focus is on the button "Snapshots of demo"
+    When I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
     And I press Enter
@@ -406,6 +431,7 @@ Feature: Maintenance of a repository on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the config names no plan
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the main content shows the line "No snapshots yet."
@@ -420,6 +446,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And the config names no plan
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Orphaned history"
@@ -430,6 +457,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 2 times
     And the plan "home" is now called "away"
     When I open the address "/snapshots?locale=<locale>"
+    And I skip to the content
     And I press Tab until focus is on the button of the repository "demo"
     And I press Enter
     Then the page lists 2 snapshots
@@ -447,6 +475,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" is now called "away"
     And a viewport of 320 by 256 pixels
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Orphaned history"
@@ -461,6 +490,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" has been backed up 3 times
     And a viewport of 320 by 256 pixels
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -476,6 +506,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
@@ -491,6 +522,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the reader sets the text size to 200 percent
     And the reader increases the text spacing
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"

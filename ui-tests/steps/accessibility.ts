@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
-import { errors, type Locator, type Page } from "playwright";
+import { errors, type Locator } from "playwright";
 
-import { journey, namePattern } from "../support/keyboard.ts";
+import { journey, namePattern, pressUntilFocused, whereFocusIs } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
-
-// More Tab presses than any one stretch of a page has stops. A long page,
-// such as the gallery, is crossed in stretches: a scenario first stops at a
-// named control partway down, then presses on from there.
-const MAX_TABS = 40;
 
 // Some of what a walk is after shows only once the daemon answers the page's
 // first read, as the pages' own steps wait for it; ten seconds is generous.
@@ -52,13 +47,20 @@ export async function pressUntilFocusIsOn(world: BrowserWorld, key: string, role
     if (!(error instanceof errors.TimeoutError)) throw error;
     assert.fail(`the ${role} "${name}" did not show within ${TARGET_PATIENCE_MS / 1_000} s, so no ${key} press could reach it`);
   }
-  const focused = async () =>
-    (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement));
-  for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
-    await keys.press(key);
-  }
-  assert.ok(await focused(), `focus did not reach the ${role} "${name}" within ${MAX_TABS} ${key} presses`);
+  await pressUntilFocused(world.page, key, target, `the ${role} "${name}"`);
 }
+
+// A walk on a page's content starts where a keyboard user skips the header
+// to (§4.5): the skip link, the page's first stop and its first link, moves
+// focus to `<main>`, and the walk's next press goes to the first control in
+// it. Only the header's own walks start above it.
+When("I skip to the content", async function (this: BrowserWorld) {
+  const keys = journey(this.page);
+  await keys.press("Tab");
+  await keys.assertFocused(keys.byRole("link").first(), `the skip link, the page's first stop, not ${await whereFocusIs(this.page)}`);
+  await keys.press("Enter");
+  await keys.assertFocused(keys.byRole("main"), `the main landmark, not ${await whereFocusIs(this.page)}`);
+});
 
 When("I press Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   await pressUntilFocusIsOn(this, "Tab", role, name);
@@ -106,16 +108,6 @@ Then("focus is on the main heading", async function (this: BrowserWorld) {
   const keys = journey(this.page);
   await keys.assertFocused(keys.byRole("heading", { level: 1 }), "the main heading");
 });
-
-/** Where focus is, as the end of a sentence. */
-function whereFocusIs(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const el = document.activeElement;
-    return el === null || el === document.body
-      ? "on the page body"
-      : `on <${el.localName}> ${JSON.stringify((el.textContent ?? "").trim().slice(0, 40))}`;
-  });
-}
 
 // Focus an update did not take away (WCAG 2.4.3): the reader reached the
 // control before the update, and what the update changed was not hers to

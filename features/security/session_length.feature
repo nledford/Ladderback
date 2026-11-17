@@ -324,6 +324,7 @@ Feature: How long signing in lasts
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the page's clock can be moved on
       When I open the address "/repositories"
+      And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
       And I press Tab until focus is on the checkbox "Keep me signed in on this device"
@@ -341,6 +342,7 @@ Feature: How long signing in lasts
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the radio "30 days"
       Then the radio "30 days" of the group "Stay signed in for" is checked
       And the page has no accessibility violations
@@ -367,6 +369,7 @@ Feature: How long signing in lasts
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the button "Sign out everywhere"
       And I press Enter
       Then the dialog "Sign out everywhere?" opens with focus on the button "Cancel"
@@ -382,6 +385,7 @@ Feature: How long signing in lasts
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings"
+      And I skip to the content
       And I press Tab until focus is on the button "Sign out everywhere"
       And I press Space
       Then the dialog "Sign out everywhere?" opens with focus on the button "Cancel"

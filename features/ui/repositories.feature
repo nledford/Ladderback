@@ -105,6 +105,7 @@ Feature: Repositories page
     And the button "Test the locations of nas" shows "Test", which its name begins with
     And the widths of the columns of the table "Repositories" are noted
     When the next Test of the repository "nas" finds that each location holds another repository
+    And I skip to the content
     And I press "Test" for the repository "nas"
     Then each location of the repository "nas" says "Answers, but holds another repository. Check its address."
     And the address "<address>" of the repository "nas" <breaks>
@@ -135,6 +136,7 @@ Feature: Repositories page
   Scenario: Testing a repository by keyboard alone shows its ID and keeps nothing
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
@@ -150,6 +152,7 @@ Feature: Repositories page
   Scenario: A wrong password moves focus to an error summary that says the password was not accepted
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
@@ -166,6 +169,7 @@ Feature: Repositories page
   Scenario: A folder with no repository in it is refused as holding none, without the advice to try again
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{empty}"
     And I press Tab until focus is on the textbox "Password"
@@ -179,6 +183,7 @@ Feature: Repositories page
   Scenario: A location written as a relative path is refused at the location, saying to write it in full
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "backups/demo-repo"
     And I press Tab until focus is on the textbox "Password"
@@ -193,6 +198,7 @@ Feature: Repositories page
   Scenario: A form missing its location and password names both, and each problem links to its field
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the button "Test the repository"
     And I press Enter
     Then focus is on the heading "There are 2 problems with the form"
@@ -207,6 +213,7 @@ Feature: Repositories page
   Scenario: Connecting a repository by keyboard alone adds it to the list
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Name"
     And I type "copy"
     And I press Tab
@@ -223,6 +230,7 @@ Feature: Repositories page
   Scenario: The form offers to keep the password in the system keyring or the configuration file, the configuration file chosen
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Password"
     And I press Tab until focus is on the radio "In the configuration file"
     Then the radio "In the configuration file" of the group "Where to keep the password" is checked
@@ -235,6 +243,7 @@ Feature: Repositories page
   Scenario: Connecting a repository to maintain from this agent offers its maintenance
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Name"
     And I type "copy"
     And I press Tab
@@ -251,6 +260,7 @@ Feature: Repositories page
     And the checkbox "Maintain this repository from this agent" is not checked
     And the page has no accessibility violations
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of copy"
     And I press Enter
     Then the main content shows the line "Each of these shows what it would do first. Nothing changes until you confirm."
@@ -259,6 +269,7 @@ Feature: Repositories page
   Scenario: Connecting under a name already used is refused at the name
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Name"
     And I type "demo"
     And I press Tab
@@ -278,6 +289,7 @@ Feature: Repositories page
   Scenario: A name that is not a name is refused at the name
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Name"
     And I type "Not A Name"
     And I press Tab
@@ -292,6 +304,7 @@ Feature: Repositories page
   Scenario: Creating a new local repository by keyboard alone shows its ID
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{empty}"
     And I press Tab until focus is on the textbox "Password"
@@ -305,6 +318,7 @@ Feature: Repositories page
   Scenario: Creating a hot/cold repository takes the hot storage too
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{empty}"
     And I press Tab
@@ -318,6 +332,7 @@ Feature: Repositories page
   Scenario: Creating where a repository already exists is refused, and says to connect it instead
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
@@ -339,7 +354,8 @@ Feature: Repositories page
     And the button "Create demo" sits on one line
     And the row header "demo" sits on one line
     And the column header "Name" sits on one line
-    When I press Tab until focus is on the button "Create demo"
+    When I skip to the content
+    And I press Tab until focus is on the button "Create demo"
     And I press Enter
     Then focus is on the message "Created demo."
     And the page shows a repository ID
@@ -352,6 +368,7 @@ Feature: Repositories page
     Then focus is on the heading "There are 2 problems with the form"
     And the page doesn't show "Created demo."
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     Then the table "Operations" has a row "demo-home" that shows "Succeeded"
@@ -364,6 +381,7 @@ Feature: Repositories page
     When a backup of "demo-home" fails because no repository is there
     And I open the address "/repositories"
     And the list of repositories is slow to answer from now on
+    And I skip to the content
     And I press Tab until focus is on the button "Create demo"
     And I press Enter
     Then focus is on the message "Created demo."
@@ -377,6 +395,7 @@ Feature: Repositories page
     When a backup of "demo-home" fails because no repository is there
     And the demo repository is copied into the profile's repository folder
     And I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the button "Create demo"
     And I press Enter
     Then the page shows an alert containing "There is already a repository at the location of"
@@ -388,6 +407,7 @@ Feature: Repositories page
     When a backup of "demo-home" fails because no repository is there
     And the profile's repository is moved to a folder that isn't there
     And I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the button "Create demo"
     And I press Enter
     Then the page shows an alert containing "This repository wasn't created"
@@ -398,6 +418,7 @@ Feature: Repositories page
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
     And the daemon has stopped
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
@@ -410,6 +431,7 @@ Feature: Repositories page
   Scenario: Leaving the page while a repository is being tested breaks nothing
     Given a daemon with a scratch demo repository and no repositories
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the textbox "Location"
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
@@ -436,6 +458,7 @@ Feature: Repositories page
     Given a daemon with a profile imported as "demo" whose repository folder is empty
     When a backup of "demo-home" fails because no repository is there
     And I open the address "/repositories?locale=<locale>"
+    And I skip to the content
     And I press Tab until focus is on the button of the repository "demo"
     Then every visible text but the data of the tables and lists is transformed
     And the page has no accessibility violations
@@ -451,7 +474,8 @@ Feature: Repositories page
     When a backup of "demo-home" fails because no repository is there
     And I open the address "/repositories"
     Then the table "Repositories" has a row "<alias>" that shows "Read from the file"
-    When I press Tab until focus is on the button "Create <alias>"
+    When I skip to the content
+    And I press Tab until focus is on the button "Create <alias>"
     Then the page doesn't scroll sideways
     And no text is clipped
     And the button "Create <alias>" breaks <breaks>
@@ -470,6 +494,7 @@ Feature: Repositories page
     And the reader sets the text size to 200 percent
     When a backup of "demo-home" fails because no repository is there
     And I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the button "Create offsitecopiesofthefamilyphotolibrarykeptontheatticnasandthecloud"
     Then the page doesn't scroll sideways
     And no text is clipped
@@ -481,6 +506,7 @@ Feature: Repositories page
     And the reader sets the text size to 200 percent
     And the reader increases the text spacing
     When I open the address "/repositories"
+    And I skip to the content
     And I press Tab until focus is on the button "Test the repository"
     And I press Enter
     Then focus is on the heading "There are 2 problems with the form"

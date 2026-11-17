@@ -16,6 +16,7 @@ Feature: Live updates can be paused
     Given the daemon reports running backups of "demo-home" and "demo-docs"
     When I open the address "/operations"
     And the table "Operations" has a row "demo-docs" that shows "Running"
+    And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
     Then the button "Pause live updates" is pressed
@@ -34,6 +35,7 @@ Feature: Live updates can be paused
     Given the daemon reports running backups of "demo-home" and "demo-docs"
     When I open the address "/operations"
     And the table "Operations" has a row "demo-docs" that shows "Running"
+    And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
     And the daemon reports that the backup of "demo-home" has succeeded with 3 files
@@ -55,6 +57,7 @@ Feature: Live updates can be paused
     Given the daemon reports a running backup of "demo-home"
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
+    And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
     And the polite region reads "Live updates are paused."
@@ -66,6 +69,7 @@ Feature: Live updates can be paused
     Given the daemon reports a running backup of "demo-home"
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
+    And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
     And the button "Pause live updates" is pressed
@@ -78,6 +82,7 @@ Feature: Live updates can be paused
   Scenario: A paused page still answers the reader's own presses
     Given a demo plan "demo-home" with a big scratch repository
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     And the table "Operations" has a row "demo-home" that shows "Running"
@@ -98,6 +103,7 @@ Feature: Live updates can be paused
   Scenario: Leaving a paused page ends the pause
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/operations"
+    And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
     And the button "Pause live updates" is pressed
@@ -118,6 +124,7 @@ Feature: Live updates can be paused
     And the reader sets the text size to <size> percent
     When I open the address "/operations"
     And the table "Operations" has a row "demo-home" that shows "Running"
+    And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
     And the daemon reports 4 steps of progress of the backup of "demo-home"

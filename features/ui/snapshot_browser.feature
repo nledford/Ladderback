@@ -13,6 +13,7 @@ Feature: Browsing a snapshot's tree by keyboard
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the address "/snapshots"
+    And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the link to the newest snapshot of the plan "home"
@@ -27,6 +28,7 @@ Feature: Browsing a snapshot's tree by keyboard
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
+    And I skip to the content
     And I press Tab until focus is on a tree item
     And I press ArrowRight until focus is on the tree item "demo-1.txt"
     Then the tree item "demo-1.txt" is described as a file modified at some time
