@@ -6,7 +6,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { Page } from "playwright";
 import { expect } from "playwright/test";
 
-import { journey } from "../support/keyboard.ts";
+import { journey, pressUntilFocused } from "../support/keyboard.ts";
 import { type BrowserWorld, repoRoot } from "../support/world.ts";
 
 const NON_ASCII = /[^\x00-\x7f]/;
@@ -116,11 +116,7 @@ Then("the page's one progress bar shows no percentage", async function (this: Br
 // The bar is a stop in the tab order (§4.5), so a keyboard user reaches it
 // as she reaches a control; a page with one bar finds it by its role alone.
 When("I press Tab until focus is on the page's one progress bar", async function (this: BrowserWorld) {
-  const keys = journey(this.page);
-  const bar = keys.byRole("progressbar");
-  const focused = async () => (await bar.count()) === 1 && (await bar.evaluate((el) => el === document.activeElement));
-  for (let presses = 0; presses < 30 && !(await focused()); presses += 1) await keys.press("Tab");
-  assert.ok(await focused(), "focus did not reach the page's one progress bar within 30 Tab presses");
+  await pressUntilFocused(this.page, "Tab", journey(this.page).byRole("progressbar"), "the page's one progress bar");
 });
 
 // What a screen reader reads as the bar's value came out of the catalog, the
