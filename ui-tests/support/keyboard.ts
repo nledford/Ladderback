@@ -198,23 +198,28 @@ async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise
  *  the check fails if focus has left it in between. */
 async function lookAtFocus(page: Page, key: string) {
   const engine = engineOf(page);
-  // WebKit scrolls a newly focused element into view at its next rendering
-  // update, not inside the key press as Chromium and Firefox do, so the check
-  // waits two frames there to see the page as its reader does.
-  const revealsFocusAtNextFrame = engine === "webkit";
+  // WebKit scrolls a newly focused element into view from a timer that the
+  // focus starts with no delay, not inside the key press as Chromium and
+  // Firefox do, and a busy page can draw frames before that timer runs: two
+  // frames alone left the gallery's progress bar out of view on CI (#973).
+  // WebKit runs due timers in the order they fell due, so a timeout of 0 set
+  // after the press runs after that scroll; the check waits for one, then for
+  // two frames, to see the page as its reader does.
+  const revealsFocusFromATimer = engine === "webkit";
   // Firefox scrolls a focused element only until part of it shows, Chromium
   // and WebKit until all of it does: on a small screen with larger text the
   // element's center can lie past the viewport's edge, where nothing covers
   // it. There the check looks at the part of it in view; an element wholly
   // out of view still fails it.
   const revealsFocusInPart = engine === "firefox";
-  const focused = await page.evaluateHandle(async (atNextFrame) => {
-    if (atNextFrame) {
+  const focused = await page.evaluateHandle(async (fromATimer) => {
+    if (fromATimer) {
+      await new Promise((done) => setTimeout(done, 0));
       await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     }
     const el = document.activeElement;
     return el === null || el === document.body || el === document.documentElement ? null : el;
-  }, revealsFocusAtNextFrame);
+  }, revealsFocusFromATimer);
   try {
     const measured = await focused.evaluate((el) => {
       if (el === null) return null;

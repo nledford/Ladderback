@@ -45,6 +45,25 @@ const WRAPPED_LINK = `<!doctype html>
   </body>
 </html>`;
 
+// The same link a long way down the page, so the browser scrolls to it when
+// Tab first focuses it.
+const FAR_LINK = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Focus check</title>
+    <style>
+      body { margin: 1rem; background: white; color: black; }
+      a:focus-visible { outline: 2px solid black; outline-offset: 2px; }
+      .spacer { block-size: 3000px; }
+    </style>
+  </head>
+  <body>
+    <div class="spacer"></div>
+    <p><a href="#nowhere">Back to the start page</a></p>
+    <div class="spacer"></div>
+  </body>
+</html>`;
+
 let browser: Browser | undefined;
 
 before(async () => {
@@ -57,18 +76,23 @@ after(async () => {
 
 /** Opens `WRAPPED_LINK` in a context of its own at the scenarios' viewport,
  *  puts a fixed box over `over` of the link's lines, and presses Tab onto the
- *  link through the walks' check. What the check said: `null` when it passed. */
-async function tabOntoTheLink(over: "every line" | "its first line"): Promise<string | null> {
+ *  link through the walks' check. Given `leaves`, the link moves above the
+ *  viewport as it takes focus, where no scroll brings it back. What the check
+ *  said: `null` when it passed. */
+async function tabOntoTheLink(
+  over: "every line" | "its first line" | "no line",
+  { leaves = false }: { leaves?: boolean } = {},
+): Promise<string | null> {
   assert.ok(browser !== undefined, "the browser is not running: `before` failed");
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   try {
     const page = await context.newPage();
     await page.setContent(WRAPPED_LINK);
-    const lines = await page.evaluate((everyLine) => {
+    const lines = await page.evaluate(({ covered, leaves }) => {
       const link = document.querySelector("a");
       if (link === null) return 0;
       const fragments = [...link.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
-      for (const r of everyLine ? fragments : fragments.slice(0, 1)) {
+      for (const r of fragments.slice(0, covered)) {
         // A pixel past the line on every side, so no edge of it shows.
         const cover = document.createElement("div");
         cover.className = "cover";
@@ -80,8 +104,11 @@ async function tabOntoTheLink(over: "every line" | "its first line"): Promise<st
         });
         document.body.append(cover);
       }
+      if (leaves) {
+        link.addEventListener("focus", () => Object.assign(link.style, { position: "fixed", top: "-1000px" }));
+      }
       return fragments.length;
-    }, over === "every line");
+    }, { covered: { "every line": Infinity, "its first line": 1, "no line": 0 }[over], leaves });
     assert.equal(lines, 2, "the link stands on two lines");
     try {
       await journey(page).press("Tab");
@@ -107,4 +134,46 @@ test(`${engine}: a wrapped link with a box over every line is reported covered`,
 test(`${engine}: a wrapped link with a box over its first line only is in sight`, { timeout: LIMIT_MS }, async () => {
   const verdict = await tabOntoTheLink("its first line");
   assert.equal(verdict, null, `the check reported: ${verdict}`);
+});
+
+test(`${engine}: a link that leaves the viewport as it takes focus is reported out of view`, { timeout: LIMIT_MS }, async () => {
+  // The check waits for the browser's own scroll to the focused element
+  // (keyboard.ts), and no wait brings this one back into sight.
+  const verdict = await tabOntoTheLink("no line", { leaves: true });
+  assert.match(
+    verdict ?? "the check passed",
+    /^focused element is covered: <a href="#nowhere".*\(its lines' centers find nothing, out of view\)$/,
+  );
+});
+
+test(`${engine}: a link focused while the page's timers are busy is in sight once the browser scrolls to it`, { timeout: LIMIT_MS }, async () => {
+  assert.ok(browser !== undefined, "the browser is not running: `before` failed");
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  try {
+    const page = await context.newPage();
+    await page.setContent(FAR_LINK);
+    // Timers due before the press that keep the page busy for about half a
+    // second: WebKit's timer that scrolls to the focused link waits behind
+    // them, and the page draws frames in between, so a check that only
+    // waited two frames found the link still out of view on Linux (#973).
+    await page.evaluate(() => {
+      for (let i = 0; i < 12; i += 1) {
+        setTimeout(() => {
+          const end = performance.now() + 40;
+          while (performance.now() < end);
+        }, 0);
+      }
+    });
+    let verdict: string | null = null;
+    try {
+      await journey(page).press("Tab");
+    } catch (error) {
+      if (!(error instanceof assert.AssertionError)) throw error;
+      verdict = error.message;
+    }
+    assert.equal(verdict, null, `the check reported: ${verdict}`);
+    assert.ok(await page.evaluate(() => scrollY > 0), "the browser scrolled to the link");
+  } finally {
+    await context.close();
+  }
 });
