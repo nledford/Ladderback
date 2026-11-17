@@ -247,6 +247,8 @@ Feature: The shared components in the gallery
     And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the button "Check the demo folders"
     And I press Tab until focus is on the progressbar "Demo backup progress"
     Then the progress bar "Demo backup progress" reads "Backing up… 40%, 4 GiB of 10 GiB"
@@ -272,6 +274,8 @@ Feature: The shared components in the gallery
     And I skip to the content
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the button "Check the demo folders"
     And I press Tab until focus is on the progressbar "Demo progress of a step"
     Then pressing Tab moves focus to these progress bars in turn, each holding its track and its words inside its focus ring:
@@ -976,9 +980,22 @@ Feature: The shared components in the gallery
     Examples:
       | button                    |
       | Open the demo dialog      |
-      | Advance the demo progress |
       | Pause the demo updates    |
       | Filled Primary            |
+
+  # The progress demo sits past the tabs demos, so its walk stops on the way.
+  Scenario: The progress demo's button label grows with the reader's text size
+    Given the reader sets the text size to 200 percent
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
+    And I press Tab until focus is on the button "Check the demo folders"
+    And I press Tab until focus is on the button "Advance the demo progress"
+    Then the label of the button "Advance the demo progress" is as large as the page's text
+    And the page has no accessibility violations
 
   # The table's sort button sits past the 40 Tab presses a journey allows
   # from the page's start, but within them by Shift+Tab.
