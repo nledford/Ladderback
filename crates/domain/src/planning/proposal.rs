@@ -398,10 +398,10 @@ fn sha256_hex_of(parts: &[&[u8]]) -> String {
 mod decision;
 
 pub use decision::{
-    DiffHash, MAX_PER_HOUR, MAX_REASON_CHARS, PlanSetting, ProposalWarning, ProposerRecord,
-    QUIET_AFTER_REJECTION, RATE_WINDOW, REVISION_KEY_BYTES, RejectReason, Rejection,
-    RejectionRefused, RevisionKey, SHORT_PROPOSAL_ID_CHARS, Shown, ShownRevision, SummaryLine,
-    TooSoon, short_proposal_id,
+    DiffHash, ForgetDigest, MAX_PER_HOUR, MAX_REASON_CHARS, PlanSetting, ProposalWarning,
+    ProposerRecord, QUIET_AFTER_REJECTION, RATE_WINDOW, REVISION_KEY_BYTES, RejectReason,
+    Rejection, RejectionRefused, RevisionKey, SHORT_PROPOSAL_ID_CHARS, Shown, ShownRevision,
+    SummaryLine, TooSoon, short_proposal_id,
 };
 
 #[cfg(test)]

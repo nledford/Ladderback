@@ -23,10 +23,12 @@
   --color-badge-loading-bg: var(--badge-loading-bg);
   --color-badge-empty-fg: var(--badge-empty-fg);
   --color-badge-empty-bg: var(--badge-empty-bg);
-  --color-badge-error-fg: var(--badge-error-fg);
-  --color-badge-error-bg: var(--badge-error-bg);
-  --color-badge-success-fg: var(--badge-success-fg);
-  --color-badge-success-bg: var(--badge-success-bg);
+  --color-success-fg: var(--success-fg);
+  --color-success-bg: var(--success-bg);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-bg: var(--warning-bg);
+  --color-error-fg: var(--error-fg);
+  --color-error-bg: var(--error-bg);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-error: var(--error);
