@@ -339,6 +339,35 @@ ui-gallery-link-status = The demo check failed: { $link } says why.
 # The words of the link inside ui-gallery-link-status.
 ui-gallery-link-status-link = the demo log
 
+# The heading of the gallery's alert demo (§4.5): an inline message in each
+# tone, one with a link inside it and one the reader can dismiss.
+ui-gallery-alert-heading = Alert
+
+# The demo alert in the Primary tone, information.
+ui-gallery-alert-information = The demo plan backs up the demo folder every night.
+
+# The demo alert in the Success tone.
+ui-gallery-alert-success = The demo backup finished and added 12 files.
+
+# The demo alert in the Warning tone, with a link inside it, drawn in the
+# alert's text color; $link is the link's words
+# (ui-gallery-alert-warning-link).
+ui-gallery-alert-warning = The demo repository hasn't been checked in 30 days: { $link } lists its last runs.
+
+# The words of the link inside ui-gallery-alert-warning.
+ui-gallery-alert-warning-link = the demo operations
+
+# The demo alert in the Error tone, with a long path in it that wraps on a
+# small screen.
+ui-gallery-alert-error = The demo repository at /srv/demo-backups/ladderback-demo-repository couldn't be read, so nothing was backed up.
+
+# The demo alert the reader can dismiss with its button.
+ui-gallery-alert-dismissible = This demo notice goes when you dismiss it.
+
+# A demo button that brings the dismissed demo notice back, unavailable
+# while the notice shows; focus moves to it when the notice is dismissed.
+ui-gallery-alert-show = Show the demo notice again
+
 # The heading of the gallery's text field demo (§4.5): every kind, size and
 # state of the shared text field.
 ui-gallery-text-field-heading = Text field
@@ -1757,6 +1786,19 @@ ui-still-waiting = Still waiting for Ladderback to say how the run ended.
 # it and the link's words, { " " }, which a language that writes none there
 # leaves out. A whole phrase of its own, never part of the link's words.
 ui-link-outside = { " " }(goes to another site)
+
+## The alert (§4.5): what it says of itself, the same on every page.
+
+# The name of an alert's icon, heard by a screen reader before the alert's
+# words: the alert's tone in one word, which its icon's shape shows.
+ui-alert-information = Information
+ui-alert-success = Success
+ui-alert-warning = Warning
+ui-alert-error = Error
+
+# The name of the icon-only button that takes an alert away, which its
+# tooltip shows.
+ui-alert-dismiss = Dismiss
 
 ## The text field (§4.5): what it says of itself, the same on every page.
 

@@ -2515,4 +2515,25 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph: Loading the demo plan…
 - paragraph:
   - button "Show the demo plan"`,
+  // Each alert is its icon, an image named for its tone, then its words,
+  // with no role of its own: no live region. The notice ends with its
+  // Dismiss button, whose tooltip is hidden from a screen reader; the
+  // button that brings it back is unavailable while it shows.
+  Alert: `- heading "Alert" [level=2]
+- img "Information"
+- text: The demo plan backs up the demo folder every night.
+- img "Success"
+- text: The demo backup finished and added 12 files.
+- img "Warning"
+- text: "The demo repository hasn't been checked in 30 days: \u2068"
+- link "the demo operations":
+  - /url: /operations
+- text: \u2069 lists its last runs.
+- img "Error"
+- text: The demo repository at /srv/demo-backups/ladderback-demo-repository couldn't be read, so nothing was backed up.
+- img "Information"
+- text: This demo notice goes when you dismiss it.
+- button "Dismiss"
+- paragraph:
+  - button "Show the demo notice again" [disabled]`,
 };

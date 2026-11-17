@@ -163,14 +163,14 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 
 ### Primary
 
-- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge and the selected tab's bar. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
+- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's icon and edge (the Primary tone, which covers Info) and the selected tab's bar. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
 
 ### Neutral
 
 - **Paper** (`--bg`): the page.
 - **Graphite Ink** (`--fg`): all body text and headings.
 - **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and under a row of tabs, and the line around the pause banner.
-- **Ledger Gray** (`--surface`): the site header, toasts, the pause banner, a progress bar's empty track and an unavailable text field.
+- **Ledger Gray** (`--surface`): the site header, toasts, alerts, the pause banner, a progress bar's empty track and an unavailable text field.
 - **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 - **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
 
@@ -244,7 +244,7 @@ Flat. No element has a shadow. Depth is said with a Ledger Gray surface, a 1 px 
 
 ## Shapes
 
-Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, the pause banner, tooltips and a skeleton's bars. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
+Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, alerts, the pause banner, tooltips and a skeleton's bars. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
 
 ## Components
 
@@ -337,6 +337,16 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 - **Still:** no shimmer, no pulse, in any motion setting: it starts by itself and nothing could pause it (2.2.2).
 - **No tone and no size:** it is not a status, and it takes the content's size from the reader's text.
 
+### Alerts
+
+- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. Pages move onto it in #929.
+- **Look:** Ledger Gray with the small corner, the words and any link in them in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a failure is not a red banner.
+- **Tone:** Primary (information, the default), Success, Warning and Error, each with its own icon: Info, CircleCheck, TriangleAlert and CircleX, the icon named by its tone in words for a screen reader. No Secondary and no Inherit: an alert always says its tone.
+- **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page takes the alert away and names where focus goes.
+- **Not a live region:** urgent text goes through the announcer too; one failure is said once.
+- **Forced colors:** a 1px `CanvasText` edge all round, the start edge still thick; the icon in the text's color.
+- **No size:** its words are the page's text.
+
 ### Icon
 
 - **Use:** one Lucide glyph beside words that say what it shows, or inside a control its own label names. Decoration by default, hidden from a screen reader; given a label, an image named by it, for an icon that says something no words beside it say.
@@ -386,7 +396,7 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 ### Don't:
 
 - **Don't** add dashboard chrome: cards, gradients, glows, shadows or big hero numbers.
-- **Don't** repeat a failure in red across the page. It is stated once, as an error badge or one error message; no red banners, red rows or red headings.
+- **Don't** repeat a failure in red across the page. It is stated once, as an error badge or one alert or error message; no red banners, red rows or red headings.
 - **Don't** restyle a native control with custom fills, radii or borders outside its shared component: a button's look is `Button`'s.
 - **Don't** introduce a second accent color, a fourth status hue, or a color without a contrast-checked pair.
 - **Don't** set text or control sizes in pixels, or use physical properties (`left`, `width`, `margin-top`).

@@ -84,7 +84,7 @@ clippy:
 # dev-dependency), the tooling's own tests (`scripts/*.test.ts`, under Node's
 # built-in runner), the journey lint, the check that every path AGENTS.md and
 # CLAUDE.md name exists, the check that no paragraph in docs/ runs over
-# 150 words (a file that opens with the exemption marker is exempt), then the
+# 150 words, then the
 # check that the §16 decision index matches the decision files.
 [doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, and the decision-index check.')]
 [group('quality')]
@@ -147,13 +147,13 @@ lint-workflows:
 architecture:
     RELEASE_FLAGS='{{ release_flags }}' scripts/check-architecture.sh
 
-# Checks the dependency tree against deny.toml: RustSec advisories, licences,
+# Checks the dependency tree against deny.toml: RustSec advisories, licenses,
 # banned crates and sources (technical design §13.6), for every workspace
 # package: `web` is not a dependency of the root package, so without
 # `--workspace` its tree would go unchecked. It fetches the advisory database,
 # so it needs the network, and a new advisory can fail it without any change
 # here: `verify` leaves it out, and CI runs it in its own job, nightly too.
-[doc('Check dependencies for advisories, licences, bans and sources (cargo-deny; needs the network).')]
+[doc('Check dependencies for advisories, licenses, bans and sources (cargo-deny; needs the network).')]
 [group('quality')]
 deny:
     cargo deny --locked --all-features --workspace check
