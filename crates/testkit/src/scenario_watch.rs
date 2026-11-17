@@ -20,7 +20,7 @@
 //! [`ScenarioWatch::ended`] as its `after` hook, naming the scenario with
 //! [`ScenarioWatch::describe`]. The watch is a thread of its own, so a step
 //! that blocks the runner's thread can't stop it. It takes no cucumber types:
-//! as a normal dependency of `testkit`, cucumber would bring licences
+//! as a normal dependency of `testkit`, cucumber would bring licenses
 //! `cargo deny` checks only for what ships (`synthez`, BlueOak-1.0.0).
 
 use std::collections::HashMap;
