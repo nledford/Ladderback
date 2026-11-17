@@ -331,13 +331,18 @@ try *args: build
 # in `just test-ui webkit --name 'Sign in'`; without one, `LADDERBACK_UI_BROWSER`
 # picks it, and Chromium when that is unset. `LADDERBACK_UI_WORKERS` sets how
 # many scenarios run at once (3 when unset; 1 runs them one at a time). The rest
-# go to cucumber-js.
-[doc('Run the @ui scenarios in a browser engine (default chromium) against a fresh build with the gallery.')]
+# go to cucumber-js. Before the scenarios, `node --test` runs the tests of the
+# UI test tooling that need a browser (`ui-tests/support/*.browser.test.ts`) in
+# the same engine; a failure there stops the recipe, and so does a pattern that
+# matches no file (`failglob`), which `node --test` would read as its own glob
+# and pass with no test run. `just lint` runs only `scripts/*.test.ts`, so it
+# starts no browser.
+[doc('Run the UI tooling browser tests, then the @ui scenarios, in a browser engine (default chromium) against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: web-test _ui-deps
     cargo build
-    cd ui-tests && case "${1:-}" in chromium | firefox | webkit) export LADDERBACK_UI_BROWSER="$1"; shift ;; esac && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
+    shopt -s failglob && cd ui-tests && case "${1:-}" in chromium | firefox | webkit) export LADDERBACK_UI_BROWSER="$1"; shift ;; esac && node --test support/*.browser.test.ts && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
 
 # Installs the UI test dependencies when they are missing or older than the
 # lockfile, as in a new worktree: node_modules isn't tracked.

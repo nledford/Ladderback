@@ -6,20 +6,22 @@ import assert from "node:assert/strict";
 
 import type { Locator, Page } from "playwright";
 
-import { engine } from "./world.ts";
-
-// WebKit on macOS moves Tab only between text fields and lists, as Safari does
-// until its reader turns on "Press Tab to highlight each item"; Option+Tab
-// moves to every control there. WebKit on Linux, where CI runs, moves Tab to
-// every control.
-const tabModifier = engine === "webkit" && process.platform === "darwin" ? "Alt+" : "";
+/** Playwright's name for the engine that drives `page`: `chromium`, `firefox`
+ *  or `webkit`. It comes from the page, not from `world.ts`'s `engine`: only
+ *  cucumber-js can load `world.ts`, and the check's own browser test
+ *  (`focus-check.browser.test.ts`) runs this file under `node --test`. */
+function engineOf(page: Page): string {
+  const browser = page.context().browser();
+  if (browser === null) throw new Error("the page's context has no browser, so its engine is unknown");
+  return browser.browserType().name();
+}
 
 // WebKit on macOS, as Playwright drives it, scrolls neither the page nor a
 // focused frame on a bare arrow key, though it does on Page Down and on
 // Option+arrow, which scrolls by most of the frame's width. WebKit on Linux,
 // where CI runs, scrolls on the bare arrows, as Chromium and Firefox do.
-export const scrollKey = (key: string): string =>
-  engine === "webkit" && process.platform === "darwin" ? `Alt+${key}` : key;
+export const scrollKey = (page: Page, key: string): string =>
+  engineOf(page) === "webkit" && process.platform === "darwin" ? `Alt+${key}` : key;
 
 // A name the page built from fetched text carries bidi isolation marks
 // around the fetched part (§4.5): the button "Cancel ⁨demo-home⁩" is the
@@ -35,6 +37,11 @@ export const namePattern = (name: string): RegExp =>
 
 
 export function journey(page: Page) {
+  // WebKit on macOS moves Tab only between text fields and lists, as Safari
+  // does until its reader turns on "Press Tab to highlight each item";
+  // Option+Tab moves to every control there. WebKit on Linux, where CI runs,
+  // moves Tab to every control.
+  const tabModifier = engineOf(page) === "webkit" && process.platform === "darwin" ? "Alt+" : "";
   return {
     async press(key: string): Promise<void> {
       await page.keyboard.press(key === "Tab" || key === "Shift+Tab" ? tabModifier + key : key);
@@ -137,23 +144,22 @@ function isAboveTheContent(target: Locator): Promise<boolean> {
   });
 }
 
-// WebKit scrolls a newly focused element into view at its next rendering
-// update, not inside the key press as Chromium and Firefox do, so the check
-// waits two frames there to see the page as its reader does.
-const revealsFocusAtNextFrame = engine === "webkit";
-
-// Firefox scrolls a focused element only until part of it shows, Chromium and
-// WebKit until all of it does: on a small screen with larger text the
-// element's center can lie past the viewport's edge, where nothing covers it.
-// There the check looks at the center of the part in view; an element wholly
-// out of view still fails it.
-const revealsFocusInPart = engine === "firefox";
-
 // WCAG 2.4.7 and 2.4.13: the focused element shows an indicator that is at
 // least 2 px thick, differs from the unfocused look and has 3:1 contrast
 // against what it sits on (1.4.11). WCAG 2.4.11: nothing else covers it,
 // checked at its center.
 async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise<void> {
+  const engine = engineOf(page);
+  // WebKit scrolls a newly focused element into view at its next rendering
+  // update, not inside the key press as Chromium and Firefox do, so the check
+  // waits two frames there to see the page as its reader does.
+  const revealsFocusAtNextFrame = engine === "webkit";
+  // Firefox scrolls a focused element only until part of it shows, Chromium
+  // and WebKit until all of it does: on a small screen with larger text the
+  // element's center can lie past the viewport's edge, where nothing covers
+  // it. There the check looks at the center of the part in view; an element
+  // wholly out of view still fails it.
+  const revealsFocusInPart = engine === "firefox";
   const state = await page.evaluate(async ({ atNextFrame, inPart }) => {
     if (atNextFrame) {
       await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
