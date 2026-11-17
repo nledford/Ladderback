@@ -721,15 +721,15 @@ impl RunMaintenance {
     /// read. A side whose forget a policy keeping nothing would refuse is
     /// told as such, beside the other side. A read like
     /// [`preview`](Self::preview): no I7 slot, nothing in the operation
-    /// log, nothing removed. Its listing and retention reads hold one of
-    /// `turns`, the daemon's turns to list a repository (#710).
+    /// log, nothing removed. Its listing holds one of `turns`, the daemon's
+    /// turns to list a repository (#710).
     pub async fn compare_forget(
         &self,
         op: OperationId,
         before: &AgentConfig,
         after: &AgentConfig,
         alias: &RepositoryAlias,
-        _turns: &ReadTurns,
+        turns: &ReadTurns,
     ) -> Result<ForgetComparison, MaintenanceError> {
         let maintains = |config: &AgentConfig| {
             config
@@ -751,9 +751,27 @@ impl RunMaintenance {
             (Some(_), None) => before,
         };
         let access = self.open(config, alias).await?;
-        // One listing, partitioned for each side's plans, then dropped
+        // The listing holds one of the daemon's turns to list, as the
+        // snapshot list's does (#710): the wait counts against the read
+        // timeout, and a turn that comes once the time is up starts no
+        // worker. The turn ends with the listing; the retention reads after
+        // it run in the daemon, not in a worker reading the whole index.
+        let deadline = self.clock.now() + READ_TIMEOUT;
+        let listing = async {
+            let _turn = turns.turn().await;
+            if self.clock.now() >= deadline {
+                return Err(MaintenanceError::TimedOut);
+            }
+            self.listed(op, access.clone()).await
+        };
+        let give_up = self.clock.sleep_until(deadline);
+        // The listing first: one that is ready is never lost to a timer. Its
+        // snapshots are partitioned for each side's plans, then dropped
         // before the retention reads.
-        let snapshots = self.listed(op, access.clone()).await?;
+        let snapshots = select_biased! {
+            listed = pin!(listing.fuse()) => listed?,
+            () = pin!(give_up.fuse()) => return Err(MaintenanceError::TimedOut),
+        };
         let partitioned = |plans: Vec<ManagedPlan>| {
             let partition = ForgetSelection::partition(&snapshots, &self.agent, &plans);
             (plans, partition)

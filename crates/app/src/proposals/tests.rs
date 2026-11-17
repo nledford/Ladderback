@@ -9,7 +9,6 @@ use domain::planning::{
 };
 use domain::secrets::SecretRef;
 use domain::{PlanId, RepositoryAlias, SignedDuration, Timestamp};
-use futures::StreamExt as _;
 
 use super::*;
 use crate::fakes::{

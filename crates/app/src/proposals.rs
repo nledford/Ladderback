@@ -24,6 +24,7 @@ use domain::planning::{
 };
 use domain::secrets::Redactor;
 use domain::{OperationId, RepositoryAlias};
+use futures::{StreamExt as _, stream};
 
 use crate::access::{Access, StepUpRefused, confirm_step_up};
 use crate::maintenance::{MaintenanceError, RunMaintenance};
@@ -31,7 +32,7 @@ use crate::ports::{
     Admission, ChangeCodec, Clock, CodecError, ConfigDraft, ConfigDrafts, ConfigError, ConfigStore,
     EventBus, ProposalStore, Random, RandomUnavailable, SavedOver, StoreError, StoredProposal,
 };
-use crate::reads::ReadTurns;
+use crate::reads::{READS_AT_ONCE, ReadTurns};
 use crate::repositories::ConfigWrites;
 use crate::schedule::ConfigChanged;
 
@@ -399,7 +400,11 @@ impl Proposals {
 
     /// What the forget of each repository `proposal` touches would remove
     /// under `config` and under `after`, its changes made, and the digest
-    /// of that preview when every repository was read.
+    /// of that preview when every repository was read. The repositories,
+    /// each named once, are read [`READS_AT_ONCE`] at a time, each in one
+    /// of the daemon's turns to list, and answered in the order the
+    /// proposal names them: the reads of two repositories overlap rather
+    /// than add up.
     async fn read_forget(
         &self,
         proposal: &Proposal,
@@ -408,13 +413,17 @@ impl Proposals {
         op: OperationId,
         maintenance: &RunMaintenance,
     ) -> Result<ForgetPreviewed, ProposalError> {
-        let mut repositories = Vec::new();
-        for repository in proposal.repositories(config) {
-            let forget = maintenance
-                .compare_forget(op, config, after, &repository, &self.ports.listings)
-                .await;
-            repositories.push(RepositoryForget { repository, forget });
-        }
+        let listings = self.ports.listings.as_ref();
+        let repositories: Vec<RepositoryForget> = stream::iter(proposal.repositories(config))
+            .map(|repository| async move {
+                let forget = maintenance
+                    .compare_forget(op, config, after, &repository, listings)
+                    .await;
+                RepositoryForget { repository, forget }
+            })
+            .buffered(READS_AT_ONCE)
+            .collect()
+            .await;
         let read = repositories.iter().map(|one| {
             one.forget
                 .as_ref()
