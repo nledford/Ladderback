@@ -318,7 +318,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Progress Bar
 
-A Ledger Gray pill track half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The current step sits on its own line above it.
+A Ledger Gray pill track, half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The fill is the tone's own color, never a status pair: a pair is for words on a tinted fill, and the fill carries none, so each tone's fill keeps 3:1 against the track and the page instead. The current step sits on its own line above it.
 
 ### Spinner
 
