@@ -7,6 +7,97 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/nledford/Ladderback/compare/v0.3.1...v0.4.0) - 2026-11-17
+
+### Breaking
+
+- MCP tools refuse a bad argument as a result the agent reads, take an operation as `operation`, and narrow their input schemas ([#751](https://github.com/nledford/Ladderback/pull/751)): an MCP tool call with an argument the tool cannot take
+is now a tool result marked as an error (invalid-arguments), not
+JSON-RPC error -32602.
+
+* fix!: the tools that take an operation take it as `operation`
+
+`get_operation`, `wait_operation` and `cancel_operation` took the
+operation's ID as `id`, while `run_plan` and `cancel_operation` return
+it as `operation`: an agent passing back what a run gave it was refused.
+Each now takes it under the name a run returns it.
+
+### Added
+
+- Install from the release archive on Linux, building from source only as the fallback ([#607](https://github.com/nledford/Ladderback/pull/607))
+- Scoped API tokens, created and revoked in Settings ([#608](https://github.com/nledford/Ladderback/pull/608))
+- Icons and a favicon, with unhashed files revalidated ([#629](https://github.com/nledford/Ladderback/pull/629))
+- Say in Settings when an admin password waits for a restart to turn sign-in on ([#632](https://github.com/nledford/Ladderback/pull/632))
+- Restart Ladderback from Settings ([#636](https://github.com/nledford/Ladderback/pull/636))
+- Set and change the admin password in Settings ([#639](https://github.com/nledford/Ladderback/pull/639))
+- Create, edit and delete plans on the Plans page ([#643](https://github.com/nledford/Ladderback/pull/643))
+- Choose how long signing in lasts, and keep sessions across restarts ([#641](https://github.com/nledford/Ladderback/pull/641))
+- Wipe resolved secrets from memory when they are dropped ([#702](https://github.com/nledford/Ladderback/pull/702))
+- `ladderback mcp`, an MCP server through which AI agents check on, run and preview backups ([#640](https://github.com/nledford/Ladderback/pull/640))
+- Snapshots name the Ladderback build that made them ([#720](https://github.com/nledford/Ladderback/pull/720))
+- Show an icon for each state in status badges ([#717](https://github.com/nledford/Ladderback/pull/717))
+- No core dumps or debugger attach for the daemon and its workers ([#701](https://github.com/nledford/Ladderback/pull/701))
+- Browse a snapshot's folders and files in an accessible tree ([#729](https://github.com/nledford/Ladderback/pull/729))
+- Show a repository's stats, read when asked and after each check ([#760](https://github.com/nledford/Ladderback/pull/760))
+- Tell the user when a newer release is available ([#802](https://github.com/nledford/Ladderback/pull/802))
+- Run MCP tools once from the command line with `ladderback mcp call` ([#803](https://github.com/nledford/Ladderback/pull/803))
+- Give the shared components one vocabulary of tones, sizes and placements ([#807](https://github.com/nledford/Ladderback/pull/807))
+- MCP refusals say what to do next in the catalog's words ([#808](https://github.com/nledford/Ladderback/pull/808))
+- Add a shared spinner for work in progress ([#816](https://github.com/nledford/Ladderback/pull/816))
+- Restore an entry of a snapshot from the web UI, into a new folder by default ([#819](https://github.com/nledford/Ladderback/pull/819))
+- Show the daemon's recent log on a Log page of the web UI ([#823](https://github.com/nledford/Ladderback/pull/823))
+- Let an AI agent propose plans for a person to confirm ([#820](https://github.com/nledford/Ladderback/pull/820))
+- Sign macOS builds from source with a code-signing identity you name ([#828](https://github.com/nledford/Ladderback/pull/828))
+- Keep a typed repository password in the system keyring ([#817](https://github.com/nledford/Ladderback/pull/817))
+- Turn maintenance from this agent on or off from the Snapshots page ([#825](https://github.com/nledford/Ladderback/pull/825))
+- Add a shared icon component ([#834](https://github.com/nledford/Ladderback/pull/834))
+- Add a shared button component ([#848](https://github.com/nledford/Ladderback/pull/848))
+- Detect a missing Full Disk Access grant on macOS and guide the person to grant it ([#852](https://github.com/nledford/Ladderback/pull/852))
+- Add a shared tooltip component ([#855](https://github.com/nledford/Ladderback/pull/855))
+- Download a file or folder of a snapshot from its page ([#845](https://github.com/nledford/Ladderback/pull/845))
+- List stale translations and offer only the listed languages in a release ([#859](https://github.com/nledford/Ladderback/pull/859))
+- Add a shared text field component ([#875](https://github.com/nledford/Ladderback/pull/875))
+- Leave the commands out of a profile exported for an AI agent or an API token ([#879](https://github.com/nledford/Ladderback/pull/879))
+- Draw every button with the shared button ([#883](https://github.com/nledford/Ladderback/pull/883))
+- Wait for the keyring at login before a scheduled run gives up on it ([#885](https://github.com/nledford/Ladderback/pull/885))
+- Review, approve and reject an AI agent's proposed plan changes on a Pending changes page ([#858](https://github.com/nledford/Ladderback/pull/858))
+- Add a shared table component ([#890](https://github.com/nledford/Ladderback/pull/890))
+- Accept only unreviewed translations with accept-translations --all, never stale ones ([#895](https://github.com/nledford/Ladderback/pull/895))
+- Choose the web UI's language in Settings ([#899](https://github.com/nledford/Ladderback/pull/899))
+- Draw the Pending changes page's buttons with the shared button, busy while the daemon answers ([#901](https://github.com/nledford/Ladderback/pull/901))
+- Add a shared link component ([#905](https://github.com/nledford/Ladderback/pull/905))
+- Read each keyring entry once with the new build before install-restart restarts ([#910](https://github.com/nledford/Ladderback/pull/910))
+- Name the file or folder a restore or a download read on the Operations page ([#916](https://github.com/nledford/Ladderback/pull/916))
+- Add a shared skeleton component ([#920](https://github.com/nledford/Ladderback/pull/920))
+
+### Fixed
+
+- A stop signal just after start stops the daemon in order instead of killing it ([#630](https://github.com/nledford/Ladderback/pull/630))
+- A plan whose retention keeps everything forgets nothing instead of failing ([#635](https://github.com/nledford/Ladderback/pull/635))
+- Say on Linux when a keyring password can't be read before login, and how to choose a Secret Service ([#644](https://github.com/nledford/Ladderback/pull/644))
+- A location rule holds on a mixed IPv4 and IPv6 link only if it holds for both ([#646](https://github.com/nledford/Ladderback/pull/646))
+- A snapshot whose owner tags disagree is orphaned, never forgotten by a plan ([#713](https://github.com/nledford/Ladderback/pull/713))
+- Let just install-restart wait for operations and confirm the build while sign-in is on ([#709](https://github.com/nledford/Ladderback/pull/709))
+- The focus ring shows under forced colors in Firefox, and the version wraps in a narrow Safari window ([#631](https://github.com/nledford/Ladderback/pull/631))
+- Move focus to the sign-in page after Sign out everywhere in Safari ([#763](https://github.com/nledford/Ladderback/pull/763))
+- Keep a repository's further locations with it when a save adds it to config.toml ([#765](https://github.com/nledford/Ladderback/pull/765))
+- Tidy the header bar: Sign out's place, its size and the brand's mark ([#770](https://github.com/nledford/Ladderback/pull/770))
+- Refuse core dumps and debugger attach in the MCP server ([#806](https://github.com/nledford/Ladderback/pull/806))
+- Word the sign-in, token, operation and cursor errors so a program can act on them ([#827](https://github.com/nledford/Ladderback/pull/827))
+- Name the right protocol and advice in a location's plain-credentials warning ([#830](https://github.com/nledford/Ladderback/pull/830))
+- Tell a missing repository config, a refused hot/cold half and a listing's failure by their own codes ([#835](https://github.com/nledford/Ladderback/pull/835))
+- Mask a secret written with TOML's escapes ([#857](https://github.com/nledford/Ladderback/pull/857))
+- Keep the reader's place on the Plans page once a plan is saved ([#868](https://github.com/nledford/Ladderback/pull/868))
+- Mask the run's secrets and proxy credentials in its hooks' output ([#870](https://github.com/nledford/Ladderback/pull/870))
+- Mask the rest of a secret a TOML line-ending backslash pushes onto the next line ([#878](https://github.com/nledford/Ladderback/pull/878))
+- Keep an rclone command line out of a failure's detail ([#881](https://github.com/nledford/Ladderback/pull/881))
+- End a download in the history when its browser hangs up after its minute ([#887](https://github.com/nledford/Ladderback/pull/887))
+- Keep a post-create or post-delete command line out of the daemon's log ([#889](https://github.com/nledford/Ladderback/pull/889))
+- Move focus to the Plans heading when a form's opener went with the list ([#898](https://github.com/nledford/Ladderback/pull/898))
+- Say when a keyring or password file doesn't answer in time, and how to answer a keychain prompt ([#900](https://github.com/nledford/Ladderback/pull/900))
+- Keep Sign in again closed after Escape until the person makes a request ([#917](https://github.com/nledford/Ladderback/pull/917))
+- Give back expired downloads' turns before writing their history ([#922](https://github.com/nledford/Ladderback/pull/922))
+
 ## [0.3.1](https://github.com/nledford/Ladderback/compare/v0.3.0...v0.3.1) - 2026-11-14
 
 ### Before you upgrade
