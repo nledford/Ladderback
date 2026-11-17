@@ -242,10 +242,10 @@ These rules keep the daemon running and the workspace safe to work in (§16, dec
 `just deny` runs `cargo deny --locked --all-features --workspace check` (`--workspace` because `web` is not a dependency of the root package) against the lockfile for the host targets (Linux and macOS, both architectures) and `wasm32-unknown-unknown`, and checks four things:
 
 - **Advisories.** RustSec vulnerabilities, unmaintained and yanked crates fail. An advisory that can't be fixed with `cargo update -p <crate>` inside the requirements of `Cargo.toml` and of the crates above it is listed under `ignore` with its ID, why it doesn't reach Ladderback, and what ends the ignore; there is no entry without a reason.
-- **Licences.** An explicit allow list of permissive licences, compatible with MIT OR Apache-2.0, built from what the tree uses.
+- **Licenses.** An explicit allow list of permissive licenses, compatible with MIT OR Apache-2.0, built from what the tree uses.
   - An `OR` expression passes on any one allowed term, so `self_cell`, which offers `Apache-2.0 OR GPL-2.0-only`, is used under Apache-2.0 and GPL stays off the list.
-  - The one dependency that has only a copyleft licence, `option-ext` (MPL-2.0, file-level copyleft, which we never modify), is allowed by name as an `exception`, so a second MPL-2.0 crate fails.
-  - A licence not on the list is the maintainer's decision, not an edit made to turn the check green.
+  - The one dependency that has only a copyleft license, `option-ext` (MPL-2.0, file-level copyleft, which we never modify), is allowed by name as an `exception`, so a second MPL-2.0 crate fails.
+  - A license not on the list is the maintainer's decision, not an edit made to turn the check green.
 - **Bans.** Wildcard requirements are denied; duplicate versions only warn, because the tree has some we don't control. `chrono` is denied except as a dependency of `suppaftp`, `rmcp` or `schemars`, which can't drop it (decision 22), so a Ladderback crate that starts to use it fails.
 - **Sources.** crates.io only, plus the one git repository, `rustic-rs/rustic_core`, that the pinned engine crates come from (decision 7).
 
@@ -373,9 +373,9 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 - **`install` needs a throwaway machine.** `install` installs the real service under its real name, and the daemon keeps its data in the user's real folders. So it also needs `LADDERBACK_TEST_INSTALL_SERVICE=1`, which says the machine is a throwaway one such as a CI runner, and it refuses to start where a Ladderback service is installed or anything listens on its port; `contract` may run anywhere.
 - **Not required.** They are not required checks; the maintainer may add them to the ruleset once they have a clean record.
 
-### 13.9 Dependencies, licence and fixtures
+### 13.9 Dependencies, license and fixtures
 
-What may come into the repository, under which licence, and what test data may hold:
+What may come into the repository, under which license, and what test data may hold:
 
 - **Dependencies:** ask the maintainer before adding an external dependency (a crates.io crate, an npm package, a GitHub Action). Its license must be compatible with MIT OR Apache-2.0. A new workspace crate is not a dependency in this sense.
 - **License:** MIT OR Apache-2.0 ([LICENSE-MIT](../../LICENSE-MIT), [LICENSE-APACHE](../../LICENSE-APACHE)). Ladderback is inspired by Backrest and never derived from it: Backrest is GPL-3.0, so never copy, port or paraphrase its code ([design](README.md)).
