@@ -35,40 +35,60 @@ impl BannerTone {
 
     /// The shared vocabulary's tone it is.
     pub fn tone(self) -> Tone {
-        todo!()
+        match self {
+            Self::Primary => Tone::Primary,
+            Self::Warning => Tone::Warning,
+        }
     }
 
     /// The Lucide glyph its icon shows, one shape per tone, the status
     /// badge's for warnings.
     pub fn glyph(self) -> LucideGlyph {
-        todo!()
+        match self {
+            Self::Primary => LucideGlyph::Info,
+            Self::Warning => LucideGlyph::TriangleAlert,
+        }
     }
 
     /// The word that names its icon for a screen reader ("Warning"), so the
     /// tone is said before the banner's words.
     pub fn label(self) -> MessageId {
-        todo!()
+        match self {
+            Self::Primary => msg::UI_BANNER_INFORMATION,
+            Self::Warning => msg::UI_BANNER_WARNING,
+        }
     }
 }
+
+/// How a banner is drawn, in Tailwind utilities (decision 117), logical
+/// ones only: a square strip of Ledger Gray across the content, as the site
+/// header is, its words in the text's color, so a warning is never a colored
+/// banner (DESIGN.md), and its tone (`--tone`, which its tone's class sets)
+/// in a 0.25 rem edge at the start of its line, in rem so it grows with the
+/// reader's text. Under forced colors the fill is dropped, so a 1px edge all
+/// round in the system's text color keeps its box in view, the start edge
+/// still the thick one.
+const LOOK: &str = "flex items-start gap-2 my-2 py-2 px-3 bg-surface text-fg \
+    border-0 border-s-[0.25rem] border-solid border-(--tone) \
+    forced-colors:border forced-colors:border-s-[0.25rem] \
+    forced-colors:border-[color:CanvasText]";
 
 /// The classes of the banner: the banner's own, which names it, its tone's,
 /// which its icon and its edge take, and its look.
 pub fn banner_class(tone: BannerTone) -> String {
-    let _ = tone;
-    todo!()
+    format!("banner {} {LOOK}", tone.tone().class())
 }
 
 /// The name of a banner's Dismiss button, which its tooltip shows too.
 pub fn dismiss_name() -> MessageId {
-    todo!()
+    msg::UI_BANNER_DISMISS
 }
 
 /// The key of the browser's local storage that remembers the dismissal of
 /// the banner named `banner`, one per banner, so that dismissing one keeps
 /// no other away.
 pub fn storage_key(banner: &str) -> String {
-    let _ = banner;
-    todo!()
+    format!("ladderback-banner-{banner}")
 }
 
 /// Whether a banner stays away: `kept` is what the browser remembers of the
@@ -78,8 +98,7 @@ pub fn storage_key(banner: &str) -> String {
 /// again. What the browser keeps is outside input, and anything but this
 /// edition, or nothing, shows the banner.
 pub fn stays_dismissed(kept: Option<&str>, edition: &str) -> bool {
-    let _ = (kept, edition);
-    todo!()
+    kept == Some(edition)
 }
 
 #[cfg(test)]
