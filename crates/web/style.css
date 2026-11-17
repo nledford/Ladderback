@@ -283,9 +283,10 @@ a {
   margin-block: 0;
 }
 
+/* The frame's width is `<main>`'s own Tailwind utilities, which Settings'
+   Page width chooses (`page_width.rs`): a width here, unlayered, would beat
+   them. */
 main {
-  max-inline-size: 60rem;
-  margin-inline: auto;
   padding: 1rem;
 }
 

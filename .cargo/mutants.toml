@@ -112,6 +112,14 @@
 # reload and focus on the section's heading are `page.rs`'s glue; the `@ui`
 # scenarios of `features/ui/language.feature` run both in Chromium.
 #
+# `crates/web/src/settings/page_width.rs` is the DOM glue of Settings' Page
+# width section (§4.5): it shows the choices, keeps each as it is made, sets
+# the page's width and, when the browser refused, says so and puts the choice
+# back. The choices, their order, what a kept value stands for, what a choice
+# keeps and the utilities each width gives `<main>` are `page_width.rs`'s,
+# mutated on the host; keeping it is `page.rs`'s glue; the `@ui` scenarios of
+# `features/ui/page_width.feature` run both in Chromium, Firefox and WebKit.
+#
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
 # starts, the cancel and the stats' look and read; doing what
@@ -179,6 +187,7 @@ exclude_globs = [
     "crates/web/src/settings/password.rs",
     "crates/web/src/settings/sign_in.rs",
     "crates/web/src/settings/language.rs",
+    "crates/web/src/settings/page_width.rs",
     "crates/web/src/full_disk_access_warning.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:

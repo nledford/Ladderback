@@ -146,6 +146,7 @@ mod wording;
 mod variants;
 
 use daemon_log_page::DaemonLog;
+use page_width::PageWidth;
 use plans_page::Plans;
 use proposals_page::Proposals;
 use routes::{NotFound, Operations, Repositories, Start};
@@ -377,6 +378,10 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let told = RwSignal::new(None::<session::Told>);
     provide_context(told);
     provide_context(standing);
+    // The width chosen in this browser, in effect from the first render;
+    // Settings' Page width section changes it.
+    let width = RwSignal::new(PageWidth::from_kept(page::stored_page_width().as_deref()));
+    provide_context(width);
     provide_context(notice);
     provide_context(sign_in::PasswordChanged(RwSignal::new(false)));
     // Offered until a signed-out answer says otherwise, as a daemon from
@@ -488,7 +493,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                         })
                 }}
             </header>
-            <main id="main" tabindex="-1" node_ref=main>
+            <main id="main" tabindex="-1" node_ref=main class=move || width.get().main_class()>
                 {move || {
                     (notice.get() == SignInOffNotice::EveryPage)
                         .then(|| {

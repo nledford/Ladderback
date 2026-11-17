@@ -31,33 +31,61 @@ impl PageWidth {
     /// gives it or as the browser kept it. What the browser kept is outside
     /// input, so anything but Full width's own value is Narrow.
     pub(crate) fn from_kept(kept: Option<&str>) -> Self {
-        let _ = kept;
-        todo!()
+        if kept == Some(FULL) {
+            Self::Full
+        } else {
+            Self::Narrow
+        }
     }
 
     /// The value of its radio button, which is also what saving it keeps
     /// when it is kept.
     pub(crate) const fn value(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Narrow => NARROW,
+            Self::Full => FULL,
+        }
     }
 
     /// What saving it keeps in the browser: Full width's value, or nothing
     /// for Narrow, which forgets the one kept.
     pub(crate) const fn to_keep(self) -> Option<&'static str> {
-        todo!()
+        match self {
+            Self::Narrow => None,
+            Self::Full => Some(FULL),
+        }
     }
 
-    /// The Tailwind utilities `<main>` takes.
+    /// The Tailwind utilities `<main>` takes. Narrow centers it at 60rem
+    /// (240 steps of Tailwind's 0.25rem spacing), today's frame. Full width
+    /// leaves the frame to the window and holds each paragraph and form in it
+    /// to 70 characters of its own font, a readable line however wide the
+    /// window is; tables and the rest take the whole width. Tailwind 4.1 has
+    /// no named logical width bound, only `max-w-*` (`max-width`) or an
+    /// arbitrary `[max-inline-size:…]`; the page runs only horizontally,
+    /// where `max-width` is the inline size in either direction, so the named
+    /// utility on Tailwind's scale is the one used.
     pub(crate) const fn main_class(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Narrow => "mx-auto max-w-240",
+            Self::Full => "[&_p]:max-w-[70ch] [&_form]:max-w-[70ch]",
+        }
     }
 }
+
+/// Narrow's value.
+const NARROW: &str = "narrow";
+
+/// Full width's value, which saving it keeps.
+const FULL: &str = "full";
 
 /// The choices, in the order the section offers them: Narrow, worded
 /// `narrow`, then Full width, worded `full`.
 pub(crate) fn options(narrow: String, full: String) -> Vec<(&'static str, String)> {
-    let _ = (narrow, full);
-    todo!()
+    vec![
+        (PageWidth::Narrow.value(), narrow),
+        (PageWidth::Full.value(), full),
+    ]
 }
 
 #[cfg(test)]

@@ -2513,6 +2513,24 @@ ui-language-save = Save the language
 # Shown when the browser refused to keep the language chosen: its settings, or a private window, may let a site keep nothing.
 ui-language-not-kept = This browser didn't keep the language. Its settings may stop sites from keeping anything.
 
+# The heading of the section of Settings that chooses how wide each page's content is.
+ui-page-width-heading = Page width
+
+# The legend of the choice of how wide each page's content is: Narrow (ui-page-width-narrow) or Full width (ui-page-width-full).
+ui-page-width-legend = Width of each page
+
+# The description under that legend. The choice is kept in this browser alone, not by the daemon, and takes effect as soon as it is chosen, with no button. In Full width the tables use the window's width, while paragraphs and forms stay about 70 characters wide.
+ui-page-width-hint = Kept in this browser, and applied as soon as it's chosen. Full width lets tables use the whole window, while paragraphs and forms keep a readable line length.
+
+# The first choice of the page's width, the one chosen until another is: the content stays at a fixed width, centered in a wide window.
+ui-page-width-narrow = Narrow
+
+# The second choice of the page's width: the content uses the window's whole width.
+ui-page-width-full = Full width
+
+# Shown when the browser refused to keep the page width chosen: its settings, or a private window, may let a site keep nothing. The page keeps the width it had.
+ui-page-width-not-kept = This browser didn't keep the page width, so the page stays as it was. Its settings may stop sites from keeping anything.
+
 # The heading of the section of Settings about signing in: how long a session lasts, and signing out every browser at once.
 ui-signing-in-heading = Signing in
 
