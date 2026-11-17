@@ -135,6 +135,12 @@ Feature: Restoring files from a snapshot
     And the person restores "home/photos" of the snapshot, confirming with "3f2a1b4c"
     Then each restore started
 
+  Scenario: The history names the repository a restore reads from, from the moment it is queued
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    Given sign-in is off
+    When the person starts restoring "home/docs" of the snapshot, confirming with "3f2a1b4c"
+    Then the history shows the restore queued, reading from the repository "demo"
+
   Scenario: A restore cancelled midway is recorded as cancelled
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
     Given sign-in is off
@@ -226,7 +232,7 @@ Feature: Restoring files from a snapshot
     And I press Enter
     Then the polite region comes to contain "Restore of demo-1.txt finished."
     When I open the address "/operations"
-    Then the row "Operation" of the table "Operations" lists "demo-1.txt" in its "Result" column
+    Then the row "Restore from demo" of the table "Operations" lists "demo-1.txt" in its "Result" column
     And the page has no accessibility violations
 
   @ui
