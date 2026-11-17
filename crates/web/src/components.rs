@@ -54,7 +54,7 @@ pub use checkbox::Checkbox;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};
 pub use icon::Icon;
 pub use link::Link;
-pub use modal_dialog::ModalDialog;
+pub use modal_dialog::{ModalDialog, TitleLevel};
 pub(crate) use pause_updates::PauseUpdates;
 pub use progress::Progress;
 pub use radio_group::{LabelLanguage, RadioGroup};
