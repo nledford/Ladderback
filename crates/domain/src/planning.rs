@@ -42,9 +42,9 @@ pub use location::{
 pub use names::{GlobFile, Hostname, Locale, RestoreFolder, Source};
 pub use plan::{Overlap, Plan, RetryPolicy};
 pub use proposal::{
-    ConfigChange, ConfigRevision, DiffHash, MAX_CHANGES, MAX_ENDED, MAX_PENDING, MAX_PER_HOUR,
-    MAX_RATIONALE_CHARS, MAX_REASON_CHARS, PROPOSAL_ID_CHARS, PROPOSAL_LIFETIME, PlanSetting,
-    Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer,
+    ConfigChange, ConfigRevision, DiffHash, ForgetDigest, MAX_CHANGES, MAX_ENDED, MAX_PENDING,
+    MAX_PER_HOUR, MAX_RATIONALE_CHARS, MAX_REASON_CHARS, PROPOSAL_ID_CHARS, PROPOSAL_LIFETIME,
+    PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalStatus, ProposalWarning, Proposer,
     ProposerRecord, QUIET_AFTER_REJECTION, RATE_WINDOW, REVISION_KEY_BYTES, Rationale,
     RejectReason, Rejection, RejectionRefused, RevisionKey, SHORT_PROPOSAL_ID_CHARS, Shown,
     ShownRevision, SummaryLine, TooSoon, short_proposal_id,

@@ -112,6 +112,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ProposalNotPending => msg::ERROR_PROPOSAL_NOT_PENDING,
     ProposalChanged => msg::ERROR_PROPOSAL_CHANGED,
     ProposalNeedsForgetPreview => msg::ERROR_PROPOSAL_NEEDS_FORGET_PREVIEW,
+    ProposalForgetPreviewChanged => msg::ERROR_PROPOSAL_FORGET_PREVIEW_CHANGED,
     ProposalRate => msg::ERROR_PROPOSAL_RATE,
     ProposalAfterRejection => msg::ERROR_PROPOSAL_AFTER_REJECTION,
     ProposalReasons => msg::ERROR_PROPOSAL_REASONS,

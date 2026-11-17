@@ -352,6 +352,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProposalNotPending
                 | ErrorCode::ProposalChanged
                 | ErrorCode::ProposalNeedsForgetPreview
+                | ErrorCode::ProposalForgetPreviewChanged
                 | ErrorCode::ProposalRate
                 | ErrorCode::ProposalAfterRejection
                 | ErrorCode::ProposalReasons

@@ -19,7 +19,8 @@ use crate::announcer::Politeness;
 use crate::components::button::{self, Appearance, Content};
 use crate::components::{
     Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
-    focus_element, hand_focus_when_gone, recover_focus, sentence_view, text_field,
+    dialog_refusal_alert, focus_element, hand_focus_when_gone, recover_focus, refusal_alert,
+    say_refusals, text_field,
 };
 use crate::live::reply;
 use crate::plans::{
@@ -140,12 +141,14 @@ struct Open {
 #[component]
 pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
     let list = List::new();
+    say_refusals(list.refused);
     let read_localizer = Arc::clone(&localizer);
     spawn_local(async move { list.read(&read_localizer).await });
 
     // The form, and why it could not open, said in its place.
     let editing = RwSignal::<Option<Open>>::new(None);
     let not_opened = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(not_opened);
     let change_localizer = Arc::clone(&localizer);
     let change = Callback::new(move |id: String| {
         not_opened.set(None);
@@ -262,6 +265,8 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
     let table_localizer = Arc::clone(&localizer);
     let form_localizer = Arc::clone(&localizer);
     let dialog_localizer = Arc::clone(&localizer);
+    let refusal_localizer = Arc::clone(&localizer);
+    let not_opened_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>
             {move || {
@@ -277,7 +282,7 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
             (Phase::Loading, _, _) => view! { <p>{loading.clone()}</p> }.into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
-                view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+                refusal_alert(&refusal_localizer, sentence).into_any()
             }
             (Phase::Ready, None, true) => {
                 plans_table(Arc::clone(&table_localizer), list, change, ask_delete).into_any()
@@ -297,7 +302,7 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
             />
         </p>
         {move || {
-            not_opened.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            not_opened.get().map(|sentence| refusal_alert(&not_opened_localizer, sentence))
         }}
         {move || {
             editing
@@ -712,7 +717,7 @@ fn PlanEditor(
 /// forgets them on its own any more (I6), and a new plan with its ID would
 /// take them over. Cancel comes first, so a stray Enter backs out. While the
 /// daemon deletes the plan, the dialog holds still and says so; a refusal is
-/// an alert inside it.
+/// an Error alert inside it, which the dialog says itself.
 #[component]
 fn DeleteDialog(
     localizer: Arc<Localizer>,
@@ -723,6 +728,7 @@ fn DeleteDialog(
     delete: Callback<String>,
 ) -> impl IntoView {
     let title = say(&localizer, delete_title(&id));
+    let error_localizer = Arc::clone(&localizer);
     let successor = say(&localizer, delete_successor(&id));
     let returns_to = delete_id(&id);
     let confirm = Confirmation {
@@ -750,9 +756,7 @@ fn DeleteDialog(
                 <p>{text(&localizer, msg::UI_PLAN_DELETE_FORGET)}</p>
                 <p>{successor}</p>
             </div>
-            {move || {
-                error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
-            }}
+            {move || error.get().map(|sentence| dialog_refusal_alert(&error_localizer, sentence))}
         </ReviewDialog>
     }
 }

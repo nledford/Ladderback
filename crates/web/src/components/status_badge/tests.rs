@@ -59,7 +59,7 @@ fn each_state_draws_an_icon_of_its_own_in_its_texts_color_which_a_screen_reader_
 fn the_label_stands_beside_the_icon_on_the_states_pill() {
     for state in BadgeState::ALL {
         let html = rendered(state, "Demo label");
-        let pill = format!(r#"class="badge badge-{}""#, state.pill());
+        let pill = format!(r#"class="badge {}""#, state.pill());
         assert!(html.contains(&pill), "{state:?}: {html}");
         let after_icon = html.split("</svg>").nth(1).unwrap_or_default();
         assert!(after_icon.contains("Demo label"), "{state:?}: {html}");

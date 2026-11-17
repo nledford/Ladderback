@@ -1,9 +1,10 @@
 //! What a set of tabs does (components §4.5, "Tabs"; the WAI-ARIA tabs
-//! pattern), decided on the host: which tab a key moves focus to, whether
-//! arriving there selects it, which tab is the list's one Tab stop, the ids
-//! and ARIA attributes that tie each tab to its panel and name the list, and
-//! whether a panel is a Tab stop of its own. `components/tabs.rs`'s `Tabs` is
-//! its DOM glue, which the `@ui` scenarios run in a browser.
+//! pattern), decided on the host: which tab a key moves focus to in the
+//! layout shown, whether arriving there selects it, which tab is the list's
+//! one Tab stop, the ids and ARIA attributes that tie each tab to its panel,
+//! name the list and say its orientation, and whether a panel is a Tab stop
+//! of its own. `components/tabs.rs`'s `Tabs` is its DOM glue, which the `@ui`
+//! scenarios run in a browser.
 
 use l10n::Direction;
 
@@ -76,18 +77,83 @@ impl TabsName {
     }
 }
 
+/// How a set of tabs lays out its list beside its panels (§4.5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Orientation {
+    /// A row of tabs above the panel: the default.
+    #[default]
+    Horizontal,
+    /// A column of tabs beside the panel, at its start.
+    Vertical,
+    /// A column beside the panel while the tabs' container has room for
+    /// both, a row above it below that: a container query decides, so the
+    /// same tabs suit a wide page and a narrow column.
+    Responsive,
+}
+
+impl Orientation {
+    /// The layout a list of this orientation always shows, or `None` for
+    /// `Responsive`, whose layout is the one its container's room draws.
+    pub fn fixed(self) -> Option<Layout> {
+        match self {
+            Self::Horizontal => Some(Layout::Horizontal),
+            Self::Vertical => Some(Layout::Vertical),
+            Self::Responsive => None,
+        }
+    }
+}
+
+/// The layout a tab list is shown in, which its arrow keys and its
+/// `aria-orientation` follow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layout {
+    /// A row: the left and right arrows move between the tabs.
+    Horizontal,
+    /// A column: the up and down arrows move between the tabs.
+    Vertical,
+}
+
+impl Layout {
+    /// The layout of a list drawn with the CSS `flex-direction` `drawn`, its
+    /// computed value: a column is vertical, anything else a row.
+    pub fn drawn(drawn: &str) -> Self {
+        if drawn.starts_with("column") {
+            Self::Vertical
+        } else {
+            Self::Horizontal
+        }
+    }
+
+    /// The list's `aria-orientation`.
+    pub fn aria_orientation(self) -> &'static str {
+        match self {
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
+        }
+    }
+}
+
 /// The tab focus moves to from the tab `at` of a list whose last tab is
 /// `last` (a list holds at least one, so there is always a last) when `key`
 /// (a `KeyboardEvent.key` pressed without Ctrl, Alt or Meta) is pressed in a
-/// list that runs in `direction`, or `None` for a key the list leaves to the
-/// page. The arrow pointing along the line goes to the next tab, the other
-/// to the one before, so in a list that runs right to left the left arrow
-/// goes to the next tab; both wrap, from the last tab to the first and back.
-/// Home and End go to the first and the last.
-pub fn arrival(at: usize, last: usize, key: &str, direction: Direction) -> Option<usize> {
-    let (next, previous) = match direction {
-        Direction::Ltr => ("ArrowRight", "ArrowLeft"),
-        Direction::Rtl => ("ArrowLeft", "ArrowRight"),
+/// list shown in `layout` whose text runs in `direction`, or `None` for a key
+/// the list leaves to the page. In a row, the arrow pointing along the line
+/// goes to the next tab, the other to the one before, so in a list that runs
+/// right to left the left arrow goes to the next tab; in a column, the down
+/// arrow goes to the next and the up arrow to the one before, whatever the
+/// direction. Both wrap, from the last tab to the first and back. Home and
+/// End go to the first and the last.
+pub fn arrival(
+    at: usize,
+    last: usize,
+    key: &str,
+    direction: Direction,
+    layout: Layout,
+) -> Option<usize> {
+    let (next, previous) = match (layout, direction) {
+        (Layout::Horizontal, Direction::Ltr) => ("ArrowRight", "ArrowLeft"),
+        (Layout::Horizontal, Direction::Rtl) => ("ArrowLeft", "ArrowRight"),
+        (Layout::Vertical, _) => ("ArrowDown", "ArrowUp"),
     };
     match key {
         "Home" => Some(0),
@@ -137,66 +203,171 @@ mod tests {
     const LTR: Direction = Direction::Ltr;
     const RTL: Direction = Direction::Rtl;
 
+    /// Where `key` moves focus in a row of tabs.
+    fn in_a_row(at: usize, last: usize, key: &str, direction: Direction) -> Option<usize> {
+        arrival(at, last, key, direction, Layout::Horizontal)
+    }
+
+    /// Where `key` moves focus in a column of tabs.
+    fn in_a_column(at: usize, last: usize, key: &str, direction: Direction) -> Option<usize> {
+        arrival(at, last, key, direction, Layout::Vertical)
+    }
+
     #[test]
     fn in_a_list_that_runs_left_to_right_the_right_arrow_goes_to_the_next_tab_and_the_left_to_the_one_before()
      {
-        assert_eq!(arrival(0, 2, "ArrowRight", LTR), Some(1));
-        assert_eq!(arrival(1, 2, "ArrowRight", LTR), Some(2));
-        assert_eq!(arrival(2, 2, "ArrowLeft", LTR), Some(1));
-        assert_eq!(arrival(1, 2, "ArrowLeft", LTR), Some(0));
+        assert_eq!(in_a_row(0, 2, "ArrowRight", LTR), Some(1));
+        assert_eq!(in_a_row(1, 2, "ArrowRight", LTR), Some(2));
+        assert_eq!(in_a_row(2, 2, "ArrowLeft", LTR), Some(1));
+        assert_eq!(in_a_row(1, 2, "ArrowLeft", LTR), Some(0));
     }
 
     #[test]
     fn the_arrows_wrap_from_the_last_tab_to_the_first_and_back() {
-        assert_eq!(arrival(2, 2, "ArrowRight", LTR), Some(0));
-        assert_eq!(arrival(0, 2, "ArrowLeft", LTR), Some(2));
-        assert_eq!(arrival(3, 3, "ArrowLeft", RTL), Some(0));
-        assert_eq!(arrival(0, 3, "ArrowRight", RTL), Some(3));
+        assert_eq!(in_a_row(2, 2, "ArrowRight", LTR), Some(0));
+        assert_eq!(in_a_row(0, 2, "ArrowLeft", LTR), Some(2));
+        assert_eq!(in_a_row(3, 3, "ArrowLeft", RTL), Some(0));
+        assert_eq!(in_a_row(0, 3, "ArrowRight", RTL), Some(3));
     }
 
     #[test]
     fn in_a_list_that_runs_right_to_left_the_left_arrow_goes_to_the_next_tab_and_the_right_to_the_one_before()
      {
-        assert_eq!(arrival(0, 2, "ArrowLeft", RTL), Some(1));
-        assert_eq!(arrival(1, 2, "ArrowLeft", RTL), Some(2));
-        assert_eq!(arrival(2, 2, "ArrowRight", RTL), Some(1));
-        assert_eq!(arrival(1, 2, "ArrowRight", RTL), Some(0));
+        assert_eq!(in_a_row(0, 2, "ArrowLeft", RTL), Some(1));
+        assert_eq!(in_a_row(1, 2, "ArrowLeft", RTL), Some(2));
+        assert_eq!(in_a_row(2, 2, "ArrowRight", RTL), Some(1));
+        assert_eq!(in_a_row(1, 2, "ArrowRight", RTL), Some(0));
+    }
+
+    #[test]
+    fn in_a_column_the_down_arrow_goes_to_the_next_tab_and_the_up_to_the_one_before_in_either_direction()
+     {
+        for direction in [LTR, RTL] {
+            assert_eq!(
+                in_a_column(0, 2, "ArrowDown", direction),
+                Some(1),
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(1, 2, "ArrowDown", direction),
+                Some(2),
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(2, 2, "ArrowUp", direction),
+                Some(1),
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(1, 2, "ArrowUp", direction),
+                Some(0),
+                "{direction:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn in_a_column_the_up_and_down_arrows_wrap_from_the_last_tab_to_the_first_and_back() {
+        for direction in [LTR, RTL] {
+            assert_eq!(
+                in_a_column(2, 2, "ArrowDown", direction),
+                Some(0),
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(0, 2, "ArrowUp", direction),
+                Some(2),
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(3, 3, "ArrowDown", direction),
+                Some(0),
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(0, 3, "ArrowUp", direction),
+                Some(3),
+                "{direction:?}"
+            );
+        }
     }
 
     #[test]
     fn home_and_end_go_to_the_first_and_the_last_tab_in_either_direction() {
         for direction in [LTR, RTL] {
-            assert_eq!(arrival(1, 2, "Home", direction), Some(0), "{direction:?}");
-            assert_eq!(arrival(1, 2, "End", direction), Some(2), "{direction:?}");
-            assert_eq!(arrival(0, 2, "Home", direction), Some(0), "{direction:?}");
-            assert_eq!(arrival(2, 2, "End", direction), Some(2), "{direction:?}");
+            for layout in [Layout::Horizontal, Layout::Vertical] {
+                let case = format!("{direction:?} {layout:?}");
+                assert_eq!(arrival(1, 2, "Home", direction, layout), Some(0), "{case}");
+                assert_eq!(arrival(1, 2, "End", direction, layout), Some(2), "{case}");
+                assert_eq!(arrival(0, 2, "Home", direction, layout), Some(0), "{case}");
+                assert_eq!(arrival(2, 2, "End", direction, layout), Some(2), "{case}");
+            }
         }
     }
 
     #[test]
     fn a_list_of_one_tab_keeps_focus_on_it() {
         for key in ["ArrowRight", "ArrowLeft", "Home", "End"] {
-            assert_eq!(arrival(0, 0, key, LTR), Some(0), "{key}");
+            assert_eq!(in_a_row(0, 0, key, LTR), Some(0), "{key}");
+        }
+        for key in ["ArrowDown", "ArrowUp", "Home", "End"] {
+            assert_eq!(in_a_column(0, 0, key, LTR), Some(0), "{key}");
         }
     }
 
-    // Up and Down belong to a vertical list, which tabs never are; Enter
-    // and Space press the tab itself, a native button; Tab leaves the list.
+    // Up and Down belong to a column and Left and Right to a row, the other
+    // pair left to the page as the WAI-ARIA tabs pattern does; Enter and
+    // Space press the tab itself, a native button; Tab leaves the list.
     #[test]
     fn every_other_key_is_left_to_the_page() {
-        for key in [
-            "ArrowUp",
-            "ArrowDown",
-            "Enter",
-            " ",
-            "Tab",
-            "Escape",
-            "PageDown",
-            "a",
-        ] {
-            assert_eq!(arrival(1, 3, key, LTR), None, "{key}");
-            assert_eq!(arrival(1, 3, key, RTL), None, "{key}");
+        for key in ["Enter", " ", "Tab", "Escape", "PageDown", "a"] {
+            for direction in [LTR, RTL] {
+                assert_eq!(in_a_row(1, 3, key, direction), None, "{key}");
+                assert_eq!(in_a_column(1, 3, key, direction), None, "{key}");
+            }
         }
+        for direction in [LTR, RTL] {
+            assert_eq!(in_a_row(1, 3, "ArrowUp", direction), None, "{direction:?}");
+            assert_eq!(
+                in_a_row(1, 3, "ArrowDown", direction),
+                None,
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(1, 3, "ArrowLeft", direction),
+                None,
+                "{direction:?}"
+            );
+            assert_eq!(
+                in_a_column(1, 3, "ArrowRight", direction),
+                None,
+                "{direction:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn horizontal_and_vertical_tabs_always_show_their_own_layout_and_responsive_ones_the_one_drawn()
+    {
+        assert_eq!(Orientation::default(), Orientation::Horizontal);
+        assert_eq!(Orientation::Horizontal.fixed(), Some(Layout::Horizontal));
+        assert_eq!(Orientation::Vertical.fixed(), Some(Layout::Vertical));
+        assert_eq!(Orientation::Responsive.fixed(), None);
+    }
+
+    #[test]
+    fn a_list_drawn_as_a_column_is_vertical_and_any_other_is_horizontal() {
+        assert_eq!(Layout::drawn("column"), Layout::Vertical);
+        assert_eq!(Layout::drawn("column-reverse"), Layout::Vertical);
+        assert_eq!(Layout::drawn("row"), Layout::Horizontal);
+        assert_eq!(Layout::drawn("row-reverse"), Layout::Horizontal);
+        assert_eq!(Layout::drawn(""), Layout::Horizontal);
+    }
+
+    #[test]
+    fn the_list_says_the_layout_it_is_shown_in() {
+        assert_eq!(Layout::Horizontal.aria_orientation(), "horizontal");
+        assert_eq!(Layout::Vertical.aria_orientation(), "vertical");
     }
 
     #[test]

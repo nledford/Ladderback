@@ -17,10 +17,18 @@ colors:
   empty-fg: "#111827"
   empty-bg: "#e5e7eb"
   empty-bg-dark: "#26303f"
-  error-fg: "#691717"
-  error-bg: "#fee2e2"
   success-fg: "#052e16"
+  success-fg-dark: "#dcfce7"
   success-bg: "#dcfce7"
+  success-bg-dark: "#052e16"
+  warning-fg: "#451a03"
+  warning-fg-dark: "#fef3c7"
+  warning-bg: "#fffbeb"
+  warning-bg-dark: "#451a03"
+  error-fg: "#691717"
+  error-fg-dark: "#fee2e2"
+  error-bg: "#fecaca"
+  error-bg-dark: "#7f1d1d"
   tick-green: "#15803d"
   tick-green-dark: "#4ade80"
   flag-amber: "#b45309"
@@ -137,7 +145,7 @@ components:
 
 Ladderback's web UI is a ledger of backups: ruled rows of facts, each with its unit, read top to bottom. A page is a heading, a sentence that says where things stand, and a table or a form. The person comes to check that every machine is backed up, notice the one that isn't, and act; nothing on the page competes with that.
 
-The look is plain, on purpose. Headings, checkboxes and dialogs are the browser's native controls, and a button is a native `<button>` drawn from the tokens, so it looks the same in every browser while it behaves the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and four quiet status pairs say what a run is doing. Everything else is text.
+The look is plain, on purpose. Headings, checkboxes and dialogs are the browser's native controls, and a button is a native `<button>` drawn from the tokens, so it looks the same in every browser while it behaves the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and quiet pairs, dark words on a pale fill (pale on deep in dark mode), say what a run is doing. Everything else is text.
 
 Accessibility shapes the layout rather than decorating it: every layout holds at 320 px wide with text at 200 %, in both directions of writing, in light, dark and forced colors.
 
@@ -151,7 +159,7 @@ Accessibility shapes the layout rather than decorating it: every layout holds at
 
 ## Colors
 
-A white page (dark: near-black), graphite text, one blue, three status hues and four soft status pairs. Every color is a CSS custom property in `crates/web/style.css`, redefined under `prefers-color-scheme: dark`; `tailwind.css` maps the same properties as Tailwind colors, so `style.css` stays the one source. `just test-contrast` checks every pair the UI relies on.
+A white page (dark: near-black), graphite text, one blue, three status hues, a soft pair for each of them and the badge's two own soft pairs. Every color is a CSS custom property in `crates/web/style.css`, redefined under `prefers-color-scheme: dark`; `tailwind.css` maps the same properties as Tailwind colors, so `style.css` stays the one source. `just test-contrast` checks every pair the UI relies on.
 
 ### Primary
 
@@ -161,20 +169,30 @@ A white page (dark: near-black), graphite text, one blue, three status hues and 
 
 - **Paper** (`--bg`): the page.
 - **Graphite Ink** (`--fg`): all body text and headings.
-- **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and under a row of tabs, and the line around the pause banner.
+- **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and between a list of tabs and its panel, and the line around the pause banner.
 - **Ledger Gray** (`--surface`): the site header, toasts, alerts, the pause banner, a progress bar's empty track and an unavailable text field.
 - **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 - **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
 
 ### Status
 
-The status badges: each state is a text token on a background token, swapped between schemes rather than recolored: Loading (blue), Empty (gray), Error (dark red on pale red), Success (dark green on pale green). The error text color also draws the form error and the error summary's border. A badge's text keeps its pair; the status hues below are not drawn on a badge's background.
-
 The status hues: a color a part draws in to tell how something went, on the page or a surface, at 4.5:1 or more on both and lighter in dark mode. They are the Success, Warning and Error tones of the shared vocabulary (Components), and under forced colors each becomes the reader's text color.
 
 - **Tick Green** (`--success`): something ended well.
 - **Flag Amber** (`--warning`): something needs a look.
 - **Red Ink** (`--error`): something failed.
+
+The status pairs: each status tone's soft pair, for a part tinted in it (a badge's pill, an alert's or a toast's box), its words on its fill, in Tailwind's palette of the same hue. Every shared component that tints a part by status draws from these, never from a pair of its own.
+
+| Pair | Light: words on fill | Dark: words on fill |
+|---|---|---|
+| Success (`--success-fg`, `--success-bg`) | green-950 `#052e16` on green-100 `#dcfce7` | green-100 on green-950 |
+| Warning (`--warning-fg`, `--warning-bg`) | amber-950 `#451a03` on amber-50 `#fffbeb` | amber-100 `#fef3c7` on amber-950 |
+| Error (`--error-fg`, `--error-bg`) | `#691717` on red-200 `#fecaca` | red-100 `#fee2e2` on red-900 `#7f1d1d` |
+
+The words are at 4.5:1 or more on their fill. Warning's and Error's fills stand at least 0.1 apart in OKLab lightness in both schemes, Error's the further from the page (darker in light, lighter in dark), so amber and red never read as one, for a reader who can't tell the hues apart either (decision 108). The Error pair's words also draw a form's errors and the error summary's border on the page. Under forced colors the system's colors replace both.
+
+The badge's own pairs, for the states that tell no result: Loading (dark blue on pale blue) while a run is under way, Empty (gray) while it waits, once it was cancelled, or with nothing to tell. A status badge draws a run that succeeded or failed in its status tone's pair; the status hues above are not drawn on a fill.
 
 ### Named Rules
 
@@ -198,13 +216,13 @@ The status hues: a color a part draws in to tell how something went, on the page
 
 ### Named Rules
 
-**The Weight Not Color Rule.** Current, selected and pressed are said by weight (and an inset edge on a pressed button, a bar under a selected tab), never by color alone.
+**The Weight Not Color Rule.** Current, selected and pressed are said by weight (and an inset edge on a pressed button, a bar beside a selected tab), never by color alone.
 
 **The Reader's Size Rule.** Form controls inherit the page's font (`font: inherit`), so a button's label doubles when the reader doubles their text.
 
 ## Layout
 
-One column, `main` centered at up to 60rem with 1rem padding. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
+One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main` (`page_width.rs`), never a `style.css` rule. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
 
 Spacing steps are 0.25, 0.5, 0.75 and 1rem; forms stack fields 1rem apart, and an `.actions` row puts its buttons 0.5rem apart, wrapping. Inputs fill their line up to 32rem (40rem for a token).
 
@@ -257,7 +275,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Status Badges
 
-- **Style:** a pill in its state's pair (see Colors), 0.125rem by 0.5rem padding.
+- **Style:** a pill in its state's pair (see Colors): Success's or Error's for a run that succeeded or failed, the badge's own Loading or Empty pair otherwise, 0.125rem by 0.5rem padding.
 - **Content:** an icon as tall as the text, stroked in the text's color, then the label. Where the two don't fit side by side, the label wraps whole below the icon.
 
 ### Inputs / Fields
@@ -321,7 +339,7 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 
 ### Alerts
 
-- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. Pages move onto it in #929.
+- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. The Log and Plans pages show their refusals with it, as Error alerts; the other pages move onto it in #929.
 - **Look:** Ledger Gray with the small corner, the words and any link in them in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a failure is not a red banner.
 - **Tone:** Primary (information, the default), Success, Warning and Error, each with its own icon: Info, CircleCheck, TriangleAlert and CircleX, the icon named by its tone in words for a screen reader. No Secondary and no Inherit: an alert always says its tone.
 - **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page takes the alert away and names where focus goes.
@@ -348,12 +366,13 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 
 ### Tabs
 
-- **Use:** switching between views within one page, each tab showing its panel below the row. Never navigation between pages: that is the navigation's links.
-- **Look:** a row of tabs on one Slate Note rule, each tab its words in the text's color, no fill and no box. The selected tab is bold with a 3 px Ladder Blue bar over the rule under it; a hovered one shows a Slate Note line as thick as the bar in the bar's place. Flat: no boxed, lifted or pill tabs, which say a depth this system doesn't use, and no icons.
-- **Size:** the text's size, no shared size; each tab at least 24 × 24 CSS px. A bold copy of the words, unseen, keeps each tab as wide selected as not, so the row stays still as the selection moves.
-- **Narrow screens:** the row wraps onto more lines, every tab whole. Each tab stands on its own stretch of the rule, edge to edge with the next, so a tab selected on an earlier line keeps its bar over a rule; the rule runs on to the row's end under the last line.
+- **Use:** switching between views within one page. Never navigation between pages: that is the navigation's links.
+- **Orientation:** horizontal (the default), a row of tabs above the panel; vertical, a column at the panel's start, for a list too long or its words too wide for a row; responsive, a column while the tabs' own space has room for the list beside the panel and a row below that, for tabs that sit in a wide page and a narrow column alike. A change of layout moves nothing else: the selected tab, the focus and what a panel holds stay.
+- **Look:** the tabs on one Slate Note rule between them and the panel, under a row and at the end of a column, each tab its words in the text's color, no fill and no box. The selected tab is bold with a 3 px Ladder Blue bar on the rule beside it; a hovered one shows a Slate Note line as thick as the bar in the bar's place. Flat: no boxed, lifted or pill tabs, which say a depth this system doesn't use, and no icons.
+- **Size:** the text's size, no shared size; each tab at least 24 × 24 CSS px. A bold copy of the words, unseen, keeps each tab as wide selected as not, so the row stays still as the selection moves. A column takes at most half the width, its words wrapping.
+- **Narrow screens:** the row wraps onto more lines, every tab whole. Each tab stands on its own stretch of the rule, edge to edge with the next, so a tab selected on an earlier line keeps its bar over a rule; the rule runs on to the row's end under the last line. Responsive tabs are a row there, and with larger text.
 - **No tone:** the bar is the accent, and tabs aren't a status.
-- **Forced colors:** the rule and the selected bar in the text's own color, as the focus ring is, the bar told by its thickness and the weight kept.
+- **Forced colors:** the rule and the selected bar in the text's own color, as the focus ring is, the bar told by its thickness and the weight kept, in either layout.
 - **Focus:** the global 3 px ring, on a tab and on a panel that is a Tab stop of its own.
 
 ### Dialogs
