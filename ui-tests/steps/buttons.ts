@@ -114,12 +114,18 @@ Given("the daemon answers the next test of a repository {int} seconds late", fun
 
 // The first approval, or rejection, of a proposal the page asks for is
 // answered late, so the open proposal's buttons can be seen while it waits,
-// and the page's asks are counted. The late ask is kept, so a step can wait
-// until the page has its answer.
-const decisionsAsked = new WeakMap<BrowserWorld, { count: number; late: Request | null }>();
+// and the page's asks are counted. The late ask is kept with the decision it
+// asks for, so a step can wait until the page has its answer.
+interface DecisionsAsked {
+  count: number;
+  decision: "approve" | "reject";
+  late: Promise<Request>;
+}
+const decisionsAsked = new WeakMap<BrowserWorld, DecisionsAsked>();
 
 function answerProposalLate(world: BrowserWorld, decision: "approve" | "reject", seconds: number) {
-  const asked: { count: number; late: Request | null } = { count: 0, late: null };
+  const { promise: late, resolve: held } = Promise.withResolvers<Request>();
+  const asked: DecisionsAsked = { count: 0, decision, late };
   decisionsAsked.set(world, asked);
   world.contextRoutes.push(async (context) => {
     await context.route(
@@ -127,7 +133,7 @@ function answerProposalLate(world: BrowserWorld, decision: "approve" | "reject",
       async (route) => {
         asked.count += 1;
         if (asked.count === 1) {
-          asked.late = route.request();
+          held(route.request());
           await new Promise((done) => setTimeout(done, seconds * 1_000));
         }
         await route.continue();
@@ -149,9 +155,10 @@ Given("the daemon answers the next rejection of a proposal {int} seconds late", 
 // for; the time the daemon takes to decide is not theirs to allow for, and an
 // approval that could delete snapshots reads the repository again first.
 When("the daemon has answered the approval of the proposal", async function (this: BrowserWorld) {
-  const late = decisionsAsked.get(this)?.late;
-  assert.ok(late, "the page never asked for the approval the daemon answers late");
-  const response = await late.response();
+  const asked = decisionsAsked.get(this);
+  assert.ok(asked, "no approval of a proposal is answered late in this scenario");
+  assert.equal(asked.decision, "approve", "the decision answered late is a rejection, not an approval");
+  const response = await (await asked.late).response();
   assert.ok(response, "the approval of the proposal got no answer");
   await response.finished();
 });
