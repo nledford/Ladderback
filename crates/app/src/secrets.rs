@@ -952,6 +952,28 @@ mod tests {
                 },
             ),
             (
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "Secret Service: object locked".to_owned(),
+                    cause: domain::secrets::KeyringCause::Locked,
+                },
+                R::SecretKeyringLocked {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said("Secret Service: object locked"),
+                },
+            ),
+            (
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "Secret Service: prompt dismissed".to_owned(),
+                    cause: domain::secrets::KeyringCause::Refused,
+                },
+                R::SecretKeyringUnavailable {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said("Secret Service: prompt dismissed"),
+                },
+            ),
+            (
                 file("/srv/demo/password"),
                 Problem::NotUnicode,
                 R::SecretNotText {

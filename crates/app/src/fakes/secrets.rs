@@ -69,6 +69,9 @@ struct State {
     activation: Option<KeyringActivation>,
     /// The keyring is locked: every keyring read fails, entry or not.
     keyring_locked: bool,
+    /// The keyring's unlock prompt was dismissed: every keyring read fails,
+    /// entry or not.
+    unlock_prompt_dismissed: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
     /// The keyring doesn't answer, as a macOS keychain waiting on a prompt
     /// nobody answered: every keyring read outlives the time limit.
@@ -154,6 +157,12 @@ impl FakeSecrets {
     /// `KeyringUnavailable`, never as missing.
     pub fn lock_keyring(&self) {
         self.lock().keyring_locked = true;
+    }
+
+    /// A keyring whose unlock prompt the person dismissed: every keyring
+    /// entry, there or not, fails as `KeyringUnavailable`, refused.
+    pub fn dismiss_unlock_prompt(&self) {
+        self.lock().unlock_prompt_dismissed = true;
     }
 
     /// A session whose keyring service starts when `clock` reaches `at`, as
@@ -407,6 +416,8 @@ fn keyring_unavailable(state: &State) -> Option<(&'static str, KeyringCause)> {
         Some(("no session bus", KeyringCause::NoService))
     } else if state.keyring_locked {
         Some(("the keyring is locked", KeyringCause::Refused))
+    } else if state.unlock_prompt_dismissed {
+        Some(("the unlock prompt was dismissed", KeyringCause::Refused))
     } else {
         None
     }

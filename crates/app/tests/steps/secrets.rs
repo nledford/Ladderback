@@ -609,12 +609,12 @@ fn problem_unreachable(agent: &mut Agent) {
 
 #[then("the problem is that there is no keyring service to ask")]
 fn problem_no_keyring_service(agent: &mut Agent) {
-    assert_matches!(
-        agent.secrets.unresolved().problem,
-        Problem::KeyringUnavailable { .. },
-        "{:?}",
-        agent.secrets.unresolved()
-    );
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::NoService);
+}
+
+#[then("the problem is that the keyring is locked")]
+fn problem_keyring_locked(agent: &mut Agent) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Locked);
 }
 
 #[then(expr = "the problem is that it is larger than {int} bytes")]
@@ -1065,10 +1065,28 @@ fn fails_with_no_service_after_uptime(agent: &mut Agent, seconds: i64) {
     );
 }
 
-#[then(expr = "the run fails {int} seconds after the daemon started because the keyring refused")]
-fn fails_refused(agent: &mut Agent, seconds: i64) {
-    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Refused);
+#[then(expr = "the run fails {int} seconds after the daemon started because the keyring is locked")]
+fn fails_locked(agent: &mut Agent, seconds: i64) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Locked);
     assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
+}
+
+#[then(expr = "the run is refused with {string} for the keyring entry {string}")]
+fn refused_for_keyring_entry(agent: &mut Agent, code: String, entry: String) {
+    // No secret of the repository was read, so none is masked.
+    let FailureReason::SecretRefused { field, refusal } =
+        agent.secrets.error().failure(&Redactor::new([]))
+    else {
+        panic!("the run was expected to be refused for a secret")
+    };
+    assert_eq!(field, "password");
+    let source = match &refusal {
+        SettingRefusal::SecretKeyringUnavailable { source, .. }
+        | SettingRefusal::SecretKeyringLocked { source, .. } => source,
+        other => panic!("a keyring refusal was expected, not {other:?}"),
+    };
+    assert_eq!(*source, entry);
+    assert_eq!(refusal.code(), code, "{refusal:?}");
 }
 
 #[then(expr = "the wait ended {int} seconds after the daemon started, and the run never started")]

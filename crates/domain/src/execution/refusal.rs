@@ -23,8 +23,15 @@ pub enum SettingRefusal {
         detail: Option<String>,
     },
     /// `source` is a keyring entry, and the machine has no keyring service
-    /// that can be asked for it, or the service's keyring is locked.
+    /// that can be asked for it, or the service refused it otherwise than as
+    /// locked, as when its unlock prompt was dismissed.
     SecretKeyringUnavailable {
+        source: String,
+        detail: Option<String>,
+    },
+    /// `source` is a keyring entry, and the keyring service answered that
+    /// its keyring is locked.
+    SecretKeyringLocked {
         source: String,
         detail: Option<String>,
     },
@@ -72,6 +79,7 @@ impl SettingRefusal {
             Self::SecretMissing { .. } => "secret-missing",
             Self::SecretUnreadable { .. } => "secret-unreadable",
             Self::SecretKeyringUnavailable { .. } => "secret-keyring-unavailable",
+            Self::SecretKeyringLocked { .. } => todo!(),
             Self::SecretNotText { .. } => "secret-not-text",
             Self::SecretTooLarge { .. } => "secret-too-large",
             Self::SecretCommandFailed { .. } => "secret-command-failed",

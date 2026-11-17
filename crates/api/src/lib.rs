@@ -140,9 +140,14 @@ pub enum ErrorCode {
     /// A repository's secret is in a keyring entry, and the machine has no
     /// keyring service that can be asked for it: on Linux no Secret Service
     /// runs, there is no session bus to reach one by (a server, a system
-    /// service), or the service says its keyring is locked. As
-    /// `SecretMissing`; the platform's words, redacted, are the `detail`.
+    /// service), or the service refused otherwise than as locked, as when its
+    /// unlock prompt was dismissed. As `SecretMissing`; the platform's words,
+    /// redacted, are the `detail`.
     SecretKeyringUnavailable,
+    /// A repository's secret is in a keyring entry, and the keyring service
+    /// answered that its keyring is locked. As `SecretMissing`; the
+    /// platform's words, redacted, are the `detail`.
+    SecretKeyringLocked,
     /// A repository's secret isn't text: its source holds bytes that are not
     /// UTF-8. As `SecretMissing`.
     SecretNotText,
@@ -1056,6 +1061,7 @@ impl ErrorCode {
             Self::SecretMissing
             | Self::SecretUnreadable
             | Self::SecretKeyringUnavailable
+            | Self::SecretKeyringLocked
             | Self::SecretNotText
             | Self::SecretCommandFailed
             | Self::SecretCommandOutputOpen => &[
@@ -2371,6 +2377,7 @@ mod tests {
             ErrorCode::SecretMissing,
             ErrorCode::SecretUnreadable,
             ErrorCode::SecretKeyringUnavailable,
+            ErrorCode::SecretKeyringLocked,
             ErrorCode::SecretNotText,
             ErrorCode::SecretCommandFailed,
             ErrorCode::SecretCommandOutputOpen,

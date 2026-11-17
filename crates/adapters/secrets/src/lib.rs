@@ -218,6 +218,7 @@ impl SystemSecrets {
                 detail,
                 cause: KeyringCause::Refused,
             })),
+            Err(Failure::Locked(_)) => todo!(),
         }
     }
 
@@ -338,7 +339,7 @@ impl Keyring for SystemSecrets {
 /// Why the store refused to write or delete an entry.
 fn refused(failure: Failure) -> KeyringError {
     match failure {
-        Failure::NoService(detail) | Failure::Refused(detail) => {
+        Failure::NoService(detail) | Failure::Locked(detail) | Failure::Refused(detail) => {
             KeyringError::Unavailable { detail }
         }
         Failure::Unreachable(detail) => KeyringError::Unwritable { detail },

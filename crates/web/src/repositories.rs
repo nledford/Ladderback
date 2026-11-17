@@ -1005,6 +1005,17 @@ mod tests {
     }
 
     #[test]
+    fn a_locked_keyring_belongs_to_the_password_field() {
+        assert_eq!(
+            field_of(
+                ErrorCode::SecretKeyringLocked,
+                &[("field".into(), text("password"))]
+            ),
+            Some(Field::Password)
+        );
+    }
+
+    #[test]
     fn a_password_the_keyring_could_not_keep_belongs_to_the_password_field() {
         for code in [
             ErrorCode::KeyringUnavailable,

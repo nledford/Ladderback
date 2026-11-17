@@ -315,6 +315,12 @@ impl SecretsHarness for FakeSecretsHarness {
 
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
         let secrets = FakeSecrets::new();
+        secrets.dismiss_unlock_prompt();
+        Arc::new(secrets)
+    }
+
+    fn with_locked_keyring(&self) -> Arc<dyn SecretResolver> {
+        let secrets = FakeSecrets::new();
         secrets.lock_keyring();
         Arc::new(secrets)
     }
