@@ -66,6 +66,40 @@ impl Tone {
     }
 }
 
+/// One of the three tones that tell how something went, Success, Warning
+/// and Error, as a pair of colors for a part tinted in it (a badge's pill,
+/// later an alert's or a toast's box): its words in its foreground token on
+/// its fill token, a pale fill under dark words in light colors and a deep
+/// fill under pale words in dark ones. `scripts/check-contrast.ts` holds
+/// the words to 4.5:1 on the fill in both color schemes, and Warning's fill
+/// and Error's at least 0.1 apart in lightness, so the two neighboring hues
+/// never read as one (decision 108). Like every tone, a pair never says
+/// anything alone (1.4.1): the part's words or icon do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusTone {
+    /// Tick Green's pair (`--success-fg` on `--success-bg`): something ended
+    /// well.
+    Success,
+    /// Flag Amber's pair (`--warning-fg` on `--warning-bg`): something needs
+    /// a look.
+    Warning,
+    /// Red Ink's pair (`--error-fg` on `--error-bg`): something failed.
+    Error,
+}
+
+impl StatusTone {
+    /// Every status tone, in the order the gallery shows them.
+    #[cfg(test)]
+    pub const ALL: [Self; 3] = [Self::Success, Self::Warning, Self::Error];
+
+    /// Its words' token and its fill's, by their Tailwind names, written out
+    /// whole so Tailwind finds them in the source.
+    pub fn pair(self) -> &'static str {
+        let _ = self;
+        todo!()
+    }
+}
+
 /// How large a component is drawn, on one scale every component shares:
 /// each size's class sets `--size` in `style.css` (Small 1em, Medium 1.5em,
 /// Large 2em, XLarge 3em), which the component draws its length with, so a
@@ -225,6 +259,19 @@ mod tests {
             Tone::Primary,
             "a component draws in the accent"
         );
+    }
+
+    #[test]
+    fn each_status_tone_draws_its_words_on_its_fill_in_tokens_of_its_own() {
+        let pairs = [
+            (StatusTone::Success, "text-success-fg bg-success-bg"),
+            (StatusTone::Warning, "text-warning-fg bg-warning-bg"),
+            (StatusTone::Error, "text-error-fg bg-error-bg"),
+        ];
+        for (tone, pair) in pairs {
+            assert_eq!(tone.pair(), pair, "{tone:?}");
+        }
+        distinct(&StatusTone::ALL.map(StatusTone::pair));
     }
 
     #[test]

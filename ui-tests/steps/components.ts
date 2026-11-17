@@ -495,6 +495,68 @@ Then(
   },
 );
 
+// A status tone's pair (technical design §4.5, the shared vocabulary): a part
+// tinted in it draws its words in the pair's words token on its fill token.
+// Each token is read through a probe, as the page resolves it, with a
+// fallback no token has, so a token style.css lacks fails here rather than
+// matching whatever color the probe inherits. The part is read alone with
+// `evaluate`, as `expect` finds it (issue #774).
+async function drawnOnItsFill(part: Locator, name: string, words: string, fill: string) {
+  await expect(part).toHaveCount(1);
+  const missing = "rgb(1, 2, 3)";
+  const drawn = await part.evaluate(
+    (element, { tokens, missing }) => {
+      const probe = document.createElement("span");
+      document.body.append(probe);
+      const resolve = (token: string) => {
+        probe.style.color = `var(${token}, ${missing})`;
+        return getComputedStyle(probe).color;
+      };
+      const expected = { words: resolve(tokens.words), fill: resolve(tokens.fill) };
+      probe.remove();
+      const style = getComputedStyle(element);
+      return { expected, found: { words: style.color, fill: style.backgroundColor } };
+    },
+    { tokens: { words, fill }, missing },
+  );
+  assert.notEqual(drawn.expected.words, missing, `${words} is not defined`);
+  assert.notEqual(drawn.expected.fill, missing, `${fill} is not defined`);
+  assert.deepEqual(drawn.found, drawn.expected, name);
+}
+
+// The vocabulary demo's status pairs, each named in words drawn in its pair,
+// so the axe row reads each pair's words on its fill too.
+Then(
+  "each status pair of the {string} demo is named in words, drawn on its fill:",
+  async function (this: BrowserWorld, component: string, pairs: DataTable) {
+    const list = demoSection(this.page, component).getByRole("list", { name: "Status pairs", exact: true });
+    const rows = pairs.hashes() as { pair: string; words: string; fill: string }[];
+    await expect(list.getByRole("listitem")).toHaveCount(rows.length);
+    for (const { pair, words, fill } of rows) {
+      await drawnOnItsFill(list.getByRole("listitem").filter({ hasText: wholly(pair) }), pair, words, fill);
+    }
+  },
+);
+
+// A status badge (§4.5) whose operation ended draws its words and its pill in
+// the pair of its status tone, found by its words, the whole of them
+// ("Succeeded" is never "Succeeded with warnings").
+Then(
+  "each of these badges of the {string} demo is drawn on its fill:",
+  async function (this: BrowserWorld, component: string, badges: DataTable) {
+    const section = demoSection(this.page, component);
+    for (const { badge, words, fill } of badges.hashes() as { badge: string; words: string; fill: string }[]) {
+      const pill = section.getByText(badge, { exact: true });
+      await drawnOnItsFill(pill, badge, words, fill);
+    }
+  },
+);
+
+/** Text that is the whole of an element's, never a part of it. */
+function wholly(text: string): RegExp {
+  return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+}
+
 // A placement (technical design §4.5) is in logical terms: Start is the
 // line's start in the page's direction, the left in English and the right in
 // Arabic. Each row of the demo's last list is a part placed in its line (the
@@ -2314,6 +2376,11 @@ const SNAPSHOTS: Record<string, string> = {
   - listitem: Warning
   - listitem: Error
   - listitem: Inherit
+- heading "Status pairs" [level=3]
+- list "Status pairs":
+  - listitem: Success
+  - listitem: Warning
+  - listitem: Error
 - heading "Sizes" [level=3]
 - list "Sizes":
   - listitem: Small

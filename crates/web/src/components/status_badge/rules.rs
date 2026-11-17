@@ -70,6 +70,7 @@ impl BadgeState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::variants::StatusTone;
 
     #[test]
     fn each_state_has_an_icon_of_its_own() {
@@ -100,15 +101,24 @@ mod tests {
     }
 
     #[test]
-    fn each_state_is_drawn_on_the_pill_of_its_kind() {
+    fn each_state_is_drawn_on_its_pill_a_succeeded_or_failed_one_in_its_status_tones_pair() {
         let pills = [
-            (BadgeState::Queued, "empty"),
-            (BadgeState::Running, "loading"),
-            (BadgeState::Succeeded, "success"),
-            (BadgeState::SucceededWithWarnings, "success"),
-            (BadgeState::Failed, "error"),
-            (BadgeState::Cancelled, "empty"),
-            (BadgeState::Empty, "empty"),
+            (BadgeState::Queued, "text-badge-empty-fg bg-badge-empty-bg"),
+            (
+                BadgeState::Running,
+                "text-badge-loading-fg bg-badge-loading-bg",
+            ),
+            (BadgeState::Succeeded, StatusTone::Success.pair()),
+            (
+                BadgeState::SucceededWithWarnings,
+                StatusTone::Success.pair(),
+            ),
+            (BadgeState::Failed, StatusTone::Error.pair()),
+            (
+                BadgeState::Cancelled,
+                "text-badge-empty-fg bg-badge-empty-bg",
+            ),
+            (BadgeState::Empty, "text-badge-empty-fg bg-badge-empty-bg"),
         ];
         for (state, pill) in pills {
             assert_eq!(state.pill(), pill, "{state:?}");
