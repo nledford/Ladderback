@@ -187,6 +187,26 @@ cli-help-install-service = Install this agent as a service of your user: the ser
 # `install-service` is the command, typed as it is: keep it a string literal.
 cli-help-remove-service = Stop the service that { "install-service" } installed, and remove its service file.
 
+## `ladderback check-keyring` (#892): reads each keyring entry the configuration names, once, with this program.
+
+# What `check-keyring` does, in its `--help`.
+cli-help-check-keyring = Read, with this program, each keyring entry the configuration's repositories take their password from, once, and say whether it could be read, never what it holds. On macOS the keychain asks once for each new build before it lets the build read an entry: run this after an update, while you are there to answer.
+
+# A repository's keyring entry was read. Nothing it holds is kept or shown.
+# $repository (text): the repository's name in the configuration, such as nas. It is shown as it is.
+# $entry (text): the keyring entry, as the configuration names it (service/name). It is shown as it is.
+cli-check-keyring-read = { $repository }: read the keyring entry { $entry }
+
+# A repository's keyring entry could not be read, so a backup of the repository would be refused too.
+# $repository (text): the repository's name in the configuration, such as nas. It is shown as it is.
+# $entry (text): the keyring entry, as the configuration names it (service/name). It is shown as it is.
+# $code (text): the refusal's code, such as secret-keyring-unavailable. It is shown as it is.
+# $reason (text): the refusal's own message, one or more whole sentences.
+cli-check-keyring-refused = { $repository }: could not read the keyring entry { $entry } ({ $code }). { $reason }
+
+# No repository of the configuration reads its password from the keyring, so there was nothing to read.
+cli-check-keyring-none = no repository reads its password from the keyring: there is nothing to read
+
 # The service file was written and the service manager started the service.
 # $file (text): the service file's path.
 cli-service-installed = installed the service { $file }: it runs now, and from each login on

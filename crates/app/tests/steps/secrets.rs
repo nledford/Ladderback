@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use app::execution::RunOperation;
 use app::fakes::{FakeClock, FakeSecrets, Script};
+use app::keyring_check::{KeyringCheck, check_keyring_entries};
 use app::ports::Clock;
 use app::retry::{RunEnd, RunOutcome};
 use app::secrets::ResolvedRepository;
@@ -37,6 +38,10 @@ pub struct SecretsWorld {
     waited: Arc<Mutex<Vec<SourceName>>>,
     /// When the wait of a run whose daemon stopped meanwhile ended.
     stopped_at: Option<Timestamp>,
+    /// The repositories whose keyring entries a check reads, by alias.
+    checked_repositories: std::collections::BTreeMap<RepositoryAlias, RepositoryConfig>,
+    /// What the check of the keyring entries came to.
+    keyring_check: Option<KeyringCheck>,
 }
 
 impl Default for SecretsWorld {
@@ -57,6 +62,8 @@ impl Default for SecretsWorld {
             up_from: None,
             waited: Arc::default(),
             stopped_at: None,
+            checked_repositories: Default::default(),
+            keyring_check: None,
         }
     }
 }
@@ -1100,4 +1107,140 @@ fn logged_wait_holds_no(agent: &mut Agent, secret: String) {
 #[then("the daemon never logged that the run waits")]
 fn never_logged_waiting(agent: &mut Agent) {
     assert_eq!(agent.secrets.waited(), Vec::new());
+}
+
+// Checking the keyring entries (features/secrets/keyring_check.feature).
+
+impl SecretsWorld {
+    /// Adds the repository `name`, at a location of its own, with its
+    /// password in `password`.
+    fn checked_repository(&mut self, name: &str, password: SecretRef) {
+        let alias = RepositoryAlias::parse(name).expect("the scenario's alias is valid");
+        let repository = RepositoryConfig {
+            settings: RepositorySettings {
+                repository: format!("/srv/{name}"),
+                password,
+                ..self.settings.clone()
+            },
+            locations: Default::default(),
+            id: None,
+            maintenance: Maintenance::Local,
+            group_by: GroupBy::default(),
+            hooks: Hooks::default(),
+        };
+        self.checked_repositories.insert(alias, repository);
+    }
+
+    fn keyring_check(&self) -> &KeyringCheck {
+        self.keyring_check
+            .as_ref()
+            .expect("the keyring entries were checked")
+    }
+
+    /// What the check reported of the repository `name`.
+    fn read_of(&self, name: &str) -> &app::keyring_check::KeyringRead {
+        self.keyring_check()
+            .reads
+            .iter()
+            .find(|read| read.repository.as_str() == name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "the check reported nothing of {name:?}: {:?}",
+                    self.keyring_check()
+                )
+            })
+    }
+}
+
+#[given(expr = "the repository {string} takes its password from the keyring entry {string}")]
+fn repository_in_keyring(agent: &mut Agent, name: String, entry: String) {
+    let entry = KeyringEntry::parse(&entry).expect("the scenario's entry is valid");
+    agent
+        .secrets
+        .checked_repository(&name, SecretRef::Keyring(entry));
+}
+
+#[given(expr = "the repository {string} takes its password from the command {string}")]
+fn repository_from_command(agent: &mut Agent, name: String, command: String) {
+    let command = agent.secrets.command(&command);
+    agent
+        .secrets
+        .checked_repository(&name, SecretRef::Command(command));
+}
+
+#[given(expr = "the repository {string} takes its password from the file {string}")]
+fn repository_from_file(agent: &mut Agent, name: String, path: String) {
+    let read = FileRead::FirstLine;
+    agent
+        .secrets
+        .checked_repository(&name, SecretRef::File { path, read });
+}
+
+#[given(expr = "the keyring has no entry {string}")]
+fn keyring_has_no_entry(_agent: &mut Agent, _entry: String) {
+    // The keyring holds nothing until a scenario puts an entry in it.
+}
+
+#[when("the keyring entries are checked")]
+async fn check_entries(agent: &mut Agent) {
+    let config = domain::planning::AgentConfig::new(
+        domain::planning::AgentSettings::default(),
+        Hooks::default(),
+        agent.secrets.checked_repositories.clone(),
+        Vec::new(),
+    )
+    .expect("the scenario's configuration is valid");
+    agent.secrets.keyring_check =
+        Some(check_keyring_entries(&config, agent.secrets.store.as_ref()).await);
+}
+
+#[then(expr = "the check reports the repository {string} and its keyring entry {string} read")]
+fn check_reports_read(agent: &mut Agent, name: String, entry: String) {
+    let read = agent.secrets.read_of(&name);
+    assert_eq!(read.entry.to_string(), entry);
+    assert_eq!(read.refused, None, "{read:?}");
+}
+
+#[then(expr = "the check reports the repository {string} refused with {string}")]
+fn check_reports_refused(agent: &mut Agent, name: String, code: String) {
+    let read = agent.secrets.read_of(&name);
+    let refused = read
+        .refused
+        .as_ref()
+        .unwrap_or_else(|| panic!("{name:?} was read: {read:?}"));
+    assert_eq!(refused.code(), code, "{refused:?}");
+}
+
+#[then(expr = "the check reports the repositories {string} alone")]
+fn check_reports_alone(agent: &mut Agent, names: String) {
+    let reported: Vec<&str> = agent
+        .secrets
+        .keyring_check()
+        .reads
+        .iter()
+        .map(|read| read.repository.as_str())
+        .collect();
+    assert_eq!(reported, names.split(", ").collect::<Vec<_>>());
+}
+
+#[then(expr = "nothing but the keyring entry {string} was read")]
+fn only_entry_read(agent: &mut Agent, entry: String) {
+    let entry = KeyringEntry::parse(&entry).expect("the scenario's entry is valid");
+    assert_eq!(agent.secrets.store.reads(), vec![SecretRef::Keyring(entry)]);
+}
+
+#[then(expr = "the check's report holds no {string}")]
+fn report_holds_no(agent: &mut Agent, secret: String) {
+    let report = format!("{:?}", agent.secrets.keyring_check());
+    assert!(!report.contains(&secret), "{report}");
+}
+
+#[then("the check passes")]
+fn check_passes(agent: &mut Agent) {
+    assert!(agent.secrets.keyring_check().passed());
+}
+
+#[then("the check fails")]
+fn check_fails(agent: &mut Agent) {
+    assert!(!agent.secrets.keyring_check().passed());
 }

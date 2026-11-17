@@ -25,6 +25,7 @@ pub mod full_disk_access;
 pub mod globs;
 pub mod history;
 pub mod interop;
+pub mod keyring_check;
 pub mod locations;
 pub mod log_write;
 pub mod maintenance;

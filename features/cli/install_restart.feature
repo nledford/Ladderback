@@ -102,3 +102,35 @@ Feature: Update the service from a checkout without interrupting an operation
       When the owner runs install-restart
       Then the command exits with status 1
       And standard error says "can't tell whether the daemon is busy: the service isn't running"
+
+  Rule: It reads the keyring entries with the new program before it restarts
+
+    On macOS the keychain asks once for each new build before it lets the
+    build read a `password-keyring` entry. The new program reads each entry
+    once (`ladderback check-keyring`), in the terminal, before the wait and
+    the restart, so the keychain asks while someone is there and not at the
+    next scheduled backup.
+
+    Scenario: The new program reads the keyring entries before the service restarts
+      When the owner runs install-restart
+      Then the command exits with status 0
+      And the installed program read the keyring entries before the service was restarted
+      And standard output says "no repository reads its password from the keyring"
+
+    Scenario: A keyring entry the new program can't read stops it before the restart
+      Given the installed program can't read a keyring entry
+      When the owner runs install-restart
+      Then the command exits with status 1
+      And the service runs the same process
+      And the installed program never restarted the service
+      And standard error says "could not read the keyring entry ladderback/nas"
+      And standard error says "the new program couldn't read every keyring entry"
+      And standard error says "--ignore-keyring-failure restarts all the same"
+
+    Scenario: --ignore-keyring-failure restarts despite a keyring entry the new program can't read
+      Given the installed program can't read a keyring entry
+      When the owner runs install-restart with "--ignore-keyring-failure"
+      Then the command exits with status 0
+      And the service runs a new process
+      And standard error says "the new program couldn't read every keyring entry"
+      And standard output says "--ignore-keyring-failure: restarting all the same"

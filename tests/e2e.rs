@@ -51,6 +51,8 @@ mod api_tokens_steps;
 mod build_steps;
 #[path = "steps/cache.rs"]
 mod cache_steps;
+#[path = "steps/check_keyring.rs"]
+mod check_keyring_steps;
 #[path = "steps/cli_output.rs"]
 mod cli_output_steps;
 #[path = "steps/core_dumps.rs"]

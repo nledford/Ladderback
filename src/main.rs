@@ -33,6 +33,7 @@ use composition::LOG_CLOSE_BOUND;
 use shutdown::{REQUESTS_BOUND, Step, Stopping, WORKERS_BOUND};
 
 mod build_info;
+mod check_keyring;
 mod composition;
 mod dumps;
 mod logging;
@@ -107,6 +108,7 @@ enum Command {
     // Their descriptions are the catalog's (`cli-help-*`), set in `parse`.
     InstallService,
     RemoveService,
+    CheckKeyring,
     /// Serve the Model Context Protocol on standard input and output, for
     /// AI agents and scripts: their tools read and drive Ladderback.
     #[command(
@@ -183,13 +185,15 @@ fn says_help(error: &clap::Error) -> bool {
 }
 
 /// `command` with the descriptions the catalog has (`cli-help-*`), in the
-/// reader's language: those of the service commands (#299 moves the rest).
+/// reader's language: those of the service commands and `check-keyring`
+/// (#299 moves the rest).
 fn with_catalog_help(command: clap::Command) -> clap::Command {
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     command.mut_subcommands(|subcommand| {
         let id = match subcommand.get_name() {
             "install-service" => msg::CLI_HELP_INSTALL_SERVICE,
             "remove-service" => msg::CLI_HELP_REMOVE_SERVICE,
+            "check-keyring" => msg::CLI_HELP_CHECK_KEYRING,
             _ => return subcommand,
         };
         let about = localizer.message(id, &[]).text().to_owned();
@@ -217,6 +221,7 @@ fn main() -> ExitCode {
         Command::SetPassword => set_password::set_password(),
         Command::InstallService => service::install_service(),
         Command::RemoveService => service::remove_service(),
+        Command::CheckKeyring => check_keyring::check_keyring(plain),
         Command::Mcp {
             call: Some(McpCommand::Call(args)),
             ..
