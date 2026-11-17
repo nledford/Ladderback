@@ -17,6 +17,7 @@ use leptos_router::components::A;
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
 use crate::components::alert::rules::AlertTone;
+use crate::components::badge::rules::BadgeTone;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
@@ -26,11 +27,11 @@ use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
 use crate::components::{
-    Alert, Align, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation, Dismissal,
-    FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates,
-    Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State,
-    StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree,
-    show_toast, text_field,
+    Alert, Align, Badge, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation,
+    Dismissal, FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name,
+    PauseUpdates, Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner,
+    State, StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip,
+    Tree, show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -46,6 +47,12 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let table_localizer = Arc::clone(&localizer);
     // The tab the manual demo's set tells it is chosen.
     let manual_chosen = RwSignal::new(0_usize);
+    // The badge demo's count, a number in its words.
+    let pending_changes = text_with(
+        &localizer,
+        msg::UI_GALLERY_BADGES_PENDING,
+        &[("count", MsgArg::Count(3))],
+    );
     let (heading, announcer_heading) = (
         t(msg::UI_GALLERY_HEADING),
         t(msg::UI_GALLERY_ANNOUNCER_HEADING),
@@ -404,6 +411,42 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 <StatusBadge state=BadgeState::Failed label=t(msg::UI_STATUS_FAILED) />
                 <StatusBadge state=BadgeState::Cancelled label=t(msg::UI_STATUS_CANCELLED) />
                 <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
+            </p>
+        </section>
+        // `id`, so a step finds the demo under a pseudolocale too, which
+        // renames its heading.
+        <section id="badge-demo">
+            <h2>{t(msg::UI_GALLERY_BADGES_HEADING)}</h2>
+            // A count and two tags, each saying in words what it counts or
+            // names, the long one wrapping in a narrow room.
+            <p class="flex flex-wrap gap-2">
+                <Badge label=pending_changes icon=LucideGlyph::Pencil />
+                <Badge label=t(msg::UI_GALLERY_BADGES_TAG) />
+                <Badge label=t(msg::UI_GALLERY_BADGES_LONG) icon=LucideGlyph::CalendarClock />
+            </p>
+            // Every tone, named in words, so no tone is told by its color.
+            <p class="flex flex-wrap gap-2">
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_PRIMARY)
+                    tone=BadgeTone::Primary
+                    icon=LucideGlyph::Info
+                />
+                <Badge label=t(msg::UI_GALLERY_TONE_SECONDARY) tone=BadgeTone::Secondary />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_SUCCESS)
+                    tone=BadgeTone::Success
+                    icon=LucideGlyph::CircleCheck
+                />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_WARNING)
+                    tone=BadgeTone::Warning
+                    icon=LucideGlyph::TriangleAlert
+                />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_ERROR)
+                    tone=BadgeTone::Error
+                    icon=LucideGlyph::CircleX
+                />
             </p>
         </section>
         <section>

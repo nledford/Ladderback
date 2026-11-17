@@ -1,12 +1,11 @@
-//! What a status badge shows for each state (components §4.5): its pill, a
-//! pair of Tailwind utilities, its words on its fill, whose tokens the
-//! contrast gate checks, a status tone's pair for an operation that ended
-//! (decision 108), and its icon, a shape of its own for every state, so a
-//! reader who can't tell the colors apart scans a table of them without
-//! reading each label (A2). `components/status_badge.rs`'s `StatusBadge` is
-//! the glue that draws them.
+//! What a status badge shows for each state (components §4.5): its badge's
+//! tone, one of the badge's tones (`badge/rules.rs`), a status tone's pair
+//! for an operation that ended (decision 108), whose words on its fill the
+//! contrast gate checks, and its icon, a shape of its own for every state,
+//! so a reader who can't tell the colors apart scans a table of them
+//! without reading each label (A2). `components/status_badge.rs`'s
+//! `StatusBadge` is the glue that draws them, as a `Badge`.
 
-use crate::variants::StatusTone;
 use lepticons_data::LucideGlyph;
 
 use crate::components::badge::rules::BadgeTone;
@@ -43,23 +42,16 @@ impl BadgeState {
         Self::Empty,
     ];
 
-    /// The pill the badge is drawn on, its words' utility and its fill's:
-    /// Success's pair for an operation that succeeded, with warnings too
-    /// (its icon and its words tell the warnings), Error's for one that
-    /// failed, and the badge's own Loading and Empty pairs for the rest.
-    pub fn pill(self) -> &'static str {
-        match self {
-            Self::Running => "text-badge-loading-fg bg-badge-loading-bg",
-            Self::Succeeded | Self::SucceededWithWarnings => StatusTone::Success.pair(),
-            Self::Failed => StatusTone::Error.pair(),
-            Self::Queued | Self::Cancelled | Self::Empty => "text-badge-empty-fg bg-badge-empty-bg",
-        }
-    }
-
-    /// The badge's tone, whose pair of tokens the pill is drawn in, the same
-    /// pair `pill` names.
+    /// The badge's tone, whose pair of tokens its pill is drawn in: Ladder
+    /// Blue's while it runs, green once it ended well, red once it failed,
+    /// and gray while there is nothing to tell yet, or any longer.
     pub fn tone(self) -> BadgeTone {
-        todo!()
+        match self {
+            Self::Running => BadgeTone::Primary,
+            Self::Succeeded | Self::SucceededWithWarnings => BadgeTone::Success,
+            Self::Failed => BadgeTone::Error,
+            Self::Queued | Self::Cancelled | Self::Empty => BadgeTone::Secondary,
+        }
     }
 
     /// The icon beside the label, its shape the state's own (the

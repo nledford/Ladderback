@@ -1,7 +1,10 @@
-//! What a badge shows and how it is drawn (components §4.5): the tones it
-//! takes from the shared vocabulary (`variants.rs`), each a text token on a
-//! background token the contrast gate checks, and its look, in Tailwind
-//! utilities. `components/badge.rs`'s `Badge` is the glue that draws it.
+//! What a badge shows and how it is drawn (components §4.5): its tones,
+//! named as the shared vocabulary (`variants.rs`) names them, each words on
+//! a fill the contrast gate checks, the status tones' pairs for Success,
+//! Warning and Error (decision 108), and its look, in Tailwind utilities.
+//! `components/badge.rs`'s `Badge` is the glue that draws it.
+
+use crate::variants::StatusTone;
 
 /// The tones a badge is drawn in, named as the shared vocabulary names them,
 /// each a pill of its own pair of tokens: its words in the text token on the
@@ -9,13 +12,14 @@
 /// both color schemes. A tone never says anything alone (1.4.1): the badge's
 /// words do. No Inherit, which would leave a pill with no fill of its own,
 /// its words the text around it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BadgeTone {
     /// Ladder Blue's pale pair (`--badge-loading-*`): something under way.
     Primary,
     /// The gray pair (`--badge-empty-*`): a count or a tag that says
     /// nothing went well or badly. The default: Ladder Blue is the accent
     /// for action, and a badge is none.
+    #[default]
     Secondary,
     /// Tick Green's status pair (`--success-*`, the vocabulary's
     /// `StatusTone::Success`): something ended well.
@@ -38,19 +42,47 @@ impl BadgeTone {
         Self::Warning,
         Self::Error,
     ];
-}
 
-impl Default for BadgeTone {
-    fn default() -> Self {
-        todo!()
+    /// Its words' token and its pill's, by their Tailwind names, written out
+    /// whole so Tailwind finds them in the source: the badge's own Loading
+    /// and Empty pairs for Primary and Secondary, and the status tone's pair
+    /// for Success, Warning and Error, the one every component tinted in a
+    /// status shares.
+    fn pair(self) -> &'static str {
+        match self {
+            Self::Primary => "text-badge-loading-fg bg-badge-loading-bg",
+            Self::Secondary => "text-badge-empty-fg bg-badge-empty-bg",
+            Self::Success => StatusTone::Success.pair(),
+            Self::Warning => StatusTone::Warning.pair(),
+            Self::Error => StatusTone::Error.pair(),
+        }
     }
 }
+
+/// How a badge is drawn, in Tailwind utilities (decision 117), logical ones
+/// only, the same in every tone: a pill (`rounded-full`) 0.125rem by 0.5rem
+/// around its words, in rem, so it grows with the reader's text. Its icon
+/// and its words are two flex items, 0.25em apart only where they share a
+/// line: where they don't fit side by side (a narrow column with larger
+/// text), the words wrap onto a line of their own below the icon rather than
+/// a letter a line beside it. The badge sits on its words' baseline, as
+/// plain text does, and the icon, its one child element (`*:`), is centered
+/// on their line. Under forced colors the system drops the fill, so the
+/// words take the color of the text around them, as the vocabulary's tones
+/// do (the system's text color), whether or not the engine forces it, and a
+/// 1px edge in that color, drawn inside the box (an outline with a negative
+/// offset), so a frame that clips its content or the badge beside it never
+/// cuts or covers the edge, keeps each badge apart from the text and the
+/// badge beside it.
+const LOOK: &str = "inline-flex flex-wrap items-baseline gap-x-[0.25em] rounded-full py-0.5 px-2 \
+    *:self-center \
+    forced-colors:text-inherit forced-colors:outline-1 forced-colors:outline-solid \
+    forced-colors:-outline-offset-1 forced-colors:outline-current";
 
 /// The classes of a badge in `tone`: the badge's own, which names it, its
 /// tone's pair of tokens and its look.
 pub fn badge_class(tone: BadgeTone) -> String {
-    let _ = tone;
-    todo!()
+    format!("badge {} {LOOK}", tone.pair())
 }
 
 #[cfg(test)]
