@@ -14,7 +14,7 @@ import type { Locator, Page } from "playwright";
 
 import { ISOLATION } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { demoSection, eachOf } from "./components.ts";
+import { demoSection, eachOf, LIVE_REGION } from "./components.ts";
 
 // The gallery's alerts as it opens (`gallery.rs`): one in each tone, then
 // the notice the reader can dismiss.
@@ -40,18 +40,14 @@ const near = (a: number, b: number, slack = ROUNDING_PX) => Math.abs(a - b) <= s
 // it; and it is no stop for Tab itself.
 Then("no alert of the {string} demo is a live region, nor holds one", async function (this: BrowserWorld, component: string) {
   for (const alert of await eachOf(alerts(this.page, component), ALERTS)) {
-    const found = await alert.evaluate((element) => {
-      const parts = [element, ...element.querySelectorAll("*")];
-      return {
+    const found = await alert.evaluate(
+      (element, live) => ({
         role: element.getAttribute("role"),
         tabindex: element.getAttribute("tabindex"),
-        live: parts.filter(
-          (part) =>
-            part.hasAttribute("aria-live") ||
-            ["alert", "status", "log", "marquee", "timer"].includes(part.getAttribute("role") ?? ""),
-        ).length,
-      };
-    });
+        live: [element, ...element.querySelectorAll("*")].filter((part) => part.matches(live)).length,
+      }),
+      LIVE_REGION,
+    );
     assert.deepEqual(found, { role: null, tabindex: null, live: 0 });
   }
 });
@@ -296,9 +292,6 @@ const PAGE_PATIENCE_MS = 10_000;
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// What makes an element a live region, by role or by attribute.
-const LIVE = "[role~='alert'], [role~='status'], [role~='log'], [role~='marquee'], [role~='timer'], [aria-live], output";
-
 // A page's own message (§4.5, #929): an Error alert, found by its class, as
 // it has no role. What the catalog filled in is set apart by bidi isolation
 // marks, which may stand between any two characters. The alert is no live
@@ -319,7 +312,7 @@ Then("the page shows an error alert containing {string}", async function (this: 
       dialog: dialog !== null,
       around: around === null ? null : { role: around.getAttribute("role"), inDialog: dialog?.contains(around) ?? false },
     };
-  }, LIVE);
+  }, LIVE_REGION);
   assert.equal(found.role, null, "the alert's own role");
   assert.equal(found.holds, 0, "live regions inside the alert");
   if (found.dialog) {
