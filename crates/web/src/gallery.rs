@@ -23,7 +23,7 @@ use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, R
 use crate::components::skeleton::rules::{Shape, Share};
 use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
-use crate::components::tabs::{Activation, Holds, TabSet, TabsName};
+use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
 use crate::components::{
     Alert, Align, Button, Checkbox, Column, Confirmation, Dismissal, FolderLoader, FolderPage,
     Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup,
@@ -81,6 +81,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     // the toast text.
     let form_error = RwSignal::<Option<String>>::new(None);
     let form_value = RwSignal::new(String::new());
+    let address_value = RwSignal::new(String::new());
     let required_error = t(msg::UI_GALLERY_REPOSITORY_REQUIRED);
     // The multi-line field's demo: its entries and its error, which its own
     // button shows and clears as the one-line field's does.
@@ -1327,6 +1328,131 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                                 t(msg::UI_GALLERY_TABS_THIRD),
                                 Holds::Text,
                                 view! { <p>{t(msg::UI_GALLERY_TABS_THIRD_TEXT)}</p> },
+                            ),
+                        ],
+                    )
+                />
+            </div>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TABS_VERTICAL_HEADING)}</h2>
+            // A column at the start of the panel: the down arrow goes to
+            // the next tab and the up arrow to the one before.
+            <Tabs
+                id="gallery-tabs-vertical"
+                name=TabsName::Label(t(msg::UI_GALLERY_TABS_PLAN))
+                orientation=Orientation::Vertical
+                tabs=TabSet::new(
+                    Tab::new(
+                        t(msg::UI_GALLERY_TABS_SOURCES),
+                        Holds::Text,
+                        view! { <p>{t(msg::UI_GALLERY_TABS_SOURCES_TEXT)}</p> },
+                    ),
+                    vec![
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_TIMES),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_TIMES_TEXT)}</p> },
+                        ),
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_HOOKS),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_HOOKS_TEXT)}</p> },
+                        ),
+                    ],
+                )
+            />
+            // The same in a part of the page that runs right to left: the
+            // column at the panel's start, on the right, and the down arrow
+            // still going to the next tab.
+            <div dir="rtl">
+                <Tabs
+                    id="gallery-tabs-vertical-rtl"
+                    name=TabsName::Label(t(msg::UI_GALLERY_TABS_VERTICAL_RTL))
+                    orientation=Orientation::Vertical
+                    tabs=TabSet::new(
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_VERTICAL_RTL_FIRST),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_VERTICAL_RTL_FIRST_TEXT)}</p> },
+                        ),
+                        vec![
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_VERTICAL_RTL_SECOND),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_VERTICAL_RTL_SECOND_TEXT)}</p> },
+                            ),
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_VERTICAL_RTL_THIRD),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_VERTICAL_RTL_THIRD_TEXT)}</p> },
+                            ),
+                        ],
+                    )
+                />
+            </div>
+        </section>
+        <section>
+            <h2>{t(msg::UI_GALLERY_TABS_RESPONSIVE_HEADING)}</h2>
+            // As wide as the page: a column where the page is wide, a row
+            // in a narrow window or with larger text. What is typed in the
+            // middle panel stays while the layout changes.
+            <Tabs
+                id="gallery-tabs-responsive"
+                name=TabsName::Label(t(msg::UI_GALLERY_TABS_SETTINGS))
+                orientation=Orientation::Responsive
+                tabs=TabSet::new(
+                    Tab::new(
+                        t(msg::UI_GALLERY_TABS_GENERAL),
+                        Holds::Text,
+                        view! { <p>{t(msg::UI_GALLERY_TABS_GENERAL_TEXT)}</p> },
+                    ),
+                    vec![
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_ADDRESS),
+                            Holds::Controls,
+                            view! {
+                                <TextField
+                                    id="gallery-tabs-address-input"
+                                    localizer=Arc::clone(&localizer)
+                                    value=address_value
+                                    label=t(msg::UI_GALLERY_TABS_ADDRESS_FIELD)
+                                    description=t(msg::UI_GALLERY_TABS_ADDRESS_HINT)
+                                />
+                            },
+                        ),
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_ABOUT),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_ABOUT_TEXT)}</p> },
+                        ),
+                    ],
+                )
+            />
+            // The same tabs in a narrow column of a part of the page that
+            // runs right to left: too narrow for the list beside the panel,
+            // so a row, the left arrow going to the next tab.
+            <div dir="rtl" class="max-w-sm">
+                <Tabs
+                    id="gallery-tabs-column"
+                    name=TabsName::Label(t(msg::UI_GALLERY_TABS_COLUMN))
+                    orientation=Orientation::Responsive
+                    tabs=TabSet::new(
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_COLUMN_FIRST),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_COLUMN_FIRST_TEXT)}</p> },
+                        ),
+                        vec![
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_COLUMN_SECOND),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_COLUMN_SECOND_TEXT)}</p> },
+                            ),
+                            Tab::new(
+                                t(msg::UI_GALLERY_TABS_COLUMN_THIRD),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_COLUMN_THIRD_TEXT)}</p> },
                             ),
                         ],
                     )
