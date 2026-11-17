@@ -260,8 +260,11 @@ impl Downloads {
         let held = lock(&self.pending).hold(ticket.clone(), self.clock.now(), confirmed);
         match held {
             Ok(()) => Ok(ticket),
+            // Unreachable while every waiting download holds one of the
+            // DOWNLOADS_AT_ONCE turns, fewer than MAX_PENDING; kept so a
+            // change to either still logs the refused download cancelled.
             Err(confirmed) => {
-                self.give_up(confirmed).await;
+                self.write_cancelled(&[self.stop(confirmed)]).await;
                 Err(DownloadError::Busy)
             }
         }
@@ -326,11 +329,6 @@ impl Downloads {
         for operation in cancelled {
             let _ = save_within_bound(&*self.clock, &*self.store, operation, None).await;
         }
-    }
-
-    async fn give_up(&self, confirmed: Confirmed) {
-        let operation = self.stop(confirmed);
-        let _ = save_within_bound(&*self.clock, &*self.store, &operation, None).await;
     }
 
     /// Stops `confirmed`'s job and frees its turn, and returns its record,
