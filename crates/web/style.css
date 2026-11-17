@@ -17,10 +17,13 @@
   --badge-loading-bg: #dbeafe;
   --badge-empty-fg: #111827;
   --badge-empty-bg: #e5e7eb;
-  --badge-error-fg: #691717;
-  --badge-error-bg: #fee2e2;
-  --badge-success-fg: #052e16;
-  --badge-success-bg: #dcfce7;
+  /* Each status tone's pair (`StatusTone::pair`): its words on its fill. */
+  --success-fg: #052e16;
+  --success-bg: #dcfce7;
+  --warning-fg: #451a03;
+  --warning-bg: #fffbeb;
+  --error-fg: #691717;
+  --error-bg: #fecaca;
   --success: #15803d;
   --warning: #b45309;
   --error: #b91c1c;
@@ -60,10 +63,12 @@
     --badge-loading-bg: #172554;
     --badge-empty-fg: #e5e7eb;
     --badge-empty-bg: #26303f;
-    --badge-error-fg: #fee2e2;
-    --badge-error-bg: #691717;
-    --badge-success-fg: #dcfce7;
-    --badge-success-bg: #052e16;
+    --success-fg: #dcfce7;
+    --success-bg: #052e16;
+    --warning-fg: #fef3c7;
+    --warning-bg: #451a03;
+    --error-fg: #fee2e2;
+    --error-bg: #7f1d1d;
     --success: #4ade80;
     --warning: #fbbf24;
     --error: #f87171;
@@ -276,7 +281,7 @@ a {
    takes no room. */
 .sign-out-failure {
   margin-block: 0 1rem;
-  color: var(--badge-error-fg);
+  color: var(--error-fg);
 }
 
 .sign-out-failure:empty {
@@ -463,9 +468,10 @@ main:focus {
 }
 
 /*
- * Status badges (§4.5): a short labeled state on a colored pill, its text
- * token on its background token — the pairs scripts/check-contrast.ts checks
- * — with the state's icon before the text, stroked in the text's color.
+ * Status badges (§4.5): a short labeled state on a colored pill, its words
+ * and its fill Tailwind utilities that `status_badge/rules.rs` picks (the
+ * pairs scripts/check-contrast.ts checks), with the state's icon before the
+ * text, stroked in the text's color.
  *
  * The icon and the label are two flex items, apart by a gap that stands only
  * between them on one line: where the two don't fit side by side (a narrow
@@ -490,26 +496,6 @@ main:focus {
    the label's line. */
 .badge > .icon {
   align-self: center;
-}
-
-.badge-loading {
-  color: var(--badge-loading-fg);
-  background-color: var(--badge-loading-bg);
-}
-
-.badge-empty {
-  color: var(--badge-empty-fg);
-  background-color: var(--badge-empty-bg);
-}
-
-.badge-error {
-  color: var(--badge-error-fg);
-  background-color: var(--badge-error-bg);
-}
-
-.badge-success {
-  color: var(--badge-success-fg);
-  background-color: var(--badge-success-bg);
 }
 
 /* A progress bar: a filled track whose width follows every report.
@@ -1151,12 +1137,12 @@ fieldset.choices > p {
 /* A field's error and a form's summary of them, in the error's color, never
    color alone: each has its own text and the summary a heading. */
 .form-error {
-  color: var(--badge-error-fg);
+  color: var(--error-fg);
   font-weight: 600;
 }
 
 .error-summary {
-  border: 2px solid var(--badge-error-fg);
+  border: 2px solid var(--error-fg);
   padding-block: 0.5rem;
   padding-inline: 1rem;
   margin-block: 1rem;

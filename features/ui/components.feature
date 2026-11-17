@@ -15,7 +15,8 @@ Feature: The shared components in the gallery
   opened, the step-up field, which takes the admin password from a
   password manager or a paste, or shows a short ID to copy and paste back,
   and the shared vocabulary every component takes: its tones, each
-  named in words and drawn in a color of its own, its sizes and its
+  named in words and drawn in a color of its own, a pair of colors for
+  each status tone, its words on its fill, its sizes and its
   placements, which follow the page's direction, a spinner, which a
   label names, which never speaks for itself, which takes its tone, size
   and placement from that vocabulary and which stands still for a reader
@@ -774,6 +775,34 @@ Feature: The shared components in the gallery
     When I open the component gallery
     Then each of the 6 tones of the "Shared vocabulary" demo is named in words, its swatch drawn in its text's color and skipped by a screen reader
     And the 6 tones of the "Shared vocabulary" demo all draw in the color of the text around them
+
+  Scenario Outline: Each status tone has a pair of colors of its own, its words on its fill, named in words, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then each status pair of the "Shared vocabulary" demo is named in words, drawn on its fill:
+      | pair    | words        | fill         |
+      | Success | --success-fg | --success-bg |
+      | Warning | --warning-fg | --warning-bg |
+      | Error   | --error-fg   | --error-bg   |
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario Outline: A status badge of an operation that succeeded or failed is drawn in its status tone's pair, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then each of these badges of the "Status badge" demo is drawn on its fill:
+      | badge                   | words        | fill         |
+      | Succeeded               | --success-fg | --success-bg |
+      | Succeeded with warnings | --success-fg | --success-bg |
+      | Failed                  | --error-fg   | --error-bg   |
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
 
   Scenario Outline: Start, Center and End place a part at its line's start, middle and end, in the page's direction
     When I open the component gallery asking for the locale "<locale>"
