@@ -48,8 +48,7 @@ pub fn selection_on_press(selected: usize, pressed: usize) -> Option<usize> {
 /// the first one marked, or the first tab when none is, so a caller can't
 /// start the tabs on a tab the set doesn't hold.
 pub fn selected_at_start(marked: impl IntoIterator<Item = bool>) -> usize {
-    let _ = marked.into_iter();
-    todo!()
+    marked.into_iter().position(|marked| marked).unwrap_or(0)
 }
 
 /// What a panel holds, as its caller says, which decides whether the panel

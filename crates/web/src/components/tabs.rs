@@ -23,6 +23,7 @@ pub struct Tab {
     label: String,
     holds: Holds,
     panel: AnyView,
+    start: bool,
 }
 
 impl Tab {
@@ -34,7 +35,15 @@ impl Tab {
             label,
             holds,
             panel: panel.into_any(),
+            start: false,
         }
+    }
+
+    /// The tab, the one its set starts on when `start` holds, as a page
+    /// whose address names a tab does. Of several, the first does; of none,
+    /// the set starts on its first tab.
+    pub fn selected_at_start(self, start: bool) -> Self {
+        Self { start, ..self }
     }
 }
 
@@ -56,7 +65,8 @@ impl TabSet {
 /// A set of tabs (§4.5): a `tablist` named by `name`, a native
 /// `<button type="button">` for each tab, then every tab's panel, built
 /// once, the unselected ones `hidden`, so what a reader typed or scrolled
-/// to in one stays while another shows. The first tab is selected.
+/// to in one stays while another shows. The first tab is selected, or the
+/// one its caller starts the set on (`Tab::selected_at_start`).
 ///
 /// The list is a row above the panels, a column at their start, or, with
 /// `Orientation::Responsive`, a column while the tabs' own container has
@@ -103,7 +113,8 @@ pub fn Tabs(
     #[prop(optional, into)]
     described_by: Option<String>,
     /// Follows the selected tab, its index in `tabs` (0, the first, to
-    /// begin with), set once for each change: a caller that reads a panel's
+    /// begin with), set once for each change, and once as the tabs are
+    /// drawn when they start on another: a caller that reads a panel's
     /// content only once its tab is chosen watches it. The tabs set it; a
     /// caller only reads it.
     #[prop(optional)]
@@ -111,11 +122,13 @@ pub fn Tabs(
 ) -> impl IntoView {
     let TabSet { first, rest } = tabs;
     let last = rest.len();
-    let selection = RwSignal::new(0_usize);
+    let selection = RwSignal::new(rules::selected_at_start(
+        std::iter::once(first.start).chain(rest.iter().map(|tab| tab.start)),
+    ));
     if let Some(selected) = selected {
         // Written only when it differs, so a caller watching it hears of
-        // each change once and of the first tab not at all when it already
-        // holds 0.
+        // each change once and of the tab the set starts on only when it
+        // doesn't already hold it.
         Effect::new(move |_| {
             let now = selection.get();
             if selected.get_untracked() != now {
