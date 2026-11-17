@@ -95,8 +95,11 @@ impl StatusTone {
     /// Its words' token and its fill's, by their Tailwind names, written out
     /// whole so Tailwind finds them in the source.
     pub fn pair(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::Success => "text-success-fg bg-success-bg",
+            Self::Warning => "text-warning-fg bg-warning-bg",
+            Self::Error => "text-error-fg bg-error-bg",
+        }
     }
 }
 

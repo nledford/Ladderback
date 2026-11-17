@@ -420,9 +420,11 @@ ui-gallery-badge-empty = Empty
 # tones, sizes and placements every shared component takes.
 ui-gallery-vocabulary-heading = Shared vocabulary
 
-# The headings of the vocabulary demo's three lists, which name the lists
-# too.
+# The headings of the vocabulary demo's four lists, which name the lists
+# too. Status pairs lists Success, Warning and Error again, each in its words
+# on its fill: the two colors a part tinted in that status takes.
 ui-gallery-tones-heading = Tones
+ui-gallery-status-pairs-heading = Status pairs
 ui-gallery-sizes-heading = Sizes
 ui-gallery-placements-heading = Placements
 

@@ -34,7 +34,7 @@ use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
 use crate::text;
-use crate::variants::{Placement, Rem, Side, Size, Tone};
+use crate::variants::{Placement, Rem, Side, Size, StatusTone, Tone};
 
 #[component]
 pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
@@ -389,6 +389,26 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                                 {swatch("vocabulary-swatch".to_owned())} <span>{t(name)}</span>
                             </li>
                         }
+                    })
+                    .collect_view()}
+            </ul>
+            // Every status tone's pair, its name in its words on its fill,
+            // so the axe row reads each pair's words on its fill.
+            <h3 id="gallery-status-pairs">{t(msg::UI_GALLERY_STATUS_PAIRS_HEADING)}</h3>
+            <ul
+                class="vocabulary-demo flex flex-wrap gap-2"
+                role="list"
+                aria-labelledby="gallery-status-pairs"
+            >
+                {[
+                    (StatusTone::Success, msg::UI_GALLERY_TONE_SUCCESS),
+                    (StatusTone::Warning, msg::UI_GALLERY_TONE_WARNING),
+                    (StatusTone::Error, msg::UI_GALLERY_TONE_ERROR),
+                ]
+                    .into_iter()
+                    .map(|(tone, name)| {
+                        let class = format!("px-2 rounded-(--radius-small) {}", tone.pair());
+                        view! { <li class=class>{t(name)}</li> }
                     })
                     .collect_view()}
             </ul>

@@ -1,10 +1,12 @@
-//! What a status badge shows for each state (components §4.5): its pill, one
-//! of the four whose text token on its background token the contrast gate
-//! checks, and its icon, a shape of its own for every state, so a reader who
-//! can't tell the colors apart scans a table of them without reading each
-//! label (A2). `components/status_badge.rs`'s `StatusBadge` is the glue that
-//! draws them.
+//! What a status badge shows for each state (components §4.5): its pill, a
+//! pair of Tailwind utilities, its words on its fill, whose tokens the
+//! contrast gate checks, a status tone's pair for an operation that ended
+//! (decision 108), and its icon, a shape of its own for every state, so a
+//! reader who can't tell the colors apart scans a table of them without
+//! reading each label (A2). `components/status_badge.rs`'s `StatusBadge` is
+//! the glue that draws them.
 
+use crate::variants::StatusTone;
 use lepticons_data::LucideGlyph;
 
 /// A state a status badge shows: one an operation is in, or none to tell.
@@ -39,14 +41,16 @@ impl BadgeState {
         Self::Empty,
     ];
 
-    /// The pill the badge is drawn on, the `badge-{pill}` class of
-    /// `style.css`.
+    /// The pill the badge is drawn on, its words' utility and its fill's:
+    /// Success's pair for an operation that succeeded, with warnings too
+    /// (its icon and its words tell the warnings), Error's for one that
+    /// failed, and the badge's own Loading and Empty pairs for the rest.
     pub fn pill(self) -> &'static str {
         match self {
-            Self::Running => "loading",
-            Self::Succeeded | Self::SucceededWithWarnings => "success",
-            Self::Failed => "error",
-            Self::Queued | Self::Cancelled | Self::Empty => "empty",
+            Self::Running => "text-badge-loading-fg bg-badge-loading-bg",
+            Self::Succeeded | Self::SucceededWithWarnings => StatusTone::Success.pair(),
+            Self::Failed => StatusTone::Error.pair(),
+            Self::Queued | Self::Cancelled | Self::Empty => "text-badge-empty-fg bg-badge-empty-bg",
         }
     }
 
@@ -70,7 +74,6 @@ impl BadgeState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::variants::StatusTone;
 
     #[test]
     fn each_state_has_an_icon_of_its_own() {
