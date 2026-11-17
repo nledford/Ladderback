@@ -1309,6 +1309,31 @@ fn backup_failed_as_identified(agent: &mut super::Agent) {
 // ------------------------------------------------- the Repositories page's notes
 // (features/repositories/keyring_activation.feature)
 
+#[given("a repository whose password the keyring keeps")]
+async fn password_in_keyring(agent: &mut super::Agent) {
+    let settings = RepositorySettings {
+        password: SecretRef::Keyring(entry("ladderback/demo")),
+        ..agent.repositories.settings.clone()
+    };
+    configure_demo(agent, &settings).await;
+}
+
+#[given("a repository whose password the configuration file keeps")]
+async fn password_in_config(agent: &mut super::Agent) {
+    let settings = agent.repositories.settings.clone();
+    configure_demo(agent, &settings).await;
+}
+
+/// Configures `settings` as the repository `demo`.
+async fn configure_demo(agent: &mut super::Agent, settings: &RepositorySettings) {
+    agent
+        .repositories
+        .store
+        .save(&config_with("demo", settings))
+        .await
+        .expect("the configuration saves");
+}
+
 #[given("a keyring service that runs now and that nothing can start on demand")]
 fn keyring_running_only(agent: &mut super::Agent) {
     agent
