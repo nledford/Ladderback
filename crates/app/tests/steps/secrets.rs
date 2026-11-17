@@ -225,6 +225,11 @@ fn keyring_locked(agent: &mut Agent) {
     agent.secrets.store.lock_keyring();
 }
 
+#[given("the keyring's unlock prompt was dismissed")]
+fn unlock_prompt_dismissed(agent: &mut Agent) {
+    agent.secrets.store.dismiss_unlock_prompt();
+}
+
 #[given("the keyring doesn't answer in time")]
 fn keyring_stalls(agent: &mut Agent) {
     agent.secrets.store.stall_keyring();
@@ -1068,6 +1073,12 @@ fn fails_with_no_service_after_uptime(agent: &mut Agent, seconds: i64) {
 #[then(expr = "the run fails {int} seconds after the daemon started because the keyring is locked")]
 fn fails_locked(agent: &mut Agent, seconds: i64) {
     assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Locked);
+    assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
+}
+
+#[then(expr = "the run fails {int} seconds after the daemon started because the keyring refused")]
+fn fails_refused(agent: &mut Agent, seconds: i64) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Refused);
     assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
 }
 
