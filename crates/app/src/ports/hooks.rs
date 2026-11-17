@@ -11,8 +11,10 @@ use domain::secrets::{Redactor, SecretValue};
 use domain::{OperationId, PlanId, RepositoryAlias, SnapshotId};
 
 /// How long one hook may run before it is stopped: SIGTERM to its process
-/// group, then SIGKILL after 5 s, as the password-command runner does. A
-/// constant for now; making it configurable is left to a later milestone.
+/// group, then SIGKILL after 5 s, as the password-command runner does. It
+/// may wait as long again to start, and to let go of its pipes at its end,
+/// as either waits while another program's start stalls. A constant for now;
+/// making it configurable is left to a later milestone.
 pub const HOOK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// The most that is kept of each of a hook's output streams. The excess is
@@ -100,7 +102,8 @@ pub enum HookStatus {
     /// exit status is known, because a signal ended it.
     Failed { exit_code: Option<i32> },
     /// The command outlived [`HOOK_TIMEOUT`] (or the limit the runner was
-    /// built with) and was killed.
+    /// built with) and was killed, or did not start within it and never
+    /// will.
     TimedOut,
     /// The command could not be started at all. `detail` is the platform's
     /// own message, never a command line or a secret.
@@ -143,8 +146,8 @@ impl HookOutcome {
 ///   with the `redactor` the call is given, the run's, before they are
 ///   returned; a secret the cap cut through leaves nothing of itself.
 /// - A non-zero exit is `Failed` with the exit code; a command past the
-///   timeout is `TimedOut`; one that can't start is `NotStarted` with a
-///   short platform detail.
+///   timeout, or not started within it, is `TimedOut`; one that can't start
+///   is `NotStarted` with a short platform detail.
 #[async_trait]
 pub trait HookRunner: Send + Sync {
     async fn run(
