@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { Request, Route } from "playwright";
 
-import { journey, namePattern } from "../support/keyboard.ts";
+import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 import { plannedRun, rowNamed, until } from "./live.ts";
 import { expand } from "./repositories.ts";
@@ -17,10 +17,6 @@ import { expand } from "./repositories.ts";
 // A saved plan's list is read again as soon as the daemon answers, and the
 // scheduler plans its run a moment later; ten seconds is generous for both.
 const SAVE_PATIENCE_MS = 10_000;
-
-// Leaves too few presses for a plan's row to be missed, and more than the
-// page has stops before the table.
-const MAX_TABS = 30;
 
 // The reads of the plans list each world's daemon holds, as the page's
 // requests, so a step can wait until the page has the answers.
@@ -153,18 +149,13 @@ Then(
 When(
   "I press Tab until focus is on the first button of the plan {string}",
   async function (this: BrowserWorld, plan: string) {
-    const keys = journey(this.page);
     const button = this.page
       .getByRole("row")
       .filter({ has: this.page.getByRole("rowheader", { name: namePattern(plan) }) })
       .getByRole("button")
       .first();
     await button.waitFor({ timeout: SAVE_PATIENCE_MS });
-    const focused = () => button.evaluate((el) => el === document.activeElement);
-    for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
-      await keys.press("Tab");
-    }
-    assert.ok(await focused(), `focus did not reach the first button of the plan ${plan} within ${MAX_TABS} presses`);
+    await pressUntilFocused(this.page, "Tab", button, `the first button of the plan ${plan}`);
   },
 );
 

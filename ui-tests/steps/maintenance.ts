@@ -13,7 +13,7 @@ import path from "node:path";
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
-import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
+import { ISOLATION, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { type BrowserWorld, evaluateAll, startServer } from "../support/world.ts";
 import { rowNamed, serveDemoPlans, table, untilCellLists } from "./live.ts";
 
@@ -39,9 +39,6 @@ const ROWS_PATIENCE_MS = 30_000;
 // seconds late is on the page seconds after it was started. Under the
 // timeout of a step, so that a line that never comes fails by saying so.
 const LINE_PATIENCE_MS = 20_000;
-
-// More Tab presses than the Snapshots page has stops, with its groups.
-const MAX_TABS = 40;
 
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
@@ -375,14 +372,8 @@ Given("the repository {string} has no maintenance setting", async function (this
  *  page reads the history it lists from the daemon, so a button made from it
  *  is not there when the presses would begin: they begin when it is. */
 async function tabUntilFocused(world: BrowserWorld, target: Locator, description: string): Promise<void> {
-  const keys = journey(world.page);
   await target.waitFor({ state: "attached", timeout: PAGE_PATIENCE_MS });
-  const focused = async () =>
-    (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement));
-  for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
-    await keys.press("Tab");
-  }
-  assert.ok(await focused(), `focus did not reach ${description} within ${MAX_TABS} Tab presses`);
+  await pressUntilFocused(world.page, "Tab", target, description);
 }
 
 /** Reads the repository's history afresh, as a person does: back to the
@@ -390,12 +381,7 @@ async function tabUntilFocused(world: BrowserWorld, target: Locator, description
 async function readAgain(world: BrowserWorld): Promise<void> {
   const keys = journey(world.page);
   const picker = keys.byRole("button", { name: namePattern(`Snapshots of ${ALIAS}`) });
-  const focused = async () =>
-    (await picker.count()) === 1 && (await picker.evaluate((el) => el === document.activeElement));
-  for (let presses = 0; presses < MAX_TABS && !(await focused()); presses += 1) {
-    await keys.press("Shift+Tab");
-  }
-  assert.ok(await focused(), `focus did not reach the repository's button within ${MAX_TABS} Shift+Tab presses`);
+  await pressUntilFocused(world.page, "Shift+Tab", picker, "the repository's button");
   await keys.press("Enter");
 }
 
