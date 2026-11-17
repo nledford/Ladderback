@@ -31,14 +31,12 @@ Feature: Accessibility of the app shell
 
   Scenario Outline: A page that does not exist is in the language of the page
     When I open the address "/_gallery?locale=<locale>"
-    And I press Tab
-    And I press Tab
-    And I press Tab
-    And I press Tab
+    And I skip to the content
     And I press Tab
     And I press Tab
     And I press Enter
     Then focus is on the main heading
+    And the page's address is "/_missing"
     And every visible text is transformed
     And the page title is transformed
 

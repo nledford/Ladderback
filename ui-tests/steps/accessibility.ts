@@ -62,6 +62,12 @@ When("I skip to the content", async function (this: BrowserWorld) {
   await keys.assertFocused(keys.byRole("main"), `the main landmark, not ${await whereFocusIs(this.page)}`);
 });
 
+// What a step that has followed a link by keyboard arrived at, where the
+// link's name is in a pseudolocale and so is the page's heading.
+Then("the page's address is {string}", async function (this: BrowserWorld, path: string) {
+  assert.equal(new URL(this.page.url()).pathname, path, "the page's address");
+});
+
 When("I press Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   await pressUntilFocusIsOn(this, "Tab", role, name);
 });

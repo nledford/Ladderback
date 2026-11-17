@@ -67,7 +67,9 @@ export function journey(page: Page) {
 // the content"), so the limit counts stops within `<main>` only: a link added
 // to the header uses up no walk's presses but the header's own. A page with
 // more stops than this is crossed in stretches: a scenario first stops at a
-// named control partway down, then presses on from there.
+// named control partway down, then presses on from there. An arrow walk
+// through a real snapshot's tree takes two presses a folder from its root, so
+// a scratch source under a deep temporary folder uses up more of it.
 export const MAX_PRESSES = 30;
 
 /** Where focus is, as the end of a sentence. */
