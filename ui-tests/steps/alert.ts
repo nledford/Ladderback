@@ -251,8 +251,8 @@ Then(
 );
 
 // The 320 Rule (DESIGN.md): on a small screen with larger text, an alert's
-// words wrap inside it, a long path too, and its icon and Dismiss button stay
-// beside them inside its edge.
+// words wrap inside it, a long path too, and its icon and Dismiss button
+// stay inside its edge too, beside the words or on lines of their own.
 Then(
   "every alert of the {string} demo holds its icon, its words and its Dismiss button inside its edge",
   async function (this: BrowserWorld, component: string) {
