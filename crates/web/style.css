@@ -1683,8 +1683,11 @@ table.repositories :is(th, td) {
    Tailwind's layer, can't override an unlayered rule. The flex box and the
    panel's share, which override nothing, stay beside them so that each
    orientation's layout is in one place until #931 moves it all. The child
-   combinators keep a set of tabs inside a panel to its own layout.
-   Responsive tabs repeat these rules in the container query below. */
+   combinators keep a set of tabs inside a panel to its own layout. In a
+   column every tab is as wide as the list, and its words, which a row
+   centers over their bold copy, stand at the tab's start, so the labels
+   line up down the column, wrapped lines too (#1011). Responsive tabs
+   repeat these rules in the container query below. */
 .tabs-vertical > .tabs-layout {
   display: flex;
   align-items: flex-start;
@@ -1707,6 +1710,10 @@ table.repositories :is(th, td) {
   border-inline-end: 1px solid var(--muted);
   text-align: start;
   overflow-wrap: anywhere;
+}
+
+.tabs-vertical > .tabs-layout > .tab-list > .tab > .tab-label {
+  align-items: flex-start;
 }
 
 .tabs-vertical > .tabs-layout > .tab-list > .tab[aria-selected="true"] {
@@ -1771,6 +1778,10 @@ table.repositories :is(th, td) {
     border-inline-end: 1px solid var(--muted);
     text-align: start;
     overflow-wrap: anywhere;
+  }
+
+  .tabs-responsive > .tabs-layout > .tab-list > .tab > .tab-label {
+    align-items: flex-start;
   }
 
   .tabs-responsive > .tabs-layout > .tab-list > .tab[aria-selected="true"] {
