@@ -429,6 +429,15 @@ ui-gallery-demo-notification-hint = A demo choice: turning it on changes nothing
 # The label of the demo checkbox that starts on. It has no description.
 ui-gallery-demo-log = Keep the demo log
 
+# The label of the third demo checkbox, which shows a checkbox's error: it starts off.
+ui-gallery-demo-terms = Accept the demo terms
+
+# The description under the third demo checkbox.
+ui-gallery-demo-terms-hint = The demo terms change nothing.
+
+# The error the third demo checkbox shows under its description, as a form would once checked.
+ui-gallery-demo-terms-error = Accept the demo terms to go on.
+
 # The heading of the gallery's radio group demo.
 ui-gallery-radio-heading = Radio group
 
@@ -458,6 +467,18 @@ ui-gallery-demo-japanese = { "日本語" }
 
 # A choice of the second demo radio group: the name of Arabic, written in Arabic, which the group marks as Arabic, running right to left. Not translated.
 ui-gallery-demo-arabic = { "العربية" }
+
+# The legend of the third demo radio group, which shows a group's error: no choice is made in it.
+ui-gallery-demo-window = Demo backup window
+
+# The first choice of the third demo radio group.
+ui-gallery-demo-mornings = Mornings
+
+# The second choice of the third demo radio group.
+ui-gallery-demo-evenings = Evenings
+
+# The error the third demo radio group shows under its legend, as a form would once checked.
+ui-gallery-demo-window-error = Choose a demo backup window.
 
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge

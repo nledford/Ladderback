@@ -1,5 +1,7 @@
 use leptos::prelude::*;
 
+pub(crate) mod rules;
+
 /// A checkbox: a native `<input type="checkbox">` with its visible label
 /// beside it, which is also its click target, and an optional description
 /// wired to it with `aria-describedby`, read after its name, as a
@@ -13,8 +15,10 @@ pub fn Checkbox(
     id: &'static str,
     label: String,
     #[prop(optional)] description: Option<String>,
+    #[prop(optional, into)] error: Signal<Option<String>>,
     checked: RwSignal<bool>,
 ) -> impl IntoView {
+    let _ = error;
     let described_by = description.as_ref().map(|_| format!("{id}-description"));
     let description = description.map(|text| {
         view! { <p id=described_by.clone()>{text}</p> }

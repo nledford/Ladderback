@@ -32,8 +32,10 @@ pub fn RadioGroup(
     #[prop(optional)] description: Option<String>,
     options: Vec<(&'static str, String)>,
     #[prop(optional)] label_languages: Vec<(&'static str, LabelLanguage)>,
+    #[prop(optional, into)] error: Signal<Option<String>>,
     chosen: RwSignal<&'static str>,
 ) -> impl IntoView {
+    let _ = error;
     let described_by = description.as_ref().map(|_| format!("{name}-description"));
     let description = description.map(|text| {
         view! { <p id=described_by.clone()>{text}</p> }

@@ -2312,7 +2312,11 @@ const SNAPSHOTS: Record<string, string> = {
 - text: Send a demo notification
 - paragraph: "A demo choice: turning it on changes nothing."
 - checkbox "Keep the demo log" [checked]
-- text: Keep the demo log`,
+- text: Keep the demo log
+- checkbox "Accept the demo terms" [invalid]
+- text: Accept the demo terms
+- paragraph: The demo terms change nothing.
+- paragraph: Accept the demo terms to go on.`,
   "Radio group": `- heading "Radio group" [level=2]
 - group "Demo check frequency":
   - text: Demo check frequency
@@ -2330,7 +2334,14 @@ const SNAPSHOTS: Record<string, string> = {
   - radio "日本語"
   - text: 日本語
   - radio "العربية"
-  - text: العربية`,
+  - text: العربية
+- group "Demo backup window":
+  - text: Demo backup window
+  - paragraph: Choose a demo backup window.
+  - radio "Mornings"
+  - text: Mornings
+  - radio "Evenings"
+  - text: Evenings`,
   "Status badge": `- heading "Status badge" [level=2]
 - paragraph: Queued Running Succeeded Succeeded with warnings Failed Cancelled Empty`,
   Badge: `- heading "Badge" [level=2]
