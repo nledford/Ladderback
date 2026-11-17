@@ -1,4 +1,16 @@
+use l10n::Direction;
 use leptos::prelude::*;
+
+/// The language a choice's label is written in when it isn't the page's,
+/// such as a language named in itself: its `lang`, which a screen reader
+/// reads the label in (WCAG 3.1.2), and its `dir`, the way it runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LabelLanguage {
+    /// The language's tag, as `lang` takes it: `ja`, `ar`.
+    pub lang: String,
+    /// The way it runs, which its `dir` declares.
+    pub dir: Direction,
+}
 
 /// A radio group: one choice of a few, named by the `<legend>` of its
 /// `<fieldset>` and described by an optional hint under it, wired to the
@@ -8,7 +20,9 @@ use leptos::prelude::*;
 /// [`Checkbox`](super::Checkbox) is. The browser makes the group one Tab stop, on the choice
 /// made, and the arrow keys move and choose within it, so nothing here
 /// handles keys. `options` pairs each choice's value, which also makes its
-/// id (`{name}-{value}`), with its label; `chosen` holds the value chosen,
+/// id (`{name}-{value}`), with its label; `label_languages` pairs the value
+/// of a choice whose label is in another language with that language, which
+/// its `<label>` declares; `chosen` holds the value chosen,
 /// so the caller reads it and saves it when it likes: arrowing through the
 /// choices sets it at each step. One size and no color of its own (1.4.1).
 #[component]
@@ -17,6 +31,7 @@ pub fn RadioGroup(
     legend: String,
     #[prop(optional)] description: Option<String>,
     options: Vec<(&'static str, String)>,
+    #[prop(optional)] label_languages: Vec<(&'static str, LabelLanguage)>,
     chosen: RwSignal<&'static str>,
 ) -> impl IntoView {
     let described_by = description.as_ref().map(|_| format!("{name}-description"));
@@ -27,6 +42,13 @@ pub fn RadioGroup(
         .into_iter()
         .map(|(value, label)| {
             let id = format!("{name}-{value}");
+            let language = label_languages
+                .iter()
+                .find(|(of, _)| *of == value)
+                .map(|(_, language)| language.clone());
+            let (lang, dir) = language.map_or((None, None), |language| {
+                (Some(language.lang), Some(language.dir.as_str()))
+            });
             view! {
                 <div class="field checkbox">
                     <input
@@ -41,7 +63,9 @@ pub fn RadioGroup(
                             }
                         }
                     />
-                    <label for=id>{label}</label>
+                    <label for=id lang=lang dir=dir>
+                        {label}
+                    </label>
                 </div>
             }
         })

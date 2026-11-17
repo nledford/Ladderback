@@ -1,13 +1,27 @@
 import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { Page } from "playwright";
 import { expect } from "playwright/test";
 
 import { journey } from "../support/keyboard.ts";
-import type { BrowserWorld } from "../support/world.ts";
+import { type BrowserWorld, repoRoot } from "../support/world.ts";
 
 const NON_ASCII = /[^\x00-\x7f]/;
+
+// Each catalog's name of its language written in that language
+// (`ui-language-name`), by its tag: the name Settings marks with `lang` set to
+// the tag, which a pseudolocale leaves as its readers write it (§8.4).
+const LOCALES = path.join(repoRoot, "crates/l10n/locales");
+const OWN_NAMES: Record<string, string> = Object.fromEntries(
+  readdirSync(LOCALES).flatMap((tag) => {
+    const ui = path.join(LOCALES, tag, "ui.ftl");
+    const name = existsSync(ui) ? /^ui-language-name = (.+)$/m.exec(readFileSync(ui, "utf8"))?.[1] : undefined;
+    return name === undefined ? [] : [[tag, name.trim()]];
+  }),
+);
 
 Given("the browser's language is {string}", function (this: BrowserWorld, tag: string) {
   this.contextOptions.locale = tag;
@@ -33,29 +47,40 @@ Then("the text direction is {string}", async function (this: BrowserWorld, direc
 });
 
 // The visible texts of the page that have letters and no transformed one: a
-// text written in the code, not drawn from the catalog (§8.4). `data` is a
-// selector for what the page shows besides its words, which the catalog did
-// not write and so leaves as it is; without it nothing is exempt.
+// text written in the code, not drawn from the catalog (§8.4). A language's
+// name written in itself, marked with its catalog's tag (`lang`, WCAG 3.1.2),
+// as Settings offers it, is that catalog's and not the page's, and is not
+// inspected; any other text marked with a `lang` is. `data` is a selector for
+// what the page shows besides its words, which the catalog did not write and
+// so leaves as it is; without it nothing else is exempt.
 async function untransformed(page: Page, data?: string): Promise<{ inspected: number; plain: string[] }> {
-  return page.evaluate((data) => {
-    const plain: string[] = [];
-    let inspected = 0;
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const text = (node.textContent ?? "").trim();
-      const parent = node.parentElement;
-      if (!/\p{L}/u.test(text) || !parent?.checkVisibility({ visibilityProperty: true })) continue;
-      if (data && parent.closest(data)) continue;
-      inspected += 1;
-      if (/^[\x00-\x7f]*$/.test(text)) plain.push(text);
-    }
-    return { inspected, plain };
-  }, data ?? null);
+  return page.evaluate(
+    ({ data, ownNames }) => {
+      const plain: string[] = [];
+      let inspected = 0;
+      const root = document.documentElement;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = (node.textContent ?? "").trim();
+        const parent = node.parentElement;
+        if (!/\p{L}/u.test(text) || !parent?.checkVisibility({ visibilityProperty: true })) continue;
+        const marked = parent.closest("[lang]");
+        const lang = marked && marked !== root ? marked.getAttribute("lang") : null;
+        if (lang !== null && lang !== root.lang && ownNames[lang] === text) continue;
+        if (data && parent.closest(data)) continue;
+        inspected += 1;
+        if (/^[\x00-\x7f]*$/.test(text)) plain.push(text);
+      }
+      return { inspected, plain };
+    },
+    { data: data ?? null, ownNames: OWN_NAMES },
+  );
 }
 
 // §8.4: in a pseudolocale all visible text comes out of the catalog, so a text
 // with letters and no transformed character was written in the code. This
-// step exempts nothing: the pages it is used on show no data.
+// step exempts only a language's name written in itself: the pages it is used
+// on show no data.
 Then("every visible text is transformed", async function (this: BrowserWorld) {
   const { inspected, plain } = await untransformed(this.page);
   assert.ok(inspected > 0, "the page shows no text to check");

@@ -5,7 +5,8 @@ Feature: The shared components in the gallery
   journeys: a dialog, a table, sorted by keyboard, which keeps a focused
   control in a row through the row's changes and scrolls sideways in a
   frame of its own on a small screen, a checkbox, a
-  radio group, a progress bar a keyboard user can reach, whose changes
+  radio group, which marks a choice's label written in another language with
+  that language and its direction, a progress bar a keyboard user can reach, whose changes
   are never announced and are told at most every 30 seconds, and which shows
   no percentage while its size isn't known, a toast, the
   control that pauses live updates, a status badge for every state an
@@ -209,6 +210,16 @@ Feature: The shared components in the gallery
     Then focus has left the group "Demo check frequency"
     When I press Shift+Tab
     Then focus is on the radio "Every month"
+
+  Scenario Outline: A radio group marks a choice's label written in another language with that language and the way it runs
+    When I open the component gallery
+    Then the label of the radio "<name>" is in the language "<language>", running <direction>
+
+    Examples:
+      | name    | language | direction |
+      | English | en-US    | ltr       |
+      | 日本語     | ja       | ltr       |
+      | العربية | ar       | rtl       |
 
   Scenario: The progress bar is reached by keyboard and its value changes without any announcement
     Given the page's clock can be moved on

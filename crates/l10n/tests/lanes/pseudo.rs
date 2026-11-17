@@ -322,7 +322,10 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                 // locale's digits, and `ui-stats-size` and the demo's
                 // `ui-gallery-table-size` only their size, which
                 // the size helper writes: there is no text of the catalog's
-                // to transform.
+                // to transform. The gallery's names of languages
+                // (`ui-gallery-demo-english`, `-japanese`, `-arabic`) are
+                // string literals too, each written in its own language,
+                // which the radio group marks with its `lang`.
                 if id == msg::SIZE
                     || id == msg::DURATION
                     || id == msg::UI_INSTANT
@@ -332,6 +335,9 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                     || id == msg::UI_GALLERY_TABLE_FILES
                     || id == msg::UI_STATS_SIZE
                     || id == msg::UI_GALLERY_TABLE_SIZE
+                    || id == msg::UI_GALLERY_DEMO_ENGLISH
+                    || id == msg::UI_GALLERY_DEMO_JAPANESE
+                    || id == msg::UI_GALLERY_DEMO_ARABIC
                 {
                     continue;
                 }

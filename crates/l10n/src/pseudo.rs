@@ -35,7 +35,7 @@ pub(crate) enum Pseudo {
 
 impl Pseudo {
     /// Every pseudolocale this build has: none without the `pseudo` feature.
-    const ALL: &[Self] = &[
+    pub(crate) const ALL: &[Self] = &[
         #[cfg(feature = "pseudo")]
         Self::Accented,
         #[cfg(feature = "pseudo")]
@@ -58,6 +58,16 @@ impl Pseudo {
             Self::Accented => unic_langid::langid!("en-XA"),
             #[cfg(feature = "pseudo")]
             Self::Flipped => unic_langid::langid!("ar-XB"),
+        }
+    }
+
+    /// The tag as text, as the choice of it in Settings is kept.
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            #[cfg(feature = "pseudo")]
+            Self::Accented => "en-XA",
+            #[cfg(feature = "pseudo")]
+            Self::Flipped => "ar-XB",
         }
     }
 

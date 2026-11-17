@@ -8,6 +8,8 @@
 //!   typo doesn't compile.
 //! - [`PosixEnv`] reads the locales a command-line program is asked to speak,
 //!   and [`BrowserLanguages`] the ones a web page is asked for.
+//! - [`languages`] lists the languages this build offers a person to choose,
+//!   each named in itself.
 //! - [`Localizer`] formats messages, and renders the codes of the API
 //!   ([`Localizer::error`], [`Localizer::warning`]), in a chain of locales that
 //!   always ends in `en-US`. It also tells a page which `lang` and which
@@ -49,6 +51,7 @@ mod format;
 ))]
 mod icu;
 mod id;
+mod languages;
 mod locale;
 mod localizer;
 pub mod msg;
@@ -70,5 +73,6 @@ pub fn viewer_zone() -> Option<api::IanaZone> {
 }
 
 pub use id::MessageId;
+pub use languages::{Language, languages};
 pub use locale::{BrowserLanguages, Direction, PosixEnv};
 pub use localizer::{Formatted, Localizer};

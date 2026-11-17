@@ -367,6 +367,18 @@ ui-gallery-demo-weekly = Every week
 # The third choice of the demo radio group.
 ui-gallery-demo-monthly = Every month
 
+# The legend of the second demo radio group, whose choices are named in other languages.
+ui-gallery-demo-language = Demo language
+
+# A choice of the second demo radio group: the name of English, written in English. Not translated.
+ui-gallery-demo-english = { "English" }
+
+# A choice of the second demo radio group: the name of Japanese, written in Japanese, which the group marks as Japanese. Not translated.
+ui-gallery-demo-japanese = { "日本語" }
+
+# A choice of the second demo radio group: the name of Arabic, written in Arabic, which the group marks as Arabic, running right to left. Not translated.
+ui-gallery-demo-arabic = { "العربية" }
+
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge
 
@@ -2416,6 +2428,27 @@ ui-admin-password-mismatch = The two new passwords differ. Type the same passwor
 
 # Shown on the sign-in page once the admin password has been changed in Settings, which signed every browser out.
 ui-admin-password-changed = Admin password changed. Sign in with the new password.
+
+# The heading of the section of Settings that chooses the language the web UI is shown in.
+ui-language-heading = Language
+
+# The legend of the choice of the web UI's language. Each choice after the first is a language named in itself (ui-language-name), as its readers write it.
+ui-language-legend = Show { -brand-name } in
+
+# The description under that legend. The choice is kept in this browser alone, not by the daemon. Saving loads the page again, which drops anything else Settings is showing, such as a new API token's secret, so the hint says so.
+ui-language-hint = Kept in this browser. Saving reloads the page, which clears anything else Settings is showing. With the browser's languages, { -brand-name } uses the first of them it offers, and American English if it offers none.
+
+# The first choice of the web UI's language: no language of its own, but the languages the browser's settings list, best first. The one chosen until another is.
+ui-language-browser = The browser's languages
+
+# The name of this catalog's language, written in that language as its readers write it, as the choice of language in Settings shows it: "English", "日本語", "Deutsch".
+ui-language-name = English
+
+# The button that keeps the language chosen in this browser, then shows the page again in it.
+ui-language-save = Save the language
+
+# Shown when the browser refused to keep the language chosen: its settings, or a private window, may let a site keep nothing.
+ui-language-not-kept = This browser didn't keep the language. Its settings may stop sites from keeping anything.
 
 # The heading of the section of Settings about signing in: how long a session lasts, and signing out every browser at once.
 ui-signing-in-heading = Signing in

@@ -2043,7 +2043,15 @@ const SNAPSHOTS: Record<string, string> = {
   - radio "Every week" [checked]
   - text: Every week
   - radio "Every month"
-  - text: Every month`,
+  - text: Every month
+- group "Demo language":
+  - text: Demo language
+  - radio "English" [checked]
+  - text: English
+  - radio "日本語"
+  - text: 日本語
+  - radio "العربية"
+  - text: العربية`,
   "Status badge": `- heading "Status badge" [level=2]
 - paragraph: Queued Running Succeeded Succeeded with warnings Failed Cancelled Empty`,
   Progress: `- heading "Progress" [level=2]

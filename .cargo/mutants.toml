@@ -104,6 +104,14 @@
 # mutated on the host; the `@ui` scenarios of
 # `features/security/session_length.feature` run the glue in Chromium.
 #
+# `crates/web/src/settings/language.rs` is the DOM glue of Settings' Language
+# section (§8.4, decision 101): it shows the choices, holds the one chosen in
+# a signal, keeps it when its button is pressed and says when the browser
+# refused. The choices, their order, the one shown chosen and the tag a save
+# keeps are `language_choice.rs`'s, mutated on the host; keeping it, the
+# reload and focus on the section's heading are `page.rs`'s glue; the `@ui`
+# scenarios of `features/ui/language.feature` run both in Chromium.
+#
 # `crates/web/src/snapshots.rs` is the same kind of glue, for the Snapshots
 # page, and only this stays in it: sending the history read, the previews, the
 # starts, the cancel and the stats' look and read; doing what
@@ -170,6 +178,7 @@ exclude_globs = [
     "crates/web/src/daemon_log_page.rs",
     "crates/web/src/settings/password.rs",
     "crates/web/src/settings/sign_in.rs",
+    "crates/web/src/settings/language.rs",
     "crates/web/src/full_disk_access_warning.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:

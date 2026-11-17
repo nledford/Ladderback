@@ -42,7 +42,7 @@ pub use icon::Icon;
 pub use modal_dialog::ModalDialog;
 pub(crate) use pause_updates::PauseUpdates;
 pub use progress::Progress;
-pub use radio_group::RadioGroup;
+pub use radio_group::{LabelLanguage, RadioGroup};
 pub use review_dialog::{Confirmation, ReviewDialog, Working};
 pub use spinner::Spinner;
 pub use status_badge::StatusBadge;

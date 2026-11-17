@@ -7,6 +7,8 @@
 
 use unic_langid::{CharacterDirection, LanguageIdentifier, langid};
 
+use crate::pseudo::Pseudo;
+
 /// The most preferences one environment variable contributes. `LANGUAGE`
 /// is a list, and the environment is outside input.
 pub(crate) const MAX_PREFERENCES: usize = 16;
@@ -101,25 +103,42 @@ impl Direction {
 }
 
 /// What a web page asks for, in the order of its authority (technical design
-/// §8.4): the dev `?locale=` of the page's address, then the languages the
-/// browser lists in `navigator.languages`. Both are outside input, so each
-/// is read within bounds, like the POSIX environment.
+/// §8.4): the dev `?locale=` of the page's address, then the language chosen
+/// in Settings and kept in the browser (decision 101), then the languages
+/// the browser lists in `navigator.languages`. All are outside input, so
+/// each is read within bounds, like the POSIX environment.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BrowserLanguages {
     /// The `locale` parameter of the page's address, as it was given.
     pub requested: Option<String>,
+    /// The language chosen in Settings, as the browser kept it.
+    pub chosen: Option<String>,
     /// `navigator.languages`, as the browser gave it, best first.
     pub languages: Vec<String>,
 }
 
 impl BrowserLanguages {
-    /// The languages asked for, best first: the requested locale, then the
-    /// browser's languages. A name that is not a language tag, or is longer
-    /// than [`MAX_NAME_LEN`] bytes, is left out, and so is `und`. At most
+    /// The languages asked for, best first: the requested locale, the one
+    /// chosen, then the browser's languages. A name that is not a language
+    /// tag, or is longer than [`MAX_NAME_LEN`] bytes, is left out, and so is
+    /// `und`. The one chosen counts only as Settings keeps it: a tag this
+    /// build offers, written exactly as [`languages`] gives it, so the page
+    /// is never in a language Settings doesn't show chosen. At most
     /// [`MAX_PREFERENCES`] of the browser's languages are kept, from the
     /// first four times as many looked at.
+    ///
+    /// A pseudolocale stands in for `en-US` wherever it comes, so none kept
+    /// or listed comes after a requested locale, which it would overrule.
+    ///
+    /// [`languages`]: crate::languages
     pub fn preferences(&self) -> Vec<LanguageIdentifier> {
         let requested = self.requested.as_deref().and_then(browser_tag);
+        let asked_for = requested.is_some();
+        let chosen = self
+            .chosen
+            .as_deref()
+            .filter(|chosen| crate::languages::offers(chosen))
+            .and_then(browser_tag);
         // Bounded, because the browser's list is outside input: at most four
         // entries are looked at for each one kept.
         let listed = self
@@ -128,7 +147,11 @@ impl BrowserLanguages {
             .take(MAX_PREFERENCES * 4)
             .filter_map(|name| browser_tag(name))
             .take(MAX_PREFERENCES);
-        requested.into_iter().chain(listed).collect()
+        let after = chosen
+            .into_iter()
+            .chain(listed)
+            .filter(|tag| !asked_for || Pseudo::from_tag(tag).is_none());
+        requested.into_iter().chain(after).collect()
     }
 }
 
@@ -433,6 +456,7 @@ mod tests {
     fn browser(requested: Option<&str>, languages: &[&str]) -> BrowserLanguages {
         BrowserLanguages {
             requested: requested.map(str::to_owned),
+            chosen: None,
             languages: owned(languages),
         }
     }
@@ -461,6 +485,85 @@ mod tests {
         let requested = browser(Some("en-XA"), &[]);
         assert_eq!(requested.preferences(), tags(&["en-XA"]));
         assert_eq!(BrowserLanguages::default().preferences(), tags(&[]));
+    }
+
+    fn chosen(requested: Option<&str>, chosen: &str, languages: &[&str]) -> BrowserLanguages {
+        BrowserLanguages {
+            chosen: Some(chosen.to_owned()),
+            ..browser(requested, languages)
+        }
+    }
+
+    #[test]
+    fn the_language_chosen_comes_after_the_address_and_before_the_languages_of_the_browser() {
+        assert_eq!(
+            chosen(None, "en-US", &["de-DE", "fr"]).preferences(),
+            tags(&["en-US", "de-DE", "fr"])
+        );
+        assert_eq!(
+            chosen(Some("de"), "en-US", &["fr"]).preferences(),
+            tags(&["de", "en-US", "fr"])
+        );
+    }
+
+    /// Settings shows a kept language chosen only when it is a tag this build
+    /// offers, exactly as Settings keeps it, so the page asks for it only
+    /// then too: otherwise the page could be in a language Settings doesn't
+    /// show chosen.
+    #[test]
+    fn a_language_kept_asks_for_nothing_unless_it_is_a_tag_this_build_offers_as_it_is_kept() {
+        assert_eq!(
+            chosen(None, "en-US", &["de"]).preferences(),
+            tags(&["en-US", "de"]),
+            "a tag this build offers, as it is kept, counts"
+        );
+        let too_long = tag_of_len(MAX_NAME_LEN + 1);
+        for raw in [
+            " en-US ",
+            "EN-us",
+            "en_US",
+            "tlh",
+            "",
+            "und",
+            "not a language!",
+            too_long.as_str(),
+        ] {
+            assert_eq!(
+                chosen(None, raw, &["de"]).preferences(),
+                tags(&["de"]),
+                "chosen {raw:?}"
+            );
+        }
+    }
+
+    #[cfg(feature = "pseudo")]
+    #[test]
+    fn a_pseudolocale_kept_counts_only_as_its_tag_is_written() {
+        assert_eq!(
+            chosen(None, "en-XA", &["de"]).preferences(),
+            tags(&["en-XA", "de"])
+        );
+        assert_eq!(chosen(None, "EN-xa", &["de"]).preferences(), tags(&["de"]));
+    }
+
+    /// A pseudolocale stands in for `en-US` wherever it comes in the
+    /// preferences (`pseudo::split`), so one kept or listed after the locale
+    /// the address asks for would overrule it, `?locale=en-US` included.
+    #[cfg(feature = "pseudo")]
+    #[test]
+    fn no_pseudolocale_kept_or_listed_comes_after_the_locale_the_address_asks_for() {
+        assert_eq!(
+            chosen(Some("en-US"), "ar-XB", &["en-XA", "de"]).preferences(),
+            tags(&["en-US", "de"])
+        );
+        assert_eq!(
+            chosen(Some("en-XA"), "ar-XB", &["de"]).preferences(),
+            tags(&["en-XA", "de"])
+        );
+        assert_eq!(
+            chosen(None, "ar-XB", &["en-XA", "de"]).preferences(),
+            tags(&["ar-XB", "en-XA", "de"])
+        );
     }
 
     #[test]

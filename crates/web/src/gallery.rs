@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use api::{EntryDto, EntryKindDto, FolderDto, MsgArg};
-use l10n::{Localizer, MessageId, msg};
+use l10n::{Direction, Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -21,9 +21,9 @@ use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Align, Button, Checkbox, Column, Confirmation, FolderLoader, FolderPage, Footer, Icon,
-    ModalDialog, Name, PauseUpdates, Progress, RadioGroup, Rem, ReviewDialog, Sentences, Sort,
-    SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Table, TextField, Tip, Toast,
-    Tooltip, Tree, show_toast, text_field,
+    LabelLanguage, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, Rem, ReviewDialog,
+    Sentences, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Table, TextField,
+    Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -275,6 +275,41 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     ("monthly", t(msg::UI_GALLERY_DEMO_MONTHLY)),
                 ]
                 chosen=RwSignal::new("weekly")
+            />
+            // A group whose choices are named in their own languages: each
+            // label declares its language and the way it runs.
+            <RadioGroup
+                name="gallery-language"
+                legend=t(msg::UI_GALLERY_DEMO_LANGUAGE)
+                options=vec![
+                    ("en", t(msg::UI_GALLERY_DEMO_ENGLISH)),
+                    ("ja", t(msg::UI_GALLERY_DEMO_JAPANESE)),
+                    ("ar", t(msg::UI_GALLERY_DEMO_ARABIC)),
+                ]
+                label_languages=vec![
+                    (
+                        "en",
+                        LabelLanguage {
+                            lang: "en-US".to_owned(),
+                            dir: Direction::Ltr,
+                        },
+                    ),
+                    (
+                        "ja",
+                        LabelLanguage {
+                            lang: "ja".to_owned(),
+                            dir: Direction::Ltr,
+                        },
+                    ),
+                    (
+                        "ar",
+                        LabelLanguage {
+                            lang: "ar".to_owned(),
+                            dir: Direction::Rtl,
+                        },
+                    ),
+                ]
+                chosen=RwSignal::new("en")
             />
         </section>
         <section>

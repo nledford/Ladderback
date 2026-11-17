@@ -226,7 +226,7 @@ wasm-bindgen-test = "0.3.80"
 # aborts a read of the daemon that hangs with, reads the session route
 # without the session's cookie with, and measures and places a tooltip beside
 # its control with (the pointer's kind, boxes and computed styles).
-web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "BinaryType", "Clipboard", "CloseEvent", "CssStyleDeclaration", "Document", "DomRect", "Element", "ErrorEvent", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "PointerEvent", "RequestCredentials", "ScrollIntoViewOptions", "ScrollLogicalPosition", "UrlSearchParams", "WebSocket", "Window"] }
+web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "BinaryType", "Clipboard", "CloseEvent", "CssStyleDeclaration", "Document", "DomRect", "Element", "ErrorEvent", "History", "HtmlDialogElement", "HtmlElement", "Location", "MessageEvent", "Navigator", "Node", "NodeList", "Performance", "PointerEvent", "RequestCredentials", "ScrollIntoViewOptions", "ScrollLogicalPosition", "Storage", "UrlSearchParams", "WebSocket", "Window"] }
 # Wipes a resolved secret's bytes, the admin password and an API token's
 # secret when they are dropped (security §10.2); already in the tree through
 # `rustls` and `keyring`. `derive` writes the wipe and the drop that runs it,
