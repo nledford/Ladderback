@@ -1526,6 +1526,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
+    And I press Tab until focus is on the button "Check the repository name"
     And I press Tab until focus is on the textbox "Demo snapshot ID"
     Then the field "Demo snapshot ID" is described by "Read only: you can select and copy it, but not change it."
     And the field "Demo snapshot ID" is edged with dashes
