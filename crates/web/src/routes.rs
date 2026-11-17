@@ -354,7 +354,18 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // the page's presses last as long as it, and end as the page goes (#300).
     let (visit, departure) = Visit::begin();
     on_cleanup(move || drop(departure));
-    ws::watch(&base, ops, phase, &visit);
+    // A history read the daemon refused, said where the table would be, as a
+    // read refused after the reader closed Sign in again is (§4.5).
+    let history_refused = RwSignal::<Option<Sentence>>::new(None);
+    let history_localizer = Arc::clone(&localizer);
+    ws::watch(
+        &base,
+        ops,
+        phase,
+        history_refused,
+        move |code, args, detail| refused_sentence(&history_localizer, code, args, detail),
+        &visit,
+    );
     // What the page shows: the live state, or the copy taken when the reader
     // paused it. Every view reads this; the stream, the settle-poll and the
     // end announcements read the live state.
@@ -435,7 +446,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // button's, and follows it as the reader presses it.
     let showing = Memo::new(move |_| {
         let phase = page.phase();
-        page.with(|state| shown(phase, &state.rows))
+        let refused = history_refused.with(Option::is_some);
+        page.with(|state| shown(phase, refused, &state.rows))
     });
     let order = Memo::new(move |_| page.with(|state| ordered(&state.rows, sort.get())));
     let table_localizer = Arc::clone(&localizer);
@@ -578,6 +590,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             match showing.get() {
                 Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
                 Shown::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
+                Shown::Refused => {
+                    history_refused
+                        .get()
+                        .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+                        .into_any()
+                }
                 Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
                 Shown::Table => {
                     view! {
@@ -931,21 +949,25 @@ enum Shown {
     Loading,
     /// The daemon cannot be reached.
     Unreachable,
+    /// The daemon answered with a refusal rather than the history.
+    Refused,
     /// The history is here and holds no operation.
     Empty,
     /// The history is here and holds some.
     Table,
 }
 
-/// What the page shows while its connection is in `phase` and its state holds
-/// `rows`. Only a change of this rebuilds the table: an update to a row leaves
-/// the table and the controls in it as they are (WCAG 2.4.3), and a change in
-/// the order of the rows leaves the table as it is and moves the rows that
-/// change place.
-fn shown(phase: Phase, rows: &[OperationRow]) -> Shown {
+/// What the page shows while its connection is in `phase`, its last read of
+/// the history was `refused` or not, and its state holds `rows`. Only a
+/// change of this rebuilds the table: an update to a row leaves the table
+/// and the controls in it as they are (WCAG 2.4.3), and a change in the order
+/// of the rows leaves the table as it is and moves the rows that change
+/// place.
+fn shown(phase: Phase, refused: bool, rows: &[OperationRow]) -> Shown {
     match phase {
         Phase::Loading => Shown::Loading,
         Phase::Unreachable => Shown::Unreachable,
+        Phase::Ready if refused => Shown::Refused,
         Phase::Ready if rows.is_empty() => Shown::Empty,
         Phase::Ready => Shown::Table,
     }
@@ -2245,17 +2267,26 @@ mod tests {
     #[test]
     fn the_page_shows_what_its_connection_and_its_history_allow() {
         let held = [summary(None, "2026-11-09T10:00:00Z")];
-        assert_eq!(shown(Phase::Loading, &[]), Shown::Loading);
-        assert_eq!(shown(Phase::Unreachable, &[]), Shown::Unreachable);
-        assert_eq!(shown(Phase::Ready, &[]), Shown::Empty);
-        assert_eq!(shown(Phase::Ready, &held), Shown::Table);
+        assert_eq!(shown(Phase::Loading, false, &[]), Shown::Loading);
+        assert_eq!(shown(Phase::Unreachable, false, &[]), Shown::Unreachable);
+        assert_eq!(shown(Phase::Ready, false, &[]), Shown::Empty);
+        assert_eq!(shown(Phase::Ready, false, &held), Shown::Table);
     }
 
     #[test]
     fn rows_held_from_before_do_not_show_a_table_while_the_connection_is_not_ready() {
         let held = [summary(None, "2026-11-09T10:00:00Z")];
-        assert_eq!(shown(Phase::Loading, &held), Shown::Loading);
-        assert_eq!(shown(Phase::Unreachable, &held), Shown::Unreachable);
+        assert_eq!(shown(Phase::Loading, false, &held), Shown::Loading);
+        assert_eq!(shown(Phase::Unreachable, false, &held), Shown::Unreachable);
+    }
+
+    #[test]
+    fn a_refused_history_read_shows_the_refusal_in_the_place_of_the_table() {
+        let held = [summary(None, "2026-11-09T10:00:00Z")];
+        assert_eq!(shown(Phase::Ready, true, &[]), Shown::Refused);
+        assert_eq!(shown(Phase::Ready, true, &held), Shown::Refused);
+        assert_eq!(shown(Phase::Loading, true, &held), Shown::Loading);
+        assert_eq!(shown(Phase::Unreachable, true, &held), Shown::Unreachable);
     }
 
     #[test]

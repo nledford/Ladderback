@@ -16,6 +16,7 @@ use crate::backend::{
     reconnect_backoff, succeeded,
 };
 use crate::maintenance::{self, Awaited, Beat, Kind, Pace, Watched};
+use crate::repositories::Sentence;
 use crate::session::{
     Answer, Asked, Dismissals, Lease, Resend, Signed, Stand, Told, keep_signed_in_offered,
     signed_out_all_the_same, wait_ms,
@@ -355,19 +356,10 @@ async fn read_as<T: DeserializeOwned>(
     asked: Asked,
     patience: Option<Duration>,
 ) -> Option<T> {
-    let (status, text) = send(patience, asked, |_, signal| {
-        let builder = Request::get(url).abort_signal(signal);
-        let builder = match asked {
-            Asked::OnItsOwn => builder.header(api::BACKGROUND_HEADER, "1"),
-            Asked::ByPerson => builder,
-        };
-        builder.build().ok()
-    })
-    .await?;
-    if status != 200 {
-        return None;
+    match got_as(url, asked, patience).await? {
+        Got::Read(read) => Some(read),
+        Got::Refused(..) => None,
     }
-    serde_json::from_str::<T>(&text).ok()
 }
 
 /// What a GET came back with: the typed answer, or a typed refusal, which
@@ -380,8 +372,20 @@ pub(crate) enum Got<T> {
 /// Reads `url` as typed JSON like `read_as`, but tells a refusal from a daemon
 /// that did not answer: `None` is the daemon not answering, or an answer that
 /// is neither the JSON asked for nor a typed refusal.
-pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
-    let (status, text) = send(None, Asked::ByPerson, |_, _| Request::get(url).build().ok()).await?;
+async fn got_as<T: DeserializeOwned>(
+    url: &str,
+    asked: Asked,
+    patience: Option<Duration>,
+) -> Option<Got<T>> {
+    let (status, text) = send(patience, asked, |_, signal| {
+        let builder = Request::get(url).abort_signal(signal);
+        let builder = match asked {
+            Asked::OnItsOwn => builder.header(api::BACKGROUND_HEADER, "1"),
+            Asked::ByPerson => builder,
+        };
+        builder.build().ok()
+    })
+    .await?;
     if succeeded(status) {
         return serde_json::from_str::<T>(&text).ok().map(Got::Read);
     }
@@ -391,6 +395,12 @@ pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
         refusal.args.into_iter().collect::<Vec<_>>(),
         refusal.detail,
     ))
+}
+
+/// Reads `url` as typed JSON, as a person's request, telling a refusal from a
+/// daemon that did not answer as `got_as` does.
+pub(crate) async fn get<T: DeserializeOwned>(url: &str) -> Option<Got<T>> {
+    got_as(url, Asked::ByPerson, None).await
 }
 
 /// Reads `url` as typed JSON, as the page's own read (a poll), which keeps
@@ -620,8 +630,11 @@ pub(crate) fn forget_session() {
 /// When the stream drops, it waits `backend::reconnect_backoff` and starts
 /// over with the fetch: the history is the source of truth a reconnect
 /// returns to, never a guess at what was missed. Each stream that opens
-/// reads the history once more (`stream`). A fetch that fails at any point
-/// of the loop leaves the page in `Phase::Unreachable`, and the loop keeps
+/// reads the history once more (`stream`). A fetch that gets no answer at
+/// any point of the loop leaves the page in `Phase::Unreachable`; one the
+/// daemon refuses, such as a page's own read after the reader closed Sign in
+/// again (§4.5), leaves it ready with the refusal in `refused`, in the words
+/// `say` gives it, until a read gets the history. Either way the loop keeps
 /// trying with the same backoff, so a daemon that comes back is a page that
 /// heals. All of it, the re-reads too, lasts as long as `visit`: once the
 /// reader has left the page, the loop ends at its next await, and the
@@ -630,6 +643,8 @@ pub(crate) fn watch(
     base: &str,
     state: RwSignal<OperationsState>,
     phase: RwSignal<Phase>,
+    refused: RwSignal<Option<Sentence>>,
+    say: impl Fn(ErrorCode, &[(String, MsgArg)], Option<&str>) -> Sentence + 'static,
     visit: &Visit,
 ) {
     let base = base.to_owned();
@@ -652,11 +667,12 @@ pub(crate) fn watch(
                 let mut asked = Asked::ByPerson;
                 loop {
                     let url = format!("{base}/api/v1/operations");
-                    let read = read_as::<OperationsPageDto>(&url, asked, None).await;
+                    let read = got_as::<OperationsPageDto>(&url, asked, None).await;
                     asked = Asked::OnItsOwn;
                     match read {
-                        Some(page) => {
+                        Some(Got::Read(page)) => {
                             attempt = 0;
+                            refused.set(None);
                             phase.set(Phase::Ready);
                             if first {
                                 first = false;
@@ -669,6 +685,12 @@ pub(crate) fn watch(
                             // The stream ended: a closed socket is a failure like any
                             // other, and the next round waits for it.
                             attempt += 1;
+                            sleep(reconnect_backoff(attempt)).await;
+                        }
+                        Some(Got::Refused(code, args, detail)) => {
+                            attempt += 1;
+                            refused.set(Some(say(code, &args, detail.as_deref())));
+                            phase.set(Phase::Ready);
                             sleep(reconnect_backoff(attempt)).await;
                         }
                         None => {
