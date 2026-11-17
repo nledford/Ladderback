@@ -5,7 +5,8 @@
 //! or rejects it with a reason for each change. Which proposals it lists,
 //! the words of each line, whether Approve is offered and the requests it
 //! sends are `proposals.rs`'s, host-tested; this is the DOM glue, which the
-//! `@ui` scenarios of `features/ui/proposals.feature` run in Chromium.
+//! `@ui` scenarios of `features/ui/proposals.feature`, and the page's in
+//! `features/ui/buttons.feature`, run in Chromium.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,8 +17,10 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 
 use crate::announcer::Politeness;
+use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone, sentence_view, text_field,
+    Button, StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone, sentence_view,
+    text_field,
 };
 use crate::live::reply;
 use crate::plans::Said;
@@ -31,6 +34,7 @@ use crate::restore::Asks;
 use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence, text_with};
 use crate::session::Standing;
 use crate::text;
+use crate::variants::Tone;
 use crate::ws::{self, Got, Phase, Posted};
 
 /// The `id` of the open proposal's heading, which takes focus as it opens
@@ -41,7 +45,7 @@ const REVIEW_HEADING_ID: &str = "proposal-heading";
 const STEP_UP_ID: &str = "proposal-step-up";
 
 /// What the open proposal is waiting for the daemon to do, said beside the
-/// button that asked for it; while it waits, neither button sends again.
+/// button that asked for it, which is busy meanwhile, the other unavailable.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Deciding {
     Approving,
@@ -244,14 +248,12 @@ fn proposals_list(localizer: Arc<Localizer>, list: List, open: Callback<String>)
                     let id = proposal.id;
                     view! {
                         <li>
-                            <button
-                                type="button"
+                            <Button
+                                content=Content::Text(label.into())
                                 id=review_id(&id)
                                 node_ref=button
-                                on:click=move |_| open.run(id.clone())
-                            >
-                                {label}
-                            </button>
+                                on_press=Callback::new(move |()| open.run(id.clone()))
+                            />
                         </li>
                     }
                 }
@@ -484,7 +486,14 @@ fn Review(
                     error=error
                 />
                 <p class="actions">
-                    <button type="submit">{text(&localizer, msg::UI_PROPOSAL_APPROVE)}</button>
+                    <Button
+                        content=Content::Text(text(&localizer, msg::UI_PROPOSAL_APPROVE).into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        kind=Kind::Submit
+                        busy=Signal::derive(move || working.get() == Some(Deciding::Approving))
+                        disabled=Signal::derive(move || working.get() == Some(Deciding::Rejecting))
+                    />
                 </p>
             </form>
             {move || {
@@ -535,7 +544,12 @@ fn Review(
             >
                 {reason_fields}
                 <p class="actions">
-                    <button type="submit">{text(&localizer, msg::UI_PROPOSAL_REJECT)}</button>
+                    <Button
+                        content=Content::Text(text(&localizer, msg::UI_PROPOSAL_REJECT).into())
+                        kind=Kind::Submit
+                        busy=Signal::derive(move || working.get() == Some(Deciding::Rejecting))
+                        disabled=Signal::derive(move || working.get() == Some(Deciding::Approving))
+                    />
                 </p>
             </form>
             {move || {

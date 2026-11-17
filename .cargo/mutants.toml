@@ -83,7 +83,7 @@
 # proposals it lists, the words of each line, whether Approve is offered and
 # the paths and bodies of the requests it sends are `proposals.rs`'s,
 # mutated on the host; the `@ui` scenarios of `features/ui/proposals.feature`
-# run the glue in Chromium.
+# and the page's in `features/ui/buttons.feature` run the glue in Chromium.
 #
 # `crates/web/src/daemon_log_page.rs` is the DOM glue of the Log page (§4.4,
 # #618): it reads the recent log, holds the choice of levels, draws the table

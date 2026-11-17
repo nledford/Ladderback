@@ -111,6 +111,40 @@ Given("the daemon answers the next test of a repository {int} seconds late", fun
   });
 });
 
+// The first approval, or rejection, of a proposal the page asks for is
+// answered late, so the open proposal's buttons can be seen while it waits,
+// and the page's asks are counted.
+const decisionsAsked = new WeakMap<BrowserWorld, { count: number }>();
+
+function answerProposalLate(world: BrowserWorld, decision: "approve" | "reject", seconds: number) {
+  const asked = { count: 0 };
+  decisionsAsked.set(world, asked);
+  world.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname.startsWith("/api/v1/proposals/") && url.pathname.endsWith(`/${decision}`),
+      async (route) => {
+        asked.count += 1;
+        if (asked.count === 1) await new Promise((done) => setTimeout(done, seconds * 1_000));
+        await route.continue();
+      },
+    );
+  });
+}
+
+Given("the daemon answers the next approval of a proposal {int} seconds late", function (this: BrowserWorld, seconds: number) {
+  answerProposalLate(this, "approve", seconds);
+});
+
+Given("the daemon answers the next rejection of a proposal {int} seconds late", function (this: BrowserWorld, seconds: number) {
+  answerProposalLate(this, "reject", seconds);
+});
+
+Then("the page asked to approve the proposal once", function (this: BrowserWorld) {
+  const asked = decisionsAsked.get(this);
+  assert.ok(asked, "the page's approvals were never counted");
+  assert.equal(asked.count, 1, "the page's approvals of the proposal");
+});
+
 // Unavailable for now: it says so and stays in the Tab order.
 Then("the button {string} is unavailable", async function (this: BrowserWorld, name: string) {
   const button = this.page.getByRole("button", { name: namePattern(name) });

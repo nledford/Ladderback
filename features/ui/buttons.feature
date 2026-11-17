@@ -101,3 +101,43 @@ Feature: Buttons on every page
     And I press Enter
     Then the button "Check again" is busy, a spinner a screen reader skips before its label
     And the button "Open Full Disk Access settings" is unavailable
+
+  Scenario: The Pending changes page approves as its main action, and rejects and reviews beside it
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    When I open the address "/proposals"
+    Then every button on the page is drawn from the tokens, none in the browser's own look
+    When I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    Then the button "Approve the proposal" has the look "filled in Ladder Blue"
+    And the button "Reject the proposal" has the look "outlined"
+    And every button on the page is drawn from the tokens, none in the browser's own look
+
+  Scenario: Approving a proposal shows its button busy until the daemon answers, and Reject unavailable meanwhile
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    And the daemon answers the next approval of a proposal 2 seconds late
+    When I open the address "/proposals"
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the textbox "Proposal ID"
+    And I type the proposal's short ID
+    And I press Tab until focus is on the button "Approve the proposal"
+    And I press Enter
+    Then the button "Approve the proposal" is busy, a spinner a screen reader skips before its label
+    And focus is on the button "Approve the proposal"
+    And the button "Reject the proposal" is unavailable
+    When I press Enter
+    Then the polite region comes to contain "is applied, and the configuration file is saved."
+    And the page asked to approve the proposal once
+
+  Scenario: Rejecting a proposal shows its button busy until the daemon answers, and Approve unavailable meanwhile
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    And the daemon answers the next rejection of a proposal 2 seconds late
+    When I open the address "/proposals"
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the button "Reject the proposal"
+    And I press Enter
+    Then the button "Reject the proposal" is busy, a spinner a screen reader skips before its label
+    And focus is on the button "Reject the proposal"
+    And the button "Approve the proposal" is unavailable
+    And the polite region comes to contain "is rejected. The AI agent can read your reasons."
