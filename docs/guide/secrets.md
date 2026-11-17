@@ -18,6 +18,8 @@ The Repositories page saves the password you type into `config.toml`, and the pa
   The service can also start a little after Ladderback at login. A run that starts on its own in those first moments, such as a scheduled run or a catch-up run for one the machine slept through, then finds no keyring. In the first 2 minutes after Ladderback starts, it reads the keyring again every 10 seconds until the service answers, and Ladderback's log says it is waiting. A locked keyring, or an unlock prompt you dismissed, isn't asked again: that run fails at once with the keyring unavailable, as does a run or a test you start yourself. Running that plan again by hand once you are logged in and the keyring is unlocked backs it up.
 
   On macOS, the keychain asks you in a prompt whether Ladderback may read the entry, the first time it does and again after you install a new build, even one you sign yourself ([#892](https://github.com/nledford/Ladderback/issues/892) says why). A run waits up to 60 seconds for the keyring to answer. When nobody answers the prompt in that time, such as for a scheduled run while you are away, the run fails, and its message says the keyring didn't answer in time. Answer the prompt with **Always Allow**, then run the plan again.
+
+  After you install a new build, run `ladderback check-keyring` in a terminal: it reads each keyring entry your configuration names once, so the prompt comes while you are there, and says which entries it could read, never what they hold. `just install-restart` runs it for you before it restarts the service.
 - **A password file** that only you can read. Ladderback reads its first line, and warns when others can read it:
 
   ```sh
