@@ -5,7 +5,8 @@
 
 import assert from "node:assert/strict";
 
-import { Given, Then } from "@cucumber/cucumber";
+import { Given, Then, When } from "@cucumber/cucumber";
+import type { Request } from "playwright";
 import { expect } from "playwright/test";
 
 import { namePattern } from "../support/keyboard.ts";
@@ -113,18 +114,22 @@ Given("the daemon answers the next test of a repository {int} seconds late", fun
 
 // The first approval, or rejection, of a proposal the page asks for is
 // answered late, so the open proposal's buttons can be seen while it waits,
-// and the page's asks are counted.
-const decisionsAsked = new WeakMap<BrowserWorld, { count: number }>();
+// and the page's asks are counted. The late ask is kept, so a step can wait
+// until the page has its answer.
+const decisionsAsked = new WeakMap<BrowserWorld, { count: number; late: Request | null }>();
 
 function answerProposalLate(world: BrowserWorld, decision: "approve" | "reject", seconds: number) {
-  const asked = { count: 0 };
+  const asked: { count: number; late: Request | null } = { count: 0, late: null };
   decisionsAsked.set(world, asked);
   world.contextRoutes.push(async (context) => {
     await context.route(
       (url) => url.pathname.startsWith("/api/v1/proposals/") && url.pathname.endsWith(`/${decision}`),
       async (route) => {
         asked.count += 1;
-        if (asked.count === 1) await new Promise((done) => setTimeout(done, seconds * 1_000));
+        if (asked.count === 1) {
+          asked.late = route.request();
+          await new Promise((done) => setTimeout(done, seconds * 1_000));
+        }
         await route.continue();
       },
     );
@@ -137,6 +142,18 @@ Given("the daemon answers the next approval of a proposal {int} seconds late", f
 
 Given("the daemon answers the next rejection of a proposal {int} seconds late", function (this: BrowserWorld, seconds: number) {
   answerProposalLate(this, "reject", seconds);
+});
+
+// Once the page has the late answer whole. What the page says of it then
+// waits for the polite region's merge window, which the region's steps allow
+// for; the time the daemon takes to decide is not theirs to allow for, and an
+// approval that could delete snapshots reads the repository again first.
+When("the daemon has answered the approval of the proposal", async function (this: BrowserWorld) {
+  const late = decisionsAsked.get(this)?.late;
+  assert.ok(late, "the page never asked for the approval the daemon answers late");
+  const response = await late.response();
+  assert.ok(response, "the approval of the proposal got no answer");
+  await response.finished();
 });
 
 Then("the page asked to approve the proposal once", function (this: BrowserWorld) {
