@@ -10,6 +10,7 @@ mod configuration_refusals;
 mod connecting;
 mod creating;
 mod daemon_start;
+mod download_sweep;
 mod engine_jobs;
 mod hook_output;
 mod keyring_passwords;
