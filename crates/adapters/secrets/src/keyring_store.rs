@@ -89,9 +89,10 @@ pub(crate) fn os_activation() -> KeyringActivation {
 const SECRET_SERVICE: &str = "org.freedesktop.secrets";
 
 /// How long each question to the session bus may take: the bus itself
-/// answers both, from what it holds, so a healthy one answers at once.
+/// answers both, from what it holds, so a healthy one answers at once. Both
+/// together leave time to connect within the whole question's limit.
 #[cfg(target_os = "linux")]
-const BUS_CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+const BUS_CALL_LIMIT: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// How the Secret Service is started, as the bus `connection` reaches says:
 /// on demand when an activation file names it (`ListActivatableNames`),

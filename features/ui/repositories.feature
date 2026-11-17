@@ -527,10 +527,10 @@ Feature: Repositories page
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
 
-  # How the agent finds the keyring is started is scripted: the computer that
-  # runs the scenario has its own keyring, or none
-  # (features/repositories/keyring_activation.feature says when the agent
-  # notes it).
+  # What the agent notes is scripted: the computer that runs the scenario has
+  # its own keyring, or none (features/repositories/keyring_activation.feature
+  # says when the agent notes it, such as only while a repository keeps its
+  # password in the keyring).
   Scenario: A keyring that can't be started on demand is noted, with the ways out
     Given a demo plan "demo-home" with a scratch repository
     And the agent finds the keyring running but not startable on demand

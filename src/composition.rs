@@ -3454,11 +3454,15 @@ impl Repositories for RepositoryService {
         }
     }
 
-    /// Asks the OS keyring the page's question, and only it: never a run.
+    /// Asks the OS keyring the page's question, and only it: never a run. A
+    /// configuration that can't be read notes nothing; the page's list says
+    /// why it can't be read.
     async fn notes(&self) -> api::RepositoryNotesDto {
-        api::RepositoryNotesDto {
-            notes: app::repositories::page_notes(&*self.keyring).await,
-        }
+        let notes = match self.config.load().await {
+            Ok(config) => app::repositories::page_notes(&*self.keyring, &config).await,
+            Err(_) => Vec::new(),
+        };
+        api::RepositoryNotesDto { notes }
     }
 }
 

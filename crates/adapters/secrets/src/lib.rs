@@ -327,8 +327,9 @@ impl Keyring for SystemSecrets {
         match tokio::time::timeout(ACTIVATION_LIMIT, asking).await {
             Ok(Ok(said)) => said,
             // The question panicked or the runtime is ending, or the answer
-            // is late: the blocked call is left to end on its own, as the
-            // bus's own limit ends it.
+            // is late: the blocked call is left to end on its own, a call
+            // within its own limit, connecting to the bus within libdbus's
+            // default of 25 s.
             Ok(Err(_)) | Err(_) => KeyringActivation::Unknown,
         }
     }

@@ -1361,7 +1361,13 @@ fn keyring_unanswered(agent: &mut super::Agent) {
 #[when("the Repositories page asks for its notes")]
 async fn page_asks_for_notes(agent: &mut super::Agent) {
     let secrets = Arc::clone(&agent.repositories.secrets);
-    agent.repositories.notes = Some(page_notes(&*secrets).await);
+    let config = agent
+        .repositories
+        .store
+        .load()
+        .await
+        .expect("the configuration loads");
+    agent.repositories.notes = Some(page_notes(&*secrets, &config).await);
 }
 
 fn notes(agent: &super::Agent) -> &[WarningDto] {

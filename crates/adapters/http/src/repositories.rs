@@ -61,9 +61,9 @@ pub trait Repositories: Send + Sync {
     ) -> Result<(), RepositoriesError>;
 
     /// What the page notes above its list, of the machine rather than of one
-    /// repository: whether the keyring can be started on demand (#923). It
-    /// asks the platform within a short limit, and has no refusal: an answer
-    /// it can't get notes nothing.
+    /// repository: whether the keyring a repository keeps its password in
+    /// can be started on demand (#923). It asks the platform within a short
+    /// limit, and has no refusal: an answer it can't get notes nothing.
     async fn notes(&self) -> api::RepositoryNotesDto;
 }
 
