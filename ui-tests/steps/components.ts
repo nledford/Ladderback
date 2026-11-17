@@ -2305,6 +2305,32 @@ const SNAPSHOTS: Record<string, string> = {
   - tab "Third demo tab"
 - tabpanel "First demo tab":
   - paragraph: The first demo panel.`,
+  "Vertical tabs": `- heading "Vertical tabs" [level=2]
+- tablist "Demo plan":
+  - tab "Demo sources" [selected]
+  - tab "Demo times"
+  - tab "Demo hooks"
+- tabpanel "Demo sources":
+  - paragraph: The demo plan backs up two demo folders.
+- tablist "Demo plan, right to left":
+  - tab "First vertical tab" [selected]
+  - tab "Second vertical tab"
+  - tab "Third vertical tab"
+- tabpanel "First vertical tab":
+  - paragraph: The first vertical panel.`,
+  "Responsive tabs": `- heading "Responsive tabs" [level=2]
+- tablist "Demo settings":
+  - tab "Demo general" [selected]
+  - tab "Demo address"
+  - tab "Demo about"
+- tabpanel "Demo general":
+  - paragraph: The demo settings shown here change nothing.
+- tablist "Demo settings in a narrow column, right to left":
+  - tab "First column tab" [selected]
+  - tab "Second column tab"
+  - tab "Third column tab"
+- tabpanel "First column tab":
+  - paragraph: The first column panel.`,
   "Shared vocabulary": `- heading "Shared vocabulary" [level=2]
 - heading "Tones" [level=3]
 - list "Tones":

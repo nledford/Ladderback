@@ -124,9 +124,13 @@ pub fn Tabs(
                 .flatten()
                 .and_then(|style| style.get_property_value("direction").ok())
                 .unwrap_or_default();
-            let Some(to) =
-                rules::arrival(index, last, &event.key(), Direction::of_computed(&running))
-            else {
+            let Some(to) = rules::arrival(
+                index,
+                last,
+                &event.key(),
+                Direction::of_computed(&running),
+                rules::Layout::Horizontal,
+            ) else {
                 return;
             };
             event.prevent_default();
