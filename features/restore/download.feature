@@ -251,3 +251,26 @@ Feature: Downloading files from a snapshot
     Then the browser saves "demo-1.txt" holding what the plan backed up as "demo-1.txt"
     And the dialog "Download demo-1.txt" is closed
     And the page has no accessibility violations
+
+  @ui
+  Scenario: A download the daemon refuses is said in an error alert of the dialog's own, which stays open
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    When I open the newest snapshot of the plan "home"
+    And I skip to the content
+    And I press Tab until focus is on a tree item
+    And I press ArrowRight until focus is on the tree item "demo-1.txt"
+    And I press Tab until focus is on the button "Download demo-1.txt"
+    And I press Enter
+    And I press Tab until focus is on the textbox "Snapshot ID"
+    And I type the newest snapshot's short ID of the plan "home"
+    And the repository is moved away
+    And I press Tab until focus is on the button "Download"
+    And I press Enter
+    Then the dialog "Download demo-1.txt" alerts "No repository was found at this location"
+    And the page shows an error alert containing "No repository was found at this location"
+    And the dialog "Download demo-1.txt" stays open
+    And the page has no accessibility violations
+    When I press Escape
+    Then focus is on the button "Download demo-1.txt"
+    And the assertive region stays empty
