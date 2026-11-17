@@ -929,7 +929,10 @@ async fn a_start_given_up_on_before_the_gate_came_free_is_never_made() {
     .await;
     let _ = release.send(());
     stalled.join().unwrap();
-    assert!(matches!(started, Ok(None)), "{started:?}");
+    assert!(
+        matches!(started, Ok(None)),
+        "the start given up on was made or refused"
+    );
     // The start the call gave up on has the gate moments after it is free.
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(
@@ -944,15 +947,10 @@ async fn a_start_given_up_on_before_the_gate_came_free_is_never_made() {
     );
 }
 
-/// A start handed over after the call gave up on it is killed with its
-/// group: by then the hook may have started something, which `kill_on_drop`,
-/// reaching the hook alone, would leave running.
-#[tokio::test]
-async fn a_start_handed_over_too_late_is_killed_with_what_it_started() {
-    let scratch = TempDir::new().unwrap();
-    let log = scratch.path().join("log");
-    // The loop of `TICKER` runs for as long as the log is there.
-    fs::write(&log, "").unwrap();
+/// A hook started through the gate, as every start of this binary is, that
+/// has started `TICKER`'s loop, which runs for as long as `log` is there.
+async fn a_hook_that_started_a_ticker(log: &Path) -> tokio::process::Child {
+    fs::write(log, "").unwrap();
     let mut command = tokio::process::Command::new("sh");
     command
         .args([
@@ -966,15 +964,41 @@ async fn a_start_handed_over_too_late_is_killed_with_what_it_started() {
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .process_group(0);
-    // Through the gate, as every start of this binary.
     let child = spawn_gate::hold_blocking(move || command.spawn())
         .await
         .unwrap()
         .unwrap();
-    logged(&log, "ready").await;
+    logged(log, "ready").await;
+    child
+}
+
+/// A start handed over after the call gave up on it is killed with its
+/// group: by then the hook may have started something, which `kill_on_drop`,
+/// reaching the hook alone, would leave running.
+#[tokio::test]
+async fn a_start_handed_over_too_late_is_killed_with_what_it_started() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let child = a_hook_that_started_a_ticker(&log).await;
     let (to, given_up) = tokio::sync::oneshot::channel();
     drop(given_up);
     hand_over(Ok(child), to, &Stop::REAL);
+    assert!(
+        ticks_stop(&log).await,
+        "what the hook started is still running"
+    );
+}
+
+/// A start handed over in time to a call that is dropped before it takes
+/// it, as the call's own future is dropped, is killed with its group too.
+#[tokio::test]
+async fn a_start_handed_over_to_a_call_dropped_before_it_took_it_is_killed_with_what_it_started() {
+    let scratch = TempDir::new().unwrap();
+    let log = scratch.path().join("log");
+    let child = a_hook_that_started_a_ticker(&log).await;
+    let (to, taken) = tokio::sync::oneshot::channel();
+    hand_over(Ok(child), to, &Stop::REAL);
+    drop(taken);
     assert!(
         ticks_stop(&log).await,
         "what the hook started is still running"
