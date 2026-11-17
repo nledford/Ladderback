@@ -162,7 +162,7 @@ export function reinstallWarning(env: Env, os: NodeJS.Platform): string | undefi
     );
   }
   return (
-    `the program is signed with "${identity}", so macOS keeps the Full Disk Access, Photos and keychain grants it gave the last build signed with it (#281).`
+    `the program is signed with "${identity}", so macOS keeps the Full Disk Access and Photos grants it gave the last build signed with it (#281); the keychain still asks once for this build before it lets it read a keyring item (#892).`
   );
 }
 
