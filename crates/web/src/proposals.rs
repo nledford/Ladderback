@@ -255,24 +255,27 @@ pub(crate) fn rejected_before(review: &ProposalReviewDto) -> Said {
     )
 }
 
-/// Whether the page offers Approve for `review`: not for a proposal that
-/// could delete snapshots, which only the forget preview lets a person
-/// approve (decision 89, point 8); until then it is only rejected, and the
-/// page says why.
-pub(crate) fn can_approve(review: &ProposalReviewDto) -> bool {
-    !review.needs_forget_preview
+/// Whether the page offers Approve for `review`, with the digest of the
+/// forget preview it shows, when it shows one: a proposal that could delete
+/// snapshots is approved only from a forget preview that read every
+/// repository it touches (decision 89, point 8); until then it is only
+/// rejected, and the page says why.
+pub(crate) fn can_approve(review: &ProposalReviewDto, forget_digest: Option<&str>) -> bool {
+    !review.needs_forget_preview || forget_digest.is_some()
 }
 
-/// The request Approve sends: what the page showed, the file's revision
-/// and the diff's hash, with the step-up `confirmation`. `None` when the
-/// page doesn't offer Approve.
+/// The request Approve sends: what the page showed, the file's revision,
+/// the diff's hash and the forget preview's digest, with the step-up
+/// `confirmation`. `None` when the page doesn't offer Approve.
 pub(crate) fn approval(
     review: &ProposalReviewDto,
+    forget_digest: Option<&str>,
     confirmation: String,
 ) -> Option<ApproveProposalDto> {
-    can_approve(review).then(|| ApproveProposalDto {
+    can_approve(review, forget_digest).then(|| ApproveProposalDto {
         revision: review.revision.clone(),
         diff_hash: review.diff_hash.clone(),
+        forget_digest: forget_digest.map(str::to_owned),
         confirmation,
     })
 }

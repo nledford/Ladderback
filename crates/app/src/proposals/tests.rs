@@ -336,9 +336,32 @@ async fn as_shown(world: &World, id: &ProposalId) -> ApprovalAsk {
     let review = world.proposals.review(id).await.unwrap();
     ApprovalAsk {
         shown: review.shown,
+        forget: None,
         confirmation: typed(short_proposal_id(id)),
         address: HOME,
     }
+}
+
+/// The operation the approvals of these tests read a forget preview under.
+const OP: OperationId = OperationId::from_uuid(domain::Uuid::from_u128(0x0f0f));
+
+/// The maintenance use case an approval reads a forget preview through:
+/// over the simulated engine, which these tests' proposals that need one
+/// never reach.
+fn unread() -> RunMaintenance {
+    let clock: Arc<dyn Clock> = Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH));
+    RunMaintenance::new(
+        Arc::new(crate::fakes::SimulatedEngine::new(Arc::clone(&clock))),
+        clock,
+        Arc::new(crate::fakes::InMemoryOperationStore::new()),
+        crate::secrets::ResolveRepository::new(Arc::new(crate::fakes::FakeSecrets::default())),
+        Arc::new(crate::fakes::FakeRetention),
+        Arc::new(InMemoryConfigStore::new()),
+        Arc::default(),
+        domain::AgentId::from_uuid(domain::Uuid::from_u128(1)),
+        "demo-host".to_owned(),
+        Arc::new(crate::fakes::FakeSources),
+    )
 }
 
 #[tokio::test]
@@ -398,7 +421,9 @@ async fn an_approval_of_what_a_page_showed_before_a_restart_changes_nothing() {
         .unwrap();
     let ask = as_shown(&world, &made.id).await;
     assert_eq!(
-        restarted(&world, Ok(key(4))).approve(&made.id, ask).await,
+        restarted(&world, Ok(key(4)))
+            .approve(&made.id, ask, OP, &unread())
+            .await,
         Err(ProposalError::Changed)
     );
     assert_eq!(
@@ -422,7 +447,10 @@ async fn with_no_key_to_show_a_revision_under_a_review_or_an_approval_is_refused
         Err(ProposalError::Random(unavailable.clone()))
     );
     assert_eq!(
-        keyless.approve(&made.id, ask).await.map(drop),
+        keyless
+            .approve(&made.id, ask, OP, &unread())
+            .await
+            .map(drop),
         Err(ProposalError::Random(unavailable))
     );
     assert_eq!(
@@ -443,7 +471,11 @@ async fn an_approval_applies_the_proposal_tells_the_scheduler_and_announces_each
     let Applied {
         proposal: applied,
         unrecorded,
-    } = world.proposals.approve(&made.id, ask).await.unwrap();
+    } = world
+        .proposals
+        .approve(&made.id, ask, OP, &unread())
+        .await
+        .unwrap();
     assert_eq!(unrecorded, None);
     assert_eq!(applied.status, ProposalStatus::Applied);
     let kept_as = applied.applied_as.clone().unwrap();
@@ -545,7 +577,10 @@ async fn an_apply_the_store_can_t_record_is_answered_applied_with_why() {
         Arc::new(UnrecordedApplies(world.store.clone())),
         Ok(key(3)),
     );
-    let applied = unrecorded.approve(&made.id, ask).await.unwrap();
+    let applied = unrecorded
+        .approve(&made.id, ask, OP, &unread())
+        .await
+        .unwrap();
     assert_eq!(applied.proposal.status, ProposalStatus::Applied);
     assert_eq!(
         applied.unrecorded,
@@ -615,7 +650,7 @@ async fn an_approval_not_confirmed_changes_nothing() {
     let mut ask = as_shown(&world, &made.id).await;
     ask.confirmation = typed("aaaaaa");
     assert_eq!(
-        world.proposals.approve(&made.id, ask).await,
+        world.proposals.approve(&made.id, ask, OP, &unread()).await,
         Err(ProposalError::StepUpFailed)
     );
     assert_eq!(
@@ -641,7 +676,7 @@ async fn with_sign_in_on_an_approval_is_confirmed_by_the_admin_password_not_the_
         .unwrap();
     assert_eq!(
         proposals
-            .approve(&made.id, as_shown(&world, &made.id).await)
+            .approve(&made.id, as_shown(&world, &made.id).await, OP, &unread())
             .await,
         Err(ProposalError::StepUpFailed)
     );
@@ -650,7 +685,7 @@ async fn with_sign_in_on_an_approval_is_confirmed_by_the_admin_password_not_the_
     world.clock.advance(SignedDuration::from_mins(1));
     let mut ask = as_shown(&world, &made.id).await;
     ask.confirmation = typed("demo-admin-pass");
-    let applied = proposals.approve(&made.id, ask).await;
+    let applied = proposals.approve(&made.id, ask, OP, &unread()).await;
     assert_eq!(
         applied.map(|applied| applied.proposal.status),
         Ok(ProposalStatus::Applied)
@@ -666,7 +701,7 @@ async fn an_approval_of_another_diff_than_the_one_a_rebuild_gives_changes_nothin
     let mut ask = as_shown(&world, &made.id).await;
     ask.shown.diff = DiffHash::of("+[plans.elsewhere]\n");
     assert_eq!(
-        world.proposals.approve(&made.id, ask).await,
+        world.proposals.approve(&made.id, ask, OP, &unread()).await,
         Err(ProposalError::Changed)
     );
     assert_eq!(
@@ -686,7 +721,7 @@ async fn an_approval_of_a_proposal_that_could_delete_snapshots_changes_nothing()
     assert!(review.needs_forget_preview);
     let ask = as_shown(&world, &made.id).await;
     assert_eq!(
-        world.proposals.approve(&made.id, ask).await,
+        world.proposals.approve(&made.id, ask, OP, &unread()).await,
         Err(ProposalError::NeedsForgetPreview)
     );
     assert_eq!(
@@ -704,6 +739,24 @@ async fn an_approval_of_a_proposal_that_could_delete_snapshots_changes_nothing()
             .await
             .unwrap()
             .needs_forget_preview
+    );
+}
+
+#[tokio::test]
+async fn a_diff_not_shown_is_refused_as_changed_before_the_forget_preview_is_asked_for() {
+    let world = world().await;
+    let mut kept = plan("home");
+    kept.retention.keep_daily = Some(domain::planning::KeepCount::new(7).unwrap());
+    let made = propose(&world, ConfigChange::AddPlan(kept)).await.unwrap();
+    let mut ask = as_shown(&world, &made.id).await;
+    ask.shown.diff = DiffHash::of("+[plans.elsewhere]\n");
+    assert_eq!(
+        world.proposals.approve(&made.id, ask, OP, &unread()).await,
+        Err(ProposalError::Changed)
+    );
+    assert_eq!(
+        world.store.get(&made.id).await.unwrap().unwrap().status,
+        ProposalStatus::Pending
     );
 }
 
@@ -744,7 +797,7 @@ async fn a_hand_edit_during_the_apply_is_kept_and_the_proposal_is_pending_again(
     let ask = as_shown(&world, &made.id).await;
     world.config.edit_comment_before_next_save("edited by hand");
     assert_eq!(
-        world.proposals.approve(&made.id, ask).await,
+        world.proposals.approve(&made.id, ask, OP, &unread()).await,
         Err(ProposalError::Changed)
     );
     assert_eq!(world.config.current_comment(), "edited by hand");
@@ -766,7 +819,7 @@ async fn only_a_pending_proposal_is_approved_or_rejected() {
         .await
         .unwrap();
     assert_eq!(
-        world.proposals.approve(&made.id, ask).await,
+        world.proposals.approve(&made.id, ask, OP, &unread()).await,
         Err(ProposalError::NotPending(ProposalStatus::Withdrawn))
     );
     assert_eq!(

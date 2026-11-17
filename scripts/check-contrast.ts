@@ -3,6 +3,8 @@
 // from crates/web/style.css and fails any named pair below WCAG 2.2 AA:
 // 4.5:1 for text, 3:1 for UI parts like the focus ring. style.css stays the
 // source of truth; Tailwind maps the same tokens, so it needs no second table.
+// It also fails two status fills that must be told apart and sit too close
+// in lightness (FILLS_APART).
 //
 // Usage: node scripts/check-contrast.ts crates/web/style.css
 // Exit status: 0 when every pair passes, 1 otherwise.
@@ -10,11 +12,13 @@
 import { readFile } from "node:fs/promises";
 
 // The pairs the UI relies on, each with its WCAG threshold. Badge variants
-// pair each badge's text token with its background token. The tones of the
-// shared vocabulary (variants.rs) draw text and strokes on the page and on
-// a surface, so each tone's token is paired with both: Primary is the link
-// pairs, Secondary the muted text, Inherit the text around it. A tooltip is
-// the page's colors swapped: the page's background on its text color.
+// pair each badge's text token with its background token, and each status
+// tone's pair (variants.rs, `StatusTone`) its words' token with its fill's.
+// The tones of the shared vocabulary (variants.rs) draw text and strokes on
+// the page and on a surface, so each tone's token is paired with both:
+// Primary is the link pairs, Secondary the muted text, Inherit the text
+// around it. A tooltip is the page's colors swapped: the page's background
+// on its text color.
 // A link (§4.5) is always underlined, so it has no 3:1 pair against the text
 // around it: its color never tells it apart alone.
 const PAIRS = [
@@ -23,12 +27,13 @@ const PAIRS = [
   { name: "focus ring on surface", fg: "--focus", bg: "--surface", min: 3 },
   { name: "loading badge", fg: "--badge-loading-fg", bg: "--badge-loading-bg", min: 4.5 },
   { name: "empty badge", fg: "--badge-empty-fg", bg: "--badge-empty-bg", min: 4.5 },
-  { name: "error badge", fg: "--badge-error-fg", bg: "--badge-error-bg", min: 4.5 },
-  { name: "success badge", fg: "--badge-success-fg", bg: "--badge-success-bg", min: 4.5 },
+  { name: "success words on their fill", fg: "--success-fg", bg: "--success-bg", min: 4.5 },
+  { name: "warning words on their fill", fg: "--warning-fg", bg: "--warning-bg", min: 4.5 },
+  { name: "error words on their fill", fg: "--error-fg", bg: "--error-bg", min: 4.5 },
   { name: "link on surface", fg: "--accent", bg: "--surface", min: 4.5 },
   { name: "text on page", fg: "--fg", bg: "--bg", min: 4.5 },
   { name: "link on page", fg: "--accent", bg: "--bg", min: 4.5 },
-  { name: "form error on page", fg: "--badge-error-fg", bg: "--bg", min: 4.5 },
+  { name: "form error on page", fg: "--error-fg", bg: "--bg", min: 4.5 },
   { name: "table rule on page", fg: "--muted", bg: "--bg", min: 3 },
   { name: "secondary tone on page", fg: "--muted", bg: "--bg", min: 4.5 },
   { name: "success tone on page", fg: "--success", bg: "--bg", min: 4.5 },
@@ -55,6 +60,16 @@ const PAIRS = [
   { name: "selected tab's bar on page", fg: "--accent", bg: "--bg", min: 3 },
   { name: "selected tab's bar on surface", fg: "--accent", bg: "--surface", min: 3 },
 ];
+
+// Status fills that must be told apart, and how far apart in lightness, on
+// OKLab's scale from black (0) to white (1) (decision 108). Warning and
+// Error are neighboring hues, amber and red, which a reader who can't tell
+// red from green (protanopia, deuteranopia) sees as one hue, and a dark
+// fill holds too little color for its hue to tell; lightness survives both.
+// A tenth of the scale keeps them apart: dark ones 0.07 apart, a 1.24:1
+// luminance ratio, read as one. The words and the icon still say which is
+// which (1.4.1); this keeps two fills from looking alike beside each other.
+const FILLS_APART = [{ name: "warning and error fills", a: "--warning-bg", b: "--error-bg", min: 0.1 }];
 
 // A button (components §4.5) in each tone but Inherit, whose colors are the
 // text's own: a Filled button's label (`--on-fill`) on its fill and on the
@@ -119,12 +134,26 @@ function parseHex(color: string): Rgb {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function luminance(rgb: Rgb): number {
-  const [lr, lg, lb] = rgb.map((c) => {
+/** The color's channels in linear light, as WCAG's luminance takes them. */
+function linear(rgb: Rgb): Rgb {
+  return rgb.map((c) => {
     const srgb = c / 255;
     return srgb <= 0.03928 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
   }) as Rgb;
+}
+
+function luminance(rgb: Rgb): number {
+  const [lr, lg, lb] = linear(rgb);
   return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+}
+
+/** OKLab's perceived lightness (Björn Ottosson, 2020): 0 is black, 1 white. */
+function lightness(rgb: Rgb): number {
+  const [r, g, b] = linear(rgb);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
 }
 
 function contrastRatio(fg: string, bg: string): number {
@@ -154,9 +183,26 @@ for (const scheme of SCHEMES) {
       `${ok ? "pass" : "FAIL"} ${where}: ${ratio.toFixed(2)}:1 (needs ${pair.min}:1) — ${fg} on ${bg}`,
     );
   }
+  for (const fills of FILLS_APART) {
+    const where = `${scheme.name}: ${fills.name}`;
+    const a = tokens[fills.a];
+    const b = tokens[fills.b];
+    if (a === undefined || b === undefined) {
+      failed += 1;
+      const missing = [fills.a, fills.b].filter((t) => !(t in tokens));
+      console.error(`FAIL ${where}: ${missing.join(", ")} not defined in style.css`);
+      continue;
+    }
+    const apart = Math.abs(lightness(parseHex(a)) - lightness(parseHex(b)));
+    const ok = apart >= fills.min;
+    if (!ok) failed += 1;
+    console.log(
+      `${ok ? "pass" : "FAIL"} ${where}: ${apart.toFixed(3)} apart in lightness (needs ${fills.min}) — ${a} and ${b}`,
+    );
+  }
 }
 
 if (failed > 0) {
-  console.error(`${failed} pair(s) below WCAG 2.2 AA, or tokens missing.`);
+  console.error(`${failed} pair(s) below WCAG 2.2 AA or their minimum, or tokens missing.`);
   process.exit(1);
 }

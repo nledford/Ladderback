@@ -219,9 +219,15 @@ impl ForgetSelection {
     }
 }
 
-/// Newest first.
+/// Newest first; snapshots taken at the same time in ID order, so a
+/// repository that lists them in another order sorts them the same.
 fn sort_newest_first(snapshots: &mut [Snapshot]) {
-    snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.time));
+    snapshots.sort_by(|one, other| {
+        other
+            .time
+            .cmp(&one.time)
+            .then_with(|| one.id.cmp(&other.id))
+    });
 }
 
 /// Tagged snapshots by the texts their agent and plan tags agree on, ordered
@@ -803,6 +809,28 @@ mod tests {
         );
         assert!(partition.orphaned.is_empty());
         assert!(partition.unmanaged.is_empty());
+    }
+
+    #[test]
+    fn snapshots_taken_at_the_same_time_are_ordered_by_id_however_they_were_listed() {
+        let same_time = |number| Snapshot {
+            time: at(0),
+            ..tagged("home", &agent(), number)
+        };
+        for listed in [
+            vec![same_time(2), same_time(1)],
+            vec![same_time(1), same_time(2)],
+        ] {
+            let partition =
+                ForgetSelection::partition(&listed, &agent(), &plans(&[("home", home_policy())]));
+            assert_eq!(
+                ids(&partition.managed[0]),
+                [
+                    "0000000000000000000000000000000000000000000000000000000000000001",
+                    "0000000000000000000000000000000000000000000000000000000000000002"
+                ],
+            );
+        }
     }
 
     #[test]

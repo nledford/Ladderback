@@ -84,3 +84,99 @@ Feature: The forget preview of a proposal
     And a person previews what the proposal would forget
     Then the forget preview is refused because the proposal is withdrawn
     And the engine was never asked to list the repository
+
+  # Approving with the forget preview (decision 89, point 8). A proposal
+  # that could delete snapshots is approved only with the forget preview the
+  # person saw. The approval brings that preview's digest, which binds the
+  # snapshots whose fate the proposal changes, as the difference shows them;
+  # the daemon reads the preview again under the lock its apply holds, and
+  # applies the proposal only if the two match, so nothing can change
+  # between the check and the write.
+
+  Scenario: A proposal that could delete snapshots is approved as its forget preview showed it
+    Given a plan "home" keeping the last 3 snapshots
+    And the repository holds 4 snapshots of the plan "home"
+    And an AI agent has proposed keeping the last 1 snapshot of the plan "home"
+    And a person has opened the proposal
+    When a person previews what the proposal would forget
+    And the person approves the proposal as its forget preview showed it
+    Then the proposal is applied
+    And the plan "home" keeps the last 1 snapshot
+    And the engine was never asked to remove anything
+
+  Scenario: An approval is refused when a backup added a snapshot since the forget preview
+    Given a plan "home" keeping the last 3 snapshots
+    And the repository holds 4 snapshots of the plan "home"
+    And an AI agent has proposed keeping the last 1 snapshot of the plan "home"
+    And a person has opened the proposal
+    When a person previews what the proposal would forget
+    And a backup of the plan "home" has since added 1 snapshot
+    And the person approves the proposal as its forget preview showed it
+    Then the approval is refused because what the proposal would forget has changed since the preview
+    And the proposal is pending
+    And the plan "home" keeps the last 3 snapshots
+
+  Scenario: A backup of another plan in the same repository since the forget preview leaves the approval standing
+    Given a plan "home" keeping the last 3 snapshots
+    And a plan "photos" keeping the last 1 snapshot
+    And the repository holds 4 snapshots of the plan "home"
+    And the repository holds 2 snapshots of the plan "photos"
+    And an AI agent has proposed keeping the last 1 snapshot of the plan "home"
+    And a person has opened the proposal
+    When a person previews what the proposal would forget
+    And a backup of the plan "photos" has since added 1 snapshot
+    And the person approves the proposal as its forget preview showed it
+    Then the proposal is applied
+    And the plan "home" keeps the last 1 snapshot
+    And the engine was never asked to remove anything
+
+  Scenario: An approval is refused when the repository holds other snapshots than the forget preview showed
+    Given a plan "home" keeping the last 3 snapshots
+    And the repository holds 4 snapshots of the plan "home"
+    And an AI agent has proposed keeping the last 1 snapshot of the plan "home"
+    And a person has opened the proposal
+    When a person previews what the proposal would forget
+    And the repository has since been replaced by one holding 4 other snapshots of the plan "home"
+    And the person approves the proposal as its forget preview showed it
+    Then the approval is refused because what the proposal would forget has changed since the preview
+    And the proposal is pending
+    And the plan "home" keeps the last 3 snapshots
+
+  Scenario: An approval that brings another proposal's forget preview is refused
+    Given a plan "home" keeping the last 3 snapshots
+    And the repository holds 4 snapshots of the plan "home"
+    And an AI agent has proposed keeping the last 1 snapshot of the plan "home"
+    And a person has opened the proposal
+    When a person previews what the proposal would forget
+    And the person approves the proposal with the forget preview of another proposal that would forget the same
+    Then the approval is refused because what the proposal would forget has changed since the preview
+    And the proposal is pending
+
+  Scenario: An approval is refused when a repository it touches can no longer be read
+    Given a plan "home" keeping the last 3 snapshots
+    And a second repository "usb" whose password is in the environment variable "DEMO_USB_PASSWORD"
+    And the repository holds 4 snapshots of the plan "home"
+    And an AI agent has proposed moving the plan "home" to the repository "usb"
+    And a person has opened the proposal
+    When a person previews what the proposal would forget
+    And the environment variable "DEMO_USB_PASSWORD" has since been unset
+    And the person approves the proposal as its forget preview showed it
+    Then the approval is refused because what the proposal would forget has changed since the preview
+    And the proposal is pending
+    And the plan "home" backs up to the repository "demo"
+    When a person previews what the proposal would forget
+    Then the preview says the repository "usb" couldn't be read, so it offers no approval
+
+  Scenario: A plan moved to another repository is approved as its forget preview showed it
+    Given a plan "home" keeping the last 3 snapshots
+    And a second repository "usb"
+    And the repository holds 4 snapshots of the plan "home"
+    And an AI agent has proposed moving the plan "home" to the repository "usb"
+    And a person has opened the proposal
+    When a person previews what the proposal would forget
+    Then the preview covers the repositories "demo" and "usb"
+    And the forget preview of the 2 repositories offers an approval
+    When the person approves the proposal as its forget preview showed it
+    Then the proposal is applied
+    And the plan "home" backs up to the repository "usb"
+    And the engine was never asked to remove anything

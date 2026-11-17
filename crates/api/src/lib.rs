@@ -255,6 +255,11 @@ pub enum ErrorCode {
     /// approved only with the forget preview (decision 89, point 8): it
     /// was not applied, and it stays pending for a person to reject.
     ProposalNeedsForgetPreview,
+    /// What the proposal would forget, read again as it was approved, is
+    /// not what the forget preview the person saw showed, or a repository
+    /// it touches couldn't be read: nothing was applied, and the proposal
+    /// stays pending for a new preview (decision 89, point 8).
+    ProposalForgetPreviewChanged,
     /// The proposer made as many proposals in the last hour as it may.
     /// The argument `seconds` is how long until it may propose again.
     ProposalRate,
@@ -1404,6 +1409,7 @@ impl ErrorCode {
             | Self::ProposalsUnavailable
             | Self::ProposalChanged
             | Self::ProposalNeedsForgetPreview
+            | Self::ProposalForgetPreviewChanged
             | Self::CurrentPasswordWrong
             | Self::AdminPasswordUnavailable
             | Self::SessionsUnavailable
@@ -2461,6 +2467,7 @@ mod tests {
             ErrorCode::ProposalsUnavailable,
             ErrorCode::ProposalChanged,
             ErrorCode::ProposalNeedsForgetPreview,
+            ErrorCode::ProposalForgetPreviewChanged,
             ErrorCode::CurrentPasswordWrong,
             ErrorCode::AdminPasswordUnavailable,
             ErrorCode::SessionsUnavailable,
@@ -2913,11 +2920,22 @@ mod tests {
         let approval = ApproveProposalDto {
             revision: "demo-revision".to_owned(),
             diff_hash: "demo-diff".to_owned(),
+            forget_digest: Some("demo-forget".to_owned()),
             confirmation: "canary-admin-password".to_owned(),
         };
         assert_eq!(
             format!("{approval:?}"),
-            r#"ApproveProposalDto { revision: "demo-revision", diff_hash: "demo-diff", confirmation: "[hidden]" }"#
+            r#"ApproveProposalDto { revision: "demo-revision", diff_hash: "demo-diff", forget_digest: Some("demo-forget"), confirmation: "[hidden]" }"#
+        );
+        // A page that showed no forget preview sends none.
+        let unpreviewed: ApproveProposalDto = serde_json::from_str(
+            r#"{"revision": "demo-revision", "diff-hash": "demo-diff", "confirmation": "x"}"#,
+        )
+        .unwrap();
+        assert_eq!(unpreviewed.forget_digest, None);
+        assert_eq!(
+            serde_json::to_value(&approval).unwrap()["forget-digest"],
+            "demo-forget"
         );
     }
 
@@ -4231,6 +4249,11 @@ pub struct ProposalReviewDto {
 #[serde(rename_all = "kebab-case")]
 pub struct ProposalForgetPreviewDto {
     pub repositories: Vec<RepositoryForgetDto>,
+    /// What an approval of the proposal brings to say this preview is the
+    /// one the person saw; none while a repository couldn't be read, so
+    /// the page offers no approval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
 }
 
 /// What a proposal would change about what retention forgets in one
@@ -4289,6 +4312,11 @@ pub enum ForgetSideDto {
 pub struct ApproveProposalDto {
     pub revision: String,
     pub diff_hash: String,
+    /// The digest of the forget preview the page showed, from
+    /// [`ProposalForgetPreviewDto`]; a proposal that could delete
+    /// snapshots is approved only with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forget_digest: Option<String>,
     pub confirmation: String,
 }
 
@@ -4297,6 +4325,7 @@ impl std::fmt::Debug for ApproveProposalDto {
         f.debug_struct("ApproveProposalDto")
             .field("revision", &self.revision)
             .field("diff_hash", &self.diff_hash)
+            .field("forget_digest", &self.forget_digest)
             .field("confirmation", &"[hidden]")
             .finish()
     }
