@@ -237,6 +237,9 @@ Feature: Plans page
     And the dialog "Delete the plan demo-home?" stays open
     And the page has no accessibility violations
     And the table "Plans" has a row "demo-home" that shows "demo"
+    When I press Escape
+    Then focus is on the button "Delete demo-home"
+    And the assertive region stays empty
 
   Scenario Outline: The Plans page and its form are in the language of the page
     Given a demo plan "demo-home" with a scratch repository
