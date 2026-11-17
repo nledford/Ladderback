@@ -465,4 +465,14 @@ mod tests {
             })
         ));
     }
+
+    /// Unless a test says how the keyring service is started, it is started
+    /// on demand, and a machine with no keyring service has none to start.
+    #[tokio::test]
+    async fn a_keyring_service_is_started_on_demand_unless_there_is_none() {
+        let secrets = FakeSecrets::new();
+        assert_eq!(secrets.activation().await, KeyringActivation::OnDemand);
+        secrets.remove_keyring_service();
+        assert_eq!(secrets.activation().await, KeyringActivation::Absent);
+    }
 }
