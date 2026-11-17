@@ -24,8 +24,9 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 
 use domain::maintenance::{
-    AdoptSelection, AdoptionRefusal, ForgetComparison, ForgetPreview, ForgetSelection, ManagedPlan,
-    OrphanedGroup, OtherHosts, Ownership, Partition, SelectionToken, Snapshot, UnmanagedGroup,
+    AdoptSelection, AdoptionRefusal, ForgetComparison, ForgetPreview, ForgetSelection, ForgetSide,
+    ManagedPlan, OrphanedGroup, OtherHosts, Ownership, Partition, SelectionToken, Snapshot,
+    UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -716,8 +717,10 @@ impl RunMaintenance {
     /// a proposal's forget preview tells it (§16, decision 89, point 8). A
     /// side under which this agent doesn't maintain the repository forgets
     /// nothing and isn't evaluated; with neither, the repository isn't
-    /// read. A read like [`preview`](Self::preview): no I7 slot, nothing in
-    /// the operation log, nothing removed.
+    /// read. A side whose forget a policy keeping nothing would refuse is
+    /// told as such, beside the other side. A read like
+    /// [`preview`](Self::preview): no I7 slot, nothing in the operation
+    /// log, nothing removed.
     pub async fn compare_forget(
         &self,
         op: OperationId,
@@ -737,8 +740,8 @@ impl RunMaintenance {
         let config = match (&before_plans, &after_plans) {
             (None, None) => {
                 return Ok(ForgetComparison {
-                    before: None,
-                    after: None,
+                    before: ForgetSide::NotMaintained,
+                    after: ForgetSide::NotMaintained,
                 });
             }
             (_, Some(_)) => after,
@@ -756,20 +759,25 @@ impl RunMaintenance {
         let after_side = after_plans.map(partitioned);
         drop(snapshots);
         let mut opened = None;
-        let before = match before_side {
-            Some((plans, partition)) => Some(
-                self.forget_over(op, &access, &mut opened, &plans, &partition)
-                    .await?,
-            ),
-            None => None,
+        let mut side = async |plans_side: Option<(Vec<ManagedPlan>, Partition)>| {
+            let Some((plans, partition)) = plans_side else {
+                return Ok(ForgetSide::NotMaintained);
+            };
+            // A policy keeping nothing refuses that side's forget, which
+            // then removes nothing; the other side is still told.
+            match self
+                .forget_over(op, &access, &mut opened, &plans, &partition)
+                .await
+            {
+                Ok(preview) => Ok(ForgetSide::Forgets(preview)),
+                Err(MaintenanceError::KeepsNothing { plan }) => {
+                    Ok(ForgetSide::KeepsNothing { plan })
+                }
+                Err(error) => Err(error),
+            }
         };
-        let after = match after_side {
-            Some((plans, partition)) => Some(
-                self.forget_over(op, &access, &mut opened, &plans, &partition)
-                    .await?,
-            ),
-            None => None,
-        };
+        let before = side(before_side).await?;
+        let after = side(after_side).await?;
         Ok(ForgetComparison { before, after })
     }
 

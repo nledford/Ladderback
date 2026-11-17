@@ -69,7 +69,7 @@ Feature: Pending changes page
     And I press Enter
     Then the proposal says "After the proposal, retention would no longer forget 2 snapshots of the plan demo-home"
     And the proposal says "Now, retention forgets 2 of the 3 snapshots of the plan demo-home."
-    And the proposal says "After the proposal, no plan would back up to this repository, so retention would forget nothing there."
+    And the proposal says "After the proposal, no plan would own any snapshots in this repository, so retention would forget nothing there."
     And the page offers no button "Approve the proposal"
     And the page has no accessibility violations
     And the daemon lists the plan "demo-home"

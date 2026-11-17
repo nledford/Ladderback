@@ -16,7 +16,8 @@ use app::secrets::ResolveError;
 use app::stats::{ReadStats, StatsError};
 use domain::execution::FailureReason;
 use domain::maintenance::{
-    ForgetComparison, OtherHosts, PlanForget, SelectionToken, Snapshot, StatsReading, Tally,
+    ForgetComparison, ForgetSide, OtherHosts, PlanForget, SelectionToken, Snapshot, StatsReading,
+    Tally,
 };
 use domain::{OperationId, PlanId, RepositoryAlias};
 use http_adapter::{MaintenanceRefusal, MaintenanceRequest};
@@ -466,13 +467,19 @@ pub(super) fn compared_dto(
     alias: &RepositoryAlias,
     comparison: &ForgetComparison,
 ) -> api::RepositoryForgetDto {
-    let side = |side: Option<&domain::maintenance::ForgetPreview>| {
-        side.map(|preview| forget_plans(alias, &preview.plans))
+    let side = |side: &ForgetSide| match side {
+        ForgetSide::NotMaintained => api::ForgetSideDto::NotMaintained,
+        ForgetSide::Forgets(preview) => api::ForgetSideDto::Forgets {
+            plans: forget_plans(alias, &preview.plans),
+        },
+        ForgetSide::KeepsNothing { plan } => api::ForgetSideDto::KeepsNothing {
+            plan: plan.as_str().to_owned(),
+        },
     };
     api::RepositoryForgetDto::Compared {
         repository: alias.as_str().to_owned(),
-        before: side(comparison.before.as_ref()),
-        after: side(comparison.after.as_ref()),
+        before: side(&comparison.before),
+        after: side(&comparison.after),
         forgets_more: forget_plans(alias, &comparison.forgets_more()),
         forgets_less: forget_plans(alias, &comparison.forgets_less()),
     }

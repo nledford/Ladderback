@@ -49,6 +49,24 @@ Feature: The forget preview of a proposal
     Then the preview covers the repository "demo"
     And the proposal changes nothing retention forgets
 
+  Scenario: A proposal that fixes a policy keeping nothing shows what retention would then forget
+    Given a plan "home" keeping nothing
+    And the repository holds 3 snapshots of the plan "home"
+    And an AI agent has proposed keeping the last 1 snapshot of the plan "home"
+    When a person previews what the proposal would forget
+    Then before the proposal, a forget would be refused because the policy of the plan "home" keeps nothing
+    And after the proposal, retention would forget 2 of the 3 snapshots of the plan "home"
+    And the proposal would forget 2 snapshots of the plan "home" that nothing forgets now
+
+  Scenario: A proposal whose policy would keep nothing shows that a forget would then be refused
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository holds 3 snapshots of the plan "home"
+    And an AI agent has proposed keeping the last 0 snapshots of the plan "home"
+    When a person previews what the proposal would forget
+    Then before the proposal, retention would forget 2 of the 3 snapshots of the plan "home"
+    And after the proposal, a forget would be refused because the policy of the plan "home" keeps nothing
+    And the proposal would no longer forget 2 snapshots of the plan "home"
+
   Scenario: Retention forgets nothing in a repository this agent doesn't maintain
     Given a plan "home" keeping the last 3 snapshots
     And the repository holds 4 snapshots of the plan "home"

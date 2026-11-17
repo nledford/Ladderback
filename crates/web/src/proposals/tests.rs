@@ -1,6 +1,6 @@
 use api::{
-    ErrorCode, ForgetPlanDto, MsgArg, PlanSettingDto, ProposalDto, ProposalReviewDto,
-    ProposalStatusDto, SummaryLineDto,
+    ErrorCode, ForgetPlanDto, ForgetSideDto, MsgArg, PlanSettingDto, ProposalDto,
+    ProposalReviewDto, ProposalStatusDto, SummaryLineDto,
 };
 use l10n::msg;
 
@@ -239,9 +239,26 @@ fn forgets(plan: &str, total: u64, remove: u64, listed: &[char]) -> ForgetPlanDt
     }
 }
 
+/// A side that is maintained with the plans `plans`, or else not
+/// maintained.
+fn side(plans: Option<Vec<ForgetPlanDto>>) -> ForgetSideDto {
+    plans.map_or(ForgetSideDto::NotMaintained, |plans| {
+        ForgetSideDto::Forgets { plans }
+    })
+}
+
 fn compared(
     before: Option<Vec<ForgetPlanDto>>,
     after: Option<Vec<ForgetPlanDto>>,
+    forgets_more: Vec<ForgetPlanDto>,
+    forgets_less: Vec<ForgetPlanDto>,
+) -> RepositoryForgetDto {
+    compared_sides(side(before), side(after), forgets_more, forgets_less)
+}
+
+fn compared_sides(
+    before: ForgetSideDto,
+    after: ForgetSideDto,
     forgets_more: Vec<ForgetPlanDto>,
     forgets_less: Vec<ForgetPlanDto>,
 ) -> RepositoryForgetDto {
@@ -343,9 +360,9 @@ fn a_proposal_that_forgets_neither_more_nor_less_says_so() {
     );
 }
 
-/// A side this agent doesn't maintain the repository under, or with no
-/// plan on it, forgets nothing and says why; maintained on neither side,
-/// the repository says so once.
+/// A side this agent doesn't maintain the repository under, or where no
+/// plan owns snapshots, forgets nothing and says why; maintained on
+/// neither side, the repository says so once.
 #[test]
 fn a_side_that_forgets_nothing_says_why() {
     let lines =
@@ -362,17 +379,47 @@ fn a_side_that_forgets_nothing_says_why() {
         lines(None, Some(Vec::new())),
         [
             said(msg::UI_PROPOSAL_FORGET_BEFORE_NOT_MAINTAINED),
-            said(msg::UI_PROPOSAL_FORGET_AFTER_NO_PLANS),
+            said(msg::UI_PROPOSAL_FORGET_AFTER_NO_SNAPSHOTS),
             said(msg::UI_PROPOSAL_FORGET_SAME),
         ]
     );
     assert_eq!(
         lines(Some(Vec::new()), None),
         [
-            said(msg::UI_PROPOSAL_FORGET_BEFORE_NO_PLANS),
+            said(msg::UI_PROPOSAL_FORGET_BEFORE_NO_SNAPSHOTS),
             said(msg::UI_PROPOSAL_FORGET_AFTER_NOT_MAINTAINED),
             said(msg::UI_PROPOSAL_FORGET_SAME),
         ]
+    );
+}
+
+/// A side whose forget would be refused, because a plan's policy keeps
+/// nothing, forgets nothing and says which plan.
+#[test]
+fn a_side_whose_forget_would_be_refused_says_which_plan_keeps_nothing() {
+    let refused = || ForgetSideDto::KeepsNothing {
+        plan: "home".to_owned(),
+    };
+    let home = || ForgetSideDto::Forgets {
+        plans: vec![forgets("home", 3, 2, &['a', 'b'])],
+    };
+    let lines = |before, after| match repository_shown(&compared_sides(
+        before,
+        after,
+        Vec::new(),
+        Vec::new(),
+    )) {
+        RepositoryShown::Compared { lines, .. } => lines,
+        refused => panic!("compared, not {refused:?}"),
+    };
+    let keeps_nothing = |message| (message, vec![("plan", MsgArg::Text("home".to_owned()))]);
+    assert_eq!(
+        lines(refused(), home())[0],
+        keeps_nothing(msg::UI_PROPOSAL_FORGET_BEFORE_KEEPS_NOTHING)
+    );
+    assert_eq!(
+        lines(home(), refused())[1],
+        keeps_nothing(msg::UI_PROPOSAL_FORGET_AFTER_KEEPS_NOTHING)
     );
 }
 

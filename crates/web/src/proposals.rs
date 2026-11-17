@@ -6,9 +6,9 @@
 //! as. `proposals_page.rs` is its glue.
 
 use api::{
-    ApproveProposalDto, ErrorCode, ErrorDto, ForgetPlanDto, MsgArg, PlanSettingDto, ProposalDto,
-    ProposalReviewDto, ProposalStatusDto, RejectProposalDto, RepositoryForgetDto, SnapshotDto,
-    SummaryLineDto,
+    ApproveProposalDto, ErrorCode, ErrorDto, ForgetPlanDto, ForgetSideDto, MsgArg, PlanSettingDto,
+    ProposalDto, ProposalReviewDto, ProposalStatusDto, RejectProposalDto, RepositoryForgetDto,
+    SnapshotDto, SummaryLineDto,
 };
 use l10n::{MessageId, msg};
 
@@ -78,11 +78,15 @@ pub(crate) fn repository_shown(repository: &RepositoryForgetDto) -> RepositorySh
             forgets_more,
             forgets_less,
         } => {
-            let lines = if before.is_none() && after.is_none() {
+            let neither = matches!(
+                (before, after),
+                (ForgetSideDto::NotMaintained, ForgetSideDto::NotMaintained)
+            );
+            let lines = if neither {
                 vec![(msg::UI_PROPOSAL_FORGET_NOT_MAINTAINED, Vec::new())]
             } else {
-                let mut lines = side_lines(before.as_deref(), Side::Before);
-                lines.extend(side_lines(after.as_deref(), Side::After));
+                let mut lines = side_lines(before, Side::Before);
+                lines.extend(side_lines(after, Side::After));
                 if forgets_more.is_empty() && forgets_less.is_empty() {
                     lines.push((msg::UI_PROPOSAL_FORGET_SAME, Vec::new()));
                 }
@@ -117,25 +121,34 @@ enum Side {
     After,
 }
 
-/// What one side says: why it forgets nothing, when it is not maintained
-/// or has no plan, or else what retention forgets of each of its plans.
-fn side_lines(plans: Option<&[ForgetPlanDto]>, side: Side) -> Vec<Said> {
-    let (not_maintained, no_plans, each) = match side {
+/// What one side says: why it forgets nothing, when it is not maintained,
+/// has no plan owning snapshots or would be refused, or else what retention
+/// forgets of each of its plans.
+fn side_lines(forgets: &ForgetSideDto, side: Side) -> Vec<Said> {
+    let (not_maintained, no_snapshots, keeps_nothing, each) = match side {
         Side::Before => (
             msg::UI_PROPOSAL_FORGET_BEFORE_NOT_MAINTAINED,
-            msg::UI_PROPOSAL_FORGET_BEFORE_NO_PLANS,
+            msg::UI_PROPOSAL_FORGET_BEFORE_NO_SNAPSHOTS,
+            msg::UI_PROPOSAL_FORGET_BEFORE_KEEPS_NOTHING,
             msg::UI_PROPOSAL_FORGET_BEFORE,
         ),
         Side::After => (
             msg::UI_PROPOSAL_FORGET_AFTER_NOT_MAINTAINED,
-            msg::UI_PROPOSAL_FORGET_AFTER_NO_PLANS,
+            msg::UI_PROPOSAL_FORGET_AFTER_NO_SNAPSHOTS,
+            msg::UI_PROPOSAL_FORGET_AFTER_KEEPS_NOTHING,
             msg::UI_PROPOSAL_FORGET_AFTER,
         ),
     };
+    let plans = match forgets {
+        ForgetSideDto::NotMaintained => return vec![(not_maintained, Vec::new())],
+        ForgetSideDto::KeepsNothing { plan } => {
+            return vec![(keeps_nothing, vec![("plan", MsgArg::Text(plan.clone()))])];
+        }
+        ForgetSideDto::Forgets { plans } => plans.as_slice(),
+    };
     match plans {
-        None => vec![(not_maintained, Vec::new())],
-        Some([]) => vec![(no_plans, Vec::new())],
-        Some(plans) => plans
+        [] => vec![(no_snapshots, Vec::new())],
+        plans => plans
             .iter()
             .map(|plan| {
                 (

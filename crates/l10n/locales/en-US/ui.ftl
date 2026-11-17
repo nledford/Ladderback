@@ -2758,11 +2758,19 @@ ui-proposal-forget-before-not-maintained = Now, { -brand-name } doesn't maintain
 # Said of a repository this agent wouldn't maintain after the proposal.
 ui-proposal-forget-after-not-maintained = After the proposal, { -brand-name } wouldn't maintain this { -repository }, so its retention would forget nothing there.
 
-# Said of a repository no plan backs up to now.
-ui-proposal-forget-before-no-plans = Now, no plan backs up to this { -repository }, so retention forgets nothing there.
+# Said of a repository where no plan owns any snapshots now.
+ui-proposal-forget-before-no-snapshots = Now, no plan owns any { -snapshot(form: "other") } in this { -repository }, so retention forgets nothing there.
 
-# Said of a repository no plan would back up to after the proposal.
-ui-proposal-forget-after-no-plans = After the proposal, no plan would back up to this { -repository }, so retention would forget nothing there.
+# Said of a repository where no plan would own any snapshots after the proposal.
+ui-proposal-forget-after-no-snapshots = After the proposal, no plan would own any { -snapshot(form: "other") } in this { -repository }, so retention would forget nothing there.
+
+# Said of a repository where a forget is refused now, so it forgets nothing, because a plan's policy keeps nothing.
+# $plan (text): the plan's ID.
+ui-proposal-forget-before-keeps-nothing = Now, a forget in this { -repository } is refused, because the policy of the plan { $plan } keeps nothing, so retention forgets nothing there.
+
+# Said of a repository where a forget would be refused after the proposal, so it would forget nothing, because a plan's policy would keep nothing.
+# $plan (text): the plan's ID.
+ui-proposal-forget-after-keeps-nothing = After the proposal, a forget in this { -repository } would be refused, because the policy of the plan { $plan } would keep nothing, so retention would forget nothing there.
 
 # What retention forgets of one plan now.
 # $plan (text): the plan's ID. $remove (count): how many of its snapshots retention forgets. $total (count): how many it owns.

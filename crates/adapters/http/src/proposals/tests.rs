@@ -129,8 +129,10 @@ fn forget_preview() -> api::ProposalForgetPreviewDto {
     api::ProposalForgetPreviewDto {
         repositories: vec![api::RepositoryForgetDto::Compared {
             repository: "demo".to_owned(),
-            before: Some(vec![forgotten.clone()]),
-            after: Some(Vec::new()),
+            before: api::ForgetSideDto::Forgets {
+                plans: vec![forgotten.clone()],
+            },
+            after: api::ForgetSideDto::Forgets { plans: Vec::new() },
             forgets_more: Vec::new(),
             forgets_less: vec![forgotten],
         }],

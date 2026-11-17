@@ -517,7 +517,11 @@ fn Review(
         let url = list.url(&forget_preview_path(&id));
         view! {
             <p>{text(&localizer, msg::UI_PROPOSAL_NEEDS_FORGET_PREVIEW)}</p>
-            <ForgetPreview localizer=Arc::clone(&localizer) url=url />
+            <ForgetPreview
+                localizer=Arc::clone(&localizer)
+                url=url
+                disabled=Signal::derive(move || working.get() == Some(Deciding::Rejecting))
+            />
         }
         .into_any()
     };
@@ -579,9 +583,10 @@ fn Review(
 /// The open proposal's forget preview (decision 89, point 8), read when the
 /// person asks, since it reads every repository the proposal touches: under
 /// its heading, each repository's lines and differences, or why it couldn't
-/// be read. While it reads, its button is busy and the page says so.
+/// be read. While it reads, its button is busy and the page says so; while
+/// `disabled`, as while a rejection waits, its button is unavailable.
 #[component]
-fn ForgetPreview(localizer: Arc<Localizer>, url: String) -> impl IntoView {
+fn ForgetPreview(localizer: Arc<Localizer>, url: String, disabled: Signal<bool>) -> impl IntoView {
     let reading = RwSignal::new(false);
     let shown = RwSignal::new(None::<Vec<RepositoryShown>>);
     let alert = RwSignal::new(None::<Sentence>);
@@ -592,6 +597,8 @@ fn ForgetPreview(localizer: Arc<Localizer>, url: String) -> impl IntoView {
         }
         reading.set(true);
         alert.set(None);
+        // A preview read before is no longer shown as current.
+        shown.set(None);
         reply(
             Politeness::Polite,
             &text(&read_localizer, msg::UI_PROPOSAL_FORGET_PREVIEWING),
@@ -653,6 +660,7 @@ fn ForgetPreview(localizer: Arc<Localizer>, url: String) -> impl IntoView {
             <Button
                 content=Content::Text(text(&localizer, msg::UI_PROPOSAL_FORGET_PREVIEW).into())
                 busy=Signal::derive(move || reading.get())
+                disabled=disabled
                 on_press=read
             />
         </p>

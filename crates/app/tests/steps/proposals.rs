@@ -17,7 +17,7 @@ use app::proposals::{
 use cucumber::{given, then, when};
 use domain::access::TOKEN_BYTES;
 use domain::access::api_token::{ApiTokenId, ApiTokenLabel};
-use domain::maintenance::{ForgetComparison, ForgetPreview, PlanForget};
+use domain::maintenance::{ForgetComparison, ForgetPreview, ForgetSide, PlanForget};
 use domain::planning::KeepCount;
 use domain::planning::{
     ChangeRefused, ConfigChange, ConfigRevision, HookEntry, MAX_PER_HOUR, Plan, Proposal,
@@ -816,11 +816,29 @@ fn removes_of(side: Option<&ForgetPreview>, name: &str) -> Option<(usize, usize)
 }
 
 fn side<'a>(comparison: &'a ForgetComparison, when: &str) -> Option<&'a ForgetPreview> {
+    side_named(comparison, when).preview()
+}
+
+fn side_named<'a>(comparison: &'a ForgetComparison, when: &str) -> &'a ForgetSide {
     match when {
-        "before" => comparison.before.as_ref(),
-        "after" => comparison.after.as_ref(),
+        "before" => &comparison.before,
+        "after" => &comparison.after,
         other => panic!("before or after, not {other}"),
     }
+}
+
+#[then(
+    regex = r#"^(before|after) the proposal, a forget would be refused because the policy of the plan "([^"]*)" keeps nothing$"#
+)]
+fn would_be_refused(agent: &mut Agent, when: String, name: String) {
+    let comparison = compared(agent);
+    assert_eq!(
+        side_named(comparison, &when),
+        &ForgetSide::KeepsNothing {
+            plan: plan_id(&name)
+        },
+        "{comparison:?}"
+    );
 }
 
 #[then(
@@ -853,7 +871,7 @@ fn would_forget_nothing(agent: &mut Agent, when: String, name: String) {
 fn leaves_orphaned_alone_after(agent: &mut Agent, groups: usize, snapshots: usize) {
     let after = compared(agent)
         .after
-        .as_ref()
+        .preview()
         .expect("this agent maintains the repository");
     assert_eq!(
         (
@@ -919,8 +937,8 @@ fn not_maintained_here(agent: &mut Agent, repository: String) {
     assert_eq!(
         compared(agent),
         &ForgetComparison {
-            before: None,
-            after: None
+            before: ForgetSide::NotMaintained,
+            after: ForgetSide::NotMaintained
         }
     );
 }

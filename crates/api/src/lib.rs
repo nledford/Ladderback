@@ -4217,15 +4217,12 @@ pub struct ProposalForgetPreviewDto {
     rename_all_fields = "kebab-case"
 )]
 pub enum RepositoryForgetDto {
-    /// What a forget of this agent's would remove under the configuration
-    /// as it is (`before`) and as the proposal makes it (`after`): each of
-    /// the side's plans, as a forget's preview tells it. A side is `None`
-    /// where this agent doesn't maintain the repository: no forget of its
-    /// runs there, so its retention forgets nothing.
+    /// What a forget of this agent's would do under the configuration as it
+    /// is (`before`) and as the proposal makes it (`after`).
     Compared {
         repository: String,
-        before: Option<Vec<ForgetPlanDto>>,
-        after: Option<Vec<ForgetPlanDto>>,
+        before: ForgetSideDto,
+        after: ForgetSideDto,
         /// What `after` removes and `before` doesn't, per plan that removes
         /// any such: `remove` counts them and `listed` names them.
         forgets_more: Vec<ForgetPlanDto>,
@@ -4235,6 +4232,26 @@ pub enum RepositoryForgetDto {
     /// The repository couldn't be read: why, as the maintenance routes tell
     /// it.
     Refused { repository: String, error: ErrorDto },
+}
+
+/// What a forget of this agent's would do to a repository under one
+/// configuration.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "kebab-case"
+)]
+pub enum ForgetSideDto {
+    /// This agent doesn't maintain the repository: no forget of its runs
+    /// there, so its retention forgets nothing.
+    NotMaintained,
+    /// What it would remove: each plan with history there, as a forget's
+    /// preview tells it.
+    Forgets { plans: Vec<ForgetPlanDto> },
+    /// It would be refused, and so remove nothing: the policy of `plan`,
+    /// which has history there, keeps nothing.
+    KeepsNothing { plan: String },
 }
 
 /// `POST /api/v1/proposals/{id}/approve`, a browser session's only: what
