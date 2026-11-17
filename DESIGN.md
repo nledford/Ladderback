@@ -336,7 +336,7 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 
 ### Banners
 
-- **The component:** `Banner`, a page-wide notice above a page's content: an icon, then its words. Pages move onto it in #930.
+- **The component:** `Banner`, a page-wide notice above a page's content: an icon, then its words. Every page-wide notice is one: sign-in off, the available update, the Full Disk Access warning and the pages' notes (#930).
 - **Look:** a square strip of Ledger Gray across the content, the words in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a warning is not a colored banner.
 - **Tone:** Primary (information, the default) and Warning, each with its own icon, Info and TriangleAlert, named by its tone in words for a screen reader. No Success (a toast says it once), no Error (no red banners), no Secondary and no Inherit.
 - **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page names where focus goes, and the browser remembers the dismissal of that edition, so a newer one shows again.
