@@ -74,6 +74,22 @@ Then(
   },
 );
 
+// A dialog is named by its title, a heading at the level its place in the
+// page calls for (§4.5): the one its `aria-labelledby` points at.
+Then(
+  "the dialog {string} is titled by a heading at level {int}",
+  async function (this: BrowserWorld, name: string, level: number) {
+    const dialog = journey(this.page).byRole("dialog", { name: namePattern(name) });
+    const title = dialog.getByRole("heading", { level, name: namePattern(name) });
+    assert.equal(await title.count(), 1, `the dialog "${name}" has no heading "${name}" at level ${level}`);
+    assert.equal(
+      await dialog.getAttribute("aria-labelledby"),
+      await title.getAttribute("id"),
+      `the dialog "${name}" is not named by its heading at level ${level}`,
+    );
+  },
+);
+
 // A review says in its own polite region what the page's announcer can't
 // while the modal is open (§4.5). The region has no role of its own (a second
 // `status` would hide the page's one), so it is found as the live region
@@ -2129,7 +2145,8 @@ Then("the link {string} wraps onto more than one line", async function (this: Br
 const SNAPSHOTS: Record<string, string> = {
   Dialog: `- heading "Dialog" [level=2]
 - button "Open the demo dialog"
-- button "Open the demo warning"`,
+- button "Open the demo warning"
+- button "Turn the demo setting on"`,
   Table: `- heading "Table" [level=2]
 - group "Demo table shows":
   - text: Demo table shows

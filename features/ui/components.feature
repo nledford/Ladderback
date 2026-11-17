@@ -97,6 +97,21 @@ Feature: The shared components in the gallery
     Then the dialog "Demo warning" is closed
     And focus is on the button "Open the demo warning"
 
+  Scenario: A dialog can be titled under its section and return focus to the control it names, even one drawn anew
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Turn the demo setting on"
+    And I press Enter
+    Then the dialog "Demo setting" opens with focus on the button "Keep the demo setting"
+    And the dialog "Demo setting" is titled by a heading at level 3
+    And the dialog "Demo setting" is described as saying "drawn anew"
+    And the page has no accessibility violations
+    When I press Tab
+    Then focus is on the button "Change the demo setting"
+    When I press Enter
+    Then the dialog "Demo setting" is closed
+    And focus is on the button "Turn the demo setting off"
+
   Scenario: The step-up field takes a password from a password manager or paste
     When I open the component gallery
     And I skip to the content
@@ -1078,6 +1093,7 @@ Feature: The shared components in the gallery
     And I press Enter
     Then focus is inside the dialog "Demo review to confirm"
     And focus is on the button "Cancel"
+    And the dialog "Demo review to confirm" is titled by a heading at level 3
     When I press Tab until focus is on the button "Confirm the demo review now"
     And I press Tab
     Then focus is on the first control of the dialog "Demo review to confirm"
