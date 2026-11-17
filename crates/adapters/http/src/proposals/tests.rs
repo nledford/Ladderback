@@ -602,6 +602,42 @@ async fn an_approval_or_rejection_that_is_not_one_is_refused_unread() {
     assert!(daemon.proposals.decisions().is_empty());
 }
 
+#[tokio::test]
+async fn an_approval_confirmed_by_nothing_or_more_than_any_password_fails_unasked() {
+    let daemon = Daemon::new();
+    let headers = session_headers(&daemon).await;
+    let headers = borrowed(&headers);
+    let longest = domain::access::PASSWORD_MAX_BYTES;
+    // The last is the proposal's short ID, padded with spaces.
+    for confirmation in [
+        String::new(),
+        "a".repeat(longest + 1),
+        format!("{}abcdef", " ".repeat(longest)),
+    ] {
+        let body = serde_json::json!({
+            "revision": "aaaa",
+            "diff-hash": "bbbb",
+            "confirmation": confirmation,
+        })
+        .to_string();
+        let response = daemon
+            .send(post(
+                "/api/v1/proposals/abcdefghijkl/approve",
+                &headers,
+                &body,
+            ))
+            .await;
+        let length = confirmation.len();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{length} bytes");
+        assert_eq!(
+            json(response).await["code"],
+            "step-up-failed",
+            "{length} bytes"
+        );
+    }
+    assert!(daemon.proposals.decisions().is_empty());
+}
+
 #[test]
 fn an_approval_never_shows_its_confirmation() {
     let approval = Approval {

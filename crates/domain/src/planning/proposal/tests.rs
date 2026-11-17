@@ -389,6 +389,15 @@ fn a_revision_reads_back_from_its_hex() {
     );
 }
 
+/// With the rest of the file, the plain hash lets someone test guesses at a
+/// short inline secret offline, so debug output never shows it (I4).
+#[test]
+fn a_revision_never_shows_its_hash_in_debug_output() {
+    let revision = ConfigRevision::of(b"");
+    assert_eq!(format!("{revision:?}"), "ConfigRevision([hidden])");
+    assert_eq!(format!("{revision:#?}"), "ConfigRevision([hidden])");
+}
+
 #[test]
 fn a_shown_revision_is_the_sha256_of_the_key_then_the_revision() {
     let key = RevisionKey::new([7; REVISION_KEY_BYTES]);
