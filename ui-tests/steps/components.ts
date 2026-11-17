@@ -12,7 +12,7 @@ import { type DataTable, Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
-import { journey, namePattern } from "../support/keyboard.ts";
+import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { pointer } from "../support/pointer.ts";
 import { type BrowserWorld, evaluateAll } from "../support/world.ts";
 
@@ -46,6 +46,30 @@ Then(
     await journey(this.page).assertFocused(
       journey(this.page).byRole("button", { name: namePattern(name), description: namePattern(description) }),
       `the button ${JSON.stringify(name)} described by ${JSON.stringify(description)}`,
+    );
+  },
+);
+
+// A button of one name in more than one demo, told apart by its demo: the
+// alert's Dismiss and the banner's.
+function demoButton(page: Page, name: string, component: string): Locator {
+  return demoSection(page, component).getByRole("button", { name: namePattern(name) });
+}
+
+When(
+  "I press Tab until focus is on the button {string} of the {string} demo",
+  async function (this: BrowserWorld, name: string, component: string) {
+    const description = `the button ${JSON.stringify(name)} of the ${JSON.stringify(component)} demo`;
+    await pressUntilFocused(this.page, "Tab", demoButton(this.page, name, component), description);
+  },
+);
+
+Then(
+  "focus is on the button {string} of the {string} demo",
+  async function (this: BrowserWorld, name: string, component: string) {
+    await journey(this.page).assertFocused(
+      demoButton(this.page, name, component),
+      `the button ${JSON.stringify(name)} of the ${JSON.stringify(component)} demo`,
     );
   },
 );
@@ -2544,6 +2568,19 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - link "Demo rustic documentation, right to left (goes to another site)":
     - /url: https://rustic.cli.rs/`,
+  // Each banner is its icon, an image named for its tone, then its words,
+  // with no role of its own: no live region and no landmark. The notice ends
+  // with its Dismiss button, whose tooltip is hidden from a screen reader.
+  Banner: `- heading "Banner" [level=2]
+- img "Information"
+- text: The demo daemon looks for a newer release once a day.
+- img "Warning"
+- text: The demo data folder at /srv/demo-data/ladderback-demo-data-folder is almost full, so the demo backups may soon stop.
+- img "Information"
+- text: A demo update is ready. This browser remembers the last edition dismissed, and shows any other.
+- button "Dismiss"
+- paragraph:
+  - button "Show a newer demo notice"`,
   "Step-up field": `- heading "Step-up field" [level=2]
 - paragraph:
   - button "Open the demo step-up"
