@@ -2,8 +2,8 @@
   "name": "ladderback-web-assets",
   "private": true,
   "type": "module",
-  "description": "The build-time assets of Ladderback's web UI: Tailwind's CLI, run by trunk's pre-build hook over tailwind.css. Pinned exactly: newer 4.1.x resolve an optional oxide-wasm32-wasi tarball this npm policy refuses",
+  "description": "The build-time assets of Ladderback's web UI: Tailwind's CLI, run by trunk's pre-build hook over tailwind.css. Pinned exactly, with package-lock.json, so a lockfile refresh can't move the CLI or the compiler it pins, and every build of one commit compiles the same CSS",
   "devDependencies": {
-    "@tailwindcss/cli": "4.1.0"
+    "@tailwindcss/cli": "4.3.5"
   }
 }
