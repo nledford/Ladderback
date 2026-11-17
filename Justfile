@@ -85,8 +85,13 @@ clippy:
 # built-in runner), the journey lint, the check that every path AGENTS.md and
 # CLAUDE.md name exists, the check that no paragraph in docs/ runs over
 # 150 words, then the
-# check that the §16 decision index matches the decision files.
-[doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, and the decision-index check.')]
+# check that the §16 decision index matches the decision files, and rustdoc
+# on every crate, private items included, with warnings as errors, so a doc
+# comment's broken link or malformed markup fails. Rustdoc sees only the items
+# built for the host and, for `web`, not its wasm32-only ones. CI runs `lint`
+# on Linux alone, so a doc comment on macOS-only code is checked only by a
+# local run on a Mac; macOS CI runs `clippy` (see `clippy`).
+[doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
@@ -96,6 +101,7 @@ lint: _ui-deps clippy
     scripts/check-doc-paths.sh
     node scripts/check-paragraph-length.ts
     node scripts/decision-index.ts
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 # Write the index of decisions in docs/design/roadmap.md §16 from the files in
 # docs/design/decisions/, one row per file, its number and its heading. After
