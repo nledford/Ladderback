@@ -41,6 +41,10 @@
   --link-underline: max(1px, 0.0625em);
   --link-underline-hover: max(2px, 0.125em);
   --link-underline-offset: 0.25em;
+  /* A skeleton's bars (§4.5): 1.61:1 on the page and 1.47:1 on Ledger Gray
+     (1.69:1 and 1.46:1 in dark colors), so they show on either. A floor for
+     visibility, not a WCAG minimum: a skeleton carries no information. */
+  --skeleton: #c8ccd2;
   color-scheme: light dark;
 }
 
@@ -70,6 +74,7 @@
     --warning-hover: #fcd34d;
     --error-hover: #fca5a5;
     --field-edge: #7b8594;
+    --skeleton: #353d4a;
   }
 }
 
@@ -849,6 +854,41 @@ main:focus {
   .button[aria-disabled="true"]:not(.button-busy) {
     border-color: GrayText;
     color: GrayText;
+  }
+}
+
+/* A skeleton (§4.5): the still shape of content on its way, hidden from a
+   screen reader. Its bars stand in a column at the start of the room it is
+   given, so they follow the page's direction. It never moves: no
+   animation and no transition, in any motion setting (2.2.2). Flat, in
+   `--skeleton`, which shows on the page and on Ledger Gray alike, with the
+   small corner. */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+}
+
+.skeleton-bar {
+  display: block;
+  max-inline-size: 100%;
+  background-color: var(--skeleton);
+  border-radius: var(--radius-small);
+}
+
+/* A line of text: as tall as the text (1em, which the page sets on each
+   bar), centered on a line of the text's height, so a skeleton of lines is
+   as tall as the lines it stands for. Its bars are flex items, so their
+   margins never collapse. */
+.skeleton-lines > .skeleton-bar {
+  margin-block: calc((1lh - 1em) / 2);
+}
+
+/* Forced colors: the system drops the fill, so an edge in the color of
+   unavailable text keeps the shape in view. */
+@media (forced-colors: active) {
+  .skeleton-bar {
+    border: 1px solid GrayText;
   }
 }
 

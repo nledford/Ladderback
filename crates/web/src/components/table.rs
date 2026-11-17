@@ -17,11 +17,11 @@ use super::Spinner;
 use super::button::{Appearance, Button, Content};
 use crate::announcer::Politeness;
 use crate::live::reply;
-use crate::variants::Size;
+use crate::variants::{Rem, Size};
 
 pub(crate) mod rules;
 
-pub use rules::{Align, Name, Rem, SortKey, State};
+pub use rules::{Align, Name, SortKey, State};
 use rules::{Shown, Sorted};
 
 thread_local! {
@@ -281,7 +281,7 @@ where
                                             let width = if at == 0 {
                                                 rules::row_header_width(column.width)
                                             } else {
-                                                column.width.css()
+                                                column.width.to_string()
                                             };
                                             view! { <col style:inline-size=width /> }
                                         })

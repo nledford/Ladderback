@@ -168,6 +168,31 @@ impl Side {
     }
 }
 
+/// A length a caller gives a component, in `rem` to a tenth, so it grows
+/// with the reader's text: a table's column, a skeleton's block. Never below
+/// 0, and never a number that isn't one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rem(u16);
+
+impl Rem {
+    /// `tenths` tenths of a rem: `Rem::tenths(25)` is 2.5rem.
+    pub const fn tenths(tenths: u16) -> Self {
+        Self(tenths)
+    }
+
+    /// Both lengths added up, held at the longest a `Rem` holds (6553.5rem)
+    /// rather than wrapping round to a short one.
+    pub fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+}
+
+impl std::fmt::Display for Rem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}rem", self.0 / 10, self.0 % 10)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +276,22 @@ mod tests {
             Side::default(),
             Side::Above,
             "a note leaves the next lines in view"
+        );
+    }
+
+    #[test]
+    fn a_length_reads_to_a_tenth_of_a_rem_and_adds_up_without_wrapping() {
+        assert_eq!(Rem::tenths(25).to_string(), "2.5rem");
+        assert_eq!(Rem::tenths(80).to_string(), "8.0rem");
+        assert_eq!(Rem::tenths(0).to_string(), "0.0rem");
+        assert_eq!(
+            Rem::tenths(55).saturating_add(Rem::tenths(110)),
+            Rem::tenths(165)
+        );
+        assert_eq!(
+            Rem::tenths(u16::MAX).saturating_add(Rem::tenths(1)),
+            Rem::tenths(u16::MAX),
+            "a sum past the longest length stays the longest, never a short one"
         );
     }
 }

@@ -29,6 +29,8 @@ colors:
   red-ink-dark: "#f87171"
   field-edge: "#6b7280"
   field-edge-dark: "#7b8594"
+  pencil-gray: "#c8ccd2"
+  pencil-gray-dark: "#353d4a"
 typography:
   body:
     fontFamily: "system-ui, sans-serif"
@@ -121,6 +123,10 @@ components:
     # The drawing's color (its arc); the label keeps the text's color.
     textColor: "{colors.ladder-blue}"
     size: "1em"
+  skeleton-bar:
+    # A line of text 1em tall, or a block in rem; never moves.
+    backgroundColor: "{colors.pencil-gray}"
+    rounded: "{rounded.sm}"
 ---
 
 # Design System: Ladderback
@@ -158,6 +164,7 @@ A white page (dark: near-black), graphite text, one blue, three status hues and 
 - **Slate Note** (`--muted`): secondary text (captions, notes, the running version) and the rule under each table row and around the pause banner.
 - **Ledger Gray** (`--surface`): the site header, toasts, the pause banner, a progress bar's empty track and an unavailable text field.
 - **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
+- **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
 
 ### Status
 
@@ -219,7 +226,7 @@ Flat. No element has a shadow. Depth is said with a Ledger Gray surface, a 1 px 
 
 ## Shapes
 
-Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, the pause banner and tooltips. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
+Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, the pause banner, tooltips and a skeleton's bars. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
 
 ## Components
 
@@ -303,6 +310,14 @@ A Ledger Gray pill track 0.5rem tall, filling the room it is given up to 16rem, 
 - **Label:** always one, saying what the page waits for. Beside the spinner by default, where the drawing is hidden from a screen reader; where there's no room, the drawing is an image named by it.
 - **Placement:** the shared placements, on the spinner's line: Inline (the default), in its line of text, the label on the line's baseline and the drawing centered on the text; Start, Center or End, on a line of its own, which follow the page's direction, a long label wrapping beside the drawing, never under it, the drawing at its first line.
 - **The page's duties:** the spinner is no live region, so a wait the reader caused, and its end, are said through the announcer (4.1.3); the region it stands for is `aria-busy` until it is filled; a busy button takes `aria-disabled`, not `disabled`, so it keeps focus, and ignores presses until the work ends.
+
+### Skeleton
+
+- **Use:** the still shape of content on its way, standing where the content will, beside the words that say the wait ("Loading…"). Never a stand-in for those words, and hidden from a screen reader; the region it stands for is busy until the content comes.
+- **Shape:** lines of text, each 1em tall on a line of the text's height, the full width of their room but the last, which is shorter; or a block in `rem`, such as a field, never wider than its room. No circles, avatars or image shapes.
+- **Look:** flat Pencil Gray with the small corner, on the page and on Ledger Gray alike. Under forced colors, no fill and a 1px `GrayText` edge.
+- **Still:** no shimmer, no pulse, in any motion setting: it starts by itself and nothing could pause it (2.2.2).
+- **No tone and no size:** it is not a status, and it takes the content's size from the reader's text.
 
 ### Icon
 

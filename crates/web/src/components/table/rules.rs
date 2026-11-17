@@ -7,6 +7,8 @@
 
 use lepticons_data::LucideGlyph;
 
+use crate::variants::Rem;
+
 /// Which way a column is sorted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -177,17 +179,6 @@ impl Align {
     }
 }
 
-/// A column's width, in rem, so it grows with the reader's text.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rem(pub f32);
-
-impl Rem {
-    /// The width as CSS.
-    pub fn css(self) -> String {
-        format!("{}rem", self.0)
-    }
-}
-
 /// The share of its frame a pinned row header takes at most, in percent: a
 /// header pinned wider would leave the cells scrolling past it too little
 /// room to show a focused control (2.4.11) on a small screen with larger
@@ -198,7 +189,7 @@ const PINNED_SHARE: u8 = 40;
 /// to leave the others room, its share of the frame (`cqi`: the frame is the
 /// size container around the table).
 pub fn row_header_width(width: Rem) -> String {
-    format!("min({}, {PINNED_SHARE}cqi)", width.css())
+    format!("min({width}, {PINNED_SHARE}cqi)")
 }
 
 /// The frame's `scroll-padding-inline-start`: the room the pinned row header
@@ -206,21 +197,19 @@ pub fn row_header_width(width: Rem) -> String {
 /// from beneath it. A percentage of the frame's own width, as a padding of a
 /// scroller's is.
 pub fn pinned_room(width: Rem) -> String {
-    format!("min({}, {PINNED_SHARE}%)", width.css())
+    format!("min({width}, {PINNED_SHARE}%)")
 }
 
 /// The table's own width: the frame's (`100cqi`), or, where that is less
 /// than the row header's and the `columns`' widths added up, those widths,
 /// and the frame scrolls.
 pub fn table_width(row_header: Rem, columns: impl IntoIterator<Item = Rem>) -> String {
-    // From 0.0: a float sum of nothing is -0.0, which would say "-0rem".
     let sum = columns
         .into_iter()
-        .fold(0.0_f32, |sum, Rem(width)| sum + width);
+        .fold(Rem::tenths(0), Rem::saturating_add);
     format!(
-        "max(100cqi, calc({} + {}))",
-        row_header_width(row_header),
-        Rem(sum).css()
+        "max(100cqi, calc({} + {sum}))",
+        row_header_width(row_header)
     )
 }
 
@@ -460,27 +449,21 @@ mod tests {
     }
 
     #[test]
-    fn a_columns_width_is_in_rem() {
-        assert_eq!(Rem(8.0).css(), "8rem");
-        assert_eq!(Rem(5.5).css(), "5.5rem");
-    }
-
-    #[test]
     fn the_table_is_as_wide_as_its_frame_or_its_columns_whichever_is_wider() {
         assert_eq!(
-            table_width(Rem(8.0), [Rem(5.5), Rem(11.0)]),
-            "max(100cqi, calc(min(8rem, 40cqi) + 16.5rem))"
+            table_width(Rem::tenths(80), [Rem::tenths(55), Rem::tenths(110)]),
+            "max(100cqi, calc(min(8.0rem, 40cqi) + 16.5rem))"
         );
         assert_eq!(
-            table_width(Rem(8.0), []),
-            "max(100cqi, calc(min(8rem, 40cqi) + 0rem))"
+            table_width(Rem::tenths(80), []),
+            "max(100cqi, calc(min(8.0rem, 40cqi) + 0.0rem))"
         );
     }
 
     #[test]
     fn a_pinned_row_header_takes_at_most_two_fifths_of_its_frame() {
-        assert_eq!(row_header_width(Rem(6.5)), "min(6.5rem, 40cqi)");
-        assert_eq!(pinned_room(Rem(6.5)), "min(6.5rem, 40%)");
+        assert_eq!(row_header_width(Rem::tenths(65)), "min(6.5rem, 40cqi)");
+        assert_eq!(pinned_room(Rem::tenths(65)), "min(6.5rem, 40%)");
     }
 
     #[test]

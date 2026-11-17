@@ -621,6 +621,25 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # it.
 ui-gallery-spinner-save = Save the demo notes
 
+# The heading of the gallery's skeleton demo (§4.5): the still shape of
+# content on its way, which a screen reader skips.
+ui-gallery-skeleton-heading = Skeleton
+
+# The words the demo's busy region shows beside its skeleton while its
+# content, a demo backup plan, is on its way: the wait said in words.
+ui-gallery-skeleton-loading = Loading the demo plan…
+
+# The demo plan once it has come, in place of the words above: its name,
+# then three short lines, which take the place of the skeleton's three.
+ui-gallery-skeleton-plan = Demo plan: home
+ui-gallery-skeleton-folder = Backs up the demo folder.
+ui-gallery-skeleton-schedule = Runs every night.
+ui-gallery-skeleton-keeps = Keeps a week of snapshots.
+
+# A demo toggle button that brings the demo plan in place of its skeleton,
+# pressed while the plan shows; pressing it again shows the wait again.
+ui-gallery-skeleton-show = Show the demo plan
+
 # The heading of the gallery's icon demo (§4.5): one Lucide glyph, beside
 # words or inside a control.
 ui-gallery-icon-heading = Icon
