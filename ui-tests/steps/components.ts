@@ -2533,6 +2533,19 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph:
   - link "Demo rustic documentation, right to left (goes to another site)":
     - /url: https://rustic.cli.rs/`,
+  // Each banner is its icon, an image named for its tone, then its words,
+  // with no role of its own: no live region and no landmark. The notice ends
+  // with its Dismiss button, whose tooltip is hidden from a screen reader.
+  Banner: `- heading "Banner" [level=2]
+- img "Information"
+- text: The demo daemon looks for a newer release once a day.
+- img "Warning"
+- text: The demo data folder at /srv/demo-data/ladderback-demo-data-folder is almost full, so the demo backups may soon stop.
+- img "Information"
+- text: A demo update is ready. This browser remembers the last edition dismissed, and shows any other.
+- button "Dismiss"
+- paragraph:
+  - button "Show a newer demo notice"`,
   "Step-up field": `- heading "Step-up field" [level=2]
 - paragraph:
   - button "Open the demo step-up"

@@ -23,6 +23,7 @@ use crate::repositories::{Run, Sentence, address_parts, runs};
 use alert::rules::AlertTone;
 
 pub(crate) mod alert;
+pub(crate) mod banner;
 pub(crate) mod button;
 mod checkbox;
 mod error_summary;
@@ -45,6 +46,7 @@ pub(crate) mod tooltip;
 pub(crate) mod tree;
 
 pub use alert::{Alert, Dismissal};
+pub use banner::{Banner, BannerDismissal};
 pub use button::Button;
 pub use checkbox::Checkbox;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};

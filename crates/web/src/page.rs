@@ -54,7 +54,7 @@ fn browser_languages() -> BrowserLanguages {
 
 /// The browser's local storage, when it lets this page have it: its settings,
 /// or a private window, may refuse it.
-fn storage() -> Option<Storage> {
+pub(crate) fn storage() -> Option<Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
 
