@@ -16,6 +16,7 @@ use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
+use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
 use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
@@ -24,10 +25,10 @@ use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::tabs::{Activation, Holds, TabSet, TabsName};
 use crate::components::{
-    Align, Button, Checkbox, Column, Confirmation, FolderLoader, FolderPage, Footer, Icon,
-    LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup, ReviewDialog,
-    Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp, StepUpField, Tab,
-    Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
+    Alert, Align, Button, Checkbox, Column, Confirmation, Dismissal, FolderLoader, FolderPage,
+    Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup,
+    ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp,
+    StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -163,6 +164,28 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let form_sent = t(msg::UI_GALLERY_BUTTON_SENT);
     // The tooltip demo's icon-only button: its name, the tooltip's too.
     let schedule = t(msg::UI_GALLERY_TOOLTIP_SCHEDULE);
+    // The alert demo: its words in each tone, the warning's with a link
+    // inside it in the alert's text color (Inherit), and whether its
+    // dismissible notice shows, which its Dismiss button clears and the
+    // button after it sets again.
+    let (alert_information, alert_success, alert_error) = (
+        t(msg::UI_GALLERY_ALERT_INFORMATION),
+        t(msg::UI_GALLERY_ALERT_SUCCESS),
+        t(msg::UI_GALLERY_ALERT_ERROR),
+    );
+    let alert_warning = sentence_link(
+        &localizer,
+        route("/operations", Matching::Section),
+        msg::UI_GALLERY_ALERT_WARNING,
+        t(msg::UI_GALLERY_ALERT_WARNING_LINK),
+        LinkTone::Inherit,
+    );
+    let notice_shown = RwSignal::new(true);
+    let (notice, notice_show) = (
+        t(msg::UI_GALLERY_ALERT_DISMISSIBLE),
+        t(msg::UI_GALLERY_ALERT_SHOW),
+    );
+    let alert_localizer = Arc::clone(&localizer);
     // The skeleton demo: whether its plan has come, which its toggle sets,
     // the words that say the wait, and the plan's own lines.
     let plan_shown = RwSignal::new(false);
@@ -1129,6 +1152,52 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 {demo_link(&localizer, outside(RUSTIC_DOCS), t(msg::UI_GALLERY_LINK_OUTSIDE_RTL))}
             </p>
         </section>
+        // Its id finds the demo under a pseudolocale too, which renames its
+        // heading.
+        <section id="alert-demo">
+            <h2>{t(msg::UI_GALLERY_ALERT_HEADING)}</h2>
+            // Each tone, information first, which is the default.
+            <Alert localizer=Arc::clone(&localizer)>{alert_information}</Alert>
+            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Success>
+                {alert_success}
+            </Alert>
+            // A link inside, in the alert's text color.
+            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Warning>
+                {alert_warning}
+            </Alert>
+            // A long path, which wraps inside the alert on a small screen.
+            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
+                {alert_error}
+            </Alert>
+            // A notice the reader dismisses: the page takes it away, and
+            // focus goes to the button that brings it back.
+            {move || {
+                notice_shown
+                    .get()
+                    .then(|| {
+                        let notice = notice.clone();
+                        view! {
+                            <Alert
+                                localizer=Arc::clone(&alert_localizer)
+                                dismissal=Dismissal {
+                                    on_dismiss: Callback::new(move |()| notice_shown.set(false)),
+                                    then_focus: ALERT_DEMO_SHOW.to_owned(),
+                                }
+                            >
+                                {notice}
+                            </Alert>
+                        }
+                    })
+            }}
+            <p>
+                <Button
+                    id=ALERT_DEMO_SHOW
+                    content=Content::Text(notice_show.into())
+                    disabled=notice_shown
+                    on_press=Callback::new(move |()| notice_shown.set(true))
+                />
+            </p>
+        </section>
         <section>
             <h2>{t(msg::UI_GALLERY_TABS_HEADING)}</h2>
             // Each tab the arrow keys arrive at is selected, the set named by
@@ -1496,6 +1565,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
 
 /// rustic's documentation, the demo's other site.
 const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
+
+/// The ID of the alert demo's button that brings its dismissed notice back,
+/// where focus goes when the notice is dismissed.
+const ALERT_DEMO_SHOW: &str = "alert-demo-show";
 
 /// A demo route. The gallery's literal paths all parse (the link's rules
 /// test their shapes); one that didn't would show no link, which the link
