@@ -388,6 +388,72 @@ Then(
   },
 );
 
+/** Each tab of a list in a column: its box against the list's, and where
+ *  each line of its words starts and ends, in the list's direction. */
+async function columnTabs(world: BrowserWorld, name: string) {
+  return listOf(world, name).evaluate((element) => {
+    const rtl = getComputedStyle(element).direction === "rtl";
+    const list = element.getBoundingClientRect();
+    return {
+      rtl,
+      list: { left: list.left, right: list.right },
+      tabs: Array.from(element.querySelectorAll<HTMLElement>('[role="tab"]'), (each) => {
+        const box = each.getBoundingClientRect();
+        const style = getComputedStyle(each);
+        const inset = (side: string) =>
+          parseFloat(style.getPropertyValue(`border-${side}-width`)) + parseFloat(style.getPropertyValue(`padding-${side}`));
+        const range = document.createRange();
+        range.selectNodeContents(each.querySelector(".tab-label") ?? each);
+        const lines = Array.from(range.getClientRects())
+          .filter((rect) => rect.width > 0)
+          .map((rect) => ({ top: rect.top, left: rect.left, right: rect.right }));
+        return {
+          name: (each.textContent ?? "").trim(),
+          left: box.left,
+          right: box.right,
+          start: rtl ? box.right - inset("right") : box.left + inset("left"),
+          lines,
+        };
+      }),
+    };
+  });
+}
+
+// A column of tabs (§4.5, #1011): every line of each tab's words starts at
+// the tab's start, the right in a right-to-left page, so the labels line up
+// down the column instead of each centered on its own (the regression); and
+// every tab is as wide as the list, edge to edge, so its rule and hover
+// reach across it (a guard: a flex column stretched them before #1011).
+Then(
+  "every tab of the list of the tab {string} is as wide as the list, its words on every line at the column's start",
+  async function (this: BrowserWorld, name: string) {
+    const { rtl, list, tabs } = await columnTabs(this, name);
+    assert.ok(tabs.length > 1, `the list of the tab "${name}" holds ${tabs.length} tabs`);
+    for (const each of tabs) {
+      assert.ok(
+        Math.abs(each.left - list.left) <= 0.5 && Math.abs(each.right - list.right) <= 0.5,
+        `the tab "${each.name}" runs ${each.left} to ${each.right}, not across its list's ${list.left} to ${list.right}`,
+      );
+      assert.ok(each.lines.length > 0, `the tab "${each.name}" draws no words`);
+      for (const line of each.lines) {
+        const at = rtl ? line.right : line.left;
+        assert.ok(Math.abs(at - each.start) <= 1, `a line of the tab "${each.name}" starts at ${at}, not at the tab's start ${each.start}`);
+      }
+    }
+  },
+);
+
+// The 320 Rule with a column: a long label wraps inside its tab, and the
+// check above then holds for its every line.
+Then(
+  "a tab of the list of the tab {string} wraps its words onto more than one line",
+  async function (this: BrowserWorld, name: string) {
+    const { tabs } = await columnTabs(this, name);
+    const wrapped = tabs.filter((each) => new Set(each.lines.map((line) => Math.round(line.top))).size > 1);
+    assert.ok(wrapped.length > 0, `no tab of the list of the tab "${name}" wraps its words`);
+  },
+);
+
 /** A vertical tab's edges, beside the list's rule at its end, measured with
  *  a token or the system's text color read through a probe. */
 async function drawnVerticalTab(world: BrowserWorld, name: string, token: string) {

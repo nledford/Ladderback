@@ -649,6 +649,10 @@ Feature: The shared components in the gallery
     Then every tab of the list of the tab "Demo overview" shows whole inside the window, on more than one line, above the list's rule
     And the tab "Demo overview" stands on a line above the last of its list
     And every tab of the list of the tab "Demo overview" stands on its own rule: the selected one on a 3 pixel bar in --accent, the others on a 1 pixel rule in --muted
+    And a tab of the list of the tab "Demo sources" wraps its words onto more than one line
+    And every tab of the list of the tab "Demo sources" is as wide as the list, its words on every line at the column's start
+    And a tab of the list of the tab "First vertical tab" wraps its words onto more than one line
+    And every tab of the list of the tab "First vertical tab" is as wide as the list, its words on every line at the column's start
     And the page doesn't scroll sideways
 
   Scenario: Horizontal tabs, the default, stand in a row above their panel, say so, and leave the up and down arrows to the page
@@ -750,6 +754,17 @@ Feature: The shared components in the gallery
     When I press ArrowRight
     Then focus is on the tab "Third vertical tab"
     And the tab "Third vertical tab" is selected and the one Tab stop of its list
+
+  Scenario Outline: Tabs in a column are as wide as it, their words lined up at its start, <demo>
+    When I open the component gallery
+    Then the tab list of the tab "<tab>" is vertical, a column at the start of its panel
+    And every tab of the list of the tab "<tab>" is as wide as the list, its words on every line at the column's start
+
+    Examples:
+      | demo                   | tab                |
+      | vertical               | Demo sources       |
+      | vertical right to left | First vertical tab |
+      | responsive             | Demo general       |
 
   Scenario: Responsive tabs are vertical where their container has room for the list beside the panel, and horizontal in a narrow column of the same wide page
     When I open the component gallery
