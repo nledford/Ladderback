@@ -72,8 +72,13 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
 
 /// The configuration in `file`, only read, never migrated: a daemon may be
 /// running on it, and only the one that holds the data folder's lock may
-/// rewrite it. No file is a configuration with no repository.
-fn read_config(file: &Path) -> Result<AgentConfig, ConfigError> {
+/// rewrite it. No file is a configuration with no repository. Also what
+/// `install-service` counts the keyring passwords of.
+#[expect(
+    clippy::result_large_err,
+    reason = "the configuration adapter's own error, met once per command and turned into its message by config_refused"
+)]
+pub(crate) fn read_config(file: &Path) -> Result<AgentConfig, ConfigError> {
     let shown = file.display().to_string();
     let opened = match std::fs::File::open(file) {
         Ok(opened) => opened,
