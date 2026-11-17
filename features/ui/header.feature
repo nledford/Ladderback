@@ -77,11 +77,15 @@ Feature: The header bar
     Then focus is on the heading "Settings"
     And the page shows no alert containing "did not answer"
 
-  Scenario Outline: On a narrow screen the running version and Sign out end the header's line, at <size> percent text
+  # The version's width depends on the build's commit, whose digits differ in
+  # width, so the scenario measures the widest and the narrowest version a
+  # build between releases can show, never this build's own commit.
+  Scenario Outline: On a narrow screen the running version and Sign out end the header's line, at <size> percent text, with the <width> version
     Given a viewport of 320 by <height> pixels
     And the reader sets the text size to <size> percent
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
+    And the running version is the <width> one a build between releases can show
     And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
@@ -94,6 +98,7 @@ Feature: The header bar
     And the page has no accessibility violations
 
     Examples:
-      | height | size |
-      | 640    | 100  |
-      | 256    | 200  |
+      | height | size | width     |
+      | 640    | 100  | widest    |
+      | 640    | 100  | narrowest |
+      | 256    | 200  | widest    |
