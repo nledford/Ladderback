@@ -383,11 +383,27 @@ impl Proposal {
 
     /// The repositories its changes touch, which its forget preview covers
     /// (decision 89, point 8): the repository of each plan a change adds,
-    /// changes or removes, before the change and after it, each change read
-    /// against what the changes before it made, in the order first named,
-    /// each once.
+    /// changes or removes, as `config` holds it and as the change makes it,
+    /// in the order first named, each once. A plan an earlier change moved
+    /// is named in both its repositories already, so each change is read
+    /// against `config` itself.
     pub fn repositories(&self, config: &AgentConfig) -> Vec<RepositoryAlias> {
-        todo!()
+        let mut named: Vec<RepositoryAlias> = Vec::new();
+        for change in &self.changes {
+            let (id, to) = match change {
+                ConfigChange::AddPlan(plan) | ConfigChange::ChangePlan(plan) => {
+                    (&plan.id, Some(&plan.repository))
+                }
+                ConfigChange::RemovePlan(id) => (id, None),
+            };
+            let from = config.plan(id).map(|plan| &plan.repository);
+            for alias in from.into_iter().chain(to) {
+                if !named.contains(alias) {
+                    named.push(alias.clone());
+                }
+            }
+        }
+        named
     }
 }
 

@@ -360,7 +360,23 @@ impl Proposals {
         op: OperationId,
         maintenance: &RunMaintenance,
     ) -> Result<Vec<RepositoryForget>, ProposalError> {
-        todo!()
+        let proposal = self.get(&Proposer::NoToken, id).await?;
+        if proposal.status != ProposalStatus::Pending {
+            return Err(ProposalError::NotPending(proposal.status));
+        }
+        let config = self.load().await?;
+        // `get` found it applies; a hand edit since then is a change of
+        // the file the page showed.
+        let after =
+            Proposal::check(&config, &proposal.changes).map_err(|_| ProposalError::Changed)?;
+        let mut previewed = Vec::new();
+        for repository in proposal.repositories(&config) {
+            let forget = maintenance
+                .compare_forget(op, &config, &after, &repository)
+                .await;
+            previewed.push(RepositoryForget { repository, forget });
+        }
+        Ok(previewed)
     }
 
     /// Approves the pending proposal `id` as `ask` says the page showed it,

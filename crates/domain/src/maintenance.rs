@@ -605,15 +605,43 @@ impl ForgetComparison {
     /// total snapshots after the proposal and those it removes only then,
     /// newest first.
     pub fn forgets_more(&self) -> Vec<PlanForget> {
-        todo!()
+        difference(self.after.preview(), self.before.preview())
     }
 
     /// What a forget would remove before the proposal and not after: per
     /// plan of the before side, as [`forgets_more`](Self::forgets_more)
     /// tells the other way.
     pub fn forgets_less(&self) -> Vec<PlanForget> {
-        todo!()
+        difference(self.before.preview(), self.after.preview())
     }
+}
+
+/// What `side` removes and `other` doesn't, by snapshot: per plan of
+/// `side` that removes any such, in its order. A side that is `None`
+/// removes nothing.
+fn difference(side: Option<&ForgetPreview>, other: Option<&ForgetPreview>) -> Vec<PlanForget> {
+    let Some(side) = side else {
+        return Vec::new();
+    };
+    let removed: BTreeSet<&SnapshotId> = other
+        .map(|other| other.removed().collect())
+        .unwrap_or_default();
+    side.plans
+        .iter()
+        .filter_map(|plan| {
+            let remove: Vec<Snapshot> = plan
+                .remove
+                .iter()
+                .filter(|snapshot| !removed.contains(&snapshot.id))
+                .cloned()
+                .collect();
+            (!remove.is_empty()).then(|| PlanForget {
+                plan: plan.plan.clone(),
+                total: plan.total,
+                remove,
+            })
+        })
+        .collect()
 }
 
 /// Who may maintain a repository from this agent: exactly one party does
