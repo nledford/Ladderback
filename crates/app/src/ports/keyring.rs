@@ -20,6 +20,10 @@ use domain::secrets::{KeyringEntry, SecretValue};
 ///   fails with [`KeyringError::TimedOut`], and any other failure with
 ///   [`KeyringError::Unwritable`].
 /// - An error never holds the password.
+/// - `activation` says how the keyring service is started: within a short
+///   limit, never an error, and never by reading or writing an entry, so it
+///   raises no unlock prompt. An answer it can't get in time is
+///   [`KeyringActivation::Unknown`].
 #[async_trait]
 pub trait Keyring: Send + Sync {
     async fn keep(
@@ -29,6 +33,28 @@ pub trait Keyring: Send + Sync {
     ) -> Result<Kept, KeyringError>;
 
     async fn remove(&self, entry: &KeyringEntry) -> Result<(), KeyringError>;
+
+    /// Whether the keyring service can be started on demand, as the
+    /// Repositories page asks it (security §10.2). Never asked before a run.
+    async fn activation(&self) -> KeyringActivation;
+}
+
+/// How the keyring service is started. On Linux the session bus starts the
+/// Secret Service when a program first asks for it, if an activation file
+/// names it; a service with none runs only once the desktop starts it, so a
+/// program that asks before then finds no keyring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyringActivation {
+    /// Something starts it whenever a program asks for it: the session bus
+    /// can, or the platform's keyring is always there (the macOS keychain).
+    OnDemand,
+    /// It runs now, but nothing can start it on demand.
+    RunningOnly,
+    /// It doesn't run, and nothing can start it: there is no keyring service.
+    Absent,
+    /// The question got no answer: no session bus, or one that failed or
+    /// didn't answer in time.
+    Unknown,
 }
 
 /// How a password came to be in its keyring entry.

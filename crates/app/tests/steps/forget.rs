@@ -179,6 +179,12 @@ impl ForgetWorld {
         })
     }
 
+    /// The configuration store the use case loads, for a proposal checked
+    /// against it.
+    pub fn config(&self) -> Arc<InMemoryConfigStore> {
+        Arc::clone(&self.store)
+    }
+
     /// What a refused run answered, for the adoption steps too.
     pub fn set_refused(&mut self, error: Option<MaintenanceError>) {
         self.refused = error;

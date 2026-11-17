@@ -5,7 +5,7 @@ use domain::secrets::{
     SecretRef, SecretValue, SecretWarning, SourceName,
 };
 
-use crate::ports::{Kept, Keyring, KeyringError, Resolved, SecretResolver};
+use crate::ports::{Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver};
 
 /// Sets up the places secrets are read from, in memory for a fake and for
 /// real in a scratch directory for the real resolver, so the same checks run
@@ -27,6 +27,10 @@ pub trait SecretsHarness: Send + Sync {
     /// A resolver whose keyring service answers and refuses: its keyring is
     /// locked, or its unlock prompt was dismissed.
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver>;
+
+    /// A keyring whose platform says its service is started as `activation`
+    /// says: for the real adapter, a stand-in for the session bus's answer.
+    fn keyring_activated(&self, activation: KeyringActivation) -> Arc<dyn Keyring>;
 
     /// Sets a variable of the environment the resolver reads.
     fn set_env(&self, name: &str, value: &str);
@@ -110,6 +114,7 @@ async fn keyrings(harness: &dyn SecretsHarness) {
     an_entry_that_holds_another_secret_is_never_overwritten(harness).await;
     a_removed_entry_is_missing(harness).await;
     a_keyring_with_no_service_is_told_apart_from_one_that_refuses(harness).await;
+    a_keyring_says_how_its_service_is_started(harness).await;
 }
 
 async fn resolve(
@@ -535,6 +540,23 @@ async fn a_keyring_with_no_service_is_told_apart_from_one_that_refuses(
         cause(harness.with_refusing_keyring().resolve(&secret).await),
         Some(KeyringCause::Refused)
     );
+}
+
+/// How the keyring service is started is what the platform said, each answer
+/// as it is: only `RunningOnly` makes the Repositories page note it, so none
+/// may stand for another.
+async fn a_keyring_says_how_its_service_is_started(harness: &dyn SecretsHarness) {
+    for activation in [
+        KeyringActivation::OnDemand,
+        KeyringActivation::RunningOnly,
+        KeyringActivation::Absent,
+        KeyringActivation::Unknown,
+    ] {
+        assert_eq!(
+            harness.keyring_activated(activation).activation().await,
+            activation
+        );
+    }
 }
 
 /// A password kept in an entry that wasn't there is the entry's secret, and

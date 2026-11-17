@@ -765,3 +765,80 @@ fn a_change_that_no_longer_applies_needs_the_forget_preview() {
     );
     assert!(proposal.needs_forget_preview(&config(&[])));
 }
+
+fn touched(changes: Vec<ConfigChange>, config: &AgentConfig) -> Vec<RepositoryAlias> {
+    drafted(changes, config).repositories(config)
+}
+
+#[test]
+fn a_plan_moved_to_another_repository_touches_both_in_the_order_named() {
+    let config = config_over(&["nas", "usb"], &["home", "photos"]);
+    let mut moved = plan("home");
+    moved.repository = alias("usb");
+    assert_eq!(
+        touched(
+            vec![
+                ConfigChange::ChangePlan(moved),
+                ConfigChange::RemovePlan(id("photos")),
+            ],
+            &config
+        ),
+        [alias("nas"), alias("usb")],
+        "each repository once, the old one first"
+    );
+}
+
+#[test]
+fn a_plan_moved_twice_touches_every_repository_it_passes_through() {
+    // `usb` holds the plan only between the two changes.
+    let config = config_over(&["nas", "usb", "cloud"], &["home"]);
+    let mut to_usb = plan("home");
+    to_usb.repository = alias("usb");
+    let mut to_cloud = plan("home");
+    to_cloud.repository = alias("cloud");
+    assert_eq!(
+        touched(
+            vec![
+                ConfigChange::ChangePlan(to_usb),
+                ConfigChange::ChangePlan(to_cloud),
+            ],
+            &config
+        ),
+        [alias("nas"), alias("usb"), alias("cloud")]
+    );
+}
+
+#[test]
+fn a_new_plan_touches_its_repository_and_a_removal_the_removed_plans() {
+    let config = config_over(&["nas", "usb"], &["home"]);
+    let mut photos = plan("photos");
+    photos.repository = alias("usb");
+    assert_eq!(
+        touched(vec![ConfigChange::AddPlan(photos)], &config),
+        [alias("usb")]
+    );
+    assert_eq!(
+        touched(vec![ConfigChange::RemovePlan(id("home"))], &config),
+        [alias("nas")]
+    );
+}
+
+#[test]
+fn a_change_that_no_longer_applies_still_names_its_repository() {
+    // Drafted when `ghost` and `nobody` were plans; both are gone since:
+    // the change names `usb`, and a removal of no plan names none.
+    let drafted_against = config_over(&["nas", "usb"], &["home", "ghost", "nobody"]);
+    let mut ghost = plan("ghost");
+    ghost.repository = alias("usb");
+    let proposal = drafted(
+        vec![
+            ConfigChange::ChangePlan(ghost),
+            ConfigChange::RemovePlan(id("nobody")),
+        ],
+        &drafted_against,
+    );
+    assert_eq!(
+        proposal.repositories(&config_over(&["nas", "usb"], &["home"])),
+        [alias("usb")]
+    );
+}

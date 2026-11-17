@@ -1,29 +1,32 @@
 //! The proposal routes' side of the wiring (§16, decision 89): each change
 //! of a proposal read by the config adapter as the file is read when it
-//! loads, then proposed, listed, read or withdrawn by the use case of
-//! `app`, and each refusal said as the routes answer it: at the change and
-//! its setting, never with a value.
+//! loads, then proposed, listed, read, withdrawn or previewed by the use
+//! case of `app`, and each refusal said as the routes answer it: at the
+//! change and its setting, never with a value. A repository the forget
+//! preview couldn't read is told as the maintenance routes tell it.
 
 use std::sync::Arc;
 
 use api::{ChangeProblem, ErrorCode, PlanProblem, ProposalChangeDto};
+use app::maintenance::RunMaintenance;
 use app::ports::{
     ConfigError, ConfigStore, EventBus, Problem, ProposalStore, Random as _, RandomUnavailable,
 };
-use app::proposals::{ApprovalAsk, ProposalError, ProposalPorts, Proposals};
+use app::proposals::{ApprovalAsk, ProposalError, ProposalPorts, Proposals, RepositoryForget};
 use app::repositories::ConfigWrites;
 use app::schedule::ConfigChanged;
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
-use domain::PlanId;
 use domain::planning::{
     ChangeRefused, ConfigChange, DiffHash, MAX_CHANGES, MAX_PENDING, MAX_RATIONALE_CHARS,
     PlanSetting, Proposal, ProposalId, ProposalRefused, ProposalWarning, Proposer, Rationale,
     RejectionRefused, RevisionKey, Shown, ShownRevision, SummaryLine, TooSoon, short_proposal_id,
 };
+use domain::{OperationId, PlanId};
 use http_adapter::{Approval, PlansError, ProposalsError, SignIn};
 use platform::SystemClock;
 use platform::random::OsRandom;
+use uuid::Uuid;
 
 use super::config_unusable;
 use super::plans::{problem_of, violated};
@@ -80,13 +83,22 @@ pub(super) struct ProposalService {
     /// Shared with each approval's own task, which a browser that hangs up
     /// doesn't stop.
     proposals: Arc<Proposals>,
+    /// What reads the repositories a proposal's forget preview covers.
+    maintenance: RunMaintenance,
+    /// The configuration, whose secrets a refused read masks (I4).
+    config: Arc<dyn ConfigStore>,
 }
 
 impl ProposalService {
     /// The proposals over `parts`, an approval confirmed as `sign_in`
     /// says: by the admin password with sign-in on, by the proposal's
-    /// short ID with it off (decision 89, point 6).
-    pub(super) fn new(parts: &ProposalParts, sign_in: &SignIn) -> Self {
+    /// short ID with it off (decision 89, point 6). A forget preview reads
+    /// the repositories through `maintenance`.
+    pub(super) fn new(
+        parts: &ProposalParts,
+        sign_in: &SignIn,
+        maintenance: RunMaintenance,
+    ) -> Self {
         let proposals = parts.proposals();
         let proposals = match sign_in {
             SignIn::On(access) => proposals.with_access(Arc::clone(access)),
@@ -95,6 +107,8 @@ impl ProposalService {
         Self {
             file: Arc::clone(&parts.file),
             proposals: Arc::new(proposals),
+            maintenance,
+            config: Arc::clone(&parts.config),
         }
     }
 }
@@ -196,6 +210,34 @@ impl http_adapter::Proposals for ProposalService {
             rejected: u64::try_from(review.rejected).unwrap_or(u64::MAX),
             proposal: shown(review.proposal)?,
         })
+    }
+
+    async fn forget_preview(
+        &self,
+        id: String,
+    ) -> Result<api::ProposalForgetPreviewDto, ProposalsError> {
+        let named = named(&id)?;
+        let operation = OperationId::from_uuid(Uuid::now_v7());
+        let previewed = self
+            .proposals
+            .forget_preview(&named, operation, &self.maintenance)
+            .await
+            .map_err(|error| refused(error, &id))?;
+        let mut repositories = Vec::with_capacity(previewed.len());
+        for RepositoryForget { repository, forget } in previewed {
+            repositories.push(match forget {
+                Ok(comparison) => super::maintenance::compared_dto(&repository, &comparison),
+                // Told as the maintenance routes tell it, each secret of
+                // the repository's settings masked (I4).
+                Err(error) => api::RepositoryForgetDto::Refused {
+                    repository: repository.as_str().to_owned(),
+                    error: super::maintenance::refusal(self.config.as_ref(), &repository, error)
+                        .await
+                        .error(repository.as_str()),
+                },
+            });
+        }
+        Ok(api::ProposalForgetPreviewDto { repositories })
     }
 
     async fn approve(
@@ -592,14 +634,23 @@ sources = ["/home/demo"]
 
     fn service_with(sign_in: &SignIn) -> (ProposalService, tempfile::TempDir, std::path::PathBuf) {
         let (parts, scratch, file) = parts();
-        (ProposalService::new(&parts, sign_in), scratch, file)
+        (
+            ProposalService::new(&parts, sign_in, maintenance(&parts)),
+            scratch,
+            file,
+        )
     }
 
     /// Parts over a configuration file of `CONFIG` in a scratch folder.
     fn parts() -> (ProposalParts, tempfile::TempDir, std::path::PathBuf) {
+        parts_over(CONFIG)
+    }
+
+    /// Parts over a configuration file of `config` in a scratch folder.
+    fn parts_over(config: &str) -> (ProposalParts, tempfile::TempDir, std::path::PathBuf) {
         let scratch = tempfile::tempdir().expect("a scratch dir");
         let file = scratch.path().join("config.toml");
-        std::fs::write(&file, CONFIG).expect("the config file");
+        std::fs::write(&file, config).expect("the config file");
         let file_store = Arc::new(FileConfigStore::new(file.clone(), Arc::new(SystemClock)));
         let parts = ProposalParts {
             config: file_store.clone(),
@@ -611,6 +662,24 @@ sources = ["/home/demo"]
             revision_key: revision_key(),
         };
         (parts, scratch, file)
+    }
+
+    /// The maintenance use case over `parts`' configuration, each secret
+    /// resolved as the daemon resolves it; its engine holds no repository.
+    fn maintenance(parts: &ProposalParts) -> RunMaintenance {
+        let clock: Arc<dyn app::ports::Clock> = Arc::new(SystemClock);
+        RunMaintenance::new(
+            Arc::new(app::fakes::SimulatedEngine::new(Arc::clone(&clock))),
+            clock,
+            Arc::new(app::fakes::InMemoryOperationStore::new()),
+            app::secrets::ResolveRepository::new(Arc::new(secrets::SystemSecrets::default())),
+            Arc::new(engine::RusticRetention),
+            Arc::clone(&parts.config),
+            Arc::default(),
+            domain::AgentId::from_uuid(uuid::Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(engine::RusticSources),
+        )
     }
 
     /// Approves the proposal `id` as its review shows it, confirmed by
@@ -692,7 +761,7 @@ sources = ["/home/demo"]
     #[tokio::test]
     async fn a_browser_that_hangs_up_mid_approval_leaves_the_apply_to_finish() {
         let (parts, _scratch, file) = parts();
-        let service = ProposalService::new(&parts, &signed_out());
+        let service = ProposalService::new(&parts, &signed_out(), maintenance(&parts));
         let made = service
             .propose(
                 Proposer::NoToken,
@@ -928,5 +997,62 @@ sources = ["/home/demo"]
                 status: domain::planning::ProposalStatus::Withdrawn
             })
         );
+    }
+
+    /// A repository maintained here whose password command fails, saying
+    /// the repository's other secret as it does.
+    const CANARY_CONFIG: &str = r#"schema = 1
+
+[repositories.demo]
+repository = "/srv/demo-repo"
+password-command = "sh -c 'echo canary-inline >&2; exit 3'"
+maintenance = "local"
+
+[repositories.demo.options]
+secret_access_key = "canary-inline"
+
+[[plans]]
+id = "home"
+repository = "demo"
+sources = ["/home/demo"]
+"#;
+
+    /// A repository the forget preview couldn't read is answered with why,
+    /// as the maintenance routes tell it: what the password command said,
+    /// each secret of the repository's settings masked (I4). The proposal
+    /// stays pending.
+    #[tokio::test]
+    async fn a_forget_preview_says_why_a_repository_was_not_read_without_its_secrets() {
+        let (parts, _scratch, _file) = parts_over(CANARY_CONFIG);
+        let service = ProposalService::new(&parts, &signed_out(), maintenance(&parts));
+        let made = service
+            .propose(
+                Proposer::NoToken,
+                proposal(json!([{"kind": "remove-plan", "plan": "home"}])),
+            )
+            .await
+            .expect("proposed");
+
+        let previewed = service
+            .forget_preview(made.id.clone())
+            .await
+            .expect("previewed");
+
+        let [api::RepositoryForgetDto::Refused { repository, error }] =
+            previewed.repositories.as_slice()
+        else {
+            panic!("one repository, refused: {previewed:?}");
+        };
+        assert_eq!(repository, "demo");
+        assert_eq!(error.code, ErrorCode::SecretCommandFailed);
+        let detail = error.detail.as_deref().expect("the command's words");
+        assert!(detail.contains(domain::secrets::REDACTED), "{detail}");
+        let wire = serde_json::to_string(&previewed).expect("it serializes");
+        assert!(!wire.contains("canary-inline"), "{wire}");
+        let kept = service
+            .proposal(Proposer::NoToken, made.id)
+            .await
+            .expect("kept");
+        assert_eq!(kept.status, api::ProposalStatusDto::Pending);
     }
 }

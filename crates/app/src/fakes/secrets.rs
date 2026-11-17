@@ -8,7 +8,9 @@ use domain::secrets::{
     command_failure, command_secret, decode, file_warning,
 };
 
-use crate::ports::{Clock, Kept, Keyring, KeyringError, Resolved, SecretResolver};
+use crate::ports::{
+    Clock, Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver,
+};
 
 /// What the fake does when told to run a command.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +64,9 @@ struct State {
     /// The session's keyring service starts when this clock reaches this
     /// time: until then there is none to ask, as with `no_keyring_service`.
     service_starts: Option<(Arc<dyn Clock>, Timestamp)>,
+    /// How the keyring service is started, when a test said; otherwise on
+    /// demand, or absent with `no_keyring_service`.
+    activation: Option<KeyringActivation>,
     /// The keyring is locked: every keyring read fails, entry or not.
     keyring_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
@@ -162,6 +167,11 @@ impl FakeSecrets {
     /// prompt nobody answered: every keyring entry fails as `TimedOut`.
     pub fn stall_keyring(&self) {
         self.lock().keyring_stalls = true;
+    }
+
+    /// How the keyring service is started, as `activation` then answers.
+    pub fn set_keyring_activation(&self, activation: KeyringActivation) {
+        self.lock().activation = Some(activation);
     }
 
     /// A file at `path` whose read doesn't answer, as one on a network
@@ -365,6 +375,15 @@ impl Keyring for FakeSecrets {
         state.keyring.remove(&entry.to_string());
         Ok(())
     }
+
+    async fn activation(&self) -> KeyringActivation {
+        let state = self.lock();
+        match state.activation {
+            Some(activation) => activation,
+            None if state.no_keyring_service => KeyringActivation::Absent,
+            None => KeyringActivation::OnDemand,
+        }
+    }
 }
 
 /// A keyring with no service to ask, or a locked one, as the resolver reads
@@ -445,5 +464,15 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// Unless a test says how the keyring service is started, it is started
+    /// on demand, and a machine with no keyring service has none to start.
+    #[tokio::test]
+    async fn a_keyring_service_is_started_on_demand_unless_there_is_none() {
+        let secrets = FakeSecrets::new();
+        assert_eq!(secrets.activation().await, KeyringActivation::OnDemand);
+        secrets.remove_keyring_service();
+        assert_eq!(secrets.activation().await, KeyringActivation::Absent);
     }
 }
