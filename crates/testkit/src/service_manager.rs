@@ -433,3 +433,89 @@ fn systemd_starts_again(unit: &str, status: u8) -> bool {
             _ => false,
         }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::starts_again;
+
+    const PLIST_HEAD: &str =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n";
+
+    fn plist(keep_alive: &str) -> String {
+        format!(
+            "{PLIST_HEAD}\t<key>RunAtLoad</key>\n\t<true/>\n{keep_alive}\t<key>ExitTimeOut</key>\n\t<integer>75</integer>\n</dict>\n</plist>\n"
+        )
+    }
+
+    fn unit(restart: &str) -> String {
+        format!(
+            "[Service]\nType=exec\n{restart}RestartSec=10\n\n[Install]\nWantedBy=default.target\n"
+        )
+    }
+
+    #[test]
+    fn launchd_keeps_an_agent_alive_whatever_ended_it() {
+        let file = plist("\t<key>KeepAlive</key>\n\t<true/>\n");
+        for status in [0, 1, 75] {
+            assert!(starts_again(&file, status), "status {status}");
+        }
+    }
+
+    #[test]
+    fn launchd_with_successful_exit_false_starts_again_only_after_a_failure() {
+        let file = plist(
+            "\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n",
+        );
+        assert!(!starts_again(&file, 0));
+        assert!(starts_again(&file, 1));
+        assert!(starts_again(&file, 75));
+    }
+
+    #[test]
+    fn launchd_with_successful_exit_true_starts_again_only_after_a_success() {
+        let file = plist(
+            "\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<true/>\n\t</dict>\n",
+        );
+        assert!(starts_again(&file, 0));
+        assert!(!starts_again(&file, 1));
+    }
+
+    #[test]
+    fn launchd_without_keep_alive_never_starts_again() {
+        let file = plist("");
+        assert!(!starts_again(&file, 0));
+        assert!(!starts_again(&file, 1));
+        let other = plist("\t<key>KeepAlive</key>\n\t<false/>\n");
+        assert!(!starts_again(&other, 1));
+    }
+
+    #[test]
+    fn systemd_restart_always_starts_again_after_any_status() {
+        let file = unit("Restart=always\nSuccessExitStatus=75\n");
+        for status in [0, 1, 75] {
+            assert!(starts_again(&file, status), "status {status}");
+        }
+    }
+
+    #[test]
+    fn systemd_on_failure_starts_again_only_after_an_unclean_status() {
+        let file = unit("Restart=on-failure\nSuccessExitStatus=75\n");
+        assert!(!starts_again(&file, 0));
+        assert!(starts_again(&file, 1));
+        // 75 is clean here, so only a force brings the unit back.
+        assert!(!starts_again(&file, 75));
+        let forced = unit("Restart=on-failure\nRestartForceExitStatus=75\nSuccessExitStatus=75\n");
+        assert!(starts_again(&forced, 75));
+        assert!(!starts_again(&forced, 0));
+    }
+
+    #[test]
+    fn systemd_without_restart_starts_again_only_on_a_forced_status() {
+        let file = unit("");
+        assert!(!starts_again(&file, 1));
+        let forced = unit("RestartForceExitStatus=3 75\n");
+        assert!(starts_again(&forced, 75));
+        assert!(starts_again(&forced, 3));
+        assert!(!starts_again(&forced, 1));
+    }
+}
