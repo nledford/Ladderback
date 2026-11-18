@@ -724,6 +724,22 @@ fn a_snapshot_s_address_encodes_its_repository() {
 }
 
 #[test]
+fn a_snapshot_s_row_links_to_its_page_only_once_its_address_parses() {
+    assert_eq!(
+        snapshot_link("a/b", "ff"),
+        Destination::route("/snapshots/a%2Fb/ff", Matching::Exact)
+    );
+    assert!(snapshot_link("demo", "ff").is_some());
+    for (alias, snapshot) in [("demo", ".."), ("demo", "."), ("..", "ff"), ("", "ff")] {
+        assert_eq!(
+            snapshot_link(alias, snapshot),
+            None,
+            "{alias:?} {snapshot:?}"
+        );
+    }
+}
+
+#[test]
 fn each_row_has_its_level_position_and_its_folder_s_size() {
     let mut tree = opened();
     open_with(

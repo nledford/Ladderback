@@ -195,6 +195,13 @@ async fn a_password_the_keyring_could_not_keep_is_refused_naming_its_entry() {
             true,
         ),
         (
+            KeyringError::Locked {
+                detail: said.clone(),
+            },
+            ErrorCode::KeyringLocked,
+            true,
+        ),
+        (
             KeyringError::Unwritable {
                 detail: said.clone(),
             },

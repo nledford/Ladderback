@@ -22,15 +22,15 @@ use l10n::{Localizer, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
-use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 
 use crate::announcer::Politeness;
 use crate::components::button::{Appearance, Content};
+use crate::components::link::rules::{Destination, Matching};
 use crate::components::tree::rules::{Selection, folder_url};
 use crate::components::{
-    Button, Confirmation, FolderLoader, FolderPage, RadioGroup, ReviewDialog, StepUp, StepUpField,
-    Tree, Working, dialog_refusal_alert,
+    Button, Confirmation, FolderLoader, FolderPage, Link, RadioGroup, ReviewDialog, StepUp,
+    StepUpField, Tree, Working, dialog_refusal_alert,
 };
 use crate::download;
 use crate::live::{reply, say};
@@ -100,6 +100,11 @@ fn snapshot_view(localizer: Arc<Localizer>, alias: String, snapshot: String) -> 
         })
     });
     let selected = RwSignal::new(None::<Selection>);
+    // Back to the Snapshots page, which is never the page the reader is on
+    // here: the navigation's Snapshots link marks the section instead.
+    let back = Destination::route("/snapshots", Matching::Exact);
+    let back_words = text(&localizer, msg::UI_SNAPSHOT_BACK);
+    let back_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>{text(&localizer, msg::UI_SNAPSHOT_BODY)}</p>
@@ -113,7 +118,14 @@ fn snapshot_view(localizer: Arc<Localizer>, alias: String, snapshot: String) -> 
         />
         <EntryPane localizer=Arc::clone(&localizer) alias snapshot selected />
         <p>
-            <A href="/snapshots">{text(&localizer, msg::UI_SNAPSHOT_BACK)}</A>
+            {back
+                .map(|to| {
+                    view! {
+                        <Link to=to localizer=back_localizer>
+                            {back_words}
+                        </Link>
+                    }
+                })}
         </p>
     }
 }

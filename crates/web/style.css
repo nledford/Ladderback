@@ -164,12 +164,12 @@ a {
   font-weight: 600;
 }
 
-/* The brand is the start page's link, and looks like the brand still: the
-   product's mark, then its name. */
+/* The brand is the start page's link (`Link`, in the color of the text
+   around it), and looks like the brand still: the product's mark, then its
+   name. */
 .brand a {
   display: inline-block;
   padding-block: 0.25rem;
-  color: inherit;
 }
 
 /* The mark (`BrandMark` in main.rs), as tall as the name's letters, the
@@ -247,8 +247,8 @@ a {
   padding-block: 0.25rem;
 }
 
-/* The pages' links, in the header of every page; the current page is bold,
-   which is more than its color (§4.5, A2). */
+/* The pages' links (`Link`), in the header of every page; `Link` draws the
+   current page bold, which is more than its color (§4.5, A2). */
 .site-nav ul {
   display: flex;
   flex-wrap: wrap;
@@ -261,10 +261,6 @@ a {
 .site-nav a {
   display: inline-block;
   padding-block: 0.25rem;
-}
-
-.site-nav a[aria-current="page"] {
-  font-weight: 700;
 }
 
 /* A failed sign-out, said at the top of the main content

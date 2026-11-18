@@ -395,13 +395,19 @@ impl Keyring for FakeSecrets {
     }
 }
 
-/// A keyring with no service to ask, or a locked one, as the resolver reads
-/// it: what keeping or removing an entry is refused with there.
+/// A keyring with no service to ask, a locked one or one that refused, as
+/// the resolver reads it: what keeping or removing an entry is refused with
+/// there.
 fn unavailable(state: &State) -> Result<(), KeyringError> {
     match keyring_unavailable(state) {
-        Some((detail, _)) => Err(KeyringError::Unavailable {
+        Some((detail, KeyringCause::Locked)) => Err(KeyringError::Locked {
             detail: detail.to_owned(),
         }),
+        Some((detail, KeyringCause::NoService | KeyringCause::Refused)) => {
+            Err(KeyringError::Unavailable {
+                detail: detail.to_owned(),
+            })
+        }
         None => Ok(()),
     }
 }

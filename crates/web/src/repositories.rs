@@ -215,6 +215,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         // keyring the person chose (§10.2).
         ErrorCode::PasswordNotAccepted
         | ErrorCode::KeyringUnavailable
+        | ErrorCode::KeyringLocked
         | ErrorCode::KeyringUnwritable
         | ErrorCode::KeyringEntryTaken => Some(Field::Password),
         ErrorCode::SecretMissing
@@ -1020,6 +1021,7 @@ mod tests {
     fn a_password_the_keyring_could_not_keep_belongs_to_the_password_field() {
         for code in [
             ErrorCode::KeyringUnavailable,
+            ErrorCode::KeyringLocked,
             ErrorCode::KeyringUnwritable,
             ErrorCode::KeyringEntryTaken,
         ] {

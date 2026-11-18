@@ -102,3 +102,37 @@ Feature: The header bar
       | 640    | 100  | widest    |
       | 640    | 100  | narrowest |
       | 256    | 200  | widest    |
+
+  # The header's links are the shared link (§4.5): underlined, the product's
+  # name in the color of the text around it, the pages' links in Ladder Blue.
+  # A page of the navigation is current on its own path and on every page
+  # below it, as a snapshot's page is below the Snapshots page.
+  Scenario Outline: The product's name and the pages' links are underlined, and the page the reader is in is marked bold, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the address "/snapshots/demo/3f2a"
+    Then every link in the banner is underlined below its letters, 8 in all
+    And each link in the banner is drawn in its tone:
+      | link            | color              |
+      | Ladderback      | the text around it |
+      | Operations      | --accent           |
+      | Plans           | --accent           |
+      | Pending changes | --accent           |
+      | Snapshots       | --accent           |
+      | Repositories    | --accent           |
+      | Log             | --accent           |
+      | Settings        | --accent           |
+    And the link "Snapshots" is the current page, drawn bold
+    And the link "Ladderback" is not the current page, drawn in the weight of the text around it
+    And the page has no accessibility violations
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors the product's name and the pages' links take the system's link color and keep their underline
+    Given the browser asks for "forced colors"
+    When I open the address "/operations"
+    Then every link in the banner is drawn in the system's link color, 8 in all
+    And every link in the banner is underlined below its letters, 8 in all
+    And the link "Operations" is the current page, drawn bold

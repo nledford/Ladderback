@@ -176,13 +176,14 @@ Given("the daemon has found that version {string} is available", function (this:
 
 // The notice follows the running version in reading order, and is no live
 // region of its own: only the announcer talks (A3). Its link opens the
-// release's notes without telling GitHub the page it came from.
+// release's notes without telling GitHub the page it came from, and its name
+// says it goes to another site, as every outside link's does (§4.5).
 Then(
   "the header links to the notes of version {string} after the running version",
   async function (this: BrowserWorld, version: string) {
     const banner = this.page.getByRole("banner");
     const running = banner.getByText(namePattern(`Version ${await runningBuild()}`));
-    const link = banner.getByRole("link", { name: namePattern(`Version ${version} is available`) });
+    const link = banner.getByRole("link", { name: namePattern(`Version ${version} is available (goes to another site)`) });
     await expect(link).toHaveCount(1);
     await expect(banner.getByRole("status")).toHaveCount(0);
     await expect(link).toBeVisible();

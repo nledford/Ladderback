@@ -6,7 +6,9 @@ Feature: Keeping a repository's password in the system keyring
   never the password (§10.2). An entry is never overwritten: one that holds
   another password is refused and left as it is, and one that already holds
   the typed password is used as it is. Where there is no keyring to keep it
-  in, nothing is saved and nothing is created. A request that fails after it
+  in, or the keyring is locked, nothing is saved and nothing is created, and
+  a locked keyring is named as locked, since unlocking it lets the person
+  save again. A request that fails after it
   added an entry removes it again, unless a repository was created with that
   password, whose only copy the entry may then be.
 
@@ -36,6 +38,13 @@ Feature: Keeping a repository's password in the system keyring
     When the agent initialises the repository as "demo", keeping the password in the keyring
     Then the request is refused because there is no keyring to keep the password in
     And the engine ran no job
+    And the agent has no repository configured
+
+  Scenario: Where the keyring is locked, keeping the password in it is refused because it is locked, and nothing is saved
+    Given a repository the engine identifies
+    And a machine whose keyring is locked
+    When the agent connects it as "demo", keeping the password in the keyring
+    Then the request is refused because the keyring is locked
     And the agent has no repository configured
 
   Scenario: A keyring entry that holds another password is refused and left as it is
