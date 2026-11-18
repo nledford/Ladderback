@@ -9,7 +9,10 @@ Feature: The shared components in the gallery
   that language and its direction, a progress bar a keyboard user can reach, whose changes
   are never announced and are told at most every 30 seconds, which shows
   no percentage while its size isn't known, and whose fill takes its tone
-  and whose track its thickness from the shared vocabulary, a toast, the
+  and whose track its thickness from the shared vocabulary, a toast, which
+  answers what the reader did without taking focus, its icon naming its
+  tone, and which goes by itself only when nothing in it needs the reader,
+  never while the reader is on it, the
   control that pauses live updates, a status badge for every state an
   operation can be in, whose icon tells the state by its shape, a
   snapshot's tree, one stop for Tab, whose folders are read as they are
@@ -46,16 +49,23 @@ Feature: The shared components in the gallery
   of tabs, one stop for Tab, in a row above its panel, in a column at its
   start, or in whichever of the two its container has room for, whose arrow
   keys follow the layout shown and the page's direction, each panel kept as
-  it was while another is shown or the layout changes, and an alert, an
-  inline message about a page's state whose icon names its tone in words,
-  which is no live region and no stop for Tab, and whose Dismiss button
-  takes it away and leaves focus where its page names.
+  it was while another is shown or the layout changes, an alert, an inline
+  message about a page's state whose icon names its tone in words, which
+  is no live region and no stop for Tab, and whose Dismiss button takes it
+  away and leaves focus where its page names, and a badge, a count or a
+  tag on a pill of its tone's colors, which says what it counts or names
+  in words, never by its color alone, its icon a decoration a screen
+  reader skips, and which Tab never stops on.
   Every demo state a component can show (loading, empty, error, success,
   on and off) stays clear
   of accessibility violations, and each component's structure is pinned by an
   ARIA snapshot. The text of a control, such as a button's label, grows with
   the reader's text size as the page's does, and the gallery still fits a
   small screen when the text has grown (A4).
+  A banner, a page-wide notice above a page's content, shows its tone by an
+  icon named in words, is no live region and no stop for Tab, and its
+  Dismiss button takes it away, leaves focus where its page names and is
+  remembered in this browser until a newer edition of it comes.
 
   Scenario: A dialog opens from a button, traps focus, closes on Escape and returns focus
     When I open the component gallery
@@ -68,6 +78,24 @@ Feature: The shared components in the gallery
     Then focus is on the first control of the dialog "Demo dialog"
     When I press Escape
     Then focus is on the button "Open the demo dialog"
+
+  Scenario: A dialog can start on a button of its own, hand Escape to its page, and close once its page has answered
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Open the demo warning"
+    And I press Enter
+    Then the dialog "Demo warning" opens with focus on the button "Keep the demo warning"
+    And the dialog "Demo warning" is described as saying "Escape keeps this warning open"
+    And the page has no accessibility violations
+    When I press Escape
+    Then the dialog "Demo warning" politely says "The page keeps the demo warning open."
+    And the dialog "Demo warning" stays open
+    When I press Tab
+    Then focus is on the first control of the dialog "Demo warning"
+    And focus is on the button "Answer the demo warning"
+    When I press Enter
+    Then the dialog "Demo warning" is closed
+    And focus is on the button "Open the demo warning"
 
   Scenario: The step-up field takes a password from a password manager or paste
     When I open the component gallery
@@ -340,15 +368,178 @@ Feature: The shared components in the gallery
       | en-US  | left to right |
       | ar-XB  | right to left |
 
-  Scenario: A toast appears and is announced politely, and its going is not announced
+  Scenario: A toast answers the reader politely without taking focus, is no live region, and goes by itself unannounced
     When I open the component gallery
     And I skip to the content
     And I press Tab until focus is on the button "Save the demo settings"
     And I press Enter
-    Then a toast reads "Settings saved."
+    Then the toast reads "Settings saved." after its icon "Success"
+    And the toast is no live region, nor holds one
+    And focus stays on the button "Save the demo settings"
     And the polite region reads "Settings saved."
     When the toast "Settings saved." is gone
     Then the polite region reads "Settings saved."
+
+  Scenario Outline: A toast in the <tone> tone names its tone by its icon, is said in the <region> region and takes no focus
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "<button>"
+    And I press Enter
+    Then the toast reads "<words>" after its icon "<name>"
+    And the <region> region reads "<words>"
+    And focus stays on the button "<button>"
+    And the "Toast" demo has no accessibility violations
+
+    Examples:
+      | tone    | button                    | words                                                          | name        | region    |
+      | primary | Queue a demo check        | Demo check queued.                                             | Information | polite    |
+      | success | Save the demo settings    | Settings saved.                                                | Success     | polite    |
+      | warning | Back up the demo plan     | Demo backup finished with warnings: 2 files couldn't be read. | Warning     | polite    |
+      | error   | Restore the demo snapshot | The demo restore failed.                                       | Error       | assertive |
+
+  Scenario Outline: A toast in the <tone> tone goes by itself <lifetime> seconds after it arrives
+    Given the page's clock can be moved on
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "<button>"
+    And I press Enter
+    And the page's clock moves on 5 seconds
+    Then the toast reads "<words>" after its icon "<name>"
+    When the page's clock moves on 2 seconds
+    Then the "Toast" demo shows no toast
+
+    Examples:
+      | tone    | button                 | words              | name        | lifetime |
+      | primary | Queue a demo check     | Demo check queued. | Information | 6        |
+      | success | Save the demo settings | Settings saved.    | Success     | 6        |
+
+  Scenario Outline: A toast in the <tone> tone needs the reader, so it stays until the reader dismisses it
+    Given the page's clock can be moved on
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "<button>"
+    And I press Enter
+    And the page's clock moves on 600 seconds
+    Then the toast reads "<words>" after its icon "<name>"
+
+    Examples:
+      | tone    | button                    | words                                                          | name    |
+      | warning | Back up the demo plan     | Demo backup finished with warnings: 2 files couldn't be read. | Warning |
+      | error   | Restore the demo snapshot | The demo restore failed.                                       | Error   |
+
+  Scenario: A toast waits while focus is on it, and has its whole time again once focus leaves
+    Given the page's clock can be moved on
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Save the demo settings"
+    And I press Enter
+    And the page's clock moves on 3 seconds
+    And I press Tab until focus is on the toast's Dismiss button
+    And the page's clock moves on 600 seconds
+    Then the toast reads "Settings saved." after its icon "Success"
+    When I press Tab
+    And the page's clock moves on 5 seconds
+    Then the toast reads "Settings saved." after its icon "Success"
+    When the page's clock moves on 2 seconds
+    Then the "Toast" demo shows no toast
+
+  Scenario: A toast waits while the pointer rests on it, and has its whole time again once the pointer leaves
+    Given the page's clock can be moved on
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Save the demo settings"
+    And I press Enter
+    And the page's clock moves on 3 seconds
+    And I rest the pointer on the toast
+    And the page's clock moves on 600 seconds
+    Then the toast reads "Settings saved." after its icon "Success"
+    When I move the pointer off the toast
+    And the page's clock moves on 5 seconds
+    Then the toast reads "Settings saved." after its icon "Success"
+    When the page's clock moves on 2 seconds
+    Then the "Toast" demo shows no toast
+
+  Scenario Outline: Escape on a toast's Dismiss button leaves the toast to the reader, and <key> takes it away, says nothing more and hands focus to the control its page names, the failure staying on the page
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Restore the demo snapshot"
+    And I press Enter
+    Then the assertive region reads "The demo restore failed."
+    And the "Toast" demo shows an alert with the words "The demo restore failed: its target folder can't be written to. Choose another folder and restore again."
+    When I press Tab until focus is on the toast's Dismiss button
+    And I press Escape
+    Then the toast reads "The demo restore failed." after its icon "Error"
+    When I press <key>
+    Then the "Toast" demo shows no toast
+    And focus is on the button "Save the demo settings"
+    And the polite region stays empty
+    And the "Toast" demo shows an alert with the words "The demo restore failed: its target folder can't be written to. Choose another folder and restore again."
+
+    Examples:
+      | key   |
+      | Enter |
+      | Space |
+
+  Scenario: A new toast takes the place of the one shown
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Restore the demo snapshot"
+    And I press Enter
+    And I press Shift+Tab until focus is on the button "Save the demo settings"
+    And I press Enter
+    Then the toast reads "Settings saved." after its icon "Success"
+    When I press Tab until focus is on the button "Back up the demo plan"
+    And I press Enter
+    Then the toast reads "Demo backup finished with warnings: 2 files couldn't be read." after its icon "Warning"
+
+  Scenario Outline: A toast in the <tone> tone lies on its fill with its words, its icon and its Dismiss button in its words' color, edged in its tone, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "<button>"
+    And I press Enter
+    Then the toast lies on <fill> with its words, its icon and its Dismiss button in <words>, edged 1 pixel wide in <edge>
+
+    Examples:
+      | tone    | colors       | button                    | fill         | words        | edge      |
+      | primary | light colors | Queue a demo check        | --surface    | --fg         | --accent  |
+      | success | light colors | Save the demo settings    | --success-bg | --success-fg | --success |
+      | warning | light colors | Back up the demo plan     | --warning-bg | --warning-fg | --warning |
+      | error   | light colors | Restore the demo snapshot | --error-bg   | --error-fg   | --error   |
+      | primary | dark colors  | Queue a demo check        | --surface    | --fg         | --accent  |
+      | success | dark colors  | Save the demo settings    | --success-bg | --success-fg | --success |
+      | warning | dark colors  | Back up the demo plan     | --warning-bg | --warning-fg | --warning |
+      | error   | dark colors  | Restore the demo snapshot | --error-bg   | --error-fg   | --error   |
+
+  Scenario: Under forced colors a toast is edged in the text's color, its icon in the text's color too
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Restore the demo snapshot"
+    And I press Enter
+    Then the toast is edged 1 pixel wide in CanvasText, its icon in the text's color
+
+  Scenario Outline: A toast's icon stands at the start of its line and its Dismiss button at the end, in a page that runs <direction>
+    When I open the component gallery asking for the locale "<locale>"
+    And I skip to the content
+    And I press Enter on the first button of the toast demo
+    Then the toast has its icon before its words and its Dismiss button after them, in a page that runs <direction>
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
+
+  Scenario: On a small screen with larger text, a toast's words wrap inside it, its icon and Dismiss button inside it too
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Back up the demo plan"
+    And I press Enter
+    Then the toast holds its icon, its words and its Dismiss button inside its edge
+    And the page doesn't scroll sideways
+    And no text is clipped
 
   Scenario: The pause control holds the demo's updates and says once what changed when it resumes
     When I open the component gallery
@@ -827,8 +1018,10 @@ Feature: The shared components in the gallery
       | Checkbox    |
       | Radio group |
       | Status badge |
+      | Badge        |
       | Progress    |
       | Toast       |
+      | Banner      |
       | Review dialog |
       | Pause control |
       | Tree        |
@@ -857,8 +1050,10 @@ Feature: The shared components in the gallery
       | Checkbox    |
       | Radio group |
       | Status badge |
+      | Badge        |
       | Progress    |
       | Toast       |
+      | Banner      |
       | Review dialog |
       | Pause control |
       | Tree        |
@@ -1027,6 +1222,51 @@ Feature: The shared components in the gallery
     Given the reader sets the text size to 200 percent
     When I open the component gallery
     Then the icon of each badge of the "Status badge" demo is as tall as its text
+
+  Scenario: A badge says what it counts or names in words, with no role, its icon a decoration a screen reader skips, and Tab never stops on it
+    When I open the component gallery
+    Then every badge of the "Badge" demo says its words with no role and nothing in it to focus, any icon in it a decoration a screen reader skips
+    When I skip to the content
+    And I press Tab until focus is on the radio "English"
+    And I press Tab
+    Then focus has passed the "Badge" demo without stopping in it
+
+  Scenario Outline: Each tone of a badge is named in words and drawn on its own pair of tokens, its icon in its words' color, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then the badges of the "Badge" demo named for their tones are drawn on their pairs of tokens, at least 4.5:1 apart:
+      | badge     | words              | fill               |
+      | Primary   | --badge-loading-fg | --badge-loading-bg |
+      | Secondary | --badge-empty-fg   | --badge-empty-bg   |
+      | Success   | --success-fg       | --success-bg       |
+      | Warning   | --warning-fg       | --warning-bg       |
+      | Error     | --error-fg         | --error-bg         |
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors a badge's words and icon take the system's text color, edged 1 pixel wide in it, so its words tell the tones apart and each badge stands apart from the next
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then every badge of the "Badge" demo draws its words and icon in the color of the text around it, edged 1 pixel wide in that color
+
+  Scenario Outline: A badge's icon stands before its words, centered on their line and as tall as the text, in a page that runs <direction>
+    When I open the component gallery asking for the locale "<locale>"
+    Then the icon of each badge of the badge demo stands before its words, centered on their line and as tall as the text, in a page that runs <direction>
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
+
+  Scenario: On a small screen with larger text, a badge's words wrap within the room it is given
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then every badge of the "Badge" demo keeps within the room it is given
+    And the page doesn't scroll sideways
 
   Scenario: Each tone is named in words, and draws its text and its swatch in a color of its own, which a screen reader skips
     When I open the component gallery
@@ -1440,6 +1680,99 @@ Feature: The shared components in the gallery
     When I open the component gallery
     Then every skeleton of the "Skeleton" demo is edged 1 pixel wide in GrayText
 
+  Scenario: A banner is no live region and no stop for Tab, and its icon names its tone in words
+    When I open the component gallery
+    Then no banner of the "Banner" demo is a live region, nor holds one
+    And the banners of the "Banner" demo show these icons, each named for its tone, one shape per tone, in this order:
+      | tone    | name        |
+      | primary | Information |
+      | warning | Warning     |
+      | primary | Information |
+    When I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab
+    Then focus is on the button "Dismiss" of the "Banner" demo
+
+  Scenario Outline: <key> on a banner's Dismiss button takes the banner away, says nothing, leaves focus on the control its page names and keeps it away on the next load
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
+    And I press <key>
+    Then the "Banner" demo shows no banner with the words "A demo update is ready."
+    And focus is on the button "Show a newer demo notice"
+    And the polite region stays empty
+    And the assertive region stays empty
+    When I reload the page
+    Then the "Banner" demo shows 2 banners, none with the words "A demo update is ready."
+
+    Examples:
+      | key   |
+      | Enter |
+      | Space |
+
+  Scenario: A newer edition of a dismissed banner shows again
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
+    And I press Enter
+    And I press Enter
+    Then the "Banner" demo shows a banner with the words "A demo update is ready."
+    And focus stays on the button "Show a newer demo notice"
+
+  Scenario: A banner dismissed in a browser that keeps nothing goes for now and shows again on the next load
+    Given this browser keeps nothing a page stores
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Filled Primary"
+    And I press Tab until focus is on the button "Demo work in progress"
+    And I press Tab until focus is on the button "Show the demo plan"
+    And I press Tab until focus is on the button "Dismiss" of the "Banner" demo
+    And I press Enter
+    Then the "Banner" demo shows no banner with the words "A demo update is ready."
+    And focus is on the button "Show a newer demo notice"
+    When I reload the page
+    Then the "Banner" demo shows a banner with the words "A demo update is ready."
+
+  Scenario Outline: A banner lies on Ledger Gray, square, its words in the text's color and its icon and start edge in its tone, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then every banner of the "Banner" demo lies square on --surface with its words in --fg, its icon and its 0.25 rem start edge in its tone's color
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors a banner is edged all round in the text's color, its start edge thicker, and its icon in the text's color
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then every banner of the "Banner" demo is edged 1 pixel wide in CanvasText, its start edge 0.25 rem, and its icon in the text's color
+
+  Scenario Outline: A banner's edge and icon stand at the start of its line and its Dismiss button at the end, in a page that runs <direction>
+    When I open the component gallery asking for the locale "<locale>"
+    Then every banner of the banner demo has its edge on its start side, its icon before its words and its Dismiss button after them, in a page that runs <direction>
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
+
+  Scenario: On a small screen with larger text, a banner's words wrap inside it, its icon and Dismiss button inside it too
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then every banner of the "Banner" demo holds its icon, its words and its Dismiss button inside its edge
+    And the page doesn't scroll sideways
+    And no text is clipped
+
   Scenario: Keyboard focus on a control shows its tooltip at once, beside the control, which it describes
     When I open the component gallery
     And I press Shift+Tab until focus is on the button "Prune the demo repository"
@@ -1801,7 +2134,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Show the demo plan"
     And I press Tab until focus is on the link "the demo operations"
     And I press Tab
-    Then focus is on the button "Dismiss"
+    Then focus is on the button "Dismiss" of the "Alert" demo
 
   Scenario Outline: <key> on an alert's Dismiss button takes the alert away, says nothing and leaves focus on the control its page names
     When I open the component gallery
@@ -1809,7 +2142,7 @@ Feature: The shared components in the gallery
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
-    And I press Tab until focus is on the button "Dismiss"
+    And I press Tab until focus is on the button "Dismiss" of the "Alert" demo
     And I press <key>
     Then the "Alert" demo shows no alert with the words "This demo notice goes when you dismiss it."
     And focus is on the button "Show the demo notice again"
@@ -1855,3 +2188,21 @@ Feature: The shared components in the gallery
     Then every alert of the "Alert" demo holds its icon, its words and its Dismiss button inside its edge
     And the page doesn't scroll sideways
     And no text is clipped
+
+  # A word that fits on a line of its own wraps whole, never "Ladderbac" over
+  # "k"; only a word longer than the line, as the error's long path is, may
+  # break inside. Dismiss keeps to the end of its line, a line of its own if
+  # it doesn't fit beside the words (#972).
+  Scenario Outline: On a small screen with larger text, an alert's words wrap only between words and its Dismiss button keeps to the end, in a page that runs <direction>
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery asking for the locale "<locale>"
+    Then every alert of the alert demo breaks its words only between them, unless a word is longer than its line
+    And the Dismiss button of the alert demo stands at the end of its line, in a page that runs <direction>
+    And the page doesn't scroll sideways
+    And no text is clipped
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |

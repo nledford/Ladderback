@@ -195,6 +195,9 @@ pub fn refused(
             from(source),
             detail.clone(),
         ),
+        R::SecretKeyringLocked { source, detail } => {
+            (ErrorCode::SecretKeyringLocked, from(source), detail.clone())
+        }
         R::SecretNotText { source } => (ErrorCode::SecretNotText, from(source), None),
         R::SecretTooLarge { source, limit } => (
             ErrorCode::SecretTooLarge,
@@ -764,6 +767,16 @@ mod tests {
                 },
                 ErrorCode::SecretKeyringUnavailable,
                 "secret-keyring-unavailable",
+                vec![field(), source()],
+                said(),
+            ),
+            (
+                R::SecretKeyringLocked {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said(),
+                },
+                ErrorCode::SecretKeyringLocked,
+                "secret-keyring-locked",
                 vec![field(), source()],
                 said(),
             ),

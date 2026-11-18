@@ -13,6 +13,7 @@ use app::ports::{
     ConfigError, ConfigStore, EventBus, Problem, ProposalStore, Random as _, RandomUnavailable,
 };
 use app::proposals::{ApprovalAsk, ProposalError, ProposalPorts, Proposals, RepositoryForget};
+use app::reads::ReadTurns;
 use app::repositories::ConfigWrites;
 use app::schedule::ConfigChanged;
 use async_trait::async_trait;
@@ -50,6 +51,9 @@ pub(super) struct ProposalParts {
     /// ([`revision_key`]): held here, so every service built over these
     /// parts shows the same file the same.
     pub(super) revision_key: Result<RevisionKey, RandomUnavailable>,
+    /// The turns to list a repository's snapshots, which every listing of
+    /// the daemon shares (#710), the forget previews' included.
+    pub(super) listings: Arc<ReadTurns>,
 }
 
 /// A key to show the configuration's revisions under, drawn from the
@@ -73,6 +77,7 @@ impl ProposalParts {
             clock: Arc::new(SystemClock),
             random: Arc::new(OsRandom),
             revision_key: self.revision_key.clone(),
+            listings: Arc::clone(&self.listings),
         })
     }
 }
@@ -679,6 +684,7 @@ sources = ["/home/demo"]
             changed: app::schedule::config_changes().0,
             events: Arc::new(app::event_bus::BroadcastEventBus::new()),
             revision_key: revision_key(),
+            listings: Arc::default(),
         };
         (parts, scratch, file)
     }

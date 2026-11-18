@@ -900,6 +900,9 @@ async fn state_over(
         Arc::clone(&writes),
     ));
     let (changed, changes) = app::schedule::config_changes();
+    // The turns to list a repository's snapshots: the snapshot list's
+    // listings and the forget previews' reads take them alike (#710, #967).
+    let listings: Arc<ReadTurns> = Arc::default();
     let proposal_parts = proposals::ProposalParts {
         file: Arc::new(FileConfigStore::new(
             config_file.clone(),
@@ -911,6 +914,7 @@ async fn state_over(
         changed: changed.another(),
         events: Arc::clone(&bus),
         revision_key: proposals::revision_key(),
+        listings: Arc::clone(&listings),
     };
     // As with the operations: nothing has been approved yet, so a proposal
     // the store still shows being applied was left by a process that
@@ -953,7 +957,7 @@ async fn state_over(
         link: Arc::clone(&conditions.link),
         sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
         reads: Arc::default(),
-        listings: Arc::default(),
+        listings,
     });
     let notice = Arc::new(UpdateNotice::new());
     let background = Background {

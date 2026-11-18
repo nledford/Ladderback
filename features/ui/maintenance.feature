@@ -83,6 +83,25 @@ Feature: Maintenance of a repository on the Snapshots page
     And the page offers no button "Forget snapshots"
     And the page offers the button "Maintain from this agent"
 
+  Scenario: A change of who maintains a repository the daemon refuses is said in an error alert of the dialog's own, which stays open
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the daemon refuses each change of who maintains a repository
+    When I open the address "/snapshots"
+    And I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Stop maintaining from this agent"
+    And I press Enter
+    And I press Tab until focus is on the button "Turn off maintenance"
+    And I press Enter
+    Then the dialog "Stop maintaining demo from this agent" alerts "could not read or write its configuration file /etc/ladderback/config.toml"
+    And the page shows an error alert containing "could not read or write its configuration file /etc/ladderback/config.toml"
+    And the page has no accessibility violations
+    When I press Escape
+    Then focus is on the button "Stop maintaining from this agent"
+    And the assertive region stays empty
+
   Scenario: The dialog that turns maintenance on has no accessibility violations
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
@@ -268,7 +287,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And the main content names the pack no index lists in the engine's words, marked as English
     And the main content shows a line containing "the next prune tidies"
 
-  Scenario: A forget whose plan would keep nothing is refused when it is reviewed
+  Scenario: A forget whose plan would keep nothing is refused when it is reviewed, in an error alert said assertively
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     And the plan "home" keeps the last 0 snapshots
@@ -278,7 +297,8 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Enter
     And I press Tab until focus is on the button "Forget snapshots"
     And I press Enter
-    Then the page shows an alert containing "would keep none of its snapshots"
+    Then the page shows an error alert containing "would keep none of its snapshots"
+    And the assertive region comes to contain "would keep none of its snapshots"
 
   Scenario: The snapshots page with a repository's history has no accessibility violations
     Given a demo plan "home" with a tiny scratch repository
@@ -352,7 +372,7 @@ Feature: Maintenance of a repository on the Snapshots page
 
   # What the engine says is English whatever the language of the page, and the
   # page marks it so.
-  Scenario: The engine's words in a refusal are marked as English
+  Scenario: The engine's words in a refusal are an error alert, said assertively and marked as English
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
     And the repository has been removed
@@ -360,7 +380,8 @@ Feature: Maintenance of a repository on the Snapshots page
     And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    Then the page shows an alert containing "No repository was found at this location"
+    Then the page shows an error alert containing "No repository was found at this location"
+    And the assertive region comes to contain "No repository was found at this location"
     And the alert marks the sender's words as English
     And the page has no accessibility violations
 
@@ -532,15 +553,16 @@ Feature: Maintenance of a repository on the Snapshots page
     And no text is clipped
     And the page has no accessibility violations
 
-  Scenario: A mistake in the configuration file is shown on the Snapshots page where it is, by keyboard alone
+  Scenario: A mistake in the configuration file is shown on the Snapshots page where it is as an error alert, by keyboard alone
     Given a daemon with a scratch demo repository and no repositories
     And someone has written a setting the daemon does not know on line 6 of its configuration file
     When I open the web UI
     And I press Tab until focus is on the link "Snapshots"
     And I press Enter
     Then focus is on the main heading "Snapshots"
-    And the page shows an alert containing "did not accept its configuration file"
-    And the page shows an alert containing "line 6: repositories.demo.colour"
+    And the page shows an error alert containing "did not accept its configuration file"
+    And the page shows an error alert containing "line 6: repositories.demo.colour"
+    And the assertive region comes to contain "did not accept its configuration file"
     And the alert marks the sender's words as English
     And the page doesn't show "demo-password"
     And the page has no accessibility violations

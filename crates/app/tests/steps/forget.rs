@@ -22,7 +22,8 @@ use domain::planning::{
 };
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{
-    AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid,
+    AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId,
+    Timestamp, Uuid,
 };
 use futures::StreamExt;
 use futures::stream;
@@ -34,10 +35,10 @@ use app::maintenance::{
     MaintenanceAssessment, MaintenanceError, MaintenanceKind, PreparedMaintenance, RunMaintenance,
 };
 use app::ports::{
-    CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, ForgetSummary, Job,
-    JobControl, MAX_JOB_IDS, NormalizeSources, OperationStore, PrunePlanSummary, PruneSummary,
-    RepositoryAccess, Retention, RetentionError, RewriteSummary, RunningJob, SnapshotSummary,
-    SourcesError, Start,
+    CheckSummary, Clock, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
+    ForgetSummary, Job, JobControl, MAX_JOB_IDS, NormalizeSources, OperationStore,
+    PrunePlanSummary, PruneSummary, RepositoryAccess, Retention, RetentionError, RewriteSummary,
+    RunningJob, SnapshotSummary, SourcesError, Start,
 };
 use domain::maintenance::Snapshot;
 use domain::planning::{RetentionPolicy, Source};
@@ -133,6 +134,9 @@ pub struct ForgetWorld {
     hostname: Option<Hostname>,
     /// The environment variables the repositories' secrets resolve from.
     pub env: BTreeMap<String, String>,
+    /// How long the engine takes to list each repository, by its location,
+    /// on the use case's clock; one not named lists at once.
+    listing_takes: BTreeMap<String, SignedDuration>,
 }
 
 impl Default for ForgetWorld {
@@ -156,6 +160,7 @@ impl Default for ForgetWorld {
             env: BTreeMap::new(),
             source_reads: Arc::new(AtomicUsize::new(0)),
             hostname: None,
+            listing_takes: BTreeMap::new(),
         }
     }
 }
@@ -168,8 +173,9 @@ impl ForgetWorld {
 
     /// The engine the forget scenarios talk to: it answers an identify, a
     /// listing and a forget, holding one forget or rewrite job (the first,
-    /// unless a scenario says otherwise) until it is released.
-    pub fn engine(&self) -> Arc<dyn Engine> {
+    /// unless a scenario says otherwise) until it is released. A listing
+    /// takes the scenario's time on `clock`.
+    pub fn engine(&self, clock: Arc<dyn Clock>) -> Arc<dyn Engine> {
         Arc::new(Scripted {
             snapshots: self.snapshots.clone(),
             fail: self.fail,
@@ -179,6 +185,8 @@ impl ForgetWorld {
             hold_at: self.hold_at,
             fail_at: self.fail_at,
             repository_id: self.repository_id.clone(),
+            clock,
+            listing_takes: self.listing_takes.clone(),
         })
     }
 
@@ -598,6 +606,10 @@ struct Scripted {
     hold_at: Option<usize>,
     fail_at: Option<usize>,
     repository_id: RepositoryId,
+    clock: Arc<dyn Clock>,
+    /// How long a listing of each repository, by its location, takes on
+    /// `clock` from its start.
+    listing_takes: BTreeMap<String, SignedDuration>,
 }
 
 struct Nothing;
@@ -698,16 +710,33 @@ impl Engine for Scripted {
             _ => Vec::new(),
         };
         // Everything but the result flows at once; a forget's result waits
-        // for the release, so a scenario can hold a run on purpose. A read
-        // (identify, listing) answers at once: `assess` runs them before
-        // anything holds the repository.
+        // for the release, so a scenario can hold a run on purpose. An
+        // identify answers at once, and a listing once the scenario's time
+        // for it has passed: `assess` runs them before anything holds the
+        // repository.
         let hold = change.is_some() && change == self.hold_at;
         let release = Arc::clone(&self.release);
+        let listed_at = match &job {
+            Job::Ls(access) => Some(
+                self.clock.now()
+                    + self
+                        .listing_takes
+                        .get(&access.repository)
+                        .copied()
+                        .unwrap_or(SignedDuration::ZERO),
+            ),
+            _ => None,
+        };
+        let clock = Arc::clone(&self.clock);
         let stream = stream::iter(vec![started]).chain(stream::iter(events).then(move |event| {
             let release = Arc::clone(&release);
+            let clock = Arc::clone(&clock);
             async move {
                 if hold && matches!(event, EngineEvent::Succeeded(_)) {
                     release.notified().await;
+                }
+                if let Some(at) = listed_at {
+                    clock.sleep_until(at).await;
                 }
                 event
             }
@@ -721,6 +750,11 @@ impl Engine for Scripted {
 
 /// The maintenance use case wired to the scenario's own pieces.
 pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
+    use_case_on(agent, agent.clock.clone())
+}
+
+/// The maintenance use case wired to the scenario's own pieces, on `clock`.
+pub fn use_case_on(agent: &Agent, clock: Arc<dyn Clock>) -> Arc<RunMaintenance> {
     let secrets = app::fakes::FakeSecrets::default();
     for (name, value) in &agent.forget.env {
         secrets.set_env(name, value);
@@ -729,8 +763,8 @@ pub fn use_case(agent: &Agent) -> Arc<RunMaintenance> {
         agent
             .announcement
             .listening_maintenance(RunMaintenance::new(
-                agent.forget.engine(),
-                agent.clock.clone(),
+                agent.forget.engine(Arc::clone(&clock)),
+                clock,
                 agent.store.clone(),
                 app::secrets::ResolveRepository::new(Arc::new(secrets)),
                 match agent.forget.fail {
@@ -910,6 +944,14 @@ async fn engine_unreachable(agent: &mut Agent) {
 #[given("the repository never answers")]
 async fn repository_silent(agent: &mut Agent) {
     agent.forget.fail_read(ReadFailure::Silent);
+}
+
+#[given(expr = "listing the repository {string} takes {int} minutes")]
+async fn listing_takes(agent: &mut Agent, alias: String, minutes: i64) {
+    agent.forget.listing_takes.insert(
+        format!("/srv/{alias}/repo"),
+        SignedDuration::from_mins(minutes),
+    );
 }
 
 #[given(expr = "the folder {string} is recorded by the engine as {string}")]

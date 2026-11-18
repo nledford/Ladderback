@@ -12,11 +12,14 @@ use api::{EntryDto, EntryKindDto, FolderDto, MsgArg};
 use l10n::{Direction, Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
+use leptos::task::{spawn_local, tick};
 use leptos_router::components::A;
 
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
 use crate::components::alert::rules::AlertTone;
+use crate::components::badge::rules::BadgeTone;
+use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
 use crate::components::link::rules::{Destination, LinkTone, Matching, Outside, Route};
@@ -25,10 +28,11 @@ use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
 use crate::components::{
-    Alert, Align, Button, Checkbox, Column, Confirmation, Dismissal, FolderLoader, FolderPage,
-    Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates, Progress, RadioGroup,
-    ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State, StatusBadge, StepUp,
-    StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree, show_toast, text_field,
+    Alert, Align, Badge, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation,
+    Dismissal, FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name,
+    PauseUpdates, Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner,
+    State, StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, ToastTone,
+    Toasts, Tooltip, Tree, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -44,6 +48,12 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let table_localizer = Arc::clone(&localizer);
     // The tab the manual demo's set tells it is chosen.
     let manual_chosen = RwSignal::new(0_usize);
+    // The badge demo's count, a number in its words.
+    let pending_changes = text_with(
+        &localizer,
+        msg::UI_GALLERY_BADGES_PENDING,
+        &[("count", MsgArg::Count(3))],
+    );
     let (heading, announcer_heading) = (
         t(msg::UI_GALLERY_HEADING),
         t(msg::UI_GALLERY_ANNOUNCER_HEADING),
@@ -100,8 +110,27 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         current: 6 * GIB,
         ..progress.get_untracked()
     };
-    let toast = RwSignal::<Option<String>>::new(None);
-    let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
+    // The toast demo's toasts, and whether its restore's failure stands on
+    // the page, as a failure must beside its toast.
+    let toasts = Toasts::new();
+    let restore_failure_shown = RwSignal::new(false);
+    let toast_button = |id: &'static str, label, tone, words| {
+        let words: String = t(words);
+        view! {
+            <p>
+                <Button
+                    content=Content::Text(t(label).into())
+                    id=id
+                    on_press=Callback::new(move |()| {
+                        if tone == ToastTone::Error {
+                            restore_failure_shown.set(true);
+                        }
+                        toasts.show(tone, words.clone());
+                    })
+                />
+            </p>
+        }
+    };
     // Whether the icon demo's notifications are on, which its icon-only
     // toggle button shows and changes.
     let notifications = RwSignal::new(false);
@@ -125,6 +154,27 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let dialog_body = t(msg::UI_GALLERY_DEMO_DIALOG_BODY);
     let dialog_polite_text = backup_finished.clone();
     let dialog_polite_label = polite_button.clone();
+    let dialog_open = RwSignal::new(false);
+    // The demo warning, which hands Escape to the page as the idle warning
+    // does: whether it is open, the button it starts on, and whether the page
+    // has said it keeps the warning open, cleared first on each keep so a
+    // second one is said again.
+    let warning_open = RwSignal::new(false);
+    let warning_keep = NodeRef::<leptos::html::Button>::new();
+    let warning_kept = RwSignal::new(false);
+    let keep_warning = move || {
+        warning_kept.set(false);
+        spawn_local(async move {
+            tick().await;
+            warning_kept.try_set(true);
+        });
+    };
+    let (warning_body, warning_kept_text, warning_answer, warning_keep_label) = (
+        t(msg::UI_GALLERY_DEMO_WARNING_BODY),
+        t(msg::UI_GALLERY_DEMO_WARNING_KEPT),
+        t(msg::UI_GALLERY_ANSWER_DEMO_WARNING),
+        t(msg::UI_GALLERY_KEEP_DEMO_WARNING),
+    );
     // The pause control's demo: whether it is paused, and the demo runs that
     // finished meanwhile, each a change the banner counts.
     let demo_paused = RwSignal::new(false);
@@ -223,6 +273,16 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             last: Share::percent(40),
         },
     );
+    // The banner demo: its words in each tone it takes, and the edition of
+    // its dismissible notice, which the button after it makes newer, so the
+    // dismissal of the one before doesn't keep it away.
+    let (banner_information, banner_warning, banner_notice) = (
+        t(msg::UI_GALLERY_BANNER_INFORMATION),
+        t(msg::UI_GALLERY_BANNER_WARNING),
+        t(msg::UI_GALLERY_BANNER_DISMISSIBLE),
+    );
+    let banner_edition = RwSignal::new(0_u32);
+    let banner_demo_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
         <p>
@@ -297,9 +357,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_DIALOG_HEADING)}</h2>
+            <Button
+                content=Content::Text(t(msg::UI_GALLERY_OPEN_DEMO_DIALOG).into())
+                on_press=Callback::new(move |()| dialog_open.set(true))
+            />
             <ModalDialog
-                label=t(msg::UI_GALLERY_DEMO_DIALOG)
-                open_label=t(msg::UI_GALLERY_OPEN_DEMO_DIALOG)
+                open=dialog_open
+                id="gallery-demo-dialog"
+                title=t(msg::UI_GALLERY_DEMO_DIALOG)
                 close_label=t(msg::UI_GALLERY_CLOSE_DEMO_DIALOG)
             >
                 <p>{dialog_body.clone()}</p>
@@ -309,6 +374,42 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                         on_press=Callback::new(move |()| {
                             say(Politeness::Polite, &dialog_polite_text);
                         })
+                    />
+                </p>
+            </ModalDialog>
+            <Button
+                content=Content::Text(t(msg::UI_GALLERY_OPEN_DEMO_WARNING).into())
+                on_press=Callback::new(move |()| {
+                    warning_kept.set(false);
+                    warning_open.set(true);
+                })
+            />
+            // Escape and Keep the demo warning keep it open; Answer the demo
+            // warning closes it from outside, as the daemon's answer closes
+            // the idle warning.
+            <ModalDialog
+                open=warning_open
+                id="gallery-demo-warning"
+                title=t(msg::UI_GALLERY_DEMO_WARNING)
+                described_by="gallery-demo-warning-body"
+                starts_on=warning_keep
+                on_cancel=Callback::new(move |()| keep_warning())
+            >
+                <p id="gallery-demo-warning-body">{warning_body}</p>
+                <p aria-live="polite" aria-atomic="true">
+                    {move || warning_kept.get().then(|| warning_kept_text.clone())}
+                </p>
+                <p class="actions">
+                    <Button
+                        content=Content::Text(warning_answer.into())
+                        on_press=Callback::new(move |()| warning_open.set(false))
+                    />
+                    <Button
+                        content=Content::Text(warning_keep_label.into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        node_ref=warning_keep
+                        on_press=Callback::new(move |()| keep_warning())
                     />
                 </p>
             </ModalDialog>
@@ -392,6 +493,42 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 <StatusBadge state=BadgeState::Failed label=t(msg::UI_STATUS_FAILED) />
                 <StatusBadge state=BadgeState::Cancelled label=t(msg::UI_STATUS_CANCELLED) />
                 <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
+            </p>
+        </section>
+        // `id`, so a step finds the demo under a pseudolocale too, which
+        // renames its heading.
+        <section id="badge-demo">
+            <h2>{t(msg::UI_GALLERY_BADGES_HEADING)}</h2>
+            // A count and two tags, each saying in words what it counts or
+            // names, the long one wrapping in a narrow room.
+            <p class="flex flex-wrap gap-2">
+                <Badge label=pending_changes icon=LucideGlyph::Pencil />
+                <Badge label=t(msg::UI_GALLERY_BADGES_TAG) />
+                <Badge label=t(msg::UI_GALLERY_BADGES_LONG) icon=LucideGlyph::CalendarClock />
+            </p>
+            // Every tone, named in words, so no tone is told by its color.
+            <p class="flex flex-wrap gap-2">
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_PRIMARY)
+                    tone=BadgeTone::Primary
+                    icon=LucideGlyph::Info
+                />
+                <Badge label=t(msg::UI_GALLERY_TONE_SECONDARY) tone=BadgeTone::Secondary />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_SUCCESS)
+                    tone=BadgeTone::Success
+                    icon=LucideGlyph::CircleCheck
+                />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_WARNING)
+                    tone=BadgeTone::Warning
+                    icon=LucideGlyph::TriangleAlert
+                />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_ERROR)
+                    tone=BadgeTone::Error
+                    icon=LucideGlyph::CircleX
+                />
             </p>
         </section>
         <section>
@@ -484,15 +621,53 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     .collect_view()}
             </ul>
         </section>
-        <section>
+        <section id="toast-demo">
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
-            <Toast text=toast />
-            <p>
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_SAVE_SETTINGS).into())
-                    on_press=Callback::new(move |()| show_toast(toast, settings_saved.clone()))
-                />
-            </p>
+            // A button for each tone, then the toast under them, so Tab
+            // reaches its Dismiss button from each.
+            {toast_button(
+                TOAST_DEMO_SAVE,
+                msg::UI_GALLERY_SAVE_SETTINGS,
+                ToastTone::Success,
+                msg::UI_GALLERY_SETTINGS_SAVED,
+            )}
+            {toast_button(
+                "toast-demo-queue",
+                msg::UI_GALLERY_QUEUE_CHECK,
+                ToastTone::Primary,
+                msg::UI_GALLERY_CHECK_QUEUED,
+            )}
+            {toast_button(
+                "toast-demo-back-up",
+                msg::UI_GALLERY_BACK_UP_PLAN,
+                ToastTone::Warning,
+                msg::UI_GALLERY_BACKUP_WARNED,
+            )}
+            {toast_button(
+                "toast-demo-restore",
+                msg::UI_GALLERY_RESTORE_SNAPSHOT,
+                ToastTone::Error,
+                msg::UI_GALLERY_DEMO_RESTORE_FAILED,
+            )}
+            // Dismissed, a toast hands focus to the first button.
+            <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=TOAST_DEMO_SAVE />
+            // The failure stays on the page after its toast has gone.
+            {
+                let localizer = Arc::clone(&localizer);
+                let detail = t(msg::UI_GALLERY_DEMO_RESTORE_FAILED_DETAIL);
+                move || {
+                    restore_failure_shown
+                        .get()
+                        .then(|| {
+                            let detail = detail.clone();
+                            view! {
+                                <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
+                                    {detail}
+                                </Alert>
+                            }
+                        })
+                }
+            }
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_REVIEW_HEADING)}</h2>
@@ -1101,6 +1276,45 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     content=Content::Text(t(msg::UI_GALLERY_SKELETON_SHOW).into())
                     pressed=plan_shown
                     on_press=Callback::new(move |()| plan_shown.update(|shown| *shown = !*shown))
+                />
+            </p>
+        </section>
+        // Its id finds the demo under a pseudolocale too, which renames its
+        // heading.
+        <section id="banner-demo">
+            <h2>{t(msg::UI_GALLERY_BANNER_HEADING)}</h2>
+            // Each tone it takes, information first, which is the default.
+            <Banner localizer=Arc::clone(&localizer)>{banner_information}</Banner>
+            // A long path, which wraps inside the banner on a small screen.
+            <Banner localizer=Arc::clone(&localizer) tone=BannerTone::Warning>
+                {banner_warning}
+            </Banner>
+            // A notice the reader dismisses: it goes, focus goes to the
+            // button that brings a newer one, and this browser keeps this
+            // edition away on every later load.
+            {move || {
+                let edition = banner_edition.get().to_string();
+                let notice = banner_notice.clone();
+                view! {
+                    <Banner
+                        localizer=Arc::clone(&banner_demo_localizer)
+                        dismissal=BannerDismissal {
+                            remember_as: BANNER_DEMO,
+                            edition,
+                            then_focus: BANNER_DEMO_NEWER.to_owned(),
+                        }
+                    >
+                        {notice}
+                    </Banner>
+                }
+            }}
+            <p>
+                <Button
+                    id=BANNER_DEMO_NEWER
+                    content=Content::Text(t(msg::UI_GALLERY_BANNER_NEWER).into())
+                    on_press=Callback::new(move |()| {
+                        banner_edition.update(|edition| *edition = edition.saturating_add(1));
+                    })
                 />
             </p>
         </section>
@@ -1771,6 +1985,18 @@ const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
 /// The ID of the alert demo's button that brings its dismissed notice back,
 /// where focus goes when the notice is dismissed.
 const ALERT_DEMO_SHOW: &str = "alert-demo-show";
+
+/// The name the gallery's dismissible demo banner is remembered under in
+/// the browser's local storage.
+const BANNER_DEMO: &str = "gallery-demo";
+
+/// The ID of the banner demo's button that brings a newer edition of its
+/// notice, where focus goes when the notice is dismissed.
+const BANNER_DEMO_NEWER: &str = "banner-demo-newer";
+
+/// The ID of the toast demo's Save button, where focus goes when a toast is
+/// dismissed.
+const TOAST_DEMO_SAVE: &str = "toast-demo-save";
 
 /// A demo route. The gallery's literal paths all parse (the link's rules
 /// test their shapes); one that didn't would show no link, which the link

@@ -24,9 +24,12 @@ pub trait SecretsHarness: Send + Sync {
     /// Secret Service's name on the session bus.
     fn without_keyring_service(&self) -> Arc<dyn SecretResolver>;
 
-    /// A resolver whose keyring service answers and refuses: its keyring is
-    /// locked, or its unlock prompt was dismissed.
+    /// A resolver whose keyring service answers and refuses otherwise than as
+    /// locked: its unlock prompt was dismissed.
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver>;
+
+    /// A resolver whose keyring service answers that its keyring is locked.
+    fn with_locked_keyring(&self) -> Arc<dyn SecretResolver>;
 
     /// A keyring whose platform says its service is started as `activation`
     /// says: for the real adapter, a stand-in for the session bus's answer.
@@ -517,9 +520,11 @@ async fn an_entry_that_is_not_there_is_missing(harness: &dyn SecretsHarness) {
     );
 }
 
-/// A keyring with no service to ask and one whose service refuses are both
-/// unavailable, by the entry, and told apart by their cause: only the first
-/// can pass by itself, as when the daemon outruns the service at login.
+/// A keyring with no service to ask, one whose service says it is locked and
+/// one whose service refuses otherwise are all unavailable, by the entry, and
+/// told apart by their cause: only the first can pass by itself, as when the
+/// daemon outruns the service at login, and only the second is unlocked by
+/// the person (#993).
 async fn a_keyring_with_no_service_is_told_apart_from_one_that_refuses(
     harness: &dyn SecretsHarness,
 ) {
@@ -535,6 +540,10 @@ async fn a_keyring_with_no_service_is_told_apart_from_one_that_refuses(
     assert_eq!(
         cause(harness.without_keyring_service().resolve(&secret).await),
         Some(KeyringCause::NoService)
+    );
+    assert_eq!(
+        cause(harness.with_locked_keyring().resolve(&secret).await),
+        Some(KeyringCause::Locked)
     );
     assert_eq!(
         cause(harness.with_refusing_keyring().resolve(&secret).await),
