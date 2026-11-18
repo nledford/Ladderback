@@ -9,7 +9,7 @@ Machines are upgraded one at a time, and a hub on a NAS is often upgraded later 
 ## Decided
 
 1. **The window is counted in protocols.** Additive changes within a protocol (new optional message fields) never break and don't use up the window. A new protocol number is rare.
-2. **Negotiation goes both ways.** `Hello` carries the range of protocols the agent speaks; the hub answers `Welcome` with the highest both speak and its own range (§7.2). A newer agent works with an older hub and an older agent with a newer hub. The handshake (nonce, signature, `Hello`, `Welcome`) never changes between protocols.
+2. **Negotiation goes both ways.** `Hello` carries the range of protocols the agent speaks; the hub answers `Welcome` with the highest both speak and its own range (§7.2). A newer agent works with an older hub and an older agent with a newer hub. The handshake (`Connect`, `Challenge`, `Proof`, `Pair`, `Paired`, `Hello`, `Welcome`; [decision 120](120-agent-hub-connection-security.md)) never changes between protocols.
 3. **A release speaks at most N and N−1.** A release that adds protocol N+1 therefore drops N−1.
 4. **N−1 stays for at least 6 months** after protocol N first ships. Dropping it after that is a breaking change (§12.1) and from 1.0 needs a major release, so from 1.0 at most one new protocol ships per major release.
 5. **It applies before 1.0**, from the first hub release (M4a).
@@ -19,3 +19,7 @@ Machines are upgraded one at a time, and a hub on a NAS is often upgraded later 
 9. **A change in meaning is a new protocol.** Any change to what a lease, a grant, a deadline or ownership means in `RepoGrants`, `ReposSnapshot` or `Heartbeat` (§7.3) takes a new protocol number, never an optional field an older peer could ignore.
 
 Left out: a longer window (three protocols or more), which would multiply the code and tests for old protocols, and requiring the hub to upgrade first, which the old draft of question 4 assumed.
+
+**Amended by decision 120** (2026-11-18): the handshake of item 2 is the one decision 120 defines, in which the agent speaks first and both sides prove themselves; `Hello` is signed by the agent and `Welcome` by the hub, and `Welcome` echoes the range the hub saw, so a range lowered on the way is noticed. The handshake is named by its label and path and is never negotiated within a release. Pairing needs a release that speaks the handshake, not the same release. The key exchange a pinned connection offers and accepts belongs to the path as well and changes only with a new one, so item 6 holds at the TLS layer too: an agent a release behind is told it is out of date, never cut off before `Connect`.
+
+An agent that speaks a newer handshake than a hub tries the newer path first and falls back on a 404, but never trusts what the 404 seems to say: the hub's proof, signed with the key the agent pinned, lists the handshakes the hub speaks. A hub reinstalled as an older release therefore keeps its agents syncing, with no click and no re-pairing, on the older handshake it proved; a 404 that the signed list contradicts is refused as `handshake-hidden`. Item 6 holds throughout: a mismatch never stops local backups, and with no protocol in common the agent is out of date and backing up locally, never an identity conflict.
