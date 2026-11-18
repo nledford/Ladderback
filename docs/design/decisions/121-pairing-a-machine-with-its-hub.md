@@ -463,6 +463,19 @@ Feature: Pairing a machine with its hub
     When a script gives --replace-pin with a fingerprint that isn't the new key's
     Then the agent refuses and its pin stays
 
+  Scenario: A taken hostname is paired under another name
+    Given a hub that already has an agent named laptop
+    When another machine named laptop pairs with a token
+    Then the agent says the hub already has an agent named laptop and how to pair under another name
+    When the person pairs again with --hostname laptop-2
+    Then the agent is paired with the hub as laptop-2 and waits for approval
+
+  Scenario: A token file other users can read is warned about
+    Given a token file that other users on the machine can read
+    When the person pairs with --token-file and that file
+    Then the agent warns that other users can read the file
+    And the agent says to delete the file after pairing
+
   Scenario: The pairing command waits and ends with a line for each outcome
     Given an agent that has paired and waits for approval
     Then the command shows the steps and the time waited
