@@ -77,14 +77,15 @@ fn parse(text: &str) -> io::Result<AgentId> {
 }
 
 /// Makes the new directory entry durable, so a crash right after the first
-/// backup can't bring the agent back with a different ID.
+/// backup can't bring the agent back with a different ID. The key files
+/// rely on it too.
 #[cfg(unix)]
-fn sync_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
     File::open(dir)?.sync_all()
 }
 
 #[cfg(not(unix))]
-fn sync_dir(_dir: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 

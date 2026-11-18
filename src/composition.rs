@@ -851,6 +851,7 @@ async fn state_over(
         writes: Arc::clone(&writes),
         resolve: Arc::clone(&resolve),
         agent_id,
+        left_out: left_out_of_backups(data_dir),
         engine: Arc::clone(&engine),
         locations: Some(locations),
         store: Arc::clone(&store),
@@ -1586,6 +1587,24 @@ struct PlanRunner {
     /// The agent's Full Disk Access check, run before each backup on macOS
     /// (§16, decision 115); none elsewhere.
     full_disk_access: Option<Arc<FullDiskAccessCheck>>,
+    /// The globs that leave the secret key files in the data folder out of
+    /// every backup (§16, decisions 120 and 122).
+    left_out: Vec<String>,
+}
+
+/// The globs that leave the secret key files out of a backup, for the data
+/// folder as given and as rustic walks it: rustic canonicalizes a source, so
+/// on macOS a folder under `/var` is walked as `/private/var`. A folder whose
+/// path isn't UTF-8 gets none, as a glob can't name it.
+fn left_out_of_backups(data_dir: &std::path::Path) -> Vec<String> {
+    let canonical = std::fs::canonicalize(data_dir).ok();
+    let mut folders = vec![data_dir];
+    folders.extend(canonical.as_deref().filter(|path| *path != data_dir));
+    folders
+        .into_iter()
+        .filter_map(std::path::Path::to_str)
+        .flat_map(domain::fleet::left_out_globs)
+        .collect()
 }
 
 impl PlanRunner {
@@ -1653,7 +1672,16 @@ impl PlanRunner {
             extra_tags: plan.tags.clone(),
             label: plan.label.clone(),
             host: plan.snapshot_host(config.agent()).cloned(),
-            filter: plan.filter.clone(),
+            filter: {
+                // The secret key files stay out of every backup that walks
+                // the data folder, in every build (§16, decisions 120 and
+                // 122). Last, so a glob of the plan's own can't bring one
+                // back; iglobs, so a case-insensitive file system's other
+                // spellings stay out too.
+                let mut filter = plan.filter.clone();
+                filter.iglobs.extend(self.left_out.iter().cloned());
+                filter
+            },
             deadline_budget: backup_budget(None, None),
         });
         // The agent, repository and plan hooks of §6.1 wrap the run.

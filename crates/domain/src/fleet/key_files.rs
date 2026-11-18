@@ -47,8 +47,15 @@ impl KeyFile {
 
     /// The file's name in the data folder.
     pub const fn file_name(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::AgentKey => "agent-key",
+            Self::HubKey => "hub-key",
+            Self::HubTlsKey => "hub-tls-key",
+            Self::RecoveryKey => "hub-recovery-key",
+            Self::RecoverySeed => "hub-recovery-seed",
+            Self::ConnectionCounter => "connection-counter",
+            Self::HubPin => "hub-pin",
+        }
     }
 }
 
@@ -81,8 +88,11 @@ pub const LEFT_OUT_OF_BACKUPS: [KeyFile; 4] = [
 /// system, `*` never crosses a `/`, and the folder's own characters are
 /// escaped so none is read as a pattern.
 pub fn left_out_globs(folder: &str) -> Vec<String> {
-    let _ = (folder, escape_glob);
-    todo!()
+    let folder = escape_glob(folder.trim_end_matches('/'));
+    LEFT_OUT_OF_BACKUPS
+        .iter()
+        .map(|file| format!("!{folder}/{}*", file.file_name()))
+        .collect()
 }
 
 /// Which seed a seed file holds.
@@ -97,16 +107,19 @@ impl SeedFile {
     pub const ALL: [Self; 3] = [Self::AgentKey, Self::HubKey, Self::RecoverySeed];
 
     pub const fn key_file(self) -> KeyFile {
-        let _ = self;
-        todo!()
+        match self {
+            Self::AgentKey => KeyFile::AgentKey,
+            Self::HubKey => KeyFile::HubKey,
+            Self::RecoverySeed => KeyFile::RecoverySeed,
+        }
     }
 }
 
 /// The text of a key file of one line, its line break taken off; `None`
 /// when it isn't one line ended by one line break.
 pub fn one_line(text: &str) -> Option<&str> {
-    let _ = text;
-    todo!()
+    let line = text.strip_suffix('\n').unwrap_or(text);
+    (!line.contains(['\n', '\r'])).then_some(line)
 }
 
 /// An agent's connection counter (§16, decision 120, "A copied data
@@ -133,21 +146,30 @@ impl ConnectionCounter {
 
     /// The counter one above, or `None` at the most a `u64` holds.
     pub fn next(self) -> Option<Self> {
-        todo!()
+        self.0.checked_add(1).map(Self)
     }
 
     /// The counter from its file: decimal digits on one line, ended by a
     /// line break, at most 20 of them.
     pub fn parse(text: &str) -> Result<Self, CounterRefused> {
-        let _ = text;
-        todo!()
+        let digits = one_line(text).ok_or(CounterRefused)?;
+        if digits.is_empty()
+            || digits.len() > MAX_COUNTER_DIGITS
+            || !digits.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Err(CounterRefused);
+        }
+        digits.parse().map(Self).map_err(|_| CounterRefused)
     }
 
     /// The file's text: the number and a line break.
     pub fn to_file_text(self) -> String {
-        todo!()
+        format!("{}\n", self.0)
     }
 }
+
+/// The digits of `u64::MAX`; a counter file of more holds no counter.
+const MAX_COUNTER_DIGITS: usize = 20;
 
 /// The most bytes a TLS key's encoding may have. An ECDSA P-256 key in
 /// PKCS#8 has about 140; more is not a key this build made.
@@ -170,8 +192,11 @@ impl TlsKey {
     /// The key from its PKCS#8 encoding, which is wiped when it is dropped,
     /// refused or not.
     pub fn from_der(der: Vec<u8>) -> Result<Self, TlsKeyRefused> {
-        let _ = der;
-        todo!()
+        let der = Zeroizing::new(der);
+        if der.is_empty() || der.len() > MAX_TLS_KEY_BYTES {
+            return Err(TlsKeyRefused);
+        }
+        Ok(Self(der))
     }
 
     /// The key's PKCS#8 encoding, for the TLS adapter and the key file.

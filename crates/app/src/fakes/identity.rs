@@ -38,8 +38,9 @@ impl InMemoryIdentity {
     /// Key files whose counter stands at `counter`, as a data folder copied
     /// after that many attempts would.
     pub fn with_counter(counter: ConnectionCounter) -> Self {
-        let _ = counter;
-        todo!()
+        let identity = Self::default();
+        identity.kept().counter = counter;
+        identity
     }
 
     fn kept(&self) -> std::sync::MutexGuard<'_, Kept> {
@@ -50,8 +51,7 @@ impl InMemoryIdentity {
 #[async_trait]
 impl Identity for InMemoryIdentity {
     async fn seed(&self, file: SeedFile) -> Result<Option<SigningSeed>, IdentityError> {
-        let _ = (file, self.kept());
-        todo!()
+        Ok(self.kept().seeds.get(&file).cloned())
     }
 
     async fn keep_seed(
@@ -59,44 +59,48 @@ impl Identity for InMemoryIdentity {
         file: SeedFile,
         seed: SigningSeed,
     ) -> Result<SigningSeed, IdentityError> {
-        let _ = (file, seed);
-        todo!()
+        Ok(self.kept().seeds.entry(file).or_insert(seed).clone())
     }
 
     async fn forget_recovery_seed(&self) -> Result<(), IdentityError> {
-        todo!()
+        self.kept().seeds.remove(&SeedFile::RecoverySeed);
+        Ok(())
     }
 
     async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError> {
-        todo!()
+        Ok(self.kept().recovery_key)
     }
 
     async fn keep_recovery_key(&self, key: PublicKey) -> Result<PublicKey, IdentityError> {
-        let _ = key;
-        todo!()
+        Ok(*self.kept().recovery_key.get_or_insert(key))
     }
 
     async fn tls_key(&self) -> Result<Option<TlsKey>, IdentityError> {
-        todo!()
+        Ok(self.kept().tls_key.clone())
     }
 
     async fn keep_tls_key(&self, key: TlsKey) -> Result<TlsKey, IdentityError> {
-        let _ = key;
-        todo!()
+        Ok(self.kept().tls_key.get_or_insert(key).clone())
     }
 
     async fn pin(&self) -> Result<Option<HubPin>, IdentityError> {
-        todo!()
+        Ok(self.kept().pin.clone())
     }
 
     async fn write_pin(&self, pin: &HubPin) -> Result<(), IdentityError> {
-        let _ = pin;
-        todo!()
+        self.kept().pin = Some(pin.clone());
+        Ok(())
     }
 
     async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {
-        let _ = (&self.attempting, Held, Attempt::new);
-        todo!()
+        if self.attempting.swap(true, Ordering::SeqCst) {
+            return Err(IdentityError::AttemptInFlight);
+        }
+        let held = Held(Arc::clone(&self.attempting));
+        let mut kept = self.kept();
+        let counter = kept.counter.next().ok_or(IdentityError::CounterExhausted)?;
+        kept.counter = counter;
+        Ok(Attempt::new(counter, Box::new(held)))
     }
 }
 

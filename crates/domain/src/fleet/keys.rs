@@ -75,13 +75,16 @@ impl PublicKey {
     /// The key from 64 lower-case hex digits, as a key file and the pin
     /// hold it (§16, decision 120, "The hub key").
     pub fn from_hex(text: &str) -> Result<Self, KeyRefused> {
-        let _ = text;
-        todo!()
+        let mut bytes = [0; KEY_BYTES];
+        if !decode_hex32(text, &mut bytes) {
+            return Err(KeyRefused::NotHex);
+        }
+        Self::from_bytes(bytes)
     }
 
     /// The key as 64 lower-case hex digits.
     pub fn to_hex(&self) -> String {
-        todo!()
+        lower_hex(&self.0)
     }
 }
 
@@ -173,13 +176,21 @@ impl SigningSeed {
     /// decoded in place so no copy of it is left behind; `None` for any
     /// other text.
     pub fn from_hex(text: &str) -> Option<Self> {
-        let _ = text;
-        todo!()
+        let mut seed = Self(Zeroizing::new([0; KEY_BYTES]));
+        decode_hex32(text, &mut seed.0).then_some(seed)
     }
 
     /// The seed as 64 lower-case hex digits, wiped when dropped.
+    /// Its buffer is made at its full size, so no copy is left by a
+    /// regrowth.
     pub fn to_hex(&self) -> Zeroizing<String> {
-        todo!()
+        use std::fmt::Write as _;
+        let mut text = Zeroizing::new(String::with_capacity(KEY_BYTES * 2));
+        for byte in self.0.iter() {
+            // Writing to a `String` can't fail.
+            let _ = write!(text, "{byte:02x}");
+        }
+        text
     }
 }
 
@@ -198,6 +209,30 @@ pub(crate) fn lower_hex(bytes: &[u8]) -> String {
         let _ = write!(text, "{byte:02x}");
     }
     text
+}
+
+/// Decodes exactly 64 lower-case hex digits into `out`, in place; `false`,
+/// with `out` partly written, for any other text.
+pub(crate) fn decode_hex32(text: &str, out: &mut [u8; KEY_BYTES]) -> bool {
+    fn digit(c: u8) -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            _ => None,
+        }
+    }
+    let text = text.as_bytes();
+    if text.len() != KEY_BYTES * 2 {
+        return false;
+    }
+    let (pairs, _) = text.as_chunks::<2>();
+    for (byte, &[high, low]) in out.iter_mut().zip(pairs) {
+        let (Some(high), Some(low)) = (digit(high), digit(low)) else {
+            return false;
+        };
+        *byte = high << 4 | low;
+    }
+    true
 }
 
 /// 64 hex digits as 32 bytes, at compile time; a bad constant fails the

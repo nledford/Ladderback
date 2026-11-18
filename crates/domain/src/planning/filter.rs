@@ -284,8 +284,14 @@ fn same(part: &str, name: &str, case_insensitive: bool) -> bool {
 /// characters (`*`, `?`, `[`, `]`, `{`, `}` and the escape `\`) behind a
 /// backslash, which gitignore's rules read as that character.
 pub fn escape_glob(text: &str) -> String {
-    let _ = text;
-    todo!()
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '*' | '?' | '[' | ']' | '{' | '}' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
 }
 
 #[cfg(test)]
