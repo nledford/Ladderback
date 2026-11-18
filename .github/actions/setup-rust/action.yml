@@ -1,10 +1,17 @@
-# The build cache of every job that compiles Rust: mr boxington (mbx), with its
-# cache keyed so that stale build files can't pile up in it. Use it, after
-# `rustup toolchain install`, as `uses: $/.github/actions/rust-cache` (the
-# action from the commit the workflow runs, whatever the job checked out), with
-# `continue-on-error: true` so that a cache outage doesn't fail a required
-# check. ci.yml's header comment is the design of the cache as a whole; this
-# file is its key.
+# The Rust setup of every job that runs Rust: the toolchain, the build cache
+# and the tools the job names, in that order. Use it, after the checkout, as
+# `uses: $/.github/actions/setup-rust` (the action from the commit the workflow
+# runs, whatever the job checked out), so that a change to the setup is made
+# here once and no job drifts from the others (#996). ci.yml's header comment
+# is the design of the cache as a whole; this file is its key.
+#
+# The toolchain. `rustup toolchain install` installs the version
+# rust-toolchain.toml names (development.md §13.12), before the cache, so mbx
+# keys on it and a cache outage can't leave a job without it.
+#
+# The cache. A build-cache outage must not fail a required check, so each of
+# its steps may fail: the build then runs uncached (slower, still correct).
+# `cache: "false"` leaves it out, for a job that compiles nothing.
 #
 # Why the key has a manifest hash. Cargo names an artifact by a hash of
 # everything that goes into it, the manifests, the lockfile and the toolchain
@@ -22,25 +29,41 @@
 # - a push to main restores only an entry of its own manifest hash, or none,
 #   and then saves its build as a new entry of that hash;
 # - everything else (pull requests, the nightly run) restores an entry of its
-#   own hash when there is one, and else the newest entry of any hash, a build
-#   that is stale in places and still saves most of the compile. They never
-#   save: mbx saves on a push to the default branch alone.
+#   own hash when there is one, and else the newest entry of any hash of its
+#   own generation, a build that is stale in places and still saves most of
+#   the compile. They never save: mbx saves on a push to the default branch
+#   alone. The restore prefixes end in `-m`, the start of the hash, so the
+#   default generation never restores the wasm one (`v1-wasm-m…`).
 #
 # The restore prefixes need the key's layout, which mbx documents as
 # `<platform>-<architecture>-mbx-<generation>-<mode>-<toolchain>-<commit>`; the
-# last step warns when mbx's primary key doesn't start as this action expects,
-# so a change of layout shows on the run and not as a cold build on every pull
-# request. ci.yml's `cache-prune` job prunes by the same layout.
-name: Rust build cache
-description: Restores, and on a push to main saves, the Cargo build, keyed by the files a stale build file comes from.
+# cache's last step warns when mbx's primary key doesn't start as this action
+# expects, so a change of layout shows on the run and not as a cold build on
+# every pull request. ci.yml's `cache-prune` job prunes by the same layout.
+#
+# The tools. `tools` is taiki-e/install-action's `tool` list (`just,trunk`);
+# a tool pinned from a value only `just` can read (leptosfmt, wasm-bindgen)
+# is the job's own step after this one.
+name: Rust setup
+description: Installs the pinned toolchain, restores (and on a push to main saves) the Cargo build, and installs the tools a job names.
 inputs:
+  tools:
+    description: "The tools to install, as install-action's comma-separated `tool` list; empty installs none."
+    default: ""
+  cache:
+    description: 'Whether to use the build cache: "true" or "false" (a job that compiles nothing).'
+    default: "true"
   generation:
     description: "Names the cache of this job apart from the other jobs' (mbx's `cache-generation`). The manifest hash is added to it."
     default: v1
 runs:
   using: composite
   steps:
+    - shell: bash
+      run: rustup toolchain install
     - id: keys
+      if: inputs.cache == 'true'
+      continue-on-error: true
       shell: bash
       env:
         GENERATION: ${{ inputs.generation }}
@@ -68,16 +91,24 @@ runs:
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
     - id: mbx
+      if: steps.keys.outcome == 'success'
+      continue-on-error: true
       uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
       with:
         cache-generation: ${{ steps.keys.outputs.generation }}
         restore-keys: ${{ steps.keys.outputs.restore-keys }}
-    - shell: bash
+    - if: steps.mbx.outcome == 'success'
+      continue-on-error: true
+      shell: bash
       env:
         OWN: ${{ steps.keys.outputs.own }}
         PRIMARY: ${{ steps.mbx.outputs.cache-primary-key }}
       run: |
         case "$PRIMARY" in
           "$OWN"*) ;;
-          *) echo "::warning title=Rust build cache::mbx's cache key '$PRIMARY' doesn't start with '$OWN', so mbx's key layout has changed: the restore keys in .github/actions/rust-cache/action.yml and ci.yml's cache-prune families no longer match it." ;;
+          *) echo "::warning title=Rust build cache::mbx's cache key '$PRIMARY' doesn't start with '$OWN', so mbx's key layout has changed: the restore keys in .github/actions/setup-rust/action.yml and ci.yml's cache-prune families no longer match it." ;;
         esac
+    - if: inputs.tools != ''
+      uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: ${{ inputs.tools }}
