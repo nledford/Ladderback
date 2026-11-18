@@ -210,6 +210,27 @@ ui-gallery-answer-demo-warning = Answer the demo warning
 # The demo warning's button that keeps it open, which it opens on.
 ui-gallery-keep-demo-warning = Keep the demo warning
 
+# The button that opens the demo setting's dialog while the setting is off.
+# Changing the setting draws the button anew, and focus returns to the new one.
+ui-gallery-turn-demo-setting-on = Turn the demo setting on
+
+# The button that opens the demo setting's dialog while the setting is on.
+ui-gallery-turn-demo-setting-off = Turn the demo setting off
+
+# The demo setting dialog's accessible name and heading, at level 3.
+ui-gallery-demo-setting = Demo setting
+
+# What the demo setting dialog says, which describes it.
+ui-gallery-demo-setting-body = Its button is drawn anew once the setting changes, and focus returns to the new one.
+
+# The demo setting dialog's button that closes it and changes nothing, which it
+# opens on.
+ui-gallery-keep-demo-setting = Keep the demo setting
+
+# The demo setting dialog's button that turns the setting on or off and closes
+# it.
+ui-gallery-change-demo-setting = Change the demo setting
+
 # The heading of the gallery's table demo.
 ui-gallery-table-heading = Table
 
