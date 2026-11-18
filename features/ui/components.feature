@@ -347,6 +347,7 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -374,6 +375,7 @@ Feature: The shared components in the gallery
   Scenario: Every progress bar is a stop for Tab whatever its size and tone, its focus ring around all it draws, and reads its value
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -775,6 +777,7 @@ Feature: The shared components in the gallery
   Scenario: A tab list is one stop for Tab, on its selected tab, and Tab from it goes into that tab's panel
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -789,6 +792,7 @@ Feature: The shared components in the gallery
   Scenario: The arrow keys move between the tabs and wrap at either end, Home and End go to the first and last, and each tab arrived at is selected
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -815,6 +819,7 @@ Feature: The shared components in the gallery
   Scenario: Tabs that are chosen by hand move focus with the arrow keys, select a tab only on Enter or Space, and tell the page which tab is chosen
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -848,6 +853,7 @@ Feature: The shared components in the gallery
   Scenario: In tabs that run right to left, the left arrow goes to the next tab and the right arrow to the one before
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -866,6 +872,7 @@ Feature: The shared components in the gallery
   Scenario: What is typed in a panel stays while another tab is shown, and a panel holding a field is no Tab stop of its own
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -919,6 +926,7 @@ Feature: The shared components in the gallery
   Scenario: Horizontal tabs, the default, stand in a row above their panel, say so, and leave the up and down arrows to the page
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -933,6 +941,7 @@ Feature: The shared components in the gallery
   Scenario: Vertical tabs stand in a column at the start of their panel, say so, and the up and down arrows move between them, wrapping at either end
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -997,6 +1006,7 @@ Feature: The shared components in the gallery
   Scenario: Vertical tabs in a part of the page that runs right to left stand at its start, on the right, and the down arrow still goes to the next tab
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -1030,6 +1040,7 @@ Feature: The shared components in the gallery
   Scenario: Responsive tabs are vertical where their container has room for the list beside the panel, and horizontal in a narrow column of the same wide page
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -1051,6 +1062,7 @@ Feature: The shared components in the gallery
   Scenario: Responsive tabs that change layout keep the selected tab, the focus and what was typed in a panel, and their arrow keys follow the new layout
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -1273,6 +1285,7 @@ Feature: The shared components in the gallery
     Given the reader sets the text size to 200 percent
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -1703,6 +1716,7 @@ Feature: The shared components in the gallery
     Given the browser asks for "forced colors"
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Space
@@ -1712,6 +1726,7 @@ Feature: The shared components in the gallery
     When I open the component gallery
     Then every skeleton of the "Skeleton" demo is hidden from a screen reader, with no role and nothing inside it to focus
     When I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -1722,6 +1737,7 @@ Feature: The shared components in the gallery
     When I open the component gallery
     Then the region of the "Skeleton" demo is busy and shows the words "Loading the demo plan…" beside a skeleton
     When I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
@@ -1779,6 +1795,7 @@ Feature: The shared components in the gallery
       | warning | Warning     |
       | primary | Information |
     When I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
@@ -1788,6 +1805,7 @@ Feature: The shared components in the gallery
   Scenario Outline: <key> on a banner's Dismiss button takes the banner away, says nothing, leaves focus on the control its page names and keeps it away on the next load
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
@@ -1808,6 +1826,7 @@ Feature: The shared components in the gallery
   Scenario: A newer edition of a dismissed banner shows again
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
@@ -1821,6 +1840,7 @@ Feature: The shared components in the gallery
     Given this browser keeps nothing a page stores
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
@@ -1977,6 +1997,7 @@ Feature: The shared components in the gallery
   Scenario: A text field's error is shown above it, describes it, marks it invalid with a thicker edge in the Error tone, and is announced
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2008,6 +2029,7 @@ Feature: The shared components in the gallery
   Scenario: A multi-line text field takes an entry a line and shows its error as a one-line field does
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2028,6 +2050,7 @@ Feature: The shared components in the gallery
   Scenario: A password's Show password button shows it and hides it again, keeping its value, its caret and focus, and says it is pressed
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2055,6 +2078,7 @@ Feature: The shared components in the gallery
   Scenario: A number field asks for the keyboard of digits, is never a spin box, and takes what is typed for its form to check
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2067,6 +2091,7 @@ Feature: The shared components in the gallery
   Scenario: A read-only field stays in the Tab order behind a dashed edge, a disabled one is skipped with its Show password button, and each says so in words
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2133,6 +2158,7 @@ Feature: The shared components in the gallery
     When I open the component gallery
     And I skip to the content
     And the page carries a mark that a reload would lose
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2146,6 +2172,7 @@ Feature: The shared components in the gallery
   Scenario: A link to the page the reader is on says it is the current page and is bold, and a link elsewhere is neither
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2156,6 +2183,7 @@ Feature: The shared components in the gallery
   Scenario: A link to another site says so in its name after its words, shows an icon after them that a screen reader skips, is marked as leaving the app, and tells that site nothing of the page
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Send the demo form"
@@ -2219,6 +2247,7 @@ Feature: The shared components in the gallery
       | error   | Error       |
       | primary | Information |
     When I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
@@ -2229,6 +2258,7 @@ Feature: The shared components in the gallery
   Scenario Outline: <key> on an alert's Dismiss button takes the alert away, says nothing and leaves focus on the control its page names
     When I open the component gallery
     And I skip to the content
+    And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
     And I press Tab until focus is on the button "Show the demo plan"
