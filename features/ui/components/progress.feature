@@ -9,6 +9,7 @@ Feature: The progress bar
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And the page's clock stands still until a step moves it on
     And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
