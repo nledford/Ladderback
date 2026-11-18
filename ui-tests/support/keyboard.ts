@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 
 import type { Locator, Page } from "playwright";
+import { expect } from "playwright/test";
 
 import { focusProbes } from "./focus-probes.ts";
 
@@ -80,6 +81,20 @@ export function journey(page: Page) {
 // through a real snapshot's tree takes two presses a folder from its root, so
 // a scratch source under a deep temporary folder uses up more of it.
 export const MAX_PRESSES = 30;
+
+// The pages whose clock a step has stopped ("the page's clock stands still
+// until a step moves it on"). There the page's own timers and frames run only
+// when a step moves the clock on, so the focus check can't wait on them in
+// WebKit; it waits instead for the browser to bring focus into view, through
+// Playwright's own check, which keeps real time, for at most
+// `STOPPED_CLOCK_REVEAL_MS`. An element still out of view then fails as ever.
+const stoppedClocks = new WeakSet<Page>();
+const STOPPED_CLOCK_REVEAL_MS = 5_000;
+
+/** Records that `page`'s clock now stands still until a step moves it on. */
+export function clockStandsStill(page: Page): void {
+  stoppedClocks.add(page);
+}
 
 /** Where focus is, as the end of a sentence. */
 export function whereFocusIs(page: Page): Promise<string> {
@@ -212,6 +227,13 @@ async function lookAtFocus(page: Page, key: string) {
   // it. There the check looks at the part of it in view; an element wholly
   // out of view still fails it.
   const revealsFocusInPart = engine === "firefox";
+  const stopped = revealsFocusFromATimer && stoppedClocks.has(page);
+  if (stopped) {
+    // Its failure is only the end of the wait: the measure below is the check.
+    await expect(page.locator(":focus"))
+      .toBeInViewport({ timeout: STOPPED_CLOCK_REVEAL_MS })
+      .catch(() => undefined);
+  }
   const focused = await page.evaluateHandle(async (fromATimer) => {
     if (fromATimer) {
       await new Promise((done) => setTimeout(done, 0));
@@ -219,7 +241,7 @@ async function lookAtFocus(page: Page, key: string) {
     }
     const el = document.activeElement;
     return el === null || el === document.body || el === document.documentElement ? null : el;
-  }, revealsFocusFromATimer);
+  }, revealsFocusFromATimer && !stopped);
   try {
     const measured = await focused.evaluate((el) => {
       if (el === null) return null;
