@@ -158,6 +158,11 @@ function removeTree(dir: string): void {
  * copied outputs and their changes would go unseen, the very failure that
  * separate target dirs exist to prevent. `cp -a` keeps the outputs' own times,
  * and the checkout that follows is newer than all of them.
+ *
+ * The copy is a clone where the filesystem can make one (APFS, Btrfs, XFS):
+ * the two target dirs share their blocks until one rewrites a file, so a
+ * target dir of many gigabytes costs next to no disk or time. Elsewhere (ext4
+ * on CI) both cp flags fall back to an ordinary copy.
  */
 function seedTarget(from: string, to: string, skip: string[] = []): void {
   if (existsSync(to) || !existsSync(from)) return;
@@ -165,11 +170,14 @@ function seedTarget(from: string, to: string, skip: string[] = []): void {
   rmSync(partial, { recursive: true, force: true });
   mkdirSync(partial, { recursive: true });
   for (const entry of readdirSync(from)) {
-    if (!skip.includes(entry)) execFileSync("cp", ["-a", path.join(from, entry), partial]);
+    if (!skip.includes(entry)) execFileSync("cp", [...CLONE_FLAGS, path.join(from, entry), partial]);
   }
   renameSync(partial, to);
   console.log(`red-first: ${path.relative(repo, to)} starts from a copy of ${path.relative(repo, from)}`);
 }
+
+/** cp's flags for a copy that keeps times and clones where it can: BSD cp's `-c`, GNU cp's `--reflink=auto`. */
+const CLONE_FLAGS = process.platform === "darwin" ? ["-a", "-c"] : ["-a", "--reflink=auto"];
 
 /**
  * Gives the base tree a copy of the build that RED_FIRST_SEED names to start
