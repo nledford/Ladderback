@@ -620,3 +620,28 @@ fn a_keyring_or_file_that_did_not_answer_in_time_says_so_with_its_seconds() {
         assert!(!said.contains("Check that it is there"), "{code:?}: {said}");
     }
 }
+
+/// A keyring whose service says it is locked is named as locked, with how to
+/// unlock it and the platform's words, never as a computer with no keyring
+/// service, which the platform's "object locked" would contradict (#993).
+#[test]
+fn a_locked_keyring_says_it_is_locked_and_how_to_unlock_it() {
+    let localizer = english();
+    let text = |text: &str| MsgArg::Text(text.to_owned());
+    let args = [
+        ("field", text("password")),
+        ("source", text("ladderback/demo")),
+    ];
+    for detail in [None, Some("Secret Service: object locked")] {
+        let shown = localizer.error(ErrorCode::SecretKeyringLocked, &args, detail);
+        assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+        let said = shown.text();
+        assert!(said.contains("ladderback/demo"), "{said}");
+        assert!(said.contains("the keyring is locked"), "{said}");
+        assert!(said.contains("Unlock it"), "{said}");
+        assert!(!said.contains("no keyring service"), "{said}");
+        if let Some(detail) = detail {
+            assert!(said.contains(detail), "{said}");
+        }
+    }
+}

@@ -69,10 +69,11 @@ impl AlertTone {
 /// ones only: on Ledger Gray, as a toast is, its words in the text's color,
 /// so a failure is never a red banner (DESIGN.md), and its tone (`--tone`,
 /// which its tone's class sets) in a 0.25 rem edge at the start of its line,
-/// in rem so it grows with the reader's text. Under forced colors the fill
-/// is dropped, so a 1px edge all round in the system's text color keeps its
-/// box in view, the start edge still the thick one.
-const LOOK: &str = "flex items-start gap-2 my-2 py-2 px-3 bg-surface text-fg \
+/// in rem so it grows with the reader's text. Its parts wrap: words whose
+/// longest doesn't fit beside the icon go under it (#972). Under forced
+/// colors the fill is dropped, so a 1px edge all round in the system's text
+/// color keeps its box in view, the start edge still the thick one.
+const LOOK: &str = "flex flex-wrap items-start gap-2 my-2 py-2 px-3 bg-surface text-fg \
     rounded-(--radius-small) border-0 border-s-[0.25rem] border-solid border-(--tone) \
     forced-colors:border forced-colors:border-s-[0.25rem] \
     forced-colors:border-[color:CanvasText]";

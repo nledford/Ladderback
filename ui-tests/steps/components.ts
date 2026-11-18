@@ -702,10 +702,6 @@ Then("the progress bar {string} shows no percentage", async function (this: Brow
   await expect.poll(shown).not.toMatch(/%/);
 });
 
-Then("a toast reads {string}", async function (this: BrowserWorld, text: string) {
-  await expect(this.page.locator("main").getByText(text)).toBeVisible();
-});
-
 // A toast is transient; ten seconds is generous for however long it shows.
 // Scoped to main: the polite live region carries the same text.
 When("the toast {string} is gone", async function (this: BrowserWorld, text: string) {
@@ -2132,7 +2128,8 @@ Then("the link {string} wraps onto more than one line", async function (this: Br
 // logging demoSection(page, name).ariaSnapshot() and pasting it here.
 const SNAPSHOTS: Record<string, string> = {
   Dialog: `- heading "Dialog" [level=2]
-- button "Open the demo dialog"`,
+- button "Open the demo dialog"
+- button "Open the demo warning"`,
   Table: `- heading "Table" [level=2]
 - group "Demo table shows":
   - text: Demo table shows
@@ -2336,6 +2333,9 @@ const SNAPSHOTS: Record<string, string> = {
   - text: العربية`,
   "Status badge": `- heading "Status badge" [level=2]
 - paragraph: Queued Running Succeeded Succeeded with warnings Failed Cancelled Empty`,
+  Badge: `- heading "Badge" [level=2]
+- paragraph: Pending changes ⁨3⁩ Demo tag Kept by the demo plan's retention rules
+- paragraph: Primary Secondary Success Warning Error`,
   Progress: `- heading "Progress" [level=2]
 - progressbar "Demo backup progress": Backing up… 40%
 - paragraph:
@@ -2354,7 +2354,13 @@ const SNAPSHOTS: Record<string, string> = {
 - progressbar "Demo progress in the Inherit tone": Backing up… 60%`,
   Toast: `- heading "Toast" [level=2]
 - paragraph:
-  - button "Save the demo settings"`,
+  - button "Save the demo settings"
+- paragraph:
+  - button "Queue a demo check"
+- paragraph:
+  - button "Back up the demo plan"
+- paragraph:
+  - button "Restore the demo snapshot"`,
   "Review dialog": `- heading "Review dialog" [level=2]
 - paragraph:
   - button "Open a demo review"

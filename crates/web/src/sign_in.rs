@@ -16,9 +16,8 @@ use leptos::task::spawn_local;
 
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    Button, Checkbox, ErrorSummary, SummaryItem, TextField, recover_focus, text_field, trap_focus,
+    Button, Checkbox, ErrorSummary, ModalDialog, SummaryItem, TextField, text_field,
 };
-use crate::live::{close_modal_when_gone, modal_gone, open_modal};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, refusal, text_with};
 use crate::session::{
@@ -233,66 +232,51 @@ pub(crate) fn SignInPage(localizer: Arc<Localizer>, standing: RwSignal<Standing>
 /// (`session::Dismissals`). Focus returns where it was when it opened.
 #[component]
 pub(crate) fn SessionEnded(localizer: Arc<Localizer>, ended: RwSignal<bool>) -> impl IntoView {
-    let dialog = NodeRef::<leptos::html::Dialog>::new();
-    // Whether the announcer counts the dialog as an open modal.
-    let counted = RwSignal::new(false);
-    close_modal_when_gone(dialog, counted);
     // Whether the dialog closes because the reader signed in, not because
     // the reader dismissed it.
     let signed = StoredValue::new(false);
-    Effect::new(move |_| {
-        if let Some(dialog) = dialog.get() {
-            open_modal(&dialog, counted);
-        }
-    });
     // Whether the form offers Keep me signed in may have changed in Settings
     // since the page last heard: a signed-out answer says, read without the
     // session, which this read must neither use nor bring back.
     spawn_local(ws::hear_keep_offered());
+    // Signing in clears `ended`, which closes the dialog.
     let signed_in = Callback::new(move |session: Option<Signed>| {
         signed.set_value(true);
-        if let Some(dialog) = dialog.get_untracked() {
-            dialog.close();
-        }
         ws::signed_in(session);
     });
+    let closed = Callback::new(move |()| {
+        if signed.try_get_value() == Some(false) {
+            ws::gave_up();
+        }
+    });
+    let body_text = text(&localizer, msg::UI_SESSION_ENDED_BODY);
     view! {
-        <dialog
-            node_ref=dialog
-            aria-labelledby="session-ended-title"
-            aria-describedby="session-ended-body"
-            on:close=move |_| {
-                modal_gone(counted);
-                if !signed.get_value() {
-                    ws::gave_up();
-                    ended.try_set(false);
-                }
-                recover_focus("main");
-            }
-            on:keydown=move |event: web_sys::KeyboardEvent| trap_focus(&dialog, &event)
+        <ModalDialog
+            open=ended
+            id="session-ended"
+            title=text(&localizer, msg::UI_SESSION_ENDED_TITLE)
+            described_by="session-ended-body"
+            on_close=closed
+            fallback="main"
         >
-            <h2 id="session-ended-title">{text(&localizer, msg::UI_SESSION_ENDED_TITLE)}</h2>
-            <p id="session-ended-body">{text(&localizer, msg::UI_SESSION_ENDED_BODY)}</p>
+            <p id="session-ended-body">{body_text}</p>
             <SignInForm localizer=Arc::clone(&localizer) place=Place::Dialog signed_in=signed_in />
-        </dialog>
+        </ModalDialog>
     }
 }
 
 /// The warning shown two minutes before the session would end unused
 /// (WCAG 2.2.1), while `warning` is `true`: the page's lease decides when
-/// (`session.rs`). It is a native modal `<dialog>`, named by its title and
-/// described by what it says, so a screen reader reads both as focus moves
-/// in, onto **Stay signed in**. That button and Escape both keep the session:
-/// either says someone is there. Asking the daemon where the page stands is
-/// the use that keeps it, and the warning closes once the answer is in, with
-/// focus back where it was. Left alone, the warning gives way to the dialog
-/// asking to sign in again when the session ends.
+/// (`session.rs`). It is a [`ModalDialog`], named by its title and described
+/// by what it says, so a screen reader reads both as focus moves in, onto
+/// **Stay signed in**. That button and Escape both keep the session: either
+/// says someone is there. Asking the daemon where the page stands is the use
+/// that keeps it, and the warning closes once the answer is in, with focus
+/// back where it was. Left alone, the warning gives way to the dialog asking
+/// to sign in again when the session ends.
 #[component]
 pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) -> impl IntoView {
-    let dialog = NodeRef::<leptos::html::Dialog>::new();
     let stay = NodeRef::<leptos::html::Button>::new();
-    let counted = RwSignal::new(false);
-    close_modal_when_gone(dialog, counted);
     // Whether a request to stay signed in is on its way, and whether the
     // last one found no daemon to answer it.
     let busy = RwSignal::new(false);
@@ -309,40 +293,25 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
             unanswered.try_set(!answered);
         });
     };
+    // A warning shown anew says nothing of an earlier one's request.
     Effect::new(move |_| {
-        let wanted = warning.get();
-        let Some(element) = dialog.get() else {
-            return;
-        };
-        if wanted {
+        if warning.get() {
             unanswered.set(false);
-            open_modal(&element, counted);
-            if let Some(stay) = stay.get_untracked() {
-                let _ = stay.focus();
-            }
-        } else if element.open() {
-            element.close();
         }
     });
     let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
     view! {
-        // On `cancel`, Escape keeps the session too; the warning closes once
-        // the daemon has counted the use.
-        <dialog
-            node_ref=dialog
-            aria-labelledby="idle-warning-title"
-            aria-describedby="idle-warning-body"
-            on:cancel=move |event: web_sys::Event| {
-                event.prevent_default();
-                keep();
-            }
-            on:close=move |_| {
-                modal_gone(counted);
-                recover_focus("main");
-            }
-            on:keydown=move |event: web_sys::KeyboardEvent| trap_focus(&dialog, &event)
+        // Escape keeps the session too; the warning closes once the daemon
+        // has counted the use.
+        <ModalDialog
+            open=warning
+            id="idle-warning"
+            title=text(&localizer, msg::UI_IDLE_WARNING_TITLE)
+            described_by="idle-warning-body"
+            starts_on=stay
+            on_cancel=Callback::new(move |()| keep())
+            fallback="main"
         >
-            <h2 id="idle-warning-title">{text(&localizer, msg::UI_IDLE_WARNING_TITLE)}</h2>
             <p id="idle-warning-body">{text(&localizer, msg::UI_IDLE_WARNING_BODY)}</p>
             <p role="alert">{move || unanswered.get().then(|| unreachable.clone())}</p>
             <p class="actions">
@@ -355,7 +324,7 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
                     on_press=Callback::new(move |()| keep())
                 />
             </p>
-        </dialog>
+        </ModalDialog>
     }
 }
 

@@ -214,6 +214,10 @@ impl SystemSecrets {
                 detail,
                 cause: KeyringCause::NoService,
             })),
+            Err(Failure::Locked(detail)) => Err(fail(Problem::KeyringUnavailable {
+                detail,
+                cause: KeyringCause::Locked,
+            })),
             Err(Failure::Refused(detail)) => Err(fail(Problem::KeyringUnavailable {
                 detail,
                 cause: KeyringCause::Refused,
@@ -338,7 +342,7 @@ impl Keyring for SystemSecrets {
 /// Why the store refused to write or delete an entry.
 fn refused(failure: Failure) -> KeyringError {
     match failure {
-        Failure::NoService(detail) | Failure::Refused(detail) => {
+        Failure::NoService(detail) | Failure::Locked(detail) | Failure::Refused(detail) => {
             KeyringError::Unavailable { detail }
         }
         Failure::Unreachable(detail) => KeyringError::Unwritable { detail },

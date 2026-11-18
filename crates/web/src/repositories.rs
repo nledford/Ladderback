@@ -220,6 +220,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         ErrorCode::SecretMissing
         | ErrorCode::SecretUnreadable
         | ErrorCode::SecretKeyringUnavailable
+        | ErrorCode::SecretKeyringLocked
         | ErrorCode::SecretNotText
         | ErrorCode::SecretTooLarge
         | ErrorCode::SecretCommandFailed
@@ -998,6 +999,17 @@ mod tests {
         assert_eq!(
             field_of(
                 ErrorCode::SecretKeyringUnavailable,
+                &[("field".into(), text("password"))]
+            ),
+            Some(Field::Password)
+        );
+    }
+
+    #[test]
+    fn a_locked_keyring_belongs_to_the_password_field() {
+        assert_eq!(
+            field_of(
+                ErrorCode::SecretKeyringLocked,
                 &[("field".into(), text("password"))]
             ),
             Some(Field::Password)

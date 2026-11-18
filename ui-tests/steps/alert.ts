@@ -13,6 +13,7 @@ import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
 import { ISOLATION } from "../support/keyboard.ts";
+import { wordsBrokenInside } from "../support/parts.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf, LIVE_REGION } from "./components.ts";
 
@@ -250,8 +251,8 @@ Then(
 );
 
 // The 320 Rule (DESIGN.md): on a small screen with larger text, an alert's
-// words wrap inside it, a long path too, and its icon and Dismiss button stay
-// beside them inside its edge.
+// words wrap inside it, a long path too, and its icon and Dismiss button
+// stay inside its edge too, beside the words or on lines of their own.
 Then(
   "every alert of the {string} demo holds its icon, its words and its Dismiss button inside its edge",
   async function (this: BrowserWorld, component: string) {
@@ -282,6 +283,60 @@ Then(
       assert.equal(drawn.overflows, false, `the words of "${drawn.text}" run out of their room`);
       assert.ok(drawn.parts.length >= 2, `"${drawn.text}" has no icon or no words`);
       for (const part of drawn.parts) assert.ok(part.inside, `${part.selector} of "${drawn.text}" lies outside its alert`);
+    }
+  },
+);
+
+// Words wrap whole (#972): on a small screen with larger text an alert's
+// words break between words, never inside one that fits on a line of the
+// alert's own (its content box: the widest line its words can be given,
+// under its icon if not beside it); only a word longer than that, as the
+// error's long path is, may break inside. The demo is found by its id, since
+// a pseudolocale renames its heading.
+Then(
+  "every alert of the alert demo breaks its words only between them, unless a word is longer than its line",
+  async function (this: BrowserWorld) {
+    for (const alert of await eachOf(this.page.locator("#alert-demo .alert"), ALERTS)) {
+      const room = await alert.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          text: element.querySelector(".alert-words")?.textContent?.trim() ?? "",
+          line: element.clientWidth - parseFloat(style.paddingInlineStart) - parseFloat(style.paddingInlineEnd),
+        };
+      });
+      const found = await alert.locator(".alert-words").evaluate(wordsBrokenInside, { line: room.line });
+      assert.ok(found.words > 1, `"${room.text}" shows no sentence`);
+      assert.deepEqual(found.inside, [], `the words of "${room.text}" break inside a word`);
+    }
+  },
+);
+
+// The Dismiss button keeps to the end of its line (#972), beside the words
+// or on a line of its own under them: its end edge meets the end of the
+// alert's content box, the right in English and the left in Arabic.
+Then(
+  "the Dismiss button of the alert demo stands at the end of its line, in a page that runs {word} to {word}",
+  async function (this: BrowserWorld, from: string, to: string) {
+    const rtl = from === "right" && to === "left";
+    const alert = this.page.locator("#alert-demo .alert").filter({ has: this.page.locator(".alert-dismiss") });
+    await expect(alert).toHaveCount(1);
+    const drawn = await alert.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const outer = element.getBoundingClientRect();
+      const dismiss = element.querySelector(".alert-dismiss")?.getBoundingClientRect();
+      return {
+        direction: style.direction,
+        left: outer.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+        right: outer.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight),
+        dismiss: dismiss === undefined ? null : { left: dismiss.left, right: dismiss.right },
+      };
+    });
+    assert.equal(drawn.direction, rtl ? "rtl" : "ltr");
+    assert.ok(drawn.dismiss !== null, "the dismissible alert has no Dismiss button");
+    if (rtl) {
+      assert.ok(near(drawn.dismiss.left, drawn.left), `Dismiss's left edge at ${drawn.dismiss.left}px, not at the line's end, ${drawn.left}px`);
+    } else {
+      assert.ok(near(drawn.dismiss.right, drawn.right), `Dismiss's right edge at ${drawn.dismiss.right}px, not at the line's end, ${drawn.right}px`);
     }
   },
 );
