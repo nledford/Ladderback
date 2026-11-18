@@ -3,8 +3,7 @@ use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsCast;
 
 use super::button::{Appearance, Content};
-use super::{Button, return_focus, trap_focus};
-use crate::live::{close_modal_when_gone, modal_gone, open_modal};
+use super::{Button, ModalDialog, TitleLevel};
 use crate::variants::Tone;
 
 /// What a review's confirm button says, the tone it is drawn in (`Error`
@@ -33,15 +32,15 @@ pub struct Working {
 }
 
 /// A review dialog (§4.5): what a run would do, shown before it runs, with the
-/// person's word asked for. It is a native `<dialog>` opened with `showModal`,
-/// as [`ModalDialog`](super::ModalDialog) is, but opened by whoever owns the run: the page sets
-/// `open` once it knows what the run would do, and the dialog clears it
-/// however it closes (Escape, the dismiss button, or the owner clearing it
-/// first). It opens with focus on its first button, the dismiss one, so a
-/// stray Enter backs out and never confirms. Closing returns focus to the
-/// control with the id `returns_to`, the one that asked for the review, or to
-/// the element with the id `fallback` when that control is gone, so that
-/// focus never falls to the page.
+/// person's word asked for. It is a [`ModalDialog`] titled at level 3, under
+/// the section of the page that asked for it, and opened by whoever owns the
+/// run: the page sets `open` once it knows what the run would do, and the
+/// dialog clears it however it closes (Escape, the dismiss button, or the
+/// owner clearing it first). It opens with focus on its first button, the
+/// dismiss one, so a stray Enter backs out and never confirms. Closing returns
+/// focus to the control with the id `returns_to`, the one that asked for the
+/// review, or to the element with the id `fallback` when that control is gone,
+/// so that focus never falls to the page.
 ///
 /// A review with something to confirm has a [`Confirmation`]: the dismiss
 /// button and then the confirm one, whose action leaves the dialog open until
@@ -82,17 +81,11 @@ pub fn ReviewDialog(
     #[prop(optional)] starts_on: Option<NodeRef<leptos::html::Button>>,
     children: Children,
 ) -> impl IntoView {
-    let dialog = NodeRef::<leptos::html::Dialog>::new();
     let dismiss = NodeRef::<leptos::html::Button>::new();
-    // Whether the announcer counts the dialog as an open modal, so leaving the
-    // page while it is open closes it and ends the count however it went away.
-    let counted = RwSignal::new(false);
-    close_modal_when_gone(dialog, counted);
     let (busy, status) = match working {
         Some(Working { active, status }) => (active, status),
         None => (Signal::stored(false), String::new()),
     };
-    let title_id = format!("{returns_to}-title");
     let held_id = format!("{returns_to}-held");
     let held = held.unwrap_or_else(|| Signal::stored(None));
     // Whether a button that goes ahead was pressed while held, so the polite
@@ -102,37 +95,6 @@ pub fn ReviewDialog(
     Effect::new(move |_| {
         if held.with(Option::is_none) {
             pressed_held.set(false);
-        }
-    });
-    let (opener, opener_fallback) = (returns_to.clone(), fallback.clone());
-    Effect::new(move |_| {
-        let wanted = open.get();
-        let Some(dialog) = dialog.get() else {
-            return;
-        };
-        if wanted {
-            // The browser queues a dialog's `close` event rather than raising
-            // it as the dialog closes, and Chromium has been seen to raise it
-            // after the reader's next key press: a dialog closed with Escape
-            // and opened again at once still waits for it. That closing is
-            // over, so it is counted gone now, and its event, come late, finds
-            // the dialog open and is left alone, or it would close the dialog
-            // under the reader.
-            if !dialog.open() {
-                modal_gone(counted);
-            }
-            open_modal(&dialog, counted);
-            // The browser puts focus on the first control it finds; the
-            // dismiss button is the one a review means to start on, unless
-            // the owner named another.
-            if let Some(first) = starts_on.unwrap_or(dismiss).get_untracked() {
-                let _ = first.focus();
-            }
-        } else if dialog.open() {
-            // Closed by its owner, which no `close` handler can be counted on
-            // to follow once the owner has taken the dialog off the page.
-            dialog.close();
-            return_focus(&opener, opener_fallback.as_deref());
         }
     });
     let body = children();
@@ -198,30 +160,25 @@ pub fn ReviewDialog(
             });
         }
     };
+    // Escape dismisses the review as its dismiss button does, unless the run
+    // is being started: the review then holds still.
+    let escape = Callback::new(move |()| {
+        if !busy.get_untracked() {
+            open.set(false);
+        }
+    });
     view! {
-        // A `close` event that finds the dialog open is late, for a closing
-        // the dialog was opened again since (see above): that closing was
-        // already counted gone, so the event is left alone.
-        <dialog
-            node_ref=dialog
-            aria-labelledby=title_id.clone()
-            aria-describedby=described_by
-            on:cancel=move |ev: web_sys::Event| {
-                if busy.get_untracked() {
-                    ev.prevent_default();
-                }
-            }
-            on:close=move |_| {
-                if dialog.get_untracked().is_some_and(|dialog| dialog.open()) {
-                    return;
-                }
-                modal_gone(counted);
-                open.try_set(false);
-                return_focus(&returns_to, fallback.as_deref());
-            }
-            on:keydown=move |ev: web_sys::KeyboardEvent| trap_focus(&dialog, &ev)
+        <ModalDialog
+            open=open
+            id=returns_to.clone()
+            title=title
+            title_level=TitleLevel::Three
+            described_by=described_by
+            starts_on=starts_on.unwrap_or(dismiss)
+            on_cancel=escape
+            returns_to=returns_to
+            fallback=fallback
         >
-            <h3 id=title_id.clone()>{title}</h3>
             {body}
             {move || {
                 held.get()
@@ -247,15 +204,11 @@ pub fn ReviewDialog(
                     content=Content::Text(dismiss_label.into())
                     node_ref=dismiss
                     disabled=busy
-                    on_press=Callback::new(move |()| {
-                        if let Some(dialog) = dialog.get() {
-                            dialog.close();
-                        }
-                    })
+                    on_press=Callback::new(move |()| open.set(false))
                 />
                 {confirm}
                 {also}
             </p>
-        </dialog>
+        </ModalDialog>
     }
 }
