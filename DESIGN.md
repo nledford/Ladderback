@@ -62,12 +62,12 @@ spacing:
   md: "0.75rem"
   lg: "1rem"
 components:
-  badge-loading:
+  badge-primary:
     backgroundColor: "{colors.loading-bg}"
     textColor: "{colors.loading-fg}"
     rounded: "{rounded.pill}"
     padding: "0.125rem 0.5rem"
-  badge-empty:
+  badge-secondary:
     backgroundColor: "{colors.empty-bg}"
     textColor: "{colors.empty-fg}"
     rounded: "{rounded.pill}"
@@ -80,6 +80,11 @@ components:
   badge-success:
     backgroundColor: "{colors.success-bg}"
     textColor: "{colors.success-fg}"
+    rounded: "{rounded.pill}"
+    padding: "0.125rem 0.5rem"
+  badge-warning:
+    backgroundColor: "{colors.warning-bg}"
+    textColor: "{colors.warning-fg}"
     rounded: "{rounded.pill}"
     padding: "0.125rem 0.5rem"
   button-filled:
@@ -119,6 +124,8 @@ components:
     backgroundColor: "{colors.ledger-gray}"
     padding: "0.75rem 1rem"
   toast:
+    # Information's; a status tone's lies on its status pair. Edged 1 px in
+    # its tone.
     backgroundColor: "{colors.ledger-gray}"
     rounded: "{rounded.sm}"
     padding: "0.5rem 0.75rem"
@@ -193,7 +200,7 @@ The status pairs: each status tone's soft pair, for a part tinted in it (a badge
 
 The words are at 4.5:1 or more on their fill. Warning's and Error's fills stand at least 0.1 apart in OKLab lightness in both schemes, Error's the further from the page (darker in light, lighter in dark), so amber and red never read as one, for a reader who can't tell the hues apart either (decision 108). The Error pair's words also draw a form's errors and the error summary's border on the page. Under forced colors the system's colors replace both.
 
-The badge's own pairs, for the states that tell no result: Loading (dark blue on pale blue) while a run is under way, Empty (gray) while it waits, once it was cancelled, or with nothing to tell. A status badge draws a run that succeeded or failed in its status tone's pair; the status hues above are not drawn on a fill.
+The badge's own pairs, for the tones that tell no result: Loading (dark blue on pale blue), the badge's Primary tone, which a status badge takes while a run is under way, and Empty (gray), its Secondary tone, which a status badge takes while a run waits, once it was cancelled, or with nothing to tell. A badge in the Success, Warning or Error tone, and a status badge for a run that succeeded or failed, draws in its status tone's pair; the status hues above are not drawn on a fill.
 
 ### Named Rules
 
@@ -253,7 +260,7 @@ Every component is plain and exact: a control is the browser's own element, size
 
 ### Shared Vocabulary
 
-Every shared component takes the same choices, defined once in `crates/web/src/variants.rs`, as it is built or reworked. A tone, a size and a placement are each a set of Tailwind utilities that `variants.rs` returns, or, until its component moves (#931), a class of `style.css`; the gallery's "Shared vocabulary" demo shows them. A side is where the page places a part, which the "Tooltip" demo shows. The status badge keeps its states' own pairs for its text. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
+Every shared component takes the same choices, defined once in `crates/web/src/variants.rs`, as it is built or reworked. A tone, a size and a placement are each a set of Tailwind utilities that `variants.rs` returns, or, until its component moves (#931), a class of `style.css`; the gallery's "Shared vocabulary" demo shows them. A side is where the page places a part, which the "Tooltip" demo shows. A badge keeps the five status pairs for its text and its pill, each under a tone's name. A component's row in §4.5 names any tone it leaves out because it makes no sense there.
 
 - **Tone:** Primary (Ladder Blue, the default, unless a component names its own, as the icon and the button do), Secondary (Slate Note), Success, Warning and Error (the status hues), and Inherit, the color of the text around it, for a part inside another component, such as a spinner in a button. No Info: Primary covers it. A tone's class sets `--tone`, which the component draws with.
 - **Size:** Small, Medium, Large and XLarge, one scale every component shares, in `em`, so a size grows with the reader's text: Small 1em, Medium 1.5em, Large 2em, XLarge 3em. A size's class sets `--size`, which the component draws its length with, so a spinner and an icon of one size line up. A component that needs other lengths may deviate, saying why with it. The vocabulary has no default size: each component picks its own.
@@ -274,10 +281,17 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 - **Forced colors:** the reader's `ButtonFace`, its label and edge `ButtonText`, a pressed Ghost one's edge too, an unavailable one `GrayText`; a busy one keeps `ButtonText`, as it is at work, not unavailable.
 - **Focus:** the global 3 px Ladder Blue ring, 2 px offset; `CanvasText` under forced colors.
 
+### Badges
+
+- **Use:** a count or a tag beside what it describes ("Pending changes 3"), its words saying what it counts or names, the count included. Never a number or a color alone.
+- **Style:** a pill in its tone's pair (see Colors), 0.125rem by 0.5rem padding: Secondary (the badge's own gray pair, the default), Primary (its own blue pair), or Success, Warning or Error (their status pairs). Under forced colors, a 1px edge in the text's color, inside the pill.
+- **Content:** an optional icon as tall as the text, stroked in the text's color, then the words. Where the two don't fit side by side, the words wrap whole below the icon.
+- **Plain text:** no role, nothing to focus; it takes the text's size and stands in its line.
+
 ### Status Badges
 
-- **Style:** a pill in its state's pair (see Colors): Success's or Error's for a run that succeeded or failed, the badge's own Loading or Empty pair otherwise, 0.125rem by 0.5rem padding.
-- **Content:** an icon as tall as the text, stroked in the text's color, then the label. Where the two don't fit side by side, the label wraps whole below the icon.
+- **Style:** a badge in its state's tone: Success's pair or Error's for a run that succeeded or failed, the badge's own Loading (blue) pair while it runs and its Empty (gray) pair otherwise.
+- **Content:** the state's own icon, then the label.
 
 ### Inputs / Fields
 
@@ -357,6 +371,15 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 - **Not a live region:** urgent text goes through the announcer too; one failure is said once.
 - **Forced colors:** a 1px `CanvasText` edge all round, the start edge still thick; the icon in the text's color.
 - **No size:** its words are the page's text.
+
+### Toasts
+
+- **The component:** `Toast`, the answer to what the reader just did, in the page's flow where its page puts it, never fixed over the page: an icon, the words, then a Dismiss button. One at a time; a new one takes the place of the one shown.
+- **Look:** a status tone's toast lies on its status pair, its words, icon and Dismiss button in the pair's words; information on Ledger Gray in Graphite Ink. Edged 1px all round in its tone, with the small corner. Flat: its fill and edge set it off, never a lift.
+- **Tone:** Primary (information, the default), Success, Warning and Error, with the alert's icons, each named by its tone in words for a screen reader. No Secondary and no Inherit.
+- **Time:** information and success go by themselves after 6 s, held while the pointer rests on it or focus is in it; a warning or a failure stays until dismissed. A failure also stays on its page.
+- **Said, not seized:** the announcer says it, assertively only for a failure; it never takes focus. Dismiss hands focus to the control its page names.
+- **Forced colors:** no fill, a 1px `CanvasText` edge; the icon in the text's color.
 
 ### Icon
 

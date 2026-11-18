@@ -634,7 +634,7 @@ impl futures::task::ArcWake for Woken {
 /// only when nothing in the run can go on without it: a discrete-event
 /// clock, which neither skips a deadline nor lets one sleeper's wait add to
 /// another's.
-fn until_done<F: Future>(clock: &FakeClock, run: F) -> F::Output {
+pub(crate) fn until_done<F: Future>(clock: &FakeClock, run: F) -> F::Output {
     let woken = Arc::new(Woken(AtomicBool::new(false)));
     let waker = futures::task::waker(Arc::clone(&woken));
     let mut cx = std::task::Context::from_waker(&waker);
