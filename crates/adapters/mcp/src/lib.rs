@@ -1002,8 +1002,9 @@ fn tools() -> Vec<Tool> {
         .with_annotations(acting()),
         Tool::new(
             GET_PROPOSAL,
-            "One proposal this AI agent made: its status, its changes, its rationale and the \
-             reasons a person gave for rejecting any of them.",
+            "One proposal, by its ID: its status, its changes, its rationale and the reasons a \
+             person gave for rejecting any of them. With an API token, only a proposal that \
+             token made.",
             input_schema::<ProposalArguments>(),
         )
         .with_title("Get proposal")
@@ -1011,8 +1012,8 @@ fn tools() -> Vec<Tool> {
         .with_annotations(read_only()),
         Tool::new(
             WITHDRAW_PROPOSAL,
-            "Withdraws a pending proposal this AI agent made, so no person approves it, and \
-             returns it.",
+            "Withdraws a pending proposal, so no person approves it, and returns it. With an \
+             API token, only a proposal that token made.",
             input_schema::<ProposalArguments>(),
         )
         .with_title("Withdraw proposal")

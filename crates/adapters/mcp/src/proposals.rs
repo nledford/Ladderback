@@ -38,7 +38,8 @@ pub struct ProposeArguments {
     /// its ID, each giving the plan's table in the configuration file's keys,
     /// as a `[[plans]]` entry writes it (`id`, `repository`, `sources` and
     /// so on); `remove-plan` gives the ID of the plan to remove. A plan names
-    /// a repository by its alias, never a secret, and takes no hooks.
+    /// a repository by its alias, never a secret. A proposal can't add a
+    /// hook, and a `change-plan` must keep the plan's hooks as they are.
     #[schemars(schema_with = "changes")]
     pub changes: Vec<ProposalChangeDto>,
     /// Why, in the AI agent's own words: shown apart from the summary

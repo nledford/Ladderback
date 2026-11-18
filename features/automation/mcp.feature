@@ -646,6 +646,17 @@ Feature: AI agents and scripts use Ladderback through MCP
     And standard error never says "canary-script-password"
     And no scratch folder is left
 
+  Scenario: A script's call of a proposal tool names no tool where the server offers none
+    Given a file of calls "calls.jsonl" holding:
+      """
+      {"tool": "get_proposal", "arguments": {"proposal": "x"}}
+      """
+    When an agent runs "mcp call --scratch --script {scratch}/calls.jsonl"
+    Then the command exits with status 1
+    And standard output has 0 lines
+    And standard error says "line 1 of the script names no tool that exists"
+    And no scratch folder is left
+
   Scenario: A script of calls that can't be read is named by its path
     Given a folder "calls.d" where a file of calls would be
     When an agent runs "mcp call --scratch --script {scratch}/calls.d"

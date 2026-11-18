@@ -3705,7 +3705,7 @@
       "additionalProperties": false,
       "properties": {
         "changes": {
-          "description": "The changes, applied in this order when a person approves them. Each\nis an object with its `kind` and its `plan`: `add-plan` adds the plan\nafter the last one and `change-plan` puts it in place of the plan with\nits ID, each giving the plan's table in the configuration file's keys,\nas a `[[plans]]` entry writes it (`id`, `repository`, `sources` and\nso on); `remove-plan` gives the ID of the plan to remove. A plan names\na repository by its alias, never a secret, and takes no hooks.",
+          "description": "The changes, applied in this order when a person approves them. Each\nis an object with its `kind` and its `plan`: `add-plan` adds the plan\nafter the last one and `change-plan` puts it in place of the plan with\nits ID, each giving the plan's table in the configuration file's keys,\nas a `[[plans]]` entry writes it (`id`, `repository`, `sources` and\nso on); `remove-plan` gives the ID of the plan to remove. A plan names\na repository by its alias, never a secret. A proposal can't add a\nhook, and a `change-plan` must keep the plan's hooks as they are.",
           "items": {
             "additionalProperties": false,
             "properties": {
@@ -3948,7 +3948,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "One proposal this AI agent made: its status, its changes, its rationale and the reasons a person gave for rejecting any of them.",
+    "description": "One proposal, by its ID: its status, its changes, its rationale and the reasons a person gave for rejecting any of them. With an API token, only a proposal that token made.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -4164,7 +4164,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "Withdraws a pending proposal this AI agent made, so no person approves it, and returns it.",
+    "description": "Withdraws a pending proposal, so no person approves it, and returns it. With an API token, only a proposal that token made.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -4374,4 +4374,3 @@
     "title": "Withdraw proposal"
   }
 ]
-
