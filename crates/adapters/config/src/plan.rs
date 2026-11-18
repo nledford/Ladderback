@@ -61,7 +61,7 @@ pub fn read_plan(table: &impl Serialize) -> Result<Plan, ConfigError> {
 /// `text` isn't a TOML table: [`Problem::Syntax`], at no key, its detail
 /// holding none of the text.
 pub fn plan_table(text: &str) -> Result<serde_json::Map<String, serde_json::Value>, ConfigError> {
-    todo!("{text}")
+    toml::from_str(text).map_err(|error| whole(Problem::Syntax, scrub(error.message())))
 }
 
 /// `plan` as the file writes it, in the file's keys, each default left out,

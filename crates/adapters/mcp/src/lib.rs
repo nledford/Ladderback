@@ -368,7 +368,7 @@ struct Status {
 /// of streams, saying each refusal in the catalog's words of its locale.
 pub struct Server {
     backend: Arc<dyn Backend>,
-    proposals: Option<Proposing>,
+    proposing: Option<Proposing>,
     build: BuildDto,
     localizer: Localizer,
 }
@@ -393,7 +393,7 @@ impl Server {
     pub fn new(backend: Arc<dyn Backend>, build: BuildDto, localizer: Localizer) -> Self {
         Self {
             backend,
-            proposals: None,
+            proposing: None,
             build,
             localizer,
         }
@@ -405,14 +405,14 @@ impl Server {
     #[must_use]
     pub fn proposing(self, proposals: Arc<dyn Proposals>, tables: Arc<dyn PlanTables>) -> Self {
         Self {
-            proposals: Some(Proposing { proposals, tables }),
+            proposing: Some(Proposing { proposals, tables }),
             ..self
         }
     }
 
     /// Which tools the server offers.
     pub fn offer(&self) -> Offer {
-        if self.proposals.is_some() {
+        if self.proposing.is_some() {
             Offer::Connect
         } else {
             Offer::InProcess
@@ -513,7 +513,7 @@ impl Server {
             ToolName::PreviewImport => answered(self.preview_import(given).await),
             ToolName::ExportProfile => answered(self.export_profile(given).await),
             ToolName::ProposeSetup | ToolName::GetProposal | ToolName::WithdrawProposal => {
-                let Some(proposing) = &self.proposals else {
+                let Some(proposing) = &self.proposing else {
                     // A one-shot call of a tool this server doesn't offer:
                     // refused before it asks anything, as `tools/call` is.
                     return Answer::Unwritten(format!("no tool is named {:?}", tool.name()));
@@ -737,7 +737,8 @@ async fn propose(
     match tool {
         ToolName::ProposeSetup => {
             let arguments: ProposeArguments = read(given)?;
-            proposals.propose(arguments.into()).await
+            let proposal = arguments.proposal(proposing.tables.as_ref())?;
+            proposals.propose(proposal).await
         }
         ToolName::WithdrawProposal => {
             let ProposalArguments { proposal } = read(given)?;
