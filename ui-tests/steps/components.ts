@@ -582,14 +582,15 @@ Then(
 );
 
 // A status badge (§4.5) whose operation ended draws its words and its pill in
-// the pair of its status tone, found by its words, the whole of them
-// ("Succeeded" is never "Succeeded with warnings").
+// the pair of its status tone, found by its class and its words, the whole of
+// them ("Succeeded" is never "Succeeded with warnings"): the pill, not the
+// words inside it, which lie on its fill.
 Then(
   "each of these badges of the {string} demo is drawn on its fill:",
   async function (this: BrowserWorld, component: string, badges: DataTable) {
     const section = demoSection(this.page, component);
     for (const { badge, words, fill } of badges.hashes() as { badge: string; words: string; fill: string }[]) {
-      const pill = section.getByText(badge, { exact: true });
+      const pill = section.locator(".badge").filter({ hasText: wholly(badge) });
       await drawnOnItsFill(pill, badge, words, fill);
     }
   },
