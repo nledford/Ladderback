@@ -288,7 +288,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Status Badges
 
-- **Style:** a badge in its state's tone: Success's pair or Error's for a run that succeeded or failed, the badge's own Loading (blue) pair while it runs and its Empty (gray) pair otherwise.
+- **Style:** a badge in its state's tone: Success's pair for a run that succeeded, Warning's for one that succeeded with warnings (a success with something to read, never a clean run's green), Error's for one that failed, the badge's own Loading (blue) pair while it runs and its Empty (gray) pair otherwise.
 - **Content:** the state's own icon, then the label.
 
 ### Inputs / Fields
