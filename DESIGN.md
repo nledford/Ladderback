@@ -124,6 +124,8 @@ components:
     backgroundColor: "{colors.ledger-gray}"
     padding: "0.75rem 1rem"
   toast:
+    # Information's; a status tone's lies on its status pair. Edged 1 px in
+    # its tone.
     backgroundColor: "{colors.ledger-gray}"
     rounded: "{rounded.sm}"
     padding: "0.5rem 0.75rem"
@@ -362,13 +364,22 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 
 ### Alerts
 
-- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. The Log and Plans pages show their refusals with it, as Error alerts; the other pages move onto it in #929.
+- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. The Log, Plans and Snapshots pages, and a snapshot's Restore and Download dialogs, show their refusals with it, as Error alerts; the other pages and the tree's own message move onto it in #929.
 - **Look:** Ledger Gray with the small corner, the words and any link in them in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a failure is not a red banner.
 - **Tone:** Primary (information, the default), Success, Warning and Error, each with its own icon: Info, CircleCheck, TriangleAlert and CircleX, the icon named by its tone in words for a screen reader. No Secondary and no Inherit: an alert always says its tone.
 - **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page takes the alert away and names where focus goes.
 - **Not a live region:** urgent text goes through the announcer too; one failure is said once.
 - **Forced colors:** a 1px `CanvasText` edge all round, the start edge still thick; the icon in the text's color.
 - **No size:** its words are the page's text.
+
+### Toasts
+
+- **The component:** `Toast`, the answer to what the reader just did, in the page's flow where its page puts it, never fixed over the page: an icon, the words, then a Dismiss button. One at a time; a new one takes the place of the one shown.
+- **Look:** a status tone's toast lies on its status pair, its words, icon and Dismiss button in the pair's words; information on Ledger Gray in Graphite Ink. Edged 1px all round in its tone, with the small corner. Flat: its fill and edge set it off, never a lift.
+- **Tone:** Primary (information, the default), Success, Warning and Error, with the alert's icons, each named by its tone in words for a screen reader. No Secondary and no Inherit.
+- **Time:** information and success go by themselves after 6 s, held while the pointer rests on it or focus is in it; a warning or a failure stays until dismissed. A failure also stays on its page.
+- **Said, not seized:** the announcer says it, assertively only for a failure; it never takes focus. Dismiss hands focus to the control its page names.
+- **Forced colors:** no fill, a 1px `CanvasText` edge; the icon in the text's color.
 
 ### Icon
 

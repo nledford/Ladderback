@@ -702,10 +702,6 @@ Then("the progress bar {string} shows no percentage", async function (this: Brow
   await expect.poll(shown).not.toMatch(/%/);
 });
 
-Then("a toast reads {string}", async function (this: BrowserWorld, text: string) {
-  await expect(this.page.locator("main").getByText(text)).toBeVisible();
-});
-
 // A toast is transient; ten seconds is generous for however long it shows.
 // Scoped to main: the polite live region carries the same text.
 When("the toast {string} is gone", async function (this: BrowserWorld, text: string) {
@@ -2358,7 +2354,13 @@ const SNAPSHOTS: Record<string, string> = {
 - progressbar "Demo progress in the Inherit tone": Backing up… 60%`,
   Toast: `- heading "Toast" [level=2]
 - paragraph:
-  - button "Save the demo settings"`,
+  - button "Save the demo settings"
+- paragraph:
+  - button "Queue a demo check"
+- paragraph:
+  - button "Back up the demo plan"
+- paragraph:
+  - button "Restore the demo snapshot"`,
   "Review dialog": `- heading "Review dialog" [level=2]
 - paragraph:
   - button "Open a demo review"

@@ -66,7 +66,7 @@ pub use step_up_field::{StepUp, StepUpField};
 pub use table::{Align, Column, Footer, Name, Sentences, Sort, SortKey, State, Table};
 pub use tabs::{Tab, Tabs};
 pub use text_field::TextField;
-pub(crate) use toast::{Toast, show_toast};
+pub use toast::{Toast, ToastTone, Toasts};
 pub use tooltip::{Tip, Tooltip};
 pub(crate) use tree::{FolderLoader, FolderPage, Tree};
 
@@ -218,9 +218,11 @@ pub(crate) fn dialog_refusal_alert(
 /// assertive region, as the page's answer (4.1.3), since its
 /// [`refusal_alert`] is no live region. Each is said once: a page that reads
 /// again and is refused in the same words keeps its alert and says nothing
-/// new, and one cleared, then refused again, is said again. Called once,
-/// where the page makes the signal; it stops with the page.
-pub(crate) fn say_refusals(refused: RwSignal<Option<Sentence>>) {
+/// new, and one cleared, then refused again, is said again. `refused` may be
+/// derived, as a panel's refusal put into words is. Called once, where the
+/// page makes the signal; it stops with the page.
+pub(crate) fn say_refusals(refused: impl Into<Signal<Option<Sentence>>>) {
+    let refused = refused.into();
     let shown = Memo::new(move |_| refused.get());
     Effect::new(move |_| {
         if let Some(sentence) = shown.get() {

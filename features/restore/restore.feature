@@ -251,7 +251,7 @@ Feature: Restoring files from a snapshot
     And the page has no accessibility violations
 
   @ui
-  Scenario: A restore over the original files is held, and says why, until its dry run is read again
+  Scenario: A restore over the original files is held, and says why in an error alert of the dialog's own, until its dry run is read again
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
@@ -268,6 +268,7 @@ Feature: Restoring files from a snapshot
     And the button "Restore" is described by "The dry run couldn't be read, so nothing is restored over the original files. Read it again, or restore into a new folder."
     When I press Enter
     Then the dialog "Restore demo-1.txt" politely says "The dry run couldn't be read, so nothing is restored over the original files."
+    And the page shows an error alert containing "No repository was found at this location"
     And the dialog "Restore demo-1.txt" stays open
     When the repository is put back
     And I press Shift+Tab until focus is on the button "Read the dry run again"
@@ -277,6 +278,9 @@ Feature: Restoring files from a snapshot
     And the dialog "Restore demo-1.txt" has its button "Restore" available
     And focus is on the button "Read the dry run again"
     And the page has no accessibility violations
+    When I press Escape
+    Then focus is on the button "Restore demo-1.txt"
+    And the assertive region stays empty
 
   @ui
   Scenario: A wrong confirmation is said inside the dialog, which stays open

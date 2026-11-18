@@ -31,8 +31,8 @@ use crate::components::{
     Alert, Align, Badge, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation,
     Dismissal, FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name,
     PauseUpdates, Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner,
-    State, StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip,
-    Tree, show_toast, text_field,
+    State, StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, ToastTone,
+    Toasts, Tooltip, Tree, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -110,8 +110,27 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         current: 6 * GIB,
         ..progress.get_untracked()
     };
-    let toast = RwSignal::<Option<String>>::new(None);
-    let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
+    // The toast demo's toasts, and whether its restore's failure stands on
+    // the page, as a failure must beside its toast.
+    let toasts = Toasts::new();
+    let restore_failure_shown = RwSignal::new(false);
+    let toast_button = |id: &'static str, label, tone, words| {
+        let words: String = t(words);
+        view! {
+            <p>
+                <Button
+                    content=Content::Text(t(label).into())
+                    id=id
+                    on_press=Callback::new(move |()| {
+                        if tone == ToastTone::Error {
+                            restore_failure_shown.set(true);
+                        }
+                        toasts.show(tone, words.clone());
+                    })
+                />
+            </p>
+        }
+    };
     // Whether the icon demo's notifications are on, which its icon-only
     // toggle button shows and changes.
     let notifications = RwSignal::new(false);
@@ -602,15 +621,53 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     .collect_view()}
             </ul>
         </section>
-        <section>
+        <section id="toast-demo">
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
-            <Toast text=toast />
-            <p>
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_SAVE_SETTINGS).into())
-                    on_press=Callback::new(move |()| show_toast(toast, settings_saved.clone()))
-                />
-            </p>
+            // A button for each tone, then the toast under them, so Tab
+            // reaches its Dismiss button from each.
+            {toast_button(
+                TOAST_DEMO_SAVE,
+                msg::UI_GALLERY_SAVE_SETTINGS,
+                ToastTone::Success,
+                msg::UI_GALLERY_SETTINGS_SAVED,
+            )}
+            {toast_button(
+                "toast-demo-queue",
+                msg::UI_GALLERY_QUEUE_CHECK,
+                ToastTone::Primary,
+                msg::UI_GALLERY_CHECK_QUEUED,
+            )}
+            {toast_button(
+                "toast-demo-back-up",
+                msg::UI_GALLERY_BACK_UP_PLAN,
+                ToastTone::Warning,
+                msg::UI_GALLERY_BACKUP_WARNED,
+            )}
+            {toast_button(
+                "toast-demo-restore",
+                msg::UI_GALLERY_RESTORE_SNAPSHOT,
+                ToastTone::Error,
+                msg::UI_GALLERY_DEMO_RESTORE_FAILED,
+            )}
+            // Dismissed, a toast hands focus to the first button.
+            <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=TOAST_DEMO_SAVE />
+            // The failure stays on the page after its toast has gone.
+            {
+                let localizer = Arc::clone(&localizer);
+                let detail = t(msg::UI_GALLERY_DEMO_RESTORE_FAILED_DETAIL);
+                move || {
+                    restore_failure_shown
+                        .get()
+                        .then(|| {
+                            let detail = detail.clone();
+                            view! {
+                                <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
+                                    {detail}
+                                </Alert>
+                            }
+                        })
+                }
+            }
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_REVIEW_HEADING)}</h2>
@@ -1936,6 +1993,10 @@ const BANNER_DEMO: &str = "gallery-demo";
 /// The ID of the banner demo's button that brings a newer edition of its
 /// notice, where focus goes when the notice is dismissed.
 const BANNER_DEMO_NEWER: &str = "banner-demo-newer";
+
+/// The ID of the toast demo's Save button, where focus goes when a toast is
+/// dismissed.
+const TOAST_DEMO_SAVE: &str = "toast-demo-save";
 
 /// A demo route. The gallery's literal paths all parse (the link's rules
 /// test their shapes); one that didn't would show no link, which the link

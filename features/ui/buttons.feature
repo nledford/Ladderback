@@ -182,4 +182,5 @@ Feature: Buttons on every page
     And I press Enter
     Then the button "Approve the proposal" is busy, a spinner a screen reader skips before its label
     And the button "Show what it would forget" is unavailable
-    And the polite region comes to contain "is applied, and the configuration file is saved."
+    When the daemon has answered the approval of the proposal
+    Then the polite region comes to contain "is applied, and the configuration file is saved."

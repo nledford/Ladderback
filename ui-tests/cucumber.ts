@@ -35,7 +35,9 @@ const config: Partial<IConfiguration> = {
   import: ["support/**/!(*.test).ts", "steps/**/*.ts"],
   tags: "@ui",
   strict: true,
-  format: ["progress"],
+  // cucumber-js's own JUnit formatter, beside the failed scenarios' traces
+  // and screenshots (`support/world.ts`), which CI uploads when a run fails.
+  format: ["progress", "junit:reports/junit.xml"],
   parallel: workers(),
 };
 

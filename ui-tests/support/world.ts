@@ -6,7 +6,7 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,10 +14,13 @@ import { fileURLToPath } from "node:url";
 import {
   After,
   AfterAll,
+  AfterStep,
   Before,
   BeforeAll,
+  type ITestCaseHookParameter,
   setDefaultTimeout,
   setWorldConstructor,
+  Status,
   World,
 } from "@cucumber/cucumber";
 import {
@@ -87,6 +90,26 @@ function chosenEngine(): Engine {
  *  this. */
 export const engine: Engine = chosenEngine();
 const browserType: BrowserType = engines[engine];
+
+/** Where a run's reports go: the JUnit report (`cucumber.ts`) and, under
+ *  `failures/<engine>/`, a failed scenario's trace and screenshot. `just
+ *  test-ui` empties it first, and CI uploads it when the run fails. */
+const failuresDir = path.join(repoRoot, "ui-tests", "reports", "failures", engine);
+
+/** A failed scenario's files are named after its feature file, its name and
+ *  the start of its pickle's ID, which tells apart an outline's rows and two
+ *  scenarios of one name. */
+function evidenceName(pickle: ITestCaseHookParameter["pickle"]): string {
+  const slug = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 80);
+  return `${slug(path.basename(pickle.uri, ".feature"))}--${slug(pickle.name)}--${pickle.id.slice(0, 8)}`;
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** `locator.evaluateAll(pageFunction, arg)`, which a step whose locator is
  *  scoped by an accessible name calls instead. In Firefox that call crashed
@@ -300,10 +323,21 @@ export class BrowserWorld extends World {
   /** The files the browser saved, oldest first: a download's event comes
    *  before the step that checks it starts, so every page keeps them. */
   downloads: Download[] = [];
+  /** Whether the context records a Playwright trace that is still to be kept
+   *  or thrown away: `open` starts one, and the hooks below end it. */
+  tracing = false;
 
   async open(pathname = "/"): Promise<void> {
     if (browser === undefined) throw new Error("the browser is not running: BeforeAll failed");
+    // A second page of the scenario gets a context of its own; the first
+    // one's trace ends here rather than record for the rest of the run.
+    await this.discardTrace();
     this.context = await browser.newContext(this.contextOptions);
+    // Screenshots and DOM snapshots of every action, kept only when the
+    // scenario fails (`keepFailureEvidence`), so a failure that shows only on
+    // CI can be read from its run.
+    await this.context.tracing.start({ screenshots: true, snapshots: true });
+    this.tracing = true;
     await this.scriptedDaemon?.install(this.context);
     for (const install of this.contextRoutes) await install(this.context);
     if (this.answerDelayMs > 0) {
@@ -350,6 +384,48 @@ export class BrowserWorld extends World {
     await this.page.bringToFront();
   }
 
+  /** Saves the trace the context recorded and a screenshot of the page, as
+   *  `<name>.trace.zip` and `<name>.png` under `ui-tests/reports/failures/
+   *  <engine>/`, and names them in the scenario's report. Once per scenario:
+   *  at the failed step, before any After hook has stopped a daemon, or in
+   *  the After hook for a scenario that failed in a hook or is about to. The
+   *  trace first, and the screenshot within 5 s, so a page that hangs can't
+   *  hold the hook past its own limit and lose both. A page that crashed has
+   *  no screenshot, and a capture that fails is reported, never thrown, so it
+   *  never hides the scenario's own failure. */
+  async keepFailureEvidence(name: string): Promise<void> {
+    if (!this.tracing) return;
+    const base = path.join(failuresDir, name);
+    const shown = path.relative(repoRoot, base);
+    try {
+      await mkdir(failuresDir, { recursive: true });
+    } catch (error) {
+      this.attach(`no trace or screenshot kept: ${message(error)}`);
+      await this.discardTrace();
+      return;
+    }
+    this.tracing = false;
+    try {
+      await this.context.tracing.stop({ path: `${base}.trace.zip` });
+      this.attach(`trace: ${shown}.trace.zip (ui-tests/node_modules/.bin/playwright show-trace, or trace.playwright.dev)`);
+    } catch (error) {
+      this.attach(`no trace: ${message(error)}`);
+    }
+    try {
+      await this.page.screenshot({ path: `${base}.png`, timeout: 5_000 });
+      this.attach(`screenshot: ${shown}.png`);
+    } catch (error) {
+      this.attach(`no screenshot: ${message(error)}`);
+    }
+  }
+
+  /** Ends a passing scenario's trace without writing it. */
+  async discardTrace(): Promise<void> {
+    if (!this.tracing) return;
+    this.tracing = false;
+    await this.context.tracing.stop().catch(() => undefined);
+  }
+
   /** Keeps what `page`'s scripts throw and what its content security policy
    *  refuses, for the steps and the After hook to check. */
   #watch(page: Page): void {
@@ -379,14 +455,26 @@ Before(function (this: BrowserWorld) {
   this.baseUrl = null;
   this.fakeClock = false;
   this.firstTab = null;
+  this.tracing = false;
 });
 
-After(async function (this: BrowserWorld) {
-  // A scenario that failed before its first page opened has no context.
-  await (this.context as BrowserContext | undefined)?.close();
+// At the step that failed, so the screenshot and the trace's end show the
+// page as the step left it.
+AfterStep(async function (this: BrowserWorld, { pickle, result }) {
+  if (result.status === Status.FAILED) await this.keepFailureEvidence(evidenceName(pickle));
+});
+
+After(async function (this: BrowserWorld, { pickle, result }) {
   // The daemon's content security policy (§10.1) must let the UI do all it
   // does: any journey that has the browser refuse something fails.
-  if (!this.expectsPolicyBlocks && this.policyBlocks.length > 0) {
+  const blocked = !this.expectsPolicyBlocks && this.policyBlocks.length > 0;
+  // A scenario that failed in a hook, or fails on a refusal below, keeps its
+  // trace and screenshot here, unless a failed step kept them already.
+  if (blocked || result?.status === Status.FAILED) await this.keepFailureEvidence(evidenceName(pickle));
+  else await this.discardTrace();
+  // A scenario that failed before its first page opened has no context.
+  await (this.context as BrowserContext | undefined)?.close();
+  if (blocked) {
     throw new Error(`the browser blocked the page under its content security policy:\n${this.policyBlocks.join("\n")}`);
   }
 });
