@@ -307,8 +307,23 @@ async fn with_sign_in_on_an_api_request_without_a_live_session_never_reaches_its
 #[tokio::test]
 async fn the_web_ui_files_are_served_without_a_session() {
     let on = on();
-    for path in ["/", "/index.html", "/app.wasm", "/api", "/api/v10/plans"] {
+    for path in ["/", "/index.html", "/app.wasm"] {
         assert_let_through(&on, get(path, &[]), path).await;
+    }
+}
+
+/// Sign-in guards `/api/v1` alone, so an API path beside it that no route
+/// serves is told unknown without a session, never sent the UI.
+#[tokio::test]
+async fn an_api_path_beside_v1_that_no_route_serves_is_unknown_without_a_session() {
+    let on = on();
+    for path in ["/api", "/api/v10/plans"] {
+        let answer = code(send(&on, get(path, &[])).await).await;
+        assert_eq!(
+            answer,
+            (StatusCode::NOT_FOUND, Some("route-unknown".to_owned())),
+            "{path}"
+        );
     }
 }
 

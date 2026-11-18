@@ -2533,11 +2533,15 @@ mod tests {
         }
     }
 
+    /// Every path but the API's is the UI's, so a client-side route whose
+    /// name only starts like the API's gets the page too.
     #[tokio::test]
     async fn client_side_routes_get_the_entry_page() {
-        let response = get("/machines/laptop").await;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(content_type(&response), "text/html; charset=utf-8");
+        for route in ["/machines/laptop", "/plans", "/apiary", "/machines/api"] {
+            let response = get(route).await;
+            assert_eq!(response.status(), StatusCode::OK, "{route}");
+            assert_eq!(content_type(&response), "text/html; charset=utf-8");
+        }
     }
 
     #[tokio::test]
@@ -2551,7 +2555,49 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_file_is_not_found() {
-        assert_eq!(get("/missing.js").await.status(), StatusCode::NOT_FOUND);
+        for path in ["/missing.js", "/api.js"] {
+            let response = get(path).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+            assert!(body(response).await.is_empty(), "{path}");
+        }
+    }
+
+    /// The API's paths no route serves: the router's fallback must never take
+    /// them for the UI's.
+    const NO_SUCH_ROUTES: &[&str] = &[
+        "/api/v1/no-such-route",
+        "/api/v2/plans",
+        "/api/v1/",
+        "/api",
+        "//api/v1/no-such-route",
+    ];
+
+    #[tokio::test]
+    async fn a_path_no_route_serves_is_refused_whatever_the_method() {
+        use serde_json::json;
+        for path in NO_SUCH_ROUTES {
+            for method in [Method::GET, Method::POST, Method::PUT, Method::DELETE] {
+                let response = request(ui(), method.clone(), path, "").await;
+                assert_eq!(
+                    content_type(&response),
+                    "application/json",
+                    "{method} {path}"
+                );
+                assert_eq!(
+                    response.headers()[header::CACHE_CONTROL],
+                    "no-store",
+                    "{method} {path}"
+                );
+                assert_eq!(
+                    json_of(response).await,
+                    (StatusCode::NOT_FOUND, json!({"code": "route-unknown"})),
+                    "{method} {path}"
+                );
+            }
+            let head = request(ui(), Method::HEAD, path, "").await;
+            assert_eq!(head.status(), StatusCode::NOT_FOUND, "HEAD {path}");
+            assert_eq!(content_type(&head), "application/json", "HEAD {path}");
+        }
     }
 
     #[tokio::test]
