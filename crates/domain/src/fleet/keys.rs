@@ -98,12 +98,7 @@ fn x_is_zero_with_sign(bytes: &[u8; KEY_BYTES]) -> bool {
 
 /// Whether the little-endian number `a` is below `b`.
 fn less_than_le(a: &[u8; KEY_BYTES], b: &[u8; KEY_BYTES]) -> bool {
-    for (x, y) in a.iter().rev().zip(b.iter().rev()) {
-        if x != y {
-            return x < y;
-        }
-    }
-    false
+    a.iter().rev().lt(b.iter().rev())
 }
 
 /// Why bytes aren't a signature the protocol accepts.
