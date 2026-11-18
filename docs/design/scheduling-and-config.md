@@ -62,6 +62,7 @@ allow-hub-restore = false        # §10.4
 locale = "en-US"                 # notification text (§8.4); defaults to the POSIX locale, then en-US
 check-for-updates = true         # the daily release check (§5, §10.7); false never asks
 restore-folder = "/srv/restores" # where restores into a new folder go (§10.4); absolute; defaults to ~/ladderback-restore
+dry-run-allowlist = []           # folders a plan dry run may read (§16, decision 89); absolute; set by a person only
 
 [hub]                            # optional; a build with the hub only, so from M8 (decision 122)
 url = "https://hub.example.lan:9899"
