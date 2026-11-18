@@ -348,7 +348,7 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
         .sanitize()
         .map_err(|error| JobError::failed(error.to_string()))?
         .paths();
-    let options = backup_options(&job.filter).parent_opts(parent_options);
+    let options = backup_options(&job.filter)?.parent_opts(parent_options);
     // What `Repository::backup` does for folders, with a source a cancel
     // cuts short: the backup then winds down through rustic's own end,
     // which saves the index of the packs written, and the backends refuse

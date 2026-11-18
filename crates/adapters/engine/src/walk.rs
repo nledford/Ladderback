@@ -18,7 +18,8 @@ use crate::log_masking::unlogged;
 use crate::worker::backup_options;
 
 /// The most a `glob-files` or `iglob-files` file may hold for a dry run:
-/// rustic reads each whole as the walk is built, before any limit.
+/// each is read whole as the walk is built (the glob files by rustic, the
+/// iglob files by `backup_options`), before any limit.
 const MAX_GLOB_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Walks sources with rustic's `LocalSource`, the walker a backup reads.
@@ -44,13 +45,14 @@ impl WalkSources for RusticWalk {
             .chain(&filter.iglob_files)
             .map(|file| PathBuf::from(file.as_str()))
             .collect();
-        let options = backup_options(&filter_spec(filter.clone(), left_out.to_vec()));
+        let spec = filter_spec(filter.clone(), left_out.to_vec());
         let time = Duration::try_from(limits.time).unwrap_or(Duration::ZERO);
         tokio::task::spawn_blocking(move || {
             let (walked, warnings) = unlogged(|| {
                 if !glob_files.iter().all(|file| fits(file)) {
                     return Err(WalkError::Filter);
                 }
+                let options = backup_options(&spec).map_err(|_| WalkError::Filter)?;
                 let walker = LocalSource::new(
                     options.ignore_save_opts,
                     &options.excludes,
