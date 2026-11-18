@@ -308,16 +308,17 @@ async fn an_agent_refuses_the_pinned_certificate_without_its_private_key() {
     );
 }
 
-/// Only the certificate the hub is: the pinned one as an intermediate below
-/// another key's certificate counts for nothing.
+/// The hub shows its own certificate alone: the pinned certificate with
+/// another below it, as a CA's chain would carry, is refused, though the
+/// hub's key signs the handshake.
 #[tokio::test]
-async fn an_agent_refuses_the_pinned_certificate_behind_another() {
+async fn an_agent_refuses_the_pinned_certificate_with_another_behind_it() {
     let (pinned, other) = (new_key(), new_key());
     let chain = vec![
-        certificate(&other, &names(), now()).unwrap(),
         certificate(&pinned, &names(), now()).unwrap(),
+        certificate(&other, &names(), now()).unwrap(),
     ];
-    let agent = connect_to(server_showing(chain, &other), &connector(&pinned)).await;
+    let agent = connect_to(server_showing(chain, &pinned), &connector(&pinned)).await;
     assert!(
         matches!(agent, Err(ConnectError::Handshake(_))),
         "{agent:?}"
@@ -481,6 +482,66 @@ fn the_listener_and_the_client_show_no_key_in_their_debug_forms() {
     let key = new_key();
     assert_eq!(format!("{:?}", listener(&key)), "HubListener { .. }");
     assert_eq!(format!("{:?}", connector(&key)), "PinnedConnector { .. }");
+}
+
+/// The serial number in a certificate's DER: the INTEGER after the explicit
+/// version at the start of its TBSCertificate.
+fn serial(certificate: &CertificateDer<'_>) -> Vec<u8> {
+    /// The tag, the header's length and the content's length of the DER
+    /// element at the start of `der`.
+    fn element(der: &[u8]) -> (u8, usize, usize) {
+        let (&tag, &first) = (der.first().unwrap(), der.get(1).unwrap());
+        if first < 0x80 {
+            return (tag, 2, usize::from(first));
+        }
+        let octets = usize::from(first & 0x7f);
+        let length = der
+            .get(2..2 + octets)
+            .unwrap()
+            .iter()
+            .fold(0, |length, byte| (length << 8) | usize::from(*byte));
+        (tag, 2 + octets, length)
+    }
+    let der = certificate.as_ref();
+    let (_, header, _) = element(der);
+    let tbs = der.get(header..).unwrap();
+    let (_, header, _) = element(tbs);
+    let fields = tbs.get(header..).unwrap();
+    let (tag, header, length) = element(fields);
+    assert_eq!(tag, 0xa0, "the explicit version");
+    let rest = fields.get(header + length..).unwrap();
+    let (tag, header, length) = element(rest);
+    assert_eq!(tag, 0x02, "an INTEGER");
+    rest.get(header..header + length).unwrap().to_vec()
+}
+
+/// Every certificate has one issuer, the hub, so each one made, even from
+/// one key on one day, has its own serial number (RFC 5280 §4.1.2.2): a
+/// browser that took one certificate would refuse the next with the same
+/// issuer and serial. The number is positive and at most 20 octets.
+#[test]
+fn every_certificate_made_from_one_key_has_its_own_serial_number() {
+    let key = new_key();
+    let first = serial(&certificate(&key, &names(), now()).unwrap());
+    let second = serial(&certificate(&key, &names(), now()).unwrap());
+    assert_ne!(first, second);
+    assert!(first.len() <= 20, "{first:?}");
+    assert_eq!(first[0] & 0x80, 0, "{first:?}");
+}
+
+/// A certificate's time can't hold a year before 0: a clock that far back is
+/// refused rather than made into a certificate.
+#[test]
+fn a_certificate_dated_before_year_0_is_refused() {
+    let refused = certificate(
+        &new_key(),
+        &names(),
+        "0000-01-01T12:00:00Z".parse().unwrap(),
+    );
+    assert!(
+        matches!(refused, Err(ListenerError::Certificate { .. })),
+        "{refused:?}"
+    );
 }
 
 /// One provider, aws-lc-rs, with the groups named here, TLS 1.3 suites
