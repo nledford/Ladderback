@@ -56,7 +56,7 @@ pub struct HubPin {
 /// Why text isn't a pin this build can read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinRefused {
-    /// More than [`MAX_PIN_BYTES`].
+    /// More than [`MAX_PIN_BYTES`], as read or as it would be written.
     TooLong,
     /// The line, counted from 1, isn't blank and isn't `name = value` with
     /// a name of lower-case letters, digits and hyphens.
@@ -91,6 +91,8 @@ impl HubPin {
 
     /// Reads a pin. Blank lines are skipped; a name this build doesn't
     /// know is kept with its value, which [`HubPin::to_text`] writes back.
+    /// A pin whose text as written would be past [`MAX_PIN_BYTES`] is
+    /// refused too, so every pin read can be written and read again.
     pub fn parse(text: &str) -> Result<Self, PinRefused> {
         if text.len() > MAX_PIN_BYTES {
             return Err(PinRefused::TooLong);
@@ -109,7 +111,11 @@ impl HubPin {
             }
             read.line(name, value)?;
         }
-        read.finish()
+        let pin = read.finish()?;
+        if pin.to_text().len() > MAX_PIN_BYTES {
+            return Err(PinRefused::TooLong);
+        }
+        Ok(pin)
     }
 
     /// The pin's text: the names this build knows in a fixed order, then
