@@ -11,7 +11,9 @@ Feature: Pending changes page
   its forget preview: what retention would forget before and after it, and
   the difference (decision 89, point 8), and is approved only from that
   preview; until then it is only rejected, and the page says why. Rejecting takes a reason for
-  each change, which the AI agent reads.
+  each change, which the AI agent reads. Whatever the daemon refuses, the
+  page shows in an error alert where the reader is looking, and says it
+  assertively once (§4.5, #929).
 
   Scenario: Approving a proposal by keyboard alone applies it
     Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
@@ -81,7 +83,7 @@ Feature: Pending changes page
     Then the polite region comes to contain "is applied, and the configuration file is saved."
     And the daemon no longer lists the plan "demo-home"
 
-  Scenario: An approval refused because what the proposal would forget changed says so until a new forget preview
+  Scenario: An approval refused because what the proposal would forget changed is an error alert, said assertively, until a new forget preview
     Given a demo plan "demo-home" with a tiny scratch repository
     And the plan "demo-home" has been backed up 3 times
     And the plan "demo-home" keeps the last 1 snapshots
@@ -98,13 +100,98 @@ Feature: Pending changes page
     And I type the proposal's short ID
     And I press Tab until focus is on the button "Approve the proposal"
     And I press Enter
-    Then the page alerts "What this proposal would forget has changed since you previewed it, or a repository it touches couldn't be read again, so nothing was applied. Show what it would forget again, then approve it if it still looks right."
+    Then the page shows an error alert containing "What this proposal would forget has changed since you previewed it, or a repository it touches couldn't be read again, so nothing was applied. Show what it would forget again, then approve it if it still looks right."
+    And the assertive region comes to contain "What this proposal would forget has changed since you previewed it, or a repository it touches couldn't be read again, so nothing was applied."
+    And focus stays on the button "Approve the proposal"
     And the daemon lists the plan "demo-home"
     When I press Shift+Tab until focus is on the button "Show what it would forget"
     And I press Enter
     Then the proposal says "After the proposal, retention would no longer forget 3 snapshots of the plan demo-home"
-    And the open proposal alerts nothing
+    And the open proposal shows no alert
     When I press Tab until focus is on the button "Approve the proposal"
     And I press Enter
     Then the polite region comes to contain "is applied, and the configuration file is saved."
     And the daemon no longer lists the plan "demo-home"
+
+  Scenario: A list of pending proposals the daemon refuses is an error alert, said assertively
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    And the daemon refuses each read of the pending proposals
+    When I open the address "/proposals"
+    Then the page shows an error alert containing "Ladderback could not read or keep the proposals."
+    And the assertive region comes to contain "Ladderback could not read or keep the proposals."
+    And the main heading reads "Pending changes"
+    And the page has no accessibility violations
+
+  Scenario: A proposal whose review the daemon refuses is an error alert, said assertively, and focus stays on its Review button
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    And the daemon refuses the review of the proposal
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    Then the page shows an error alert containing "Ladderback could not read or keep the proposals."
+    And the assertive region comes to contain "Ladderback could not read or keep the proposals."
+    And focus stays on the proposal's Review button
+    And the page has no accessibility violations
+
+  Scenario: A rejection the daemon refuses is an error alert in the open proposal, said assertively, and focus stays on Reject
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And the AI agent withdraws the proposal
+    And I press Tab until focus is on the button "Reject the proposal"
+    And I press Enter
+    Then the open proposal shows an error alert containing "The proposal was withdrawn, so nothing more was done to it."
+    And the page shows an error alert containing "The proposal was withdrawn, so nothing more was done to it."
+    And the assertive region comes to contain "The proposal was withdrawn, so nothing more was done to it."
+    And focus stays on the button "Reject the proposal"
+    And the page has no accessibility violations
+
+  Scenario: A forget preview the daemon refuses is an error alert in the open proposal, said assertively, and focus stays on its button
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to remove it
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And the AI agent withdraws the proposal
+    And I press Tab until focus is on the button "Show what it would forget"
+    And I press Enter
+    Then the open proposal shows an error alert containing "The proposal was withdrawn, so nothing more was done to it."
+    And the page shows an error alert containing "The proposal was withdrawn, so nothing more was done to it."
+    And the assertive region comes to contain "The proposal was withdrawn, so nothing more was done to it."
+    And focus stays on the button "Show what it would forget"
+    And the page has no accessibility violations
+
+  Scenario: A repository the forget preview can't read says why in an error alert in the open proposal, said assertively
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to remove it
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And the repository is moved away
+    And I press Tab until focus is on the button "Show what it would forget"
+    And I press Enter
+    Then the open proposal shows an error alert containing "No repository was found at this location"
+    And the page shows an error alert containing "No repository was found at this location"
+    And the assertive region comes to contain "No repository was found at this location"
+    And the page offers no button "Approve the proposal"
+    And the page has no accessibility violations
+
+  Scenario: A refusal in the open proposal takes the place of the one before it, so one failure shows one error alert
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the textbox "Proposal ID"
+    And I type the proposal's short ID
+    And the AI agent withdraws the proposal
+    And I press Tab until focus is on the button "Approve the proposal"
+    And I press Enter
+    Then the open proposal shows an error alert containing "The proposal was withdrawn, so nothing more was done to it."
+    When I press Tab until focus is on the button "Reject the proposal"
+    And I press Enter
+    Then the open proposal shows one alert, after the button "Reject the proposal"
+    And the page has no accessibility violations
