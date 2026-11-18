@@ -355,7 +355,7 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 - **Its margin.** The step starts at most 4.6 minutes into the job, so it ends 10 minutes before the job's limit.
 - **Retuning.** Retune it from the same measurement when the suite grows; how the log names the hang is in §13.2.
 
-**The UI jobs' test step.** The `just test-ui` step of `UI journeys` and of both engine jobs has a `timeout-minutes` of 40, five below the job's 45 and above the 13 to 20 minutes a passing run takes: a hang fails the step, and the steps that run after a failure still run, where GitHub cancels a job at its limit and skips them (#1016).
+**The UI jobs' test step.** The `just test-ui` step of `UI journeys` and of both engine jobs has a `timeout-minutes` of 35, ten below the job's 45 and well above the 13 to 20 minutes a passing run takes: a hang fails the step, and the steps that run after a failure still run, where GitHub cancels a job at its limit and skips them (#1016). The step starts up to about 4 minutes into the job, so 35 leaves about 6 minutes for the steps after it.
 
 **Pinned Node and runner images.** CI doesn't take whatever `lts/*`, `ubuntu-latest` and `macos-latest` point at on the day it runs.
 
