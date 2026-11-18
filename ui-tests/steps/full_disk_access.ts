@@ -1,11 +1,12 @@
 // Steps of the Full Disk Access journeys (features/ui/full_disk_access.feature):
 // what the agent's Full Disk Access probe found, as a Given sets it in the
-// daemon's answers, and the warning the start page shows for it. Elements are
-// found by role and accessible name, as in every journey.
+// daemon's answers, the warning banner every page shows for it, and the steps
+// the start page shows. Elements are found by role and accessible name, as in
+// every journey; the banner, which has no role (§4.5), by its words.
 
 import assert from "node:assert/strict";
 
-import { Given, Then } from "@cucumber/cucumber";
+import { Given, Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 
 import { namePattern } from "../support/keyboard.ts";
@@ -72,6 +73,12 @@ function warning(world: BrowserWorld) {
   return world.page.getByRole("region", { name: namePattern(WARNING) });
 }
 
+// The page-wide banner, which has no role of its own (§4.5): the one banner
+// that names Full Disk Access.
+function banner(world: BrowserWorld) {
+  return world.page.locator(".banner").filter({ hasText: /Full Disk Access/ });
+}
+
 Given("the agent has found Full Disk Access {word}", function (this: BrowserWorld, state: string) {
   answers(this).state = foundState(state);
 });
@@ -88,6 +95,12 @@ Given("the agent takes {int} seconds to check again", function (this: BrowserWor
   answers(this).checkTakesMs = seconds * 1_000;
 });
 
+// The agent's next probe, before a backup, finds another answer: the page
+// learns it on the next page the reader goes to.
+When("the agent then finds Full Disk Access {word}", function (this: BrowserWorld, state: string) {
+  answers(this).state = foundState(state);
+});
+
 Then("the page warns that Full Disk Access is missing", async function (this: BrowserWorld) {
   await warning(this).waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
 });
@@ -98,8 +111,30 @@ Then("the page lists the steps to grant Full Disk Access", async function (this:
   assert.ok((await steps.count()) >= 3, `the warning lists ${await steps.count()} steps`);
 });
 
-// Only once the page has read what the agent found: a page that never asked
-// would show no warning either.
+Then(
+  "the page shows the Full Disk Access banner, its link {string} leading to the start page",
+  async function (this: BrowserWorld, name: string) {
+    await expect(banner(this)).toHaveCount(1, { timeout: PAGE_PATIENCE_MS });
+    const link = banner(this).getByRole("link", { name: namePattern(name) });
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute("href", "/");
+  },
+);
+
+// Not dismissible while the grant is missing (#948): no Dismiss button, nor
+// any other.
+Then("the Full Disk Access banner offers no button", async function (this: BrowserWorld) {
+  await expect(banner(this)).toHaveCount(1, { timeout: PAGE_PATIENCE_MS });
+  await expect(banner(this).getByRole("button")).toHaveCount(0);
+});
+
+Then("the page shows no Full Disk Access banner", async function (this: BrowserWorld) {
+  await expect(banner(this)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
+});
+
+// Only once the page has read what the agent found and drawn what it read: a
+// page that never asked, or has yet to handle the answer, would show no
+// warning either.
 Then("the page doesn't warn of Full Disk Access", async function (this: BrowserWorld) {
   const { read } = answers(this);
   const { promise: late, resolve: tooLate } = Promise.withResolvers<"late">();
@@ -107,5 +142,13 @@ Then("the page doesn't warn of Full Disk Access", async function (this: BrowserW
   const outcome = await Promise.race([read.then(() => "read" as const), late]);
   clearTimeout(timer);
   assert.equal(outcome, "read", "the page never read what the agent found of Full Disk Access");
+  // The answer reaches the page's code after the route answers it: two frames
+  // later, the page has drawn whatever it drew for it.
+  await this.page.evaluate(() => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    return promise;
+  });
   await expect(warning(this)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
+  await expect(banner(this)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
 });
