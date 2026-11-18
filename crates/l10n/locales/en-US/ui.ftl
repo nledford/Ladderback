@@ -763,6 +763,30 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # it.
 ui-gallery-spinner-save = Save the demo notes
 
+# The heading of the gallery's steps demo (§4.5): a process's steps in
+# order, each with its state, and where the process has reached.
+ui-gallery-steps-heading = Steps
+
+# The name of the demo's first list of steps: a demo of moving the hub, with
+# its five steps, one of them a long name that wraps.
+ui-gallery-steps-move = Demo hub move
+ui-gallery-steps-check = Check
+ui-gallery-steps-copy = Copy
+ui-gallery-steps-commit = Commit the demo move once every demo snapshot has reached the new hub
+ui-gallery-steps-switch = Switch the agents
+ui-gallery-steps-clean-up = Clean up
+
+# The button that moves the demo hub move on to its next step, and from its
+# end back to its first.
+ui-gallery-steps-advance = Advance the demo hub move
+
+# The name of the demo's second list of steps: a demo of pairing an agent,
+# which failed at its second step.
+ui-gallery-steps-pairing = Demo pairing
+ui-gallery-steps-token = Token
+ui-gallery-steps-connect = Connect
+ui-gallery-steps-approval = Approval
+
 # The heading of the gallery's skeleton demo (§4.5): the still shape of
 # content on its way, which a screen reader skips.
 ui-gallery-skeleton-heading = Skeleton

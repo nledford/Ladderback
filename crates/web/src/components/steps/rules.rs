@@ -30,7 +30,10 @@ impl Reached {
     /// Where the process has reached among `count` steps: a place past the
     /// last step is every step done.
     fn within(self, count: usize) -> Self {
-        todo!()
+        match self {
+            Self::At(place) | Self::FailedAt(place) if place >= count => Self::Finished,
+            reached => reached,
+        }
     }
 }
 
@@ -48,7 +51,10 @@ impl StepsName {
     /// The list's `aria-label` and `aria-labelledby`: one of them, never
     /// both.
     pub fn attributes(&self) -> (Option<String>, Option<String>) {
-        todo!()
+        match self {
+            Self::Label(label) => (Some(label.clone()), None),
+            Self::LabelledBy(id) => (None, Some(id.clone())),
+        }
     }
 }
 
@@ -73,32 +79,58 @@ impl StepState {
     /// The state of the step at `place` of `count` steps, when the process
     /// has reached `reached`.
     pub fn of(place: usize, count: usize, reached: Reached) -> Self {
-        todo!()
+        let (at, stood) = match reached.within(count) {
+            Reached::At(at) => (at, Self::Current),
+            Reached::FailedAt(at) => (at, Self::Failed),
+            Reached::Finished => return Self::Done,
+        };
+        match place.cmp(&at) {
+            std::cmp::Ordering::Less => Self::Done,
+            std::cmp::Ordering::Equal => stood,
+            std::cmp::Ordering::Greater => Self::ToDo,
+        }
     }
 
     /// The icon before the step's name, its shape the state's own, so a
     /// reader who can't tell the colors apart, or whose forced colors draw
     /// every icon alike, tells the states apart by it.
     pub fn glyph(self) -> LucideGlyph {
-        todo!()
+        match self {
+            Self::Done => LucideGlyph::CircleCheck,
+            Self::Current => LucideGlyph::CircleDot,
+            Self::ToDo => LucideGlyph::Circle,
+            Self::Failed => LucideGlyph::CircleX,
+        }
     }
 
     /// The icon's tone: Ladder Blue for the steps reached, the muted text's
     /// gray for those still to do, red for a failure. The words carry the
     /// state too (1.4.1).
     pub fn tone(self) -> Tone {
-        todo!()
+        match self {
+            Self::Done | Self::Current => Tone::Primary,
+            Self::ToDo => Tone::Secondary,
+            Self::Failed => Tone::Error,
+        }
     }
 
     /// The state in words, shown under the step's name.
     pub fn word(self) -> MessageId {
-        todo!()
+        match self {
+            Self::Done => msg::UI_STEPS_DONE,
+            Self::Current => msg::UI_STEPS_CURRENT,
+            Self::ToDo => msg::UI_STEPS_TO_DO,
+            Self::Failed => msg::UI_STEPS_FAILED,
+        }
     }
 
     /// The step's `aria-current`: `step` on the step the process stands at,
     /// under way or failed there, and on no other.
     pub fn aria_current(self) -> Option<&'static str> {
-        todo!()
+        match self {
+            Self::Current | Self::Failed => Some("step"),
+            Self::Done | Self::ToDo => None,
+        }
     }
 
     /// The color of the connector that leaves this step for the next one:
@@ -107,7 +139,10 @@ impl StepState {
     /// against the page and a surface (1.4.11; the contrast gate's link and
     /// muted pairs).
     pub fn connector_class(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Done => "border-accent",
+            Self::Current | Self::ToDo | Self::Failed => "border-muted",
+        }
     }
 }
 
@@ -117,7 +152,35 @@ impl StepState {
 /// otherwise the step it reached, the step it failed at, or that every step
 /// is done, one message with its place, the count and the name.
 pub fn change(before: Option<Reached>, now: Reached, names: &[String]) -> Option<Words> {
-    todo!()
+    let count = names.len();
+    let now = now.within(count);
+    // With no steps, every place is past the end, so nothing ever changes.
+    if before?.within(count) == now {
+        return None;
+    }
+    let total = (
+        "total",
+        MsgArg::Count(u64::try_from(count).unwrap_or(u64::MAX)),
+    );
+    let (id, at) = match now {
+        Reached::At(at) => (msg::UI_STEPS_REACHED, at),
+        Reached::FailedAt(at) => (msg::UI_STEPS_FAILED_AT, at),
+        Reached::Finished => {
+            return Some(Words {
+                id: msg::UI_STEPS_FINISHED,
+                args: vec![total],
+            });
+        }
+    };
+    let number = u64::try_from(at).map_or(u64::MAX, |at| at.saturating_add(1));
+    Some(Words {
+        id,
+        args: vec![
+            ("number", MsgArg::Count(number)),
+            total,
+            ("name", MsgArg::Text(names.get(at)?.clone())),
+        ],
+    })
 }
 
 #[cfg(test)]
