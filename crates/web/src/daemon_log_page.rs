@@ -1,8 +1,7 @@
 //! The Log page's DOM glue (technical design §4.4, #618): it reads the recent
 //! log once as the page opens, holds the choice of levels, lists the lines
 //! the choice keeps and copies them for a bug report, answering in a toast
-//! once they are on the clipboard and saying through the announcer when
-//! they aren't. `daemon_log.rs` decides for it.
+//! whether they are on the clipboard. `daemon_log.rs` decides for it.
 
 use std::sync::Arc;
 
@@ -11,7 +10,6 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::announcer::Politeness;
 use crate::components::button::Content;
 use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
@@ -19,7 +17,6 @@ use crate::components::{
     Button, RadioGroup, Toast, ToastTone, Toasts, refusal_alert, say_refusals, write_clipboard,
 };
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
-use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence};
 use crate::session::Told;
@@ -121,13 +118,14 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
             .map(|told| told.build);
         let report = listed.with_untracked(|listed| bug_report(build.as_ref(), listed));
         let (copied, refused) = (copied.clone(), refused.clone());
-        // Nothing else on the page shows that the lines were copied, so a
-        // toast does, said once; a refusal is never only a toast (§4.5).
+        // Nothing else on the page shows whether the lines were copied, so a
+        // toast does, said once. A refusal is an Error toast, which stays
+        // beside the button until the reader dismisses it (§4.5).
         write_clipboard(&report, move |done| {
             if done {
                 toasts.show(ToastTone::Success, copied.clone());
             } else {
-                reply(Politeness::Polite, &refused);
+                toasts.show(ToastTone::Error, refused.clone());
             }
         });
     };

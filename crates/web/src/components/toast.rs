@@ -114,8 +114,11 @@ impl Default for Toasts {
 ///
 /// What the caller owes WCAG 2.2 AA, since the toast does none of it:
 ///
-/// - **Keeping a failure on the page.** A toast is never the only place a
-///   failure appears: it also stays where it happened, an alert say.
+/// - **Keeping a failure on the page.** A failure stays where it happened,
+///   an alert say, and a toast never is the only place it appears, unless
+///   it is the failure of that press alone, which leaves nothing else on
+///   the page wrong (a copy the browser refused): then an `Error` toast
+///   beside the control, which stays until dismissed, is that place.
 /// - **Words that say what happened,** in the page's language.
 /// - **Keeping `then_focus` on the page.**
 #[component]
