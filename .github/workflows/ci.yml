@@ -356,7 +356,13 @@ jobs:
       - uses: $/.github/actions/browser
         with:
           engines: chromium
+      # A step limit of its own, 10 minutes below the job's 45 (as `just test`
+      # in `Check` has a limit of its own, #638): a hang fails this step, and
+      # the steps that run after a failure still run, where a job cancelled at
+      # its limit skips them (#1016). The step starts up to about 4 minutes in,
+      # so 35 leaves about 6 for the upload. Passing runs take 13 to 20 minutes.
       - run: just test-ui
+        timeout-minutes: 35
       # The JUnit report and each failed scenario's trace and screenshot
       # (ui-tests/support/world.ts), only when the run failed, kept 14 days as
       # the JUnit and `mutants.out` uploads are. The attempt in the name keeps
@@ -422,8 +428,10 @@ jobs:
       - uses: $/.github/actions/browser
         with:
           engines: ${{ matrix.engine }}
-      # `LADDERBACK_UI_BROWSER` (above) picks the engine.
+      # `LADDERBACK_UI_BROWSER` (above) picks the engine. The step limit is the
+      # `ui` job's.
       - run: just test-ui
+        timeout-minutes: 35
       # As in the `ui` job.
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
