@@ -6,6 +6,7 @@ use std::fs;
 
 use cucumber::{given, then};
 use domain::fleet::{COUNTER_LOCK_FILE, KeyFile, LEFT_OUT_OF_BACKUPS};
+use domain::planning::GlobFile;
 
 use super::Agent;
 use super::backup_steps::names_in_newest;
@@ -38,6 +39,17 @@ async fn the_data_folder_is_the_source(agent: &mut Agent) {
     fs::write(data.join(COUNTER_LOCK_FILE), "").expect("the counter's lock");
     fs::write(data.join(STAGED), "canary staged\n").expect("a staged key");
     agent.backup.source = Some(data);
+    save_daemon_config(agent, None).await;
+}
+
+/// An include-everything line, as a rustic profile's iglob file may hold:
+/// `*` takes in every file, so only globs matched after it leave one out.
+#[given("the plan's iglob file takes in every file")]
+async fn an_iglob_file_takes_in_every_file(agent: &mut Agent) {
+    let file = Events::data_dir(agent).join("take-every-file");
+    fs::write(&file, "*\n").expect("an iglob file");
+    let path = file.to_str().expect("a UTF-8 data folder");
+    agent.backup.filter.iglob_files = vec![GlobFile::parse(path).expect("an absolute path")];
     save_daemon_config(agent, None).await;
 }
 

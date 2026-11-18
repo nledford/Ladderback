@@ -15,3 +15,13 @@ Feature: Pairing an agent with its hub
     Then the history page shows the operation succeeded
     And the backup's snapshot leaves out the hub key, the hub's TLS key, the recovery seed and the agent key
     And the backup's snapshot holds the rest of the data folder
+
+  @e2e
+  Scenario: A plan's own iglob file can't bring a key file back into a backup
+    Given Ladderback is serving on loopback with the plan "home"
+    And the plan's source is Ladderback's data folder, which holds the hub's and the agent's key files
+    And the plan's iglob file takes in every file
+    When the daemon has finished 1 backup of the plan "home"
+    Then the history page shows the operation succeeded
+    And the backup's snapshot leaves out the hub key, the hub's TLS key, the recovery seed and the agent key
+    And the backup's snapshot holds the rest of the data folder
