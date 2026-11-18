@@ -190,6 +190,26 @@ ui-gallery-demo-dialog-body = A dialog traps focus and returns it on close.
 # The button inside the demo dialog that closes it.
 ui-gallery-close-demo-dialog = Close the demo dialog
 
+# The button that opens the demo warning, a dialog that hands Escape to the
+# page, as the warning before a session ends unused does.
+ui-gallery-open-demo-warning = Open the demo warning
+
+# The demo warning's accessible name and heading.
+ui-gallery-demo-warning = Demo warning
+
+# What the demo warning says, which describes it.
+ui-gallery-demo-warning-body = Escape keeps this warning open, as Keep the demo warning does. Answer the demo warning, and the page closes it.
+
+# What the demo warning says when Escape or Keep the demo warning has kept it
+# open.
+ui-gallery-demo-warning-kept = The page keeps the demo warning open.
+
+# The demo warning's button that has the page close it.
+ui-gallery-answer-demo-warning = Answer the demo warning
+
+# The demo warning's button that keeps it open, which it opens on.
+ui-gallery-keep-demo-warning = Keep the demo warning
+
 # The heading of the gallery's table demo.
 ui-gallery-table-heading = Table
 
@@ -445,6 +465,19 @@ ui-gallery-badge-heading = Status badge
 # The empty badge of the status badge demo: a badge with nothing to tell.
 ui-gallery-badge-empty = Empty
 
+# The heading of the gallery's badge demo: the shared badge, a count or a tag on a pill.
+ui-gallery-badges-heading = Badge
+
+# A badge of the badge demo that counts something: the changes a demo plan has waiting. The words say what the number counts.
+# $count (number): how many changes wait, 3 in the demo.
+ui-gallery-badges-pending = Pending changes { $count }
+
+# A badge of the badge demo that names something: a tag a demo snapshot carries.
+ui-gallery-badges-tag = Demo tag
+
+# A badge of the badge demo whose words are long enough to wrap on a small screen with larger text.
+ui-gallery-badges-long = Kept by the demo plan's retention rules
+
 # The heading of the gallery's demo of the shared vocabulary (§4.5): the
 # tones, sizes and placements every shared component takes.
 ui-gallery-vocabulary-heading = Shared vocabulary
@@ -684,6 +717,27 @@ ui-gallery-skeleton-keeps = Keeps a week of snapshots.
 # A demo toggle button that brings the demo plan in place of its skeleton,
 # pressed while the plan shows; pressing it again shows the wait again.
 ui-gallery-skeleton-show = Show the demo plan
+
+# The heading of the gallery's banner demo (§4.5): a page-wide notice in
+# each tone it takes, one with a long path in it and one the reader can
+# dismiss, which this browser then remembers.
+ui-gallery-banner-heading = Banner
+
+# The demo banner in the Primary tone, information.
+ui-gallery-banner-information = The demo daemon looks for a newer release once a day.
+
+# The demo banner in the Warning tone, with a long path in it that wraps on
+# a small screen.
+ui-gallery-banner-warning = The demo data folder at /srv/demo-data/ladderback-demo-data-folder is almost full, so the demo backups may soon stop.
+
+# The demo banner the reader can dismiss with its button. The browser keeps
+# the last edition dismissed, and the demo shows any other edition again.
+ui-gallery-banner-dismissible = A demo update is ready. This browser remembers the last edition dismissed, and shows any other.
+
+# A demo button that shows a newer edition of the dismissible demo notice,
+# which a dismissal of the one before doesn't hide; focus moves to it when
+# the notice is dismissed.
+ui-gallery-banner-newer = Show a newer demo notice
 
 # The heading of the gallery's icon demo (§4.5): one Lucide glyph, beside
 # words or inside a control.
@@ -1883,6 +1937,17 @@ ui-text-field-read-only = Read only: you can select and copy it, but not change 
 # Under a disabled text field's label: it can't be used now. The field's
 # own hint says why, where there is a reason.
 ui-text-field-disabled = Unavailable: it can't be changed now.
+
+## The banner (§4.5): what it says of itself, the same on every page.
+
+# The name of a banner's icon, heard by a screen reader before the banner's
+# words: the banner's tone in one word, which its icon's shape shows.
+ui-banner-information = Information
+ui-banner-warning = Warning
+
+# The name of the icon-only button that takes a banner away, which its
+# tooltip shows. The browser remembers the choice.
+ui-banner-dismiss = Dismiss
 
 ## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
 ## admin password with sign-in on, the short ID of what it confirms with
