@@ -13,6 +13,7 @@ Feature: The component gallery
 
   Scenario Outline: The address of the "<demo>" demo puts focus on its heading
     When I open the "<demo>" demo
+    Then focus is on the heading "<demo>"
 
     Examples:
       | demo              |
@@ -47,6 +48,8 @@ Feature: The component gallery
     When I open the "Dialog" demo
     And I press Tab
     Then focus is on the button "Open the demo dialog"
+    When I press Shift+Tab
+    Then focus is on the button "Open the modal stand-in"
 
   Scenario Outline: Each component's demo states have no accessibility violations
     When I open the component gallery

@@ -128,8 +128,12 @@ test("a load at a demo of the gallery leaves focus on the demo's heading", () =>
       '    And I press Tab until focus is on the tab "Snapshots"',
       "    When I open the component gallery",
       '    And I press Tab until focus is on the tab "Snapshots"',
+      '    When I open the address "/_gallery#tabs-demo"',
+      '    And I press Tab until focus is on the tab "Snapshots"',
+      '    When I open the address "/_gallery#tabs"',
+      '    And I press Tab until focus is on the tab "Snapshots"',
     ]),
-    ["10 top"],
+    ["10 top", "14 top"],
   );
 });
 

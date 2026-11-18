@@ -32,9 +32,9 @@ const RELOAD_AT_LANGUAGE = /^I press Enter, and the page loads again$/;
 
 // The addresses that name a section whose heading takes focus as the page
 // loads (§4.5, route changes: `page::focus_when_named`): Settings' Language
-// section, and a demo of the gallery, which "I open the … demo" names
-// (§13.7.5). Any other page load leaves focus at the top.
-const AT_SECTION = /#language$/;
+// section, and a demo of the gallery, named by its address or by "I open the …
+// demo" (§13.7.5). Any other page load leaves focus at the top.
+const AT_SECTION = /#language$|^\/_gallery#[a-z0-9-]+-demo$/;
 const OPEN_DEMO = /^I open the "[^"]*" demo$/;
 
 const SKIP = /^I skip to the content$/;
