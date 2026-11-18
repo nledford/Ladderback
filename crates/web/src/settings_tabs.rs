@@ -89,6 +89,7 @@ mod tests {
                 "admin-password",
                 "signing-in",
                 "api-tokens",
+                "dry-run-allowlist",
                 "restart"
             ]
         );
@@ -122,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn signed_in_every_section_but_the_restart_holds_a_control() {
+    fn signed_in_every_section_but_the_dry_run_allowlist_and_the_restart_holds_a_control() {
         let held: Vec<_> = Section::ALL.map(|section| section.holds(true)).into();
         assert_eq!(
             held,
@@ -132,13 +133,15 @@ mod tests {
                 Holds::Controls,
                 Holds::Controls,
                 Holds::Controls,
+                Holds::Text,
                 Holds::Text
             ]
         );
     }
 
     #[test]
-    fn with_sign_in_off_signing_in_and_the_api_tokens_hold_only_words() {
+    fn with_sign_in_off_signing_in_the_api_tokens_the_dry_run_allowlist_and_the_restart_may_hold_only_words()
+     {
         let held: Vec<_> = Section::ALL.map(|section| section.holds(false)).into();
         assert_eq!(
             held,
@@ -146,6 +149,7 @@ mod tests {
                 Holds::Controls,
                 Holds::Controls,
                 Holds::Controls,
+                Holds::Text,
                 Holds::Text,
                 Holds::Text,
                 Holds::Text
