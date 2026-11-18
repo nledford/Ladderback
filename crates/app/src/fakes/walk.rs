@@ -53,6 +53,36 @@ impl WalkSources for InMemoryTree {
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
-        todo!("{sources:?} {filter:?} {limits:?} {}", give_way())
+        let names = left_out(filter).ok_or(WalkError::Filter)?;
+        let mut walked = Walked::default();
+        let mut read: u64 = 0;
+        let below = self.entries.iter().filter(|(path, _)| {
+            sources
+                .iter()
+                .any(|source| path.as_str() != source.as_str() && is_within(path, source.as_str()))
+        });
+        for (path, size) in below {
+            if give_way() {
+                walked.stopped = Some(WalkStop::GaveWay);
+                break;
+            }
+            if !limits.time.is_positive() {
+                walked.stopped = Some(WalkStop::Time);
+                break;
+            }
+            if read >= limits.entries {
+                walked.stopped = Some(WalkStop::Entries);
+                break;
+            }
+            read = read.saturating_add(1);
+            if path.split('/').any(|part| names.contains(&part)) {
+                continue;
+            }
+            if let Some(size) = size {
+                walked.files = walked.files.saturating_add(1);
+                walked.bytes = walked.bytes.saturating_add(*size);
+            }
+        }
+        Ok(walked)
     }
 }

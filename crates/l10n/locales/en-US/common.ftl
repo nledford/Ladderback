@@ -377,10 +377,10 @@ error-dry-run-rate = { $seconds ->
    *[other] This client started as many plan dry runs in the last hour as it may. Try again in { $seconds } seconds.
   }
 
-# A path the draft plan reads is outside the dry-run allowlist, or could not be resolved; the message never says which.
-# $setting (text): the plan's setting, as its key in the configuration file: { "sources" }, { "glob-files" } or { "iglob-files" }.
+# A path the draft plan reads is outside the dry-run allowlist, or could not be resolved, or a marker it names is not a file name alone; the message never says which.
+# $setting (text): the plan's setting, as its key in the configuration file: { "sources" }, { "glob-files" }, { "iglob-files" } or { "exclude-if-present" }.
 # $entry (count): the entry of that setting, from 1.
-error-dry-run-not-allowed = Entry { $entry } of the plan's { $setting } is not within the { -dry-run-allowlist }, so nothing was read. A person can add its folder on the Settings page.
+error-dry-run-not-allowed = Entry { $entry } of the plan's { $setting } would read outside the { -dry-run-allowlist }, so nothing was read. Give a path within it, and a marker by its name alone, or ask a person to add the folder on the Settings page.
 
 # For this setting of the draft plan, rustic would read files in the folders above the plan's sources, outside the dry-run allowlist, so the dry run read nothing.
 # $setting (text): the plan's setting, as its key in the configuration file: { "custom-ignorefiles" }, { "git-ignore" } or { "no-require-git" }.

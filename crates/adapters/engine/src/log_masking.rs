@@ -20,13 +20,20 @@
 //! redactor of the secrets of both would mask it: more, never less (I4,
 //! #287).
 
+use std::cell::Cell;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::secrets::Redactor;
-use log::{Log, Metadata, Record};
+use log::{Level, Log, Metadata, Record};
 
 /// The redactor of every open running.
 static OPEN: Mutex<Vec<Arc<Redactor>>> = Mutex::new(Vec::new());
+
+thread_local! {
+    /// The warnings counted so far while this thread walks for a plan dry
+    /// run, or none when it doesn't ([`unlogged`]).
+    static WALKING: Cell<Option<u64>> = const { Cell::new(None) };
+}
 
 /// Runs `walk` with every record this thread makes held back from the log,
 /// and answers its output with the warnings and errors among them counted.
@@ -36,8 +43,30 @@ static OPEN: Mutex<Vec<Arc<Redactor>>> = Mutex::new(Vec::new());
 /// counts only where [`Masked`] is the process's logger, as the daemon's
 /// is; the thread logs as before once `walk` returns or panics.
 pub(crate) fn unlogged<T>(walk: impl FnOnce() -> T) -> (T, u64) {
-    let _ = walk;
-    todo!()
+    /// Puts back what the thread counted before, when dropped.
+    struct Restore(Option<u64>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WALKING.set(self.0);
+        }
+    }
+    let _restore = Restore(WALKING.replace(Some(0)));
+    let done = walk();
+    (done, WALKING.get().unwrap_or(0))
+}
+
+/// Whether this thread walks for a dry run, so a record of `level` is held
+/// back: counted when it is a warning or an error.
+fn held_back(level: Level) -> bool {
+    match WALKING.get() {
+        Some(counted) => {
+            if level <= Level::Warn {
+                WALKING.set(Some(counted.saturating_add(1)));
+            }
+            true
+        }
+        None => false,
+    }
 }
 
 /// A logger whose records are masked with the secrets of every repository
@@ -59,7 +88,7 @@ impl<L: Log> Log for Masked<L> {
     }
 
     fn log(&self, record: &Record<'_>) {
-        if !self.inner.enabled(record.metadata()) {
+        if held_back(record.level()) || !self.inner.enabled(record.metadata()) {
             return;
         }
         // Copied out, so the lock isn't held while the record is written.

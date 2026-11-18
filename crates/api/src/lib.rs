@@ -296,8 +296,9 @@ pub enum ErrorCode {
     /// A path the plan reads isn't within the dry-run allowlist once its
     /// links and `..` are resolved, or can't be resolved: the same refusal
     /// either way, so it never tells whether the path exists. The argument
-    /// `setting` names the plan's setting, `sources`, `glob-files` or
-    /// `iglob-files`, and `entry` its entry, from 1.
+    /// `setting` names the plan's setting, `sources`, `glob-files`,
+    /// `iglob-files` or `exclude-if-present` (whose entries must be file
+    /// names alone), and `entry` its entry, from 1.
     DryRunNotAllowed,
     /// For one of the plan's settings, rustic's walker would read files in
     /// the folders above the plan's sources, outside the dry-run
@@ -4193,7 +4194,7 @@ pub struct NewProposalDto {
     pub rationale: String,
 }
 
-/// `POST /api/v1/plans/dry-run`: the draft plan to walk, its table in the
+/// `POST /api/v1/dry-runs`: the draft plan to walk, its table in the
 /// configuration file's keys, as [`PlanDto`] holds one (§16, decision 89,
 /// point 13).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

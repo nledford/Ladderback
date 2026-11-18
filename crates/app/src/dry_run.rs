@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::planning::{
     AgentConfig, DryRunAllowlist, DryRunRecord, ExcludeSetting, Plan, Proposer, Source,
-    SourceFilter, is_within,
+    SourceFilter, is_file_name, is_within,
 };
 use domain::{SignedDuration, Timestamp};
 
@@ -110,16 +110,27 @@ pub struct PlanDryRuns {
     /// Whether a backup holds a place in the queue, running or waiting.
     backups: GiveWay,
     limits: DryRunLimits,
-    running: AtomicBool,
+    running: Arc<AtomicBool>,
     records: Mutex<Vec<(Proposer, DryRunRecord)>>,
 }
 
-/// Lets go of the one dry run's turn when dropped.
-struct Turn<'a>(&'a AtomicBool);
+/// Lets go of the one dry run's turn when dropped: once the dry run and
+/// every walk still holding its give-way have let go, so a caller that
+/// hangs up mid-walk doesn't free the turn while the walk reads on.
+struct Turn(Arc<AtomicBool>);
 
-impl Drop for Turn<'_> {
+impl Drop for Turn {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
+    }
+}
+
+/// Asks the dry run's walks to give way when its caller lets go of it.
+struct StopWhenDropped(Arc<AtomicBool>);
+
+impl Drop for StopWhenDropped {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
     }
 }
 
@@ -139,14 +150,36 @@ impl PlanDryRuns {
             clock,
             backups,
             limits,
-            running: AtomicBool::new(false),
+            running: Arc::new(AtomicBool::new(false)),
             records: Mutex::new(Vec::new()),
         }
     }
 
     /// Dry-runs `plan` for `asker`.
     pub async fn run(&self, asker: &Proposer, plan: &Plan) -> Result<PlanDryRun, DryRunError> {
-        todo!("{asker:?} {plan:?}")
+        if self.running.swap(true, Ordering::AcqRel) {
+            return Err(DryRunError::Running);
+        }
+        let turn = Turn(Arc::clone(&self.running));
+        if (self.backups)() {
+            return Err(DryRunError::BackupGoing);
+        }
+        self.start(asker)?;
+        let started = self.clock.monotonic();
+        let config = self
+            .config
+            .load()
+            .await
+            .map_err(|error| DryRunError::Config(Box::new(error)))?;
+        let sources = self.allowed(&config, plan).await?;
+        let dropped = Arc::new(AtomicBool::new(false));
+        let _stop = StopWhenDropped(Arc::clone(&dropped));
+        let backups = Arc::clone(&self.backups);
+        let give_way: GiveWay = Arc::new(move || {
+            let _turn = &turn;
+            dropped.load(Ordering::Acquire) || backups()
+        });
+        self.count(&sources, &plan.filter, started, &give_way).await
     }
 
     /// Records a dry run of `asker`'s, unless it must wait.
@@ -171,9 +204,13 @@ impl PlanDryRuns {
         }
     }
 
-    /// The plan's sources resolved, once each is within the allowlist
-    /// resolved, and so is each glob file it reads.
+    /// The plan's sources resolved, once its filter reads nothing above
+    /// them, each is within the allowlist resolved, and so is each glob
+    /// file it reads; each marker it names must be a file name alone.
     async fn allowed(&self, config: &AgentConfig, plan: &Plan) -> Result<Vec<Source>, DryRunError> {
+        if let Some(setting) = plan.filter.reads_above() {
+            return Err(DryRunError::ReadsAbove { setting });
+        }
         let mut folders = Vec::new();
         for folder in config.agent().dry_run_allowlist.folders() {
             if let Ok(folder) = Source::parse(folder.as_str())
@@ -214,6 +251,13 @@ impl PlanDryRuns {
                 }
             }
         }
+        let markers = &plan.filter.exclude_if_present;
+        if let Some(index) = markers.iter().position(|name| !is_file_name(name)) {
+            return Err(DryRunError::NotAllowed {
+                setting: "exclude-if-present",
+                index,
+            });
+        }
         Ok(sources)
     }
 
@@ -227,35 +271,39 @@ impl PlanDryRuns {
     }
 
     /// Walks `sources` through `filter`, then with no exclude and with
-    /// each exclude alone, until a walk stops early.
+    /// each exclude alone, until a walk stops early, all in the time
+    /// left since `started`.
     async fn count(
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        started: SignedDuration,
+        give_way: &GiveWay,
     ) -> Result<PlanDryRun, DryRunError> {
-        let started = self.clock.monotonic();
-        let planned = self.walked(sources, filter, started).await?;
+        let planned = self.walked(sources, filter, started, give_way).await?;
         let mut dry_run = PlanDryRun {
             files: planned.files,
             bytes: planned.bytes,
             unreadable: planned.unreadable,
             excludes: Vec::new(),
             stopped: planned.stopped,
-            warnings: 0,
+            warnings: planned.warnings,
         };
         let excludes = filter.excludes();
         if dry_run.stopped.is_some() || excludes.is_empty() {
             return Ok(dry_run);
         }
         let all = self
-            .walked(sources, &SourceFilter::default(), started)
+            .walked(sources, &SourceFilter::default(), started, give_way)
             .await?;
+        dry_run.warnings = dry_run.warnings.saturating_add(all.warnings);
         if all.stopped.is_some() {
             dry_run.stopped = all.stopped;
             return Ok(dry_run);
         }
         for (exclude, alone) in excludes {
-            let with = self.walked(sources, &alone, started).await?;
+            let with = self.walked(sources, &alone, started, give_way).await?;
+            dry_run.warnings = dry_run.warnings.saturating_add(with.warnings);
             if with.stopped.is_some() {
                 dry_run.stopped = with.stopped;
                 break;
@@ -276,6 +324,7 @@ impl PlanDryRuns {
         sources: &[Source],
         filter: &SourceFilter,
         started: SignedDuration,
+        give_way: &GiveWay,
     ) -> Result<Walked, DryRunError> {
         let spent = self.clock.monotonic().saturating_sub(started);
         let time = self.limits.time.saturating_sub(spent);
@@ -290,7 +339,7 @@ impl PlanDryRuns {
             time,
         };
         self.walk
-            .walk(sources, filter, limits, Arc::clone(&self.backups))
+            .walk(sources, filter, limits, Arc::clone(give_way))
             .await
             .map_err(|error| match error {
                 WalkError::Filter => DryRunError::Filter,
@@ -306,6 +355,10 @@ pub struct DryRunAllowlists {
     changed: ConfigChanged,
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the configuration store's own error, which the routes map to its code"
+)]
 impl DryRunAllowlists {
     pub fn new(
         config: Arc<dyn ConfigStore>,
@@ -321,12 +374,18 @@ impl DryRunAllowlists {
 
     /// The allowlist the configuration holds.
     pub async fn allowlist(&self) -> Result<DryRunAllowlist, ConfigError> {
-        todo!()
+        Ok(self.config.load().await?.agent().dry_run_allowlist.clone())
     }
 
     /// Saves `allowlist` as the configuration's, holding the write lock.
     pub async fn set(&self, allowlist: DryRunAllowlist) -> Result<(), ConfigError> {
-        todo!("{allowlist:?}")
+        let _writing = self.writes.lock().await;
+        let loaded = self.config.load().await?;
+        self.config
+            .save(&loaded.with_dry_run_allowlist(allowlist))
+            .await?;
+        self.changed.tell();
+        Ok(())
     }
 }
 

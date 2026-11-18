@@ -26,7 +26,11 @@ pub struct DryRunFolder(String);
 
 impl DryRunFolder {
     pub fn parse(text: &str) -> Result<Self, InvalidValue> {
-        todo!("{text}")
+        if is_absolute_path(text) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidValue::new(ValueKind::DryRunFolder, text))
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -44,7 +48,10 @@ impl DryRunAllowlist {
     /// `folders`, in the order given, unless there are more than
     /// [`MAX_DRY_RUN_FOLDERS`]: the first one beyond is refused.
     pub fn new(folders: Vec<DryRunFolder>) -> Result<Self, InvalidValue> {
-        Ok(Self(folders))
+        match folders.get(MAX_DRY_RUN_FOLDERS) {
+            Some(beyond) => Err(InvalidValue::new(ValueKind::DryRunFolder, beyond.as_str())),
+            None => Ok(Self(folders)),
+        }
     }
 
     pub fn folders(&self) -> &[DryRunFolder] {
@@ -60,7 +67,11 @@ impl DryRunAllowlist {
 /// component by component: `/srv/demo` holds `/srv/demo/a`, never
 /// `/srv/demo-2`. The root folder holds every path.
 pub fn is_within(path: &str, folder: &str) -> bool {
-    todo!("{path} {folder}")
+    let folder = folder.trim_end_matches('/');
+    match path.strip_prefix(folder) {
+        Some(rest) => rest.is_empty() || rest.starts_with('/'),
+        None => false,
+    }
 }
 
 /// Whether `name` is one file's name alone, as `exclude-if-present` means
@@ -68,7 +79,7 @@ pub fn is_within(path: &str, folder: &str) -> bool {
 /// name with a `/` (an absolute path above all) would read a file
 /// anywhere, outside the allowlist too.
 pub fn is_file_name(name: &str) -> bool {
-    todo!("{name}")
+    !name.is_empty() && name != "." && name != ".." && !name.contains('/')
 }
 
 /// One exclude of a plan's source filter: the setting it is written under,
@@ -86,7 +97,86 @@ impl SourceFilter {
     /// dry run counts what each removes on its own. `no-require-git` goes
     /// with `git-ignore`, which it changes, and alone is no exclude.
     pub fn excludes(&self) -> Vec<(ExcludeSetting, SourceFilter)> {
-        todo!()
+        let mut each = Vec::new();
+        let mut list = |setting: &'static str, count: usize, alone: &dyn Fn(usize) -> Self| {
+            for index in 0..count {
+                each.push((
+                    ExcludeSetting {
+                        setting,
+                        index: Some(index),
+                    },
+                    alone(index),
+                ));
+            }
+        };
+        let one = |items: &[String], index: usize| items.get(index).cloned().into_iter().collect();
+        list("globs", self.globs.len(), &|index| Self {
+            globs: one(&self.globs, index),
+            ..Self::default()
+        });
+        list("iglobs", self.iglobs.len(), &|index| Self {
+            iglobs: one(&self.iglobs, index),
+            ..Self::default()
+        });
+        list("glob-files", self.glob_files.len(), &|index| Self {
+            glob_files: self.glob_files.get(index).cloned().into_iter().collect(),
+            ..Self::default()
+        });
+        list("iglob-files", self.iglob_files.len(), &|index| Self {
+            iglob_files: self.iglob_files.get(index).cloned().into_iter().collect(),
+            ..Self::default()
+        });
+        list(
+            "custom-ignorefiles",
+            self.custom_ignorefiles.len(),
+            &|index| Self {
+                custom_ignorefiles: one(&self.custom_ignorefiles, index),
+                ..Self::default()
+            },
+        );
+        list(
+            "exclude-if-present",
+            self.exclude_if_present.len(),
+            &|index| Self {
+                exclude_if_present: one(&self.exclude_if_present, index),
+                ..Self::default()
+            },
+        );
+        list("exclude-if-xattr", self.exclude_if_xattr.len(), &|index| {
+            Self {
+                exclude_if_xattr: one(&self.exclude_if_xattr, index),
+                ..Self::default()
+            }
+        });
+        let switch = |setting: &'static str, alone: Self| {
+            (
+                ExcludeSetting {
+                    setting,
+                    index: None,
+                },
+                alone,
+            )
+        };
+        if self.git_ignore {
+            each.push(switch(
+                "git-ignore",
+                Self {
+                    git_ignore: true,
+                    no_require_git: self.no_require_git,
+                    ..Self::default()
+                },
+            ));
+        }
+        if self.one_file_system {
+            each.push(switch(
+                "one-file-system",
+                Self {
+                    one_file_system: true,
+                    ..Self::default()
+                },
+            ));
+        }
+        each
     }
 
     /// The first setting of this filter for which rustic's walker reads
@@ -96,7 +186,13 @@ impl SourceFilter {
     /// root, and with `no-require-git` applies git's global excludes file.
     /// A dry run refuses a filter that has one.
     pub fn reads_above(&self) -> Option<&'static str> {
-        todo!()
+        [
+            ("custom-ignorefiles", !self.custom_ignorefiles.is_empty()),
+            ("git-ignore", self.git_ignore),
+            ("no-require-git", self.no_require_git),
+        ]
+        .into_iter()
+        .find_map(|(setting, set)| set.then_some(setting))
     }
 }
 
@@ -110,7 +206,21 @@ impl DryRunRecord {
     /// [`MAX_DRY_RUNS_PER_HOUR`] in the [`DRY_RUN_WINDOW`] before it: then
     /// nothing is recorded, and the answer is when it may start one again.
     pub fn start(&mut self, now: Timestamp) -> Result<(), Timestamp> {
-        todo!("{now}")
+        while self
+            .0
+            .front()
+            .is_some_and(|started| now.duration_since(*started) >= DRY_RUN_WINDOW)
+        {
+            self.0.pop_front();
+        }
+        if self.0.len() >= MAX_DRY_RUNS_PER_HOUR {
+            let oldest = self.0.front().copied().unwrap_or(now);
+            return Err(oldest
+                .saturating_add(DRY_RUN_WINDOW)
+                .unwrap_or(Timestamp::MAX));
+        }
+        self.0.push_back(now);
+        Ok(())
     }
 }
 
@@ -118,15 +228,6 @@ impl DryRunRecord {
 mod tests {
     use super::*;
     use crate::planning::GlobFile;
-
-    #[test]
-    fn a_file_name_is_one_name_alone() {
-        assert!(is_file_name(".gitignore"));
-        assert!(is_file_name("CACHEDIR.TAG"));
-        for name in ["", ".", "..", "/etc/passwd", "../.ignore", "a/b", "a/"] {
-            assert!(!is_file_name(name), "{name:?}");
-        }
-    }
 
     #[test]
     fn a_folder_holds_itself_and_what_lies_under_it_by_whole_components() {
@@ -137,6 +238,15 @@ mod tests {
         assert!(!is_within("/srv/demo-2", "/srv/demo"));
         assert!(!is_within("/srv", "/srv/demo"));
         assert!(!is_within("/other/demo", "/srv/demo"));
+    }
+
+    #[test]
+    fn a_file_name_is_one_name_alone() {
+        assert!(is_file_name(".gitignore"));
+        assert!(is_file_name("CACHEDIR.TAG"));
+        for name in ["", ".", "..", "/etc/passwd", "../.ignore", "a/b", "a/"] {
+            assert!(!is_file_name(name), "{name:?}");
+        }
     }
 
     #[test]

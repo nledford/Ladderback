@@ -125,7 +125,7 @@ impl BackupQueue {
 
     /// Whether any backup holds a place: running, or waiting for its turn.
     pub fn is_busy(&self) -> bool {
-        todo!()
+        !self.running.is_empty() || !self.waiting.is_empty()
     }
 
     /// Holds the queue for a restart that waits for the running backups to

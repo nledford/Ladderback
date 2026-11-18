@@ -3,7 +3,10 @@
 //! it loads, then dry-run by the use case of `app`, and the dry-run
 //! allowlist read and set; each refusal said as the routes answer it,
 //! never with a path. A walk that failed is said in the log only: the
-//! engine's words can name a path, which a client may not learn.
+//! engine's words can name a path, which a client may not learn. The
+//! warnings it raises while it walks are counted, not logged, since
+//! `GET /api/v1/log` serves the log at the `read` scope: one line gives
+//! their count and the draft's plan ID.
 
 use api::{DryRunStopDto, ErrorCode, ExcludeTallyDto, PlanDryRunDto};
 use app::dry_run::{DryRunAllowlists, DryRunError, PlanDryRun, PlanDryRuns};
@@ -59,11 +62,15 @@ impl http_adapter::DryRuns for DryRunService {
             PlansError::InvalidBody => DryRunsError::InvalidBody,
             error => DryRunsError::Plan(error),
         })?;
-        self.dry_runs
-            .run(&asker, &plan)
-            .await
-            .map(shown)
-            .map_err(refused)
+        let counted = self.dry_runs.run(&asker, &plan).await.map_err(refused)?;
+        if counted.warnings > 0 {
+            log::warn!(
+                "A plan dry run of the draft plan {} met {} warnings of the engine while it walked; they aren't logged, as they can name a path.",
+                plan.id.as_str(),
+                counted.warnings
+            );
+        }
+        Ok(shown(counted))
     }
 
     async fn allowlist(&self) -> Result<api::DryRunAllowlistDto, DryRunsError> {
@@ -142,13 +149,15 @@ fn refused(error: DryRunError) -> DryRunsError {
             setting,
             entry: index.saturating_add(1),
         },
-        DryRunError::ReadsAbove { setting } => todo!("{setting}"),
+        DryRunError::ReadsAbove { setting } => DryRunsError::ReadsAbove { setting },
         DryRunError::Filter => DryRunsError::Filter,
         DryRunError::Config(error) => unusable(*error),
-        DryRunError::Walk { detail } => {
-            // The engine's words can name a path the walk met: the log
-            // keeps them for whoever runs the daemon, never the asker.
-            log::warn!("a plan dry run's walk failed: {detail}");
+        DryRunError::Walk { .. } => {
+            // The engine's words can name a path the walk met, and the log
+            // is served at the `read` scope: they are left out. A walk
+            // fails only when its thread panics, and the panic is written
+            // to stderr as it happens, outside the log the route serves.
+            log::warn!("A plan dry run's walk failed.");
             DryRunsError::Failed
         }
     }

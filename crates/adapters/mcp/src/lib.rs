@@ -767,7 +767,9 @@ async fn dry_run(
     proposing: &Proposing,
     given: Option<JsonObject>,
 ) -> Result<PlanDryRunDto, ErrorDto> {
-    todo!("{:?} {given:?}", proposing.tables.as_ref() as *const _)
+    let arguments: DryRunArguments = read(given)?;
+    let plan = arguments.plan(proposing.tables.as_ref())?;
+    proposing.proposals.dry_run(plan).await
 }
 
 /// A tool's result: what it read or did, or its refusal.

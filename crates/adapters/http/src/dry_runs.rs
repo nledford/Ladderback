@@ -79,22 +79,27 @@ pub enum DryRunsError {
     },
 }
 
-/// `POST /api/v1/plans/dry-run`: dry-runs the body's plan.
+/// `POST /api/v1/dry-runs`: dry-runs the body's plan.
 pub(crate) async fn dry_run(
     State(state): State<AppState>,
     token: Option<axum::Extension<TokenOf>>,
     body: Result<Json<api::DryRunPlanDto>, JsonRejection>,
 ) -> Response {
-    todo!(
-        "{:?} {}",
-        state.dry_runs.as_ref() as *const _,
-        token.is_some() && body.is_ok()
-    )
+    let Ok(Json(api::DryRunPlanDto { plan })) = body else {
+        return refusal(&DryRunsError::InvalidBody);
+    };
+    match state.dry_runs.dry_run(asker(token), plan).await {
+        Ok(counted) => (StatusCode::OK, Json(counted)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// `GET /api/v1/settings/dry-run-allowlist`: the allowlist.
 pub(crate) async fn allowlist(State(state): State<AppState>) -> Response {
-    todo!("{:?}", state.dry_runs.as_ref() as *const _)
+    match state.dry_runs.allowlist().await {
+        Ok(allowlist) => (StatusCode::OK, Json(allowlist)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// `PUT /api/v1/settings/dry-run-allowlist`: saves the body's folders.
@@ -102,7 +107,13 @@ pub(crate) async fn set_allowlist(
     State(state): State<AppState>,
     body: Result<Json<api::DryRunAllowlistDto>, JsonRejection>,
 ) -> Response {
-    todo!("{:?} {}", state.dry_runs.as_ref() as *const _, body.is_ok())
+    let Ok(Json(api::DryRunAllowlistDto { folders, .. })) = body else {
+        return refusal(&DryRunsError::InvalidBody);
+    };
+    match state.dry_runs.set_allowlist(folders).await {
+        Ok(allowlist) => (StatusCode::OK, Json(allowlist)).into_response(),
+        Err(error) => refusal(&error),
+    }
 }
 
 /// A count as a message argument carries it.
@@ -112,12 +123,74 @@ fn count(value: usize) -> api::MsgArg {
 
 /// The typed refusal of `error`: a body that isn't the request's, 400; a
 /// draft the file wouldn't load, as the plan routes answer it; a path
-/// outside the allowlist, 403; a filter the engine can't apply or an
-/// allowlist that can't be saved, 422; another dry run or a backup going,
-/// 409; a proposer that must wait, 429 with `Retry-After`; a walk that
-/// failed or a configuration that can't be read, 503.
+/// outside the allowlist or a setting that reads above it, 403; a filter
+/// the engine can't apply or an allowlist that can't be saved, 422;
+/// another dry run or a backup going, 409; a proposer that must wait, 429
+/// with `Retry-After`; a walk that failed or a configuration that can't
+/// be read, 503.
 fn refusal(error: &DryRunsError) -> Response {
-    todo!("{error:?}")
+    use api::{ErrorCode, MsgArg};
+    let (status, code, args) = match error {
+        DryRunsError::InvalidBody => (StatusCode::BAD_REQUEST, ErrorCode::InvalidBody, Vec::new()),
+        DryRunsError::Plan(error) => return crate::plans::refusal(error),
+        DryRunsError::Busy => (StatusCode::CONFLICT, ErrorCode::DryRunBusy, Vec::new()),
+        DryRunsError::GivesWay => (StatusCode::CONFLICT, ErrorCode::DryRunGivesWay, Vec::new()),
+        DryRunsError::TooSoon { seconds } => {
+            let mut response = refused(
+                StatusCode::TOO_MANY_REQUESTS,
+                ErrorCode::DryRunRate,
+                vec![("seconds", MsgArg::Count(*seconds))],
+                None,
+            );
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from(*seconds),
+            );
+            return response;
+        }
+        DryRunsError::NotAllowed { setting, entry } => (
+            StatusCode::FORBIDDEN,
+            ErrorCode::DryRunNotAllowed,
+            vec![
+                ("setting", MsgArg::Text((*setting).to_owned())),
+                ("entry", count(*entry)),
+            ],
+        ),
+        DryRunsError::ReadsAbove { setting } => (
+            StatusCode::FORBIDDEN,
+            ErrorCode::DryRunReadsAbove,
+            vec![("setting", MsgArg::Text((*setting).to_owned()))],
+        ),
+        DryRunsError::Filter => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::DryRunFilter,
+            Vec::new(),
+        ),
+        DryRunsError::Failed => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::DryRunFailed,
+            Vec::new(),
+        ),
+        DryRunsError::FolderInvalid { entry } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::DryRunFolderInvalid,
+            vec![("entry", count(*entry))],
+        ),
+        DryRunsError::TooLong { limit } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::DryRunAllowlistTooLong,
+            vec![("limit", count(*limit))],
+        ),
+        DryRunsError::Unavailable { code, args, detail } => {
+            return refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                *code,
+                args.clone(),
+                detail.clone(),
+            );
+        }
+    };
+    refused(status, code, args, None)
 }
 
 #[cfg(test)]

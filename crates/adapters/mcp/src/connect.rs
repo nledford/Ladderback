@@ -615,8 +615,7 @@ impl Proposals for Connect {
     // A read, as a preview is: an answer lost leaves nothing done.
     async fn dry_run(&self, plan: PlanDto) -> Result<PlanDryRunDto, ErrorDto> {
         let body = serde_json::json!({ "plan": plan });
-        self.post("api/v1/plans", &["dry-run"], &body, no_answer)
-            .await
+        self.post("api/v1/dry-runs", &[], &body, no_answer).await
     }
 }
 

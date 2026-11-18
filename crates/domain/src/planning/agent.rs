@@ -271,7 +271,9 @@ impl AgentConfig {
     /// rest as it is: a person sets it on the Settings page, and no
     /// proposal changes it (decision 89, point 13).
     pub fn with_dry_run_allowlist(&self, allowlist: DryRunAllowlist) -> Self {
-        todo!("{allowlist:?}")
+        let mut changed = self.clone();
+        changed.agent.dry_run_allowlist = allowlist;
+        changed
     }
 
     /// The hooks that wrap every operation of the agent.

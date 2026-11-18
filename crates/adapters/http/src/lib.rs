@@ -535,12 +535,9 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             "/api/v1/plans",
             axum::routing::get(list_plans).post(plans::create),
         )
-        // Before `/api/v1/plans/{id}`, which has no POST: a static segment
-        // wins over a capture in axum's router.
-        .route(
-            "/api/v1/plans/dry-run",
-            axum::routing::post(dry_runs::dry_run),
-        )
+        // Outside `/api/v1/plans/{id}`, so a plan whose ID is `dry-run`
+        // stays reachable there.
+        .route("/api/v1/dry-runs", axum::routing::post(dry_runs::dry_run))
         // A session's only: the scope table names no scope for it, so no
         // token, and so no proposal, sets the allowlist (decision 89).
         .route(
