@@ -302,6 +302,14 @@ fn agent(settings: &AgentSettings) -> Option<AgentTable> {
             .restore_folder
             .as_ref()
             .map(|folder| folder.as_str().to_owned()),
+        dry_run_allowlist: (!settings.dry_run_allowlist.is_empty()).then(|| {
+            settings
+                .dry_run_allowlist
+                .folders()
+                .iter()
+                .map(|folder| folder.as_str().to_owned())
+                .collect()
+        }),
     })
 }
 

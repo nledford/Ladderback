@@ -85,6 +85,7 @@ use store::SqliteStore;
 use uuid::Uuid;
 
 mod downloads;
+mod dry_runs;
 mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
@@ -933,6 +934,26 @@ async fn state_over(
             error.code()
         ),
     }
+    // The plan dry run reads outside the backup concurrency limit, one at a
+    // time, and gives way to every backup the queue holds (decision 89,
+    // point 13).
+    let queue = Arc::clone(&runner.queue);
+    let dry_runs: Arc<dyn http_adapter::DryRuns> = Arc::new(dry_runs::DryRunService::new(
+        app::dry_run::PlanDryRuns::new(
+            Arc::clone(&config),
+            Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
+            Arc::new(engine::RusticWalk),
+            Arc::new(SystemClock),
+            Arc::new(move || queue.is_busy()),
+            app::dry_run::DryRunLimits::DAEMON,
+        ),
+        app::dry_run::DryRunAllowlists::new(
+            Arc::clone(&config),
+            Arc::clone(&writes),
+            changed.another(),
+        ),
+        std::env::home_dir().and_then(|home| home.to_str().map(str::to_owned)),
+    ));
     let plans: Arc<dyn Plans> = Arc::new(plans::PlanService::new(
         Arc::clone(&config),
         app::plans::EditPlans::new(Arc::clone(&config), writes, changed)
@@ -984,6 +1005,7 @@ async fn state_over(
             profiles,
             restores,
             proposals,
+            dry_runs,
             downloads,
             sign_in,
             exposure: http_adapter::Exposure::Loopback,

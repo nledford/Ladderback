@@ -25,9 +25,11 @@ mod log_masking;
 mod rclone;
 mod retention;
 mod step;
+mod walk;
 pub mod worker;
 
 pub use cache_tidy::{CacheTidying, NotRemoved, Recorded, Removed, RemovedKind, tidy_cache};
 pub use client::{STOP_GRACE, WorkerEngine, Workers};
 pub use log_masking::Masked;
 pub use retention::{RusticRetention, RusticSources};
+pub use walk::RusticWalk;

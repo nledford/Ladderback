@@ -26,6 +26,7 @@ mod service;
 mod session_store;
 mod sources;
 mod stats_store;
+mod walk;
 
 pub use admin_password::{AdminPassword, AdminPasswordError};
 pub use api_token_store::{Added, ApiTokenStore};
@@ -74,3 +75,4 @@ pub use service::{Installed, Removed, ServiceError, ServiceManager, ServiceProbl
 pub use session_store::SessionStore;
 pub use sources::{NormalizeSources, SourcesError};
 pub use stats_store::StatsStore;
+pub use walk::{GiveWay, WalkError, WalkLimits, WalkSources, WalkStop, Walked};

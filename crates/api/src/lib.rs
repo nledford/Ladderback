@@ -284,6 +284,38 @@ pub enum ErrorCode {
     /// The proposals couldn't be read or kept, or a proposal's ID couldn't
     /// be drawn; the daemon's log says why (decision 89).
     ProposalsUnavailable,
+    /// Another plan dry run is running: dry runs run one at a time (§16,
+    /// decision 89, point 13).
+    DryRunBusy,
+    /// A backup is running or waiting in the queue, so the plan dry run
+    /// gives way to it.
+    DryRunGivesWay,
+    /// The proposer started as many plan dry runs in the last hour as it
+    /// may. The argument `seconds` is how long until it may start another.
+    DryRunRate,
+    /// A path the plan reads isn't within the dry-run allowlist once its
+    /// links and `..` are resolved, or can't be resolved: the same refusal
+    /// either way, so it never tells whether the path exists. The argument
+    /// `setting` names the plan's setting, `sources`, `glob-files`,
+    /// `iglob-files` or `exclude-if-present` (whose entries must be file
+    /// names alone), and `entry` its entry, from 1.
+    DryRunNotAllowed,
+    /// For one of the plan's settings, rustic's walker would read files in
+    /// the folders above the plan's sources, outside the dry-run
+    /// allowlist, so the dry run reads nothing. The argument `setting`
+    /// names it: `custom-ignorefiles`, `git-ignore` or `no-require-git`.
+    DryRunReadsAbove,
+    /// The engine can't apply the plan's source filter, as a backup
+    /// couldn't.
+    DryRunFilter,
+    /// The walk of the plan dry run failed; the daemon's log says why.
+    DryRunFailed,
+    /// A folder of the dry-run allowlist isn't an absolute path. The
+    /// argument `entry` is its place in the list, from 1.
+    DryRunFolderInvalid,
+    /// The dry-run allowlist holds more folders than it may. The argument
+    /// `limit` is how many it may hold.
+    DryRunAllowlistTooLong,
     /// The configuration holds no repository by that name. The argument
     /// `alias` names it.
     RepositoryUnknown,
@@ -1242,7 +1274,34 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::ProposalRate | Self::ProposalAfterRejection => &[ArgSpec {
+            Self::DryRunReadsAbove => &[ArgSpec {
+                name: "setting",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::DryRunNotAllowed => &[
+                ArgSpec {
+                    name: "setting",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "entry",
+                    kind: ArgKind::Count,
+                    optional: false,
+                },
+            ],
+            Self::DryRunFolderInvalid => &[ArgSpec {
+                name: "entry",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
+            Self::DryRunAllowlistTooLong => &[ArgSpec {
+                name: "limit",
+                kind: ArgKind::Count,
+                optional: false,
+            }],
+            Self::ProposalRate | Self::ProposalAfterRejection | Self::DryRunRate => &[ArgSpec {
                 name: "seconds",
                 kind: ArgKind::Count,
                 optional: false,
@@ -1419,6 +1478,10 @@ impl ErrorCode {
             | Self::ApiTokenNoScope
             | Self::ApiTokensUnavailable
             | Self::ProposalsUnavailable
+            | Self::DryRunBusy
+            | Self::DryRunGivesWay
+            | Self::DryRunFilter
+            | Self::DryRunFailed
             | Self::ProposalChanged
             | Self::ProposalNeedsForgetPreview
             | Self::ProposalForgetPreviewChanged
@@ -2479,6 +2542,10 @@ mod tests {
             ErrorCode::ApiTokenNoScope,
             ErrorCode::ApiTokensUnavailable,
             ErrorCode::ProposalsUnavailable,
+            ErrorCode::DryRunBusy,
+            ErrorCode::DryRunGivesWay,
+            ErrorCode::DryRunFilter,
+            ErrorCode::DryRunFailed,
             ErrorCode::ProposalChanged,
             ErrorCode::ProposalNeedsForgetPreview,
             ErrorCode::ProposalForgetPreviewChanged,
@@ -4125,6 +4192,80 @@ pub struct NewProposalDto {
     pub changes: Vec<ProposalChangeDto>,
     #[serde(default)]
     pub rationale: String,
+}
+
+/// `POST /api/v1/dry-runs`: the draft plan to walk, its table in the
+/// configuration file's keys, as [`PlanDto`] holds one (§16, decision 89,
+/// point 13).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct DryRunPlanDto {
+    pub plan: PlanDto,
+}
+
+/// What a plan dry run counted: counts and sizes only, never a path.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct PlanDryRunDto {
+    /// The files the plan would back up.
+    pub files: u64,
+    /// Their size in bytes.
+    pub bytes: u64,
+    /// The entries the walk couldn't read.
+    pub unreadable: u64,
+    /// What each exclude removes on its own, in the order of the plan's
+    /// settings; those the dry run didn't reach before it stopped are left
+    /// out.
+    #[serde(default)]
+    pub excludes: Vec<ExcludeTallyDto>,
+    /// Why the dry run stopped before the end, if it did: its counts are
+    /// then what it read until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<DryRunStopDto>,
+}
+
+/// What one exclude of a plan's source filter removes on its own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct ExcludeTallyDto {
+    /// The plan's setting, as the configuration file names it
+    /// (`globs`, `exclude-if-present`, `git-ignore`).
+    pub setting: String,
+    /// The setting's entry, from 1, for a setting that is a list; none for
+    /// a switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<u64>,
+    /// The files it removes, and their bytes.
+    pub files: u64,
+    pub bytes: u64,
+}
+
+/// Why a plan dry run stopped before the end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum DryRunStopDto {
+    /// A walk read as many entries as one may.
+    Entries,
+    /// Its time ran out.
+    Time,
+    /// A backup took a place in the queue, and it gave way.
+    GaveWay,
+}
+
+/// `GET` and `PUT /api/v1/settings/dry-run-allowlist`: the folders a plan
+/// dry run may read, a person's setting only (§16, decision 89, point 13).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct DryRunAllowlistDto {
+    /// The folders, absolute paths, as the configuration file holds them.
+    pub folders: Vec<String>,
+    /// The daemon's home folder, which "Add home folder" adds; sent by the
+    /// daemon only, and none when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<String>,
 }
 
 /// Where a proposal is in its life (decision 89).

@@ -359,6 +359,15 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProposalAfterRejection
                 | ErrorCode::ProposalReasons
                 | ErrorCode::ProposalsUnavailable
+                | ErrorCode::DryRunBusy
+                | ErrorCode::DryRunGivesWay
+                | ErrorCode::DryRunRate
+                | ErrorCode::DryRunNotAllowed
+                | ErrorCode::DryRunReadsAbove
+                | ErrorCode::DryRunFilter
+                | ErrorCode::DryRunFailed
+                | ErrorCode::DryRunFolderInvalid
+                | ErrorCode::DryRunAllowlistTooLong
                 | ErrorCode::RepositoryUnknown
                 | ErrorCode::SnapshotUnknown
                 | ErrorCode::FolderUnknown

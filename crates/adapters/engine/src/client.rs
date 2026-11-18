@@ -28,6 +28,8 @@ mod stop;
 pub(crate) mod test_support;
 mod translate;
 
+pub(crate) use job_kind::filter_spec;
+
 /// How long the events of a job whose worker has exited may go on arriving.
 /// What the worker wrote is in the pipe already, so this is only the time to
 /// read it: a process the worker left running can hold the pipe open for as

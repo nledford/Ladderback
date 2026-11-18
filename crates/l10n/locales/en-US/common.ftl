@@ -44,6 +44,9 @@
 # macOS's grant that opens a program's way into Mail, Messages, Safari and other programs' data. Use the name System Settings shows for it in this language.
 -full-disk-access = Full Disk Access
 
+# The folders a plan dry run may read, set by a person on the Settings page. A plan dry run counts what a draft plan would back up without backing anything up.
+-dry-run-allowlist = dry-run allowlist
+
 ## Sizes and durations. The program splits the value and picks the form; the
 ## catalog arranges the parts, so word order stays with the translator.
 
@@ -360,6 +363,42 @@ error-proposal-reasons = { $problem ->
 
 # The proposals could not be read or kept; the daemon's log says why.
 error-proposals-unavailable = { -brand-name } could not read or keep the proposals. Its log says why; check the data folder and try again.
+
+# Another plan dry run is running; dry runs run one at a time.
+error-dry-run-busy = Another plan dry run is running, and they run one at a time. Try again when it has finished.
+
+# A backup is running or waiting, so the plan dry run did not start.
+error-dry-run-gives-way = A backup is running or waiting, and a plan dry run gives way to backups. Try again when the backups have finished.
+
+# The proposer started as many plan dry runs in the last hour as it may.
+# $seconds (count): how long until it may start another.
+error-dry-run-rate = { $seconds ->
+    [one] This client started as many plan dry runs in the last hour as it may. Try again in 1 second.
+   *[other] This client started as many plan dry runs in the last hour as it may. Try again in { $seconds } seconds.
+  }
+
+# A path the draft plan reads is outside the dry-run allowlist, or could not be resolved, or a marker it names is not a file name alone; the message never says which.
+# $setting (text): the plan's setting, as its key in the configuration file: { "sources" }, { "glob-files" }, { "iglob-files" } or { "exclude-if-present" }.
+# $entry (count): the entry of that setting, from 1.
+error-dry-run-not-allowed = Entry { $entry } of the plan's { $setting } would read outside the { -dry-run-allowlist }, so nothing was read. Give a path within it, and a marker by its name alone, or ask a person to add the folder on the Settings page.
+
+# For this setting of the draft plan, rustic would read files in the folders above the plan's sources, outside the dry-run allowlist, so the dry run read nothing.
+# $setting (text): the plan's setting, as its key in the configuration file: { "custom-ignorefiles" }, { "git-ignore" } or { "no-require-git" }.
+error-dry-run-reads-above = For the plan's { $setting }, rustic would read files in the folders above its sources, outside the { -dry-run-allowlist }, so nothing was read. Leave { $setting } out of the draft to dry-run the rest.
+
+# The engine cannot apply the draft plan's source filter, as a backup could not.
+error-dry-run-filter = The plan's source filter can't be applied, so the plan dry run did not run. Correct its excludes, then try again.
+
+# The walk of the plan dry run failed; the daemon's log says why.
+error-dry-run-failed = The plan dry run failed. { -brand-name }'s log says why.
+
+# A folder of the dry-run allowlist is not an absolute path, so the list was not saved.
+# $entry (count): the folder's place in the list, from 1.
+error-dry-run-folder-invalid = Folder { $entry } of the { -dry-run-allowlist } is not an absolute path, so the list was not saved. Give the full path, then save again.
+
+# The dry-run allowlist holds more folders than it may, so it was not saved.
+# $limit (count): how many folders it may hold.
+error-dry-run-allowlist-too-long = The { -dry-run-allowlist } may hold at most { $limit } folders, so it was not saved. Remove some, then save again.
 
 # The request names a repository the configuration does not have.
 # $alias (text): the repository's alias, such as demo.

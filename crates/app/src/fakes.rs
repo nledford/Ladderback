@@ -25,6 +25,7 @@ mod service;
 mod session_store;
 mod sources;
 mod stats_store;
+mod walk;
 
 pub use admin_password::InMemoryAdminPassword;
 pub use api_token_store::InMemoryApiTokenStore;
@@ -50,3 +51,4 @@ pub use service::FakeServiceManager;
 pub use session_store::InMemorySessionStore;
 pub use sources::FakeSources;
 pub use stats_store::InMemoryStatsStore;
+pub use walk::InMemoryTree;

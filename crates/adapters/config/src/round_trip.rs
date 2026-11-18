@@ -33,12 +33,12 @@ use domain::notifications::{
     Username,
 };
 use domain::planning::{
-    AgentConfig, AgentSettings, Alternative, Cadence, Concurrency, CronExpression, GlobFile,
-    GroupBy, HookEntry, Hooks, Hostname, Interval, KeepCount, KeepWithin, Locale, Location,
-    LocationRule, Locations, MAX_DURATION, MAX_LOCATIONS, MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES,
-    MIN_INTERVAL, Maintenance, NameFilter, NetworkKind, NetworkName, Nice, OnFailure, Overlap,
-    Plan, RepositoryConfig, RestoreFolder, RetentionPolicy, RetryPolicy, Schedule, Source,
-    SourceFilter, UpdateCheck,
+    AgentConfig, AgentSettings, Alternative, Cadence, Concurrency, CronExpression, DryRunAllowlist,
+    DryRunFolder, GlobFile, GroupBy, HookEntry, Hooks, Hostname, Interval, KeepCount, KeepWithin,
+    Locale, Location, LocationRule, Locations, MAX_DURATION, MAX_LOCATIONS, MAX_NETWORK_NAMES,
+    MAX_RULE_ALTERNATIVES, MIN_INTERVAL, Maintenance, NameFilter, NetworkKind, NetworkName, Nice,
+    OnFailure, Overlap, Plan, RepositoryConfig, RestoreFolder, RetentionPolicy, RetryPolicy,
+    Schedule, Source, SourceFilter, UpdateCheck,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{PlanId, RepositoryAlias, RepositoryId};
@@ -268,6 +268,11 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
     let restore_folder = absolute().prop_filter_map("a path without NUL", |path| {
         RestoreFolder::parse(&path).ok()
     });
+    let dry_run_allowlist = vec(
+        absolute().prop_filter_map("a path without NUL", |path| DryRunFolder::parse(&path).ok()),
+        0..=3,
+    )
+    .prop_map(|folders| DryRunAllowlist::new(folders).expect("under the limit"));
     (
         weighted(0.5, hostname),
         concurrency,
@@ -276,6 +281,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
         weighted(0.5, locale),
         prop_oneof![Just(UpdateCheck::On), Just(UpdateCheck::Off)],
         weighted(0.5, restore_folder),
+        dry_run_allowlist,
     )
         .prop_map(
             |(
@@ -286,6 +292,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
                 locale,
                 update_check,
                 restore_folder,
+                dry_run_allowlist,
             )| {
                 AgentSettings {
                     hostname,
@@ -295,6 +302,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
                     locale,
                     update_check,
                     restore_folder,
+                    dry_run_allowlist,
                 }
             },
         )

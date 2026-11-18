@@ -68,7 +68,7 @@ fn a_file_with_a_repository_and_a_plan_gets_the_defaults_for_the_rest() {
 fn the_agent_table_is_read() {
     let text = "schema = 1\n\n[agent]\nhostname = \"demo-host\"\nconcurrency = 4\nnice = 10\n\
                 allow-hub-restore = true\nlocale = \"en-US\"\ncheck-for-updates = false\n\
-                restore-folder = \"/srv/restores\"\n";
+                restore-folder = \"/srv/restores\"\ndry-run-allowlist = [\"/srv/demo\"]\n";
     assert_eq!(
         parsed(text).expect("valid").config.agent(),
         &AgentSettings {
@@ -81,6 +81,10 @@ fn the_agent_table_is_read() {
             restore_folder: Some(
                 domain::planning::RestoreFolder::parse("/srv/restores").expect("a restore folder"),
             ),
+            dry_run_allowlist: domain::planning::DryRunAllowlist::new(vec![
+                domain::planning::DryRunFolder::parse("/srv/demo").expect("a folder"),
+            ])
+            .expect("an allowlist"),
         }
     );
 }
@@ -593,6 +597,12 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
             "agent.restore-folder",
             ValueKind::RestoreFolder,
             "\"ladderback-restore\"",
+        ),
+        refused(
+            agent("dry-run-allowlist = [\"/srv/demo\", \"projects\"]\n"),
+            "agent.dry-run-allowlist[1]",
+            ValueKind::DryRunFolder,
+            "\"projects\"",
         ),
         refused(
             base_with("schedule = { cron = \"every day\" }\n"),

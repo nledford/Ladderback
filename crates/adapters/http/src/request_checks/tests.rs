@@ -46,6 +46,7 @@ pub(crate) fn test_state() -> AppState {
         profiles: Arc::new(NoProfiles),
         restores: Arc::new(NoRestores),
         proposals: Arc::new(NoProposals),
+        dry_runs: Arc::new(NoDryRuns),
         downloads: Arc::new(NoDownloads),
         sign_in: sign_in_off(),
         exposure: crate::Exposure::Loopback,
@@ -143,6 +144,31 @@ impl crate::Plans for NoPlans {
 
     async fn delete(&self, _id: String) -> Result<(), crate::PlansError> {
         Err(crate::PlansError::InvalidBody)
+    }
+}
+
+/// Does nothing: the checks never reach a route.
+pub(crate) struct NoDryRuns;
+
+#[async_trait]
+impl crate::DryRuns for NoDryRuns {
+    async fn dry_run(
+        &self,
+        _asker: domain::planning::Proposer,
+        _plan: api::PlanDto,
+    ) -> Result<api::PlanDryRunDto, crate::DryRunsError> {
+        Err(crate::DryRunsError::InvalidBody)
+    }
+
+    async fn allowlist(&self) -> Result<api::DryRunAllowlistDto, crate::DryRunsError> {
+        Err(crate::DryRunsError::InvalidBody)
+    }
+
+    async fn set_allowlist(
+        &self,
+        _folders: Vec<String>,
+    ) -> Result<api::DryRunAllowlistDto, crate::DryRunsError> {
+        Err(crate::DryRunsError::InvalidBody)
     }
 }
 

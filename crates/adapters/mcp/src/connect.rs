@@ -7,8 +7,9 @@ use std::time::Duration;
 
 use api::{
     ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, NewProposalDto,
-    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlansDto, ProfileExportDto,
-    ProfileImportDto, ProposalDto, RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
+    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto, PlanDto, PlansDto,
+    ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SessionDto, SignInStateDto,
+    SnapshotsDto,
 };
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
@@ -609,6 +610,12 @@ impl Proposals for Connect {
             answer_lost,
         )
         .await
+    }
+
+    // A read, as a preview is: an answer lost leaves nothing done.
+    async fn dry_run(&self, plan: PlanDto) -> Result<PlanDryRunDto, ErrorDto> {
+        let body = serde_json::json!({ "plan": plan });
+        self.post("api/v1/dry-runs", &[], &body, no_answer).await
     }
 }
 

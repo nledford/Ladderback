@@ -20,13 +20,54 @@
 //! redactor of the secrets of both would mask it: more, never less (I4,
 //! #287).
 
+use std::cell::Cell;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::secrets::Redactor;
-use log::{Log, Metadata, Record};
+use log::{Level, Log, Metadata, Record};
 
 /// The redactor of every open running.
 static OPEN: Mutex<Vec<Arc<Redactor>>> = Mutex::new(Vec::new());
+
+thread_local! {
+    /// The warnings counted so far while this thread walks for a plan dry
+    /// run, or none when it doesn't ([`unlogged`]).
+    static WALKING: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+/// Runs `walk` with every record this thread makes held back from the log,
+/// and answers its output with the warnings and errors among them counted.
+/// A plan dry run's walk meets paths, and its records name them (rustic's
+/// xattr warning, the `ignore` crate's debug record of each entry it
+/// leaves out), while the daemon's log is served at the `read` scope. It
+/// counts only where [`Masked`] is the process's logger, as the daemon's
+/// is; the thread logs as before once `walk` returns or panics.
+pub(crate) fn unlogged<T>(walk: impl FnOnce() -> T) -> (T, u64) {
+    /// Puts back what the thread counted before, when dropped.
+    struct Restore(Option<u64>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WALKING.set(self.0);
+        }
+    }
+    let _restore = Restore(WALKING.replace(Some(0)));
+    let done = walk();
+    (done, WALKING.get().unwrap_or(0))
+}
+
+/// Whether this thread walks for a dry run, so a record of `level` is held
+/// back: counted when it is a warning or an error.
+fn held_back(level: Level) -> bool {
+    match WALKING.get() {
+        Some(counted) => {
+            if level <= Level::Warn {
+                WALKING.set(Some(counted.saturating_add(1)));
+            }
+            true
+        }
+        None => false,
+    }
+}
 
 /// A logger whose records are masked with the secrets of every repository
 /// the process has open in-process, as they are when it logs them.
@@ -47,7 +88,7 @@ impl<L: Log> Log for Masked<L> {
     }
 
     fn log(&self, record: &Record<'_>) {
-        if !self.inner.enabled(record.metadata()) {
+        if held_back(record.level()) || !self.inner.enabled(record.metadata()) {
             return;
         }
         // Copied out, so the lock isn't held while the record is written.
@@ -166,6 +207,32 @@ mod tests {
 
     // Each test has secrets of its own: an open another test holds masks
     // its own secrets only, which these texts don't hold.
+
+    #[test]
+    fn a_dry_run_walk_s_records_are_held_back_and_its_warnings_and_errors_counted() {
+        let kept = Kept::default();
+        let logger = Masked::new(kept.clone());
+        let named = "Error reading xattrs for /srv/demo/CANARY-walked.txt, not excluding";
+        let ((), counted) = super::unlogged(|| {
+            for level in [Level::Error, Level::Warn, Level::Info, Level::Debug] {
+                log(&logger, level, "rustic_core::backend::ignore", named);
+            }
+        });
+        assert_eq!(counted, 2);
+        assert_eq!(kept.messages(), []);
+        let unwound =
+            std::panic::catch_unwind(|| super::unlogged(|| -> u8 { panic!("the walk panicked") }));
+        assert!(unwound.is_err());
+        log(&logger, Level::Warn, "ladderback", "after the walk");
+        assert_eq!(
+            kept.messages(),
+            [(
+                Level::Warn,
+                "ladderback".to_owned(),
+                "after the walk".to_owned()
+            )]
+        );
+    }
 
     #[test]
     fn while_an_open_runs_its_secrets_are_masked_in_every_record_whatever_its_crate() {

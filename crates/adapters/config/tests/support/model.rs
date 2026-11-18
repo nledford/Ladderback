@@ -59,6 +59,8 @@ pub fn expected() -> AgentConfig {
         restore_folder: Some(
             domain::planning::RestoreFolder::parse("/srv/restores").expect("a restore folder"),
         ),
+        // `golden/v1.toml` predates the key: none is allowed.
+        dry_run_allowlist: domain::planning::DryRunAllowlist::default(),
     };
     let hooks = Hooks {
         run_before: vec![hook("echo 'agent starting'")],

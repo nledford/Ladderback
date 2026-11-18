@@ -9,6 +9,7 @@
 //! a sentence (§8.4).
 
 mod agent;
+mod dry_run;
 mod duration;
 mod filter;
 mod hooks;
@@ -26,6 +27,10 @@ mod schedule;
 pub use agent::{
     AgentConfig, AgentSettings, ChangeRefused, Concurrency, Nice, NotRecorded, UpdateCheck,
     Violation,
+};
+pub use dry_run::{
+    DRY_RUN_WINDOW, DryRunAllowlist, DryRunFolder, DryRunRecord, ExcludeSetting,
+    MAX_DRY_RUN_FOLDERS, MAX_DRY_RUNS_PER_HOUR, is_file_name, is_within,
 };
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
 pub use filter::{NeverMatchingGlob, Placement, SourceFilter};
@@ -74,6 +79,9 @@ pub enum ValueKind {
     Locale,
     /// The agent's `restore-folder`: not an absolute path.
     RestoreFolder,
+    /// A folder of the agent's `dry-run-allowlist`: not an absolute path,
+    /// or one beyond [`MAX_DRY_RUN_FOLDERS`].
+    DryRunFolder,
     Concurrency,
     Nice,
     Cron,

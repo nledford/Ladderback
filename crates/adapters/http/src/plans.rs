@@ -110,7 +110,7 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<String>
 /// isn't a plan's table is 400; a plan the configuration doesn't hold, 404;
 /// a plan the file wouldn't load, 422; a plan a rule names, 409; and the
 /// configuration not being usable now, 503.
-fn refusal(error: &PlansError) -> Response {
+pub(crate) fn refusal(error: &PlansError) -> Response {
     use api::{ErrorCode, MsgArg};
     let text = |value: &str| MsgArg::Text(value.to_owned());
     match error {

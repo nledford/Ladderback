@@ -533,12 +533,17 @@ async fn serving_on_loopback(agent: &mut Agent) {
 /// Starts `ladderback serve` on a free loopback port with the scenario's
 /// shared folders, and keeps it as the daemon requests go to.
 pub(crate) async fn serve_on_loopback(agent: &mut Agent) {
+    serve_on_loopback_logging(agent, None).await;
+}
+
+/// As [`serve_on_loopback`], the daemon logging at `rust_log` when given.
+pub(crate) async fn serve_on_loopback_logging(agent: &mut Agent, rust_log: Option<&'static str>) {
     let home = agent.web.home.clone();
     let (child, outcome, log) = start(
         agent.scratch(),
         home.as_deref(),
         &["--listen", "127.0.0.1:0"],
-        None,
+        rust_log,
     )
     .await;
     match outcome {

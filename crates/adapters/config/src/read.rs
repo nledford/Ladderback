@@ -11,13 +11,14 @@ use domain::notifications::{
     Rule, RuleName, Template, Username,
 };
 use domain::planning::{
-    AgentConfig, AgentSettings, Alternative, Cadence, Concurrency, CronExpression, GlobFile,
-    GroupBy, HookEntry, Hooks, Hostname, Interval, InvalidValue, KeepCount, KeepWithin, Locale,
-    Location, LocationRule, Locations, MAX_LOCATIONS, MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES,
-    Maintenance, NameFilter, NetworkKind, NetworkName, Nice, OnFailure, Overlap, Plan,
-    RepositoryConfig, RepositoryField, RepositorySettings, RestoreFolder, RetentionPolicy,
-    RetryPolicy, Schedule, Source, SourceFilter, UpdateCheck, ValueKind, Violation, check_location,
-    check_location_count, check_option_value, check_options, parse_duration,
+    AgentConfig, AgentSettings, Alternative, Cadence, Concurrency, CronExpression, DryRunAllowlist,
+    DryRunFolder, GlobFile, GroupBy, HookEntry, Hooks, Hostname, Interval, InvalidValue, KeepCount,
+    KeepWithin, Locale, Location, LocationRule, Locations, MAX_DRY_RUN_FOLDERS, MAX_LOCATIONS,
+    MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES, Maintenance, NameFilter, NetworkKind, NetworkName,
+    Nice, OnFailure, Overlap, Plan, RepositoryConfig, RepositoryField, RepositorySettings,
+    RestoreFolder, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter, UpdateCheck,
+    ValueKind, Violation, check_location, check_location_count, check_option_value, check_options,
+    parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
@@ -179,6 +180,18 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
         .restore_folder
         .map(|text| reader.value(&path.key("restore-folder"), RestoreFolder::parse(&text)))
         .transpose()?;
+    let allowlist_path = path.key("dry-run-allowlist");
+    let folders = table
+        .dry_run_allowlist
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(index, text)| reader.value(&allowlist_path.index(index), DryRunFolder::parse(text)))
+        .collect::<Read<Vec<_>>>()?;
+    let dry_run_allowlist = reader.value(
+        &allowlist_path.index(MAX_DRY_RUN_FOLDERS),
+        DryRunAllowlist::new(folders),
+    )?;
     Ok(AgentSettings {
         hostname,
         concurrency,
@@ -190,6 +203,7 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
             Some(true) | None => UpdateCheck::On,
         },
         restore_folder,
+        dry_run_allowlist,
     })
 }
 

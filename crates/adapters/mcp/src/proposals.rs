@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use api::{ErrorDto, NewProposalDto, PlanDto, ProposalChangeDto, ProposalDto};
+use api::{ErrorDto, NewProposalDto, PlanDryRunDto, PlanDto, ProposalChangeDto, ProposalDto};
 use async_trait::async_trait;
 use rmcp::schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
@@ -28,6 +28,11 @@ pub trait Proposals: Send + Sync + 'static {
 
     /// Withdraws the pending proposal whose ID is `id`, and returns it.
     async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto>;
+
+    /// Walks the draft `plan`'s sources within the dry-run allowlist
+    /// through its source filter: counts and sizes only (decision 89,
+    /// point 13).
+    async fn dry_run(&self, plan: PlanDto) -> Result<PlanDryRunDto, ErrorDto>;
 }
 
 /// Reads a plan's table given as TOML text, in the configuration file's
@@ -187,4 +192,27 @@ fn changes(_generator: &mut SchemaGenerator) -> Schema {
 pub struct ProposalArguments {
     /// The proposal's ID, as `propose_setup` returned it.
     pub proposal: String,
+}
+
+/// The arguments of `dry_run_plan`: a draft plan's table, as `propose_setup`
+/// takes one.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+#[serde(deny_unknown_fields)]
+pub struct DryRunArguments {
+    /// The draft plan's table as TOML text: the keys of a `[[plans]]` entry
+    /// in the configuration file, without the header (`id = "home"`,
+    /// `repository`, `sources` and so on), as `propose_setup` takes a plan.
+    pub plan: String,
+}
+
+impl DryRunArguments {
+    /// The plan's table, read from its text by `tables`.
+    ///
+    /// # Errors
+    ///
+    /// `invalid-arguments` naming `plan`: the text isn't a TOML table.
+    pub fn plan(self, tables: &dyn PlanTables) -> Result<PlanDto, ErrorDto> {
+        tables.read(&self.plan).ok_or_else(|| invalid("plan"))
+    }
 }

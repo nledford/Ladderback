@@ -140,6 +140,11 @@ fn rich_agent_settings() -> Option<AgentSettings> {
         locale: Some(Locale::parse("en-US").ok()?),
         update_check: domain::planning::UpdateCheck::Off,
         restore_folder: Some(domain::planning::RestoreFolder::parse("/srv/restores").ok()?),
+        dry_run_allowlist: domain::planning::DryRunAllowlist::new(vec![
+            domain::planning::DryRunFolder::parse("/srv/demo").ok()?,
+            domain::planning::DryRunFolder::parse("/home/demo/projects").ok()?,
+        ])
+        .ok()?,
     })
 }
 
