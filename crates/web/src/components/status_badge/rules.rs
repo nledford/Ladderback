@@ -43,12 +43,14 @@ impl BadgeState {
     ];
 
     /// The badge's tone, whose pair of tokens its pill is drawn in: Ladder
-    /// Blue's while it runs, green once it ended well, red once it failed,
-    /// and gray while there is nothing to tell yet, or any longer.
+    /// Blue's while it runs, green once it ended well, amber once it ended
+    /// well with warnings, a success with something to read (#942), red once
+    /// it failed, and gray while there is nothing to tell yet, or any longer.
     pub fn tone(self) -> BadgeTone {
         match self {
             Self::Running => BadgeTone::Primary,
-            Self::Succeeded | Self::SucceededWithWarnings => BadgeTone::Success,
+            Self::Succeeded => BadgeTone::Success,
+            Self::SucceededWithWarnings => BadgeTone::Warning,
             Self::Failed => BadgeTone::Error,
             Self::Queued | Self::Cancelled | Self::Empty => BadgeTone::Secondary,
         }
