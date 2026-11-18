@@ -63,7 +63,7 @@ locale = "en-US"                 # notification text (§8.4); defaults to the PO
 check-for-updates = true         # the daily release check (§5, §10.7); false never asks
 restore-folder = "/srv/restores" # where restores into a new folder go (§10.4); absolute; defaults to ~/ladderback-restore
 
-[hub]                            # optional
+[hub]                            # optional; a build with the hub only, so from M8 (decision 122)
 url = "https://hub.example.lan:9899"
 
 [hooks]                          # = rustic [global.hooks]: wraps every job on this agent

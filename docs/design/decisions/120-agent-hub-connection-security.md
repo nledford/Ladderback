@@ -6,6 +6,8 @@ This decision is the security core: identities, keys, the handshake, signed mess
 
 The decision also fixes the order of the handshake, which decision 88 left open. The maintainer pre-approved security crates on 2026-11-18; "Crates" names them. The decision is too large for one pull request; issue #1040's "Implementation slices for #567 and #568" gives the order in which it is built, each slice its own pull request off `main`.
 
+**Amended by decision 122** (2026-11-18): every surface this decision adds is built behind the `hub` Cargo feature, which release builds leave out until M8's release candidate. "The first release" here means M8's full release; until it, the handshake and its fields may change on `main` in place. The default backup exclusions of the hub's and the agent's key files ("The hub key") apply in every build.
+
 ## Where each item is answered
 
 | Item | Answered in |

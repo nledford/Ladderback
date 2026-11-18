@@ -117,6 +117,8 @@ CREATE TABLE repo_claims (repo_uuid TEXT, agent_id TEXT, requested TEXT, status 
 - `0014_proposal_decisions.sql` adds to `proposals` the columns of what a person decided (below, decision 89).
 - `0015_operation_entry.sql` adds `entry` to `operations` (below, #847).
 
+**The hub's migrations ship in every build,** a release before M8 included, though only a build with the hub writes to their tables before then, so that a database has one schema history whichever build opened it (§16, decision 122).
+
 Later tables, columns and indexes arrive as migrations of the features that need them. As of version 15:
 
 - `operations` has the columns the log writes: `id`, `agent_id` (always `local` for now), `kind`, `plan_id`, `repo_uuid`, `repo_alias` (below), `trigger`, `token_id` and `token_label` (below), `status`, `location_no` and `locations_json` (below), `entry` (below), `queued_at`, `started_at`, `finished_at`, `snapshot_id` (a backup's), `summary_json` (what the engine reported), `error_code`, `error_args`, `error_detail`, `warning_count`. `queued_at` and `warning_count` are `NOT NULL`. `kind` is `fake|identify|init|backup|forget|adopt|prune|check|ls`: `fake` and `identify` are the diagnostic and repository-opening jobs, `init` creates a repository, `forget`/`adopt`/`prune`/`check` are the maintenance ones (I7), `ls` a read that is never logged. `trigger`, `status` and the other columns take the values listed above. `repo_uuid` is the repository the operation runs on: an operation queued from an entry that records no ID names none while it is queued, and from its start the one its job opened, which an identify found first (`Operation::start_on`, decision 81).
