@@ -651,6 +651,20 @@ Feature: Sign-in
       Then the page shows a message containing "Sign-in is off, and Ladderback answers on the network"
       And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"
 
+    Scenario: The start page's notice that sign-in is off is an information banner
+      When I open the web UI
+      Then the page shows an information banner that says "Sign-in is off: anyone on this machine can use Ladderback."
+      And the page has no accessibility violations
+
+    Scenario: Listening on the network, the notice on every page that sign-in is off is a warning banner
+      Given a daemon with sign-in off listening on every address for the host name "backup.example"
+      When I open the web UI
+      Then the page shows a warning banner that says "Sign-in is off, and Ladderback answers on the network"
+      And the page has no accessibility violations
+      When I open the Repositories page
+      Then the page shows a warning banner that says "Sign-in is off, and Ladderback answers on the network"
+      And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"
+
   @ui
   Rule: Settings says when an admin password waits for a restart to turn sign-in on
 
@@ -662,4 +676,20 @@ Feature: Sign-in
       And I press Enter
       Then focus is on the main heading "Settings"
       And the page shows a message containing "Admin password set. Restart Ladderback to turn sign-in on."
+      And the page has no accessibility violations
+
+    Scenario: An admin password waiting for a restart is an information banner above Settings
+      Given a daemon with sign-in off
+      When I open the web UI
+      And the admin password "demo-admin-pass" is set
+      And I open the address "/settings"
+      Then the page shows an information banner that says "Admin password set. Restart Ladderback to turn sign-in on."
+      And the page has no accessibility violations
+
+    Scenario: An admin password file found damaged is a warning banner above Settings
+      Given a daemon with sign-in off
+      When I open the web UI
+      And the data folder holds an admin password file that is not a password hash
+      And I open the address "/settings"
+      Then the page shows a warning banner that says "The admin password file is damaged"
       And the page has no accessibility violations

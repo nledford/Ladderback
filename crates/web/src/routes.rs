@@ -18,11 +18,12 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
+use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, Checkbox, ErrorSummary, Icon, Link, PauseUpdates, Progress, RadioGroup, StatusBadge,
+    Banner, Button, Checkbox, ErrorSummary, Link, PauseUpdates, Progress, RadioGroup, StatusBadge,
     SummaryItem, TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view,
     sentence_view, text_field,
 };
@@ -1489,6 +1490,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
 
     let list_localizer = Arc::clone(&localizer);
     let summary_localizer = Arc::clone(&localizer);
+    let note_localizer = Arc::clone(&localizer);
     let field_text = |id| text(&localizer, id);
     view! {
         <PageHeading>
@@ -1507,11 +1509,9 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 .into_iter()
                 .map(|note| {
                     view! {
-                        <p role="note" class="page-note">
-                            <Icon glyph=LucideGlyph::TriangleAlert tone=Tone::Warning />
-                            " "
+                        <Banner localizer=Arc::clone(&note_localizer) tone=BannerTone::Warning>
                             {note}
-                        </p>
+                        </Banner>
                     }
                 })
                 .collect_view()

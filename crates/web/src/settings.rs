@@ -47,8 +47,8 @@ use crate::api_tokens::{
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
-    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, Tab, Tabs, TextField,
-    Working, copy_text, hand_focus_when_gone, sentence_view, text_field,
+    Banner, Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, Tab, Tabs,
+    TextField, Working, copy_text, hand_focus_when_gone, sentence_view, text_field,
 };
 use crate::live::reply;
 use crate::page_width::PageWidth;
@@ -58,7 +58,7 @@ use crate::restart::{
     confirm_said, offers_now, request, running_said, status_of,
 };
 use crate::routes::{PAGE_HEADING_ID, PageHeading, instant, refused_sentence, text_with};
-use crate::session::{Standing, waiting_password};
+use crate::session::{Standing, waiting_password, waiting_tone};
 use crate::settings_tabs::Section;
 use crate::variants::{Size, Tone};
 use crate::ws::{self, Got, Phase, Posted};
@@ -172,7 +172,18 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     let waiting_localizer = Arc::clone(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
-        {move || waiting.get().map(|id| view! { <p>{text(&waiting_localizer, id)}</p> })}
+        {move || {
+            waiting
+                .get()
+                .map(|id| {
+                    let words = text(&waiting_localizer, id);
+                    view! {
+                        <Banner localizer=Arc::clone(&waiting_localizer) tone=waiting_tone(id)>
+                            {words}
+                        </Banner>
+                    }
+                })
+        }}
         <Tabs
             id="settings"
             name=TabsName::LabelledBy(PAGE_HEADING_ID.to_owned())

@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { cp, mkdtemp } from "node:fs/promises";
+import { cp, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -97,6 +97,17 @@ When("the admin password {string} is set", async function (this: BrowserWorld, p
   assert.ok(own, "this scenario's daemon was never started");
   await setPassword(own.scratch, password);
 });
+
+// Written while the daemon runs, as a damaged disk or an editor would leave
+// it: the next answer the daemon gives says the file is unreadable.
+When(
+  "the data folder holds an admin password file that is not a password hash",
+  async function (this: BrowserWorld) {
+    const own = this.ownServer;
+    assert.ok(own, "this scenario's daemon was never started");
+    await writeFile(path.join(own.scratch, "data", "admin-password"), "not a password hash\n", { mode: 0o600 });
+  },
+);
 
 // What a screen reader reads after the page's heading, which takes focus when
 // a reader navigates to the page: a notice above it would be passed over.

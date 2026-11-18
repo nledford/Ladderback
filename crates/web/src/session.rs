@@ -13,6 +13,7 @@ use l10n::{MessageId, msg};
 use serde::Deserialize;
 
 use crate::backend::succeeded;
+use crate::components::banner::rules::BannerTone;
 use crate::components::link::rules::Outside;
 
 /// Where the page stands with sign-in.
@@ -103,6 +104,17 @@ pub(crate) fn waiting_password(read: Option<&SessionDto>) -> Option<MessageId> {
     match read?.admin_password? {
         AdminPasswordDto::Set => Some(msg::UI_ADMIN_PASSWORD_WAITING),
         AdminPasswordDto::Unreadable => Some(msg::UI_ADMIN_PASSWORD_DAMAGED),
+    }
+}
+
+/// The tone of Settings' banner that says `waiting` ([`waiting_password`]):
+/// a warning that the password file is damaged and must be set again,
+/// information that a restart turns sign-in on.
+pub(crate) fn waiting_tone(waiting: MessageId) -> BannerTone {
+    if waiting == msg::UI_ADMIN_PASSWORD_DAMAGED {
+        BannerTone::Warning
+    } else {
+        BannerTone::Primary
     }
 }
 
@@ -596,6 +608,18 @@ mod tests {
         );
         assert_eq!(waiting_password(Some(&waiting(None))), None);
         assert_eq!(waiting_password(None), None);
+    }
+
+    #[test]
+    fn a_damaged_password_file_is_a_warning_and_a_password_waiting_for_a_restart_information() {
+        assert_eq!(
+            waiting_tone(msg::UI_ADMIN_PASSWORD_DAMAGED),
+            BannerTone::Warning
+        );
+        assert_eq!(
+            waiting_tone(msg::UI_ADMIN_PASSWORD_WAITING),
+            BannerTone::Primary
+        );
     }
 
     const HOUR: i64 = 3_600_000;

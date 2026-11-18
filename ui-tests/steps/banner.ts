@@ -15,6 +15,7 @@ import type { Locator, Page } from "playwright";
 
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "./components.ts";
+import { ISOLATION, namePattern } from "../support/keyboard.ts";
 
 // The gallery's banners as it opens (`gallery.rs`): one in each tone it
 // takes, then the notice the reader can dismiss.
@@ -22,6 +23,9 @@ const BANNERS = 3;
 
 // Half a pixel of rounding in a laid-out length.
 const ROUNDING_PX = 0.5;
+
+// How long a page takes to show what the daemon answered, with room.
+const PAGE_PATIENCE_MS = 10_000;
 
 // The token each tone draws its icon and its edge in (`style.css`).
 const TONE_TOKENS: Record<string, string> = {
@@ -305,5 +309,35 @@ Then(
       assert.ok(drawn.parts.length >= 2, `"${drawn.text}" has no icon or no words`);
       for (const part of drawn.parts) assert.ok(part.inside, `${part.selector} of "${drawn.text}" lies outside its banner`);
     }
+  },
+);
+
+// The tone each banner a page shows is drawn in, by the word a scenario
+// names it with: its class, and the word its icon is named by (§4.5).
+const PAGE_TONES: Record<string, { tone: string; icon: string }> = {
+  information: { tone: "primary", icon: "Information" },
+  warning: { tone: "warning", icon: "Warning" },
+};
+
+// Words a banner says, among the rest of its words: fetched text in them
+// may carry bidi isolation marks (§4.5).
+const saying = (words: string): RegExp =>
+  new RegExp([...words].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION));
+
+// A page's notice is the shared banner (#930): found by its words, as a
+// banner has no role, it is one banner in the tone named, its icon an image
+// named for that tone, and its words after it, never a live region itself.
+Then(
+  "the page shows a(n) {word} banner that says {string}",
+  async function (this: BrowserWorld, tone: string, words: string) {
+    const expected = PAGE_TONES[tone];
+    assert.ok(expected, `no banner tone "${tone}"`);
+    const banner = this.page.locator(".banner").filter({ hasText: saying(words) });
+    await expect(banner).toHaveCount(1, { timeout: PAGE_PATIENCE_MS });
+    await expect(banner).toHaveClass(new RegExp(`(^|\\s)tone-${expected.tone}(\\s|$)`));
+    await expect(banner.locator(".banner-icon").getByRole("img", { name: namePattern(expected.icon) })).toHaveCount(1);
+    await expect(banner.locator(".banner-words")).toContainText(saying(words));
+    await expect(banner).not.toHaveAttribute("role", /.+/);
+    await expect(banner).not.toHaveAttribute("aria-live", /.+/);
   },
 );

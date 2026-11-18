@@ -240,17 +240,8 @@ a {
   text-align: end;
 }
 
-/* The available update, on a line of its own under the running version and
-   at the same side; its padding is its link's. The sentence wraps on a
-   narrow screen rather than stick out (1.4.10). */
-.site-update {
-  flex-basis: 100%;
-  margin: 0;
-  text-align: end;
-  min-inline-size: 0;
-  overflow-wrap: anywhere;
-}
-
+/* The available update's link, in its banner on a line of its own under the
+   running version (`basis-full`); its padding is the link's. */
 .site-update a {
   display: inline-block;
   padding-block: 0.25rem;
@@ -1045,30 +1036,6 @@ fieldset.choices > p {
 .error-summary ul {
   margin-block: 0.5rem;
   padding-inline-start: 1.25rem;
-}
-
-/* A note of the machine above a page's list (the Repositories page's
-   keyring note, #923): set apart by its border and its icon, and said in
-   words, never by color alone. */
-.page-note {
-  border: 2px solid var(--warning);
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-  margin-block: 1rem;
-}
-
-/* The start page's Full Disk Access warning (§16, decision 115): set apart by
-   its border and named by its heading, never by color alone. */
-.full-disk-access {
-  border: 2px solid var(--warning);
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-  margin-block: 1rem;
-}
-
-.full-disk-access h2 {
-  margin-block: 0.25rem;
-  font-size: 1.125rem;
 }
 
 .actions {

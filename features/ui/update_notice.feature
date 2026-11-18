@@ -36,3 +36,10 @@ Feature: The available update in the header
     Then the header links to the notes of version "99.0.0" after the running version
     And the page doesn't scroll sideways
     And the page has no accessibility violations
+
+  Scenario: The notice is an information banner in the header
+    Given the daemon has found that version "99.0.0" is available
+    When I open the web UI
+    Then the page shows an information banner that says "Version 99.0.0 is available"
+    And the header links to the notes of version "99.0.0" after the running version
+    And the page has no accessibility violations
