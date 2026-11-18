@@ -296,7 +296,7 @@ Then("the checkbox {string} is described by {string}", async function (this: Bro
 
 // A radio button found within its group, which names what it chooses.
 function radioOfGroup(world: BrowserWorld, name: string, group: string) {
-  return world.page.getByRole("group", { name: group, exact: true }).getByRole("radio", { name, exact: true });
+  return world.page.getByRole("radiogroup", { name: group, exact: true }).getByRole("radio", { name, exact: true });
 }
 
 Then("the radio {string} of the group {string} is checked", async function (this: BrowserWorld, name: string, group: string) {
@@ -309,7 +309,7 @@ Then("the radio {string} of the group {string} is not checked", async function (
 
 // What a screen reader reads after the group's name as it enters the group.
 Then("the group {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
-  await expect(this.page.getByRole("group", { name, exact: true })).toHaveAccessibleDescription(description);
+  await expect(this.page.getByRole("radiogroup", { name, exact: true })).toHaveAccessibleDescription(description);
 });
 
 // A browser draws a form control's text in its own fixed size (13.33 px in
@@ -544,7 +544,7 @@ Then(
 // fallback no token has, so a token style.css lacks fails here rather than
 // matching whatever color the probe inherits. The part is read alone with
 // `evaluate`, as `expect` finds it (issue #774).
-async function drawnOnItsFill(part: Locator, name: string, words: string, fill: string) {
+export async function drawnOnItsFill(part: Locator, name: string, words: string, fill: string) {
   await expect(part).toHaveCount(1);
   const missing = "rgb(1, 2, 3)";
   const drawn = await part.evaluate(
@@ -2148,7 +2148,7 @@ const SNAPSHOTS: Record<string, string> = {
 - button "Open the demo warning"
 - button "Turn the demo setting on"`,
   Table: `- heading "Table" [level=2]
-- group "Demo table shows":
+- radiogroup "Demo table shows":
   - text: Demo table shows
   - radio "Demo rows" [checked]
   - text: Demo rows
@@ -2329,9 +2329,13 @@ const SNAPSHOTS: Record<string, string> = {
 - text: Send a demo notification
 - paragraph: "A demo choice: turning it on changes nothing."
 - checkbox "Keep the demo log" [checked]
-- text: Keep the demo log`,
+- text: Keep the demo log
+- checkbox "Accept the demo terms" [invalid]
+- text: Accept the demo terms
+- paragraph: The demo terms change nothing.
+- paragraph: Accept the demo terms to go on.`,
   "Radio group": `- heading "Radio group" [level=2]
-- group "Demo check frequency":
+- radiogroup "Demo check frequency":
   - text: Demo check frequency
   - paragraph: "A demo choice: choosing one changes nothing."
   - radio "Every day"
@@ -2340,14 +2344,21 @@ const SNAPSHOTS: Record<string, string> = {
   - text: Every week
   - radio "Every month"
   - text: Every month
-- group "Demo language":
+- radiogroup "Demo language":
   - text: Demo language
   - radio "English" [checked]
   - text: English
   - radio "日本語"
   - text: 日本語
   - radio "العربية"
-  - text: العربية`,
+  - text: العربية
+- radiogroup "Demo backup window" [invalid]:
+  - text: Demo backup window
+  - paragraph: Choose a demo backup window.
+  - radio "Mornings"
+  - text: Mornings
+  - radio "Evenings"
+  - text: Evenings`,
   "Status badge": `- heading "Status badge" [level=2]
 - paragraph: Queued Running Succeeded Succeeded with warnings Failed Cancelled Empty`,
   Badge: `- heading "Badge" [level=2]

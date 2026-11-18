@@ -197,6 +197,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [115](decisions/115-detecting-full-disk-access.md) | Detecting a missing Full Disk Access grant |
 | [116](decisions/116-keyring-wait-at-start.md) | A scheduled run waits for the session's keyring service while the daemon starts |
 | [117](decisions/117-tailwind-first.md) | Tailwind first, custom CSS only when necessary |
+| [118](decisions/118-checkbox-and-radio-drawn-from-the-tokens.md) | A checkbox and a radio drawn from the tokens, not the browser's own |
 
 ## 17. Open questions
 

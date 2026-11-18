@@ -493,6 +493,15 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 label=t(msg::UI_GALLERY_DEMO_LOG)
                 checked=RwSignal::new(true)
             />
+            // Its error, as a form shows once it is checked, under its
+            // description.
+            <Checkbox
+                id="gallery-terms"
+                label=t(msg::UI_GALLERY_DEMO_TERMS)
+                description=t(msg::UI_GALLERY_DEMO_TERMS_HINT)
+                error=Some(t(msg::UI_GALLERY_DEMO_TERMS_ERROR))
+                checked=RwSignal::new(false)
+            />
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_RADIO_HEADING)}</h2>
@@ -542,6 +551,18 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     ),
                 ]
                 chosen=RwSignal::new("en")
+            />
+            // A group with an error, as a form shows once it is checked: no
+            // choice made, so Tab lands on its first.
+            <RadioGroup
+                name="gallery-window"
+                legend=t(msg::UI_GALLERY_DEMO_WINDOW)
+                options=vec![
+                    ("mornings", t(msg::UI_GALLERY_DEMO_MORNINGS)),
+                    ("evenings", t(msg::UI_GALLERY_DEMO_EVENINGS)),
+                ]
+                error=Some(t(msg::UI_GALLERY_DEMO_WINDOW_ERROR))
+                chosen=RwSignal::new("")
             />
         </section>
         <section>

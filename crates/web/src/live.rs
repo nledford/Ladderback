@@ -154,8 +154,13 @@ fn schedule(wakeup: Option<Duration>) {
 
 /// Opens the dialog that stands in for a modal and tells the announcer, so
 /// messages wait while it is open. A dialog already open is not counted twice.
+/// A dialog in a hidden tab panel shows that panel first, so it is drawn.
 pub(crate) fn open_modal(dialog: &web_sys::HtmlDialogElement, counted: RwSignal<bool>) {
-    if !dialog.open() && dialog.show_modal().is_ok() {
+    if dialog.open() {
+        return;
+    }
+    crate::components::tabs::show_panel_holding(dialog);
+    if dialog.show_modal().is_ok() {
         counted.set(true);
         modal_opened();
     }

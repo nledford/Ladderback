@@ -42,7 +42,7 @@ impl OtherHosts {
     /// at `now`. A snapshot is this host's when this agent tagged it,
     /// whatever host it records, as one made before the machine was renamed.
     /// It is another host's when another agent tagged it in the
-    /// [`OTHER_AGENT_RECENCY`] up to `now` (or later, by a clock ahead of
+    /// `OTHER_AGENT_RECENCY` up to `now` (or later, by a clock ahead of
     /// this one), whatever host it records, since two machines can share one
     /// name; so is one whose agent tags disagree, which this agent's tag
     /// alone no longer proves was made here. Else it is this host's when its

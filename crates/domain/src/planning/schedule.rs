@@ -296,7 +296,7 @@ impl Schedule {
 
     /// Spreads runs over up to `jitter` after the expression's moment, so
     /// that machines on the same expression don't all start at once. Not below
-    /// zero and at most [`MAX_DURATION`](super::MAX_DURATION).
+    /// zero and at most [`MAX_DURATION`].
     pub fn with_jitter(self, jitter: SignedDuration) -> Result<Self, InvalidValue> {
         let jitter = within_limits(jitter)?;
         Ok(Self {

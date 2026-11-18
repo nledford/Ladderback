@@ -341,7 +341,7 @@ Feature: How long signing in lasts
     Scenario: Choosing Stay signed in for by keyboard alone keeps the choice
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      When I open the address "/settings"
+      When I open the address "/settings#signing-in"
       And I skip to the content
       And I press Tab until focus is on the radio "30 days"
       Then the radio "30 days" of the group "Stay signed in for" is checked
@@ -368,7 +368,7 @@ Feature: How long signing in lasts
     Scenario: Sign out everywhere by keyboard alone lands on the sign-in page
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      When I open the address "/settings"
+      When I open the address "/settings#signing-in"
       And I skip to the content
       And I press Tab until focus is on the button "Sign out everywhere"
       And I press Enter
@@ -384,7 +384,7 @@ Feature: How long signing in lasts
     Scenario: Sign out everywhere chosen with Space moves focus to the sign-in page's heading
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      When I open the address "/settings"
+      When I open the address "/settings#signing-in"
       And I skip to the content
       And I press Tab until focus is on the button "Sign out everywhere"
       And I press Space
@@ -395,7 +395,7 @@ Feature: How long signing in lasts
       And the page has no accessibility violations
 
     Scenario: With sign-in off, Settings says Stay signed in for applies once sign-in is on
-      When I open the address "/settings"
+      When I open the address "/settings#signing-in"
       Then the page shows a message containing "applies once sign-in is on"
       And the page offers no button "Sign out everywhere"
       And the page has no accessibility violations
