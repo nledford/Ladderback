@@ -645,3 +645,33 @@ fn a_locked_keyring_says_it_is_locked_and_how_to_unlock_it() {
         }
     }
 }
+
+/// A password a locked keyring couldn't keep says, in four parts, what
+/// happened, what didn't, what to do and another way, with the platform's
+/// words, never as a computer with no keyring service, which its "object
+/// locked" would contradict (#993).
+#[test]
+fn a_password_a_locked_keyring_could_not_keep_says_it_is_locked_and_how_to_unlock_it() {
+    let localizer = english();
+    let args = [("entry", MsgArg::Text("ladderback/demo".to_owned()))];
+    for detail in [None, Some("Secret Service: object locked")] {
+        let shown = localizer.error(ErrorCode::KeyringLocked, &args, detail);
+        assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+        let said = shown.text();
+        for part in [
+            "ladderback/demo",
+            "because the keyring is locked",
+            "Nothing else changed",
+            "Unlock the keyring in the system's keyring app",
+            "then save again",
+            "password-file",
+            "systemd credential",
+        ] {
+            assert!(said.contains(part), "{part:?} in {said}");
+        }
+        assert!(!said.contains("no keyring service"), "{said}");
+        if let Some(detail) = detail {
+            assert!(said.contains(detail), "{said}");
+        }
+    }
+}

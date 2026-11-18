@@ -8,7 +8,7 @@ use rmcp::model::JsonObject;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ToolName, tools};
+use crate::{Offer, ToolName, tools};
 
 /// One call of a tool, read once where it enters: a tool that exists, and
 /// arguments that are an object, for the tool to check as over MCP.
@@ -121,6 +121,12 @@ impl Call {
             Some(Value::Object(arguments)) => Ok(Self { tool, arguments }),
             Some(_) => Err(CallRefused::NotACall),
         }
+    }
+
+    /// Whether a server of `offer` offers the tool called: a proposal tool
+    /// called where none is offered names no tool there, as over MCP.
+    pub fn offered_in(&self, offer: Offer) -> bool {
+        self.tool.offered_in(offer)
     }
 }
 

@@ -15,9 +15,13 @@ use domain::secrets::{KeyringEntry, SecretValue};
 /// - `remove` removes an entry, so the resolver then finds it `Missing`; an
 ///   entry that isn't there is no error.
 /// - With no keyring service to ask (on Linux no Secret Service, no session
-///   bus to reach one by, or a locked keyring), both fail with
-///   [`KeyringError::Unavailable`]; a call that outlives the resolver's limit
-///   fails with [`KeyringError::TimedOut`], and any other failure with
+///   bus to reach one by, or one that refused otherwise than as locked, as
+///   when its unlock prompt was dismissed), both fail with
+///   [`KeyringError::Unavailable`]. A service that says its keyring is
+///   locked fails both with [`KeyringError::Locked`], as the resolver reads
+///   it as [`KeyringCause::Locked`](domain::secrets::KeyringCause::Locked)
+///   (#993). A call that outlives the resolver's
+///   limit fails with [`KeyringError::TimedOut`], and any other failure with
 ///   [`KeyringError::Unwritable`].
 /// - An error never holds the password.
 /// - `activation` says how the keyring service is started: within a short
@@ -72,8 +76,12 @@ pub enum Kept {
 pub enum KeyringError {
     /// The entry holds another secret, and was left as it is.
     Taken,
-    /// There is no keyring service to ask.
+    /// There is no keyring service to ask, or it refused otherwise than as
+    /// locked.
     Unavailable { detail: String },
+    /// The keyring service answered that its keyring is locked: the person
+    /// can unlock it and try again.
+    Locked { detail: String },
     /// The keyring didn't answer within the resolver's limit, as a keyring
     /// that waits for an unlock nobody gives.
     TimedOut { seconds: u64 },

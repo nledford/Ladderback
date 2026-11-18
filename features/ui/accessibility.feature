@@ -51,6 +51,14 @@ Feature: Accessibility of the app shell
     When I press Tab
     Then focus is on the link "Skip to content"
 
+  Scenario: The not-found page's way to the start page is an underlined link
+    When I open the address "/no/such/page"
+    Then every link in the main content is underlined below its letters, 1 in all
+    When I skip to the content
+    And I press Tab until focus is on the link "Go to the start page"
+    And I press Enter
+    Then focus is on the main heading "Welcome to Ladderback"
+
   # Every Tab press checks that the control it focuses shows a focus ring and
   # that nothing lies over it (2.4.7, 2.4.11), here where a page has the least
   # room: 320 pixels wide with 200 % text.

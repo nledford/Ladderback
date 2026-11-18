@@ -26,6 +26,12 @@ pub fn read<T: DeserializeOwned>(given: Option<JsonObject>) -> Result<T, ErrorDt
     T::deserialize(MapDeserializer::new(fields)).map_err(|wrong| wrong.refusal())
 }
 
+/// The refusal of the argument `field`, given a value the tool can't take,
+/// as [`read`] refuses one: for a value only read further on.
+pub fn invalid(field: &str) -> ErrorDto {
+    Wrong::new(field, ArgumentProblem::Invalid).refusal()
+}
+
 /// The arguments of a tool that takes none.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

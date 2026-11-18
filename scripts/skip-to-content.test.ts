@@ -11,6 +11,7 @@ const catalog = [
   "ui-skip-link = Skip to content",
   "ui-brand = { -brand-name }",
   "ui-update-available = Version { $version } is available",
+  'ui-link-outside = { " " }(goes to another site)',
   "ui-nav-label = Pages",
   "ui-nav-plans = Plans",
   "ui-nav-settings = Settings",
@@ -64,7 +65,7 @@ test("a walk to a stop in the header crosses the header on purpose", () => {
       '    And I press Tab until focus is on the button "Sign out"',
       "  Scenario: The update",
       "    When I open the web UI",
-      '    And I press Tab until focus is on the link "Version 99.0.0 is available"',
+      '    And I press Tab until focus is on the link "Version 99.0.0 is available (goes to another site)"',
       "  Scenario: The product's name",
       "    When I open the web UI",
       '    And I press Tab until focus is on the link "Ladderback"',
@@ -382,7 +383,8 @@ test("the header's stops come from the English catalog, the navigation's own nam
   assert.match('the link "Skip to content"', stops);
   assert.match('the link "Plans"', stops);
   assert.match('the link "Ladderback"', stops);
-  assert.match('the link "Version 1.2.3 is available"', stops);
+  assert.match('the link "Version 1.2.3 is available (goes to another site)"', stops, "the notes are on another site");
+  assert.doesNotMatch('the link "Version 1.2.3 is available"', stops, "an outside link's name says it leaves");
   assert.match('the button "Sign out"', stops);
   assert.doesNotMatch('the link "Pages"', stops);
   assert.doesNotMatch('the button "Plans"', stops);

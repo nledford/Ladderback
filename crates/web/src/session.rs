@@ -13,6 +13,7 @@ use l10n::{MessageId, msg};
 use serde::Deserialize;
 
 use crate::backend::succeeded;
+use crate::components::link::rules::Outside;
 
 /// Where the page stands with sign-in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -309,7 +310,7 @@ impl Signed {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Told {
     pub(crate) build: BuildDto,
-    pub(crate) update: Option<AvailableUpdateDto>,
+    pub(crate) update: Option<AvailableUpdate>,
 }
 
 impl Told {
@@ -319,8 +320,30 @@ impl Told {
     pub(crate) fn of(read: &SessionDto) -> Option<Self> {
         read.build.clone().map(|build| Self {
             build,
-            update: read.available_update.clone(),
+            update: read.available_update.as_ref().and_then(AvailableUpdate::of),
         })
+    }
+}
+
+/// An available update (§3.1) the header links to: its version and the
+/// address of its notes, parsed here, where it enters the page, into the
+/// link's destination on another site (§4.5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AvailableUpdate {
+    pub(crate) version: String,
+    pub(crate) notes: Outside,
+}
+
+impl AvailableUpdate {
+    /// `update`, unless its notes are no web address: the header then shows
+    /// no update rather than a link it can't follow.
+    fn of(update: &AvailableUpdateDto) -> Option<Self> {
+        Outside::parse(&update.release_notes)
+            .ok()
+            .map(|notes| Self {
+                version: update.version.clone(),
+                notes,
+            })
     }
 }
 
@@ -765,10 +788,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             Told::of(&with_build).and_then(|told| told.update),
-            Some(AvailableUpdateDto {
+            Some(AvailableUpdate {
                 version: "0.4.0".to_owned(),
-                release_notes: "https://github.com/nledford/Ladderback/releases/tag/v0.4.0"
-                    .to_owned(),
+                notes: Outside::parse("https://github.com/nledford/Ladderback/releases/tag/v0.4.0")
+                    .unwrap(),
             })
         );
         let without_build: SessionDto = serde_json::from_str(&format!(
@@ -776,6 +799,21 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(Told::of(&without_build), None);
+    }
+
+    #[test]
+    fn an_update_whose_notes_are_no_web_address_is_not_told() {
+        for notes in ["javascript:alert(1)", "/releases/tag/v0.4.0", ""] {
+            let read: SessionDto = serde_json::from_str(&format!(
+                r#"{{"sign-in":"off","exposure":"loopback","version":"0.3.0","dirty":false,"release":true,"available-update":{{"version":"0.4.0","release-notes":"{notes}"}}}}"#
+            ))
+            .unwrap();
+            assert_eq!(
+                Told::of(&read).map(|told| told.update),
+                Some(None),
+                "{notes}"
+            );
+        }
     }
 
     #[test]

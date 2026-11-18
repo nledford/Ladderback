@@ -58,34 +58,44 @@ const MAIN_HEADING = /^the main heading\b/;
 // The header's own stops, by their messages in the English catalog: the
 // skip link, the product's name, the pages' links (every `ui-nav-` message
 // but the navigation's own name), the available update's notes and Sign out.
-// A walk to one of them crosses the header on purpose (§4.4), as the
-// run-time guard allows.
-const HEADER_LINKS = ["ui-skip-link", "ui-brand", "ui-update-available"];
+// The notes are on another site, so their link's name ends with the words
+// every outside link adds (`ui-link-outside`, §4.5). A walk to one of them
+// crosses the header on purpose (§4.4), as the run-time guard allows.
+const HEADER_LINKS = ["ui-skip-link", "ui-brand"];
+const HEADER_OUTSIDE_LINKS = ["ui-update-available"];
+const OUTSIDE_NOTE = "ui-link-outside";
 const HEADER_NAV_LINK = /^ui-nav-(?!label$)/;
 const HEADER_BUTTONS = ["ui-sign-out"];
 
 /** How a walk step names a stop in the header, from the English catalog's
  *  text (`crates/l10n/locales/en-US/*.ftl`, the files joined): `the link
  *  "Settings"`, `the button "Sign out"`. A message's variable matches any
- *  words. A header message the catalog lacks is an error, so a rename can't
- *  leave the lint looking for a name the page no longer shows. */
+ *  words, and a string literal (`{ " " }`) its own text. A header message the
+ *  catalog lacks is an error, so a rename can't leave the lint looking for a
+ *  name the page no longer shows. */
 export function headerTargets(catalog: string): RegExp {
   const messages = new Map<string, string>();
   for (const [, id = "", value = ""] of catalog.matchAll(/^(-?[a-z][a-z0-9-]*) = (.+)$/gm)) messages.set(id, value);
+  const escaped = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = (id: string): string => {
     const value = messages.get(id);
     if (value === undefined) throw new Error(`the English catalog has no message ${id}, a stop in the header`);
     return value
-      .split(/(\{ *[-$][a-z0-9-]+ *\})/)
+      .split(/(\{ *(?:[-$][a-z0-9-]+|"[^"]*") *\})/)
       .map((part) => {
+        const literal = /^\{ *"([^"]*)" *\}$/.exec(part);
+        if (literal !== null) return escaped(literal[1] ?? "");
         const placeable = /^\{ *([-$])([a-z0-9-]+) *\}$/.exec(part);
-        if (placeable === null) return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (placeable === null) return escaped(part);
         return placeable[1] === "$" ? '[^"]+' : pattern(`-${placeable[2]}`);
       })
       .join("");
   };
-  const links = [...HEADER_LINKS, ...[...messages.keys()].filter((id) => HEADER_NAV_LINK.test(id))];
-  return new RegExp(`^the (?:link "(?:${links.map(pattern).join("|")})"|button "(?:${HEADER_BUTTONS.map(pattern).join("|")})")$`);
+  const links = [
+    ...[...HEADER_LINKS, ...[...messages.keys()].filter((id) => HEADER_NAV_LINK.test(id))].map(pattern),
+    ...HEADER_OUTSIDE_LINKS.map((id) => pattern(id) + pattern(OUTSIDE_NOTE)),
+  ];
+  return new RegExp(`^the (?:link "(?:${links.join("|")})"|button "(?:${HEADER_BUTTONS.map(pattern).join("|")})")$`);
 }
 
 // Where focus is, as far as the steps' words tell: at the top of the page,

@@ -40,7 +40,7 @@ mod write;
 mod zone;
 
 pub use change::JsonChangeCodec;
-pub use plan::{plan_as, read_plan};
+pub use plan::{plan_as, plan_table, read_plan};
 pub use schema::{
     CURRENT_SCHEMA, KEPT_VERSIONS, MAX_CONFIG_BYTES, MigrationError, Parsed, Schemas, Step, parse,
     render,

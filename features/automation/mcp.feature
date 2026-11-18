@@ -43,7 +43,17 @@ Feature: AI agents and scripts use Ladderback through MCP
     Given Ladderback is serving on loopback
     And an MCP server connected to it
     When the MCP client lists the tools
+    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal"
+
+  # A proposal waits for a person on the web UI's "Pending changes" page,
+  # which only a running Ladderback serves: a session of its own offers no
+  # proposal tools, and has none to call.
+  Scenario: A server without a daemon offers no proposal tools
+    Given an MCP server running in a scratch folder
+    When the MCP client lists the tools
     Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile"
+    When the MCP client calls the tool "propose_setup" with the arguments '{"changes": []}'
+    Then the server answers that it has no such tool
 
   # Some clients turn a tool's input schema into a function declaration of a
   # narrower schema language, with one type per field and no `format`
@@ -535,6 +545,8 @@ Feature: AI agents and scripts use Ladderback through MCP
       | list_plans --args [1]        | one JSON object     |
       | list_plans limit=1 --args {} | cannot be used with |
       | restore                      | no tool named       |
+      | get_proposal proposal=x --scratch       | no tool named |
+      | withdraw_proposal proposal=x --headless | no tool named |
       | status --headless --scratch  | cannot be used with |
       | status --json                | '--json'            |
       | status --connect not-a-url   | isn't an http       |
@@ -632,6 +644,17 @@ Feature: AI agents and scripts use Ladderback through MCP
     And standard error says "line 3 of the script names no tool that exists"
     And standard error never says "erase_everything"
     And standard error never says "canary-script-password"
+    And no scratch folder is left
+
+  Scenario: A script's call of a proposal tool names no tool where the server offers none
+    Given a file of calls "calls.jsonl" holding:
+      """
+      {"tool": "get_proposal", "arguments": {"proposal": "x"}}
+      """
+    When an agent runs "mcp call --scratch --script {scratch}/calls.jsonl"
+    Then the command exits with status 1
+    And standard output has 0 lines
+    And standard error says "line 1 of the script names no tool that exists"
     And no scratch folder is left
 
   Scenario: A script of calls that can't be read is named by its path

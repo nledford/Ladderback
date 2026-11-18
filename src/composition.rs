@@ -3624,6 +3624,7 @@ async fn keyring_refusal(
     let (code, said) = match error {
         KeyringError::Taken => (ErrorCode::KeyringEntryTaken, None),
         KeyringError::Unavailable { detail } => (ErrorCode::KeyringUnavailable, Some(detail)),
+        KeyringError::Locked { detail } => (ErrorCode::KeyringLocked, Some(detail)),
         KeyringError::Unwritable { detail } => (ErrorCode::KeyringUnwritable, Some(detail)),
         KeyringError::TimedOut { .. } => (ErrorCode::KeyringUnwritable, None),
     };

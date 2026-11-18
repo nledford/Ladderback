@@ -6,9 +6,9 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use api::{
-    ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, OperationDetailDto,
-    OperationSummaryDto, OperationsPageDto, PlansDto, ProfileExportDto, ProfileImportDto,
-    RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
+    ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, NewProposalDto,
+    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlansDto, ProfileExportDto,
+    ProfileImportDto, ProposalDto, RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
@@ -18,8 +18,8 @@ use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use crate::{
-    Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, PlanStatus, RECENT_OPERATIONS,
-    not_cancellable, unfinished,
+    Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, PlanStatus, Proposals,
+    RECENT_OPERATIONS, not_cancellable, unfinished,
 };
 
 /// The daemon `--connect` reaches when it names none: `serve`'s default
@@ -317,6 +317,16 @@ fn unknown_operation(id: String) -> ErrorDto {
     )
 }
 
+/// `proposal-unknown` for `id`: the daemon holds no proposal it names that
+/// the token sees.
+fn unknown_proposal(id: String) -> ErrorDto {
+    ErrorDto::new(
+        ErrorCode::ProposalUnknown,
+        [("proposal", MsgArg::Text(id))],
+        None,
+    )
+}
+
 /// `daemon-answer-lost`: a request that changes something may have reached
 /// the daemon, and no answer of the API's came back.
 fn answer_lost() -> ErrorDto {
@@ -566,6 +576,37 @@ impl Backend for Connect {
             "api/v1/plans",
             &[segment, "profile"],
             &[("commands", "left-out")],
+        )
+        .await
+    }
+}
+
+/// The proposal routes, as the API token sent sees them: only its own
+/// proposals, and never an approval (decision 89).
+#[async_trait]
+impl Proposals for Connect {
+    async fn propose(&self, proposal: NewProposalDto) -> Result<ProposalDto, ErrorDto> {
+        let body = serde_json::to_value(proposal).map_err(|_| no_answer())?;
+        self.post("api/v1/proposals", &[], &body, answer_lost).await
+    }
+
+    async fn proposal(&self, id: String) -> Result<ProposalDto, ErrorDto> {
+        let Some(segment) = segment(&id) else {
+            return Err(unknown_proposal(id));
+        };
+        self.get("api/v1/proposals", &[segment], &[]).await
+    }
+
+    async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto> {
+        let Some(segment) = segment(&id) else {
+            return Err(unknown_proposal(id));
+        };
+        let body = serde_json::json!({});
+        self.post(
+            "api/v1/proposals",
+            &[segment, "withdraw"],
+            &body,
+            answer_lost,
         )
         .await
     }

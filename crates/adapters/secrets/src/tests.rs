@@ -97,6 +97,15 @@ impl SecretsHarness for RealHarness {
         Arc::new(self.system().with_keyring(Arc::new(LockedSecretService)))
     }
 
+    fn keyring_that_cannot_be_asked(&self, cause: KeyringCause) -> Arc<dyn Keyring> {
+        let store: Arc<dyn KeyringStore> = match cause {
+            KeyringCause::NoService => Arc::new(NoService),
+            KeyringCause::Locked => Arc::new(LockedSecretService),
+            KeyringCause::Refused => Arc::new(Refusing),
+        };
+        Arc::new(self.system().with_keyring(store))
+    }
+
     fn keyring_activated(&self, activation: KeyringActivation) -> Arc<dyn Keyring> {
         Arc::new(self.system().with_activation(move || activation))
     }
@@ -1197,6 +1206,25 @@ impl KeyringStore for LockedSecretService {
     }
 }
 
+/// A Secret Service that finds no entry in an unlocked keyring, then says
+/// its keyring is locked when the entry is written or deleted: locked in
+/// between, or the item's own collection locked.
+struct LocksOnWrite;
+
+impl KeyringStore for LocksOnWrite {
+    fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
+        Err(Failure::NoEntry)
+    }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        Err(Failure::Locked("Secret Service: object locked".to_owned()))
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        Err(Failure::Locked("Secret Service: object locked".to_owned()))
+    }
+}
+
 /// A Secret Service that says its keyring is locked is told apart from one
 /// that isn't there, in its own words: the entry may well be in it, and the
 /// person can unlock it (#993).
@@ -1324,18 +1352,6 @@ async fn a_keyring_that_cannot_keep_a_password_says_why() {
         Err(unavailable.clone())
     );
     assert_eq!(no_service.remove(&entry).await, Err(unavailable));
-    // A Secret Service that says its keyring is locked keeps nothing either,
-    // as one with no service to ask.
-    let locked_service =
-        resolver(Duration::from_secs(1)).with_keyring(Arc::new(LockedSecretService));
-    let locked_unavailable = KeyringError::Unavailable {
-        detail: "Secret Service: object locked".to_owned(),
-    };
-    assert_eq!(
-        locked_service.keep(&entry, &password).await,
-        Err(locked_unavailable.clone())
-    );
-    assert_eq!(locked_service.remove(&entry).await, Err(locked_unavailable));
     let locked = resolver(Duration::from_secs(1)).with_keyring(Arc::new(Locked));
     let unwritable = KeyringError::Unwritable {
         detail: "the keychain is locked".to_owned(),
@@ -1345,6 +1361,34 @@ async fn a_keyring_that_cannot_keep_a_password_says_why() {
         Err(unwritable.clone())
     );
     assert_eq!(locked.remove(&entry).await, Err(unwritable));
+}
+
+/// A Secret Service that says its keyring is locked keeps nothing and
+/// removes nothing, and says it is locked in its own words, never as no
+/// keyring service: the person can unlock it and save again (#993).
+#[tokio::test]
+async fn a_locked_secret_service_keeps_nothing_and_says_it_is_locked() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let locked_service =
+        resolver(Duration::from_secs(1)).with_keyring(Arc::new(LockedSecretService));
+    let locked = KeyringError::Locked {
+        detail: "Secret Service: object locked".to_owned(),
+    };
+    assert_eq!(
+        locked_service
+            .keep(&entry, &SecretValue::new("hunter2"))
+            .await,
+        Err(locked.clone())
+    );
+    assert_eq!(locked_service.remove(&entry).await, Err(locked.clone()));
+    // Locked only by the time the entry is written: refused the same way.
+    let locks_on_write = resolver(Duration::from_secs(1)).with_keyring(Arc::new(LocksOnWrite));
+    assert_eq!(
+        locks_on_write
+            .keep(&entry, &SecretValue::new("hunter2"))
+            .await,
+        Err(locked)
+    );
 }
 
 /// A Secret Service that finds no entry and can't say whether its keyring

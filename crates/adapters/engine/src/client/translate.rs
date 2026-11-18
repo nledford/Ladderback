@@ -300,6 +300,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::LocationTooManyCredentials
                 | ErrorCode::RepositoryPathRelative
                 | ErrorCode::KeyringUnavailable
+                | ErrorCode::KeyringLocked
                 | ErrorCode::KeyringUnwritable
                 | ErrorCode::KeyringEntryTaken
                 | ErrorCode::EngineExited

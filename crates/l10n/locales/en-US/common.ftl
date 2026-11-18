@@ -729,12 +729,19 @@ error-location-too-many-credentials = The repository's { $field } is an rclone c
 # The slash is the character a full path starts with: keep it as it is.
 error-repository-path-relative = The repository's { $field } is a path that does not start with /, so it would be read from whichever folder { -brand-name } was started in. Write it in full, starting with /.
 
-# The person chose to keep the password they typed for a repository in the system keyring, and this computer has no keyring service to keep it in: no Secret Service runs, there is no session bus to reach one by, or its keyring is locked. Nothing was saved.
+# The person chose to keep the password they typed for a repository in the system keyring, and this computer has no keyring service to keep it in: no Secret Service runs, there is no session bus to reach one by, or it refused, as when its unlock prompt was dismissed. Nothing was saved.
 # $entry (text): the keyring entry, as service/name, such as ladderback/home-nas.
 # $detail (text): the message of the platform, shown as it came with secrets masked.
 # `password-file` is a setting, typed as it is: keep it a string literal.
 error-keyring-unavailable = { -brand-name } could not keep the password in the keyring entry { $entry }, because this computer has no keyring service it can use, so nothing was saved. A server, or a service that starts before anyone logs in, usually has none. Keep the password in the configuration file instead, or in a file the configuration names ({ "password-file" }).
     .with-detail = { -brand-name } could not keep the password in the keyring entry { $entry }, because this computer has no keyring service it can use ({ $detail }), so nothing was saved. A server, or a service that starts before anyone logs in, usually has none. Keep the password in the configuration file instead, or in a file the configuration names ({ "password-file" }).
+
+# The person chose to keep the password they typed for a repository in the system keyring, and the keyring service answered that its keyring is locked. Nothing was saved or created, and the form keeps what was typed.
+# $entry (text): the keyring entry, as service/name.
+# $detail (text): the message of the platform, shown as it came with secrets masked.
+# `password-file` is a setting, typed as it is: keep it a string literal.
+error-keyring-locked = The password was not saved in the keyring entry { $entry }, because the keyring is locked. Nothing else changed: the repository and the rest of the form are as they were. Unlock the keyring in the system's keyring app (logging in to the desktop usually does that), then save again. If the keyring often starts locked, keep the password in a file ({ "password-file" }) or a systemd credential instead.
+    .with-detail = The password was not saved in the keyring entry { $entry }, because the keyring is locked ({ $detail }). Nothing else changed: the repository and the rest of the form are as they were. Unlock the keyring in the system's keyring app (logging in to the desktop usually does that), then save again. If the keyring often starts locked, keep the password in a file ({ "password-file" }) or a systemd credential instead.
 
 # The person chose to keep the password they typed for a repository in the system keyring, and the keyring refused it, failed, or did not answer in time. Nothing was saved.
 # $entry (text): the keyring entry, as service/name.

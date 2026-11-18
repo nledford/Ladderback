@@ -43,7 +43,7 @@ Feature: Start page
     Then the table "Plans" has the row "demo-home"
     And the row "demo-home" of the table "Plans" shows its planned run in its "Next run" column in the time zone "Asia/Kolkata"
     And the row "demo-photos" of the table "Plans" shows "When started from Operations" in its "Next run" column
-    And the link "How to write a plan in config.toml, on GitHub" leads to the section "6.1 Source of truth" of "docs/design/scheduling-and-config.md" in this release
+    And the link "How to write a plan in config.toml, on GitHub (goes to another site)" leads to the section "6.1 Source of truth" of "docs/design/scheduling-and-config.md" in this release
     And the page has no accessibility violations
     When I skip to the content
     And I press Tab until focus is on the link "Start a backup from the Operations page"
@@ -68,12 +68,20 @@ Feature: Start page
   Scenario: A start page without plans says to connect a repository first, and where plans are described
     When I open the web UI
     Then the page shows the paragraph "There are no plans yet. To add one, connect a repository on the Repositories page first, then add a plan for it to config.toml. Each plan is listed here with its next run."
-    And the link "How to write a plan in config.toml, on GitHub" leads to the section "6.1 Source of truth" of "docs/design/scheduling-and-config.md" in this release
+    And the link "How to write a plan in config.toml, on GitHub (goes to another site)" leads to the section "6.1 Source of truth" of "docs/design/scheduling-and-config.md" in this release
     And the page has no accessibility violations
     When I skip to the content
     And I press Tab until focus is on the link "Connect a repository on the Repositories page"
     And I press Enter
     Then focus is on the main heading "Repositories"
+
+  # The start page's links are the shared link (§4.5), and the one to the
+  # plan format leaves the app for GitHub, so it says so.
+  Scenario: The start page's links are underlined, and the one to GitHub says it goes to another site
+    When I open the web UI
+    Then every link in the main content is underlined below its letters, 3 in all
+    And the link "How to write a plan in config.toml, on GitHub (goes to another site)" shows the words "How to write a plan in config.toml, on GitHub", then an icon a screen reader skips
+    And the link "How to write a plan in config.toml, on GitHub (goes to another site)" is marked external, sends no referrer and opens where the reader is
 
   Scenario Outline: The start page's plans are in the language of the page
     Given a demo plan "demo-home" on the schedule "0 3 * * *" and a demo plan "demo-photos" without one

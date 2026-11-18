@@ -309,19 +309,19 @@ pub fn pid(agent: &Agent) -> u32 {
         .id()
 }
 
-fn answer(agent: &Agent) -> &Value {
+pub(super) fn answer(agent: &Agent) -> &Value {
     agent.mcp.answer.as_ref().expect("a request was answered")
 }
 
 /// The answer's `result`, which an error answer has none of.
-fn result(agent: &Agent) -> &Value {
+pub(super) fn result(agent: &Agent) -> &Value {
     let answer = answer(agent);
     assert!(answer["result"].is_object(), "no result: {answer}");
     &answer["result"]
 }
 
 /// A tool's result that isn't an error: its `structuredContent`.
-fn content(agent: &Agent) -> &Value {
+pub(super) fn content(agent: &Agent) -> &Value {
     let result = result(agent);
     assert_eq!(result["isError"], false, "{result}");
     &result["structuredContent"]
@@ -621,7 +621,7 @@ async fn calls(agent: &mut Agent, tool: String) {
 }
 
 /// Calls `tool` with `arguments` on the scenario's server.
-async fn call(agent: &mut Agent, tool: String, arguments: Value) {
+pub(super) async fn call(agent: &mut Agent, tool: String, arguments: Value) {
     let params = current(json!({"name": tool, "arguments": arguments}));
     agent.mcp.last_call = Some((tool, arguments));
     ask(agent, "tools/call", params).await;

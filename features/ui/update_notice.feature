@@ -15,8 +15,18 @@ Feature: The available update in the header
   Scenario: The link to the notes is reached by keyboard
     Given the daemon has found that version "99.0.0" is available
     When I open the web UI
-    And I press Tab until focus is on the link "Version 99.0.0 is available"
+    And I press Tab until focus is on the link "Version 99.0.0 is available (goes to another site)"
     Then the header links to the notes of version "99.0.0" after the running version
+
+  # The notes are on GitHub, so the link says it leaves the app, as every
+  # outside link does (§4.5), and its words are still the sentence a sighted
+  # reader sees.
+  Scenario: The link to the notes says it goes to another site and is underlined like every link
+    Given the daemon has found that version "99.0.0" is available
+    When I open the web UI
+    Then the link "Version 99.0.0 is available (goes to another site)" shows the words "Version 99.0.0 is available", then an icon a screen reader skips
+    And the link "Version 99.0.0 is available (goes to another site)" is marked external, sends no referrer and opens where the reader is
+    And every link in the banner is underlined below its letters, 9 in all
 
   Scenario: On a narrow screen with large text, the notice wraps and stays whole
     Given a viewport of 320 by 256 pixels

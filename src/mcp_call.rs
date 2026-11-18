@@ -112,6 +112,16 @@ fn run(localizer: &Localizer, args: CallArgs) -> io::Result<ExitCode> {
                     say(localizer, msg::CLI_MCP_CALL_RUN_ALONE, &[])?;
                     return Ok(ExitCode::from(2));
                 }
+                // Only connect mode offers the proposal tools (§4.6).
+                Ok(call)
+                    if !matches!(mode, McpMode::Connect(..))
+                        && !call.offered_in(::mcp::Offer::InProcess) =>
+                {
+                    let (id, message_args) =
+                        refusal_of_the_command_line(::mcp::CallRefused::NoTool, &tool);
+                    say(localizer, id, &message_args)?;
+                    return Ok(ExitCode::from(2));
+                }
                 Ok(call) => Calls::One(call),
                 Err(refused) => {
                     let (id, message_args) = refusal_of_the_command_line(refused, &tool);
@@ -208,8 +218,17 @@ fn make(localizer: &Localizer, session: &Session, calls: Calls) -> io::Result<bo
                     Ok(Some(Line::Read)) => {
                         match std::str::from_utf8(&line)
                             .map_err(|_| ::mcp::CallRefused::NotACall)
-                            .and_then(::mcp::Call::of_line)
-                        {
+                            .and_then(|line| {
+                                // Only connect mode offers the proposal
+                                // tools: elsewhere a line calling one names
+                                // no tool, as on the command line (§4.6).
+                                let call = ::mcp::Call::of_line(line)?;
+                                if call.offered_in(session.server.offer()) {
+                                    Ok(call)
+                                } else {
+                                    Err(::mcp::CallRefused::NoTool)
+                                }
+                            }) {
                             Ok(call) => made(session, call, &mut out)?,
                             Err(refused) => {
                                 say_line(localizer, number, &refused)?;
