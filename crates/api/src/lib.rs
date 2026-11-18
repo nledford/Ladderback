@@ -540,6 +540,9 @@ pub enum ErrorCode {
     /// No download waits under the ticket asked for: it was fetched
     /// already, its minute ran out, or it never was (§10.4).
     DownloadUnknown,
+    /// No route of the API serves the path asked for under `/api`: a typo,
+    /// or a route of a newer or older Ladderback (§4.2). Nothing ran.
+    RouteUnknown,
     #[serde(other)]
     Unknown,
 }
@@ -1503,6 +1506,7 @@ impl ErrorCode {
             | Self::DownloadsBusy
             | Self::DownloadsUnavailable
             | Self::DownloadUnknown
+            | Self::RouteUnknown
             | Self::Unknown => &[],
         }
     }

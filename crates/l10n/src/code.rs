@@ -150,6 +150,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     DownloadsUnavailable => msg::ERROR_DOWNLOADS_UNAVAILABLE,
     EntryUnknown => msg::ERROR_ENTRY_UNKNOWN,
     DownloadUnknown => msg::ERROR_DOWNLOAD_UNKNOWN,
+    RouteUnknown => msg::ERROR_ROUTE_UNKNOWN,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,
     MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,

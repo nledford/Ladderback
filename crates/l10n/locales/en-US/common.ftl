@@ -484,6 +484,10 @@ error-entry-unknown = The { -snapshot } has no file or folder { $path }, so noth
 # already, its minute ran out, or it never existed.
 error-download-unknown = This download is no longer waiting: it was already fetched, or a minute passed before it was. Download it again.
 
+# No route of the daemon's API serves the path a program asked for: a mistyped
+# path, or a program newer or older than the daemon. Nothing was done.
+error-route-unknown = This version of { -brand-name } has no such route, so nothing was done. Check the path the program asked for; if the program is newer or older than this { -brand-name }, update the older one.
+
 # This agent doesn't maintain the repository: its entry doesn't ask this
 # agent to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The

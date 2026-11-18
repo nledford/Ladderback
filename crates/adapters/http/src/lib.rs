@@ -1078,7 +1078,23 @@ fn refused_detailed(
     (status, axum::Json(api::ErrorDto::new(code, args, detail))).into_response()
 }
 
+/// The router's fallback: the UI's files, and its page for every client-side
+/// route. A path whose first segment is the API's is never the UI's, so one no
+/// route serves is `route-unknown` (404) whatever its method: a program that
+/// asks for a route this daemon lacks gets an error it can read, never the
+/// page as a success (#1063).
 fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let first = path.split_once('/').map_or(path, |(first, _)| first);
+    if first == API_SEGMENT {
+        // An answer of the API is never stored, as the response headers make
+        // every one under `/api/`; this one also answers `/api` and `//api/…`.
+        let mut response = refused(StatusCode::NOT_FOUND, api::ErrorCode::RouteUnknown);
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return response;
+    }
     if method != Method::GET && method != Method::HEAD {
         return (
             StatusCode::METHOD_NOT_ALLOWED,
@@ -1086,7 +1102,6 @@ fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
         )
             .into_response();
     }
-    let path = uri.path().trim_start_matches('/');
     // UI file names are plain: no parent segments, escapes or backslashes.
     // Refusing these keeps every lookup inside the UI folder whatever the
     // asset source does with a path.
@@ -1117,6 +1132,9 @@ fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
 }
 
 const INDEX: &str = "index.html";
+
+/// The first path segment the API keeps for itself.
+const API_SEGMENT: &str = "api";
 
 /// The kinds of file a trunk build of the UI contains.
 const UI_FILE_EXTENSIONS: &[&str] = &[
