@@ -45,6 +45,7 @@ setup:
     scripts/install-rustic.sh
     scripts/install-actionlint.sh
     scripts/install-dist.sh
+    scripts/install-nfpm.sh
     cd ui-tests && npm ci
     cd ui-tests && node_modules/.bin/playwright install chromium firefox webkit
 
@@ -559,6 +560,42 @@ release-build target: web-release
     set -euo pipefail
     mkdir -p target/distrib
     dist build --artifacts=local --target {{ quote(target) }} --print=linkage --output-format=json > target/distrib/release-build-manifest.json
+
+# Builds the .deb and the .rpm of a Linux release binary with nfpm
+# (packaging/nfpm.yaml, §16 decision 123): the binary `just release-build`
+# built and the archive holds, copied as it is, never rebuilt. `version` is
+# what the binary says (`0.5.0`, `0.5.0-rc.1`, or `0.5.0+3f937cf` between
+# releases) and goes into the file names as written; nfpm writes a release
+# candidate into the package as `0.5.0~rc.1`, so it sorts before the release.
+# The packages and a `.sha256` of each go to `target/distrib`, beside the
+# archive: `ladderback_<version>_<amd64|arm64>.deb` and
+# `ladderback-<version>-1.<x86_64|aarch64>.rpm`. Needs nfpm
+# (scripts/install-nfpm.sh). It publishes nothing.
+[doc('Build the .deb and .rpm of a Linux release binary with nfpm; publishes nothing.')]
+[group('release')]
+package target binary version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target={{ quote(target) }}
+    case $target in
+      x86_64-unknown-linux-gnu) deb_arch=amd64 rpm_arch=x86_64 ;;
+      aarch64-unknown-linux-gnu) deb_arch=arm64 rpm_arch=aarch64 ;;
+      *) echo "error: no packages for target $target: Linux on x86_64 or aarch64 only" >&2; exit 1 ;;
+    esac
+    version={{ quote(version) }}
+    export PACKAGE_VERSION=$version PACKAGE_ARCH=$deb_arch PACKAGE_BINARY
+    PACKAGE_BINARY=$(realpath {{ quote(binary) }})
+    [[ -f $PACKAGE_BINARY ]] || { echo "error: no binary at $PACKAGE_BINARY" >&2; exit 1; }
+    out=target/distrib
+    mkdir -p "$out"
+    deb="ladderback_${version}_$deb_arch.deb"
+    rpm="ladderback-${version}-1.$rpm_arch.rpm"
+    nfpm package --config packaging/nfpm.yaml --packager deb --target "$out/$deb"
+    nfpm package --config packaging/nfpm.yaml --packager rpm --target "$out/$rpm"
+    cd "$out"
+    for file in "$deb" "$rpm"; do
+      if command -v sha256sum >/dev/null; then sha256sum "$file" > "$file.sha256"; else shasum -a 256 "$file" > "$file.sha256"; fi
+    done
 
 # Runs scripts/smoke-release.ts on a release binary: its version, no
 # pseudolocales and no gallery, its dynamic libraries and glibc floor, then

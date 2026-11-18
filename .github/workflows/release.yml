@@ -3,9 +3,9 @@
 #   the workspace version and CHANGELOG.md from the Conventional Commits since
 #   the last tag.
 # - Merging that PR to main makes the next push run tag `vX.Y.Z` and create
-#   the GitHub release, then build the Linux archives of that commit
-#   (release-builds.yml) and attach them with a SHA256SUMS file (§16,
-#   decision 54). Pushes without a release PR merge release nothing.
+#   the GitHub release, then build the Linux archives and packages of that
+#   commit (release-builds.yml) and attach them with a SHA256SUMS file (§16,
+#   decisions 54 and 123). Pushes without a release PR merge release nothing.
 name: Release
 
 on:
@@ -104,7 +104,8 @@ jobs:
       tag: ${{ needs.release.outputs.tag }}
 
   # A job of its own, so only it, which runs none of the build's code, can
-  # write to the release. Either archive missing fails it.
+  # write to the release. Any of the six files missing fails it: the two
+  # archives, and the .deb and .rpm of each (§16 decision 123).
   publish:
     name: Attach the Linux archives to the release
     needs: [release, builds]
@@ -120,23 +121,48 @@ jobs:
     steps:
       # Two names, so each artifact gets a folder of its own: both hold a
       # release-build-manifest.json, and gh won't overwrite a file.
-      - name: Download the archives
+      - name: Download the archives and packages
         run: gh run download "$GITHUB_RUN_ID" --name ladderback-x86_64-unknown-linux-gnu --name ladderback-aarch64-unknown-linux-gnu --dir artifacts
-      # Each archive against the checksum its build wrote, then one SHA256SUMS
-      # for both, which `sha256sum -c` checks after a download. A missing
-      # archive fails here: gh downloads the names it finds without a word
-      # about the others.
+      # Each archive and package against the checksum its build wrote, then
+      # one SHA256SUMS for all six, which `sha256sum -c` checks after a
+      # download. A package's checksum file must be the build's `sha256sum` line
+      # for that package and no other file's. A missing file fails here: gh
+      # downloads the names it finds without a word about the others, and the
+      # names are the ones the tag's version gives (`just package`). The last
+      # check is that the folder holds these six and SHA256SUMS, nothing else.
       - name: Write SHA256SUMS
         run: |
+          version=${TAG#v}
           mkdir assets
+          files=()
           for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            (cd "artifacts/ladderback-$target" && sha256sum -c "ladderback-$target.tar.xz.sha256")
-            mv "artifacts/ladderback-$target/ladderback-$target.tar.xz" assets/
+            case $target in
+              x86_64-unknown-linux-gnu) deb_arch=amd64 rpm_arch=x86_64 ;;
+              aarch64-unknown-linux-gnu) deb_arch=arm64 rpm_arch=aarch64 ;;
+            esac
+            archive="ladderback-$target.tar.xz"
+            deb="ladderback_${version}_$deb_arch.deb"
+            rpm="ladderback-${version}-1.$rpm_arch.rpm"
+            (
+              cd "artifacts/ladderback-$target"
+              sha256sum -c "$archive.sha256"
+              for package in "$deb" "$rpm"; do
+                sha256sum "$package" | diff - "$package.sha256"
+              done
+            )
+            for file in "$archive" "$deb" "$rpm"; do
+              mv "artifacts/ladderback-$target/$file" assets/
+              files+=("$file")
+            done
           done
           cd assets
-          sha256sum ladderback-x86_64-unknown-linux-gnu.tar.xz ladderback-aarch64-unknown-linux-gnu.tar.xz > SHA256SUMS
+          sha256sum "${files[@]}" > SHA256SUMS
           sha256sum -c SHA256SUMS
-      # --clobber, so rerunning a failed run attaches them again.
+          [ "${#files[@]}" -eq 6 ] || { echo "::error::${#files[@]} files to attach, not 6"; exit 1; }
+          [ "$(wc -l < SHA256SUMS)" -eq 6 ] || { echo "::error::SHA256SUMS doesn't list 6 files"; exit 1; }
+          [ "$(printf '%s\n' "${files[@]}" SHA256SUMS | sort)" = "$(printf '%s\n' * | sort)" ] || { echo "::error::the folder holds files other than the six and SHA256SUMS"; exit 1; }
+      # --clobber, so rerunning a failed run attaches them again. Everything in
+      # the folder, which the step above checked holds these files only.
       - name: Attach them to the release
         working-directory: assets
-        run: gh release upload "$TAG" --clobber ladderback-x86_64-unknown-linux-gnu.tar.xz ladderback-aarch64-unknown-linux-gnu.tar.xz SHA256SUMS
+        run: gh release upload "$TAG" --clobber ./*
