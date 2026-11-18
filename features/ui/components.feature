@@ -315,14 +315,14 @@ Feature: The shared components in the gallery
     When I press Space
     Then the checkbox "Accept the demo terms" is checked
 
-  Scenario: A radio group's error stands under its legend, describes the group, and marks each choice invalid with a thicker edge in the Error tone
+  Scenario: A radio group's error stands under its legend, describes the group, and marks the group invalid, each choice edged thicker in the Error tone
     When I open the component gallery
     And I skip to the content
     And I press Tab until focus is on the radio "Every week"
     And I press Tab until focus is on the radio "Mornings"
     Then the group "Demo backup window" is described by "Choose a demo backup window."
     And the group "Demo backup window" shows its legend, its error and its choices, in that order
-    And every radio of the group "Demo backup window" is marked invalid
+    And the radio group "Demo backup window" is marked invalid, and its radios are not
     And the radio "Mornings" is edged 2 pixels wide in --error
     And the radio "Mornings" of the group "Demo backup window" is not checked
     When I press Space

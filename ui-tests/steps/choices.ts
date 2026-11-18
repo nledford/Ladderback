@@ -163,10 +163,13 @@ Then("the checkbox {string} is marked invalid", async function (this: BrowserWor
   await expect(choice(this, "checkbox", name)).toHaveAttribute("aria-invalid", "true");
 });
 
-Then("every radio of the group {string} is marked invalid", async function (this: BrowserWorld, group: string) {
-  const radios = this.page.getByRole("group", { name: group, exact: true }).getByRole("radio");
+// ARIA 1.2 allows aria-invalid on a radiogroup, not on a radio.
+Then("the radio group {string} is marked invalid, and its radios are not", async function (this: BrowserWorld, group: string) {
+  const radiogroup = this.page.getByRole("radiogroup", { name: group, exact: true });
+  await expect(radiogroup).toHaveAttribute("aria-invalid", "true");
+  const radios = radiogroup.getByRole("radio");
   await expect(radios.first()).toBeVisible();
-  for (const radio of await radios.all()) await expect(radio).toHaveAttribute("aria-invalid", "true");
+  for (const radio of await radios.all()) await expect(radio).not.toHaveAttribute("aria-invalid");
 });
 
 // The error a group's description ends with, between its legend and its
@@ -174,7 +177,7 @@ Then("every radio of the group {string} is marked invalid", async function (this
 Then(
   "the group {string} shows its legend, its error and its choices, in that order",
   async function (this: BrowserWorld, name: string) {
-    const group = this.page.getByRole("group", { name, exact: true });
+    const group = this.page.getByRole("radiogroup", { name, exact: true });
     await expect(group).toHaveCount(1);
     const tops = await group.evaluate((fieldset) => {
       const ids = (fieldset.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);

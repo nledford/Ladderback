@@ -47,19 +47,33 @@ const BOX: &str = "peer col-start-1 row-start-1 appearance-none m-0 p-0 \
     inline-[max(24px,1.5em)] block-[max(24px,1.5em)] \
     border border-solid border-(--field-edge) bg-bg \
     checked:border-accent checked:bg-accent \
-    aria-[invalid=true]:border-2 aria-[invalid=true]:border-error \
     forced-colors:border-[color:FieldText] forced-colors:bg-[color:Field] \
-    forced-colors:checked:border-[color:FieldText] forced-colors:checked:bg-[color:Field] \
+    forced-colors:checked:border-[color:FieldText] forced-colors:checked:bg-[color:Field]";
+
+/// A checkbox is invalid itself (`aria-invalid` on it), edged 2px in the
+/// Error tone, which stays under forced colors.
+const SQUARE_INVALID: &str = "aria-[invalid=true]:border-2 aria-[invalid=true]:border-error \
     forced-colors:aria-[invalid=true]:border-[color:FieldText]";
+
+/// A radio is invalid with its group, which carries `aria-invalid` (ARIA
+/// 1.2 allows it on a `radiogroup`, not on a `radio`), so each is edged from
+/// the group it stands in, the `group` of its fieldset ([`GROUP`]).
+const ROUND_INVALID: &str = "group-aria-[invalid=true]:border-2 \
+    group-aria-[invalid=true]:border-error \
+    forced-colors:group-aria-[invalid=true]:border-[color:FieldText]";
+
+/// The class of a radio group's fieldset, the `group` its radios' invalid
+/// edge is keyed on.
+pub const GROUP: &str = "choices group";
 
 /// The classes of a choice's box, a native `<input>`: its shape's corner,
 /// a text field's small one for a checkbox, round for a radio.
 pub fn box_class(shape: Shape) -> String {
-    let corner = match shape {
-        Shape::Square => "rounded-(--radius-small)",
-        Shape::Round => "rounded-full",
+    let (corner, invalid) = match shape {
+        Shape::Square => ("rounded-(--radius-small)", SQUARE_INVALID),
+        Shape::Round => ("rounded-full", ROUND_INVALID),
     };
-    format!("{BOX} {corner}")
+    format!("{BOX} {corner} {invalid}")
 }
 
 /// The classes of the mark a chosen box shows over its fill, in its middle
@@ -123,7 +137,6 @@ mod tests {
                 "forced-colors:bg-[color:Field]",
                 "forced-colors:checked:bg-[color:Field]",
                 "forced-colors:checked:border-[color:FieldText]",
-                "forced-colors:aria-[invalid=true]:border-[color:FieldText]",
             ] {
                 assert!(
                     classes.contains(&wanted),
@@ -144,16 +157,34 @@ mod tests {
     }
 
     #[test]
-    fn an_invalid_box_is_edged_thicker_in_the_error_tone() {
-        for shape in SHAPES {
-            let class = box_class(shape);
-            let classes = classes(&class);
-            assert!(classes.contains(&"aria-[invalid=true]:border-2"), "{class}");
-            assert!(
-                classes.contains(&"aria-[invalid=true]:border-error"),
-                "{class}"
-            );
+    fn an_invalid_checkbox_is_edged_thicker_in_the_error_tone() {
+        let class = box_class(Shape::Square);
+        let classes = classes(&class);
+        for wanted in [
+            "aria-[invalid=true]:border-2",
+            "aria-[invalid=true]:border-error",
+            "forced-colors:aria-[invalid=true]:border-[color:FieldText]",
+        ] {
+            assert!(classes.contains(&wanted), "lacks {wanted}: {class}");
         }
+    }
+
+    #[test]
+    fn a_radio_is_edged_thicker_when_its_group_is_invalid_not_itself() {
+        let class = box_class(Shape::Round);
+        let classes = classes(&class);
+        for wanted in [
+            "group-aria-[invalid=true]:border-2",
+            "group-aria-[invalid=true]:border-error",
+            "forced-colors:group-aria-[invalid=true]:border-[color:FieldText]",
+        ] {
+            assert!(classes.contains(&wanted), "lacks {wanted}: {class}");
+        }
+        assert!(
+            !classes.iter().any(|c| c.starts_with("aria-[invalid")),
+            "{class}"
+        );
+        assert!(GROUP.split_whitespace().any(|c| c == "group"));
     }
 
     #[test]

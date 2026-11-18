@@ -22,8 +22,9 @@ pub struct LabelLanguage {
 /// `<fieldset>` and described by an optional hint under it and its error
 /// while it has one, under the hint and above the choices, both wired to the
 /// group with `aria-describedby` so a screen reader reads them on entering
-/// the group; the error marks every choice invalid (`aria-invalid`), each
-/// edged thicker in the Error tone beside the words. Each choice is a native
+/// the group; the error marks the group invalid (`aria-invalid` on its
+/// `role="radiogroup"`, which ARIA 1.2 allows there and not on a radio), each
+/// choice edged thicker in the Error tone beside the words. Each choice is a native
 /// `<input type="radio">` sharing `name`, with its visible label beside it as
 /// its click target, drawn as a [`Checkbox`](super::Checkbox) is but round,
 /// filled in Ladder Blue under a dot in the page's color once chosen. The
@@ -77,7 +78,6 @@ pub fn RadioGroup(
                                     chosen.set(value);
                                 }
                             }
-                            aria-invalid=move || invalid(has_error())
                         />
                         <span class=rules::mark_class(Shape::Round) aria-hidden="true"></span>
                     </span>
@@ -90,7 +90,9 @@ pub fn RadioGroup(
         .collect_view();
     view! {
         <fieldset
-            class="choices"
+            class=rules::GROUP
+            role="radiogroup"
+            aria-invalid=move || invalid(has_error())
             aria-describedby=move || {
                 described_by(name, has_description, Access::Editable, has_error())
             }
