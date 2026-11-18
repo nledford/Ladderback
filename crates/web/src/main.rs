@@ -106,6 +106,9 @@ mod restore;
 mod routes;
 // The Settings page's DOM glue; `api_tokens.rs` decides for it.
 mod settings;
+// Settings' tabs, the address that opens each and what each panel holds,
+// decided on the host; `settings.rs` is its glue.
+mod settings_tabs;
 // What the page's standing with sign-in is, decided on the host.
 mod session;
 // The sign-in page and dialog's DOM glue; `session.rs` decides for them.

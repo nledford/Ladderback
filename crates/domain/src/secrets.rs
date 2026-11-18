@@ -743,7 +743,7 @@ fn go_prints(c: char) -> bool {
 /// Every password the userinfo of the URL inside a repository string may
 /// hold, as written and decoded; empty when the string has no URL or the
 /// URL has no password. Each userinfo the URL may hold is tried
-/// ([`userinfos`]), with a `${…}` reference read as one piece and as text.
+/// (`userinfos`), with a `${…}` reference read as one piece and as text.
 pub fn url_passwords(repository: &str) -> Vec<SecretValue> {
     url_userinfo_parts(repository, |userinfo| userinfo.password)
 }
@@ -773,7 +773,7 @@ fn url_userinfo_parts<'a>(
 /// secret: `rclone::s3,provider=AWS,secret_access_key=…:bucket` holds the
 /// settings of its backend as `key=value` pieces between commas and colons,
 /// and a piece whose key names a credential in a connection string
-/// ([`is_rclone_secret_option`]) is one. Any other string is not, whatever it
+/// (`is_rclone_secret_option`) is one. Any other string is not, whatever it
 /// holds. Every piece is read, the path's too, so this finds every setting
 /// the redactor masks and more.
 pub fn rclone_secret(location: &str) -> bool {

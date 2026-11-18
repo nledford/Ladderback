@@ -4,7 +4,9 @@ Feature: The shared components in the gallery
   component gallery, a development page at /_gallery, with keyboard-only
   journeys: a dialog, a table, sorted by keyboard, which keeps a focused
   control in a row through the row's changes and scrolls sideways in a
-  frame of its own on a small screen, a checkbox, a
+  frame of its own on a small screen, a checkbox and a radio group, each
+  box drawn from the tokens, filled in Ladder Blue under a mark once chosen,
+  growing with the text and edged in the Error tone beside its error, the
   radio group, which marks a choice's label written in another language with
   that language and its direction, a progress bar a keyboard user can reach, whose changes
   are never announced and are told at most every 30 seconds, which shows
@@ -268,6 +270,63 @@ Feature: The shared components in the gallery
       | English | en-US    | ltr       |
       | 日本語     | ja       | ltr       |
       | العربية | ar       | rtl       |
+
+  Scenario Outline: A checkbox and a radio are drawn from the tokens, edged in Field Edge and filled in Ladder Blue under a mark in the page's color once chosen, in <colors>
+    Given the browser asks for "<colors>"
+    When I open the component gallery
+    Then the checkbox "Send a demo notification" is edged 1 pixel wide in --field-edge
+    And the checkbox "Send a demo notification" shows no mark
+    And the checkbox "Keep the demo log" is filled in --accent, its mark in --bg
+    And the radio "Every day" is edged 1 pixel wide in --field-edge
+    And the radio "Every day" shows no mark
+    And the radio "Every week" is filled in --accent, its mark in --bg
+    And the "Checkbox" demo has no accessibility violations
+    And the "Radio group" demo has no accessibility violations
+
+    Examples:
+      | colors       |
+      | light colors |
+      | dark colors  |
+
+  Scenario: Under forced colors a checkbox and a radio take the reader's field colors, a chosen one's mark too, and an invalid one keeps its thicker edge
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    Then the checkbox "Send a demo notification" is edged 1 pixel wide in FieldText
+    And the checkbox "Keep the demo log" is filled in Field, its mark in FieldText
+    And the radio "Every week" is filled in Field, its mark in FieldText
+    And the checkbox "Accept the demo terms" is edged 2 pixels wide
+
+  Scenario: On a small screen with larger text, a checkbox's and a radio's box grow with the text, never under 24 pixels a side, the mark centered in them
+    Given a viewport of 320 by 640 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then the checkbox "Keep the demo log" is a square 1.5 times its text's size, at least 24 pixels a side, its mark centered in it
+    And the radio "Every week" is a circle 1.5 times its text's size, at least 24 pixels a side, its mark centered in it
+    And the page doesn't scroll sideways
+
+  Scenario: A checkbox's error stands under its description, describes it, and marks it invalid with a thicker edge in the Error tone
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the checkbox "Accept the demo terms"
+    Then the checkbox "Accept the demo terms" stands before its label, its description and its error under the label, in that order
+    And the checkbox "Accept the demo terms" is described by "The demo terms change nothing. Accept the demo terms to go on."
+    And the checkbox "Accept the demo terms" is marked invalid
+    And the checkbox "Accept the demo terms" is edged 2 pixels wide in --error
+    When I press Space
+    Then the checkbox "Accept the demo terms" is checked
+
+  Scenario: A radio group's error stands under its legend, describes the group, and marks the group invalid, each choice edged thicker in the Error tone
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the radio "Every week"
+    And I press Tab until focus is on the radio "Mornings"
+    Then the group "Demo backup window" is described by "Choose a demo backup window."
+    And the group "Demo backup window" shows its legend, its error and its choices, in that order
+    And the radio group "Demo backup window" is marked invalid, and its radios are not
+    And the radio "Mornings" is edged 2 pixels wide in --error
+    And the radio "Mornings" of the group "Demo backup window" is not checked
+    When I press Space
+    Then the radio "Mornings" of the group "Demo backup window" is checked
 
   Scenario: The progress bar is reached by keyboard and its value changes without any announcement
     Given the page's clock can be moved on
@@ -836,6 +895,10 @@ Feature: The shared components in the gallery
     Then every tab of the list of the tab "Demo overview" shows whole inside the window, on more than one line, above the list's rule
     And the tab "Demo overview" stands on a line above the last of its list
     And every tab of the list of the tab "Demo overview" stands on its own rule: the selected one on a 3 pixel bar in --accent, the others on a 1 pixel rule in --muted
+    And a tab of the list of the tab "Demo sources" wraps its words onto more than one line
+    And every tab of the list of the tab "Demo sources" is as wide as the list, its words on every line at the column's start
+    And a tab of the list of the tab "First vertical tab" wraps its words onto more than one line
+    And every tab of the list of the tab "First vertical tab" is as wide as the list, its words on every line at the column's start
     And the page doesn't scroll sideways
 
   Scenario: Horizontal tabs, the default, stand in a row above their panel, say so, and leave the up and down arrows to the page
@@ -937,6 +1000,17 @@ Feature: The shared components in the gallery
     When I press ArrowRight
     Then focus is on the tab "Third vertical tab"
     And the tab "Third vertical tab" is selected and the one Tab stop of its list
+
+  Scenario Outline: Tabs in a column are as wide as it, their words lined up at its start, <demo>
+    When I open the component gallery
+    Then the tab list of the tab "<tab>" is vertical, a column at the start of its panel
+    And every tab of the list of the tab "<tab>" is as wide as the list, its words on every line at the column's start
+
+    Examples:
+      | demo                   | tab                |
+      | vertical               | Demo sources       |
+      | vertical right to left | First vertical tab |
+      | responsive             | Demo general       |
 
   Scenario: Responsive tabs are vertical where their container has room for the list beside the panel, and horizontal in a narrow column of the same wide page
     When I open the component gallery
@@ -1227,7 +1301,7 @@ Feature: The shared components in the gallery
     When I open the component gallery
     Then every badge of the "Badge" demo says its words with no role and nothing in it to focus, any icon in it a decoration a screen reader skips
     When I skip to the content
-    And I press Tab until focus is on the radio "English"
+    And I press Tab until focus is on the radio "Mornings"
     And I press Tab
     Then focus has passed the "Badge" demo without stopping in it
 
@@ -1294,13 +1368,13 @@ Feature: The shared components in the gallery
       | light colors |
       | dark colors  |
 
-  Scenario Outline: A status badge of an operation that succeeded or failed is drawn in its status tone's pair, in <colors>
+  Scenario Outline: A status badge of an operation that succeeded, succeeded with warnings or failed is drawn in its status tone's pair, in <colors>
     Given the browser asks for "<colors>"
     When I open the component gallery
     Then each of these badges of the "Status badge" demo is drawn on its fill:
       | badge                   | words        | fill         |
       | Succeeded               | --success-fg | --success-bg |
-      | Succeeded with warnings | --success-fg | --success-bg |
+      | Succeeded with warnings | --warning-fg | --warning-bg |
       | Failed                  | --error-fg   | --error-bg   |
 
     Examples:

@@ -192,10 +192,9 @@ impl WorkerEngine {
     }
 
     /// Starts workers with `vars` as the environment they are scrubbed from
-    /// (see [`environment`]) instead of this process's own. For tests, and
-    /// for a composition root that has read its environment already.
-    ///
-    /// [`environment`]: crate::environment
+    /// (see the crate's private `environment` module) instead of this
+    /// process's own. For tests, and for a composition root that has read its
+    /// environment already.
     #[must_use]
     pub fn with_environment(
         mut self,

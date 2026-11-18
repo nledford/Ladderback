@@ -41,7 +41,7 @@ Given("this browser keeps nothing a page stores", function (this: BrowserWorld) 
 
 Then("the group {string} offers the radios, in order:", async function (this: BrowserWorld, group: string, radios: DataTable) {
   const names = radios.raw().flat();
-  const offered = this.page.getByRole("group", { name: group, exact: true }).getByRole("radio");
+  const offered = this.page.getByRole("radiogroup", { name: group, exact: true }).getByRole("radio");
   await expect(offered).toHaveCount(names.length);
   for (const [index, name] of names.entries()) {
     await expect(offered.nth(index)).toHaveAccessibleName(name);
