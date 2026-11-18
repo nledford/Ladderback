@@ -1078,7 +1078,23 @@ fn refused_detailed(
     (status, axum::Json(api::ErrorDto::new(code, args, detail))).into_response()
 }
 
+/// The router's fallback: the UI's files, and its page for every client-side
+/// route. A path whose first segment is the API's is never the UI's, so one no
+/// route serves is `route-unknown` (404) whatever its method: a program that
+/// asks for a route this daemon lacks gets an error it can read, never the
+/// page as a success (#1063).
 fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let first = path.split_once('/').map_or(path, |(first, _)| first);
+    if first == API_SEGMENT {
+        // An answer of the API is never stored, as the response headers make
+        // every one under `/api/`; this one also answers `/api` and `//api/…`.
+        let mut response = refused(StatusCode::NOT_FOUND, api::ErrorCode::RouteUnknown);
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return response;
+    }
     if method != Method::GET && method != Method::HEAD {
         return (
             StatusCode::METHOD_NOT_ALLOWED,
@@ -1086,7 +1102,6 @@ fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
         )
             .into_response();
     }
-    let path = uri.path().trim_start_matches('/');
     // UI file names are plain: no parent segments, escapes or backslashes.
     // Refusing these keeps every lookup inside the UI folder whatever the
     // asset source does with a path.
@@ -1117,6 +1132,9 @@ fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
 }
 
 const INDEX: &str = "index.html";
+
+/// The first path segment the API keeps for itself.
+const API_SEGMENT: &str = "api";
 
 /// The kinds of file a trunk build of the UI contains.
 const UI_FILE_EXTENSIONS: &[&str] = &[
@@ -2533,11 +2551,15 @@ mod tests {
         }
     }
 
+    /// Every path but the API's is the UI's, so a client-side route whose
+    /// name only starts like the API's gets the page too.
     #[tokio::test]
     async fn client_side_routes_get_the_entry_page() {
-        let response = get("/machines/laptop").await;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(content_type(&response), "text/html; charset=utf-8");
+        for route in ["/machines/laptop", "/plans", "/apiary", "/machines/api"] {
+            let response = get(route).await;
+            assert_eq!(response.status(), StatusCode::OK, "{route}");
+            assert_eq!(content_type(&response), "text/html; charset=utf-8");
+        }
     }
 
     #[tokio::test]
@@ -2551,7 +2573,49 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_file_is_not_found() {
-        assert_eq!(get("/missing.js").await.status(), StatusCode::NOT_FOUND);
+        for path in ["/missing.js", "/api.js"] {
+            let response = get(path).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+            assert!(body(response).await.is_empty(), "{path}");
+        }
+    }
+
+    /// The API's paths no route serves: the router's fallback must never take
+    /// them for the UI's.
+    const NO_SUCH_ROUTES: &[&str] = &[
+        "/api/v1/no-such-route",
+        "/api/v2/plans",
+        "/api/v1/",
+        "/api",
+        "//api/v1/no-such-route",
+    ];
+
+    #[tokio::test]
+    async fn a_path_no_route_serves_is_refused_whatever_the_method() {
+        use serde_json::json;
+        for path in NO_SUCH_ROUTES {
+            for method in [Method::GET, Method::POST, Method::PUT, Method::DELETE] {
+                let response = request(ui(), method.clone(), path, "").await;
+                assert_eq!(
+                    content_type(&response),
+                    "application/json",
+                    "{method} {path}"
+                );
+                assert_eq!(
+                    response.headers()[header::CACHE_CONTROL],
+                    "no-store",
+                    "{method} {path}"
+                );
+                assert_eq!(
+                    json_of(response).await,
+                    (StatusCode::NOT_FOUND, json!({"code": "route-unknown"})),
+                    "{method} {path}"
+                );
+            }
+            let head = request(ui(), Method::HEAD, path, "").await;
+            assert_eq!(head.status(), StatusCode::NOT_FOUND, "HEAD {path}");
+            assert_eq!(content_type(&head), "application/json", "HEAD {path}");
+        }
     }
 
     #[tokio::test]

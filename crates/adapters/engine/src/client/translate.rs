@@ -407,6 +407,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::DownloadsUnavailable
                 | ErrorCode::EntryUnknown
                 | ErrorCode::DownloadUnknown
+                | ErrorCode::RouteUnknown
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }
