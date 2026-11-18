@@ -12,7 +12,7 @@ Feature: Choosing the width of the pages
 
   Scenario: Settings offers Narrow and Full width, and Narrow keeps a wide window's page at 60rem
     Given a viewport of 1600 by 900 pixels
-    When I open the address "/settings"
+    When I open the address "/settings#page-width"
     Then the group "Width of each page" offers the radios, in order:
       | Narrow     |
       | Full width |
@@ -24,7 +24,7 @@ Feature: Choosing the width of the pages
 
   Scenario: Full width chosen by keyboard alone widens the page at once, and after a reload
     Given a viewport of 1600 by 900 pixels
-    When I open the address "/settings"
+    When I open the address "/settings#page-width"
     And I skip to the content
     And I press Tab until focus is on the radio "Narrow"
     And I press the down arrow until focus is on the radio "Full width"
@@ -39,7 +39,7 @@ Feature: Choosing the width of the pages
   Scenario: Narrow chosen again by keyboard alone brings the page back to 60rem, and keeps it there
     Given a viewport of 1600 by 900 pixels
     And the page width chosen in this browser is "Full width"
-    When I open the address "/settings"
+    When I open the address "/settings#page-width"
     Then the main content is as wide as the window
     When I skip to the content
     And I press Tab until focus is on the radio "Full width"
@@ -61,7 +61,7 @@ Feature: Choosing the width of the pages
   Scenario Outline: A window 320 pixels wide shows the page across its width with either choice
     Given a viewport of 320 by 640 pixels
     And the page width chosen in this browser is "<width>"
-    When I open the address "/settings"
+    When I open the address "/settings#page-width"
     Then the radio "<width>" of the group "Width of each page" is checked
     And the main content is as wide as the window
 
@@ -73,7 +73,7 @@ Feature: Choosing the width of the pages
   Scenario: A browser that keeps nothing says so, and the page stays narrow
     Given a viewport of 1600 by 900 pixels
     And this browser keeps nothing a page stores
-    When I open the address "/settings"
+    When I open the address "/settings#page-width"
     And I skip to the content
     And I press Tab until focus is on the radio "Narrow"
     And I press the down arrow until focus is on the radio "Full width"

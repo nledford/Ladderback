@@ -872,21 +872,6 @@ main:focus {
   }
 }
 
-/* A checkbox's or a radio's field, spaced from the next: its label in the
-   Label weight and its description close under it. */
-.field {
-  margin-block: 1rem;
-}
-
-.field label {
-  display: block;
-  font-weight: 600;
-}
-
-.field p {
-  margin-block: 0.25rem;
-}
-
 /* A text field (§4.5): its label above in the Label weight, its
    description, the note of its state and its error under the label, then
    the field: a 1 px edge (`--field-edge`, 3:1 or more on the page and on a
@@ -1022,29 +1007,6 @@ textarea.text-field-input {
     border-color: GrayText;
     color: GrayText;
   }
-}
-
-/* A checkbox sits before its label on one line, its description under the
-   label, and the label is its click target. The box is never under 24px
-   square, the smallest target 2.5.8 allows, and grows with the text. One
-   size and no color of its own: the words carry the meaning (1.4.1). */
-.field.checkbox {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 0.5rem;
-  align-items: start;
-}
-
-.field.checkbox input {
-  inline-size: max(24px, 1.5em);
-  block-size: max(24px, 1.5em);
-  min-block-size: max(24px, 1.5em);
-  margin-block: 0;
-  padding: 0;
-}
-
-.field.checkbox p {
-  grid-column: 2;
 }
 
 /* A group of choices, such as an API token's scopes: named by its legend,

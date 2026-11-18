@@ -19,6 +19,7 @@ import { partsBrokenInside } from "../support/parts.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, evaluateAll, fixtureRepo, startServer } from "../support/world.ts";
+import { drawnOnItsFill } from "./components.ts";
 
 // The scratch repositories' password: the one the `demo-repo` fixture was
 // initialized with. Not a real secret.
@@ -264,6 +265,19 @@ Given(
     this.scriptedDaemon = daemon;
   },
 );
+
+// A backup that ended well but kept a warning: a source item it couldn't
+// read, as the daemon's wire records it.
+Given("the daemon reports a backup of {string} that succeeded with warnings", function (this: BrowserWorld, plan: string) {
+  const daemon = new ScriptedDaemon();
+  daemon.addBackup(plan, "succeeded-with-warnings", {
+    queuedAt: "2026-11-09T10:00:00Z",
+    startedAt: "2026-11-09T10:00:00Z",
+    finishedAt: "2026-11-09T10:05:00Z",
+    warningCodes: ["source-unreadable"],
+  });
+  this.scriptedDaemon = daemon;
+});
 
 // A backup that went through `gib` GiB and wrote a snapshot: the facts a
 // finished backup's Result cell lists, as the daemon's wire has them.
@@ -579,6 +593,34 @@ Then(
         return icon !== "" && icon !== noted;
       }, { message: `the status badge of the row ${row} of the table ${name} kept its icon`, timeout: UPDATE_PATIENCE_MS })
       .toBe(true);
+  },
+);
+
+// Lucide's `triangle-alert`, the warning icon (the shape `lepticons-data`
+// draws for it): the icon of a status badge whose run succeeded with
+// warnings, as it is of the Warning tone's alert and banner (§4.5).
+const WARNING_ICON = [
+  "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
+  "M12 9v4",
+  "M12 17h.01",
+];
+
+// A run that ended with something to read is drawn as one that needs a look
+// (#942): the row's status badge, found by its words, the whole of them,
+// lays them on the Warning tone's pair (`--warning-fg` on `--warning-bg`,
+// DESIGN.md "Status") and draws the warning icon, never a clean success's
+// green and check mark. The icon is decoration a screen reader skips, so it
+// is read from the badge's drawing.
+Then(
+  "the status badge of the row {string} of the table {string} is drawn in the Warning tone, with the warning icon",
+  async function (this: BrowserWorld, row: string, name: string) {
+    const cell = await cellOf(this, name, row, "Status");
+    const badge = cell.getByText("Succeeded with warnings", { exact: true });
+    await drawnOnItsFill(badge, `the status badge of the row ${row}`, "--warning-fg", "--warning-bg");
+    const icon = await badge.evaluate((element) =>
+      Array.from(element.querySelectorAll("svg path"), (path) => path.getAttribute("d")),
+    );
+    assert.deepEqual(icon, WARNING_ICON, `the status badge of the row ${row} doesn't draw the warning icon`);
   },
 );
 

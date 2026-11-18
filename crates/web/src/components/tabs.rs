@@ -23,6 +23,7 @@ pub struct Tab {
     label: String,
     holds: Holds,
     panel: AnyView,
+    start: bool,
 }
 
 impl Tab {
@@ -34,7 +35,15 @@ impl Tab {
             label,
             holds,
             panel: panel.into_any(),
+            start: false,
         }
+    }
+
+    /// The tab, the one its set starts on when `start` holds, as a page
+    /// whose address names a tab does. Of several, the first does; of none,
+    /// the set starts on its first tab.
+    pub fn selected_at_start(self, start: bool) -> Self {
+        Self { start, ..self }
     }
 }
 
@@ -56,7 +65,8 @@ impl TabSet {
 /// A set of tabs (§4.5): a `tablist` named by `name`, a native
 /// `<button type="button">` for each tab, then every tab's panel, built
 /// once, the unselected ones `hidden`, so what a reader typed or scrolled
-/// to in one stays while another shows. The first tab is selected.
+/// to in one stays while another shows. The first tab is selected, or the
+/// one its caller starts the set on (`Tab::selected_at_start`).
 ///
 /// The list is a row above the panels, a column at their start, or, with
 /// `Orientation::Responsive`, a column while the tabs' own container has
@@ -103,7 +113,8 @@ pub fn Tabs(
     #[prop(optional, into)]
     described_by: Option<String>,
     /// Follows the selected tab, its index in `tabs` (0, the first, to
-    /// begin with), set once for each change: a caller that reads a panel's
+    /// begin with), set once for each change, and once as the tabs are
+    /// drawn when they start on another: a caller that reads a panel's
     /// content only once its tab is chosen watches it. The tabs set it; a
     /// caller only reads it.
     #[prop(optional)]
@@ -111,11 +122,13 @@ pub fn Tabs(
 ) -> impl IntoView {
     let TabSet { first, rest } = tabs;
     let last = rest.len();
-    let selection = RwSignal::new(0_usize);
+    let selection = RwSignal::new(rules::selected_at_start(
+        std::iter::once(first.start).chain(rest.iter().map(|tab| tab.start)),
+    ));
     if let Some(selected) = selected {
         // Written only when it differs, so a caller watching it hears of
-        // each change once and of the first tab not at all when it already
-        // holds 0.
+        // each change once and of the tab the set starts on only when it
+        // doesn't already hold it.
         Effect::new(move |_| {
             let now = selection.get();
             if selected.get_untracked() != now {
@@ -232,6 +245,32 @@ pub fn Tabs(
         </div>
     }
     .into_any()
+}
+
+/// Shows each hidden tab panel `element` is in, as a press on its tab does,
+/// so a modal dialog opened there is drawn: one under a hidden panel isn't,
+/// and a dialog that opens when the daemon answers can do so after the
+/// reader has chosen another tab. The press goes through the tab's own
+/// handler, so the tabs stay the one owner of the selection; the panel is
+/// shown at once too, before the tabs' next update would, so the dialog can
+/// take focus as it opens.
+pub(crate) fn show_panel_holding(element: &web_sys::Element) {
+    let mut from = element.parent_element();
+    while let Some(inside) = from {
+        let Ok(Some(panel)) = inside.closest("[role='tabpanel']") else {
+            return;
+        };
+        if panel.has_attribute("hidden")
+            && let Some(tab) = panel
+                .get_attribute("aria-labelledby")
+                .and_then(|id| document().get_element_by_id(&id))
+                .and_then(|tab| tab.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            tab.click();
+            let _ = panel.remove_attribute("hidden");
+        }
+        from = panel.parent_element();
+    }
 }
 
 /// Keeps `layout` to the layout a responsive set's `list` is drawn in: read
