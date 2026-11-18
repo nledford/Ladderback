@@ -17,13 +17,16 @@
   --badge-loading-bg: #dbeafe;
   --badge-empty-fg: #111827;
   --badge-empty-bg: #e5e7eb;
-  /* Each status tone's pair (`StatusTone::pair`): its words on its fill. */
+  /* Each status tone's pair (`StatusTone::pair`): its words on its fill.
+     Warning's fill stands a visible step further from the page than
+     Success's, and Warning's and Error's stand 0.1 apart in lightness,
+     Error's the further (decision 108). */
   --success-fg: #052e16;
   --success-bg: #dcfce7;
   --warning-fg: #451a03;
-  --warning-bg: #fffbeb;
+  --warning-bg: #fde68a;
   --error-fg: #691717;
-  --error-bg: #fecaca;
+  --error-bg: #fca5a5;
   --success: #15803d;
   --warning: #b45309;
   --error: #b91c1c;
@@ -66,7 +69,7 @@
     --success-fg: #dcfce7;
     --success-bg: #052e16;
     --warning-fg: #fef3c7;
-    --warning-bg: #451a03;
+    --warning-bg: #481d05;
     --error-fg: #fee2e2;
     --error-bg: #7f1d1d;
     --success: #4ade80;

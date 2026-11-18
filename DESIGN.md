@@ -23,11 +23,11 @@ colors:
   success-bg-dark: "#052e16"
   warning-fg: "#451a03"
   warning-fg-dark: "#fef3c7"
-  warning-bg: "#fffbeb"
-  warning-bg-dark: "#451a03"
+  warning-bg: "#fde68a"
+  warning-bg-dark: "#481d05"
   error-fg: "#691717"
   error-fg-dark: "#fee2e2"
-  error-bg: "#fecaca"
+  error-bg: "#fca5a5"
   error-bg-dark: "#7f1d1d"
   tick-green: "#15803d"
   tick-green-dark: "#4ade80"
@@ -190,15 +190,15 @@ The status hues: a color a part draws in to tell how something went, on the page
 - **Flag Amber** (`--warning`): something needs a look.
 - **Red Ink** (`--error`): something failed.
 
-The status pairs: each status tone's soft pair, for a part tinted in it (a badge's pill, an alert's or a toast's box), its words on its fill, in Tailwind's palette of the same hue. Every shared component that tints a part by status draws from these, never from a pair of its own.
+The status pairs: each status tone's soft pair, for a part tinted in it (a badge's pill, an alert's or a toast's box), its words on its fill, in Tailwind's palette of the same hue, but for Error's words in light colors and Warning's fill in dark colors. Every shared component that tints a part by status draws from these, never from a pair of its own.
 
 | Pair | Light: words on fill | Dark: words on fill |
 |---|---|---|
 | Success (`--success-fg`, `--success-bg`) | green-950 `#052e16` on green-100 `#dcfce7` | green-100 on green-950 |
-| Warning (`--warning-fg`, `--warning-bg`) | amber-950 `#451a03` on amber-50 `#fffbeb` | amber-100 `#fef3c7` on amber-950 |
-| Error (`--error-fg`, `--error-bg`) | `#691717` on red-200 `#fecaca` | red-100 `#fee2e2` on red-900 `#7f1d1d` |
+| Warning (`--warning-fg`, `--warning-bg`) | amber-950 `#451a03` on amber-200 `#fde68a` | amber-100 `#fef3c7` on `#481d05`, amber-950's hue at OKLab lightness 0.29 |
+| Error (`--error-fg`, `--error-bg`) | `#691717` on red-300 `#fca5a5` | red-100 `#fee2e2` on red-900 `#7f1d1d` |
 
-The words are at 4.5:1 or more on their fill. Warning's and Error's fills stand at least 0.1 apart in OKLab lightness in both schemes, Error's the further from the page (darker in light, lighter in dark), so amber and red never read as one, for a reader who can't tell the hues apart either (decision 108). The Error pair's words also draw a form's errors and the error summary's border on the page. Under forced colors the system's colors replace both.
+The words are at 4.5:1 or more on their fill. Warning's and Error's fills stand at least 0.1 apart in OKLab lightness in both schemes, Error's the further from the page (darker in light, lighter in dark), so amber and red never read as one, for a reader who can't tell the hues apart either. Warning's fill stands further from the page and a surface than Success's, by contrast ratio and by 0.02 or more in OKLab lightness, so a warning never reads paler than a success beside it (decision 108). The Error pair's words also draw a form's errors and the error summary's border on the page. Under forced colors the system's colors replace both.
 
 The badge's own pairs, for the tones that tell no result: Loading (dark blue on pale blue), the badge's Primary tone, which a status badge takes while a run is under way, and Empty (gray), its Secondary tone, which a status badge takes while a run waits, once it was cancelled, or with nothing to tell. A badge in the Success, Warning or Error tone, and a status badge for a run that succeeded or failed, draws in its status tone's pair; the status hues above are not drawn on a fill.
 

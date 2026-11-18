@@ -4,7 +4,8 @@
 // 4.5:1 for text, 3:1 for UI parts like the focus ring. style.css stays the
 // source of truth; Tailwind maps the same tokens, so it needs no second table.
 // It also fails two status fills that must be told apart and sit too close
-// in lightness (FILLS_APART).
+// in lightness (FILLS_APART), and a status fill that must read at least as
+// strongly as another beside it and doesn't (FILLS_STRONGER).
 //
 // Usage: node scripts/check-contrast.ts crates/web/style.css
 // Exit status: 0 when every pair passes, 1 otherwise.
@@ -62,10 +63,12 @@ const PAIRS = [
   { name: "selected tab's bar on surface", fg: "--accent", bg: "--surface", min: 3 },
   // A toast (components §4.5) in a status tone lies on its pair's fill:
   // the focus ring around its Dismiss button against that fill (1.4.11),
-  // and the button's label, the toast's words' color, on the surface it
-  // takes on hover.
+  // its edge, in its tone, against that fill as well as the page (the tone
+  // pairs above), so the edge holds 3:1 on both its sides, and the button's
+  // label, the toast's words' color, on the surface it takes on hover.
   ...["success", "warning", "error"].flatMap((tone) => [
     { name: `focus ring on the ${tone} fill`, fg: "--focus", bg: `--${tone}-bg`, min: 3 },
+    { name: `${tone} toast edge on its fill`, fg: `--${tone}`, bg: `--${tone}-bg`, min: 3 },
     { name: `${tone} words on surface`, fg: `--${tone}-fg`, bg: "--surface", min: 4.5 },
   ]),
   // A checkbox and a radio (components §4.5): a chosen box's edge and fill
@@ -85,6 +88,27 @@ const PAIRS = [
 // luminance ratio, read as one. The words and the icon still say which is
 // which (1.4.1); this keeps two fills from looking alike beside each other.
 const FILLS_APART = [{ name: "warning and error fills", a: "--warning-bg", b: "--error-bg", min: 0.1 }];
+
+// A status fill that must read at least as strongly as another beside it
+// (decision 108), so the fills read in the order of their severity: Warning's
+// beside Success's, as on the Operations page, and Error's beside Warning's. How
+// strongly a fill reads is how far it stands from what lies around it, the
+// page or a surface, and the stronger fill must stand further on both scales
+// the gate uses: by WCAG's contrast ratio, the scale of every pair above, at
+// least as far; and in OKLab lightness, a perceptual scale, at least 0.02
+// further, the difference CSS Color 4 takes as just noticeable (a deltaEOK of
+// 0.02), so the reader sees it rather than a tie that rounding could flip.
+// Lightness, as for FILLS_APART, survives a reader who can't tell green from
+// amber, and both scales agreeing keeps either from hiding a fill the other
+// reads as paler.
+const FILLS_STRONGER = [
+  { name: "warning fill over success fill", stronger: "--warning-bg", weaker: "--success-bg", min: 0.02 },
+  { name: "error fill over warning fill", stronger: "--error-bg", weaker: "--warning-bg", min: 0.02 },
+];
+const AROUND_FILLS = [
+  { name: "page", token: "--bg" },
+  { name: "surface", token: "--surface" },
+];
 
 // A button (components §4.5) in each tone but Inherit, whose colors are the
 // text's own: a Filled button's label (`--on-fill`) on its fill and on the
@@ -234,6 +258,31 @@ for (const scheme of SCHEMES) {
     console.log(
       `${ok ? "pass" : "FAIL"} ${where}: ${apart.toFixed(3)} apart in lightness (needs ${fills.min}) — ${a} and ${b}`,
     );
+  }
+  for (const fills of FILLS_STRONGER) {
+    for (const around of AROUND_FILLS) {
+      const where = `${scheme.name}: ${fills.name} on ${around.name}`;
+      const strong = tokens[fills.stronger];
+      const weak = tokens[fills.weaker];
+      const bg = tokens[around.token];
+      if (strong === undefined || weak === undefined || bg === undefined) {
+        failed += 1;
+        const missing = [fills.stronger, fills.weaker, around.token].filter((t) => !(t in tokens));
+        console.error(`FAIL ${where}: ${missing.join(", ")} not defined in style.css`);
+        continue;
+      }
+      const ground = lightness(parseHex(bg));
+      const further =
+        Math.abs(lightness(parseHex(strong)) - ground) - Math.abs(lightness(parseHex(weak)) - ground);
+      const strongRatio = contrastRatio(strong, bg);
+      const weakRatio = contrastRatio(weak, bg);
+      const ok = further >= fills.min && strongRatio >= weakRatio;
+      if (!ok) failed += 1;
+      console.log(
+        `${ok ? "pass" : "FAIL"} ${where}: ${further.toFixed(3)} further in lightness (needs ${fills.min}), ` +
+          `${strongRatio.toFixed(3)}:1 against ${weakRatio.toFixed(3)}:1 (needs at least as much) — ${strong} and ${weak} on ${bg}`,
+      );
+    }
   }
 }
 
