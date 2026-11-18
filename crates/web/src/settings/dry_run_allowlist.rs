@@ -3,9 +3,9 @@
 //! shared table, each removed once its dialog is confirmed; a folder added
 //! by its full path; and "Add home folder", which warns first of what the
 //! home folder opens, as a folder typed that is the home folder or holds it
-//! does. What each decides is `dry_run_allowlist.rs`'s, host-tested; this
-//! is the DOM glue, which the `@ui` scenarios of
-//! `features/ui/dry_run_allowlist.feature` run.
+//! does. What each decides, what the section holds and when a save may
+//! start are `dry_run_allowlist.rs`'s, host-tested; this is the DOM glue,
+//! which the `@ui` scenarios of `features/ui/dry_run_allowlist.feature` run.
 
 use std::sync::Arc;
 
@@ -23,8 +23,9 @@ use crate::components::{
     dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals, sentence_view,
 };
 use crate::dry_run_allowlist::{
-    ALLOWLIST_PATH, HEADING_ID, Listed, added, alert_words, field_refusal, home_body, home_offered,
-    opens_home, remove_id, remove_label, remove_title, removed, request, rows, with_added, without,
+    Allowlist, HEADING_ID, Listed, added, alert_words, empty_if_still, field_refusal, home_body,
+    home_offered, opens_home, remove_id, remove_label, remove_title, removed, request, rows,
+    with_added, without,
 };
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -95,59 +96,6 @@ fn unreachable(localizer: &Localizer) -> Sentence {
     Sentence::new(&text(localizer, msg::UI_SESSION_UNREACHABLE), None)
 }
 
-/// What the section holds: the list as the daemon last answered it, and
-/// whether a save of it is going. Every change saves the whole list, so one
-/// save at a time: while one goes, every control that changes the list is
-/// busy, and takes no press.
-#[derive(Clone, Copy)]
-struct Allowlist {
-    base: StoredValue<String>,
-    /// The list; `None` until the read answers, and while it is refused.
-    held: RwSignal<Option<Listed>>,
-    saving: RwSignal<bool>,
-}
-
-impl Allowlist {
-    fn url(self) -> String {
-        format!("{}{ALLOWLIST_PATH}", self.base.get_value())
-    }
-
-    /// The folders as the list holds them, none while unread.
-    fn current(self) -> Vec<String> {
-        self.held
-            .with_untracked(|held| held.as_ref().map(|held| held.folders.clone()))
-            .unwrap_or_default()
-    }
-
-    /// The daemon's home folder, as the list last named it.
-    fn home(self) -> Option<String> {
-        self.held
-            .with_untracked(|held| held.as_ref().and_then(|held| held.home.clone()))
-    }
-
-    /// Takes the daemon's answer to a save.
-    fn take(self, answer: DryRunAllowlistDto) {
-        self.held.update(|held| match held {
-            Some(held) => held.take(answer),
-            None => *held = Some(Listed::read(answer)),
-        });
-    }
-
-    /// Starts a save: `false`, and nothing started, while another goes.
-    fn start(self) -> bool {
-        if self.saving.get_untracked() {
-            return false;
-        }
-        self.saving.set(true);
-        true
-    }
-
-    /// Ends the save, unless the reader has left the page.
-    fn end(self) {
-        self.saving.try_set(false);
-    }
-}
-
 /// A folder the home folder's dialog asks about: the daemon's home folder
 /// "Add home folder" offers, or a folder typed that is it or holds it.
 #[derive(Clone)]
@@ -165,11 +113,7 @@ struct Asked {
 /// the daemon refuses is said calmly in the table's place, with no form.
 #[component]
 pub(super) fn DryRunAllowlistSection(localizer: Arc<Localizer>) -> impl IntoView {
-    let list = Allowlist {
-        base: StoredValue::new(ws::origin()),
-        held: RwSignal::new(None),
-        saving: RwSignal::new(false),
-    };
+    let list = Allowlist::new(ws::origin());
     let state = RwSignal::new(State::Loading);
     let read_refused = RwSignal::<Option<Sentence>>::new(None);
     let read_localizer = Arc::clone(&localizer);
@@ -400,17 +344,6 @@ pub(super) fn DryRunAllowlistSection(localizer: Arc<Localizer>) -> impl IntoView
                     })
             }}
         </section>
-    }
-}
-
-/// Empties the Folder field once `folder` is added, unless what it holds
-/// has changed since: what was typed meanwhile stays.
-fn empty_if_still(typed: RwSignal<String>, folder: &str) {
-    if typed
-        .try_with_untracked(|now| now.trim() == folder)
-        .unwrap_or(false)
-    {
-        typed.set(String::new());
     }
 }
 

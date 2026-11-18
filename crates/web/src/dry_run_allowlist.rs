@@ -3,12 +3,14 @@
 //! row shows, the list a change saves, why a folder typed can't be added,
 //! when a folder typed warns as the home folder does, the home folder "Add
 //! home folder" offers, which refusal is the field's error and how an
-//! alert words the rest, and the words of each button and dialog.
-//! Host-tested here; the DOM glue that holds the signals and sends the
-//! requests is `settings/dry_run_allowlist.rs`.
+//! alert words the rest, and the words of each button and dialog; what the
+//! section holds, one save at a time, and when the Folder field empties.
+//! Host-tested here; the DOM glue that sends the requests and draws the
+//! section is `settings/dry_run_allowlist.rs`.
 
 use api::{DryRunAllowlistDto, ErrorCode, MsgArg};
 use l10n::{MessageId, msg};
+use leptos::prelude::*;
 
 use crate::api_tokens::Said;
 
@@ -62,6 +64,83 @@ impl Listed {
             self.home = answer.home;
         }
         self.folders = answer.folders;
+    }
+}
+
+/// What the section holds: the list as the daemon last answered it, and
+/// whether a save of it is going. Every change saves the whole list, so one
+/// save at a time: while one goes, every control that changes the list is
+/// busy, and takes no press.
+#[derive(Clone, Copy)]
+pub(crate) struct Allowlist {
+    /// The daemon's origin, which the route's path follows.
+    base: StoredValue<String>,
+    /// The list; `None` until the read answers, and while it is refused.
+    pub(crate) held: RwSignal<Option<Listed>>,
+    /// Whether a save is going.
+    pub(crate) saving: RwSignal<bool>,
+}
+
+impl Allowlist {
+    /// Nothing read yet and no save going, with the daemon at `base`.
+    pub(crate) fn new(base: String) -> Self {
+        Self {
+            base: StoredValue::new(base),
+            held: RwSignal::new(None),
+            saving: RwSignal::new(false),
+        }
+    }
+
+    /// The address that reads and saves the list.
+    pub(crate) fn url(self) -> String {
+        format!("{}{ALLOWLIST_PATH}", self.base.get_value())
+    }
+
+    /// The folders as the list holds them, none while unread.
+    pub(crate) fn current(self) -> Vec<String> {
+        self.held
+            .with_untracked(|held| held.as_ref().map(|held| held.folders.clone()))
+            .unwrap_or_default()
+    }
+
+    /// The daemon's home folder, as the list last named it.
+    pub(crate) fn home(self) -> Option<String> {
+        self.held
+            .with_untracked(|held| held.as_ref().and_then(|held| held.home.clone()))
+    }
+
+    /// Takes the daemon's answer to a save.
+    pub(crate) fn take(self, answer: DryRunAllowlistDto) {
+        self.held.update(|held| match held {
+            Some(held) => held.take(answer),
+            None => *held = Some(Listed::read(answer)),
+        });
+    }
+
+    /// Starts a save: `false`, and nothing started, while another goes.
+    pub(crate) fn start(self) -> bool {
+        if self.saving.get_untracked() {
+            return false;
+        }
+        self.saving.set(true);
+        true
+    }
+
+    /// Ends the save, unless the reader has left the page.
+    pub(crate) fn end(self) {
+        self.saving.try_set(false);
+    }
+}
+
+/// Empties the Folder field `typed` once `folder` is added, unless what it
+/// holds has changed since: what was typed meanwhile stays. Nothing once
+/// the reader has left the page.
+pub(crate) fn empty_if_still(typed: RwSignal<String>, folder: &str) {
+    if typed
+        .try_with_untracked(|now| now.trim() == folder)
+        .unwrap_or(false)
+    {
+        typed.set(String::new());
     }
 }
 
