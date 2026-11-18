@@ -342,9 +342,11 @@ impl Keyring for SystemSecrets {
 /// Why the store refused to write or delete an entry.
 fn refused(failure: Failure) -> KeyringError {
     match failure {
-        Failure::NoService(detail) | Failure::Locked(detail) | Failure::Refused(detail) => {
+        Failure::NoService(detail) | Failure::Refused(detail) => {
             KeyringError::Unavailable { detail }
         }
+        // The person can unlock it and save again (#993).
+        Failure::Locked(detail) => KeyringError::Locked { detail },
         Failure::Unreachable(detail) => KeyringError::Unwritable { detail },
         // An entry that holds what isn't text holds another secret.
         Failure::NotUnicode => KeyringError::Taken,

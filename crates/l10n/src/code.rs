@@ -100,7 +100,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     LocationTooManyCredentials => msg::ERROR_LOCATION_TOO_MANY_CREDENTIALS,
     RepositoryPathRelative => msg::ERROR_REPOSITORY_PATH_RELATIVE,
     KeyringUnavailable => msg::ERROR_KEYRING_UNAVAILABLE,
-    KeyringLocked => msg::ERROR_KEYRING_UNAVAILABLE,
+    KeyringLocked => msg::ERROR_KEYRING_LOCKED,
     KeyringUnwritable => msg::ERROR_KEYRING_UNWRITABLE,
     KeyringEntryTaken => msg::ERROR_KEYRING_ENTRY_TAKEN,
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,

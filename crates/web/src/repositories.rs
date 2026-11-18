@@ -215,6 +215,7 @@ pub(crate) fn field_of(code: ErrorCode, args: &[(String, MsgArg)]) -> Option<Fie
         // keyring the person chose (§10.2).
         ErrorCode::PasswordNotAccepted
         | ErrorCode::KeyringUnavailable
+        | ErrorCode::KeyringLocked
         | ErrorCode::KeyringUnwritable
         | ErrorCode::KeyringEntryTaken => Some(Field::Password),
         ErrorCode::SecretMissing
