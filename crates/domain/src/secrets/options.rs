@@ -49,8 +49,8 @@ const RCLONE_SECRET_NAMES: [&str; 1] = ["key"];
 /// it. The values of such options are secrets even when they are written
 /// inline in the config, so the redactor hides them (I4, §10.2).
 ///
-/// A name is a secret when it is one of [`SECRET_NAMES`], has a
-/// [`SECRET_WORDS`] word in it or ends in `_key` (`account_key`,
+/// A name is a secret when it is one of `SECRET_NAMES`, has a
+/// `SECRET_WORDS` word in it or ends in `_key` (`account_key`,
 /// `application_key`, `encryption_key`, `temp_url_key`); `-` and `_` are the
 /// same, and case doesn't matter.
 /// Names that only identify a credential (`access_key_id`,
