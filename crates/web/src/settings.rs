@@ -50,7 +50,8 @@ use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
     Banner, Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, Tab, Tabs,
-    TextField, Working, copy_text, hand_focus_when_gone, sentence_view, text_field,
+    TextField, Toast, ToastTone, Toasts, Working, copy_text, hand_focus_when_gone, sentence_view,
+    text_field,
 };
 use crate::live::reply;
 use crate::page_width::PageWidth;
@@ -256,9 +257,10 @@ impl Problems {
     }
 }
 
-/// The API tokens' section: the list, the form that creates one, the dialog
-/// that shows a new one's whole text once, and the dialog that asks before
-/// one is revoked. With sign-in off the daemon refuses the list
+/// The API tokens' section: the list, the toast that answers a token
+/// revoked, which nothing else in it confirms, the form that creates one,
+/// the dialog that shows a new one's whole text once, and the dialog that
+/// asks before one is revoked. With sign-in off the daemon refuses the list
 /// (`sign-in-off`), and the section says why in its place, with no form.
 #[component]
 fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
@@ -377,6 +379,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
         revoking.set(Some(token));
         revoke_open.set(true);
     });
+    let toasts = Toasts::new();
     let revoke_localizer = Arc::clone(&localizer);
     let revoke = Callback::new(move |token: ApiTokenDto| {
         if revoke_busy.get_untracked() {
@@ -395,7 +398,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
             match answer {
                 Some(Posted::Done(_)) => {
                     revoke_open.set(false);
-                    reply(Politeness::Polite, &say(&localizer, revoked(&token.label)));
+                    toasts.show(ToastTone::Success, say(&localizer, revoked(&token.label)));
                     load.run(());
                 }
                 Some(Posted::Refused(code, args, detail)) => revoke_error.set(Some(
@@ -424,6 +427,8 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                 {heading}
             </h2>
             <p>{body}</p>
+            // Dismissed, a toast hands focus to the heading just before it.
+            <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=HEADING_ID />
             {move || match phase.get() {
                 Phase::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
                 Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
