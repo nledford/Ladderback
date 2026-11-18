@@ -85,6 +85,21 @@ Feature: The forget preview of a proposal
     Then the forget preview is refused because the proposal is withdrawn
     And the engine was never asked to list the repository
 
+  # The preview reads the repositories at the same time, as many at once
+  # as the daemon lists repositories and in the turns its listings take, so
+  # the reads of two repositories overlap rather than add up (#967), and
+  # it answers them in the order the proposal names them all the same.
+  Scenario: The repositories a proposal touches are read at the same time
+    Given a plan "home" keeping the last 3 snapshots
+    And a second repository "usb"
+    And the repository holds 4 snapshots of the plan "home"
+    And listing the repository "demo" takes 7 minutes
+    And listing the repository "usb" takes 5 minutes
+    And an AI agent has proposed moving the plan "home" to the repository "usb"
+    When a person previews what the proposal would forget
+    Then the preview covers the repositories "demo" and "usb"
+    And the forget preview is answered after 7 minutes
+
   # Approving with the forget preview (decision 89, point 8). A proposal
   # that could delete snapshots is approved only with the forget preview the
   # person saw. The approval brings that preview's digest, which binds the
