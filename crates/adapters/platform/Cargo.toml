@@ -20,7 +20,8 @@ shell-words.workspace = true
 # The Wi-Fi report of `system_profiler -json` on macOS (decision 80).
 serde_json.workspace = true
 spawn-gate.workspace = true
-tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
+# `macros`: `tokio::join!` reads a child's stdout and stderr at once.
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 uuid = { workspace = true, features = ["v7"] }
 
 [target.'cfg(unix)'.dependencies]
