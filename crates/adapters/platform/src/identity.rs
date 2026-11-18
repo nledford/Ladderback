@@ -112,16 +112,13 @@ impl Identity for FileIdentity {
         self.keep(file.key_file(), seed, text, parse_seed).await
     }
 
+    /// Deletes the seed's file and every staged copy of it a write cut short
+    /// left (`hub-recovery-seed.<id>.tmp`), since each holds the seed too.
     async fn forget_recovery_seed(&self) -> Result<(), IdentityError> {
         let file = KeyFile::RecoverySeed;
         let folder = self.folder.clone();
         blocking(file, move || {
-            match fs::remove_file(folder.join(file.file_name())) {
-                Ok(()) => sync_dir(&folder),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(error),
-            }
-            .map_err(|error| unavailable(file, &error))
+            forget(&folder, file).map_err(|error| unavailable(file, &error))
         })
         .await
     }
@@ -328,6 +325,37 @@ fn replace(folder: &Path, file: KeyFile, bytes: &[u8]) -> io::Result<()> {
         return Err(error);
     }
     sync_dir(folder)
+}
+
+/// Deletes `file` and every staged copy of it ([`stage`]), then syncs the
+/// folder when it deleted any. A folder or file that isn't there is
+/// nothing to delete.
+fn forget(folder: &Path, file: KeyFile) -> io::Result<()> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let name = file.file_name();
+    let staged_prefix = format!("{name}.");
+    let mut deleted = false;
+    for entry in entries {
+        let entry = entry?;
+        let entry_name = entry.file_name();
+        let Some(entry_name) = entry_name.to_str() else {
+            continue;
+        };
+        let staged = entry_name.starts_with(&staged_prefix) && entry_name.ends_with(".tmp");
+        if entry_name != name && !staged {
+            continue;
+        }
+        match fs::remove_file(entry.path()) {
+            Ok(()) => deleted = true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    if deleted { sync_dir(folder) } else { Ok(()) }
 }
 
 fn unavailable(file: KeyFile, error: &io::Error) -> IdentityError {
