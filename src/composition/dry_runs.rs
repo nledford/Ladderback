@@ -151,6 +151,7 @@ fn refused(error: DryRunError) -> DryRunsError {
         },
         DryRunError::ReadsAbove { setting } => DryRunsError::ReadsAbove { setting },
         DryRunError::Filter => DryRunsError::Filter,
+        DryRunError::KeyFilesNotLeftOut => DryRunsError::KeyFilesNotLeftOut,
         DryRunError::Config(error) => unusable(*error),
         DryRunError::Walk { .. } => {
             // The engine's words can name a path the walk met, and the log

@@ -951,8 +951,8 @@ async fn state_over(
             Arc::new(SystemClock),
             Arc::new(move || queue.is_busy()),
             app::dry_run::DryRunLimits::DAEMON,
-        )
-        .with_left_out(runner.left_out.globs().to_vec()),
+            runner.left_out.for_dry_runs(),
+        ),
         app::dry_run::DryRunAllowlists::new(
             Arc::clone(&config),
             Arc::clone(&writes),

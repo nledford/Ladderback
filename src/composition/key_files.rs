@@ -4,6 +4,7 @@
 //! glob can name the folder, the refusal of a backup that would take them.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use domain::planning::Source;
 use http_adapter::StartError;
@@ -53,13 +54,14 @@ impl KeyFilesLeftOut {
         }
     }
 
-    /// The globs every walk of the data folder leaves the key files out
-    /// with; none when no glob can name them.
-    pub(super) fn globs(&self) -> &[String] {
-        match self {
-            Self::Globs(globs) => globs,
-            Self::Unnamed(_) => &[],
-        }
+    /// The globs each dry run's walks leave the key files out with; none
+    /// when no glob can name them.
+    pub(super) fn for_dry_runs(&self) -> app::dry_run::LeftOut {
+        let globs = match self {
+            Self::Globs(globs) => globs.clone(),
+            Self::Unnamed(_) => Vec::new(),
+        };
+        Arc::new(move |_: &[Source]| Some(globs.clone()))
     }
 
     /// The globs a backup of `sources` appends to its filter, or its

@@ -99,6 +99,7 @@ struct Setup {
     clock: Arc<FakeClock>,
     backups: Arc<AtomicBool>,
     limits: DryRunLimits,
+    left_out: LeftOut,
 }
 
 impl Default for Setup {
@@ -108,6 +109,7 @@ impl Default for Setup {
             clock: Arc::new(FakeClock::new(epoch())),
             backups: Arc::new(AtomicBool::new(false)),
             limits: DryRunLimits::DAEMON,
+            left_out: Arc::new(|_: &[Source]| Some(Vec::new())),
         }
     }
 }
@@ -122,6 +124,7 @@ impl Setup {
             self.clock.clone(),
             Arc::new(move || backups.load(Ordering::Acquire)),
             self.limits,
+            Arc::clone(&self.left_out),
         )
     }
 }
@@ -377,12 +380,14 @@ impl WalkSources for WithKeyFile {
 async fn a_dry_run_leaves_out_what_every_backup_leaves_out() {
     let setup = Setup {
         walk: Arc::new(WithKeyFile),
+        // Given the plan's sources, resolved, as the backup's check is.
+        left_out: Arc::new(|sources: &[Source]| {
+            (sources == [Source::parse("/srv/demo").expect("a source")])
+                .then(|| vec![KEY_GLOB.to_owned()])
+        }),
         ..Setup::default()
     };
-    let dry_runs = setup
-        .dry_runs(&["/srv/demo"])
-        .await
-        .with_left_out(vec![KEY_GLOB.to_owned()]);
+    let dry_runs = setup.dry_runs(&["/srv/demo"]).await;
     let counted = dry_runs
         .run(&Proposer::NoToken, &plan(&["/srv/demo"], &["!docs"]))
         .await;
@@ -396,6 +401,25 @@ async fn a_dry_run_leaves_out_what_every_backup_leaves_out() {
             stopped: None,
             warnings: 0,
         })
+    );
+}
+
+/// A dry run predicts what the backup does, so it is refused as the
+/// backup is when the walks would take key files no glob can name (§16,
+/// decision 120).
+#[tokio::test]
+async fn a_dry_run_that_would_take_key_files_no_glob_can_name_is_refused() {
+    let setup = Setup {
+        walk: Arc::new(WithKeyFile),
+        left_out: Arc::new(|_: &[Source]| None),
+        ..Setup::default()
+    };
+    let dry_runs = setup.dry_runs(&["/srv/demo"]).await;
+    assert_eq!(
+        dry_runs
+            .run(&Proposer::NoToken, &plan(&["/srv/demo"], &[]))
+            .await,
+        Err(DryRunError::KeyFilesNotLeftOut)
     );
 }
 
