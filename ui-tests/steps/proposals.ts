@@ -11,7 +11,7 @@ import path from "node:path";
 import { Given, Then, When } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 
-import { journey, namePattern } from "../support/keyboard.ts";
+import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
 import { PASSWORD, serveDemoPlans, until } from "./live.ts";
@@ -148,7 +148,85 @@ Then("the daemon no longer lists the plan {string}", async function (this: Brows
   );
 });
 
-// No refusal, of an approval or a rejection, is shown in the open proposal.
-Then("the open proposal alerts nothing", async function (this: BrowserWorld) {
-  await expect(openProposal(this).getByRole("alert")).toHaveCount(0);
+// No refusal, of an approval or a rejection, is shown in the open proposal:
+// no shared Alert (#929), and no `role="alert"` either.
+Then("the open proposal shows no alert", async function (this: BrowserWorld) {
+  await expect(openProposal(this).locator(".alert, [role~='alert']")).toHaveCount(0);
+});
+
+// Escapes what a regular expression would read as its own syntax.
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A refusal shown inside the open proposal, not elsewhere on the page: an
+// Error alert (#929), found by its class, as it has no role. What the
+// catalog filled in may be set apart by bidi isolation marks.
+Then("the open proposal shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await openProposal(this)
+    .locator(".alert.tone-error")
+    .filter({ hasText: new RegExp([...needle].map(escape).join(ISOLATION)) })
+    .first()
+    .waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
+});
+
+// One failure, one alert (DESIGN.md): once the refusal of the last press
+// shows, after its button, no alert of an earlier press is left beside it.
+Then("the open proposal shows one alert, after the button {string}", async function (this: BrowserWorld, name: string) {
+  const button = openProposal(this).getByRole("button", { name: namePattern(name) });
+  const count = () =>
+    button.evaluate((pressed) => {
+      const section = pressed.closest("section");
+      const alerts = [...(section?.querySelectorAll(".alert, [role~='alert']") ?? [])];
+      return {
+        all: alerts.length,
+        after: alerts.filter((alert) => pressed.compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).length,
+      };
+    });
+  await expect.poll(async () => (await count()).after, { timeout: ANSWER_PATIENCE_MS }).toBeGreaterThan(0);
+  assert.deepEqual(await count(), { all: 1, after: 1 }, `the alerts in the open proposal, and those after the button "${name}"`);
+});
+
+// The daemon can't read its store of proposals, as it answers when its
+// database fails: the list is refused, each time the page reads it.
+Given("the daemon refuses each read of the pending proposals", function (this: BrowserWorld) {
+  refuseWithProposalsUnavailable(this, "GET", (pathname) => pathname === "/api/v1/proposals");
+});
+
+// The read of the open proposal's review is refused the same way.
+Given("the daemon refuses the review of the proposal", function (this: BrowserWorld) {
+  const review = `/api/v1/proposals/${encodeURIComponent(proposalOf(this))}/review`;
+  refuseWithProposalsUnavailable(this, "GET", (pathname) => pathname === review);
+});
+
+/** Answers the page's `method` requests to a path `matches` takes as the
+ *  daemon does when it can't read its store of proposals. The steps' own
+ *  calls to the API don't pass through the browser, so they still reach it. */
+function refuseWithProposalsUnavailable(world: BrowserWorld, method: string, matches: (pathname: string) => boolean): void {
+  world.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => matches(url.pathname),
+      async (route) => {
+        if (route.request().method() !== method) return route.continue();
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "proposals-unavailable" }),
+        });
+      },
+    );
+  });
+}
+
+// The AI agent takes its proposal back while the page shows it, so what the
+// page then asks of it is refused.
+When("the AI agent withdraws the proposal", async function (this: BrowserWorld) {
+  await api(this, "POST", `/api/v1/proposals/${proposalOf(this)}/withdraw`, {});
+});
+
+// Focus a refused review did not take away (WCAG 2.4.3).
+Then("focus stays on the proposal's Review button", async function (this: BrowserWorld) {
+  const name = `Review proposal ${proposalOf(this)}, made without an API token`;
+  const button = journey(this.page).byRole("button", { name: namePattern(name) });
+  assert.equal(await button.count(), 1, `the button "${name}" is no longer on the page`);
+  const stays = await button.evaluate((element) => element === document.activeElement);
+  assert.ok(stays, `focus left the button "${name}"`);
 });
