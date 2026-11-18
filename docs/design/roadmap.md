@@ -201,6 +201,8 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [117](decisions/117-tailwind-first.md) | Tailwind first, custom CSS only when necessary |
 | [118](decisions/118-checkbox-and-radio-drawn-from-the-tokens.md) | A checkbox and a radio drawn from the tokens, not the browser's own |
 | [119](decisions/119-components-when-a-page-needs-them.md) | Build each new shared component just before the first page that needs it |
+| [120](decisions/120-agent-hub-connection-security.md) | How an agent and its hub prove who they are |
+| [121](decisions/121-pairing-a-machine-with-its-hub.md) | How a person pairs a machine with its hub |
 
 ## 17. Open questions
 
