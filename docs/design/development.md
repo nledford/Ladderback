@@ -302,8 +302,8 @@ A shared component is four pieces:
 1. The component in a file of its own, `crates/web/src/components/<component>.rs`, re-exported from `components.rs`, with any decision it makes in a child module, `components/<component>/rules.rs`, tested on the host.
    - It is built from native elements first (§4.5), takes its tone, size and placement from the shared vocabulary (`crates/web/src/variants.rs`), its sizes drawn at the shared scale's lengths (`--size`).
    - It has its row in §4.5's table naming any tone it leaves out, its default tone where it isn't `Primary`, and any size it draws at other lengths, with the reason.
-2. Its entry in the gallery (`crates/web/src/gallery.rs`), with every state it can show.
-3. A row in both Scenario Outlines of `features/ui/components/gallery.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.ts`.
+2. Its entry in the gallery (`crates/web/src/gallery.rs`), with every state it can show: a `<section>` whose `id` is its anchor, the demo's English heading in lower case with hyphens for spaces, then `-demo` (`text-field-demo`), and whose heading is a `DemoHeading`, so that the address `/_gallery#<id>` puts focus on it.
+3. A row in both Scenario Outlines of `features/ui/components/gallery.feature`: no axe-core violations in its demo states, and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/components.ts`. A third outline there, `When I open the "<demo>" demo`, takes a row for its anchor.
 4. Contract scenarios for its behaviour in a feature file of its own, `features/ui/components/<component>.feature`, with steps that find it by role and name and drive it by keyboard alone. The one exception is a pointer's own behaviour, such as a tooltip's hover (1.4.13): its steps move the pointer through `ui-tests/support/pointer.ts`, which the maintainer approved and which never presses.
 
 #### 13.7.6 A workspace crate

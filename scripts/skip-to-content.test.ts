@@ -118,6 +118,21 @@ test("a load at the Language section leaves focus on its heading, and no other f
   );
 });
 
+test("a load at a demo of the gallery leaves focus on the demo's heading", () => {
+  assert.deepEqual(
+    found([
+      "  Scenario: A demo",
+      '    When I open the "Tabs" demo',
+      '    And I press Tab until focus is on the tab "Snapshots"',
+      "    When I reload the page",
+      '    And I press Tab until focus is on the tab "Snapshots"',
+      "    When I open the component gallery",
+      '    And I press Tab until focus is on the tab "Snapshots"',
+    ]),
+    ["10 top"],
+  );
+});
+
 test("a background's steps come before each scenario's", () => {
   assert.deepEqual(
     found([

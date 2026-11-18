@@ -7,7 +7,46 @@ Feature: The component gallery
   stays clear of accessibility violations, and each component's structure is
   pinned by an ARIA snapshot. The text of a control, such as a button's label,
   grows with the reader's text size as the page's does, and the gallery still
-  fits a small screen when the text has grown (A4).
+  fits a small screen when the text has grown (A4). Each demo has an anchor,
+  /_gallery#<id>, whose address puts focus on the demo's heading, so a
+  scenario can start at its own demo.
+
+  Scenario Outline: The address of the "<demo>" demo puts focus on its heading
+    When I open the "<demo>" demo
+
+    Examples:
+      | demo              |
+      | Announcer         |
+      | Dialog            |
+      | Checkbox          |
+      | Radio group       |
+      | Status badge      |
+      | Badge             |
+      | Shared vocabulary |
+      | Toast             |
+      | Review dialog     |
+      | Tree              |
+      | Step-up field     |
+      | Pause control     |
+      | Spinner           |
+      | Icon              |
+      | Button            |
+      | Skeleton          |
+      | Banner            |
+      | Link              |
+      | Alert             |
+      | Tabs              |
+      | Vertical tabs     |
+      | Responsive tabs   |
+      | Text field        |
+      | Progress          |
+      | Table             |
+      | Tooltip           |
+
+  Scenario: A demo's heading takes focus from the demo's address but is no stop for Tab
+    When I open the "Dialog" demo
+    And I press Tab
+    Then focus is on the button "Open the demo dialog"
 
   Scenario Outline: Each component's demo states have no accessibility violations
     When I open the component gallery

@@ -30,10 +30,12 @@ const RELOAD = /^I reload the page$/;
 // Saving the language loads Settings again at its Language section.
 const RELOAD_AT_LANGUAGE = /^I press Enter, and the page loads again$/;
 
-// The one address that names a section whose heading takes focus as the
-// page loads (§4.5, route changes: `page::focus_when_named`). Any other
-// page load leaves focus at the top.
+// The addresses that name a section whose heading takes focus as the page
+// loads (§4.5, route changes: `page::focus_when_named`): Settings' Language
+// section, and a demo of the gallery, which "I open the … demo" names
+// (§13.7.5). Any other page load leaves focus at the top.
 const AT_SECTION = /#language$/;
+const OPEN_DEMO = /^I open the "[^"]*" demo$/;
 
 const SKIP = /^I skip to the content$/;
 
@@ -228,8 +230,9 @@ export function walksWithoutSkip(feature: string, header: RegExp): Finding[] {
   for (const scenario of scenarios(feature)) {
     if (!scenario.tags.includes("@ui")) continue;
     let focus: Focus = "elsewhere";
-    // Whether the page's address names the Language section, so that a
-    // reload leaves focus on its heading.
+    // Whether the page's address names a section (Settings' Language
+    // section or a demo of the gallery), so that a load leaves focus on its
+    // heading.
     let atSection = false;
     let firstTab: { focus: Focus; atSection: boolean } | undefined;
     for (const { line, text } of scenario.steps) {
@@ -238,7 +241,7 @@ export function walksWithoutSkip(feature: string, header: RegExp): Finding[] {
       if (FIRST_TAB.test(text)) {
         ({ focus, atSection } = firstTab ?? { focus, atSection });
       } else if (opened) {
-        if (OPEN.test(text)) atSection = AT_SECTION.test(OPEN_ADDRESS.exec(text)?.[1] ?? "");
+        if (OPEN.test(text)) atSection = OPEN_DEMO.test(text) || AT_SECTION.test(OPEN_ADDRESS.exec(text)?.[1] ?? "");
         if (RELOAD_AT_LANGUAGE.test(text)) atSection = true;
         focus = atSection ? "elsewhere" : "top";
       } else if (SKIP.test(text)) {
