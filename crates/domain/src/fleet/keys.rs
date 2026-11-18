@@ -56,36 +56,54 @@ pub struct PublicKey([u8; KEY_BYTES]);
 impl PublicKey {
     /// Parses a key that came from outside: a token, a file, the wire.
     pub fn from_bytes(bytes: [u8; KEY_BYTES]) -> Result<Self, KeyRefused> {
-        todo!()
+        if !y_below_p(&bytes) || x_is_zero_with_sign(&bytes) {
+            return Err(KeyRefused::NotCanonical);
+        }
+        if SMALL_ORDER_KEYS.contains(&bytes) {
+            return Err(KeyRefused::SmallOrder);
+        }
+        Ok(Self(bytes))
     }
 
     pub const fn as_bytes(&self) -> &[u8; KEY_BYTES] {
-        todo!()
+        &self.0
     }
 }
 
 impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "PublicKey({})", lower_hex(&self.0))
     }
 }
 
 /// The 255-bit `y` (the sign bit cleared), compared with `p` from the most
 /// significant byte down.
 fn y_below_p(bytes: &[u8; KEY_BYTES]) -> bool {
-    todo!()
+    let mut y = *bytes;
+    y[KEY_BYTES - 1] &= 0x7f;
+    less_than_le(&y, &FIELD_PRIME)
 }
 
 /// The two points with `x = 0` are `y = 1` and `y = p - 1`; their canonical
 /// encodings have no sign bit, so one with it is another encoding of a
 /// small-order point.
 fn x_is_zero_with_sign(bytes: &[u8; KEY_BYTES]) -> bool {
-    todo!()
+    if bytes[KEY_BYTES - 1] & 0x80 == 0 {
+        return false;
+    }
+    let mut y = *bytes;
+    y[KEY_BYTES - 1] &= 0x7f;
+    y == SMALL_ORDER_KEYS[0] || y == SMALL_ORDER_KEYS[1]
 }
 
 /// Whether the little-endian number `a` is below `b`.
 fn less_than_le(a: &[u8; KEY_BYTES], b: &[u8; KEY_BYTES]) -> bool {
-    todo!()
+    for (x, y) in a.iter().rev().zip(b.iter().rev()) {
+        if x != y {
+            return x < y;
+        }
+    }
+    false
 }
 
 /// Why bytes aren't a signature the protocol accepts.
@@ -103,17 +121,22 @@ pub struct Signature([u8; SIGNATURE_BYTES]);
 
 impl Signature {
     pub fn from_bytes(bytes: [u8; SIGNATURE_BYTES]) -> Result<Self, SignatureRefused> {
-        todo!()
+        let s = bytes.last_chunk::<KEY_BYTES>();
+        if s.is_some_and(|s| less_than_le(s, &GROUP_ORDER)) {
+            Ok(Self(bytes))
+        } else {
+            Err(SignatureRefused::NotCanonical)
+        }
     }
 
     pub const fn as_bytes(&self) -> &[u8; SIGNATURE_BYTES] {
-        todo!()
+        &self.0
     }
 }
 
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "Signature({})", lower_hex(&self.0))
     }
 }
 
@@ -126,24 +149,32 @@ pub struct SigningSeed(Zeroizing<[u8; KEY_BYTES]>);
 impl SigningSeed {
     /// Takes the bytes and wipes the copy it was given.
     pub fn from_bytes(mut bytes: [u8; KEY_BYTES]) -> Self {
-        todo!()
+        let seed = Self(Zeroizing::new(bytes));
+        bytes.zeroize();
+        seed
     }
 
     /// The seed itself, for the signing adapter alone.
     pub fn expose(&self) -> &[u8; KEY_BYTES] {
-        todo!()
+        &self.0
     }
 }
 
 impl fmt::Debug for SigningSeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        f.write_str("SigningSeed(***)")
     }
 }
 
 /// Lower-case hex, two digits a byte.
 pub(crate) fn lower_hex(bytes: &[u8]) -> String {
-    todo!()
+    use std::fmt::Write as _;
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        // Writing to a `String` can't fail.
+        let _ = write!(text, "{byte:02x}");
+    }
+    text
 }
 
 /// 64 hex digits as 32 bytes, at compile time; a bad constant fails the

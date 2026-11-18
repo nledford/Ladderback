@@ -56,11 +56,21 @@ pub struct InvalidHubAddress;
 
 impl HubAddress {
     pub fn parse(text: &str) -> Result<Self, InvalidHubAddress> {
-        todo!()
+        let rest = text
+            .strip_prefix("https://")
+            .or_else(|| text.strip_prefix("http://"));
+        let well_formed = rest.is_some_and(|rest| !rest.is_empty())
+            && text.len() <= MAX_ADDRESS_BYTES
+            && !text.chars().any(|c| c.is_whitespace() || c.is_control());
+        if well_formed {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidHubAddress)
+        }
     }
 
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
@@ -90,43 +100,114 @@ impl PairingToken {
         pairing_seed: SigningSeed,
         address: HubAddress,
     ) -> Self {
-        todo!()
+        Self {
+            hub_key,
+            tls,
+            pairing_seed,
+            address,
+        }
     }
 
     pub const fn hub_key(&self) -> &PublicKey {
-        todo!()
+        &self.hub_key
     }
 
     pub const fn tls(&self) -> TokenTls {
-        todo!()
+        self.tls
     }
 
     /// The pairing key's seed, which the agent signs `Pair` with and never
     /// sends.
     pub const fn pairing_seed(&self) -> &SigningSeed {
-        todo!()
+        &self.pairing_seed
     }
 
     pub const fn address(&self) -> &HubAddress {
-        todo!()
+        &self.address
     }
 
     /// The token as text, a secret until it is used.
     pub fn to_text(&self) -> SecretValue {
-        todo!()
+        let address = self.address.as_str().as_bytes();
+        let mut bytes = Zeroizing::new(Vec::with_capacity(FIXED_BYTES + address.len()));
+        bytes.push(TOKEN_VERSION);
+        bytes.extend_from_slice(self.hub_key.as_bytes());
+        match self.tls {
+            TokenTls::Ca => {
+                bytes.push(0);
+                bytes.extend_from_slice(&[0; KEY_BYTES]);
+            }
+            TokenTls::Pinned(fingerprint) => {
+                bytes.push(1);
+                bytes.extend_from_slice(fingerprint.digest());
+            }
+        }
+        bytes.extend_from_slice(self.pairing_seed.expose());
+        // `HubAddress` holds at most 200 bytes.
+        bytes.push(u8::try_from(address.len()).unwrap_or(u8::MAX));
+        bytes.extend_from_slice(address);
+        let checksum = checksum(&bytes);
+        bytes.extend_from_slice(&checksum);
+        let mut text = Zeroizing::new(String::with_capacity(MAX_TOKEN_TEXT));
+        text.push_str(TOKEN_PREFIX);
+        URL_SAFE_NO_PAD.encode_string(bytes.as_slice(), &mut text);
+        SecretValue::new(text.as_str())
     }
 
     /// Reads a token as it was shown: the prefix, the checksum and the
     /// version are checked before any field is read. The decoding is strict,
     /// so one token has one text.
     pub fn parse(text: &str) -> Result<Self, TokenRefused> {
-        todo!()
+        if text.len() > MAX_TOKEN_TEXT {
+            return Err(TokenRefused::Malformed);
+        }
+        let encoded = text
+            .strip_prefix(TOKEN_PREFIX)
+            .ok_or(TokenRefused::Malformed)?;
+        let bytes = Zeroizing::new(
+            URL_SAFE_NO_PAD
+                .decode(encoded)
+                .map_err(|_| TokenRefused::Malformed)?,
+        );
+        let (body, sum) = bytes
+            .split_last_chunk::<CHECKSUM_BYTES>()
+            .ok_or(TokenRefused::Malformed)?;
+        if body.is_empty() || checksum(body) != *sum {
+            return Err(TokenRefused::Malformed);
+        }
+        let mut fields = Fields(body);
+        if fields.byte()? != TOKEN_VERSION {
+            return Err(TokenRefused::Unsupported);
+        }
+        let hub_key =
+            PublicKey::from_bytes(fields.array()?).map_err(|_| TokenRefused::Malformed)?;
+        let tls_byte = fields.byte()?;
+        let fingerprint = fields.array()?;
+        let tls = match tls_byte {
+            0 if fingerprint == [0; KEY_BYTES] => TokenTls::Ca,
+            1 => TokenTls::Pinned(Fingerprint::from_digest(fingerprint)),
+            _ => return Err(TokenRefused::Malformed),
+        };
+        let pairing_seed = SigningSeed::from_bytes(fields.array()?);
+        let length = usize::from(fields.byte()?);
+        let address = fields.take(length)?;
+        if !fields.0.is_empty() {
+            return Err(TokenRefused::Malformed);
+        }
+        let address = std::str::from_utf8(address)
+            .ok()
+            .and_then(|text| HubAddress::parse(text).ok())
+            .ok_or(TokenRefused::Malformed)?;
+        Ok(Self::new(hub_key, tls, pairing_seed, address))
     }
 }
 
 /// The first 4 bytes of the SHA-256 of `bytes`.
 fn checksum(bytes: &[u8]) -> [u8; CHECKSUM_BYTES] {
-    todo!()
+    let digest: [u8; KEY_BYTES] = Sha256::digest(bytes).into();
+    *digest
+        .first_chunk::<CHECKSUM_BYTES>()
+        .unwrap_or(&[0; CHECKSUM_BYTES])
 }
 
 /// The token's bytes not read yet; a field past the end is a malformed token.
@@ -134,15 +215,27 @@ struct Fields<'a>(&'a [u8]);
 
 impl<'a> Fields<'a> {
     fn take(&mut self, count: usize) -> Result<&'a [u8], TokenRefused> {
-        todo!()
+        if count > self.0.len() {
+            return Err(TokenRefused::Malformed);
+        }
+        let (field, rest) = self.0.split_at(count);
+        self.0 = rest;
+        Ok(field)
     }
 
     fn byte(&mut self) -> Result<u8, TokenRefused> {
-        todo!()
+        let (&first, rest) = self.0.split_first().ok_or(TokenRefused::Malformed)?;
+        self.0 = rest;
+        Ok(first)
     }
 
     fn array(&mut self) -> Result<[u8; KEY_BYTES], TokenRefused> {
-        todo!()
+        let (field, rest) = self
+            .0
+            .split_first_chunk::<KEY_BYTES>()
+            .ok_or(TokenRefused::Malformed)?;
+        self.0 = rest;
+        Ok(*field)
     }
 }
 

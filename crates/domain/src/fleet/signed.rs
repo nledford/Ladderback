@@ -25,17 +25,17 @@ pub struct Nonce([u8; KEY_BYTES]);
 
 impl Nonce {
     pub const fn from_bytes(bytes: [u8; KEY_BYTES]) -> Self {
-        todo!()
+        Self(bytes)
     }
 
     pub const fn as_bytes(&self) -> &[u8; KEY_BYTES] {
-        todo!()
+        &self.0
     }
 }
 
 impl fmt::Debug for Nonce {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "Nonce({})", lower_hex(&self.0))
     }
 }
 
@@ -51,7 +51,10 @@ pub enum Binding {
 impl Binding {
     /// The kind byte `Connect` names and the signed bytes carry.
     pub const fn kind(&self) -> u8 {
-        todo!()
+        match self {
+            Self::None => 0,
+            Self::TlsExporter(_) => 1,
+        }
     }
 }
 
@@ -61,11 +64,11 @@ pub struct Handshakes(u64);
 
 impl Handshakes {
     pub const fn from_bits(bits: u64) -> Self {
-        todo!()
+        Self(bits)
     }
 
     pub const fn bits(self) -> u64 {
-        todo!()
+        self.0
     }
 }
 
@@ -77,15 +80,15 @@ pub struct EpochSeconds(u64);
 impl EpochSeconds {
     /// The whole seconds of `time`, or `None` before the epoch.
     pub fn from_timestamp(time: Timestamp) -> Option<Self> {
-        todo!()
+        u64::try_from(time.as_second()).ok().map(Self)
     }
 
     pub const fn from_seconds(seconds: u64) -> Self {
-        todo!()
+        Self(seconds)
     }
 
     pub const fn seconds(self) -> u64 {
-        todo!()
+        self.0
     }
 }
 
@@ -103,11 +106,16 @@ pub struct InvalidWireName;
 
 impl WireName {
     pub fn parse(text: &str) -> Result<Self, InvalidWireName> {
-        todo!()
+        let fits = (1..=MAX_WIRE_NAME_BYTES).contains(&text.len());
+        if fits && text.bytes().all(|byte| byte.is_ascii_graphic()) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidWireName)
+        }
     }
 
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
@@ -117,7 +125,7 @@ pub struct PayloadDigest([u8; KEY_BYTES]);
 
 impl PayloadDigest {
     pub fn of(payload: &[u8]) -> Self {
-        todo!()
+        Self(Sha256::digest(payload).into())
     }
 }
 
@@ -227,13 +235,13 @@ pub struct SignedBytes(Vec<u8>);
 
 impl SignedBytes {
     pub fn as_bytes(&self) -> &[u8] {
-        todo!()
+        &self.0
     }
 }
 
 impl fmt::Debug for SignedBytes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "SignedBytes({})", lower_hex(&self.0))
     }
 }
 
@@ -242,53 +250,224 @@ struct Writer(Vec<u8>);
 
 impl Writer {
     fn label(name: &str) -> Self {
-        todo!()
+        let mut writer = Self(Vec::with_capacity(512));
+        let label = [LABEL_PREFIX, name].concat();
+        writer.short(label.as_bytes());
+        writer
     }
 
     fn key(&mut self, key: &PublicKey) -> &mut Self {
-        todo!()
+        self.0.extend_from_slice(key.as_bytes());
+        self
     }
 
     fn agent(&mut self, id: AgentId) -> &mut Self {
-        todo!()
+        self.0.extend_from_slice(id.as_uuid().as_bytes());
+        self
     }
 
     fn nonce(&mut self, nonce: &Nonce) -> &mut Self {
-        todo!()
+        self.0.extend_from_slice(nonce.as_bytes());
+        self
     }
 
     fn binding(&mut self, binding: &Binding) -> &mut Self {
-        todo!()
+        self.0.push(binding.kind());
+        match binding {
+            Binding::None => self.0.extend_from_slice(&[0; KEY_BYTES]),
+            Binding::TlsExporter(value) => self.0.extend_from_slice(value),
+        }
+        self
     }
 
     fn number(&mut self, number: u64) -> &mut Self {
-        todo!()
+        self.0.extend_from_slice(&number.to_be_bytes());
+        self
     }
 
     fn digest(&mut self, digest: &PayloadDigest) -> &mut Self {
-        todo!()
+        self.0.extend_from_slice(&digest.0);
+        self
     }
 
     /// One length byte, then the bytes. Every caller's type holds at most
     /// 255 bytes; the cap here only keeps a mistake from wrapping the length.
     fn short(&mut self, bytes: &[u8]) -> &mut Self {
-        todo!()
+        let bytes = bytes.get(..usize::from(u8::MAX)).unwrap_or(bytes);
+        self.0.push(u8::try_from(bytes.len()).unwrap_or(u8::MAX));
+        self.0.extend_from_slice(bytes);
+        self
     }
 
     fn done(&mut self) -> SignedBytes {
-        todo!()
+        SignedBytes(std::mem::take(&mut self.0))
     }
 }
 
 impl SignedMessage<'_> {
     /// The label's last part, after [`LABEL_PREFIX`].
     pub const fn label(&self) -> &'static str {
-        todo!()
+        match self {
+            Self::HubProof { .. } => "hub-proof",
+            Self::AgentProof { .. } => "agent-proof",
+            Self::Pair { .. } => "pair",
+            Self::Paired { .. } => "paired",
+            Self::HubMessage { .. } => "hub-signed",
+            Self::AgentMessage { .. } => "agent-signed",
+            Self::Refusal { .. } => "hub-refused",
+            Self::Handover { .. } => "handover",
+            Self::RecoveryHandover { .. } => "recovery-handover",
+            Self::RecoveryRotation { .. } => "recovery-rotation",
+        }
     }
 
     /// The bytes the message's signature covers.
     pub fn to_bytes(&self) -> SignedBytes {
-        todo!()
+        let mut w = Writer::label(self.label());
+        match self {
+            Self::HubProof {
+                hub_key,
+                agent_id,
+                agent_nonce,
+                hub_nonce,
+                binding,
+                handshakes,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .nonce(agent_nonce)
+                .nonce(hub_nonce)
+                .binding(binding)
+                .number(handshakes.bits()),
+            Self::AgentProof {
+                hub_key,
+                agent_id,
+                agent_key,
+                agent_nonce,
+                hub_nonce,
+                binding,
+                counter,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .key(agent_key)
+                .nonce(agent_nonce)
+                .nonce(hub_nonce)
+                .binding(binding)
+                .number(*counter),
+            Self::Pair {
+                hub_key,
+                agent_id,
+                agent_key,
+                agent_nonce,
+                hub_nonce,
+                binding,
+                counter,
+                hostname,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .key(agent_key)
+                .nonce(agent_nonce)
+                .nonce(hub_nonce)
+                .binding(binding)
+                .number(*counter)
+                .short(hostname.as_str().as_bytes()),
+            Self::Paired {
+                hub_key,
+                agent_id,
+                agent_key,
+                recovery_key,
+                agent_nonce,
+                hub_nonce,
+                binding,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .key(agent_key)
+                .key(recovery_key)
+                .nonce(agent_nonce)
+                .nonce(hub_nonce)
+                .binding(binding),
+            Self::HubMessage {
+                hub_key,
+                agent_id,
+                agent_nonce,
+                hub_nonce,
+                binding,
+                sequence,
+                expires_at,
+                kind,
+                payload,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .nonce(agent_nonce)
+                .nonce(hub_nonce)
+                .binding(binding)
+                .number(*sequence)
+                .number(expires_at.seconds())
+                .short(kind.as_str().as_bytes())
+                .digest(payload),
+            Self::AgentMessage {
+                hub_key,
+                agent_id,
+                agent_nonce,
+                hub_nonce,
+                binding,
+                sequence,
+                kind,
+                payload,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .nonce(agent_nonce)
+                .nonce(hub_nonce)
+                .binding(binding)
+                .number(*sequence)
+                .short(kind.as_str().as_bytes())
+                .digest(payload),
+            Self::Refusal {
+                hub_key,
+                agent_id,
+                agent_nonce,
+                hub_nonce,
+                binding,
+                code,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .nonce(agent_nonce)
+                .nonce(hub_nonce)
+                .binding(binding)
+                .short(code.as_str().as_bytes()),
+            Self::Handover {
+                old_key,
+                new_key,
+                made_at,
+            } => w.key(old_key).key(new_key).number(made_at.seconds()),
+            Self::RecoveryHandover {
+                recovery_key,
+                new_hub_key,
+                recovery_number,
+                made_at,
+            } => w
+                .key(recovery_key)
+                .key(new_hub_key)
+                .number(*recovery_number)
+                .number(made_at.seconds()),
+            Self::RecoveryRotation {
+                old_recovery_key,
+                new_recovery_key,
+                recovery_number,
+                made_at,
+            } => w
+                .key(old_recovery_key)
+                .key(new_recovery_key)
+                .number(*recovery_number)
+                .number(made_at.seconds()),
+        }
+        .done()
     }
 }
 

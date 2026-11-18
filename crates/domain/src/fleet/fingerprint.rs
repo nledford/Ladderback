@@ -22,28 +22,28 @@ impl Fingerprint {
     /// The fingerprint of an Ed25519 key: the hub key, an agent key, the
     /// recovery key.
     pub fn of_key(key: &PublicKey) -> Self {
-        todo!()
+        Self::of_bytes(key.as_bytes())
     }
 
     /// The fingerprint of any other key's encoding, such as the TLS
     /// certificate's SubjectPublicKeyInfo.
     pub fn of_bytes(encoding: &[u8]) -> Self {
-        todo!()
+        Self(Sha256::digest(encoding).into())
     }
 
     /// A fingerprint carried whole, as a pairing token carries the
     /// certificate's.
     pub const fn from_digest(digest: [u8; KEY_BYTES]) -> Self {
-        todo!()
+        Self(digest)
     }
 
     pub const fn digest(&self) -> &[u8; KEY_BYTES] {
-        todo!()
+        &self.0
     }
 
     /// All 256 bits as 64 lower-case hex digits.
     pub fn full_hex(&self) -> String {
-        todo!()
+        lower_hex(&self.0)
     }
 }
 
@@ -51,13 +51,28 @@ impl fmt::Display for Fingerprint {
     /// The first 100 bits: 20 characters, a hyphen after each four but the
     /// last.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        let mut first = [0; 16];
+        first.copy_from_slice(self.0.first_chunk::<16>().unwrap_or(&[0; 16]));
+        let bits = u128::from_be_bytes(first) >> 28;
+        for i in 0..20u32 {
+            if i > 0 && i % 4 == 0 {
+                f.write_str("-")?;
+            }
+            let index = (bits >> (5 * (19 - i))) & 0x1f;
+            let digit = usize::try_from(index)
+                .ok()
+                .and_then(|index| CROCKFORD.get(index))
+                .copied()
+                .unwrap_or(b'0');
+            write!(f, "{}", char::from(digit))?;
+        }
+        Ok(())
     }
 }
 
 impl fmt::Debug for Fingerprint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "Fingerprint({self})")
     }
 }
 
@@ -68,23 +83,23 @@ pub struct KeyId([u8; 4]);
 
 impl KeyId {
     pub fn of_key(key: &PublicKey) -> Self {
-        todo!()
+        Self::of_fingerprint(&Fingerprint::of_key(key))
     }
 
     fn of_fingerprint(fingerprint: &Fingerprint) -> Self {
-        todo!()
+        Self(*fingerprint.0.first_chunk::<4>().unwrap_or(&[0; 4]))
     }
 }
 
 impl fmt::Display for KeyId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "{:08X}", u32::from_be_bytes(self.0))
     }
 }
 
 impl fmt::Debug for KeyId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "KeyId({self})")
     }
 }
 
@@ -95,19 +110,19 @@ pub struct TokenId(KeyId);
 
 impl TokenId {
     pub fn of_pairing_key(key: &PublicKey) -> Self {
-        todo!()
+        Self(KeyId::of_key(key))
     }
 }
 
 impl fmt::Display for TokenId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        self.0.fmt(f)
     }
 }
 
 impl fmt::Debug for TokenId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "TokenId({self})")
     }
 }
 

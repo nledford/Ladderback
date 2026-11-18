@@ -25,23 +25,32 @@ pub enum InvalidHostname {
 
 impl Hostname {
     pub fn parse(text: &str) -> Result<Self, InvalidHostname> {
-        todo!()
+        if text.is_empty() {
+            return Err(InvalidHostname::Empty);
+        }
+        if text.len() > MAX_HOSTNAME_BYTES {
+            return Err(InvalidHostname::TooLong);
+        }
+        if let Some(hidden) = text.chars().find(|&c| c.is_control() || is_format(c)) {
+            return Err(InvalidHostname::Hidden(hidden));
+        }
+        Ok(Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
-        todo!()
+        &self.0
     }
 }
 
 impl fmt::Debug for Hostname {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "Hostname({:?})", self.0)
     }
 }
 
 impl fmt::Display for Hostname {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        f.write_str(&self.0)
     }
 }
 
@@ -75,7 +84,9 @@ const FORMAT: &[(char, char)] = &[
 ];
 
 fn is_format(c: char) -> bool {
-    todo!()
+    FORMAT
+        .iter()
+        .any(|&(first, last)| (first..=last).contains(&c))
 }
 
 #[cfg(test)]
