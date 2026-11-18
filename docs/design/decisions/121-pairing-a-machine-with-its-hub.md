@@ -35,7 +35,7 @@ One rendering of a key's fingerprint is shown wherever a person compares one: **
 
 ## The hub's dialog
 
-**Settings → Agents → New pairing token** asks for a life (15 minutes by default, 5 minutes to 24 hours) and an address, then shows one token three ways from the same bytes: as text, as a QR code and, where the browser has a share sheet, a Share button. Making a token is a high-impact action under [120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md); this decision doesn't change its rules.
+**Settings → Agents → New pairing token** asks for a life (15 minutes by default, 5 minutes to 24 hours) and an address with its kind, then shows one token three ways from the same bytes: as text, as a QR code and, where the browser has a share sheet, a Share button. The kind is a choice beside the address: the hub's own certificate (pinned) or a certificate authority's, which is a proxy's. It defaults to the kind of the listener the page came in on, so a person who edits the address to a proxy's chooses the second, and the agent never meets a pinned token for an address it can't pin. Making a token is a high-impact action under [120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md); this decision doesn't change its rules.
 
 - **The dialog shows,** above the token: the hub key's fingerprint in full, the address, and when the token lapses, as a local time with the UTC offset and the time left ("14:47 UTC+01:00, in 15 minutes"). The lapse time and the seconds left come from the hub's response, and the page counts down on its own monotonic clock. It never compares the hub's time with the browser's wall clock, so a wrong clock can't show a live token as lapsed.
 - **A loopback or plain `http://` address gets a warning.** The address is what the person was using and is editable, since agents may reach the hub another way. A loopback address (`localhost`, `127.0.0.1`, `[::1]`) can't be reached from another machine, and an agent refuses a plain `http://` address that isn't loopback ([120, "Binding to the TLS session"](120-agent-hub-connection-security.md)). Either way an Alert in the Warning tone says so and asks for the address agents will use. Making the token stays possible, for an agent on this machine. `ladderback pairing-token` warns the same way ("From a terminal").
@@ -55,8 +55,8 @@ Every new agent is held pending until a person approves it ([120, "Pending appro
 
 - **Approving in the pairing dialog.** The new agent's row has Approve and Reject, named for it ("Approve laptop"). Approve opens the Step-up field in the same row, inside the same dialog, with no second modal on top of the first. Focus goes to the field, Escape or Cancel returns it to Approve, and a wrong password is a `role="alert"` in the dialog (`step-up-failed`). Reject needs no step-up: it turns the buttons into "Reject laptop" and "Keep waiting", the second focused. The dialog's status line says each outcome.
 - **Approving in Settings → Agents.** A "Waiting for approval" section stands above the agents list. It is a Table, with the hostname, agent ID, key fingerprint in full, how long it has waited and how long is left, and row buttons named for the agent. Approve opens a Review dialog, "Approve laptop?", that holds the full fingerprint and the Step-up field and starts on Cancel; Reject is a Review dialog too. After either, focus goes to the next row or the section's heading.
-- **A new key waiting for an agent that is already approved** shows as "New key waiting" on that agent's row, with both fingerprints and the same two actions. Approving swaps its key; rejecting discards the new key and leaves the agent as it was ([120, "Pairing"](120-agent-hub-connection-security.md)).
-- **A Banner on every hub page** says "3 machines are waiting for approval" while any wait, with a link to the section. Its edition carries the count and the arrival time of the newest agent, so dismissing it hides only that edition and a new arrival shows it again. It is Primary, and Warning in the last 24 hours of any agent's wait.
+- **A new key waiting for an agent that is already approved** shows as "New key waiting" on that agent's row, with both fingerprints and the same two actions. Approving swaps its key and closes the old key's live connections; rejecting discards the new key and leaves the agent as it was ([120, "Pairing"](120-agent-hub-connection-security.md)). A new key lapses after 7 days like a pending agent, counts toward the limit of 20, and is in the Banner's count.
+- **A Banner on every hub page** says "3 machines are waiting for approval" while any wait, new agents and new keys counted, with a link to the section. Its edition carries the count and the arrival time of the newest, so dismissing it hides only that edition and a new arrival shows it again. It is Primary, and Warning in the last 24 hours of any agent's wait.
 - **An arrival is said politely.** A `UiEvent::AgentPending` goes through the announcer, which says "laptop is waiting for approval", or a count when several arrive within 5 seconds. A Banner isn't a live region, so this is how a screen-reader user on another page hears of it. Inside the pairing dialog the announcer is inert, so the dialog's own status line says it.
 - **The `agent.pending` event** (§11) goes to the person's notification rules. Channels are opt-in, so without a rule the Banner, the announcement and the list are all there is.
 - **A pending agent lapses after 7 days** ([120, "Pending approval"](120-agent-hub-connection-security.md)). Each row shows how long it has waited and how long is left, both from the hub's response. In the last 24 hours the row says so in words, and the Banner takes the Warning tone.
@@ -159,10 +159,10 @@ Each is a catalog message in the web UI and the command line, with the code in t
 | `token-not-for-this-agent` | "This is a replacement token for another agent. Make a replacement token for this one." |
 | `hub-key-mismatch` | "This hub's key isn't the one this agent trusts. If you reset or reinstalled the hub on purpose, make a new token on the hub and pair again, and compare the hub key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it." |
 | `hub-proof-invalid` | Same as `hub-key-mismatch`, with "the hub didn't prove its key" |
-| `proof-refused` | "The hub refused this agent. It may have been removed, or its key may have changed. Look at the agents list on the hub; to bring it back, make a replacement token for it." One message for every cause, since the hub says no more |
+| `proof-refused` | "The hub refused this agent. It may have been removed, or its key may have changed. Look at the agents list on the hub; to bring it back, make a replacement token for it. If this machine was never approved, its wait may have lapsed: make a new token and pair again." One message for every cause, since the hub says no more |
 | `identity-conflict` | "Another machine is using this agent's identity. This one keeps backing up and runs no maintenance. Make a replacement token for it on the hub." |
 | `agent-removed` | "The hub removed this machine, or someone rejected it. It keeps backing up on its own. A new ordinary token is refused; ask whoever runs the hub for a replacement token for this agent." |
-| `pending-expired` | "Nobody approved this machine within 7 days, and the hub dropped it. Make a new token and pair again; the machine keeps its identity." |
+| `pending-expired` (signed, so shown as an instruction) | "Nobody approved this machine within 7 days, and the hub dropped it. Make a new token and pair again; the machine keeps its identity." Shown also to a machine that was off when the 7 days ended, a laptop asleep for 8 days among them: the hub keeps a marker for 30 days |
 | `pending-limit` | "The hub already has 20 agents waiting for approval. Approve or reject some, then pair again with this token." |
 | `pairing-needs-sign-in` | "Set an admin password on this machine before pairing from another computer." |
 | `step-up-failed` | With sign-in on: "That password didn't match. Try again; the wait grows with each miss." With sign-in off, on this machine only: "That key ID didn't match. Type the 8 characters shown above the field." |
@@ -174,8 +174,10 @@ Each is a catalog message in the web UI and the command line, with the code in t
 | `rate-limited` | "The agent refused a plan run the hub asked for: at most one in 5 minutes for a plan. Try again later; nothing was lost." |
 | `sequence-error` | "The connection to the hub went out of step and was closed; something in the network path may be dropping or repeating messages. The agent reconnects by itself. If it keeps happening, connect to the hub directly and look at the log." |
 | `stale-proof` | "The hub saw a late message from this agent and ignored it. Nothing is wrong and nothing was changed; the agent tries again on its own." It shows only in the log, and never as an alert |
-| `handshake-hidden` | "The hub's reply hid a newer handshake that the hub says it speaks, which a proxy or someone on the network may do. This agent didn't connect and sent no proof. Connect to the hub directly; if it persists, don't re-pair, and tell whoever runs the hub." |
+| `handshake-hidden` | "The hub's reply hid a newer handshake that the hub says it speaks. A proxy that forwards only some of the hub's routes may do that: forward the whole `/sync/` path, not only `/sync/v1`. This agent didn't connect and sent no proof. If it persists, don't re-pair, and tell whoever runs the hub." |
 | `generation-lower` | "The hub offered an older state than this agent has already seen, so the agent ignored it. It keeps backing up. If you restored the hub from a backup, or moved it, ask whoever runs it. If you didn't, the hub's key may be leaked: on the hub's machine run `ladderback hub-recover` with the recovery kit. A leaked key always needs a recovery or a reset of the hub key." |
+| `kit-command-only` | "The hub doesn't show the recovery kit in a browser here: sign-in is off, the connection can't be protected, or the 7 days are over. On the hub's machine run `ladderback recovery-kit`." |
+| a TLS handshake that failed on its version or key exchange (no code) | "The hub, or a proxy in front of it, doesn't speak TLS 1.3, or, for a pinned address, the hybrid key exchange X25519MLKEM768 this machine needs. Update the proxy or the hub, or reach the hub at its own address. It keeps backing up and tries again on its own. Don't pair over anything lower." |
 | out of date ([120, "Versions"](120-agent-hub-connection-security.md)) | "The hub is on an older release than this agent can use, or a newer one. This agent keeps backing up. Update whichever side is older." |
 
 Messages are localized (Fluent). A code's text never includes a token.
@@ -187,13 +189,13 @@ The hub makes a recovery seed at its first start and after each `hub-recover` ([
 - **The kit holds** the seed, as text in groups of four (`K7QM-…`, 13 groups) and as a QR code of the same text; the **recovery key's fingerprint**, which changes only when the hub is recovered, in the rendering of "The fingerprint"; the hub's address and the hub key's fingerprint, labeled "at the time this kit was made", since a routine rotation changes the hub key and keeps the seed; the date it was made, as `2026-11-18`; and three numbered steps.
 - **The three steps.** 1, on the machine that runs the hub, run `ladderback hub-recover`. 2, type or paste the seed at its prompt, which does not echo it; case, hyphens, spaces and Crockford's aliases are read ("O" for "0", "I" and "L" for "1"). The command shows the recovery key's fingerprint it derived: check that it is the one on this kit. 3, the hub makes a new key and a new kit, and its agents follow it on their next connection, so print the new kit and destroy this one.
 - **The kit is a route in the web app,** built from the shared components, not a page the daemon renders: the Step-up field opens it, the seed is a Text field set read-only, and errors are Alerts ("Shared components"). The route's address holds no seed and its title is "Ladderback recovery kit". The seed arrives in the response to the authenticated request that follows the step-up, with `Cache-Control: no-store`, so no cache or history keeps it and a reload or print never resubmits a form: after a reload the page asks for the step-up again.
-- **One step-up opens the kit, and no second one follows.** The step-up that opens the kit page covers its Download and the confirmation page, for at most 10 minutes and only while the person stays in the kit's pages ([120, "The recovery key"](120-agent-hub-connection-security.md)). Download and the confirmation take no step-up of their own, and the page says so beside both.
-- **It is viewable beyond loopback for 7 days only.** The kit page and its Download work for 7 days after the hub is set up and for 7 days after each `hub-recover`. After that the page says the kit can only be shown by `ladderback recovery-kit` on the hub's machine. Each view, in the page, a download or the command, raises `hub.recovery_kit_viewed` (§11), and the page says it does.
+- **One step-up opens the kit page, and its Download needs no second one.** The step-up that opens the kit page covers its Download, for at most 10 minutes and only while the person stays in the kit's pages ([120, "The recovery key"](120-agent-hub-connection-security.md)). The confirmation is another action and asks for a step-up of its own, and the page says so beside its link.
+- **It is viewable in the browser for 7 days only, and only with sign-in on.** The kit page and its Download work for 7 days after the hub is set up and for 7 days after each `hub-recover`. After that, with sign-in off or in proxy-header mode, or with built-in TLS on a connection that didn't use the hybrid key exchange, the page refuses with `kit-command-only` and says the kit can only be shown by `ladderback recovery-kit` on the hub's machine. Each view, in the page, a download or the command, raises `hub.recovery_kit_viewed` (§11) naming the way, the user and the peer address, and the page says it does; Settings shows the last view.
 - **The kit page prints as the kit and nothing else.** Its print rule hides the app's chrome, the Banner, Download, the confirmation link and every Alert but the leak warning, which is part of the sheet; the token's dialog hides its secret. "Shared components" names the two behaviors in one contract, so they don't contradict.
 - **The file is the same kit.** "Download" gives `ladderback-recovery-kit-2026-11-18.html`, one file with no script, no external reference and the QR as inline SVG, so it prints the same later. It is sent with `Content-Disposition: attachment` and `no-store`.
-- **`ladderback recovery-kit`** on the hub's machine, run by the user that owns the data folder, shows the kit as text and a code drawn as for a token ("The terminal's QR code"). **It refuses when standard output isn't a terminal,** unless `--out <path>` is given, since a redirect would write the root key with the shell's file mode and may overwrite a file; it warns that the terminal's scrollback, a `tmux` or `screen` log and a recording keep what it prints, and that the person can clear them. `--out` writes the file with mode 0600 and refuses to overwrite. After the 7 days `ladderback recovery-kit --confirm` is how the person confirms.
+- **`ladderback recovery-kit`** on the hub's machine, run by the user that owns the data folder, shows the kit as text and a code drawn as for a token ("The terminal's QR code"). **It refuses when standard output isn't a terminal,** unless `--out <path>` is given, since a redirect would write the root key with the shell's file mode and may overwrite a file; it warns that the terminal's scrollback, a `tmux` or `screen` log and a recording keep what it prints, and that the person can clear them. `--out` writes the file with mode 0600 and refuses to overwrite, and says to move the file off this machine and delete it. `ladderback recovery-kit --confirm` confirms the kit with a random group, as the web page does, and works at any time.
 - **The seed file waits for the person.** Until they confirm they have stored the kit, the seed stays in `hub-recovery-seed` in the data folder, which the default backup exclusion leaves out of a plan ([120, "The recovery key"](120-agent-hub-connection-security.md)). Settings and a Banner on the hub's pages say the kit is waiting, and after the 7 days that `ladderback recovery-kit` shows it.
-- **They confirm on a later page that doesn't show the seed,** by typing back the last group, four characters. A group read off the kit's own page would prove nothing. The field is a Text field apart from any step-up, with a visible label and a description: "The last four characters of the seed, from where you saved it. Paste works. Capital or small letters are fine, and O, I and L are read as 0, 1 and 1." A wrong group is an Alert and changes nothing; the right one deletes the seed file and the page says so.
+- **They confirm on a page that doesn't show the seed,** by typing back one group picked at random when the page loads, with its number ("Group 7 of 13"), never always the last, after a step-up of their own. It is offered at any time, also after the 7 days. The field is a Text field apart from any step-up, with a visible label and a description: "The four characters of group 7, from where you saved the kit. Paste works. Capital or small letters are fine, and O, I and L are read as 0, 1 and 1." The page doesn't claim more than it does: it says it catches a kit that is missing, cut short or mistyped, not that the kit is kept offline. A wrong group is an Alert and changes nothing; the right one deletes the seed file and the page says so.
 - **After the confirmation the hub has nothing to show.** The page says the hub no longer holds the seed and can't show it. A person who has lost the kit has a hub with a recovery seed nobody knows; [120, "The recovery key"](120-agent-hub-connection-security.md) says what that costs, and Settings tells them so they can decide.
 - **The QR is the seed's text and nothing more.** For 64 characters in alphanumeric mode it is version 3, 29 modules a side by the capacity tables (not rendered). It lets a person who keeps the kit on paper read the seed with a phone's camera and type or paste it at the prompt; no part of Ladderback scans it. It uses the crates of "Crates" and draws in the same module as the token's.
 - **Where a kit can leak, and where to keep it.** A printer's spool, a download folder, a synced downloads directory, a screenshot, a photo of the screen, and the shoulder of anyone behind the person. The page says so in one line above the kit ("Print it, or store the file offline on paper or an encrypted drive; don't keep it in a folder that syncs to the cloud, or on this machine"), and the file's name carries no secret. A person who syncs it anyway has put the root key where the cloud's holder can read it; the choice is theirs, and `hub-recover` with a new kit ends the exposure.
@@ -261,14 +263,14 @@ Each is a test that fails before the behavior exists (§13.1).
 - **The fingerprint.** One function renders every fingerprint shown, at 100 bits, with fixed vectors; the dialog, the command, Settings, the agent's confirm step and the pending row show the same string for one key; no key ID or agent ID is labeled a fingerprint or offered to verify with. A test reads the accessibility tree of a fingerprint and of the kit's seed and expects one name for each character, with the hyphens hidden, and the text wraps between groups at 320 CSS px with 200 % text.
 - **The QR.** It decodes to exactly the token's text. The SVG is black on white with a 4-module quiet zone, `forced-color-adjust: none` and `crispEdges`, at level L or an M of the same version, with a module of at least 4 CSS px and a `max-inline-size` that fits 320 px. The QR goes with the token when it is used, lapsed or canceled, and its text alternative doesn't hold the token.
 - **The camera.** It is asked for only on pressing "Scan the code", is released on a read, a cancel, "Stop scanning", an error and a page leave, and no frame is stored. The status line says "waiting for permission" while the browser asks. The preview is `aria-hidden`. A Wake Lock is asked for again when the page becomes visible. A scanned text that isn't a token is dropped with a status line. Scanning is offered only where the camera API and a secure context are.
-- **The dialog.** A used token replaces the content with a status line naming who used it, with the full fingerprint, and focus goes to the agent's row; a lapse puts focus on "Make a new token"; Cancel and Close revoke an unused token; a list shows unused tokens and revokes them by a Review dialog whose buttons carry the token ID; the expiry shows a UTC offset and its remaining time comes from the hub's response, so a wrong browser clock changes nothing; a loopback or plain `http://` address is warned about; a print rule hides the token; nothing is spoken through a Toast.
-- **Waiting for approval.** Approve in the dialog's row opens the Step-up field in place with no second modal; Approve in Settings opens a Review dialog that starts on Cancel; a wrong password is `step-up-failed` and approves nothing; Reject needs no step-up. The Banner's edition carries the count, so a dismissal hides only that count; the announcer says a new arrival politely, and the dialog's status line says it inside the dialog; `agent.pending` is raised once for each agent; a row shows its age and time left from the hub's response; after 7 days the agent is dropped and told `pending-expired`. The agent's page shows each state's Alert and Steps.
+- **The dialog.** A used token replaces the content with a status line naming who used it, with the full fingerprint, and focus goes to the agent's row; a lapse puts focus on "Make a new token"; Cancel and Close revoke an unused token; a list shows unused tokens and revokes them by a Review dialog whose buttons carry the token ID; the expiry shows a UTC offset and its remaining time comes from the hub's response, so a wrong browser clock changes nothing; a loopback or plain `http://` address is warned about; the address takes its kind with it, by default that of the listener the page came in on; a print rule hides the token; nothing is spoken through a Toast.
+- **Waiting for approval.** Approve in the dialog's row opens the Step-up field in place with no second modal; Approve in Settings opens a Review dialog that starts on Cancel; a wrong password is `step-up-failed` and approves nothing; Reject needs no step-up. The Banner's edition carries the count, new keys included, so a dismissal hides only that count; the announcer says a new arrival politely, and the dialog's status line says it inside the dialog; `agent.pending` is raised once for each agent or new key; a row shows its age and time left from the hub's response; after 7 days an agent is dropped and told `pending-expired`, also when it connects later, and a new key is discarded; approving a new key closes the old key's connections. The agent's page shows each state's Alert and Steps.
 - **The terminal's output.** `pairing-token` prints the hub fingerprint, the token, the one-time line with the token ID and a code whose half blocks decode, in a test, to exactly the token, with a 4-module quiet zone and explicit colors. It prints the token alone to a pipe, and the hub key, expiry and token ID to standard error. `NO_COLOR`, `--plain` and `--no-qr` print text and a line that says why, and `--qr` prints the code anyway. A loopback address is warned about.
 - **The terminal's size and wait.** A window too small waits, measures again on Enter, shows the time left and never mints a second token. The size shown matches the computed one for tokens from 191 to 420 characters. In a terminal it waits for the pairing and prompts with the full fingerprint, `n` leaves the agent pending, and Ctrl-C revokes an unused token. The token and the code are in no log line, and the command refuses to run as another user than the one that owns the data folder.
 - **`pair`.** A token on argv is refused with how to give it. A token wrapped across lines, quoted or with a trailing newline is read; one with letters changed fails the checksum with the message. It echoes what it read and asks before it sends anything. Piped with no terminal, a first pairing refuses without `--yes`. A changed hub key needs `--replace-pin` with a standard input that isn't a terminal, and the fingerprint is read in any case and with or without hyphens. A `--token-file` that others can read warns. `--hostname` pairs under that name. It waits with progress and ends with its own line and exit code for approval, rejection, removal and expiry, and Ctrl-C leaves the pairing as it is.
-- **Errors.** Every code in the table, and the three failures with no code, has a message with a next step in the catalog, and none holds a token. A refusal that isn't signed is shown only as "not connected", never as an instruction to re-key.
+- **Errors.** Every code in the table, and the four failures with no code (unreachable, TLS pin mismatch, plain `http://`, and a TLS handshake that failed on its version or key exchange), has a message with a next step in the catalog, and none holds a token. A refusal that isn't signed is shown only as "not connected", never as an instruction to re-key. `handshake-hidden` names the proxy's routes as the likely cause, and the TLS row doesn't send a person to look for the hub that isn't running.
 - **The Recovery Kit's page.** It is a route of the web app built from the shared components, and holds the seed in 13 groups and a QR that decodes to exactly the seed's text, the recovery key's fingerprint, the hub's address and key fingerprint labeled as of the kit's date, the date and the three steps. It is sent with `no-store`; its title and its address hold no part of the seed; a print rule leaves only the kit. The download is one file with no script and no external reference, and the same seed text.
-- **The Recovery Kit's access.** One step-up opens the kit, and the download and the confirmation need none; the kit is refused beyond 7 days, and each view raises `hub.recovery_kit_viewed`. The confirmation is on a page that holds none of the seed, takes a paste, any case and Crockford's aliases, and is a field apart from the step-up. A wrong group deletes nothing and the right one deletes the seed file; after that the page shows nothing of the seed.
+- **The Recovery Kit's access.** One step-up opens the kit and its download; the confirmation takes a step-up of its own. The kit is refused with `kit-command-only` with sign-in off, after 7 days and on a built-in TLS connection without the hybrid exchange, and each view raises `hub.recovery_kit_viewed` naming the way, the user and the peer address, and Settings shows the last. The confirmation is on a page that holds none of the seed, asks for a group picked at random and shows its number, takes a paste, any case and Crockford's aliases, is a field apart from the step-up, and works after the 7 days. A wrong group deletes nothing and the right one deletes the seed file; after that the page shows nothing of the seed.
 - **`recovery-kit`.** It refuses when standard output isn't a terminal unless `--out` is given, warns about scrollback, prints the text and a code that decodes to the seed, refuses a user other than the data folder's owner and refuses to overwrite a file.
 - **`hub-recover`.** The seed is read in any case, with or without hyphens and spaces, and with Crockford's aliases; the derived recovery key's fingerprint is shown before anything changes.
 - **Where they run.** The encoding and the checks in `domain` and `app` with fakes; the QR and the scanner `@ui` in the three engines, with a fake camera stream; the terminal flows `@e2e` against a pseudo-terminal.
@@ -559,6 +561,14 @@ Feature: Pairing a machine with its hub
   Scenario: The code stays readable on a small screen
     Given a hub showing a pairing code at 320 pixels with text enlarged to 200 percent
     Then the code fits without sideways scrolling and its modules are at least 4 pixels
+
+  Scenario: The token's address carries its certificate kind
+    Given a hub with built-in TLS that the person also reaches through a proxy
+    When the person edits the address in the dialog to the proxy's and chooses a certificate authority's certificate
+    Then the token is for a CA address
+    And an agent that pairs through the proxy is never told not to pair
+    When the person runs the hub's pairing-token command with that address and --kind ca
+    Then it makes the same kind of token
 ```
 
 ### Waiting for approval
@@ -636,6 +646,18 @@ Feature: Pairing a machine with its hub
     Then the page says it was approved and the announcer says so once
     When the hub removes it
     Then the page says the hub removed it and to ask for a replacement token
+
+  Scenario: A new key waiting is counted and lapses
+    Given an approved agent and a replacement token for it that another machine has used
+    Then the Banner counts the new key among the machines that wait
+    When seven days pass
+    Then the new key is discarded and the agent is as it was
+
+  Scenario: A laptop asleep for eight days is told to pair again
+    Given an agent that waited for approval and was asleep for eight days
+    When it wakes and connects
+    Then it says nobody approved it within seven days and to pair again with a new token
+    And it keeps backing up
 ```
 
 ### Errors and their next step
@@ -705,6 +727,23 @@ Feature: Pairing a machine with its hub
     Given a hub on this machine with sign-in off
     When the person types a key ID that doesn't match
     Then the hub says the key ID didn't match and to type the 8 characters shown
+
+  Scenario: A TLS version the agent can't use says to update the proxy
+    Given a hub behind a proxy that speaks only TLS 1.2
+    When the agent connects
+    Then the agent says the proxy doesn't speak TLS 1.3 and to update it
+    And it doesn't tell the person to check that the hub is running
+
+  Scenario: A pinned hub whose listener lacks the hybrid exchange is named
+    Given an agent paired with a hub at a pinned address whose listener speaks only X25519
+    When the agent connects
+    Then the agent says the hub doesn't offer the hybrid key exchange and sends nothing
+
+  Scenario: The kit isn't shown in a browser with sign-in off
+    Given a hub with sign-in off and an unconfirmed recovery seed
+    When the person opens the recovery kit's page
+    Then the page says the kit can be shown only by the recovery-kit command on the hub's machine
+    And the seed isn't sent
 ```
 
 ### The Recovery Kit
@@ -771,17 +810,28 @@ Feature: Pairing a machine with its hub
     Then the page holds no part of the seed
     And its field is separate from the password field and says that pasting, any case and the letters O, I and L are accepted
 
-  Scenario: A wrong last group doesn't confirm the kit
-    Given the person is on the confirmation page
-    When the person types a group that isn't the seed's last one
+  Scenario: A group that isn't the one asked for doesn't confirm the kit
+    Given the person is on the confirmation page, which asks for group 7
+    When the person types a group that isn't the seed's seventh
     Then the hub refuses and the seed file stays
 
+  Scenario: The confirmation asks for a new password and a random group
+    Given the person opened the recovery kit with their password
+    When the person goes to the confirmation
+    Then the page asks for the password again
+    And it shows the number of the group it asks for, which may differ the next time the page loads
+
   Scenario: The kit is confirmed with a pasted group in small letters, and the seed file is then deleted
-    Given the person is on the confirmation page
-    When the person pastes the seed's last group in small letters with an O where a zero belongs
+    Given the person is on the confirmation page, which asks for group 7
+    When the person pastes the seed's seventh group in small letters with an O where a zero belongs
     Then the hub deletes the seed file
     And the hub's pages no longer say the kit is waiting
     And the kit page says the hub no longer holds the seed and can't show it
+
+  Scenario: The kit is confirmed on the web after the seven days
+    Given a hub whose recovery seed has been unconfirmed for eight days
+    When the person confirms with their password and the group asked for
+    Then the hub deletes the seed file
 
   Scenario: A headless hub prints the kit in its terminal
     Given a hub with an unconfirmed recovery seed and no web browser
