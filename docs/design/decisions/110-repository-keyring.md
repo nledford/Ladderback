@@ -4,7 +4,7 @@
 
 `POST /api/v1/repositories` and `POST /api/v1/repositories/_init` take `keep-in-keyring` (absent is `false`). With it, the daemon keeps the inline password in the entry `ladderback/<alias>` through a new `Keyring` port, which the secrets adapter implements in one blocking call under the resolver's time limit, and saves `password-keyring = "ladderback/<alias>"` in its place. A request that asks for it with no alias, or with a password that is already a reference, is `invalid-body`. Connecting tests first, then keeps the password, then saves; creating keeps it before the job runs, so a missing keyring is refused before anything is created. A request that fails after it added the entry removes it again, except when a repository was created with that password and only the save failed: the entry may then be the only copy of it.
 
-A refusal is one of three codes at the password field, each with the `entry` and nothing saved: `keyring-unavailable` (no keyring service to ask), `keyring-unwritable` (it refused, failed or didn't answer in time) and `keyring-entry-taken`. The platform's words are the `detail`, masked of every secret of the repository, the typed password first (I4).
+A refusal is one of four codes at the password field, each with the `entry` and nothing saved: `keyring-unavailable` (no keyring service to ask), `keyring-locked` (the keyring service says its keyring is locked, added by #993), `keyring-unwritable` (it refused otherwise, failed or didn't answer in time) and `keyring-entry-taken`; security §10.2's "Refusals" says which failure is which. The platform's words are the `detail`, masked of every secret of the repository, the typed password first (I4).
 
 Six choices carry the weight.
 
