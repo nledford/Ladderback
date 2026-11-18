@@ -131,17 +131,17 @@ pub struct BrowserLanguages {
 impl BrowserLanguages {
     /// The languages asked for, best first: the requested locale, the one
     /// chosen, then the browser's languages. A name that is not a language
-    /// tag, or is longer than [`MAX_NAME_LEN`] bytes, is left out, and so is
+    /// tag, or is longer than `MAX_NAME_LEN` bytes, is left out, and so is
     /// `und`. The one chosen counts only as Settings keeps it: a tag this
     /// build offers, written exactly as [`languages`] gives it, so the page
     /// is never in a language Settings doesn't show chosen. At most
-    /// [`MAX_PREFERENCES`] of the browser's languages are kept, from the
+    /// `MAX_PREFERENCES` of the browser's languages are kept, from the
     /// first four times as many looked at.
     ///
     /// A pseudolocale stands in for `en-US` wherever it comes, so none kept
     /// or listed comes after a requested locale, which it would overrule.
     ///
-    /// [`languages`]: crate::languages
+    /// [`languages`]: crate::languages()
     pub fn preferences(&self) -> Vec<LanguageIdentifier> {
         let requested = self.requested.as_deref().and_then(browser_tag);
         let asked_for = requested.is_some();

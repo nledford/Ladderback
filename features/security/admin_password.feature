@@ -123,7 +123,7 @@ Feature: Setting and changing the admin password in Settings
 
     Scenario: With sign-in off, an admin password set in Settings by keyboard alone waits for a restart
       Given a daemon with sign-in off
-      When I open the address "/settings"
+      When I open the address "/settings#admin-password"
       Then the page shows a message containing "Once it is set, sign-in protects Ladderback"
       When I skip to the content
       And I press Tab until focus is on the textbox "New password"
@@ -138,7 +138,7 @@ Feature: Setting and changing the admin password in Settings
 
     Scenario: A password shown while it was typed is hidden again once it is set and the form is cleared
       Given a daemon with sign-in off
-      When I open the address "/settings"
+      When I open the address "/settings#admin-password"
       And I skip to the content
       And I press Tab until focus is on the textbox "New password"
       And I type "demo-admin-pass"
@@ -156,7 +156,7 @@ Feature: Setting and changing the admin password in Settings
 
     Scenario: Passwords that differ move focus to an error summary that says how to fix it
       Given a daemon with sign-in off
-      When I open the address "/settings"
+      When I open the address "/settings#admin-password"
       And I skip to the content
       And I press Tab until focus is on the textbox "New password"
       And I type "demo-admin-pass"
@@ -171,7 +171,7 @@ Feature: Setting and changing the admin password in Settings
     Scenario: With sign-in on, changing the admin password in Settings by keyboard alone asks to sign in with the new one
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      When I open the address "/settings"
+      When I open the address "/settings#admin-password"
       And I skip to the content
       And I press Tab until focus is on the textbox "Current password"
       And I type "demo-admin-pass"
@@ -192,7 +192,7 @@ Feature: Setting and changing the admin password in Settings
     Scenario: A wrong current password moves focus to an error summary that says so
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      When I open the address "/settings"
+      When I open the address "/settings#admin-password"
       And I skip to the content
       And I press Tab until focus is on the textbox "Current password"
       And I type "not-the-password"

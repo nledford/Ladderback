@@ -136,7 +136,7 @@ impl axum::serve::Listener for GatedListener {
     /// The next connection. A connection its client gave up on before it
     /// was accepted is passed over at once; after any other failure, such as
     /// a daemon out of descriptors, the accept is tried again
-    /// [`AFTER_FAILURE`] later, as `axum::serve` does with its own listener.
+    /// `AFTER_FAILURE` later, as `axum::serve` does with its own listener.
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
             match Self::accept(self).await {

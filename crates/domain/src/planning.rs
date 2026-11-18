@@ -97,7 +97,7 @@ pub enum ValueKind {
     /// [`MAX_LOCATION_BYTES`](crate::secrets::MAX_LOCATION_BYTES).
     Location,
     /// A location's `when`: an empty list, more than
-    /// [`MAX_RULE_ALTERNATIVES`](crate::planning::MAX_RULE_ALTERNATIVES)
+    /// [`MAX_RULE_ALTERNATIVES`]
     /// alternatives, or a `network` that isn't `wired` nor `wifi`.
     LocationRule,
     /// The value of an option, longer than

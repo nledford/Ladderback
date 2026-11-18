@@ -210,6 +210,27 @@ ui-gallery-answer-demo-warning = Answer the demo warning
 # The demo warning's button that keeps it open, which it opens on.
 ui-gallery-keep-demo-warning = Keep the demo warning
 
+# The button that opens the demo setting's dialog while the setting is off.
+# Changing the setting draws the button anew, and focus returns to the new one.
+ui-gallery-turn-demo-setting-on = Turn the demo setting on
+
+# The button that opens the demo setting's dialog while the setting is on.
+ui-gallery-turn-demo-setting-off = Turn the demo setting off
+
+# The demo setting dialog's accessible name and heading, at level 3.
+ui-gallery-demo-setting = Demo setting
+
+# What the demo setting dialog says, which describes it.
+ui-gallery-demo-setting-body = Its button is drawn anew once the setting changes, and focus returns to the new one.
+
+# The demo setting dialog's button that closes it and changes nothing, which it
+# opens on.
+ui-gallery-keep-demo-setting = Keep the demo setting
+
+# The demo setting dialog's button that turns the setting on or off and closes
+# it.
+ui-gallery-change-demo-setting = Change the demo setting
+
 # The heading of the gallery's table demo.
 ui-gallery-table-heading = Table
 
@@ -429,6 +450,15 @@ ui-gallery-demo-notification-hint = A demo choice: turning it on changes nothing
 # The label of the demo checkbox that starts on. It has no description.
 ui-gallery-demo-log = Keep the demo log
 
+# The label of the third demo checkbox, which shows a checkbox's error: it starts off.
+ui-gallery-demo-terms = Accept the demo terms
+
+# The description under the third demo checkbox.
+ui-gallery-demo-terms-hint = The demo terms change nothing.
+
+# The error the third demo checkbox shows under its description, as a form would once checked.
+ui-gallery-demo-terms-error = Accept the demo terms to go on.
+
 # The heading of the gallery's radio group demo.
 ui-gallery-radio-heading = Radio group
 
@@ -458,6 +488,18 @@ ui-gallery-demo-japanese = { "日本語" }
 
 # A choice of the second demo radio group: the name of Arabic, written in Arabic, which the group marks as Arabic, running right to left. Not translated.
 ui-gallery-demo-arabic = { "العربية" }
+
+# The legend of the third demo radio group, which shows a group's error: no choice is made in it.
+ui-gallery-demo-window = Demo backup window
+
+# The first choice of the third demo radio group.
+ui-gallery-demo-mornings = Mornings
+
+# The second choice of the third demo radio group.
+ui-gallery-demo-evenings = Evenings
+
+# The error the third demo radio group shows under its legend, as a form would once checked.
+ui-gallery-demo-window-error = Choose a demo backup window.
 
 # The heading of the gallery's status badge demo.
 ui-gallery-badge-heading = Status badge
@@ -2632,11 +2674,11 @@ ui-settings-title = Settings – { -brand-name }
 # The Settings page's heading: its one main heading.
 ui-settings-heading = Settings
 
-# Settings, while sign-in is off: an admin password has been set since Ladderback started, by `ladderback set-password` or in the Admin password section. Sign-in is decided only when Ladderback starts, so it stays off until a restart, which the restart section of the same page does where a service manager runs Ladderback.
-ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn sign-in on. The restart section below does it where a service manager runs { -brand-name }.
+# Settings, while sign-in is off: an admin password has been set since Ladderback started, by `ladderback set-password` or in the Admin password tab. Sign-in is decided only when Ladderback starts, so it stays off until a restart, which the Restart Ladderback tab of the same page does where a service manager runs Ladderback. "Restart Ladderback" is that tab's name, as `ui-restart-heading` words it.
+ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn sign-in on. The Restart { -brand-name } tab does it where a service manager runs { -brand-name }.
 
-# Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. The password can be set again in the Admin password section below this sentence, or at a terminal. `ladderback set-password` is typed as it is: keep it a string literal.
-ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Set the password again below, or with { "ladderback set-password" }.
+# Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. The password can be set again in the Admin password tab of the same page, named as `ui-admin-password-heading` words it, or at a terminal. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Set the password again in the Admin password tab, or with { "ladderback set-password" }.
 
 # The heading of the section of Settings that restarts Ladderback.
 ui-restart-heading = Restart { -brand-name }

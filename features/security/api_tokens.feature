@@ -191,7 +191,7 @@ Feature: API tokens
     Scenario: Creating a token by keyboard alone shows its secret once, with a button that copies it
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the page may use the clipboard
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       And I skip to the content
       And I press Tab until focus is on the textbox "Admin password"
       And I type "demo-admin-pass"
@@ -226,7 +226,7 @@ Feature: API tokens
     Scenario: Escape leaves the token's dialog and takes its secret off the page
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       And I skip to the content
       And I press Tab until focus is on the textbox "Label"
       And I type "nightly-mcp"
@@ -245,7 +245,7 @@ Feature: API tokens
       And the admin is signed in with "demo-admin-pass"
       And the admin has created the API token "nightly-mcp" with the scopes "read"
       And a program has used the API token "nightly-mcp"
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       Then the row "nightly-mcp" of the table "API tokens" says "Read" in its "Scopes" column, not as a list
       And the row "nightly-mcp" of the table "API tokens" shows "Less than a minute ago" in its "Last used" column
       And the page has no accessibility violations
@@ -254,7 +254,7 @@ Feature: API tokens
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       And the admin has created the API token "nightly-mcp" with the scopes "read, run"
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       And I skip to the content
       And I press Tab until focus is on the button "Revoke token nightly-mcp"
       And I press Enter
@@ -276,7 +276,7 @@ Feature: API tokens
     Scenario: A form without a label or a scope moves focus to an error summary that names both
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       And I skip to the content
       And I press Tab until focus is on the button "Create the token"
       And I press Enter
@@ -290,7 +290,7 @@ Feature: API tokens
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       And the admin has created 100 API tokens
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       And I press Shift+Tab until focus is on the textbox "Label"
       And I type "one-more"
       And I press Tab until focus is on the checkbox "Read"
@@ -302,14 +302,14 @@ Feature: API tokens
       And the page has no accessibility violations
 
     Scenario: With sign-in off, Settings says why there are no API tokens
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       Then the page shows a message containing "Sign-in is off, so there are no API tokens."
       And the page offers no button "Create the token"
       And the page has no accessibility violations
 
     Scenario: Tokens Ladderback can't read are said calmly in the list's place
       Given the daemon can't read its API tokens
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       Then the page shows a message containing "could not read or keep its API tokens"
       And the page has no accessibility violations
 
@@ -318,7 +318,7 @@ Feature: API tokens
       And the admin is signed in with "demo-admin-pass"
       And the admin has created the API token "nightly-mcp" with the scopes "read, run, preview"
       And a viewport of 320 by 256 pixels
-      When I open the address "/settings"
+      When I open the address "/settings#api-tokens"
       Then the page shows the row "nightly-mcp"
       And the page doesn't scroll sideways
       And no text is clipped
@@ -328,7 +328,7 @@ Feature: API tokens
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       And the admin has created the API token "nightly-mcp" with the scopes "read"
-      When I open the address "/settings?locale=<locale>"
+      When I open the address "/settings?locale=<locale>#api-tokens"
       Then the page shows the row "nightly-mcp"
       And every visible text but the data of the tables and lists is transformed
       And the page has no accessibility violations

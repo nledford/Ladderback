@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
 import { errors, type Locator } from "playwright";
+import { expect } from "playwright/test";
 
 import { journey, namePattern, pressUntilFocused, whereFocusIs } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
@@ -68,6 +69,12 @@ Then("the page's address is {string}", async function (this: BrowserWorld, path:
   assert.equal(new URL(this.page.url()).pathname, path, "the page's address");
 });
 
+// What names a part of the page in its address after the path, such as a
+// tab of Settings.
+Then("the page's address ends in the fragment {string}", async function (this: BrowserWorld, fragment: string) {
+  await expect.poll(() => new URL(this.page.url()).hash, { message: "the page's address's fragment" }).toBe(fragment);
+});
+
 When("I press Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   await pressUntilFocusIsOn(this, "Tab", role, name);
 });
@@ -96,7 +103,7 @@ Then("focus is on the radio {string}", async function (this: BrowserWorld, name:
 
 // A radio group is one stop: Tab from the choice made goes past the others.
 Then("focus has left the group {string}", async function (this: BrowserWorld, name: string) {
-  const group = journey(this.page).byRole("group", { name: namePattern(name) });
+  const group = journey(this.page).byRole("radiogroup", { name: namePattern(name) });
   assert.equal(await group.count(), 1, `the group "${name}" is not on the page once`);
   const inside = await group.evaluate((el) => el.contains(document.activeElement));
   assert.ok(!inside, `focus is still in the group "${name}": it is ${await whereFocusIs(this.page)}`);

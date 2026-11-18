@@ -43,6 +43,14 @@ pub fn selection_on_press(selected: usize, pressed: usize) -> Option<usize> {
     (pressed != selected).then_some(pressed)
 }
 
+/// The tab selected when the tabs are drawn, of tabs whose callers marked
+/// each as the one to start on or not (`marked`, in the order of the list):
+/// the first one marked, or the first tab when none is, so a caller can't
+/// start the tabs on a tab the set doesn't hold.
+pub fn selected_at_start(marked: impl IntoIterator<Item = bool>) -> usize {
+    marked.into_iter().position(|marked| marked).unwrap_or(0)
+}
+
 /// What a panel holds, as its caller says, which decides whether the panel
 /// is a Tab stop of its own: Tab from the selected tab goes into its panel,
 /// to the panel itself or to the first control in it.
@@ -211,6 +219,20 @@ mod tests {
     /// Where `key` moves focus in a column of tabs.
     fn in_a_column(at: usize, last: usize, key: &str, direction: Direction) -> Option<usize> {
         arrival(at, last, key, direction, Layout::Vertical)
+    }
+
+    #[test]
+    fn the_tabs_start_on_the_first_tab_marked_to_start_on() {
+        assert_eq!(selected_at_start([false, false, true]), 2);
+        assert_eq!(selected_at_start([false, true, false]), 1);
+        assert_eq!(selected_at_start([false, true, true]), 1);
+        assert_eq!(selected_at_start([true, true]), 0);
+    }
+
+    #[test]
+    fn tabs_none_of_which_is_marked_start_on_the_first() {
+        assert_eq!(selected_at_start([false, false, false]), 0);
+        assert_eq!(selected_at_start([false]), 0);
     }
 
     #[test]

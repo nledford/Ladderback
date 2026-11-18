@@ -416,7 +416,7 @@ pub enum WorkerEvent {
     /// this size, or a folder written as an archive. `name` is the entry's
     /// name as a person reads it, none for the snapshot's top; `host` is the
     /// host the snapshot records. Each is cut to
-    /// [`MAX_LISTED_TEXT_BYTES`].
+    /// `MAX_LISTED_TEXT_BYTES`.
     Dumping {
         found: DumpFound,
         name: Option<String>,
@@ -523,7 +523,7 @@ pub enum DumpResult {
 /// What a browse found: one page of the folder, or that the snapshot or the
 /// folder isn't there. The page is one message: at most
 /// [`domain::browse::PAGE_ENTRIES`] entries, serialized to at most
-/// [`LISTING_BATCH_BYTES`].
+/// `LISTING_BATCH_BYTES`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "found", rename_all = "snake_case")]
 pub enum FolderResult {

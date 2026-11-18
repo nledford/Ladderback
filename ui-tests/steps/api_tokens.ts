@@ -87,6 +87,27 @@ Given("the admin has created {int} API tokens", function (this: BrowserWorld, co
   });
 });
 
+// The daemon holds the page's next creation of a token for a while before it
+// answers, so the reader can leave its tab while it waits.
+Given(
+  "the daemon answers the next creation of an API token {int} seconds late",
+  function (this: BrowserWorld, seconds: number) {
+    let held = false;
+    this.contextRoutes.push(async (context) => {
+      await context.route(
+        (url) => url.pathname === "/api/v1/tokens",
+        async (route) => {
+          if (route.request().method() === "POST" && !held) {
+            held = true;
+            await new Promise((done) => setTimeout(done, seconds * 1_000));
+          }
+          await route.continue();
+        },
+      );
+    });
+  },
+);
+
 // A program presents the token as a program does, with no cookie, so the
 // daemon records its use.
 Given("a program has used the API token {string}", function (this: BrowserWorld, label: string) {

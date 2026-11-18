@@ -11,6 +11,7 @@ use std::sync::Arc;
 use api::{EntryDto, EntryKindDto, FolderDto, MsgArg};
 use l10n::{Direction, Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
+use leptos::either::Either;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use leptos_router::components::A;
@@ -31,8 +32,8 @@ use crate::components::{
     Alert, Align, Badge, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation,
     Dismissal, FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name,
     PauseUpdates, Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner,
-    State, StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, ToastTone,
-    Toasts, Tooltip, Tree, text_field,
+    State, StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, TitleLevel, Toast,
+    ToastTone, Toasts, Tooltip, Tree, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -175,6 +176,18 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         t(msg::UI_GALLERY_ANSWER_DEMO_WARNING),
         t(msg::UI_GALLERY_KEEP_DEMO_WARNING),
     );
+    // The demo setting, whose button is drawn anew each time the setting
+    // changes, as a page draws a control afresh once a run has changed what
+    // it does: whether the setting is on, and whether its dialog is open.
+    let setting_on = RwSignal::new(false);
+    let setting_open = RwSignal::new(false);
+    let (setting_turn_on, setting_turn_off, setting_body, setting_keep, setting_change) = (
+        t(msg::UI_GALLERY_TURN_DEMO_SETTING_ON),
+        t(msg::UI_GALLERY_TURN_DEMO_SETTING_OFF),
+        t(msg::UI_GALLERY_DEMO_SETTING_BODY),
+        t(msg::UI_GALLERY_KEEP_DEMO_SETTING),
+        t(msg::UI_GALLERY_CHANGE_DEMO_SETTING),
+    );
     // The pause control's demo: whether it is paused, and the demo runs that
     // finished meanwhile, each a change the banner counts.
     let demo_paused = RwSignal::new(false);
@@ -195,7 +208,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     // restore's is: the dialog opens again empty, a password shown there
     // hidden. Keyed on the opening, not on `open` turning false, which a
     // dialog closed with Escape and opened again at once may never see: its
-    // late `close` finds it open again and is left alone (`ReviewDialog`).
+    // late `close` finds it open again and is left alone (`ModalDialog`).
     let step_up_opening = RwSignal::new(0_u32);
     let step_up_id_open = RwSignal::new(false);
     let step_up_id_value = RwSignal::new(String::new());
@@ -413,6 +426,58 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     />
                 </p>
             </ModalDialog>
+            // Changing the setting draws its button anew, so the browser's own
+            // return of focus, to the button that opened the dialog, finds it
+            // gone: `returns_to` names the button by its id instead.
+            {move || {
+                let open_setting = Callback::new(move |()| setting_open.set(true));
+                if setting_on.get() {
+                    Either::Left(
+                        view! {
+                            <Button
+                                content=Content::Text(setting_turn_off.clone().into())
+                                id="gallery-demo-setting"
+                                on_press=open_setting
+                            />
+                        },
+                    )
+                } else {
+                    Either::Right(
+                        view! {
+                            <Button
+                                content=Content::Text(setting_turn_on.clone().into())
+                                id="gallery-demo-setting"
+                                on_press=open_setting
+                            />
+                        },
+                    )
+                }
+            }}
+            <ModalDialog
+                open=setting_open
+                id="gallery-demo-setting-dialog"
+                title=t(msg::UI_GALLERY_DEMO_SETTING)
+                title_level=TitleLevel::Three
+                described_by="gallery-demo-setting-body"
+                returns_to="gallery-demo-setting"
+            >
+                <p id="gallery-demo-setting-body">{setting_body}</p>
+                <p class="actions">
+                    <Button
+                        content=Content::Text(setting_keep.into())
+                        on_press=Callback::new(move |()| setting_open.set(false))
+                    />
+                    <Button
+                        content=Content::Text(setting_change.into())
+                        appearance=Appearance::Filled
+                        tone=Tone::Primary
+                        on_press=Callback::new(move |()| {
+                            setting_on.update(|on| *on = !*on);
+                            setting_open.set(false);
+                        })
+                    />
+                </p>
+            </ModalDialog>
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_CHECKBOX_HEADING)}</h2>
@@ -427,6 +492,15 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 id="gallery-log"
                 label=t(msg::UI_GALLERY_DEMO_LOG)
                 checked=RwSignal::new(true)
+            />
+            // Its error, as a form shows once it is checked, under its
+            // description.
+            <Checkbox
+                id="gallery-terms"
+                label=t(msg::UI_GALLERY_DEMO_TERMS)
+                description=t(msg::UI_GALLERY_DEMO_TERMS_HINT)
+                error=Some(t(msg::UI_GALLERY_DEMO_TERMS_ERROR))
+                checked=RwSignal::new(false)
             />
         </section>
         <section>
@@ -477,6 +551,18 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     ),
                 ]
                 chosen=RwSignal::new("en")
+            />
+            // A group with an error, as a form shows once it is checked: no
+            // choice made, so Tab lands on its first.
+            <RadioGroup
+                name="gallery-window"
+                legend=t(msg::UI_GALLERY_DEMO_WINDOW)
+                options=vec![
+                    ("mornings", t(msg::UI_GALLERY_DEMO_MORNINGS)),
+                    ("evenings", t(msg::UI_GALLERY_DEMO_EVENINGS)),
+                ]
+                error=Some(t(msg::UI_GALLERY_DEMO_WINDOW_ERROR))
+                chosen=RwSignal::new("")
             />
         </section>
         <section>
