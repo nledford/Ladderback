@@ -52,3 +52,19 @@ impl Signing for FakeSigning {
         Self::mac(key, message) == *signature.as_bytes()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Its keys keep `y` below 2²⁵⁴ and the sign bit off, so the domain
+    /// never refuses one as `y` past `p`, or as an `x` of zero with a sign.
+    #[test]
+    fn a_fake_key_keeps_its_top_two_bits_off() {
+        for byte in 0..=u8::MAX {
+            let seed = SigningSeed::from_bytes([byte; KEY_BYTES]);
+            let key = FakeSigning.public_key(&seed).unwrap();
+            assert_eq!(key.as_bytes()[KEY_BYTES - 1] & 0xc0, 0, "seed {byte:#04x}");
+        }
+    }
+}

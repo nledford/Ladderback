@@ -100,6 +100,14 @@ mod tests {
         }
     }
 
+    /// Debug names the type around the quoted name; Display is the name alone.
+    #[test]
+    fn a_name_shows_as_typed() {
+        let name = Hostname::parse("Nick's NAS").unwrap();
+        assert_eq!(format!("{name:?}"), r#"Hostname("Nick's NAS")"#);
+        assert_eq!(name.to_string(), "Nick's NAS");
+    }
+
     #[test]
     fn an_empty_name_is_refused() {
         assert_eq!(Hostname::parse(""), Err(InvalidHostname::Empty));

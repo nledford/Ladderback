@@ -47,6 +47,7 @@ fn a_token_is_103_bytes_plus_its_address() {
     let encoded = text.expose().strip_prefix(TOKEN_PREFIX).unwrap();
     let bytes = URL_SAFE_NO_PAD.decode(encoded).unwrap();
     assert_eq!(bytes.len(), 103 + "https://hub.example:9899".len());
+    assert_eq!(bytes.len(), FIXED_BYTES + "https://hub.example:9899".len());
 }
 
 /// The longest address, 200 bytes, makes the longest token, which reads back.
@@ -54,6 +55,7 @@ fn a_token_is_103_bytes_plus_its_address() {
 fn a_token_with_the_longest_address_reads_back() {
     let address = format!("https://{}", "h".repeat(MAX_ADDRESS_BYTES - 8));
     let text = token(pinned(), &address).to_text();
+    assert_eq!(text.expose().len(), 420);
     assert_eq!(text.expose().len(), MAX_TOKEN_TEXT);
     let read = PairingToken::parse(text.expose()).unwrap();
     assert_eq!(read.address().as_str(), address);
