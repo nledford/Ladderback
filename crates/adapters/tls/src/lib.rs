@@ -137,7 +137,8 @@ fn serial_number() -> Result<SerialNumber, ListenerError> {
 }
 
 /// The year, month and day, in UTC, `days` after `now`'s; the certificate
-/// counts from their midnight.
+/// counts from their midnight. A year before 0 is out of range: a
+/// certificate's time can't hold it.
 fn date(now: Timestamp, days: i64) -> Result<(i32, u8, u8), ListenerError> {
     let out_of_range = || ListenerError::Certificate {
         detail: format!("a certificate can't be valid {days} days from now"),
@@ -147,9 +148,10 @@ fn date(now: Timestamp, days: i64) -> Result<(i32, u8, u8), ListenerError> {
         .map_err(|_| out_of_range())?
         .to_zoned(TimeZone::UTC)
         .date();
+    let year = u16::try_from(day.year()).map_err(|_| out_of_range())?;
     let month = u8::try_from(day.month()).map_err(|_| out_of_range())?;
     let day_of_month = u8::try_from(day.day()).map_err(|_| out_of_range())?;
-    Ok((i32::from(day.year()), month, day_of_month))
+    Ok((i32::from(year), month, day_of_month))
 }
 
 fn certificate_error(error: rcgen::Error) -> ListenerError {
