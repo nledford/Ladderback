@@ -201,6 +201,17 @@ Feature: Each row of the Operations page names its operation and says what it di
     Then the row "demo-home" of the table "Operations" shows "Succeeded" in its "Status" column
     And the status badge of the row "demo-home" of the table "Operations" draws another icon than the one noted
 
+  # A run that ended with warnings is a success with something to read: its
+  # status is drawn in the Warning tone, with the warning icon, never in a
+  # clean success's green, so it doesn't read as one that needs nothing
+  # (#942). Its words say it too, so color is never the only signal.
+  Scenario: An operation that succeeded with warnings shows its status as a warning
+    Given the daemon reports a backup of "demo-home" that succeeded with warnings
+    When I open the address "/operations"
+    Then the row "demo-home" of the table "Operations" shows "Succeeded with warnings" in its "Status" column
+    And the status badge of the row "demo-home" of the table "Operations" is drawn in the Warning tone, with the warning icon
+    And the page has no accessibility violations
+
   Scenario: Runs that end while the page reads its history and reconnects each show what they did
     Given the daemon reports running backups of "demo-home" and "demo-docs"
     When I open the address "/operations"

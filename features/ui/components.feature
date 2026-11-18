@@ -1294,13 +1294,13 @@ Feature: The shared components in the gallery
       | light colors |
       | dark colors  |
 
-  Scenario Outline: A status badge of an operation that succeeded or failed is drawn in its status tone's pair, in <colors>
+  Scenario Outline: A status badge of an operation that succeeded, succeeded with warnings or failed is drawn in its status tone's pair, in <colors>
     Given the browser asks for "<colors>"
     When I open the component gallery
     Then each of these badges of the "Status badge" demo is drawn on its fill:
       | badge                   | words        | fill         |
       | Succeeded               | --success-fg | --success-bg |
-      | Succeeded with warnings | --success-fg | --success-bg |
+      | Succeeded with warnings | --warning-fg | --warning-bg |
       | Failed                  | --error-fg   | --error-bg   |
 
     Examples:
