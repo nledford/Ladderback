@@ -551,13 +551,6 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
   const said = shown.stdout.toString().trim();
   report.add("--version", shown.status === 0 && said === `ladderback ${version}`, `said ${JSON.stringify(said)}${shown.status === 0 ? "" : `, exit ${shown.status}: ${shown.stderr.trim()}`}`);
 
-  // A release has no hub (§16, decision 122): the argument parser refuses
-  // its commands, exit 2, before anything starts.
-  for (const args of [["serve", "--hub"], ["pairing-token"]]) {
-    const refused = await place.run(args, {});
-    report.add(`no hub: ${args.join(" ")} is refused`, refused.status === 2, `exit ${refused.status}: ${refused.stderr.trim().slice(0, 300)}`);
-  }
-
   const scratch = place.scratch;
   // Each daemon's own folders, and a release feed nothing answers at, so
   // the smoke test never asks GitHub for the newest release.
@@ -567,6 +560,14 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
     LADDERBACK_CACHE_DIR: `${scratch}/${name}/cache`,
     LADDERBACK_RELEASES_URL: "http://127.0.0.1:9/",
   });
+
+  // A release has no hub (§16, decision 122): the argument parser refuses
+  // its commands, exit 2, before anything starts. On scratch folders and a
+  // free port, so a release that has the hub by mistake touches nothing real.
+  for (const args of [["serve", "--hub", "--listen", "127.0.0.1:0"], ["pairing-token"]]) {
+    const refused = await place.run(args, folders("hub"));
+    report.add(`no hub: ${args.slice(0, 2).join(" ")} is refused`, refused.status === 2, `exit ${refused.status}: ${refused.stderr.trim().slice(0, 300)}`);
+  }
   const source = `${scratch}/source`;
   const repository = `${scratch}/repository`;
   const passwordFile = `${scratch}/password`;
