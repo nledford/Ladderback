@@ -117,6 +117,8 @@ CREATE TABLE repo_claims (repo_uuid TEXT, agent_id TEXT, requested TEXT, status 
 - `0014_proposal_decisions.sql` adds to `proposals` the columns of what a person decided (below, decision 89).
 - `0015_operation_entry.sql` adds `entry` to `operations` (below, #847).
 
+**Released migrations are append-only.** Every installed database records each applied migration's sqlx checksum and the store refuses to open one whose file has since changed, so a released migration is never edited, renamed or removed: a change is a new migration. `crates/adapters/store/tests/migrations_pinned.rs` pins each migration's checksum and fails on any such edit, or on a migration it doesn't list; adding a migration adds its line there in the same PR (#1068).
+
 **The hub's migrations ship in every build,** a release before M8 included, though only a build with the hub writes to their tables before then, so that a database has one schema history whichever build opened it (§16, decision 122).
 
 Later tables, columns and indexes arrive as migrations of the features that need them. As of version 15:
