@@ -217,6 +217,23 @@ fn the_full_path_suggested_follows_the_home_folder_s_own_separator() {
 }
 
 #[test]
+fn a_home_folder_that_uses_slashes_keeps_them_though_a_name_in_it_has_a_backslash() {
+    let saved = list(&["Documents"]);
+    let error = field_refusal(
+        ErrorCode::DryRunFolderInvalid,
+        &entry(1),
+        &saved,
+        Some(r"/home/demo\old"),
+    );
+    assert!(
+        error
+            .map(shown)
+            .unwrap()
+            .ends_with(r"such as /home/demo\old/Documents.")
+    );
+}
+
+#[test]
 fn without_a_home_folder_the_field_s_error_still_names_the_folder_typed() {
     let saved = list(&["Documents"]);
     let error = field_refusal(ErrorCode::DryRunFolderInvalid, &entry(1), &saved, None);
@@ -286,6 +303,13 @@ fn each_folder_s_remove_button_has_an_id_of_its_own_whatever_its_path_holds() {
 }
 
 #[test]
+fn a_remove_button_s_id_spells_each_byte_of_the_folder_high_digit_first() {
+    assert_eq!(remove_id("/a"), "dry-run-folder-remove-2f61");
+    // `a` and `q` differ only in their high digit.
+    assert_ne!(remove_id("/a"), remove_id("/q"));
+}
+
+#[test]
 fn a_folder_s_button_dialog_and_announcements_name_it() {
     let folder = "/home/demo/Documents";
     assert_eq!(shown(remove_label(folder)), "Remove /home/demo/Documents");
@@ -315,4 +339,81 @@ fn the_home_folder_s_warning_names_it_and_isolates_the_keys_folder_as_a_path() {
     // right-to-left text does.
     let isolated = text_with(&Localizer::new(&[]).with_isolation(true), said.0, &said.1);
     assert!(isolated.contains("\u{2068}~/.ssh\u{2069}"), "{isolated}");
+}
+
+/// The section once the daemon's read answered `folders` and `home`.
+fn read_as(folders: &[&str], home: Option<&str>) -> Allowlist {
+    let section = Allowlist::new("http://127.0.0.1:4100".to_owned());
+    section.held.set(Some(Listed::read(dto(folders, home))));
+    section
+}
+
+#[test]
+fn the_list_is_read_and_saved_at_the_daemon_s_own_origin() {
+    assert_eq!(
+        Allowlist::new("http://127.0.0.1:4100".to_owned()).url(),
+        "http://127.0.0.1:4100/api/v1/settings/dry-run-allowlist"
+    );
+}
+
+#[test]
+fn a_list_not_read_yet_holds_no_folder_and_names_no_home_folder() {
+    let section = Allowlist::new(String::new());
+    assert_eq!(section.current(), Vec::<String>::new());
+    assert_eq!(section.home(), None);
+}
+
+#[test]
+fn a_list_read_holds_its_folders_in_order_and_the_daemon_s_home_folder() {
+    let section = read_as(
+        &["/home/demo/Documents", "/home/demo/Music"],
+        Some("/home/demo"),
+    );
+    assert_eq!(
+        section.current(),
+        list(&["/home/demo/Documents", "/home/demo/Music"])
+    );
+    assert_eq!(section.home().as_deref(), Some("/home/demo"));
+}
+
+#[test]
+fn a_save_s_answer_is_taken_whether_or_not_the_list_was_read() {
+    let unread = Allowlist::new(String::new());
+    unread.take(dto(&["/home/demo/Documents"], Some("/home/demo")));
+    assert_eq!(
+        unread.held.get_untracked(),
+        Some(Listed::read(dto(
+            &["/home/demo/Documents"],
+            Some("/home/demo")
+        )))
+    );
+    let read = read_as(&["/home/demo/Documents"], Some("/home/demo"));
+    read.take(dto(&["/home/demo/Music"], None));
+    assert_eq!(read.current(), list(&["/home/demo/Music"]));
+    assert_eq!(read.home().as_deref(), Some("/home/demo"));
+}
+
+#[test]
+fn one_save_goes_at_a_time_and_the_next_starts_once_it_ends() {
+    let section = Allowlist::new(String::new());
+    assert!(section.start());
+    assert!(section.saving.get_untracked());
+    assert!(!section.start());
+    section.end();
+    assert!(!section.saving.get_untracked());
+    assert!(section.start());
+}
+
+#[test]
+fn the_folder_field_empties_once_the_folder_it_holds_is_added() {
+    let typed = RwSignal::new(" /home/demo/Music ".to_owned());
+    empty_if_still(typed, "/home/demo/Music");
+    assert_eq!(typed.get_untracked(), "");
+}
+
+#[test]
+fn a_folder_typed_while_the_last_was_added_stays_in_the_field() {
+    let typed = RwSignal::new("/home/demo/Pic".to_owned());
+    empty_if_still(typed, "/home/demo/Music");
+    assert_eq!(typed.get_untracked(), "/home/demo/Pic");
 }
