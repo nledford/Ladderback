@@ -382,7 +382,7 @@ Feature: Secret references in a repository's settings
       When the repository is resolved
       Then the resolution fails for the field "password"
       And the failure names the keyring entry "ladderback/demo"
-      And the problem is that there is no keyring service to ask
+      And the problem is that the keyring is locked
 
     Scenario: A command that fails is told by its status and what it said
       Given the command "vault-reader --token demo-argument" prints "demo-stdout\n" and fails with status 2 saying "no such entry\nsecond line"
