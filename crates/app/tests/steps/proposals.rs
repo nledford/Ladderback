@@ -9,8 +9,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use api::{ProposalStatusDto, UiEvent};
-use app::fakes::{FakeChangeCodec, InMemoryConfigStore, InMemoryProposalStore, SeededRandom};
-use app::ports::{ConfigDrafts, ConfigStore, ProposalStore};
+use app::fakes::{
+    FakeChangeCodec, FakeClock, InMemoryConfigStore, InMemoryProposalStore, SeededRandom,
+};
+use app::ports::{Clock, ConfigDrafts, ConfigStore, ProposalStore};
 use app::proposals::{
     ApprovalAsk, ForgetPreviewed, Made, ProposalError, ProposalPorts, Proposals, Review,
 };
@@ -54,6 +56,8 @@ pub struct ProposalsWorld {
     config: Option<Arc<InMemoryConfigStore>>,
     /// What the person's last forget preview came to.
     forget: Option<Result<ForgetPreviewed, ProposalError>>,
+    /// How long the person's last forget preview took to answer.
+    preview_took: Option<SignedDuration>,
 }
 
 impl Default for ProposalsWorld {
@@ -71,6 +75,7 @@ impl Default for ProposalsWorld {
             rejected: None,
             config: None,
             forget: None,
+            preview_took: None,
         }
     }
 }
@@ -112,6 +117,11 @@ impl ProposalsWorld {
 /// loop reads, on the scenario's clock, with sign-in off. Built again for
 /// each step, as one daemon's: under the same revision key.
 pub(crate) fn proposals(agent: &Agent) -> Proposals {
+    proposals_on(agent, agent.clock.clone())
+}
+
+/// As [`proposals`], on `clock`.
+fn proposals_on(agent: &Agent, clock: Arc<dyn Clock>) -> Proposals {
     let config = proposals_config(agent);
     Proposals::new(ProposalPorts {
         store: agent.proposals.store.clone(),
@@ -121,9 +131,10 @@ pub(crate) fn proposals(agent: &Agent) -> Proposals {
         writes: Arc::default(),
         changed: app::schedule::config_changes().0,
         events: agent.proposals.events.clone(),
-        clock: agent.clock.clone(),
+        clock,
         random: agent.proposals.random.clone(),
         revision_key: Ok(scenario_key()),
+        listings: Arc::default(),
     })
 }
 
@@ -792,11 +803,28 @@ async fn has_proposed_labelling(agent: &mut Agent, name: String, label: String) 
 #[when("a person previews what the proposal would forget")]
 async fn previews_forget(agent: &mut Agent) {
     let id = agent.proposals.kept().id.clone();
-    let maintenance = super::forget_steps::use_case(agent);
+    // The preview's own clock moves only when everything in it waits on
+    // it, to the next deadline, so reads that run at once take the time of
+    // the slowest, not the sum.
+    let clock = Arc::new(FakeClock::new(agent.clock.now()));
+    let maintenance = super::forget_steps::use_case_on(agent, clock.clone());
     let op = OperationId::from_uuid(domain::Uuid::from_u128(
         0x018f_0000_0000_7000_8000_0000_0000_0f0f,
     ));
-    agent.proposals.forget = Some(proposals(agent).forget_preview(&id, op, &maintenance).await);
+    let proposals = proposals_on(agent, clock.clone());
+    let previewed =
+        super::locations_steps::until_done(&clock, proposals.forget_preview(&id, op, &maintenance));
+    agent.clock.advance(clock.monotonic());
+    agent.proposals.preview_took = Some(clock.monotonic());
+    agent.proposals.forget = Some(previewed);
+}
+
+#[then(expr = "the forget preview is answered after {int} minutes")]
+fn preview_answered_after(agent: &mut Agent, minutes: i64) {
+    assert_eq!(
+        agent.proposals.preview_took,
+        Some(SignedDuration::from_mins(minutes))
+    );
 }
 
 /// The forget preview of the one repository the proposal touches, which

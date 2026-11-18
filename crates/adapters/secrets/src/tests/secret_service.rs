@@ -29,8 +29,7 @@ use crate::keyring_store::{Failure, activation_on, os_activation, os_store};
 /// Set in the copy, to what it does: the state of the stand-in's keyring, or
 /// the step of the store's call.
 const IN_COPY: &str = "LADDERBACK_SECRETS_STAND_IN_COPY";
-const FINDS_NOTHING: &str =
-    "tests::secret_service::a_locked_keyring_that_finds_nothing_is_no_keyring_service";
+const FINDS_NOTHING: &str = "tests::secret_service::a_locked_keyring_that_finds_nothing_is_locked";
 const KEEPS: &str =
     "tests::secret_service::a_secret_set_in_the_keyring_reads_back_until_it_is_deleted";
 const NO_SERVICE: &str =
@@ -44,20 +43,20 @@ const COLLECTION: &str = "/org/freedesktop/secrets/collection/login";
 
 /// A Secret Service whose default collection is locked and, as oo7 does,
 /// finds no items in it while it is, though the entry is there: the entry is
-/// refused as no keyring service to ask, in the words `keyring` gives a
-/// locked collection, never as missing (#483). The same service unlocked,
-/// finding nothing, has no such entry; one whose collection doesn't say
-/// whether it is locked leaves the missing entry unconfirmed, in the words of
-/// the call that failed.
+/// refused as a locked keyring, in the words `keyring` gives a locked
+/// collection, never as missing (#483). The same service unlocked, finding
+/// nothing, has no such entry; one whose collection doesn't say whether it is
+/// locked leaves the missing entry unconfirmed, in the words of the call that
+/// failed.
 #[test]
-fn a_locked_keyring_that_finds_nothing_is_no_keyring_service() {
+fn a_locked_keyring_that_finds_nothing_is_locked() {
     if let Some(state) = std::env::var_os(IN_COPY) {
         let read = os_store().get("ladderback-demo", "nas");
         if state == Keyring::Locked.name() {
             let said =
                 keyring::Error::NoStorageAccess(Box::new(dbus_secret_service::Error::Locked))
                     .to_string();
-            assert_eq!(read, Err(Failure::Refused(said)));
+            assert_eq!(read, Err(Failure::Locked(said)));
         } else if state == Keyring::Silent.name() {
             assert!(
                 matches!(&read, Err(Failure::Unconfirmed(why)) if why.contains("the stand-in has no such method")),
