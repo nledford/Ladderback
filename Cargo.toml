@@ -197,7 +197,7 @@ signal-hook = "0.4.6"
 # `sqlite-bundled` rather than `sqlite`, which adds extension loading,
 # (de)serializing a database and unlock notification (for a shared cache,
 # which the store doesn't use): none of them is called.
-sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
+sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
 # Compares a session's tokens in constant time (security §10.1, decision 70).
 subtle = "2.6.1"
 # The engine writes a downloaded folder as a tar archive (§10.4), as it is
