@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
 import { errors, type Locator } from "playwright";
+import { expect } from "playwright/test";
 
 import { journey, namePattern, pressUntilFocused, whereFocusIs } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
@@ -66,6 +67,12 @@ When("I skip to the content", async function (this: BrowserWorld) {
 // link's name is in a pseudolocale and so is the page's heading.
 Then("the page's address is {string}", async function (this: BrowserWorld, path: string) {
   assert.equal(new URL(this.page.url()).pathname, path, "the page's address");
+});
+
+// What names a part of the page in its address after the path, such as a
+// tab of Settings.
+Then("the page's address ends in the fragment {string}", async function (this: BrowserWorld, fragment: string) {
+  await expect.poll(() => new URL(this.page.url()).hash, { message: "the page's address's fragment" }).toBe(fragment);
 });
 
 When("I press Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {

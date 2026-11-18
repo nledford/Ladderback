@@ -56,7 +56,7 @@ Feature: The header bar
 
   Scenario: A failed sign-out isn't said again once the session has ended another way and the admin signs in again
     Given a daemon with sign-in on and the admin password "demo-admin-pass"
-    When I open the address "/settings"
+    When I open the address "/settings#signing-in"
     And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"

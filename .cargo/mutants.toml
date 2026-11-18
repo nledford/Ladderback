@@ -42,14 +42,17 @@
 # `@ui` scenarios of `features/security/sign_in.feature` and
 # `features/security/session_length.feature` run the glue in Chromium.
 #
-# `crates/web/src/settings.rs` is the DOM glue of the Settings page's API
-# tokens (security §10.1): it sends the list, create and revoke requests,
-# opens and closes the two dialogs, clears a new token's text when its dialog
-# is left, and writes the text to the clipboard. What the form lacks, the
-# request it sends, which field a refusal is about, how a scope and a last use
-# read and the words of each button and dialog are `api_tokens.rs`'s, mutated
-# on the host; the `@ui` scenarios of `features/security/api_tokens.feature`
-# run the glue in Chromium.
+# `crates/web/src/settings.rs` is the DOM glue of the Settings page's tabs
+# and its API tokens (security §10.1): it draws a tab per section, reads the
+# address's fragment and writes the chosen tab's, sends the list, create and
+# revoke requests, opens and closes the two dialogs, clears a new token's
+# text when its dialog is left, and writes the text to the clipboard. Which
+# section a fragment names, each section's own and what each panel holds are
+# `settings_tabs.rs`'s; what the form lacks, the request it sends, which
+# field a refusal is about, how a scope and a last use read and the words of
+# each button and dialog are `api_tokens.rs`'s, both mutated on the host; the
+# `@ui` scenarios of `features/ui/settings.feature` and
+# `features/security/api_tokens.feature` run the glue in Chromium.
 #
 # `crates/web/src/settings/password.rs` is the DOM glue of Settings' admin
 # password section (security §10.1, decision 70): it holds the form's
