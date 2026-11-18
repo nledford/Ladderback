@@ -155,6 +155,16 @@ impl PlanDryRuns {
         }
     }
 
+    /// Leaves out of every walk what `globs` name, as each backup leaves
+    /// out the secret key files in the data folder (§16, decision 120): in
+    /// rustic's `iglobs`, after the plan's own, and never tallied as one of
+    /// its excludes.
+    #[must_use]
+    pub fn with_left_out(self, globs: Vec<String>) -> Self {
+        let _ = globs;
+        todo!()
+    }
+
     /// Dry-runs `plan` for `asker`.
     pub async fn run(&self, asker: &Proposer, plan: &Plan) -> Result<PlanDryRun, DryRunError> {
         if self.running.swap(true, Ordering::AcqRel) {

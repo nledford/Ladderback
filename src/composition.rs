@@ -86,6 +86,7 @@ use uuid::Uuid;
 
 mod downloads;
 mod dry_runs;
+mod key_files;
 mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
@@ -93,6 +94,8 @@ mod profiles;
 mod proposals;
 mod restores;
 mod runs;
+
+use key_files::KeyFilesLeftOut;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
 pub(crate) struct Refused {
@@ -851,7 +854,7 @@ async fn state_over(
         writes: Arc::clone(&writes),
         resolve: Arc::clone(&resolve),
         agent_id,
-        left_out: left_out_of_backups(data_dir),
+        left_out: KeyFilesLeftOut::Globs(left_out_of_backups(data_dir)),
         engine: Arc::clone(&engine),
         locations: Some(locations),
         store: Arc::clone(&store),
@@ -1587,9 +1590,9 @@ struct PlanRunner {
     /// The agent's Full Disk Access check, run before each backup on macOS
     /// (§16, decision 115); none elsewhere.
     full_disk_access: Option<Arc<FullDiskAccessCheck>>,
-    /// The globs that leave the secret key files in the data folder out of
-    /// every backup (§16, decisions 120 and 122).
-    left_out: Vec<String>,
+    /// What keeps the secret key files in the data folder out of every
+    /// backup (§16, decisions 120 and 122).
+    left_out: KeyFilesLeftOut,
 }
 
 /// The globs that leave the secret key files out of a backup, for the data
@@ -1679,7 +1682,7 @@ impl PlanRunner {
                 // back; iglobs, so a case-insensitive file system's other
                 // spellings stay out too.
                 let mut filter = plan.filter.clone();
-                filter.iglobs.extend(self.left_out.iter().cloned());
+                filter.iglobs.extend(self.left_out.globs().iter().cloned());
                 filter
             },
             deadline_budget: backup_budget(None, None),
@@ -1892,6 +1895,7 @@ fn start_refused(error: &StartError) -> String {
                 wire_name(refusal.code)
             )
         }
+        StartError::KeyFilesNotLeftOut => todo!(),
     }
 }
 

@@ -17,7 +17,7 @@ pub use fingerprint::{Fingerprint, KeyId, TokenId};
 pub use hostname::{Hostname, InvalidHostname, MAX_HOSTNAME_BYTES};
 pub use key_files::{
     COUNTER_LOCK_FILE, ConnectionCounter, CounterRefused, KeyFile, LEFT_OUT_OF_BACKUPS,
-    MAX_TLS_KEY_BYTES, SeedFile, TlsKey, TlsKeyRefused, left_out_globs, one_line,
+    MAX_TLS_KEY_BYTES, SeedFile, TlsKey, TlsKeyRefused, is_left_out, left_out_globs, one_line,
 };
 pub use keys::{
     KEY_BYTES, KeyRefused, PublicKey, SIGNATURE_BYTES, SMALL_ORDER_KEYS, Signature,

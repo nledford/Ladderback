@@ -285,6 +285,9 @@ error-plan-invalid = { $problem ->
 # $rule (text): the notification rule's name, such as failures.
 error-plan-in-use = The notification rule { $rule } names the plan { $plan }, so the plan was not deleted. Remove the plan from that rule, then delete it again.
 
+# A backup was not started: its sources hold the data folder, which holds a secret key file, and the folder's path is not valid UTF-8, so the key files can't be left out of it.
+error-key-files-not-left-out = The backup was not started: it would take the secret key files in the data folder, and { -brand-name } can't leave them out because the folder's path isn't valid UTF-8. Move the data folder to a path in UTF-8, or take the folder that holds it out of the plan's sources.
+
 # A proposal of configuration changes holds no change, so nothing was kept.
 error-proposal-empty = The proposal holds no change, so it was not kept. Propose at least one change.
 

@@ -192,7 +192,7 @@ pub(super) async fn runner_at_a_gate() -> (
         runs: crate::composition::runs::Runs::default(),
         readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         full_disk_access: None,
-        left_out: Vec::new(),
+        left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };
     (runner, entered, open_gate, scratch)

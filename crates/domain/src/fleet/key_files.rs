@@ -95,6 +95,15 @@ pub fn left_out_globs(folder: &str) -> Vec<String> {
         .collect()
 }
 
+/// Whether [`left_out_globs`] leave out the file named `name` in the data
+/// folder: a name that starts with a left-out file's, in any case, as an
+/// `iglob` reads it. The name's bytes, as the file system gives them, so a
+/// name that isn't UTF-8 is judged too.
+pub fn is_left_out(name: &[u8]) -> bool {
+    let _ = name;
+    todo!()
+}
+
 /// Which seed a seed file holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SeedFile {

@@ -329,6 +329,74 @@ async fn the_warnings_of_every_walk_of_a_dry_run_are_counted_together() {
     assert_eq!(counted.warnings, 4);
 }
 
+/// The glob that leaves out [`WithKeyFile`]'s key file.
+const KEY_GLOB: &str = "!/srv/demo/hub-key*";
+
+/// The tree with a key file, `/srv/demo/hub-key` (17 bytes), which a walk
+/// leaves out only when its filter's `iglobs` end with [`KEY_GLOB`]; any
+/// other filter is the tree's to apply.
+struct WithKeyFile;
+
+#[async_trait]
+impl WalkSources for WithKeyFile {
+    async fn walk(
+        &self,
+        sources: &[Source],
+        filter: &SourceFilter,
+        limits: WalkLimits,
+        give_way: GiveWay,
+    ) -> Result<Walked, WalkError> {
+        let mut rest = filter.clone();
+        if rest.iglobs.last().map(String::as_str) == Some(KEY_GLOB) {
+            rest.iglobs.pop();
+            return tree().walk(sources, &rest, limits, give_way).await;
+        }
+        let file = |path: &str, size| (path.to_owned(), Some(size));
+        let folder = |path: &str| (path.to_owned(), None);
+        InMemoryTree::new([
+            folder("/srv/demo"),
+            file("/srv/demo/a.txt", 3),
+            file("/srv/demo/hub-key", 17),
+            folder("/srv/demo/cache"),
+            file("/srv/demo/cache/x", 11),
+            folder("/srv/demo/docs"),
+            file("/srv/demo/docs/b.txt", 5),
+            file("/srv/demo/docs/c.txt", 7),
+        ])
+        .walk(sources, &rest, limits, give_way)
+        .await
+    }
+}
+
+/// A dry run counts what a backup takes, so it leaves out the key files
+/// each backup does (§16, decision 120), in every walk, and its tally of
+/// what each exclude removes counts the plan's own alone.
+#[tokio::test]
+async fn a_dry_run_leaves_out_what_every_backup_leaves_out() {
+    let setup = Setup {
+        walk: Arc::new(WithKeyFile),
+        ..Setup::default()
+    };
+    let dry_runs = setup
+        .dry_runs(&["/srv/demo"])
+        .await
+        .with_left_out(vec![KEY_GLOB.to_owned()]);
+    let counted = dry_runs
+        .run(&Proposer::NoToken, &plan(&["/srv/demo"], &["!docs"]))
+        .await;
+    assert_eq!(
+        counted,
+        Ok(PlanDryRun {
+            files: 2,
+            bytes: 14,
+            unreadable: 0,
+            excludes: vec![tally("globs", 0, 2, 12)],
+            stopped: None,
+            warnings: 0,
+        })
+    );
+}
+
 /// How long a test waits on a held walk or on a dry run: both run in
 /// memory on a fake clock and answer at once, so one that waits on what
 /// never comes fails the test here instead of hanging it.

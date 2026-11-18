@@ -180,7 +180,7 @@ async fn what_hooks_printing_secrets_left(
         runs: crate::composition::runs::Runs::default(),
         readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         full_disk_access: None,
-        left_out: Vec::new(),
+        left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };
 

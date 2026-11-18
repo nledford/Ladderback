@@ -56,6 +56,39 @@ fn the_folder_is_read_as_written() {
     );
 }
 
+/// A name the globs leave out: a secret key file's, what is staged beside
+/// it, in any case, and whatever bytes follow; never the public files, nor
+/// a name that only holds a secret one's further in.
+#[test]
+fn the_names_the_globs_leave_out() {
+    let left_out: [&[u8]; 7] = [
+        b"hub-key",
+        b"hub-key.0123.tmp",
+        b"HUB-TLS-KEY",
+        b"hub-recovery-seed.new",
+        b"Agent-Key",
+        b"agent-key\xff",
+        b"hub-tls-key",
+    ];
+    for name in left_out {
+        assert!(is_left_out(name), "{}", name.escape_ascii());
+    }
+    let kept: [&[u8]; 9] = [
+        b"",
+        b"hub-ke",
+        b"hub-recovery-key",
+        b"hub-pin",
+        b"connection-counter",
+        b"ladderback.db",
+        b"old-hub-key",
+        b"\xffhub-key",
+        b"agent-id",
+    ];
+    for name in kept {
+        assert!(!is_left_out(name), "{}", name.escape_ascii());
+    }
+}
+
 #[test]
 fn one_line_takes_off_one_line_break() {
     assert_eq!(one_line("abc\n"), Some("abc"));

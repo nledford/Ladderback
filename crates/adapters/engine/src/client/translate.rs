@@ -346,6 +346,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::PlanUnknown
                 | ErrorCode::PlanInvalid
                 | ErrorCode::PlanInUse
+                | ErrorCode::KeyFilesNotLeftOut
                 | ErrorCode::ProposalEmpty
                 | ErrorCode::ProposalInvalid
                 | ErrorCode::ProposalTooLarge

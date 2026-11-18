@@ -69,7 +69,7 @@ async fn a_backup_started_by_hand_and_refused_for_its_secret_says_why_in_the_log
         runs: crate::composition::runs::Runs::default(),
         readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         full_disk_access: None,
-        left_out: Vec::new(),
+        left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };
 
@@ -429,7 +429,7 @@ async fn refused_runner(
         runs: crate::composition::runs::Runs::default(),
         readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         full_disk_access: None,
-        left_out: Vec::new(),
+        left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };
     (runner, heard, scripted, plan)
