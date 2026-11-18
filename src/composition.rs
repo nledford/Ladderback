@@ -940,8 +940,8 @@ async fn state_over(
     }
     // The plan dry run reads outside the backup concurrency limit, one at a
     // time, and gives way to every backup the queue holds (decision 89,
-    // point 13). It leaves out the key files each backup does (decision
-    // 120), so it counts what a backup would take.
+    // point 13). It leaves out the key files each backup does, and is
+    // refused where the backup is (decision 120), so it predicts the backup.
     let queue = Arc::clone(&runner.queue);
     let dry_runs: Arc<dyn http_adapter::DryRuns> = Arc::new(dry_runs::DryRunService::new(
         app::dry_run::PlanDryRuns::new(

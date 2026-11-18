@@ -1,7 +1,8 @@
 //! What keeps the secret key files in the data folder out of every backup
 //! and every dry run that walks the folder (§16, decisions 120, "A copied
 //! data folder", and 122, item 3): the globs that name them, or, when no
-//! glob can name the folder, the refusal of a backup that would take them.
+//! glob can name the folder, the refusal of a backup or dry run that would
+//! take them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -54,14 +55,15 @@ impl KeyFilesLeftOut {
         }
     }
 
-    /// The globs each dry run's walks leave the key files out with; none
-    /// when no glob can name them.
+    /// What each dry run's walks leave the key files out with, by the
+    /// backup's own check ([`Self::for_backup`]): the globs, or `None`, a
+    /// refusal, where a backup of the same sources is refused, since a dry
+    /// run predicts what the backup does.
     pub(super) fn for_dry_runs(&self) -> app::dry_run::LeftOut {
-        let globs = match self {
-            Self::Globs(globs) => globs.clone(),
-            Self::Unnamed(_) => Vec::new(),
-        };
-        Arc::new(move |_: &[Source]| Some(globs.clone()))
+        let left_out = self.clone();
+        Arc::new(move |sources: &[Source]| {
+            left_out.for_backup(sources).ok().map(<[String]>::to_vec)
+        })
     }
 
     /// The globs a backup of `sources` appends to its filter, or its
