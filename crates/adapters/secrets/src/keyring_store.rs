@@ -20,8 +20,12 @@ pub(crate) enum Failure {
     /// the session bus, or there is no session bus to reach one by. The
     /// platform's own words.
     NoService(String),
-    /// The Secret Service answered and refused: it says its keyring is
-    /// locked, or its unlock prompt was dismissed. The platform's own words.
+    /// The Secret Service answered that its keyring is locked. The
+    /// platform's own words.
+    Locked(String),
+    /// The Secret Service answered and refused otherwise: its unlock prompt
+    /// was dismissed, or it has no collection to look in. The platform's own
+    /// words.
     Refused(String),
     /// The Secret Service found no entry but couldn't say whether its
     /// keyring is locked, where an entry goes unseen: the entry may be
@@ -240,7 +244,7 @@ pub(crate) fn failure(
         keyring::Error::NoEntry => match store {
             OsStore::SecretService => match locked() {
                 Lock::Unlocked => Failure::NoEntry,
-                Lock::Locked(said) => Failure::Refused(said),
+                Lock::Locked(said) => Failure::Locked(said),
                 Lock::Unknown(why) => Failure::Unconfirmed(why),
             },
             OsStore::Keychain => Failure::NoEntry,
@@ -252,6 +256,7 @@ pub(crate) fn failure(
         }
         error => match unavailable {
             Some(KeyringCause::NoService) => Failure::NoService(error.to_string()),
+            Some(KeyringCause::Locked) => Failure::Locked(error.to_string()),
             Some(KeyringCause::Refused) => Failure::Refused(error.to_string()),
             None => Failure::Unreachable(error.to_string()),
         },
@@ -260,9 +265,9 @@ pub(crate) fn failure(
 
 /// What the error `keyring` boxed for a Secret Service failure says of the
 /// service: none to ask (no session bus, no daemon on it, a provider that
-/// isn't there), or one that refused (a locked or missing collection, a
-/// dismissed unlock prompt). Anything else, or an error of another type, is
-/// a read that failed: `None`.
+/// isn't there), one whose collection is locked, or one that refused
+/// otherwise (a missing collection, a dismissed unlock prompt). Anything
+/// else, or an error of another type, is a read that failed: `None`.
 #[cfg(target_os = "linux")]
 fn secret_service_unavailable(
     source: &(dyn std::error::Error + Send + Sync + 'static),
@@ -270,7 +275,8 @@ fn secret_service_unavailable(
     use dbus_secret_service::Error;
     match source.downcast_ref::<Error>() {
         Some(Error::Unavailable) => Some(KeyringCause::NoService),
-        Some(Error::Locked | Error::NoResult | Error::Prompt) => Some(KeyringCause::Refused),
+        Some(Error::Locked) => Some(KeyringCause::Locked),
+        Some(Error::NoResult | Error::Prompt) => Some(KeyringCause::Refused),
         Some(Error::Dbus(error)) => error.name().and_then(bus_error_cause),
         _ => None,
     }
@@ -280,8 +286,8 @@ fn secret_service_unavailable(
 /// when there is no session bus to connect to (`NoServer`, `FileNotFound`,
 /// or `NotSupported` from libdbus's autolaunch without a display) or no
 /// daemon owns the service's name (`ServiceUnknown`, `NameHasNoOwner`); one
-/// that refused when it says its collection is locked (`IsLocked`). A call
-/// the service took and failed (no reply, access denied, an object gone) is
+/// whose collection is locked when it says so (`IsLocked`). A call the
+/// service took and failed (no reply, access denied, an object gone) is
 /// neither. Only Linux reads D-Bus errors; the tests run it everywhere.
 #[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
 pub(crate) fn bus_error_cause(name: &str) -> Option<KeyringCause> {
@@ -291,7 +297,7 @@ pub(crate) fn bus_error_cause(name: &str) -> Option<KeyringCause> {
         | "org.freedesktop.DBus.Error.NotSupported"
         | "org.freedesktop.DBus.Error.ServiceUnknown"
         | "org.freedesktop.DBus.Error.NameHasNoOwner" => Some(KeyringCause::NoService),
-        "org.freedesktop.Secret.Error.IsLocked" => Some(KeyringCause::Refused),
+        "org.freedesktop.Secret.Error.IsLocked" => Some(KeyringCause::Locked),
         _ => None,
     }
 }
