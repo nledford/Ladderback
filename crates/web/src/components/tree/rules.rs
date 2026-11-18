@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use api::{EntryDto, EntryKindDto, FolderDto};
 
+use crate::components::link::rules::{Destination, Matching};
 use crate::repositories::Sentence;
 
 /// How long after a typed character the next one still adds to the same
@@ -703,8 +704,15 @@ pub(crate) fn encoded(text: &str) -> String {
 }
 
 /// The address of the page of snapshot `snapshot` of repository `alias`.
-pub(crate) fn snapshot_href(alias: &str, snapshot: &str) -> String {
+fn snapshot_href(alias: &str, snapshot: &str) -> String {
     format!("/snapshots/{}/{}", encoded(alias), encoded(snapshot))
+}
+
+/// Where a snapshot's row links to: its page, or `None` when the link's rules
+/// refuse its address (a `.` or `..` alias or ID, or an empty alias), and the
+/// row shows the ID as text.
+pub(crate) fn snapshot_link(alias: &str, snapshot: &str) -> Option<Destination> {
+    Destination::route(&snapshot_href(alias, snapshot), Matching::Exact)
 }
 
 #[cfg(test)]

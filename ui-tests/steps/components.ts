@@ -2011,7 +2011,12 @@ Then(
       const note = icon.nextElementSibling;
       return {
         icons: 1,
-        words: range.toString().trim(),
+        // Without Fluent's isolation marks around a variable, which show
+        // nothing, as a message with a version is.
+        words: range
+          .toString()
+          .replace(/[\u2068\u2069]/g, "")
+          .trim(),
         hidden: icon.getAttribute("aria-hidden"),
         after: last !== undefined && (rtl ? box.right <= last.left + 1 : box.left >= last.right - 1),
         noteUnseen: note !== null && getComputedStyle(note).clipPath === "inset(50%)" && note.nextSibling === null,
@@ -2067,9 +2072,8 @@ Then("the underline of the link {string} is thicker than at rest", async functio
 // Underlined at rest, its line at least a pixel thick and far enough under
 // the baseline (a fifth of the text's size) to clear the letters' descenders,
 // which ink skipping keeps it off as well.
-Then("every link of the {string} demo is underlined below its letters", async function (this: BrowserWorld, component: string) {
-  const links = demoSection(this.page, component).getByRole("link");
-  for (const link of await eachOf(links, LINK_DEMO_LINKS)) {
+async function assertUnderlinedBelowLetters(links: Locator, count: number): Promise<void> {
+  for (const link of await eachOf(links, count)) {
     const drawn = await link.evaluate((el) => {
       const style = getComputedStyle(el);
       return {
@@ -2085,36 +2089,33 @@ Then("every link of the {string} demo is underlined below its letters", async fu
     assert.ok(drawn.offset >= 0.2, `the link "${drawn.name}"'s underline is ${drawn.offset}em under its baseline`);
     assert.notEqual(drawn.skip, "none", `the link "${drawn.name}"'s underline crosses its letters`);
   }
-});
+}
 
-Then(
-  "each link of the {string} demo is drawn in its tone:",
-  async function (this: BrowserWorld, component: string, table: DataTable) {
-    const rows = table.hashes() as { link: string; color: string }[];
-    const section = demoSection(this.page, component);
-    await eachOf(section.getByRole("link"), rows.length);
-    for (const { link: name, color } of rows) {
-      const drawn = await section.getByRole("link", { name: namePattern(name) }).evaluate((el, token) => {
-        let want = getComputedStyle(el.parentElement ?? el).color;
-        if (token.startsWith("--")) {
-          const probe = document.createElement("span");
-          probe.style.color = `var(${token})`;
-          document.body.append(probe);
-          want = getComputedStyle(probe).color;
-          probe.remove();
-        }
-        const style = getComputedStyle(el);
-        return { want, text: style.color, underline: style.textDecorationColor };
-      }, color);
-      assert.equal(drawn.text, drawn.want, `the link "${name}" is not drawn in ${color}`);
-      assert.equal(drawn.underline, drawn.want, `the link "${name}"'s underline is not drawn in ${color}`);
-    }
-  },
-);
+// Each link in its tone, its words and underline alike: a token's color, or
+// the color of the text around it. The table names every link of `scope`.
+async function assertTones(scope: Locator, table: DataTable): Promise<void> {
+  const rows = table.hashes() as { link: string; color: string }[];
+  await eachOf(scope.getByRole("link"), rows.length);
+  for (const { link: name, color } of rows) {
+    const drawn = await scope.getByRole("link", { name: namePattern(name) }).evaluate((el, token) => {
+      let want = getComputedStyle(el.parentElement ?? el).color;
+      if (token.startsWith("--")) {
+        const probe = document.createElement("span");
+        probe.style.color = `var(${token})`;
+        document.body.append(probe);
+        want = getComputedStyle(probe).color;
+        probe.remove();
+      }
+      const style = getComputedStyle(el);
+      return { want, text: style.color, underline: style.textDecorationColor };
+    }, color);
+    assert.equal(drawn.text, drawn.want, `the link "${name}" is not drawn in ${color}`);
+    assert.equal(drawn.underline, drawn.want, `the link "${name}"'s underline is not drawn in ${color}`);
+  }
+}
 
-Then("every link of the {string} demo is drawn in the system's link color", async function (this: BrowserWorld, component: string) {
-  const links = demoSection(this.page, component).getByRole("link");
-  for (const link of await eachOf(links, LINK_DEMO_LINKS)) {
+async function assertSystemLinkColor(links: Locator, count: number): Promise<void> {
+  for (const link of await eachOf(links, count)) {
     const drawn = await link.evaluate((el) => {
       const probe = document.createElement("span");
       probe.style.forcedColorAdjust = "none";
@@ -2128,7 +2129,51 @@ Then("every link of the {string} demo is drawn in the system's link color", asyn
     assert.equal(drawn.text, drawn.want, `the link "${drawn.name}" is not drawn in LinkText`);
     assert.equal(drawn.underline, drawn.want, `the link "${drawn.name}"'s underline is not drawn in LinkText`);
   }
+}
+
+/** A landmark of every page, as a step names it. */
+function landmark(page: Page, name: string): Locator {
+  return page.getByRole(name === "banner" ? "banner" : "main");
+}
+
+Then("every link of the {string} demo is underlined below its letters", async function (this: BrowserWorld, component: string) {
+  await assertUnderlinedBelowLetters(demoSection(this.page, component).getByRole("link"), LINK_DEMO_LINKS);
 });
+
+Then(
+  "each link of the {string} demo is drawn in its tone:",
+  async function (this: BrowserWorld, component: string, table: DataTable) {
+    await assertTones(demoSection(this.page, component), table);
+  },
+);
+
+Then("every link of the {string} demo is drawn in the system's link color", async function (this: BrowserWorld, component: string) {
+  await assertSystemLinkColor(demoSection(this.page, component).getByRole("link"), LINK_DEMO_LINKS);
+});
+
+// The pages' links are the shared link (§4.5), so they look like the demo's.
+// The count is every link of the landmark, so none of them is left out, and
+// the step waits for links a page draws from its first read.
+Then(
+  /^every link in the (banner|main content) is underlined below its letters, (\d+) in all$/,
+  async function (this: BrowserWorld, where: string, count: string) {
+    await assertUnderlinedBelowLetters(landmark(this.page, where).getByRole("link"), Number(count));
+  },
+);
+
+Then(
+  /^every link in the (banner|main content) is drawn in the system's link color, (\d+) in all$/,
+  async function (this: BrowserWorld, where: string, count: string) {
+    await assertSystemLinkColor(landmark(this.page, where).getByRole("link"), Number(count));
+  },
+);
+
+Then(
+  /^each link in the (banner|main content) is drawn in its tone:$/,
+  async function (this: BrowserWorld, where: string, table: DataTable) {
+    await assertTones(landmark(this.page, where), table);
+  },
+);
 
 Then("the link {string} wraps onto more than one line", async function (this: BrowserWorld, name: string) {
   const lines = await linkNamed(this.page, name).evaluate((el) => {
