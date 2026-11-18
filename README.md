@@ -86,6 +86,17 @@ bash install.sh
 
 To build from source on Linux too, pass `--from-source`: `curl -fsSL … | bash -s -- --from-source`, or `bash install.sh --from-source`. A build asks before it installs any tool. The [install guide](docs/guide/install.md) says what the script checks and installs, how to download a release or build one by hand, how to update, how to run Ladderback as a service and what macOS asks for.
 
+On Debian, Ubuntu and Raspberry Pi OS (Debian 12 or newer, Ubuntu 22.04 or newer), or on Fedora, from 0.5.0 each release also has a package, which puts `ladderback` in `/usr/bin` and starts nothing. Download it from the [release](https://github.com/nledford/Ladderback/releases/latest) with its `SHA256SUMS`, check it, and install it:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+sudo apt install ./ladderback_<version>_arm64.deb          # amd64 on x86_64
+sudo dnf install ./ladderback-<version>-1.x86_64.rpm       # aarch64 on ARM
+ladderback install-service
+```
+
+The packages are unsigned and have no apt or dnf repository yet, so to update, install the next release's package and run `ladderback install-service` again. To move an install the script or a build made, remove `~/.cargo/bin/ladderback` first, install the package, then run `ladderback install-service` again, so the service runs `/usr/bin/ladderback`. The [install guide](docs/guide/install.md#install-a-package-debian-ubuntu-fedora) has the details.
+
 On macOS, a build from source is signed ad hoc, so after each update macOS asks again for Full Disk Access and Photos. A build from a checkout can instead be signed with a self-signed code-signing certificate from your own keychain, named in `LADDERBACK_SIGN_IDENTITY`, so that the grants carry over; the install guide says [how to make one](docs/guide/install.md#signing-your-build).
 
 ## Quick start

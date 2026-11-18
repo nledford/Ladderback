@@ -204,6 +204,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [120](decisions/120-agent-hub-connection-security.md) | How an agent and its hub prove who they are |
 | [121](decisions/121-pairing-a-machine-with-its-hub.md) | How a person pairs a machine with its hub |
 | [122](decisions/122-hub-out-of-releases-until-m8.md) | How the hub stays out of releases until M8 |
+| [123](decisions/123-deb-and-rpm-packages.md) | .deb and .rpm packages with each release, built by nfpm |
 
 ## 17. Open questions
 
