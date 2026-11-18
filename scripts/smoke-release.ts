@@ -20,6 +20,9 @@
 //     text instead;
 //   - with `LANGUAGE=en-XA` it speaks plain English: a release build has no
 //     pseudolocales (§8.4);
+//   - it has no hub until M8 (§16, decision 122): `serve --hub` and
+//     `pairing-token` are refused as unknown, and `serve` answers 404 on
+//     `/sync/v1`;
 //   - `serve` starts in scratch folders (LADDERBACK_CONFIG_DIR,
 //     LADDERBACK_DATA_DIR, LADDERBACK_CACHE_DIR) with no D-Bus session, and
 //     `GET /` answers 200 with the embedded web UI, whose wasm has neither the
@@ -548,6 +551,13 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
   const said = shown.stdout.toString().trim();
   report.add("--version", shown.status === 0 && said === `ladderback ${version}`, `said ${JSON.stringify(said)}${shown.status === 0 ? "" : `, exit ${shown.status}: ${shown.stderr.trim()}`}`);
 
+  // A release has no hub (§16, decision 122): the argument parser refuses
+  // its commands, exit 2, before anything starts.
+  for (const args of [["serve", "--hub"], ["pairing-token"]]) {
+    const refused = await place.run(args, {});
+    report.add(`no hub: ${args.join(" ")} is refused`, refused.status === 2, `exit ${refused.status}: ${refused.stderr.trim().slice(0, 300)}`);
+  }
+
   const scratch = place.scratch;
   // Each daemon's own folders, and a release feed nothing answers at, so
   // the smoke test never asks GitHub for the newest release.
@@ -607,6 +617,9 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
       pseudo.status !== 0 && line.startsWith(`ladderback: cannot listen on ${at}: `),
       `exit ${pseudo.status}, said ${JSON.stringify(line)}`,
     );
+
+    const sync = await call(place, at, "GET", "/sync/v1");
+    report.add("no hub: GET /sync/v1 answers 404", sync.status === 404, `${sync.status}`);
 
     const page = await call(place, at, "GET", "/");
     const html = page.body.toString();

@@ -80,7 +80,9 @@ _leptosfmt-pinned:
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
-# Lint: `clippy`, clippy on the web UI (wasm32, its wasm-only tests included), the type check of the
+# Lint: `clippy`, clippy on the web UI (wasm32, its wasm-only tests included),
+# both again with `release_flags`, so the build without the hub (§16, decision
+# 122) has its dead code and warnings caught too, the type check of the
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
 # dev-dependency), the tooling's own tests (`scripts/*.test.ts`, under Node's
 # built-in runner), the journey lint, the check that every path AGENTS.md and
@@ -92,10 +94,12 @@ clippy:
 # built for the host and, for `web`, not its wasm32-only ones. CI runs `lint`
 # on Linux alone, so a doc comment on macOS-only code is checked only by a
 # local run on a Mac; macOS CI runs `clippy` (see `clippy`).
-[doc('Clippy on the host and the web UI, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
+[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
+    cargo clippy --workspace --all-targets {{ release_flags }} -- -D warnings
+    cargo clippy --package web --all-targets --target wasm32-unknown-unknown {{ release_flags }} -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json
     node --test scripts/*.test.ts
     cd ui-tests && npm run --silent lint
@@ -237,10 +241,11 @@ test-e2e *args:
     scripts/with-skip-log.sh scripts/with-test-home.sh cargo test --workspace --test e2e -- "$@"
 
 # A release is built with `release_flags` (`--no-default-features`), which
-# leaves out the development pseudolocales (`pseudo`, technical design §8.4).
-# `test` builds with the default features, so the tests that exist only
-# without them never run there: the release lane of `l10n`'s tests
-# (`tests/lanes/release.rs`) and the no-pseudo test in `tests/cli_locale.rs`.
+# leaves out the development pseudolocales (`pseudo`, technical design §8.4)
+# and the hub (`hub`, §16, decision 122). `test` builds with the default
+# features, so the tests that exist only without them never run there: the
+# release lane of `l10n`'s tests (`tests/lanes/release.rs`), the no-pseudo test
+# in `tests/cli_locale.rs` and the hub's refusals in `tests/hub_gate.rs`.
 # This runs the tests of `l10n`
 # and `ladderback` built that way, so those run, and so does any test whose
 # result depends on the feature. The packages are named because only these two
@@ -597,7 +602,7 @@ package target binary version:
       if command -v sha256sum >/dev/null; then sha256sum "$file" > "$file.sha256"; else shasum -a 256 "$file" > "$file.sha256"; fi
     done
 
-# Runs scripts/smoke-release.ts on a release binary: its version, no
+# Runs scripts/smoke-release.ts on a release binary: its version, no hub, no
 # pseudolocales and no gallery, its dynamic libraries and glibc floor, then
 # the daemon serving its UI and running one backup in scratch folders, on this
 # machine or, with `--container <name>`, in a clean Linux container (Docker).

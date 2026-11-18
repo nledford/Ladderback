@@ -16,6 +16,13 @@ pub(crate) fn routes() -> Router<AppState> {
     }
     #[cfg(not(feature = "hub"))]
     {
-        todo!()
+        use axum::http::StatusCode;
+        use axum::routing::any;
+
+        let not_found = any(|| async { StatusCode::NOT_FOUND });
+        Router::new()
+            .route("/sync", not_found.clone())
+            .route("/sync/", not_found.clone())
+            .route("/sync/{*rest}", not_found)
     }
 }
