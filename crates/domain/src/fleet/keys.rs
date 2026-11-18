@@ -46,6 +46,9 @@ pub enum KeyRefused {
     /// A point of small order, under which a signature can verify for every
     /// message (§16, decision 120, "Crates").
     SmallOrder,
+    /// Text that isn't 64 lower-case hex digits, as a key file or the pin
+    /// holds a key.
+    NotHex,
 }
 
 /// An Ed25519 public key in its 32-byte encoding, canonical and not of small
@@ -67,6 +70,18 @@ impl PublicKey {
 
     pub const fn as_bytes(&self) -> &[u8; KEY_BYTES] {
         &self.0
+    }
+
+    /// The key from 64 lower-case hex digits, as a key file and the pin
+    /// hold it (§16, decision 120, "The hub key").
+    pub fn from_hex(text: &str) -> Result<Self, KeyRefused> {
+        let _ = text;
+        todo!()
+    }
+
+    /// The key as 64 lower-case hex digits.
+    pub fn to_hex(&self) -> String {
+        todo!()
     }
 }
 
@@ -152,6 +167,19 @@ impl SigningSeed {
     /// The seed itself, for the signing adapter alone.
     pub fn expose(&self) -> &[u8; KEY_BYTES] {
         &self.0
+    }
+
+    /// The seed from 64 lower-case hex digits, as its key file holds it,
+    /// decoded in place so no copy of it is left behind; `None` for any
+    /// other text.
+    pub fn from_hex(text: &str) -> Option<Self> {
+        let _ = text;
+        todo!()
+    }
+
+    /// The seed as 64 lower-case hex digits, wiped when dropped.
+    pub fn to_hex(&self) -> Zeroizing<String> {
+        todo!()
     }
 }
 

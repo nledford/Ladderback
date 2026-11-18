@@ -10,6 +10,7 @@ mod engine;
 mod event_bus;
 mod full_disk_access;
 mod hooks;
+mod identity;
 mod keyring;
 mod notifier;
 mod operation_store;
@@ -52,6 +53,7 @@ pub use hooks::{
     HOOK_TIMEOUT, HookContext, HookOutcome, HookOutput, HookPhase, HookRunner, HookSetup,
     HookStatus, MAX_HOOK_OUTPUT_BYTES,
 };
+pub use identity::{Attempt, Identity, IdentityError};
 pub use keyring::{Kept, Keyring, KeyringActivation, KeyringError};
 pub use notifier::{
     Credentials, DELIVERY_TIMEOUT, Destination, Message, Notification, Notifier, NotifyError,

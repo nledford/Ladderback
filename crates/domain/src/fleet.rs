@@ -7,16 +7,23 @@
 
 mod fingerprint;
 mod hostname;
+mod key_files;
 mod keys;
+mod pin;
 mod signed;
 mod token;
 
 pub use fingerprint::{Fingerprint, KeyId, TokenId};
 pub use hostname::{Hostname, InvalidHostname, MAX_HOSTNAME_BYTES};
+pub use key_files::{
+    COUNTER_LOCK_FILE, ConnectionCounter, CounterRefused, KeyFile, LEFT_OUT_OF_BACKUPS,
+    MAX_TLS_KEY_BYTES, SeedFile, TlsKey, TlsKeyRefused, left_out_globs, one_line,
+};
 pub use keys::{
     KEY_BYTES, KeyRefused, PublicKey, SIGNATURE_BYTES, SMALL_ORDER_KEYS, Signature,
     SignatureRefused, SigningSeed,
 };
+pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
 pub use signed::{
     Binding, EpochSeconds, Handshakes, InvalidWireName, LABEL_PREFIX, MAX_WIRE_NAME_BYTES, Nonce,
     PayloadDigest, SignedBytes, SignedMessage, WireName,
