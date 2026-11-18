@@ -103,7 +103,7 @@ Then("focus is on the radio {string}", async function (this: BrowserWorld, name:
 
 // A radio group is one stop: Tab from the choice made goes past the others.
 Then("focus has left the group {string}", async function (this: BrowserWorld, name: string) {
-  const group = journey(this.page).byRole("group", { name: namePattern(name) });
+  const group = journey(this.page).byRole("radiogroup", { name: namePattern(name) });
   assert.equal(await group.count(), 1, `the group "${name}" is not on the page once`);
   const inside = await group.evaluate((el) => el.contains(document.activeElement));
   assert.ok(!inside, `focus is still in the group "${name}": it is ${await whereFocusIs(this.page)}`);
