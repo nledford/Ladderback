@@ -26,7 +26,7 @@ use domain::fleet::{Binding, Fingerprint, TlsKey};
 use domain::{SignedDuration, TimeZone, Timestamp};
 use rcgen::{
     CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, KeyPair,
-    KeyUsagePurpose, PKCS_ECDSA_P256_SHA256, PublicKeyData as _,
+    KeyUsagePurpose, PKCS_ECDSA_P256_SHA256, PublicKeyData as _, SerialNumber,
 };
 use rustls::client::Resumption;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -53,6 +53,11 @@ const VALID_FOR_DAYS: i64 = 397;
 /// How far before `now` a certificate is valid from, for a peer whose clock
 /// runs behind.
 const BACKDATED_DAYS: i64 = 1;
+
+/// How many random bytes a certificate's serial number has: RFC 5280 takes
+/// at most 20 octets, and CA/Browser Forum certificates carry 64 bits or
+/// more.
+const SERIAL_BYTES: usize = 16;
 
 /// The one signature scheme the hub's key signs with, and so the only one
 /// the agent's verifier takes.
@@ -93,7 +98,8 @@ fn unavailable(error: rcgen::Error) -> TlsKeyError {
 }
 
 /// The hub's self-signed certificate for `key`, naming `names` (host names
-/// or addresses), valid from a day before `now` for 397 days.
+/// or addresses), valid from the start of the day before `now` until the
+/// start of the day 397 days after `now`'s, with a random serial number.
 pub fn certificate(
     key: &TlsKey,
     names: &[String],
@@ -104,6 +110,10 @@ pub fn certificate(
     let mut name = DistinguishedName::new();
     name.push(DnType::CommonName, "Ladderback hub");
     params.distinguished_name = name;
+    // One issuer, so every certificate needs its own serial (RFC 5280
+    // §4.1.2.2): rcgen's default, a hash of the key, repeats at each start,
+    // and a browser that took one certificate would refuse the next.
+    params.serial_number = Some(serial_number()?);
     let (year, month, day) = date(now, -BACKDATED_DAYS)?;
     params.not_before = rcgen::date_time_ymd(year, month, day);
     let (year, month, day) = date(now, VALID_FOR_DAYS)?;
@@ -112,6 +122,18 @@ pub fn certificate(
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
     let certificate = params.self_signed(&pair).map_err(certificate_error)?;
     Ok(certificate.der().clone())
+}
+
+/// A serial number of [`SERIAL_BYTES`] random bytes, from aws-lc-rs.
+fn serial_number() -> Result<SerialNumber, ListenerError> {
+    let mut bytes = [0; SERIAL_BYTES];
+    aws_lc_rs::default_provider()
+        .secure_random
+        .fill(&mut bytes)
+        .map_err(|_| ListenerError::Certificate {
+            detail: "no randomness for a serial number".to_owned(),
+        })?;
+    Ok(SerialNumber::from_slice(&bytes))
 }
 
 /// The year, month and day, in UTC, `days` after `now`'s; the certificate
