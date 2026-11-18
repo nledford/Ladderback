@@ -20,18 +20,22 @@ pub(crate) enum Section {
     SigningIn,
     /// The API tokens.
     ApiTokens,
+    /// The dry-run allowlist: the folders a plan dry run an AI agent asks
+    /// for may read (decision 89).
+    DryRunAllowlist,
     /// The restart of Ladderback.
     Restart,
 }
 
 impl Section {
     /// Every section, in the order of the tabs.
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Language,
         Self::PageWidth,
         Self::AdminPassword,
         Self::SigningIn,
         Self::ApiTokens,
+        Self::DryRunAllowlist,
         Self::Restart,
     ];
 
@@ -44,6 +48,7 @@ impl Section {
             Self::AdminPassword => "admin-password",
             Self::SigningIn => "signing-in",
             Self::ApiTokens => "api-tokens",
+            Self::DryRunAllowlist => "dry-run-allowlist",
             Self::Restart => "restart",
         }
     }
@@ -61,14 +66,18 @@ impl Section {
 
     /// What the section's panel holds, which decides whether the panel is a
     /// Tab stop of its own: every section has a control but two with
-    /// sign-in off (`signed_in` false), which then only say why, and the
+    /// sign-in off (`signed_in` false), which then only say why; the
     /// restart, which has a button only where a service manager runs
-    /// Ladderback.
+    /// Ladderback; and the dry-run allowlist, whose controls show only once
+    /// the daemon has read the list, so a read refused or unanswered leaves
+    /// words alone.
     pub(crate) fn holds(self, signed_in: bool) -> Holds {
         match self {
             Self::Language | Self::PageWidth | Self::AdminPassword => Holds::Controls,
             Self::SigningIn | Self::ApiTokens if signed_in => Holds::Controls,
-            Self::SigningIn | Self::ApiTokens | Self::Restart => Holds::Text,
+            Self::SigningIn | Self::ApiTokens | Self::DryRunAllowlist | Self::Restart => {
+                Holds::Text
+            }
         }
     }
 }

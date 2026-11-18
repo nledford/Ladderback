@@ -4,8 +4,10 @@
 //! in this browser too, whose glue is `settings/page_width.rs`; its admin
 //! password (security §10.1, decision 70), set with sign-in off and changed
 //! in a session, whose glue is `settings/password.rs`; its API tokens
-//! (decision 93), listed, created and revoked in a session; and the restart
-//! of Ladderback (decision 94). The tabs, the address that opens each and
+//! (decision 93), listed, created and revoked in a session; the dry-run
+//! allowlist (decision 89), whose glue is `settings/dry_run_allowlist.rs`;
+//! and the restart of Ladderback (decision 94). The tabs, the address that
+//! opens each and
 //! what each panel holds are `settings_tabs.rs`'s; what the token form
 //! lacks, the request it sends, which field a refusal is about and how a
 //! token's row reads are `api_tokens.rs`'s, and what the restart section
@@ -18,11 +20,13 @@
 //! signal only while that dialog is open: leaving the dialog, however it is
 //! left, clears it from the page (I4).
 
+mod dry_run_allowlist;
 mod language;
 mod page_width;
 mod password;
 mod sign_in;
 
+use dry_run_allowlist::DryRunAllowlistSection;
 use language::LanguageSection;
 use page_width::PageWidthSection;
 use password::AdminPassword;
@@ -132,6 +136,12 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
         tokens.into_any(),
     ));
     let restart = view! { <RestartSection localizer=Arc::clone(&localizer) /> };
+    let allowlist = view! { <DryRunAllowlistSection localizer=Arc::clone(&localizer) /> };
+    sections.push((
+        Section::DryRunAllowlist,
+        msg::UI_DRY_RUN_ALLOWLIST_HEADING,
+        allowlist.into_any(),
+    ));
     sections.push((
         Section::Restart,
         msg::UI_RESTART_HEADING,
