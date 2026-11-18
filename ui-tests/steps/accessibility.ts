@@ -61,6 +61,25 @@ When("I open the {string} demo", async function (this: BrowserWorld, demo: strin
   await expect(heading).toHaveAccessibleName(demo);
 });
 
+// The same in a locale of choice. A pseudolocale renames the demo's heading,
+// so the anchor is the English heading's, and only in en-US is the heading's
+// name the demo's.
+When(
+  "I open the {string} demo asking for the locale {string}",
+  async function (this: BrowserWorld, demo: string, locale: string) {
+    const anchor = demoAnchor(demo);
+    const address = `/_gallery?locale=${encodeURIComponent(locale)}#${anchor}`;
+    await this.open(address);
+    const heading = this.page.locator(`#${anchor}`).getByRole("heading", { level: 2 }).first();
+    try {
+      await expect(heading).toBeFocused({ timeout: TARGET_PATIENCE_MS });
+    } catch {
+      assert.fail(`the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`);
+    }
+    if (locale === "en-US") await expect(heading).toHaveAccessibleName(demo);
+  },
+);
+
 When("I open the address {string}", async function (this: BrowserWorld, address: string) {
   await this.open(address);
 });
