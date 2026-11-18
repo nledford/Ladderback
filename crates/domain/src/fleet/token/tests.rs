@@ -63,7 +63,10 @@ fn a_token_with_the_longest_address_reads_back() {
 fn a_token_never_shows_its_seed_in_its_debug_form() {
     let shown = format!("{:?}", PairingToken::parse(PINNED).unwrap());
     assert!(shown.contains("SigningSeed(***)"), "{shown}");
-    assert!(!shown.contains("102, 102"), "{shown}");
+    // The seed is 32 bytes of 0x66: in no form, decimal, hex or base64.
+    for seed in ["102, 102", "6666", "66, 66", "ZmZm"] {
+        assert!(!shown.contains(seed), "{seed} in {shown}");
+    }
 }
 
 /// Encodes `bytes` with a checksum that holds, so only the field under test
@@ -147,9 +150,21 @@ fn a_later_version_is_unsupported() {
         PairingToken::parse(&with_checksum(vec![2])).unwrap_err(),
         TokenRefused::Unsupported
     );
+}
+
+/// No token had version 0, so one that says so is a mistake, not a token
+/// from a later Ladderback.
+#[test]
+fn version_0_is_malformed() {
+    let mut body = body_of(PINNED);
+    body[0] = 0;
+    assert_eq!(
+        PairingToken::parse(&with_checksum(body)).unwrap_err(),
+        TokenRefused::Malformed
+    );
     assert_eq!(
         PairingToken::parse(&with_checksum(vec![0])).unwrap_err(),
-        TokenRefused::Unsupported
+        TokenRefused::Malformed
     );
 }
 
@@ -183,6 +198,17 @@ fn text_longer_than_any_token_is_malformed() {
     let text = format!("{TOKEN_PREFIX}{}", "A".repeat(MAX_TOKEN_TEXT));
     assert_eq!(
         PairingToken::parse(&text).unwrap_err(),
+        TokenRefused::Malformed
+    );
+    // A later version longer than the longest token of this one, checksum
+    // and all, is refused by its length before its version is read: this
+    // build can't tell it from text that isn't a token.
+    let mut later = vec![2; MAX_TOKEN_TEXT];
+    later.truncate((MAX_TOKEN_TEXT - TOKEN_PREFIX.len()) / 4 * 3);
+    let later = with_checksum(later);
+    assert!(later.len() > MAX_TOKEN_TEXT);
+    assert_eq!(
+        PairingToken::parse(&later).unwrap_err(),
         TokenRefused::Malformed
     );
     let mut body = body_of(PINNED);

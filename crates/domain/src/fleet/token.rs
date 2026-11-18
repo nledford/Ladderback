@@ -44,9 +44,11 @@ pub enum TokenTls {
     Pinned(Fingerprint),
 }
 
-/// The address the agent first connects to: `https://` or `http://` and a
-/// host, at most 200 bytes, with no space or control character. Whether a
-/// plain `http://` one may be used is the connection's rule (loopback only).
+/// The address the agent first connects to, at most 200 bytes: `https://`
+/// or `http://`, then at least one character, with no space or control
+/// character. Only this much is checked here; the address carries no trust
+/// (the hub key and the fingerprint do), and the connection reads the host
+/// and port from it and refuses a plain `http://` one off loopback.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HubAddress(String);
 
@@ -156,7 +158,9 @@ impl PairingToken {
 
     /// Reads a token as it was shown: the prefix, the checksum and the
     /// version are checked before any field is read. The decoding is strict,
-    /// so one token has one text.
+    /// so one token has one text. Text longer than this version's longest
+    /// token is malformed before it is decoded, so a later layout that is
+    /// longer shows as malformed rather than unsupported.
     pub fn parse(text: &str) -> Result<Self, TokenRefused> {
         if text.len() > MAX_TOKEN_TEXT {
             return Err(TokenRefused::Malformed);
@@ -164,20 +168,25 @@ impl PairingToken {
         let encoded = text
             .strip_prefix(TOKEN_PREFIX)
             .ok_or(TokenRefused::Malformed)?;
-        let bytes = Zeroizing::new(
-            URL_SAFE_NO_PAD
-                .decode(encoded)
-                .map_err(|_| TokenRefused::Malformed)?,
-        );
-        let (body, sum) = bytes
+        // Decoded into a buffer that is wiped however the decoding ends: a
+        // bad character late in the text leaves the seed's bytes written.
+        let mut bytes = Zeroizing::new(vec![0; MAX_TOKEN_TEXT]);
+        let length = URL_SAFE_NO_PAD
+            .decode_slice(encoded, bytes.as_mut_slice())
+            .map_err(|_| TokenRefused::Malformed)?;
+        let decoded = bytes.get(..length).ok_or(TokenRefused::Malformed)?;
+        let (body, sum) = decoded
             .split_last_chunk::<CHECKSUM_BYTES>()
             .ok_or(TokenRefused::Malformed)?;
-        if body.is_empty() || checksum(body) != *sum {
+        if checksum(body) != *sum {
             return Err(TokenRefused::Malformed);
         }
         let mut fields = Fields(body);
-        if fields.byte()? != TOKEN_VERSION {
-            return Err(TokenRefused::Unsupported);
+        match fields.byte()? {
+            TOKEN_VERSION => {}
+            // No token had version 0.
+            0 => return Err(TokenRefused::Malformed),
+            _ => return Err(TokenRefused::Unsupported),
         }
         let hub_key =
             PublicKey::from_bytes(fields.array()?).map_err(|_| TokenRefused::Malformed)?;
