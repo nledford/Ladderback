@@ -53,8 +53,19 @@ impl HubTlsKey {
     /// key is made and kept, two first starts at once keep one, and the
     /// caller records the fingerprint answered.
     pub async fn take(&self, recorded: Option<Fingerprint>) -> Result<ServedTlsKey, TlsKeyRefusal> {
-        let _ = (&self.identity, &self.keys, recorded);
-        todo!()
+        let key = match (self.identity.tls_key().await?, recorded) {
+            (Some(key), _) => key,
+            (None, Some(_)) => return Err(TlsKeyRefusal::Missing),
+            (None, None) => {
+                let made = self.keys.generate()?;
+                self.identity.keep_tls_key(made).await?
+            }
+        };
+        let fingerprint = self.keys.fingerprint(&key)?;
+        match recorded {
+            Some(recorded) if recorded != fingerprint => Err(TlsKeyRefusal::AnotherKey),
+            _ => Ok(ServedTlsKey { key, fingerprint }),
+        }
     }
 }
 

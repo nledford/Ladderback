@@ -47,6 +47,7 @@ A bug fix starts with a test that reproduces the bug.
      - `adapters/mcp` (what each MCP tool answers, and the protocol around it);
      - `adapters/releases` (what the release check sends, and how it reads an answer it can't trust, §10.7);
      - `adapters/signing` (Ed25519 for the hub and its agents: what it signs and what it accepts, §16, decision 120);
+     - `adapters/tls` (the hub's built-in TLS and the agent's pinned client: which certificate an agent accepts, and the session's binding, §16, decision 120);
      - `spawn-gate` (one child starts at a time, decision 58).
    - **A crate that joins the gate is tested whole once.** When a pull request adds a crate to `mutants_packages`, `just mutants` compares the list with the one at the merge base and runs `cargo mutants` over the whole of each crate the branch added, not only its changed lines, because a crate whose code merged before it joined has no diff to mutate (as `hooks` had).
    - **Exceptions** are marked `#[mutants::skip]` (from the `mutants` crate) or listed in `.cargo/mutants.toml` `exclude_re` or `exclude_globs`, each with a reason.

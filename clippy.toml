@@ -23,6 +23,15 @@ allow-indexing-slicing-in-tests = true
 # On macOS, a signal that interrupts `TcpStream::connect` can make it return a
 # stream that is not connected yet (testkit/src/net.rs, #170). `domain` and
 # `app` don't need this line: their clippy.toml bans the whole type.
+#
+# rustls's `builder()` takes the process's default provider, which the lock
+# file's two providers leave unchosen, and the provider's own key exchange
+# groups: every TLS config names aws-lc-rs and its groups (§16, decision 120,
+# "Post-quantum key exchange for agent–hub connections").
 disallowed-methods = [
     { path = "std::net::TcpStream::connect", reason = "on macOS a signal makes it return a stream not yet connected: use testkit::net::connect in a test, TcpStream::connect_timeout elsewhere" },
+    { path = "rustls::ClientConfig::builder", reason = "it takes the process's default provider and groups: use builder_with_provider on aws-lc-rs with kx_groups set (decision 120)" },
+    { path = "rustls::ServerConfig::builder", reason = "it takes the process's default provider and groups: use builder_with_provider on aws-lc-rs with kx_groups set (decision 120)" },
+    { path = "rustls::ClientConfig::builder_with_protocol_versions", reason = "it takes the process's default provider and groups: use builder_with_provider on aws-lc-rs with kx_groups set (decision 120)" },
+    { path = "rustls::ServerConfig::builder_with_protocol_versions", reason = "it takes the process's default provider and groups: use builder_with_provider on aws-lc-rs with kx_groups set (decision 120)" },
 ]
