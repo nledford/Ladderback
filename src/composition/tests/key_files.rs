@@ -4,6 +4,8 @@
 
 use std::path::Path;
 
+use domain::planning::Source;
+
 use super::captured_log::{self, capture};
 use super::support::runner_at_a_gate;
 use super::*;
@@ -105,4 +107,31 @@ async fn a_backup_that_would_take_key_files_no_glob_can_name_is_refused() {
     runner.left_out = KeyFilesLeftOut::Unnamed(vec![outside]);
     let built = runner.backup_of(&config, &home, &Trigger::Manual).await;
     assert_eq!(iglobs(built), Vec::<String>::new(), "a folder elsewhere");
+}
+
+/// A dry run predicts what the backup does: it leaves out the globs the
+/// backup leaves out, and is refused where the backup is, when its sources
+/// hold a data folder no glob can name while that folder holds a secret
+/// key file.
+#[test]
+fn a_dry_run_is_refused_where_the_backup_is() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let data = scratch.path().join("ladderback");
+    std::fs::create_dir_all(&data).expect("the data folder");
+    std::fs::write(data.join("hub-key"), "canary").expect("a key file");
+    let source = |path: &Path| Source::parse(path.to_str().expect("UTF-8")).expect("a source");
+    let holding = [source(scratch.path())];
+    let elsewhere = [source(&scratch.path().join("elsewhere"))];
+
+    let globs = domain::fleet::left_out_globs("/var/demo/ladderback");
+    let named = KeyFilesLeftOut::Globs(globs.clone()).for_dry_runs();
+    assert_eq!(named(&holding), Some(globs));
+
+    let unnamed = KeyFilesLeftOut::Unnamed(vec![data]).for_dry_runs();
+    assert_eq!(unnamed(&holding), None, "refused as the backup is");
+    assert_eq!(
+        unnamed(&elsewhere),
+        Some(Vec::new()),
+        "not the backup's to refuse"
+    );
 }
