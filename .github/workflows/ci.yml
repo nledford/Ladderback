@@ -28,8 +28,8 @@
 #    binary is rebuilt under a new hash then: 263 test executables sat in the
 #    entry, 86 in a build from nothing, 11.9 of the 15.9 GB it unpacks to. The
 #    macOS entry jumped at the same commits, 1.6 to 2.2 to 2.9 GB, and the
-#    wasm one held 90 MB over a build from nothing. So `rust-cache`
-#    (.github/actions/rust-cache) puts a hash of the manifests, the lockfile
+#    wasm one held 90 MB over a build from nothing. So `setup-rust`
+#    (.github/actions/setup-rust) puts a hash of the manifests, the lockfile
 #    and the toolchain file into the cache's key. A push to main restores only
 #    an entry with its own hash and otherwise builds from nothing, once per
 #    change to those files; a Check run from nothing took about 3 minutes
@@ -88,9 +88,15 @@
 # leaving that OS's save to `Check (macos-latest)`), and mbx skips the save of
 # a job with no build to keep. `Wasm tests` builds wasm32 tests, which Check
 # doesn't, so it keeps a family of its own (the `generation` input of
-# `rust-cache`). A cache per job doesn't fit the limit. If Check fails on a
+# `setup-rust`). A cache per job doesn't fit the limit. If Check fails on a
 # push, that commit saves no Linux build, and pull requests restore the one
 # before.
+#
+# One setup path (#996): every job that runs Rust sets up through
+# `.github/actions/setup-rust` (the toolchain, the build cache, its tools),
+# and both UI jobs restore npm's and trunk's caches through the same steps,
+# so a job can't drift from the rules above, as `ui-engines` once did,
+# saving caches from pull requests and restoring the wasm build's.
 name: CI
 
 on:
@@ -232,15 +238,12 @@ jobs:
           persist-credentials: false
       - if: needs.changes.outputs.docs-only == 'true'
         run: scripts/check-doc-paths.sh
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
+      # The toolchain, the build cache (allowed to fail: an outage runs the
+      # build uncached, and so for every job's setup-rust below) and the tools.
       - if: needs.changes.outputs.docs-only != 'true'
-        run: rustup toolchain install
-      # A build-cache outage must not fail a required check: with the step
-      # allowed to fail, the build runs uncached (slower, still correct). The
-      # same applies to the other mr-boxington steps below.
-      - if: needs.changes.outputs.docs-only != 'true'
-        uses: $/.github/actions/rust-cache
-        continue-on-error: true
+        uses: $/.github/actions/setup-rust
+        with:
+          tools: just,cargo-nextest
       # Only the host clippy and the tests can differ by OS (`cfg(target_os)`
       # code). Formatting, the wasm32 clippy, the journey, doc-path and
       # paragraph-length lints, the architecture checks and the contrast gate
@@ -258,10 +261,6 @@ jobs:
         run: node scripts/check-paragraph-length.ts
       - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/decision-index.ts
-      - if: needs.changes.outputs.docs-only != 'true'
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: just,cargo-nextest
       # leptosfmt at the version the Justfile pins, for `just fmt-check`.
       # install-action lists no leptosfmt (manifests/ at that SHA), so it
       # falls back to cargo-binstall at that version, which takes the
@@ -334,10 +333,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
-      - uses: $/.github/actions/rust-cache
-        continue-on-error: true
+      - uses: $/.github/actions/setup-rust
+        with:
+          tools: just,trunk
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
@@ -352,9 +350,6 @@ jobs:
           path: ~/.cache/trunk
           key: trunk-tools-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: trunk-tools-${{ runner.os }}-
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: just,trunk
       - uses: $/.github/actions/npm-ci
         with:
           save: "false"
@@ -362,6 +357,16 @@ jobs:
         with:
           engines: chromium
       - run: just test-ui
+      # The JUnit report and each failed scenario's trace and screenshot
+      # (ui-tests/support/world.ts), only when the run failed, kept 14 days as
+      # the JUnit and `mutants.out` uploads are. The attempt in the name keeps
+      # a rerun's upload from colliding with the first's.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-reports-chromium-attempt-${{ github.run_attempt }}
+          path: ui-tests/reports/
+          retention-days: 14
       # Saved here, not as the job starts, so that a build that failed leaves
       # nothing behind, and only from main: a pull request's entry would be
       # one no other pull request reads.
@@ -377,7 +382,8 @@ jobs:
   # The `ui` job's journeys in Gecko (Firefox, Zen, LibreWolf) and WebKit
   # (Safari's engine, the closest stand-in for Safari that runs on Linux).
   # Not required checks: the maintainer adds them to the ruleset once they have
-  # a clean record. Its steps are the `ui` job's; change both together.
+  # a clean record. Its steps are the `ui` job's, through the same actions, but
+  # restore-only: the `ui` job saves trunk's cache; change both together.
   ui-engines:
     name: UI journeys (${{ matrix.name }}, axe-core, keyboard)
     needs: changes
@@ -398,29 +404,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: rustup toolchain install
-      - uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
-        continue-on-error: true
+      - uses: $/.github/actions/setup-rust
+        with:
+          tools: just,trunk
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
-          cache: npm
-          cache-dependency-path: ui-tests/package-lock.json
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          package-manager-cache: false
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trunk
           key: trunk-tools-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: trunk-tools-${{ runner.os }}-
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: $/.github/actions/npm-ci
         with:
-          tool: just,trunk
-      - run: npm ci
-        working-directory: ui-tests
+          save: "false"
       - uses: $/.github/actions/browser
         with:
           engines: ${{ matrix.engine }}
       # `LADDERBACK_UI_BROWSER` (above) picks the engine.
       - run: just test-ui
+      # As in the `ui` job.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-reports-${{ matrix.engine }}-attempt-${{ github.run_attempt }}
+          path: ui-tests/reports/
+          retention-days: 14
       # Also after a failed run: these jobs are expected to fail more often, and
       # a target left behind could be saved under the shared Linux build key.
       - if: ${{ !cancelled() && github.event_name == 'push' }}
@@ -469,20 +479,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
       # Its own cache key, not Check's (top of this file).
-      - uses: $/.github/actions/rust-cache
-        continue-on-error: true
+      - uses: $/.github/actions/setup-rust
         with:
           generation: v1-wasm
+          tools: just
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
           package-manager-cache: false
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: just
       - id: wasm-bindgen
         run: echo "version=$(just _wasm-bindgen-version)" >> "$GITHUB_OUTPUT"
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
@@ -547,13 +552,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
-      - uses: $/.github/actions/rust-cache
-        continue-on-error: true
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: $/.github/actions/setup-rust
         with:
-          tool: cargo-nextest
+          tools: cargo-nextest
       # The runner starts jobs outside any login session, so its user has no
       # systemd user manager. Lingering starts one (`user@<uid>.service`), as
       # at boot for a lingering user; the step waits until it answers, and
@@ -603,13 +604,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
-      - uses: $/.github/actions/rust-cache
-        continue-on-error: true
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: $/.github/actions/setup-rust
         with:
-          tool: just,cargo-nextest
+          tools: just,cargo-nextest
       # The rustic CLI an e2e scenario compares against (§6.2), as in `check`:
       # without it that scenario skips, and the skip list would differ.
       - run: scripts/install-rustic.sh
@@ -643,10 +640,10 @@ jobs:
           persist-credentials: false
       # cargo-deny reads the tree through `cargo metadata`, which needs the
       # toolchain rust-toolchain.toml names. Nothing is compiled, so no build cache.
-      - run: rustup toolchain install
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: $/.github/actions/setup-rust
         with:
-          tool: just,cargo-deny
+          cache: "false"
+          tools: just,cargo-deny
       - run: just deny
 
   # A failed nightly `deny` opens an issue, or comments on the open one. A job
@@ -693,13 +690,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
-      - uses: $/.github/actions/rust-cache
-        continue-on-error: true
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: $/.github/actions/setup-rust
         with:
-          tool: just,cargo-mutants
+          tools: just,cargo-mutants
       # Two mutants at a time: each builds in its own copy of the tree, and the
       # runner has four cores. `--caught --unviable` print every outcome as it
       # comes, so a shard that runs out of time shows how far it got.
@@ -747,13 +740,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
-      - uses: $/.github/actions/rust-cache
-        continue-on-error: true
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: $/.github/actions/setup-rust
         with:
-          tool: just,cargo-mutants
+          tools: just,cargo-mutants
       - run: just mutants-all
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

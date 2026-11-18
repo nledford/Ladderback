@@ -465,6 +465,19 @@ ui-gallery-badge-heading = Status badge
 # The empty badge of the status badge demo: a badge with nothing to tell.
 ui-gallery-badge-empty = Empty
 
+# The heading of the gallery's badge demo: the shared badge, a count or a tag on a pill.
+ui-gallery-badges-heading = Badge
+
+# A badge of the badge demo that counts something: the changes a demo plan has waiting. The words say what the number counts.
+# $count (number): how many changes wait, 3 in the demo.
+ui-gallery-badges-pending = Pending changes { $count }
+
+# A badge of the badge demo that names something: a tag a demo snapshot carries.
+ui-gallery-badges-tag = Demo tag
+
+# A badge of the badge demo whose words are long enough to wrap on a small screen with larger text.
+ui-gallery-badges-long = Kept by the demo plan's retention rules
+
 # The heading of the gallery's demo of the shared vocabulary (§4.5): the
 # tones, sizes and placements every shared component takes.
 ui-gallery-vocabulary-heading = Shared vocabulary
@@ -540,6 +553,28 @@ ui-gallery-save-settings = Save the demo settings
 
 # The toast shown after the demo settings are saved.
 ui-gallery-settings-saved = Settings saved.
+
+# The button that queues a demo check and shows an information toast.
+ui-gallery-queue-check = Queue a demo check
+
+# The information toast shown after the demo check is queued.
+ui-gallery-check-queued = Demo check queued.
+
+# The button that backs up the demo plan and shows a warning toast.
+ui-gallery-back-up-plan = Back up the demo plan
+
+# The warning toast shown after the demo backup finishes with warnings.
+ui-gallery-backup-warned = Demo backup finished with warnings: 2 files couldn't be read.
+
+# The button that restores the demo snapshot and shows an error toast.
+ui-gallery-restore-snapshot = Restore the demo snapshot
+
+# The error toast shown after the demo restore fails.
+ui-gallery-demo-restore-failed = The demo restore failed.
+
+# The alert that keeps the demo restore's failure on the page, under its
+# toast: what failed, why, and what to do.
+ui-gallery-demo-restore-failed-detail = The demo restore failed: its target folder can't be written to. Choose another folder and restore again.
 
 # The heading of the gallery's review dialog demo.
 ui-gallery-review-heading = Review dialog
