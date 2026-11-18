@@ -1005,3 +1005,173 @@ async fn a_run_answered_with_what_isnt_the_apis_is_daemon_answer_lost() {
         assert_eq!(refused.code, ErrorCode::DaemonAnswerLost, "{status}");
     }
 }
+
+/// A proposal as the daemon's proposal routes answer one.
+fn a_proposal(status: &str) -> Value {
+    json!({
+        "id": "0197a000-0000-7000-8000-000000000001",
+        "proposed-by": "assistant",
+        "status": status,
+        "created-at": "2026-11-18T10:00:00Z",
+        "expires-at": "2026-11-20T10:00:00Z",
+        "changes": [{"kind": "remove-plan", "plan": "home"}],
+        "rationale": "Nightly.",
+        "decided-at": null,
+        "reasons": [],
+    })
+}
+
+/// A daemon whose proposal routes answer as the daemon's do, recording
+/// each request: a proposal made pending, read pending and withdrawn.
+fn a_daemon_that_keeps_proposals(sent: Sent) -> Router {
+    recording(sent, |path| {
+        let id = "0197a000-0000-7000-8000-000000000001";
+        if path == "/api/v1/proposals" {
+            (StatusCode::CREATED, axum::Json(a_proposal("pending"))).into_response()
+        } else if path == format!("/api/v1/proposals/{id}") {
+            axum::Json(a_proposal("pending")).into_response()
+        } else if path == format!("/api/v1/proposals/{id}/withdraw") {
+            axum::Json(a_proposal("withdrawn")).into_response()
+        } else {
+            let refusal = json!({
+                "code": "proposal-unknown",
+                "args": {"proposal": {"type": "text", "value": path}},
+            });
+            (StatusCode::NOT_FOUND, axum::Json(refusal)).into_response()
+        }
+    })
+}
+
+/// Each proposal tool asks its route with the token: a proposal is posted
+/// as the route's body, read by its ID, and withdrawn by posting to its
+/// `withdraw`; no other route is asked, an approval's least of all.
+#[tokio::test]
+async fn each_proposal_is_sent_to_its_route_with_the_token() {
+    let sent = Sent::default();
+    let url = daemon(a_daemon_that_keeps_proposals(Arc::clone(&sent))).await;
+    let token = ApiToken::parse(TOKEN).expect("a token");
+    let connect = Connect::new(url).unwrap().with_token(token).unwrap();
+    let proposal = NewProposalDto {
+        changes: vec![api::ProposalChangeDto::RemovePlan {
+            plan: "home".to_owned(),
+        }],
+        rationale: "Nightly.".to_owned(),
+    };
+    let id = "0197a000-0000-7000-8000-000000000001";
+    let pending: ProposalDto = serde_json::from_value(a_proposal("pending")).unwrap();
+    let withdrawn: ProposalDto = serde_json::from_value(a_proposal("withdrawn")).unwrap();
+    assert_eq!(connect.propose(proposal.clone()).await, Ok(pending.clone()));
+    assert_eq!(connect.proposal(id.to_owned()).await, Ok(pending));
+    assert_eq!(connect.withdraw(id.to_owned()).await, Ok(withdrawn));
+    let bearer = format!("Bearer {TOKEN}");
+    let sent = sent.lock().unwrap().clone();
+    let request = |method: &str, path: String, kind: &str, body: String| {
+        [
+            method.to_owned(),
+            path,
+            kind.to_owned(),
+            bearer.clone(),
+            body,
+        ]
+    };
+    assert_eq!(
+        sent,
+        [
+            request(
+                "POST",
+                "/api/v1/proposals".to_owned(),
+                "application/json",
+                serde_json::to_string(&proposal).unwrap(),
+            ),
+            request("GET", format!("/api/v1/proposals/{id}"), "", String::new()),
+            request(
+                "POST",
+                format!("/api/v1/proposals/{id}/withdraw"),
+                "application/json",
+                "{}".to_owned(),
+            ),
+        ]
+    );
+}
+
+/// A proposal's ID is one segment of the path, whatever it holds, so no ID
+/// reaches another route, an approval's included; one no segment can hold
+/// is `proposal-unknown` without asking the daemon.
+#[tokio::test]
+async fn a_proposal_id_is_one_segment_and_one_no_segment_can_hold_asks_nothing() {
+    let sent = Sent::default();
+    let url = daemon(a_daemon_that_keeps_proposals(Arc::clone(&sent))).await;
+    let connect = Connect::new(url).unwrap();
+    for id in ["x/approve", "../tokens", "a?b#c"] {
+        let read = connect.proposal(id.to_owned()).await.unwrap_err();
+        assert_eq!(read.code, ErrorCode::ProposalUnknown, "{id}");
+        let withdrawn = connect.withdraw(id.to_owned()).await.unwrap_err();
+        assert_eq!(withdrawn.code, ErrorCode::ProposalUnknown, "{id}");
+    }
+    let paths: Vec<String> = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|request| request[1].clone())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "/api/v1/proposals/x%2Fapprove",
+            "/api/v1/proposals/x%2Fapprove/withdraw",
+            "/api/v1/proposals/..%2Ftokens",
+            "/api/v1/proposals/..%2Ftokens/withdraw",
+            "/api/v1/proposals/a%3Fb%23c",
+            "/api/v1/proposals/a%3Fb%23c/withdraw",
+        ]
+    );
+    sent.lock().unwrap().clear();
+    for id in ["", ".", "..", "p\tq", "p\n"] {
+        let unknown = ErrorDto::new(
+            ErrorCode::ProposalUnknown,
+            [("proposal", MsgArg::Text(id.to_owned()))],
+            None,
+        );
+        assert_eq!(
+            connect.proposal(id.to_owned()).await,
+            Err(unknown.clone()),
+            "{id:?}"
+        );
+        assert_eq!(
+            connect.withdraw(id.to_owned()).await,
+            Err(unknown),
+            "{id:?}"
+        );
+    }
+    assert!(sent.lock().unwrap().is_empty());
+}
+
+/// A proposal or a withdrawal whose answer is lost may have been kept: it
+/// is `daemon-answer-lost` and never sent again.
+#[tokio::test]
+async fn a_proposal_or_withdrawal_whose_answer_is_lost_is_daemon_answer_lost() {
+    let (url, sent) = a_daemon_that_never_answers().await;
+    let connect = Connect::new(url).unwrap();
+    let lost = Err(ErrorDto::new(ErrorCode::DaemonAnswerLost, [], None));
+    let proposal = NewProposalDto {
+        changes: Vec::new(),
+        rationale: String::new(),
+    };
+    assert_eq!(connect.propose(proposal).await, lost);
+    assert_eq!(connect.withdraw("p".to_owned()).await, lost);
+    assert_eq!(sent.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+/// A read whose answer is lost changed nothing: `daemon-unreachable`.
+#[tokio::test]
+async fn a_proposal_read_whose_answer_is_lost_is_daemon_unreachable() {
+    let routes = Router::new().route(
+        "/api/v1/proposals/{id}",
+        get(|| async { "<html>Welcome to nginx</html>" }),
+    );
+    let connect = Connect::new(daemon(routes).await).unwrap();
+    assert_eq!(
+        connect.proposal("p".to_owned()).await,
+        Err(ErrorDto::new(ErrorCode::DaemonUnreachable, [], None))
+    );
+}

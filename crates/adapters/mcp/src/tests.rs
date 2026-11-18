@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use api::{
-    BuildDto, ErrorCode, ErrorDto, ExposureDto, OperationWarningDto, PlansDto, RepositoriesDto,
-    SnapshotsDto, WarningCode,
+    BuildDto, ErrorCode, ErrorDto, ExposureDto, NewProposalDto, OperationWarningDto, PlansDto,
+    ProposalDto, RepositoriesDto, SnapshotsDto, WarningCode,
 };
 use serde_json::{Value, json};
 use tokio::io::{
@@ -137,9 +137,26 @@ fn connect(backend: impl Backend) -> Client {
 }
 
 fn connect_to(backend: Arc<dyn Backend>) -> Client {
-    let (client, server) = tokio::io::duplex(64 * 1024);
-    let (server_input, server_output) = tokio::io::split(server);
-    let server = Server::new(backend, build(), english());
+    serve(Server::new(backend, build(), english()))
+}
+
+/// A client of connect mode's server: `lists` behind every tool, the
+/// proposal tools included.
+fn proposing(lists: Lists) -> Client {
+    serve(proposing_server(lists))
+}
+
+/// Connect mode's server over `lists`, which offers the proposal tools.
+fn proposing_server(lists: Lists) -> Server {
+    let lists = Arc::new(lists);
+    Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english())
+        .proposing(lists, Arc::new(Tables))
+}
+
+/// A client of one session of `server` over an in-memory pipe.
+fn serve(server: Server) -> Client {
+    let (client, server_end) = tokio::io::duplex(64 * 1024);
+    let (server_input, server_output) = tokio::io::split(server_end);
     let session = tokio::spawn(server.serve(server_input, server_output));
     let (output, input) = tokio::io::split(client);
     Client {
@@ -272,7 +289,7 @@ async fn a_request_of_an_older_revision_without_a_handshake_is_refused() {
 /// so a review sees it.
 #[tokio::test(start_paused = true)]
 async fn the_tools_listed_are_the_golden_files() {
-    let mut client = connect(told());
+    let mut client = proposing(Lists::default());
     let answer = client.ask_current("tools/list", json!({})).await;
     let tools = &answer["result"]["tools"];
     let golden =
@@ -307,15 +324,25 @@ async fn the_tools_listed_are_the_golden_files() {
             "preview_forget",
             "preview_import",
             "export_profile",
+            "propose_setup",
+            "get_proposal",
+            "withdraw_proposal",
         ]
     );
     for tool in tools.as_array().expect("a list of tools") {
         // Starting and stopping a backup changes what Ladderback does, never
         // what it keeps; testing a repository keeps nothing but needs the
-        // `run` scope; everything else only reads.
+        // `run` scope; proposing and withdrawing change a proposal, never
+        // the configuration; everything else only reads.
         let reads = !matches!(
             tool["name"].as_str(),
-            Some("run_plan" | "cancel_operation" | "test_repository")
+            Some(
+                "run_plan"
+                    | "cancel_operation"
+                    | "test_repository"
+                    | "propose_setup"
+                    | "withdraw_proposal"
+            )
         );
         assert_eq!(tool["annotations"]["readOnlyHint"], reads, "{tool}");
         assert_eq!(tool["annotations"]["destructiveHint"], false, "{tool}");
@@ -328,14 +355,14 @@ async fn the_tools_listed_are_the_golden_files() {
 }
 
 /// Some clients turn a tool's input schema into a function declaration of a
-/// narrower schema language (§4.6): each argument has one type, never a list
-/// with null, no `format` and no `minimum`, a bound being said in its
-/// description; an optional one is left out of `required`. The tools that
-/// take an operation name it `operation`, as `run_plan` and
-/// `cancel_operation` return it.
+/// narrower schema language (§4.6): each field, at every level, has one
+/// type, never a list with null or a choice of schemas, and no `format` and
+/// no `minimum`, a bound being said in its description; an optional
+/// argument is left out of `required`. The tools that take an operation
+/// name it `operation`, as `run_plan` and `cancel_operation` return it.
 #[tokio::test(start_paused = true)]
-async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_are_required() {
-    let mut client = connect(told());
+async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_are_required() {
+    let mut client = proposing(Lists::default());
     let answer = client.ask_current("tools/list", json!({})).await;
     let mut required = HashMap::new();
     for tool in answer["result"]["tools"]
@@ -346,18 +373,7 @@ async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_a
         let schema = &tool["inputSchema"];
         let arguments = schema["properties"].as_object().expect("its arguments");
         for (argument, argument_schema) in arguments {
-            assert!(
-                argument_schema["type"].is_string(),
-                "{name}.{argument}: {schema}"
-            );
-            assert!(
-                argument_schema.get("format").is_none(),
-                "{name}.{argument}: {schema}"
-            );
-            assert!(
-                argument_schema.get("minimum").is_none(),
-                "{name}.{argument}: {schema}"
-            );
+            assert_one_type(&format!("{name}.{argument}"), argument_schema);
         }
         let needed: Vec<&str> = schema["required"]
             .as_array()
@@ -381,10 +397,51 @@ async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_a
         ("preview_forget", vec!["repository"]),
         ("preview_import", vec!["content", "repository"]),
         ("export_profile", vec!["plan"]),
+        ("propose_setup", vec!["changes"]),
+        ("get_proposal", vec!["proposal"]),
+        ("withdraw_proposal", vec!["proposal"]),
     ]
     .into_iter()
     .collect();
     assert_eq!(required, expected);
+}
+
+/// Asserts that the field `at`, whose schema is `schema`, and every field,
+/// item and map value within it has one type, no choice of schemas, no
+/// `format` and no `minimum`.
+fn assert_one_type(at: &str, schema: &Value) {
+    assert!(schema["type"].is_string(), "{at}: {schema}");
+    // Gemini's function declarations refuse an object of no named fields.
+    if schema["type"] == "object" {
+        let fields = schema["properties"].as_object();
+        assert!(
+            fields.is_some_and(|fields| !fields.is_empty()),
+            "{at}: {schema}"
+        );
+    }
+    for keyword in [
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "not",
+        "prefixItems",
+        "format",
+        "minimum",
+    ] {
+        assert!(schema.get(keyword).is_none(), "{at}: {schema}");
+    }
+    if let Some(items) = schema.get("items") {
+        assert_one_type(&format!("{at}[]"), items);
+    }
+    if let Some(values) = schema
+        .get("additionalProperties")
+        .filter(|values| values.is_object())
+    {
+        assert_one_type(&format!("{at}.*"), values);
+    }
+    for (field, field_schema) in schema["properties"].as_object().into_iter().flatten() {
+        assert_one_type(&format!("{at}.{field}"), field_schema);
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -669,6 +726,75 @@ impl Lists {
 
     fn ask(&self, what: String) {
         self.asked.lock().unwrap().push(what);
+    }
+}
+
+/// The proposal a stand-in daemon keeps for every proposal tool: pending,
+/// with one warning of the submission checks.
+fn a_proposal() -> ProposalDto {
+    ProposalDto {
+        id: "0197a000-0000-7000-8000-000000000001".to_owned(),
+        proposed_by: Some("assistant".to_owned()),
+        status: api::ProposalStatusDto::Pending,
+        created_at: "2026-11-18T10:00:00Z".to_owned(),
+        expires_at: "2026-11-20T10:00:00Z".to_owned(),
+        changes: vec![api::ProposalChangeDto::RemovePlan {
+            plan: "home".to_owned(),
+        }],
+        rationale: "Nightly.".to_owned(),
+        decided_at: None,
+        reasons: Vec::new(),
+        warnings: vec![api::ProposalWarningDto::GlobNeverMatches {
+            change: 1,
+            glob: "!x".to_owned(),
+        }],
+    }
+}
+
+#[async_trait]
+impl Proposals for Lists {
+    async fn propose(&self, proposal: NewProposalDto) -> Result<ProposalDto, ErrorDto> {
+        self.ask(format!(
+            "propose {}",
+            serde_json::to_string(&proposal).unwrap()
+        ));
+        self.told(&a_proposal())
+    }
+
+    async fn proposal(&self, id: String) -> Result<ProposalDto, ErrorDto> {
+        self.ask(format!("proposal {id}"));
+        self.told(&a_proposal())
+    }
+
+    async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto> {
+        self.ask(format!("withdraw {id}"));
+        self.told(&a_proposal())
+    }
+}
+
+/// The plans' tables the tests propose, as TOML text and as the map the
+/// configuration's parser reads each as.
+fn tables() -> [(&'static str, Value); 2] {
+    [
+        (
+            "id = \"nightly\"\nrepository = \"nas\"\nsources = [\"/home\"]\n",
+            json!({"id": "nightly", "repository": "nas", "sources": ["/home"]}),
+        ),
+        (
+            "id = \"home\"\nrepository = \"nas\"\nsources = [\"/srv\"]\n",
+            json!({"id": "home", "repository": "nas", "sources": ["/srv"]}),
+        ),
+    ]
+}
+
+/// The configuration's parser, as far as the tests need it: it reads the
+/// tables of [`tables`] and no other text.
+struct Tables;
+
+impl PlanTables for Tables {
+    fn read(&self, text: &str) -> Option<api::PlanDto> {
+        let (_, table) = tables().into_iter().find(|(given, _)| *given == text)?;
+        serde_json::from_value(table).ok()
     }
 }
 
@@ -1220,7 +1346,7 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
         [("alias", api::MsgArg::Text("nas".to_owned()))],
         None,
     );
-    let mut client = connect(Lists {
+    let mut client = proposing(Lists {
         refusal: Some(told.clone()),
         detail: Some(OperationDetailDto {
             operation: summary(1),
@@ -1245,6 +1371,9 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
             json!({"content": "[repository]\n", "repository": "nas"}),
         ),
         ("export_profile", json!({"plan": "home"})),
+        ("propose_setup", json!({"changes": [remove_home()]})),
+        ("get_proposal", json!({"proposal": "p"})),
+        ("withdraw_proposal", json!({"proposal": "p"})),
     ] {
         let answer = client.call(tool, arguments).await;
         assert_eq!(
@@ -1312,7 +1441,7 @@ async fn no_refusal_of_any_tool_carries_structured_content() {
         None,
     );
     let mut status = connect(Told(Err(told.clone())));
-    let mut client = connect(Lists {
+    let mut client = proposing(Lists {
         refusal: Some(told.clone()),
         detail: Some(OperationDetailDto {
             operation: summary(1),
@@ -1342,7 +1471,7 @@ async fn no_refusal_of_any_tool_carries_structured_content() {
 }
 
 /// Each tool, with arguments it takes.
-fn every_tool_called() -> [(&'static str, Value); 13] {
+fn every_tool_called() -> [(&'static str, Value); 16] {
     [
         ("status", json!({})),
         ("list_plans", json!({})),
@@ -1360,6 +1489,9 @@ fn every_tool_called() -> [(&'static str, Value); 13] {
             json!({"content": "[repository]\n", "repository": "nas"}),
         ),
         ("export_profile", json!({"plan": "home"})),
+        ("propose_setup", json!({"changes": [remove_home()]})),
+        ("get_proposal", json!({"proposal": "p"})),
+        ("withdraw_proposal", json!({"proposal": "p"})),
     ]
 }
 
@@ -1369,7 +1501,7 @@ fn every_tool_called() -> [(&'static str, Value); 13] {
 async fn every_tools_answer_has_the_keys_its_output_schema_names() {
     let schemas = golden_output_schemas();
     let mut status = connect(told());
-    let mut client = connect(Lists {
+    let mut client = proposing(Lists {
         plans: plans(1),
         repositories: vec![repository("nas")],
         snapshots: vec![snapshot(1)],
@@ -2081,12 +2213,17 @@ fn a_calls_line_is_its_tool_with_its_result_or_its_refusal() {
     );
 }
 
-/// A client of a session, and a server for one-shot calls, both over
-/// `backend`.
-fn both_over(backend: impl Backend) -> (Client, Server) {
-    let backend: Arc<dyn Backend> = Arc::new(backend);
-    let server = Server::new(Arc::clone(&backend), build(), english());
-    (connect_to(backend), server)
+/// A client of a session, and a server for one-shot calls, both connect
+/// mode's over `lists`.
+fn both_over(lists: Lists) -> (Client, Server) {
+    let lists = Arc::new(lists);
+    let server = Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english())
+        .proposing(Arc::clone(&lists) as Arc<dyn Proposals>, Arc::new(Tables));
+    let client = serve(
+        Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english())
+            .proposing(lists, Arc::new(Tables)),
+    );
+    (client, server)
 }
 
 #[tokio::test(start_paused = true)]
@@ -2124,6 +2261,10 @@ async fn a_one_shot_call_answers_as_a_tools_call_does() {
             json!({"content": "[repository]\n", "repository": "nas"}),
         ),
         ("export_profile", json!({"plan": "home"})),
+        ("propose_setup", json!({"changes": [remove_home()]})),
+        ("propose_setup", json!({"changes": "all"})),
+        ("get_proposal", json!({"proposal": "p"})),
+        ("withdraw_proposal", json!({})),
     ] {
         let answer = client.call(tool, arguments.clone()).await;
         let call =
@@ -2173,4 +2314,275 @@ async fn a_one_shot_wait_waits_its_length_with_no_client() {
     assert_eq!(began.elapsed(), Duration::from_secs(3));
     assert_eq!(waited["finished"], false, "{waited}");
     assert_eq!(waited["operation"]["status"], "running", "{waited}");
+}
+
+/// A change that removes the plan `home`, as a call gives it.
+fn remove_home() -> Value {
+    json!({"kind": "remove-plan", "plan_id": "home"})
+}
+
+/// A session of its own offers no proposal tool: none is listed, and one
+/// called names no tool there, as a name no tool has does (§4.6).
+#[tokio::test(start_paused = true)]
+async fn a_server_of_its_own_offers_no_proposal_tool() {
+    let mut connected = proposing(Lists::default());
+    let every = connected.ask_current("tools/list", json!({})).await["result"]["tools"].clone();
+    let mut client = connect(Lists::default());
+    let answer = client.ask_current("tools/list", json!({})).await;
+    let proposal_tools = ["propose_setup", "get_proposal", "withdraw_proposal"];
+    let expected: Vec<&Value> = every
+        .as_array()
+        .expect("a list of tools")
+        .iter()
+        .filter(|tool| !proposal_tools.contains(&tool["name"].as_str().unwrap_or_default()))
+        .collect();
+    let listed: Vec<&Value> = answer["result"]["tools"]
+        .as_array()
+        .expect("a list of tools")
+        .iter()
+        .collect();
+    assert_eq!(listed, expected);
+    assert_eq!(listed.len(), 13);
+    for tool in proposal_tools {
+        let answer = client.call(tool, json!({"proposal": "p"})).await;
+        assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");
+        assert_eq!(
+            answer["error"]["message"],
+            format!("no tool is named {tool:?}"),
+            "{tool}: {answer}"
+        );
+    }
+}
+
+/// No tool approves or rejects a proposal, or edits the configuration: a
+/// person does, in the web UI (decision 89, point 7).
+#[tokio::test(start_paused = true)]
+async fn no_tool_approves_rejects_or_edits() {
+    let mut client = proposing(Lists::default());
+    let answer = client.ask_current("tools/list", json!({})).await;
+    for tool in answer["result"]["tools"]
+        .as_array()
+        .expect("a list of tools")
+    {
+        let name = tool["name"].as_str().expect("a name");
+        for word in ["approve", "reject", "apply", "edit", "config"] {
+            assert!(!name.contains(word), "{name}");
+        }
+    }
+    for tool in ["approve_proposal", "reject_proposal"] {
+        let answer = client.call(tool, json!({"proposal": "p"})).await;
+        assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");
+    }
+}
+
+#[test]
+fn the_servers_offer_is_told_by_whether_it_proposes() {
+    assert_eq!(
+        Server::new(Arc::new(Lists::default()), build(), english()).offer(),
+        Offer::InProcess
+    );
+    assert_eq!(proposing_server(Lists::default()).offer(), Offer::Connect);
+}
+
+/// A one-shot call of a proposal tool is read, then refused where it isn't
+/// offered; every other tool is offered in both modes.
+#[test]
+fn only_connect_mode_offers_the_proposal_tools_to_a_one_shot_call() {
+    for tool in tools() {
+        let call = Call::of_words(&tool.name, &[]).unwrap();
+        let proposes = matches!(
+            tool.name.as_ref(),
+            "propose_setup" | "get_proposal" | "withdraw_proposal"
+        );
+        assert!(call.offered_in(Offer::Connect), "{}", tool.name);
+        assert_eq!(
+            call.offered_in(Offer::InProcess),
+            !proposes,
+            "{}",
+            tool.name
+        );
+    }
+}
+
+/// A server of its own given a proposal tool's call all the same answers
+/// that it has no such tool, and asks nothing.
+#[tokio::test(start_paused = true)]
+async fn a_one_shot_proposal_call_on_a_server_of_its_own_is_unwritten() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let server = Server::new(Arc::new(lists), build(), english());
+    let call = Call::of_words("get_proposal", &words(&["proposal=p"])).unwrap();
+    let Answer::Unwritten(why) = server.call(call).await else {
+        panic!("a proposal tool was called on a server of its own")
+    };
+    assert_eq!(why, "no tool is named \"get_proposal\"");
+    assert!(asked.lock().unwrap().is_empty());
+}
+
+/// `propose_setup` hands the changes and the rationale to the daemon as the
+/// proposal route takes them, each plan's TOML table as the configuration's
+/// parser reads it and a removal's `plan_id` as its `plan`, and returns the
+/// proposal it kept, warnings and all; `get_proposal` and
+/// `withdraw_proposal` name the proposal.
+#[tokio::test(start_paused = true)]
+async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = proposing(lists);
+    let kept = serde_json::to_value(a_proposal()).unwrap();
+    let [(nightly, nightly_table), (home, home_table)] = tables();
+    let add = json!({"kind": "add-plan", "plan": nightly});
+    let change = json!({"kind": "change-plan", "plan": home});
+    let given = json!({"changes": [add, change, remove_home()], "rationale": "Every night."});
+    assert_eq!(client.listed("propose_setup", given).await, kept);
+    // A client that fills each field it leaves out with null.
+    let nulled = json!({"kind": "remove-plan", "plan": null, "plan_id": "home"});
+    assert_eq!(
+        client
+            .listed("propose_setup", json!({"changes": [nulled]}))
+            .await,
+        kept
+    );
+    let removal = json!({"kind": "remove-plan", "plan": "home"});
+    let sent = json!({
+        "changes": [
+            {"kind": "add-plan", "plan": nightly_table},
+            {"kind": "change-plan", "plan": home_table},
+            removal.clone(),
+        ],
+        "rationale": "Every night.",
+    });
+    let id = "0197a000-0000-7000-8000-000000000001";
+    assert_eq!(
+        client.listed("get_proposal", json!({"proposal": id})).await,
+        kept
+    );
+    assert_eq!(
+        client
+            .listed("withdraw_proposal", json!({"proposal": id}))
+            .await,
+        kept
+    );
+    let no_rationale = json!({"changes": [removal], "rationale": ""});
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [
+            format!("propose {sent}"),
+            format!("propose {no_rationale}"),
+            format!("proposal {id}"),
+            format!("withdraw {id}"),
+        ]
+    );
+}
+
+/// A call the proposal tools can't read is `invalid-arguments` naming the
+/// argument, never the value given, and asks the daemon nothing. A change
+/// gives a new or changed plan's TOML table in `plan` or a removed plan's
+/// ID in `plan_id`: both, neither, the other one, a plan as an object or
+/// text that isn't a TOML table is a change the tool can't take.
+#[tokio::test(start_paused = true)]
+async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = proposing(lists);
+    let [(plan, _), _] = tables();
+    for (tool, arguments, field, problem) in [
+        ("propose_setup", json!({}), "changes", "missing"),
+        (
+            "propose_setup",
+            json!({"changes": "canary"}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "approve", "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan", "plan": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "add-plan", "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "add-plan", "plan": plan, "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "change-plan", "plan": plan, "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan", "plan": plan, "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan", "plan_id": "home", "canary": true}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "add-plan", "plan": "id = \"canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "change-plan", "plan": {"id": "canary"}}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [], "rationale": 1}),
+            "rationale",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [], "approve": true}),
+            "approve",
+            "unknown-key",
+        ),
+        ("get_proposal", json!({}), "proposal", "missing"),
+        (
+            "withdraw_proposal",
+            json!({"proposal": 7}),
+            "proposal",
+            "invalid",
+        ),
+        (
+            "withdraw_proposal",
+            json!({"proposal": "p", "confirmation": "canary"}),
+            "confirmation",
+            "unknown-key",
+        ),
+    ] {
+        let answer = client.call(tool, arguments).await;
+        assert_eq!(refusal(&answer), invalid(field, problem), "{tool}");
+        assert!(!answer.to_string().contains("canary"), "{answer}");
+    }
+    assert!(asked.lock().unwrap().is_empty(), "{:?}", asked.lock());
 }

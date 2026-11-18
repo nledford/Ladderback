@@ -3691,5 +3691,683 @@
       "type": "object"
     },
     "title": "Export profile"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Proposes configuration changes for a person to approve in Ladderback's web UI: plans to add, change or remove, with the reason why. Changes nothing until a person approves; no tool approves. Returns the proposal kept, its ID and what the submission checks warn of. A plan names a repository by its alias, never a secret.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "changes": {
+          "description": "The changes, applied in this order when a person approves them. Each\nis an object with its `kind` and either `plan` or `plan_id`, never\nboth: `add-plan` adds the plan after the last one and `change-plan`\nputs it in place of the plan with its ID, each giving in `plan` the\nplan's table as TOML text: the keys of a `[[plans]]` entry in the\nconfiguration file, without the header (`id = \"home\"`, `repository`,\n`sources` and so on); `remove-plan` gives in `plan_id` the ID of the\nplan to remove. A plan names a repository by its alias, never a\nsecret. A proposal can't add a hook, and a `change-plan` must keep the\nplan's hooks as they are. `get_proposal` gives the changes back as the\ndaemon keeps them: a plan as an object of its keys, and a removal's\nID in `plan`.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "add-plan",
+                  "change-plan",
+                  "remove-plan"
+                ],
+                "type": "string"
+              },
+              "plan": {
+                "description": "For `add-plan` and `change-plan`: the plan's table, as TOML text.",
+                "type": "string"
+              },
+              "plan_id": {
+                "description": "For `remove-plan`: the ID of the plan to remove.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "rationale": {
+          "default": "",
+          "description": "Why, in the AI agent's own words: shown apart from the summary\nLadderback writes of the changes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changes"
+      ],
+      "type": "object"
+    },
+    "name": "propose_setup",
+    "outputSchema": {
+      "$defs": {
+        "PlanDto": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "ProposalChangeDto": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "add-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "$ref": "#/$defs/PlanDto"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "change-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "$ref": "#/$defs/PlanDto"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "remove-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "ProposalStatusDto": {
+          "enum": [
+            "pending",
+            "applying",
+            "applied",
+            "failed",
+            "rejected",
+            "withdrawn",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "ProposalWarningDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "change": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "same-sources",
+                  "type": "string"
+                },
+                "other": {
+                  "type": "string"
+                },
+                "plan": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "change",
+                "plan",
+                "other"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "change": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "glob": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "glob-never-matches",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "change",
+                "glob"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/ProposalChangeDto"
+          },
+          "type": "array"
+        },
+        "created-at": {
+          "type": "string"
+        },
+        "decided-at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires-at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "proposed-by": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/ProposalStatusDto"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/ProposalWarningDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "proposed-by",
+        "status",
+        "created-at",
+        "expires-at",
+        "changes",
+        "rationale",
+        "decided-at",
+        "reasons"
+      ],
+      "type": "object"
+    },
+    "title": "Propose setup"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "One proposal, by its ID: its status, its changes, its rationale and the reasons a person gave for rejecting any of them. With an API token, only a proposal that token made.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "description": "The proposal's ID, as `propose_setup` returned it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal"
+      ],
+      "type": "object"
+    },
+    "name": "get_proposal",
+    "outputSchema": {
+      "$defs": {
+        "PlanDto": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "ProposalChangeDto": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "add-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "$ref": "#/$defs/PlanDto"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "change-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "$ref": "#/$defs/PlanDto"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "remove-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "ProposalStatusDto": {
+          "enum": [
+            "pending",
+            "applying",
+            "applied",
+            "failed",
+            "rejected",
+            "withdrawn",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "ProposalWarningDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "change": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "same-sources",
+                  "type": "string"
+                },
+                "other": {
+                  "type": "string"
+                },
+                "plan": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "change",
+                "plan",
+                "other"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "change": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "glob": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "glob-never-matches",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "change",
+                "glob"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/ProposalChangeDto"
+          },
+          "type": "array"
+        },
+        "created-at": {
+          "type": "string"
+        },
+        "decided-at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires-at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "proposed-by": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/ProposalStatusDto"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/ProposalWarningDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "proposed-by",
+        "status",
+        "created-at",
+        "expires-at",
+        "changes",
+        "rationale",
+        "decided-at",
+        "reasons"
+      ],
+      "type": "object"
+    },
+    "title": "Get proposal"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Withdraws a pending proposal, so no person approves it, and returns it. With an API token, only a proposal that token made.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "proposal": {
+          "description": "The proposal's ID, as `propose_setup` returned it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal"
+      ],
+      "type": "object"
+    },
+    "name": "withdraw_proposal",
+    "outputSchema": {
+      "$defs": {
+        "PlanDto": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "ProposalChangeDto": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "add-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "$ref": "#/$defs/PlanDto"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "change-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "$ref": "#/$defs/PlanDto"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "remove-plan",
+                  "type": "string"
+                },
+                "plan": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "plan"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "ProposalStatusDto": {
+          "enum": [
+            "pending",
+            "applying",
+            "applied",
+            "failed",
+            "rejected",
+            "withdrawn",
+            "expired",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "ProposalWarningDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "change": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "same-sources",
+                  "type": "string"
+                },
+                "other": {
+                  "type": "string"
+                },
+                "plan": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "change",
+                "plan",
+                "other"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "change": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "glob": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "glob-never-matches",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "change",
+                "glob"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/ProposalChangeDto"
+          },
+          "type": "array"
+        },
+        "created-at": {
+          "type": "string"
+        },
+        "decided-at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires-at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "proposed-by": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "reasons": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/ProposalStatusDto"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/ProposalWarningDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "proposed-by",
+        "status",
+        "created-at",
+        "expires-at",
+        "changes",
+        "rationale",
+        "decided-at",
+        "reasons"
+      ],
+      "type": "object"
+    },
+    "title": "Withdraw proposal"
   }
 ]

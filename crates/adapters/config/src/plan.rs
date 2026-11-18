@@ -51,6 +51,19 @@ pub fn read_plan(table: &impl Serialize) -> Result<Plan, ConfigError> {
     read::plan(&reader, &Path::default(), table)
 }
 
+/// The table `text` holds, a plan's keys written as TOML as a `[[plans]]`
+/// entry writes them, parsed as the file is, as a map of the same keys: how
+/// a plan given as text, as an MCP client proposes one (§4.6), becomes the
+/// table [`read_plan`] reads. Only its form is read here, not the plan.
+///
+/// # Errors
+///
+/// `text` isn't a TOML table: [`Problem::Syntax`], at no key, its detail
+/// holding none of the text.
+pub fn plan_table(text: &str) -> Result<serde_json::Map<String, serde_json::Value>, ConfigError> {
+    toml::from_str(text).map_err(|error| whole(Problem::Syntax, scrub(error.message())))
+}
+
 /// `plan` as the file writes it, in the file's keys, each default left out,
 /// as a `T`: the table the Plans page shows.
 pub fn plan_as<T: DeserializeOwned>(plan: &Plan) -> Result<T, ConfigError> {

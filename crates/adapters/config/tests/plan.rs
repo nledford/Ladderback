@@ -5,7 +5,7 @@
 mod support;
 
 use app::ports::{ConfigError, Problem};
-use config_adapter::{plan_as, read_plan};
+use config_adapter::{plan_as, plan_table, read_plan};
 use domain::IdKind;
 use domain::planning::{Plan, ValueKind};
 use support::*;
@@ -121,4 +121,40 @@ fn an_id_that_isn_t_one_is_refused_at_the_id() {
         matches!(refused.problem, Problem::Id(IdKind::Plan)),
         "{refused:?}"
     );
+}
+
+/// A plan given as TOML text, as an MCP client proposes one (§4.6), reads
+/// as the same keys the text writes, and so as the same plan.
+#[test]
+fn a_plan_given_as_text_is_its_table_in_the_same_keys() {
+    let given = plan_table(FULL).expect("the text is a table");
+    assert_eq!(
+        serde_json::Value::Object(given.clone()),
+        serde_json::to_value(table(FULL)).unwrap()
+    );
+    assert_eq!(
+        read_plan(&given).expect("the plan reads"),
+        read(FULL).expect("the plan reads")
+    );
+}
+
+/// Text that isn't a TOML table is refused as a whole, its detail naming
+/// none of the text: the plan is checked by the daemon, not here.
+#[test]
+fn text_that_isn_t_a_table_is_refused_as_a_whole_without_its_text() {
+    for text in [
+        "id = ",
+        "canary",
+        "id = \"canary\"\nid = \"canary\"",
+        "[canary",
+    ] {
+        let refused = invalid(plan_table(text));
+        assert_eq!(refused.key, None, "{text:?}");
+        assert_eq!(refused.problem, Problem::Syntax, "{text:?}");
+        assert!(
+            !refused.detail.contains("canary"),
+            "{text:?}: {}",
+            refused.detail
+        );
+    }
 }

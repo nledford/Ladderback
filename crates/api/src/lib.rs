@@ -4025,6 +4025,7 @@ pub struct PlansDto {
 /// left out (decision 96). The daemon reads it as the file is read when it
 /// loads, so the wire holds no second schema of a plan.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct PlanDto(pub serde_json::Map<String, serde_json::Value>);
 
@@ -4098,6 +4099,7 @@ impl ChangeProblem {
 /// plan travels as its table in the configuration file's keys, as the plan
 /// routes take it ([`PlanDto`]); a removal names the plan by its ID.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ProposalChangeDto {
     /// Adds the plan after the configuration's last one.
@@ -4120,6 +4122,7 @@ pub struct NewProposalDto {
 
 /// Where a proposal is in its life (decision 89).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ProposalStatusDto {
     Pending,
@@ -4134,6 +4137,7 @@ pub enum ProposalStatusDto {
 
 /// One proposal as the proposal routes answer it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct ProposalDto {
     pub id: String,
@@ -4163,6 +4167,7 @@ pub struct ProposalDto {
 /// What the submission checks found that doesn't refuse a proposal
 /// (decision 89, point 5), by its `kind`. `change` counts from 1.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum ProposalWarningDto {
     /// The change leaves its plan `plan` backing up the same sources as
