@@ -528,7 +528,7 @@ Then(
 // fallback no token has, so a token style.css lacks fails here rather than
 // matching whatever color the probe inherits. The part is read alone with
 // `evaluate`, as `expect` finds it (issue #774).
-async function drawnOnItsFill(part: Locator, name: string, words: string, fill: string) {
+export async function drawnOnItsFill(part: Locator, name: string, words: string, fill: string) {
   await expect(part).toHaveCount(1);
   const missing = "rgb(1, 2, 3)";
   const drawn = await part.evaluate(

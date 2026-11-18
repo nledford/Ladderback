@@ -109,7 +109,7 @@ mod tests {
             (BadgeState::Queued, BadgeTone::Secondary),
             (BadgeState::Running, BadgeTone::Primary),
             (BadgeState::Succeeded, BadgeTone::Success),
-            (BadgeState::SucceededWithWarnings, BadgeTone::Success),
+            (BadgeState::SucceededWithWarnings, BadgeTone::Warning),
             (BadgeState::Failed, BadgeTone::Error),
             (BadgeState::Cancelled, BadgeTone::Secondary),
             (BadgeState::Empty, BadgeTone::Secondary),
