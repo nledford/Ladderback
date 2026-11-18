@@ -163,7 +163,10 @@ impl Identity for FileIdentity {
         let file = KeyFile::ConnectionCounter;
         let folder = self.folder.clone();
         let (counter, lock) = blocking(file, move || next_counter(&folder)).await?;
-        Ok(Attempt::new(counter, Box::new((in_process, lock))))
+        // The file lock first, then the process's: let go in this order, an
+        // attempt in this process that takes the process's lock finds the
+        // file's free, never an `AttemptInFlight` of its own.
+        Ok(Attempt::new(counter, Box::new((lock, in_process))))
     }
 }
 
