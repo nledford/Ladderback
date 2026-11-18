@@ -354,13 +354,13 @@ async fn the_tools_listed_are_the_golden_files() {
 }
 
 /// Some clients turn a tool's input schema into a function declaration of a
-/// narrower schema language (§4.6): each argument has one type, never a list
-/// with null, no `format` and no `minimum`, a bound being said in its
-/// description; an optional one is left out of `required`. The tools that
-/// take an operation name it `operation`, as `run_plan` and
-/// `cancel_operation` return it.
+/// narrower schema language (§4.6): each field, at every level, has one
+/// type, never a list with null or a choice of schemas, and no `format` and
+/// no `minimum`, a bound being said in its description; an optional
+/// argument is left out of `required`. The tools that take an operation
+/// name it `operation`, as `run_plan` and `cancel_operation` return it.
 #[tokio::test(start_paused = true)]
-async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_are_required() {
+async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_are_required() {
     let mut client = proposing(Lists::default());
     let answer = client.ask_current("tools/list", json!({})).await;
     let mut required = HashMap::new();
@@ -372,18 +372,7 @@ async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_a
         let schema = &tool["inputSchema"];
         let arguments = schema["properties"].as_object().expect("its arguments");
         for (argument, argument_schema) in arguments {
-            assert!(
-                argument_schema["type"].is_string(),
-                "{name}.{argument}: {schema}"
-            );
-            assert!(
-                argument_schema.get("format").is_none(),
-                "{name}.{argument}: {schema}"
-            );
-            assert!(
-                argument_schema.get("minimum").is_none(),
-                "{name}.{argument}: {schema}"
-            );
+            assert_one_type(&format!("{name}.{argument}"), argument_schema);
         }
         let needed: Vec<&str> = schema["required"]
             .as_array()
@@ -414,6 +403,22 @@ async fn each_argument_has_one_type_no_format_or_minimum_and_only_those_needed_a
     .into_iter()
     .collect();
     assert_eq!(required, expected);
+}
+
+/// Asserts that the field `at`, whose schema is `schema`, and every field
+/// and item within it has one type, no choice of schemas, no `format` and no
+/// `minimum`.
+fn assert_one_type(at: &str, schema: &Value) {
+    assert!(schema["type"].is_string(), "{at}: {schema}");
+    for keyword in ["anyOf", "oneOf", "allOf", "format", "minimum"] {
+        assert!(schema.get(keyword).is_none(), "{at}: {schema}");
+    }
+    if let Some(items) = schema.get("items") {
+        assert_one_type(&format!("{at}[]"), items);
+    }
+    for (field, field_schema) in schema["properties"].as_object().into_iter().flatten() {
+        assert_one_type(&format!("{at}.{field}"), field_schema);
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -2263,7 +2268,7 @@ async fn a_one_shot_wait_waits_its_length_with_no_client() {
 
 /// A change that removes the plan `home`, as a call gives it.
 fn remove_home() -> Value {
-    json!({"kind": "remove-plan", "plan": "home"})
+    json!({"kind": "remove-plan", "plan_id": "home"})
 }
 
 /// A session of its own offers no proposal tool: none is listed, and one
@@ -2365,8 +2370,9 @@ async fn a_one_shot_proposal_call_on_a_server_of_its_own_is_unwritten() {
 }
 
 /// `propose_setup` hands the changes and the rationale to the daemon as the
-/// proposal route takes them, and returns the proposal it kept, warnings
-/// and all; `get_proposal` and `withdraw_proposal` name the proposal.
+/// proposal route takes them, a removal's `plan_id` as its `plan`, and
+/// returns the proposal it kept, warnings and all; `get_proposal` and
+/// `withdraw_proposal` name the proposal.
 #[tokio::test(start_paused = true)]
 async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
     let lists = Lists::default();
@@ -2374,14 +2380,17 @@ async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
     let mut client = proposing(lists);
     let kept = serde_json::to_value(a_proposal()).unwrap();
     let add = json!({"kind": "add-plan", "plan": {"id": "nightly", "repository": "nas", "sources": ["/home"]}});
-    let given = json!({"changes": [add, remove_home()], "rationale": "Every night."});
-    assert_eq!(client.listed("propose_setup", given.clone()).await, kept);
+    let change = json!({"kind": "change-plan", "plan": {"id": "home", "repository": "nas", "sources": ["/srv"]}});
+    let given = json!({"changes": [add.clone(), change.clone(), remove_home()], "rationale": "Every night."});
+    assert_eq!(client.listed("propose_setup", given).await, kept);
     assert_eq!(
         client
             .listed("propose_setup", json!({"changes": [remove_home()]}))
             .await,
         kept
     );
+    let removal = json!({"kind": "remove-plan", "plan": "home"});
+    let sent = json!({"changes": [add, change, removal.clone()], "rationale": "Every night."});
     let id = "0197a000-0000-7000-8000-000000000001";
     assert_eq!(
         client.listed("get_proposal", json!({"proposal": id})).await,
@@ -2393,11 +2402,11 @@ async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
             .await,
         kept
     );
-    let no_rationale = json!({"changes": [remove_home()], "rationale": ""});
+    let no_rationale = json!({"changes": [removal], "rationale": ""});
     assert_eq!(
         *asked.lock().unwrap(),
         [
-            format!("propose {given}"),
+            format!("propose {sent}"),
             format!("propose {no_rationale}"),
             format!("proposal {id}"),
             format!("withdraw {id}"),
@@ -2406,12 +2415,15 @@ async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
 }
 
 /// A call the proposal tools can't read is `invalid-arguments` naming the
-/// argument, never the value given, and asks the daemon nothing.
+/// argument, never the value given, and asks the daemon nothing. A change
+/// gives a new plan's table in `plan` or a removed plan's ID in `plan_id`:
+/// both, neither or the other one is a change the tool can't take.
 #[tokio::test(start_paused = true)]
 async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
     let lists = Lists::default();
     let asked = Arc::clone(&lists.asked);
     let mut client = proposing(lists);
+    let plan = json!({"id": "canary", "repository": "nas", "sources": ["/home"]});
     for (tool, arguments, field, problem) in [
         ("propose_setup", json!({}), "changes", "missing"),
         (
@@ -2422,7 +2434,43 @@ async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
         ),
         (
             "propose_setup",
-            json!({"changes": [{"kind": "approve", "plan": "canary"}]}),
+            json!({"changes": [{"kind": "approve", "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan", "plan": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "add-plan", "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "change-plan", "plan": plan.clone(), "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan", "plan": plan, "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "remove-plan", "plan_id": "home", "canary": true}]}),
             "changes",
             "invalid",
         ),

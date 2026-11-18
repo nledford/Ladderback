@@ -3705,7 +3705,7 @@
       "additionalProperties": false,
       "properties": {
         "changes": {
-          "description": "The changes, applied in this order when a person approves them. Each\nis an object with its `kind` and its `plan`: `add-plan` adds the plan\nafter the last one and `change-plan` puts it in place of the plan with\nits ID, each giving the plan's table in the configuration file's keys,\nas a `[[plans]]` entry writes it (`id`, `repository`, `sources` and\nso on); `remove-plan` gives the ID of the plan to remove. A plan names\na repository by its alias, never a secret. A proposal can't add a\nhook, and a `change-plan` must keep the plan's hooks as they are.",
+          "description": "The changes, applied in this order when a person approves them. Each\nis an object with its `kind` and either `plan` or `plan_id`, never\nboth: `add-plan` adds the plan after the last one and `change-plan`\nputs it in place of the plan with its ID, each giving in `plan` the\nplan's table in the configuration file's keys, as a `[[plans]]` entry\nwrites it (`id`, `repository`, `sources` and so on); `remove-plan`\ngives in `plan_id` the ID of the plan to remove. A plan names a\nrepository by its alias, never a secret. A proposal can't add a\nhook, and a `change-plan` must keep the plan's hooks as they are.",
           "items": {
             "additionalProperties": false,
             "properties": {
@@ -3718,19 +3718,16 @@
                 "type": "string"
               },
               "plan": {
-                "anyOf": [
-                  {
-                    "type": "object"
-                  },
-                  {
-                    "type": "string"
-                  }
-                ]
+                "description": "For `add-plan` and `change-plan`: the plan's table.",
+                "type": "object"
+              },
+              "plan_id": {
+                "description": "For `remove-plan`: the ID of the plan to remove.",
+                "type": "string"
               }
             },
             "required": [
-              "kind",
-              "plan"
+              "kind"
             ],
             "type": "object"
           },
