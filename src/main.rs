@@ -722,7 +722,8 @@ fn text(value: impl std::fmt::Display) -> MsgArg {
 /// Why the daemon stops: a signal, a restart asked for, or the server's end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cause {
-    /// Ctrl-C (`SIGINT`) or `SIGTERM`, what systemd and launchd send.
+    /// Ctrl-C (`SIGINT`) or `SIGTERM`: what systemd and launchd send, and
+    /// what any other program running as the user may.
     Signal(&'static str),
     /// A restart asked for in Settings, by whom (decision 94).
     Restart(http_adapter::RestartAsker),
@@ -740,8 +741,11 @@ impl Cause {
         }
     }
 
-    /// The status an orderly stop for this cause ends with: a restart's is
-    /// the one the service manager starts the daemon again on.
+    /// The status an orderly stop for this cause ends with. The service
+    /// manager starts the daemon again after any stop it didn't ask for,
+    /// whatever the status (#1035), so a signal's is 0, a clean end for a
+    /// `serve` in a terminal; a restart's is the one systemd doesn't mark
+    /// the unit failed for (decision 94).
     fn status(self) -> ExitCode {
         match self {
             Self::Restart(_) => ExitCode::from(platform::service::RESTART_STATUS),
