@@ -102,6 +102,7 @@ fn one_line_takes_off_one_line_break() {
 #[test]
 fn a_counter_rises_by_one_and_stops_at_the_most() {
     assert_eq!(ConnectionCounter::NONE.get(), 0);
+    assert_eq!(ConnectionCounter::new(907).get(), 907);
     assert_eq!(ConnectionCounter::default(), ConnectionCounter::NONE);
     assert_eq!(
         ConnectionCounter::NONE.next(),

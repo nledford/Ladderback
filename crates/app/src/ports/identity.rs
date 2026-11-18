@@ -103,3 +103,19 @@ pub enum IdentityError {
     /// its own message.
     Unavailable { file: KeyFile, detail: String },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An attempt's `Debug` form names its counter and nothing of the lock
+    /// it holds.
+    #[test]
+    fn an_attempt_shows_its_counter_and_nothing_of_its_lock() {
+        let attempt = Attempt::new(ConnectionCounter::new(7), Box::new("lock"));
+        assert_eq!(
+            format!("{attempt:?}"),
+            "Attempt { counter: ConnectionCounter(7), .. }"
+        );
+    }
+}

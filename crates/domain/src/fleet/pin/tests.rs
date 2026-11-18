@@ -109,6 +109,22 @@ fn names_this_build_doesnt_know_are_kept_in_their_order() {
     assert_eq!(HubPin::parse(&written), Ok(pin));
 }
 
+/// Decision 120: a newer agent's pin may hold a few dozen addresses (the
+/// person's own and the latest transport statement's) under names this
+/// build doesn't know; it is read and kept whole.
+#[test]
+fn a_newer_pin_of_a_few_dozen_addresses_is_read_and_kept() {
+    let mut newer = pin().to_text();
+    for n in 0..48 {
+        newer.push_str(&format!(
+            "statement-address = https://hub-{n:02}.example:9898 pinned\n"
+        ));
+    }
+    assert!(newer.len() > 2 * 1024, "{}", newer.len());
+    let read = HubPin::parse(&newer).unwrap();
+    assert_eq!(read.to_text(), newer);
+}
+
 #[test]
 fn a_pin_with_windows_line_breaks_and_no_last_one_is_read() {
     let crlf = pin().to_text().replace('\n', "\r\n");
