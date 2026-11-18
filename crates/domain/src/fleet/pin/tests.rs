@@ -225,3 +225,26 @@ fn a_pin_past_the_most_bytes_is_refused_unread() {
     text.push('\n');
     assert_eq!(HubPin::parse(&text), Err(PinRefused::TooLong));
 }
+
+/// A pin is written back as `name = value` lines, which a pin of compact
+/// `name=value` lines outgrows: one that would be written past the most
+/// bytes is refused when it is read, so every pin read can be written and
+/// read again.
+#[test]
+fn a_pin_that_would_be_written_past_the_most_bytes_is_refused() {
+    let mut text = pin().to_text();
+    let mut n = 0;
+    while text.len() + 12 <= MAX_PIN_BYTES {
+        text.push_str(&format!("x{n:07}=1\n"));
+        n += 1;
+    }
+    assert!(text.len() <= MAX_PIN_BYTES, "{}", text.len());
+    assert_eq!(HubPin::parse(&text), Err(PinRefused::TooLong));
+    let mut fits = pin().to_text();
+    while fits.len() + 14 <= MAX_PIN_BYTES {
+        fits.push_str(&format!("x{n:07} = 1\n"));
+        n += 1;
+    }
+    let read = HubPin::parse(&fits).unwrap();
+    assert_eq!(read.to_text(), fits);
+}
