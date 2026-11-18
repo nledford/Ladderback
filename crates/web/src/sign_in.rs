@@ -257,7 +257,7 @@ pub(crate) fn SessionEnded(localizer: Arc<Localizer>, ended: RwSignal<bool>) -> 
             title=text(&localizer, msg::UI_SESSION_ENDED_TITLE)
             described_by="session-ended-body"
             on_close=closed
-            fallback="main"
+            fallback="main".to_owned()
         >
             <p id="session-ended-body">{body_text}</p>
             <SignInForm localizer=Arc::clone(&localizer) place=Place::Dialog signed_in=signed_in />
@@ -310,7 +310,7 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
             described_by="idle-warning-body"
             starts_on=stay
             on_cancel=Callback::new(move |()| keep())
-            fallback="main"
+            fallback="main".to_owned()
         >
             <p id="idle-warning-body">{text(&localizer, msg::UI_IDLE_WARNING_BODY)}</p>
             <p role="alert">{move || unanswered.get().then(|| unreachable.clone())}</p>
