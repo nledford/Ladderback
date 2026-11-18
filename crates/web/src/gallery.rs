@@ -35,6 +35,7 @@ use crate::components::{
     ToastTone, Toasts, Tooltip, Tree, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
+use crate::page;
 use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
@@ -301,8 +302,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <p>
             {demo_link(&localizer, Destination::route("/_missing", Matching::Exact), missing_link)}
         </p>
-        <section>
-            <h2>{announcer_heading}</h2>
+        <section id="announcer-demo">
+            <DemoHeading text=announcer_heading />
             <p>
                 <Button
                     content=Content::Text(polite_button.into())
@@ -365,8 +366,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 </p>
             </dialog>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_DIALOG_HEADING)}</h2>
+        <section id="dialog-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_DIALOG_HEADING) />
             <Button
                 content=Content::Text(t(msg::UI_GALLERY_OPEN_DEMO_DIALOG).into())
                 on_press=Callback::new(move |()| dialog_open.set(true))
@@ -476,8 +477,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 </p>
             </ModalDialog>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_CHECKBOX_HEADING)}</h2>
+        <section id="checkbox-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_CHECKBOX_HEADING) />
             // Its two states: off with a description, and on without one.
             <Checkbox
                 id="gallery-notification"
@@ -500,8 +501,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 checked=RwSignal::new(false)
             />
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_RADIO_HEADING)}</h2>
+        <section id="radio-group-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_RADIO_HEADING) />
             // A group with a hint, the middle choice made as it opens.
             <RadioGroup
                 name="gallery-frequency"
@@ -562,8 +563,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 chosen=RwSignal::new("")
             />
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_BADGE_HEADING)}</h2>
+        <section id="status-badge-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_BADGE_HEADING) />
             <p class="flex flex-wrap gap-2">
                 // Every state a badge can show, each with its own icon.
                 <StatusBadge state=BadgeState::Queued label=t(msg::UI_STATUS_QUEUED) />
@@ -578,10 +579,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
             </p>
         </section>
-        // `id`, so a step finds the demo under a pseudolocale too, which
-        // renames its heading.
         <section id="badge-demo">
-            <h2>{t(msg::UI_GALLERY_BADGES_HEADING)}</h2>
+            <DemoHeading text=t(msg::UI_GALLERY_BADGES_HEADING) />
             // A count and two tags, each saying in words what it counts or
             // names, the long one wrapping in a narrow room.
             <p class="flex flex-wrap gap-2">
@@ -614,8 +613,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_VOCABULARY_HEADING)}</h2>
+        <section id="shared-vocabulary-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_VOCABULARY_HEADING) />
             // Every tone, its name and its swatch drawn in it, so the axe
             // row reads each tone's text against the page.
             <h3 id="gallery-tones">{t(msg::UI_GALLERY_TONES_HEADING)}</h3>
@@ -705,7 +704,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             </ul>
         </section>
         <section id="toast-demo">
-            <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
+            <DemoHeading text=t(msg::UI_GALLERY_TOAST_HEADING) />
             // A button for each tone, then the toast under them, so Tab
             // reaches its Dismiss button from each.
             {toast_button(
@@ -752,8 +751,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 }
             }
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_REVIEW_HEADING)}</h2>
+        <section id="review-dialog-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_REVIEW_HEADING) />
             <p>
                 <Button
                     content=Content::Text(t(msg::UI_GALLERY_OPEN_REVIEW).into())
@@ -847,8 +846,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 <p id="gallery-held-review-body">{held_review_body}</p>
             </ReviewDialog>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_TREE_HEADING)}</h2>
+        <section id="tree-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TREE_HEADING) />
             <Tree
                 localizer=Arc::clone(&localizer)
                 label=t(msg::UI_GALLERY_DEMO_TREE)
@@ -857,8 +856,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 empty=t(msg::UI_SNAPSHOT_EMPTY)
             />
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_STEP_UP_HEADING)}</h2>
+        <section id="step-up-field-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_STEP_UP_HEADING) />
             <p>
                 <Button
                     content=Content::Text(t(msg::UI_GALLERY_OPEN_STEP_UP).into())
@@ -926,8 +925,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </ReviewDialog>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_PAUSE_HEADING)}</h2>
+        <section id="pause-control-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_PAUSE_HEADING) />
             <PauseUpdates
                 label=t(msg::UI_GALLERY_PAUSE_DEMO)
                 paused_said=t(msg::UI_LIVE_PAUSED)
@@ -966,8 +965,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_SPINNER_HEADING)}</h2>
+        <section id="spinner-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_SPINNER_HEADING) />
             // The defaults: Small (as tall as the text), Primary and Inline,
             // its label beside it, as a step of a longer task shows it.
             <p>
@@ -1037,8 +1036,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 <Button content=Content::Text(t(msg::UI_GALLERY_SPINNER_SAVE).into()) busy=true />
             </p>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_ICON_HEADING)}</h2>
+        <section id="icon-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_ICON_HEADING) />
             // The defaults: decoration, Inherit and Small, before the words
             // that say what it shows. A clock reads the same in either
             // direction, so a right-to-left page shows it unmirrored.
@@ -1115,8 +1114,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_BUTTON_HEADING)}</h2>
+        <section id="button-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_BUTTON_HEADING) />
             // Every appearance in every tone, each named by the two in
             // words, a row an appearance. A Filled button has no Inherit.
             {[
@@ -1311,10 +1310,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 }}
             </p>
         </section>
-        // Its id finds the demo under a pseudolocale too, which renames its
-        // heading.
         <section id="skeleton-demo">
-            <h2>{t(msg::UI_GALLERY_SKELETON_HEADING)}</h2>
+            <DemoHeading text=t(msg::UI_GALLERY_SKELETON_HEADING) />
             // Three lines standing for a paragraph, the last one shorter,
             // and a block standing for a field, each in the room its line
             // of the page gives it.
@@ -1362,10 +1359,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
-        // Its id finds the demo under a pseudolocale too, which renames its
-        // heading.
         <section id="banner-demo">
-            <h2>{t(msg::UI_GALLERY_BANNER_HEADING)}</h2>
+            <DemoHeading text=t(msg::UI_GALLERY_BANNER_HEADING) />
             // Each tone it takes, information first, which is the default.
             <Banner localizer=Arc::clone(&localizer)>{banner_information}</Banner>
             // A long path, which wraps inside the banner on a small screen.
@@ -1401,8 +1396,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_LINK_HEADING)}</h2>
+        <section id="link-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_LINK_HEADING) />
             // A page of the app, and the page the reader is on, which is the
             // current page and bold.
             <p>
@@ -1459,10 +1454,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 )}
             </p>
         </section>
-        // Its id finds the demo under a pseudolocale too, which renames its
-        // heading.
         <section id="alert-demo">
-            <h2>{t(msg::UI_GALLERY_ALERT_HEADING)}</h2>
+            <DemoHeading text=t(msg::UI_GALLERY_ALERT_HEADING) />
             // Each tone, information first, which is the default.
             <Alert localizer=Arc::clone(&localizer)>{alert_information}</Alert>
             <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Success>
@@ -1505,8 +1498,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </p>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_TABS_HEADING)}</h2>
+        <section id="tabs-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TABS_HEADING) />
             // Each tab the arrow keys arrive at is selected, the set named by
             // the heading above it. The middle panel holds a field, so it is
             // no Tab stop of its own, and what is typed there stays while
@@ -1620,8 +1613,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </div>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_TABS_VERTICAL_HEADING)}</h2>
+        <section id="vertical-tabs-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TABS_VERTICAL_HEADING) />
             // A column at the start of the panel: the down arrow goes to
             // the next tab and the up arrow to the one before.
             <Tabs
@@ -1678,8 +1671,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </div>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_TABS_RESPONSIVE_HEADING)}</h2>
+        <section id="responsive-tabs-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TABS_RESPONSIVE_HEADING) />
             // As wide as the page: a column where the page is wide, a row
             // in a narrow window or with larger text. What is typed in the
             // middle panel stays while the layout changes.
@@ -1745,8 +1738,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </div>
         </section>
-        <section>
-            <h2>{t(msg::UI_GALLERY_TEXT_FIELD_HEADING)}</h2>
+        <section id="text-field-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TEXT_FIELD_HEADING) />
             <TextField
                 id="form-field-input"
                 localizer=Arc::clone(&localizer)
@@ -1908,8 +1901,8 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         </section>
         // After the text field's, so the walks from the page's start to
         // the Toast demo and the sections after it pass none of its bars.
-        <section>
-            <h2>{t(msg::UI_GALLERY_PROGRESS_HEADING)}</h2>
+        <section id="progress-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_PROGRESS_HEADING) />
             <Progress
                 localizer=Arc::clone(&localizer)
                 label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
@@ -1989,14 +1982,14 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         </section>
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
-        <section>
-            <h2>{t(msg::UI_GALLERY_TABLE_HEADING)}</h2>
+        <section id="table-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TABLE_HEADING) />
             {demo_table(table_localizer)}
         </section>
         // Last on the page, so a journey reaches its controls by Shift+Tab
         // from the page's start, and its last button sits at the foot.
-        <section>
-            <h2>{t(msg::UI_GALLERY_TOOLTIP_HEADING)}</h2>
+        <section id="tooltip-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TOOLTIP_HEADING) />
             // A control its tooltip describes, standing above it.
             <p>
                 {demo_tooltip(
@@ -2073,6 +2066,31 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 )}
             </p>
         </section>
+    }
+}
+
+/// A demo's heading, first in its section. The section's `id` is the demo's
+/// anchor: its heading in English, in lower case with hyphens for spaces,
+/// then `-demo` (`step-up-field-demo`), so it finds the demo under a
+/// pseudolocale too, which renames the heading. The address
+/// `/_gallery#<id>` puts focus on the heading as the page loads
+/// ([`page::focus_when_named`]), so a scenario can start at its own demo and
+/// a demo added above it lengthens no walk (technical design §13.7.5). Only
+/// a script focuses it (`tabindex="-1"`), so it is no stop for Tab.
+#[component]
+fn DemoHeading(text: String) -> impl IntoView {
+    let heading = NodeRef::<leptos::html::H2>::new();
+    Effect::new(move |_| {
+        if let Some(heading) = heading.get()
+            && let Some(section) = heading.parent_element()
+        {
+            page::focus_when_named(&section.id(), &heading);
+        }
+    });
+    view! {
+        <h2 node_ref=heading tabindex="-1">
+            {text}
+        </h2>
     }
 }
 

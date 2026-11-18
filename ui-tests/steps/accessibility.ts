@@ -31,6 +31,36 @@ When("I open the component gallery", async function (this: BrowserWorld) {
   await this.open("/_gallery");
 });
 
+/** The anchor of a demo of the gallery, its section's `id`: its heading in
+ *  English, in lower case with hyphens for spaces, then `-demo`
+ *  (`crates/web/src/gallery.rs`, `DemoHeading`). A name that makes no such
+ *  anchor fails the step here, not as a selector that finds nothing. */
+function demoAnchor(demo: string): string {
+  const anchor = `${demo.toLowerCase().replaceAll(" ", "-")}-demo`;
+  if (!/^[a-z0-9-]+$/.test(anchor)) assert.fail(`the demo "${demo}" has no anchor: its name makes "${anchor}", not letters, digits and hyphens`);
+  return anchor;
+}
+
+// The address of a demo of the gallery names its section, and the page puts
+// focus on the demo's heading as it loads, as it does for a section of
+// Settings (`page::focus_when_named`), so a scenario can start at its own demo
+// (technical design §13.7.5). Reaching a demo by its address is navigation,
+// not the keyboard behaviour under test; the walk from its heading to its
+// controls is.
+When("I open the {string} demo", async function (this: BrowserWorld, demo: string) {
+  const anchor = demoAnchor(demo);
+  const address = `/_gallery#${anchor}`;
+  await this.open(address);
+  // The section the address names, by its `id`, as the browser finds it.
+  const heading = this.page.locator(`#${anchor}`).getByRole("heading", { level: 2 }).first();
+  try {
+    await expect(heading).toBeFocused({ timeout: TARGET_PATIENCE_MS });
+  } catch {
+    assert.fail(`the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`);
+  }
+  await expect(heading).toHaveAccessibleName(demo);
+});
+
 When("I open the address {string}", async function (this: BrowserWorld, address: string) {
   await this.open(address);
 });

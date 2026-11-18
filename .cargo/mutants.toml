@@ -157,7 +157,7 @@
 # title is `routes.rs`'s
 # and a refusal's sentence is `refused_sentence`'s, all mutated on the host;
 # the `@ui` scenarios of `features/ui/snapshot_browser.feature` and the tree
-# scenarios of `features/ui/components.feature` run the glue in Chromium.
+# scenarios of `features/ui/components/tree.feature` run the glue in Chromium.
 #
 # `crates/web/src/full_disk_access_warning.rs` is the DOM glue of the start
 # page's Full Disk Access warning (§16, decision 115): it reads what the
