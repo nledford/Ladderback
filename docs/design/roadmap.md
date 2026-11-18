@@ -14,7 +14,7 @@ Rough effort assumes one experienced developer working part-time (~10–15 h/wee
 | **M5** | Scheduled maintenance | Forget, prune and check on their schedules on the machine that owns maintenance, through a maintenance queue with its own limit (decision 75, point 8; #970), each check's result recorded and shown (#974); a check an agent asks for (#960); a missed run announced (#415). One machine; the hub's managed maintenance is M9 | 2–3 wks |
 | **M6** | Notification channels | Gotify, Discord, Slack, email, Telegram, Pushover, Pushbullet, web push and a webhook the user templates (#380), with the notification fixes beside them (#401, #402) | 2–3 wks |
 | **M7** | Japanese | Japanese, with the translation workflow and a language choice in the UI (§16, decision 101); released on its own once the review of its text (#707) is done, between whichever milestones that falls | 1–2 wks, and the review |
-| **M8** | Hub: visibility | Pairing with unique hostnames, sync protocol, persistent outbox and replay, aggregated dashboard, agent offline alerts | 4–6 wks |
+| **M8** | Hub: visibility | Pairing with unique hostnames, sync protocol, persistent outbox and replay, aggregated dashboard, agent offline alerts. Built behind the `hub` feature, which release builds leave out until a pull request deletes it before M8's first release candidate (decision 122) | 4–6 wks |
 | **M9** | Hub: control and maintenance | Repo ownership registry with leases; hub-managed forget/prune/check by plan tag, serialized per repo; adoption from the hub; owner prune guard; hub downloads; remote run/cancel and opt-in new-folder restore (plans view-only from the hub); MCP connect mode against a hub, with an `agent` argument (§4.6) | 3–4 wks |
 | **M10** | Polish | The metered-network run condition (AC power came in M2), charts with text summaries and table views (§4.5), Docker image, release packaging, `db rebuild`, docs | 2–3 wks |
 
@@ -203,6 +203,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [119](decisions/119-components-when-a-page-needs-them.md) | Build each new shared component just before the first page that needs it |
 | [120](decisions/120-agent-hub-connection-security.md) | How an agent and its hub prove who they are |
 | [121](decisions/121-pairing-a-machine-with-its-hub.md) | How a person pairs a machine with its hub |
+| [122](decisions/122-hub-out-of-releases-until-m8.md) | How the hub stays out of releases until M8 |
 
 ## 17. Open questions
 
