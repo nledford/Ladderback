@@ -2632,11 +2632,11 @@ ui-settings-title = Settings – { -brand-name }
 # The Settings page's heading: its one main heading.
 ui-settings-heading = Settings
 
-# Settings, while sign-in is off: an admin password has been set since Ladderback started, by `ladderback set-password` or in the Admin password section. Sign-in is decided only when Ladderback starts, so it stays off until a restart, which the restart section of the same page does where a service manager runs Ladderback.
-ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn sign-in on. The restart section below does it where a service manager runs { -brand-name }.
+# Settings, while sign-in is off: an admin password has been set since Ladderback started, by `ladderback set-password` or in the Admin password tab. Sign-in is decided only when Ladderback starts, so it stays off until a restart, which the Restart Ladderback tab of the same page does where a service manager runs Ladderback. "Restart Ladderback" is that tab's name, as `ui-restart-heading` words it.
+ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn sign-in on. The Restart { -brand-name } tab does it where a service manager runs { -brand-name }.
 
-# Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. The password can be set again in the Admin password section below this sentence, or at a terminal. `ladderback set-password` is typed as it is: keep it a string literal.
-ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Set the password again below, or with { "ladderback set-password" }.
+# Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. The password can be set again in the Admin password tab of the same page, named as `ui-admin-password-heading` words it, or at a terminal. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Set the password again in the Admin password tab, or with { "ladderback set-password" }.
 
 # The heading of the section of Settings that restarts Ladderback.
 ui-restart-heading = Restart { -brand-name }
