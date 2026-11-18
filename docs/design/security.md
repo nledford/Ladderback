@@ -373,9 +373,15 @@ A program they start (a hook, a secret command, rclone) inherits the limit but n
 
 ### 10.3 Agent ↔ hub
 
-This section decides how an agent and the hub trust each other and what passes between them.
+This section decides how an agent and the hub prove who they are to each other, and what passes between them ([decision 120](decisions/120-agent-hub-connection-security.md); the messages and their order are in [multi-machine.md](multi-machine.md) §7.1 and §7.2).
 
-Ed25519 identities, TLS (pinned or CA), and single-use short-lived pairing tokens. The protocol carries metadata, logs and restore requests, never file contents or secrets.
+- **Both sides prove themselves at connect.** The agent and the hub each sign, with their Ed25519 keys, a domain-separated message: a fixed label, the hub key, the agent ID and both sides' fresh nonces, and, when the hub serves TLS itself, the TLS 1.3 session's exporter value (RFC 9266). The agent proves nothing until the hub has, and refuses a hub whose key isn't the one pinned at pairing. A signature over a bare nonce verifies as nothing.
+- **The hub has a key of its own,** kept in its data folder and never in the database. Agents pin it at pairing, so behind a TLS-terminating proxy the proxy's certificate isn't what the agent trusts. The hub rotates it with a handover the old key signs, and never makes a replacement by itself.
+- **High-impact commands are signed end to end.** `RepoGrants`, and from M9 `RunPlan`, `CancelOp` and `RestoreRequest`, carry the hub's signature for one agent and one connection, with a sequence number and an expiry, so a proxy that ends TLS, or anything between, can read and drop them but can't forge, replay or alter one. Status traffic is not signed and holds no secret.
+- **Pairing** uses a single-use token that lapses after 15 minutes by default and carries a one-time key, so the secret itself never crosses the network. A copied data folder is caught by a connection counter beside the machine identifier check (#296).
+- **No mutual TLS, no required tunnel, no peer-to-peer.** An agent works behind a reverse proxy, over a tunnel the person already runs, or with built-in pinned TLS.
+
+The protocol carries metadata, logs and restore requests, never file contents or secrets (I4).
 
 ### 10.4 Restores
 

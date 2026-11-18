@@ -2,16 +2,18 @@
 
 ### 7.1 Pairing and identity
 
-1. On the hub: **Settings → Agents → New pairing token**. The token is single-use, with a TTL of 15 min by default.
+1. On the hub: **Settings → Agents → New pairing token**. The token is single-use, with a TTL of 15 min by default (5 min to 24 h). It holds the hub's key, the certificate's fingerprint when the hub serves TLS itself, and a one-time pairing key; the hub keeps only that key's public half, and shows the token once.
 2. On the agent: `ladderback pair https://hub:9899 <token>` (or the same in the agent's UI).
-3. The agent generates an **Ed25519 keypair** and an **agent ID** (UUIDv7) once, and keeps both in its data dir, never in the database, so `db rebuild` can't change them. A standalone agent has them too, because its backups are tagged with the ID (§7.3). At pairing it sends its agent ID, public key, hostname and the token; the hub records the agent and discards the token. Re-pairing the same identity reuses the existing record. A hostname already registered to another agent is rejected, because the UI, the `host` filter and the `agents` table all identify machines by hostname.
-4. Every later connection is a WebSocket over TLS. The hub sends a nonce, the agent signs it, and the hub checks the signature against the registered key. To revoke an agent, delete it on the hub.
+3. The agent generates an **Ed25519 keypair** (its agent key) and an **agent ID** (UUIDv7) once, and keeps both in its data dir, never in the database, so `db rebuild` can't change them. A standalone agent has them too, because its backups are tagged with the ID (§7.3). The agent first checks that the hub proves the key in the token. Then it sends its agent ID, public key, hostname and a signature by the token's key and by its own, and the hub records the agent and spends the token. Re-pairing the same identity (the same ID and key) reuses the existing record; an ID that comes with another key is refused. A hostname already registered to another agent is rejected, and the token stays good, because the UI, the `host` filter and the `agents` table all identify machines by hostname.
+4. Every later connection is a WebSocket over TLS in which the hub and the agent prove themselves to each other: each signs a domain-separated message that holds the hub's key, the agent ID and both sides' nonces, and the agent checks the hub's signature against the key it pinned at pairing. To revoke an agent, delete it on the hub. The exact messages, the pairing and the copy of a data folder (#296) are [decision 120](decisions/120-agent-hub-connection-security.md).
+
+**The hub key.** The hub makes an Ed25519 key pair once and keeps it in its data dir, never in the database, as the agent does. Each agent pins its public half at pairing, whichever TLS mode the hub uses, so behind a reverse proxy the agent trusts the hub, not the proxy's certificate. The hub signs what gives an agent authority (`Welcome`, `RepoGrants`, and from M9 `RunPlan`, `CancelOp` and `RestoreRequest`; §7.2). It rotates the key with a handover the old key signs. A hub that loses its key can't be recognized by any agent, and every agent pairs again (decision 120).
 
 Hub TLS can be either of these:
-- **Built-in.** A self-signed cert whose SHA-256 fingerprint is pinned during pairing (shown in the hub UI and included in the token string).
-- **External.** A reverse proxy such as Caddy or Traefik, using normal CA validation. Only `/sync/v1` needs to be reachable by agents. Keep `/` and `/api` on a trusted network.
+- **Built-in.** A self-signed cert whose SHA-256 fingerprint is pinned during pairing (shown in the hub UI and included in the token string), served over TLS 1.3 only. The proofs also carry the session's `tls-exporter` value (RFC 9266), so they hold on that one session.
+- **External.** A reverse proxy such as Caddy or Traefik, using normal CA validation. Only `/sync/v1` needs to be reachable by agents. Keep `/` and `/api` on a trusted network. The proxy ends TLS, so the proofs carry no session binding, and the hub key alone proves the hub.
 
-Both modes serve UI, API and `/sync/v1` on one listener; the hub's default port is 9899.
+Both modes serve UI, API and `/sync/v1` on one listener; the hub's default port is 9899. An agent refuses a plain `http://` hub address that isn't loopback.
 
 ### 7.2 Sync protocol (`/sync/v1`, WebSocket, JSON, versioned)
 
@@ -24,17 +26,19 @@ Agent → hub:
 - `RestoreResult { request_id, op_id | error }`
 
 Hub → agent:
-- `Welcome { protocol, hub_protocols: [min, max] }`: `protocol` is the highest both sides speak, or absent when they share none; `hub_protocols` lets the agent say which side is out of date. It answers `Hello`, the first message after the signature check (§7.1, step 4).
+- `Welcome { protocol, hub_protocols: [min, max], agent_protocols: [min, max] }`, signed (below): `protocol` is the highest both sides speak, or absent when they share none; `hub_protocols` lets the agent say which side is out of date; `agent_protocols` echoes the range the hub saw, so an agent notices a range lowered on the way (decision 120). It answers `Hello`, the first message after both proofs (§7.1, step 4).
 - `Ack { epoch, seq }`
-- `RepoGrants { grants: [{ repo_id, owner, epoch, expires_at, keep_delete, prune_margin }] }`: the owner lease and the deadline inputs for each repo (§7.3). Sent on connect and renewed with each heartbeat reply. The agent caches them.
-- `RunPlan { plan_id }`, `CancelOp { op_id }` (milestone 5)
-- `RestoreRequest { request_id, repo_id, snapshot_id, paths, requested_by }` (milestone 5). Always restores into a new folder. Refused unless the agent sets `allow-hub-restore = true` (§10.4).
+- `RepoGrants { grants: [{ repo_id, owner, epoch, expires_at, keep_delete, prune_margin }] }`: the owner lease and the deadline inputs for each repo (§7.3). Sent on connect and renewed with each heartbeat reply. The agent caches them. Signed (below).
+- `RunPlan { plan_id }`, `CancelOp { op_id }` (milestone 9). Signed (below).
+- `RestoreRequest { request_id, repo_id, snapshot_id, paths, requested_by }` (milestone 9). Always restores into a new folder. Refused unless the agent sets `allow-hub-restore = true` (§10.4). Signed (below).
 - `FetchLog { op_id }` → agent replies `LogChunk`
-- `UpdatePlan { plan }`: **reserved for post-v1.** Opt-in per agent ("allow hub to edit my plans"). The message type is reserved in protocol v1 so that adding it later isn't a breaking change
+- `UpdatePlan { plan }`: **reserved for post-v1.** Opt-in per agent ("allow hub to edit my plans"). The message type is reserved in protocol v1 so that adding it later isn't a breaking change. Signed when it ships.
 
-**Versions** ([decision 88](decisions/88-hub-and-agent-version-compatibility.md), which sets the window and how long it lasts). Compatibility is counted in protocols, not releases: new optional fields stay within a protocol. The order nonce, signature, `Hello`, `Welcome` and those two messages' fields are the same in every protocol, so any two releases can negotiate.
+**Signed messages** ([decision 120](decisions/120-agent-hub-connection-security.md)). `Welcome`, `RepoGrants`, `RunPlan`, `CancelOp`, `RestoreRequest` and `UpdatePlan` carry the hub's signature over their payload, the agent's ID and the connection's two nonces, with a sequence number and an expiry. The agent obeys none of them unsigned, replayed or expired. Status traffic (`Ack`, `FetchLog`, heartbeat replies and what agents send) isn't signed and holds no secret.
 
-With no protocol in common, the agent keeps running its plans locally and says whether the hub or the agent is out of date, naming both ranges; the hub lists the agent as needing an update, or itself, and does so only for an agent whose signature checked out. Until they share a protocol again the agent ignores its cached `RepoGrants` and computes deadlines as if it had never received them (§7.3, layer 1), and its lease lapses as with any lost connection, so once it expires the agent runs no scheduled maintenance. An agent on the oldest protocol the hub speaks, or a hub on the oldest its agent speaks, is told so, with the release that will drop it.
+**Versions** ([decision 88](decisions/88-hub-and-agent-version-compatibility.md), which sets the window and how long it lasts). Compatibility is counted in protocols, not releases: new optional fields stay within a protocol. The handshake (`Connect`, `Challenge`, `Proof`, their signatures, `Hello`, `Welcome` and those messages' fields) is the same in every protocol, so any two releases can negotiate. Its label and path never change in place; a change would be a new path and a decision.
+
+With no protocol in common, the agent keeps running its plans locally and says whether the hub or the agent is out of date, naming both ranges; the hub lists the agent as needing an update, or itself, and does so only for an agent whose proof checked out. Until they share a protocol again the agent ignores its cached `RepoGrants` and computes deadlines as if it had never received them (§7.3, layer 1), and its lease lapses as with any lost connection, so once it expires the agent runs no scheduled maintenance. An agent on the oldest protocol the hub speaks, or a hub on the oldest its agent speaks, is told so, with the release that will drop it.
 
 The browser never talks to agents directly. When looking at a remote machine, the hub UI calls hub APIs, and the hub forwards requests like "run now" or "fetch log" over the agent's socket.
 
