@@ -7,10 +7,12 @@
 //! and both ends of one session, and only that session, share its binding.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use app::ports::{TlsKeyError, TlsKeys};
 use domain::Timestamp;
 use domain::fleet::{Binding, Fingerprint, TlsKey};
+use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::aws_lc_rs::{self, kx_group};
 use rustls::crypto::{CryptoProvider, SupportedKxGroup};
@@ -18,14 +20,14 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, Serve
 use rustls::server::{ClientHello, ParsedCertificate, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use rustls::{
-    ClientConfig, DigitallySignedStruct, NamedGroup, ProtocolVersion, ServerConfig,
-    SignatureScheme, SupportedProtocolVersion,
+    ClientConfig, DigitallySignedStruct, HandshakeKind, NamedGroup, ProtocolVersion, RootCertStore,
+    ServerConfig, SignatureScheme, SupportedProtocolVersion,
 };
 use tls_adapter::{
     ConnectError, EXPORTER_LABEL, HubListener, ListenerError, PinnedConnector, RcgenTlsKeys,
     SessionBinding, certificate,
 };
-use tokio::io::DuplexStream;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector, client, server};
 
 const HUB: &str = "hub.example";
@@ -372,13 +374,13 @@ async fn the_listener_refuses_a_tls12_client() {
 }
 
 /// The listener serves browsers too, which may offer X25519 alone; the
-/// session says so, for the hub's `binding-unavailable` check.
+/// session says so at both ends, for the hub's `binding-unavailable` check.
 #[tokio::test]
 async fn the_listener_serves_x25519_to_a_browser_and_says_it_isnt_post_quantum() {
     let key = new_key();
     let client = client_of_kind(&[kx_group::X25519], &[&rustls::version::TLS13]);
     let (hub, other) = client_of(client, &listener(&key)).await;
-    assert!(other.is_ok(), "{other:?}");
+    assert!(!other.unwrap().is_post_quantum());
     assert!(!hub.unwrap().is_post_quantum());
 }
 
@@ -401,6 +403,84 @@ fn group_names(provider: &CryptoProvider) -> Vec<NamedGroup> {
         .iter()
         .map(|group| group.name())
         .collect()
+}
+/// The hub sends a byte on `hub` and `client` reads it, so the client has
+/// taken the session tickets the hub sent after the handshake.
+async fn take_tickets<C, S>(hub: &mut S, client: &mut C)
+where
+    S: tokio::io::AsyncWrite + Unpin,
+    C: tokio::io::AsyncRead + Unpin,
+{
+    hub.write_all(b"x").await.unwrap();
+    hub.flush().await.unwrap();
+    let mut byte = [0; 1];
+    client.read_exact(&mut byte).await.unwrap();
+}
+
+/// An agent keeps no session to resume: its second connection is a full
+/// handshake that its verifier sees again, where a browser's is resumed.
+#[tokio::test]
+async fn an_agent_resumes_no_session_where_a_browser_does() {
+    let key = new_key();
+    let hub = listener(&key);
+    let agent = connector(&key);
+    let mut agent_kind = None;
+    for _ in 0..2 {
+        let (served, connected) = handshake(&hub, &agent, HUB).await;
+        let (mut served, mut connected) = (served.unwrap(), connected.unwrap());
+        take_tickets(&mut served, &mut connected).await;
+        agent_kind = connected.get_ref().1.handshake_kind();
+    }
+    assert_eq!(agent_kind, Some(HandshakeKind::Full));
+
+    let browser = client_of_kind(&[kx_group::X25519MLKEM768], &[&rustls::version::TLS13]);
+    let mut browser_kind = None;
+    for _ in 0..2 {
+        let (served, connected) = client_of(browser.clone(), &hub).await;
+        let (mut served, mut connected) = (served.unwrap(), connected.unwrap());
+        take_tickets(&mut served, &mut connected).await;
+        browser_kind = connected.get_ref().1.handshake_kind();
+    }
+    assert_eq!(browser_kind, Some(HandshakeKind::Resumed));
+}
+
+/// A certificate made at `now` is valid from the start of the day before,
+/// for a client whose clock runs behind, until 397 days on, as a browser
+/// that checks its dates sees it.
+#[test]
+fn a_certificate_is_valid_from_the_day_before_for_397_days() {
+    const DAY: u64 = 86_400;
+    let made = certificate(&new_key(), &names(), now()).unwrap();
+    let mut roots = RootCertStore::empty();
+    roots.add(made.clone()).unwrap();
+    let browser =
+        WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider(&[kx_group::X25519]))
+            .build()
+            .unwrap();
+    let name = ServerName::try_from(HUB).unwrap();
+    let made_at = u64::try_from(now().as_second()).unwrap();
+    let valid_at = |second: u64| {
+        let at = UnixTime::since_unix_epoch(Duration::from_secs(second));
+        browser
+            .verify_server_cert(&made, &[], &name, &[], at)
+            .is_ok()
+    };
+    // 2027-01-15T08:00:00Z: valid from 2027-01-14T00:00:00Z to the start
+    // of the 397th day on.
+    assert!(valid_at(made_at));
+    assert!(valid_at(made_at - 32 * 3_600));
+    assert!(!valid_at(made_at - 32 * 3_600 - 1));
+    assert!(valid_at(made_at + 397 * DAY - 8 * 3_600));
+    assert!(!valid_at(made_at + 397 * DAY - 8 * 3_600 + 1));
+}
+
+/// Neither the listener nor the agent's client shows its config, which
+/// holds the hub's private key, in its `Debug` form (I4).
+#[test]
+fn the_listener_and_the_client_show_no_key_in_their_debug_forms() {
+    let key = new_key();
+    assert_eq!(format!("{:?}", listener(&key)), "HubListener { .. }");
+    assert_eq!(format!("{:?}", connector(&key)), "PinnedConnector { .. }");
 }
 
 /// One provider, aws-lc-rs, with the groups named here, TLS 1.3 suites
