@@ -12,7 +12,7 @@ use leptos::prelude::*;
 
 use super::button::{Appearance, Content};
 use super::icon::Meaning;
-use super::{Button, Icon, Tip, Tooltip, hand_focus_when_gone};
+use super::{Button, Icon, Tip, Tooltip, hand_focus_when_gone_to};
 use crate::live::reply;
 use crate::text;
 use crate::variants::{Size, Tone};
@@ -109,8 +109,8 @@ impl Default for Toasts {
 /// the toast or focus is in it, and have their whole 6 s again once both
 /// have left (2.2.1); a warning or a failure needs the reader and stays
 /// until dismissed. Dismissed, focus on its button moves to the element
-/// with the ID `then_focus`, which the page keeps on the page (2.4.3), and
-/// nothing is said.
+/// whose ID `then_focus` holds then, which the page keeps on the page
+/// (2.4.3), and nothing is said.
 ///
 /// What the caller owes WCAG 2.2 AA, since the toast does none of it:
 ///
@@ -120,12 +120,14 @@ impl Default for Toasts {
 ///   the page wrong (a copy the browser refused): then an `Error` toast
 ///   beside the control, which stays until dismissed, is that place.
 /// - **Words that say what happened,** in the page's language.
-/// - **Keeping `then_focus` on the page.**
+/// - **Keeping `then_focus` on the page,** or changing it to the control
+///   that asked for the toast shown, when a page's toasts answer more than
+///   one.
 #[component]
 pub fn Toast(
     localizer: Arc<Localizer>,
     toasts: Toasts,
-    #[prop(into)] then_focus: String,
+    #[prop(into)] then_focus: Signal<String>,
 ) -> impl IntoView {
     // The alert's word, so one Dismiss reads alike across the set.
     let name = text(&localizer, super::alert::rules::dismiss_name());
@@ -142,7 +144,7 @@ pub fn Toast(
             let localizer = Arc::clone(&localizer);
             let name = name.clone();
             let button = NodeRef::<leptos::html::Button>::new();
-            hand_focus_when_gone(button, then_focus.clone());
+            hand_focus_when_gone_to(button, move || then_focus.try_get_untracked());
             view! {
                 <div
                     class=move || rules::toast_class(tone())

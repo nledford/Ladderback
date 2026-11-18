@@ -54,6 +54,31 @@ const DOWNLOAD_BUTTON: &str = "download-open";
 const NEW_FOLDER: &str = "new-folder";
 const IN_PLACE: &str = "in-place";
 
+/// The pane's toast, which answers a restore or a download started, and the
+/// button its dismissal hands focus back to: the one whose dialog started
+/// what it says (2.4.3).
+#[derive(Clone, Copy)]
+struct Started {
+    toasts: Toasts,
+    returns_to: RwSignal<&'static str>,
+}
+
+impl Started {
+    fn new() -> Self {
+        Self {
+            toasts: Toasts::new(),
+            returns_to: RwSignal::new(RESTORE_BUTTON),
+        }
+    }
+
+    /// Shows `words` as information, its dismissal handing focus to the
+    /// button with the ID `button`.
+    fn show(self, button: &'static str, words: String) {
+        self.returns_to.set(button);
+        self.toasts.show(ToastTone::Primary, words);
+    }
+}
+
 /// The page of one snapshot of one repository, both named by its address.
 #[component]
 pub(crate) fn Snapshot(localizer: Arc<Localizer>) -> impl IntoView {
@@ -147,7 +172,7 @@ fn EntryPane(
     let restoring = RwSignal::new(None::<(u32, Selection)>);
     let download_open = RwSignal::new(false);
     let downloading = RwSignal::new(None::<(u32, Selection)>);
-    let toasts = Toasts::new();
+    let started = Started::new();
     let button_localizer = Arc::clone(&localizer);
     let empty = text(&localizer, msg::UI_RESTORE_PANE_EMPTY);
     let button = move || match selected.get() {
@@ -196,7 +221,7 @@ fn EntryPane(
                 selection,
                 asks,
                 restore_open,
-                toasts,
+                started,
             )
         })
     };
@@ -210,7 +235,7 @@ fn EntryPane(
                 selection,
                 asks,
                 download_open,
-                toasts,
+                started,
             )
         })
     };
@@ -218,10 +243,14 @@ fn EntryPane(
         <section aria-labelledby="entry-pane-heading">
             <h2 id="entry-pane-heading">{text(&localizer, msg::UI_RESTORE_PANE)}</h2>
             {button}
-            // Dismissed, a toast hands focus to the Download button just
-            // before it, there while an entry is selected, as it is once
-            // either has started.
-            <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=DOWNLOAD_BUTTON />
+            // Dismissed, a toast hands focus to the button whose dialog
+            // started what it says, there while an entry is selected, as it
+            // is once either has started.
+            <Toast
+                localizer=Arc::clone(&localizer)
+                toasts=started.toasts
+                then_focus=Signal::derive(move || started.returns_to.get().to_owned())
+            />
             {restore}
             {download}
         </section>
@@ -242,7 +271,7 @@ fn opened(
 
 /// The restore dialog of `selection`: what it restores, where to, what a
 /// restore in place would change, and the step-up field it is confirmed
-/// with. On the daemon's start it closes and the page's `toasts` answer that
+/// with. On the daemon's start it closes and the pane's toast answers that
 /// the restore started; the page then says how it ended.
 fn restore_dialog(
     localizer: Arc<Localizer>,
@@ -251,7 +280,7 @@ fn restore_dialog(
     selection: Selection,
     asks: Asks,
     open: RwSignal<bool>,
-    toasts: Toasts,
+    started: Started,
 ) -> impl IntoView {
     let base = ws::origin();
     let words = {
@@ -391,7 +420,7 @@ fn restore_dialog(
                             error.set(None);
                             value.set(String::new());
                             open.set(false);
-                            toasts.show(ToastTone::Primary, words(&restore::running(&name)));
+                            started.show(RESTORE_BUTTON, words(&restore::running(&name)));
                             let awaited = ws::await_operation(&base, &operation, || true).await;
                             if let Some((said, politeness)) =
                                 restore::ended(&name, folder.as_deref(), &awaited)
@@ -487,8 +516,9 @@ fn restore_dialog(
 
 /// The download dialog of `selection`: what it downloads, as which archive
 /// when it is a folder, and the step-up field it is confirmed with. On the
-/// daemon's ticket it closes, the page says the download started, and the
-/// browser is sent to the ticket's address, which it saves as a download.
+/// daemon's ticket it closes, the pane's toast answers that the download
+/// started, and the browser is sent to the ticket's address, which it saves
+/// as a download.
 fn download_dialog(
     localizer: Arc<Localizer>,
     alias: String,
@@ -496,7 +526,7 @@ fn download_dialog(
     selection: Selection,
     asks: Asks,
     open: RwSignal<bool>,
-    toasts: Toasts,
+    started: Started,
 ) -> impl IntoView {
     let base = ws::origin();
     let state = RwSignal::new(download::Dialog::new(
@@ -566,7 +596,7 @@ fn download_dialog(
                             error.set(None);
                             value.set(String::new());
                             open.set(false);
-                            toasts.show(ToastTone::Primary, words(&download::handed(&name)));
+                            started.show(DOWNLOAD_BUTTON, words(&download::handed(&name)));
                         } else {
                             alert.set(Some(unreachable));
                         }
