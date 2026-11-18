@@ -10,8 +10,8 @@ use crate::secrets::SecretValue;
 use crate::{PlanId, RepositoryAlias, RepositoryId};
 
 use super::{
-    Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig, RepositorySettings,
-    RestoreFolder, ValueKind,
+    DryRunAllowlist, Hooks, Hostname, InvalidValue, Locale, Plan, RepositoryConfig,
+    RepositorySettings, RestoreFolder, ValueKind,
 };
 
 /// How many operations an agent runs at once: from 1 to
@@ -81,6 +81,9 @@ pub struct AgentSettings {
     /// The folder its restores into a new folder are made under, when it
     /// isn't `ladderback-restore` in the home folder (§10.4).
     pub restore_folder: Option<RestoreFolder>,
+    /// The folders a plan dry run may read (§16, decision 89, point 13):
+    /// none by default.
+    pub dry_run_allowlist: DryRunAllowlist,
 }
 
 /// Whether the agent asks for Ladderback's newest release once a day, to
@@ -262,6 +265,13 @@ impl AgentConfig {
 
     pub fn agent(&self) -> &AgentSettings {
         &self.agent
+    }
+
+    /// This configuration with `allowlist` as its dry-run allowlist, the
+    /// rest as it is: a person sets it on the Settings page, and no
+    /// proposal changes it (decision 89, point 13).
+    pub fn with_dry_run_allowlist(&self, allowlist: DryRunAllowlist) -> Self {
+        todo!("{allowlist:?}")
     }
 
     /// The hooks that wrap every operation of the agent.
@@ -570,6 +580,30 @@ mod tests {
     }
 
     #[test]
+    fn setting_the_dry_run_allowlist_changes_nothing_else() {
+        let config = AgentConfig::new(
+            AgentSettings {
+                hostname: Some(Hostname::parse("demo-host").unwrap()),
+                ..AgentSettings::default()
+            },
+            Hooks::default(),
+            repositories(&["nas"]),
+            Vec::new(),
+        )
+        .unwrap();
+        let allowlist = DryRunAllowlist::new(vec![
+            crate::planning::DryRunFolder::parse("/srv/demo").unwrap(),
+        ])
+        .unwrap();
+        let changed = config.with_dry_run_allowlist(allowlist.clone());
+        assert_eq!(changed.agent().dry_run_allowlist, allowlist);
+        assert_eq!(
+            changed.with_dry_run_allowlist(DryRunAllowlist::default()),
+            config
+        );
+    }
+
+    #[test]
     fn a_configuration_keeps_what_it_was_given() {
         let settings = AgentSettings {
             hostname: Some(Hostname::parse("demo-host").unwrap()),
@@ -579,6 +613,10 @@ mod tests {
             locale: Some(Locale::parse("en-US").unwrap()),
             update_check: UpdateCheck::Off,
             restore_folder: Some(RestoreFolder::parse("/srv/restores").unwrap()),
+            dry_run_allowlist: DryRunAllowlist::new(vec![
+                crate::planning::DryRunFolder::parse("/srv/demo").unwrap(),
+            ])
+            .unwrap(),
         };
         let hooks = Hooks {
             run_before: vec![crate::planning::HookEntry::parse("true").unwrap()],

@@ -249,6 +249,16 @@ pub(crate) async fn serving_with_sign_in(agent: &mut Agent, password: String) {
     web::serve_on_loopback(agent).await;
 }
 
+/// As above, the daemon logging at `debug`, so a scenario can check that
+/// even its most talkative log names nothing it mustn't.
+#[given(
+    expr = "Ladderback is serving on loopback with sign-in on, the admin password {string} and its log at debug"
+)]
+async fn serving_with_sign_in_logging_debug(agent: &mut Agent, password: String) {
+    is_set(agent, password).await;
+    web::serve_on_loopback_logging(agent, Some("debug")).await;
+}
+
 #[given("Ladderback is serving on loopback with sign-in off")]
 async fn serving_with_sign_in_off(agent: &mut Agent) {
     // The shared folders, so a later set-password writes where it serves.

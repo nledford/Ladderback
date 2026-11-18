@@ -88,6 +88,13 @@ impl RunQueue {
         state.queue.is_going(plan)
     }
 
+    /// Whether any backup holds a place, running or waiting for its turn: a
+    /// plan dry run gives way to it (decision 89, point 13).
+    pub fn is_busy(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.is_busy()
+    }
+
     /// Holds the queue for a restart that waits for the running backups to
     /// end: no waiting run gets its turn from now on (`BackupQueue::hold`).
     pub fn hold(&self) {
@@ -194,6 +201,23 @@ mod tests {
         let queue = RunQueue::new();
         let mut home = queue.push(&plan("home"), limit(1));
         assert!(has_turn(&mut home));
+    }
+
+    #[test]
+    fn the_queue_is_busy_while_a_backup_holds_a_place_running_or_waiting() {
+        let queue = RunQueue::new();
+        assert!(!queue.is_busy());
+        queue.hold();
+        let waiting = queue.push(&plan("docs"), limit(1));
+        assert_eq!(queue.running(), 0);
+        assert!(queue.is_busy(), "a waiting run holds a place");
+        drop(waiting);
+        queue.release();
+        let running = queue.push(&plan("home"), limit(1));
+        assert_eq!(queue.running(), 1);
+        assert!(queue.is_busy(), "a running one too");
+        drop(running);
+        assert!(!queue.is_busy());
     }
 
     #[test]

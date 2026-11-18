@@ -123,6 +123,11 @@ impl BackupQueue {
             .any(|going| going == plan)
     }
 
+    /// Whether any backup holds a place: running, or waiting for its turn.
+    pub fn is_busy(&self) -> bool {
+        todo!()
+    }
+
     /// Holds the queue for a restart that waits for the running backups to
     /// end: from now on no waiting run starts, and a run that asks for a
     /// place waits, for the daemon that starts next to run (decision 94).
@@ -155,6 +160,18 @@ mod tests {
 
     fn limit(value: i64) -> Concurrency {
         Concurrency::new(value).unwrap()
+    }
+
+    #[test]
+    fn a_queue_is_busy_while_a_run_is_waiting_or_running() {
+        let mut queue = BackupQueue::new(limit(1));
+        assert!(!queue.is_busy());
+        let home = queue.push(&plan("home"));
+        assert!(queue.is_busy(), "waiting");
+        assert_eq!(queue.start(), vec![home]);
+        assert!(queue.is_busy(), "running");
+        queue.leave(home);
+        assert!(!queue.is_busy());
     }
 
     #[test]

@@ -327,6 +327,7 @@ async fn the_tools_listed_are_the_golden_files() {
             "propose_setup",
             "get_proposal",
             "withdraw_proposal",
+            "dry_run_plan",
         ]
     );
     for tool in tools.as_array().expect("a list of tools") {
@@ -400,6 +401,7 @@ async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_ar
         ("propose_setup", vec!["changes"]),
         ("get_proposal", vec!["proposal"]),
         ("withdraw_proposal", vec!["proposal"]),
+        ("dry_run_plan", vec!["plan"]),
     ]
     .into_iter()
     .collect();
@@ -769,6 +771,28 @@ impl Proposals for Lists {
     async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto> {
         self.ask(format!("withdraw {id}"));
         self.told(&a_proposal())
+    }
+
+    async fn dry_run(&self, plan: api::PlanDto) -> Result<api::PlanDryRunDto, ErrorDto> {
+        self.ask(format!("dry run {}", serde_json::to_string(&plan).unwrap()));
+        self.told(&a_dry_run())
+    }
+}
+
+/// What a stand-in daemon counts for every dry run: one exclude, and a walk
+/// stopped at its time.
+fn a_dry_run() -> api::PlanDryRunDto {
+    api::PlanDryRunDto {
+        files: 12,
+        bytes: 4096,
+        unreadable: 1,
+        excludes: vec![api::ExcludeTallyDto {
+            setting: "globs".to_owned(),
+            entry: Some(1),
+            files: 3,
+            bytes: 1024,
+        }],
+        stopped: Some(api::DryRunStopDto::Time),
     }
 }
 
@@ -1374,6 +1398,7 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
         ("propose_setup", json!({"changes": [remove_home()]})),
         ("get_proposal", json!({"proposal": "p"})),
         ("withdraw_proposal", json!({"proposal": "p"})),
+        ("dry_run_plan", json!({"plan": tables()[0].0})),
     ] {
         let answer = client.call(tool, arguments).await;
         assert_eq!(
@@ -1471,7 +1496,7 @@ async fn no_refusal_of_any_tool_carries_structured_content() {
 }
 
 /// Each tool, with arguments it takes.
-fn every_tool_called() -> [(&'static str, Value); 16] {
+fn every_tool_called() -> [(&'static str, Value); 17] {
     [
         ("status", json!({})),
         ("list_plans", json!({})),
@@ -1492,6 +1517,7 @@ fn every_tool_called() -> [(&'static str, Value); 16] {
         ("propose_setup", json!({"changes": [remove_home()]})),
         ("get_proposal", json!({"proposal": "p"})),
         ("withdraw_proposal", json!({"proposal": "p"})),
+        ("dry_run_plan", json!({"plan": tables()[0].0})),
     ]
 }
 
@@ -2265,6 +2291,8 @@ async fn a_one_shot_call_answers_as_a_tools_call_does() {
         ("propose_setup", json!({"changes": "all"})),
         ("get_proposal", json!({"proposal": "p"})),
         ("withdraw_proposal", json!({})),
+        ("dry_run_plan", json!({"plan": tables()[1].0})),
+        ("dry_run_plan", json!({"plan": "not = [a table"})),
     ] {
         let answer = client.call(tool, arguments.clone()).await;
         let call =
@@ -2329,7 +2357,12 @@ async fn a_server_of_its_own_offers_no_proposal_tool() {
     let every = connected.ask_current("tools/list", json!({})).await["result"]["tools"].clone();
     let mut client = connect(Lists::default());
     let answer = client.ask_current("tools/list", json!({})).await;
-    let proposal_tools = ["propose_setup", "get_proposal", "withdraw_proposal"];
+    let proposal_tools = [
+        "propose_setup",
+        "get_proposal",
+        "withdraw_proposal",
+        "dry_run_plan",
+    ];
     let expected: Vec<&Value> = every
         .as_array()
         .expect("a list of tools")
@@ -2392,7 +2425,7 @@ fn only_connect_mode_offers_the_proposal_tools_to_a_one_shot_call() {
         let call = Call::of_words(&tool.name, &[]).unwrap();
         let proposes = matches!(
             tool.name.as_ref(),
-            "propose_setup" | "get_proposal" | "withdraw_proposal"
+            "propose_setup" | "get_proposal" | "withdraw_proposal" | "dry_run_plan"
         );
         assert!(call.offered_in(Offer::Connect), "{}", tool.name);
         assert_eq!(
@@ -2417,6 +2450,28 @@ async fn a_one_shot_proposal_call_on_a_server_of_its_own_is_unwritten() {
     };
     assert_eq!(why, "no tool is named \"get_proposal\"");
     assert!(asked.lock().unwrap().is_empty());
+}
+
+/// `dry_run_plan` hands the daemon the plan's TOML table as the
+/// configuration's parser reads it, under `plan`, and returns the daemon's
+/// counts as they came; text that isn't a table is refused unasked.
+#[tokio::test(start_paused = true)]
+async fn dry_run_plan_asks_the_daemon_with_the_plan_s_table_and_returns_its_counts() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = proposing(lists);
+    let [(nightly, nightly_table), _] = tables();
+    assert_eq!(
+        client
+            .listed("dry_run_plan", json!({"plan": nightly}))
+            .await,
+        serde_json::to_value(a_dry_run()).unwrap()
+    );
+    let refused = client
+        .call("dry_run_plan", json!({"plan": "not = [a table"}))
+        .await;
+    assert_eq!(refusal(&refused)["code"], "invalid-arguments");
+    assert_eq!(*asked.lock().unwrap(), [format!("dry run {nightly_table}")]);
 }
 
 /// `propose_setup` hands the changes and the rationale to the daemon as the

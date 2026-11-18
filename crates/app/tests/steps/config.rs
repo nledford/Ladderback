@@ -65,6 +65,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::LocalPath => "local-path",
             ValueKind::Locale => "locale",
             ValueKind::RestoreFolder => "restore-folder",
+            ValueKind::DryRunFolder => "dry-run-allowlist",
             ValueKind::Concurrency => "concurrency",
             ValueKind::Nice => "nice",
             ValueKind::Cron => "cron",

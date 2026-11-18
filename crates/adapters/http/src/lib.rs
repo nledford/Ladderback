@@ -14,6 +14,7 @@
 mod api_tokens;
 mod body_limit;
 mod downloads;
+mod dry_runs;
 mod full_disk_access;
 mod listener;
 mod maintenance;
@@ -51,6 +52,7 @@ use rust_embed as _;
 use serde::{Deserialize, Serialize};
 
 pub use downloads::{DownloadRefusal, DownloadStart, Downloads, Handover};
+pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
@@ -96,6 +98,9 @@ pub struct AppState {
     /// How a request proposes configuration changes, and reads and
     /// withdraws proposals (decision 89).
     pub proposals: Arc<dyn Proposals>,
+    /// How a request dry-runs a draft plan, and reads and sets the dry-run
+    /// allowlist (decision 89, point 13).
+    pub dry_runs: Arc<dyn DryRuns>,
     /// How a request confirms a download and fetches it by its ticket
     /// (§10.4).
     pub downloads: Arc<dyn Downloads>,
@@ -529,6 +534,18 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/plans",
             axum::routing::get(list_plans).post(plans::create),
+        )
+        // Before `/api/v1/plans/{id}`, which has no POST: a static segment
+        // wins over a capture in axum's router.
+        .route(
+            "/api/v1/plans/dry-run",
+            axum::routing::post(dry_runs::dry_run),
+        )
+        // A session's only: the scope table names no scope for it, so no
+        // token, and so no proposal, sets the allowlist (decision 89).
+        .route(
+            "/api/v1/settings/dry-run-allowlist",
+            axum::routing::get(dry_runs::allowlist).put(dry_runs::set_allowlist),
         )
         .route(
             "/api/v1/plans/{id}",
@@ -1617,6 +1634,7 @@ mod tests {
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
             proposals: Arc::new(crate::request_checks::tests::NoProposals),
+            dry_runs: Arc::new(crate::request_checks::tests::NoDryRuns),
             downloads: Arc::new(crate::request_checks::tests::NoDownloads),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
@@ -1664,6 +1682,7 @@ mod tests {
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
             proposals: Arc::new(crate::request_checks::tests::NoProposals),
+            dry_runs: Arc::new(crate::request_checks::tests::NoDryRuns),
             downloads: Arc::new(crate::request_checks::tests::NoDownloads),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,
@@ -3149,6 +3168,7 @@ mod tests {
             profiles: Arc::new(crate::request_checks::tests::NoProfiles),
             restores: Arc::new(crate::request_checks::tests::NoRestores),
             proposals: Arc::new(crate::request_checks::tests::NoProposals),
+            dry_runs: Arc::new(crate::request_checks::tests::NoDryRuns),
             downloads: Arc::new(crate::request_checks::tests::NoDownloads),
             sign_in: crate::request_checks::tests::sign_in_off(),
             exposure: Exposure::Loopback,

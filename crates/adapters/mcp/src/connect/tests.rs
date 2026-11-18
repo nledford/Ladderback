@@ -783,6 +783,52 @@ async fn a_check_whose_answer_is_lost_is_daemon_unreachable_as_it_changes_nothin
     );
 }
 
+/// A plan dry run as the daemon counts one: an exclude, and a walk stopped
+/// at its time.
+fn dry_run_counts() -> Value {
+    json!({
+        "files": 12,
+        "bytes": 4096,
+        "unreadable": 1,
+        "excludes": [{"setting": "globs", "entry": 1, "files": 3, "bytes": 1024}],
+        "stopped": "time",
+    })
+}
+
+#[tokio::test]
+async fn a_dry_run_posts_the_plan_to_its_route_and_reads_the_counts_it_is_told() {
+    let sent = Sent::default();
+    let routes = recording(Arc::clone(&sent), |path| match path {
+        "/api/v1/dry-runs" => axum::Json(dry_run_counts()).into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    });
+    let connect = Connect::new(daemon(routes).await).unwrap();
+    let table = json!({"sources": ["/srv/demo"], "globs": ["!cache"]});
+    let plan = api::PlanDto(table.as_object().unwrap().clone());
+    let counted = connect.dry_run(plan).await.unwrap();
+    assert_eq!(serde_json::to_value(counted).unwrap(), dry_run_counts());
+    let asked: Vec<(String, String, Value)> = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|[method, path, _, _, body]| {
+            (
+                method.clone(),
+                path.clone(),
+                serde_json::from_str(body).unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        asked,
+        [(
+            "POST".to_owned(),
+            "/api/v1/dry-runs".to_owned(),
+            json!({"plan": table})
+        )]
+    );
+}
+
 #[tokio::test]
 async fn a_run_is_posted_as_json_with_the_token_and_returns_the_operation_queued() {
     let sent = Sent::default();

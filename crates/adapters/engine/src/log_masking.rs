@@ -28,6 +28,18 @@ use log::{Log, Metadata, Record};
 /// The redactor of every open running.
 static OPEN: Mutex<Vec<Arc<Redactor>>> = Mutex::new(Vec::new());
 
+/// Runs `walk` with every record this thread makes held back from the log,
+/// and answers its output with the warnings and errors among them counted.
+/// A plan dry run's walk meets paths, and its records name them (rustic's
+/// xattr warning, the `ignore` crate's debug record of each entry it
+/// leaves out), while the daemon's log is served at the `read` scope. It
+/// counts only where [`Masked`] is the process's logger, as the daemon's
+/// is; the thread logs as before once `walk` returns or panics.
+pub(crate) fn unlogged<T>(walk: impl FnOnce() -> T) -> (T, u64) {
+    let _ = walk;
+    todo!()
+}
+
 /// A logger whose records are masked with the secrets of every repository
 /// the process has open in-process, as they are when it logs them.
 pub struct Masked<L> {
@@ -166,6 +178,32 @@ mod tests {
 
     // Each test has secrets of its own: an open another test holds masks
     // its own secrets only, which these texts don't hold.
+
+    #[test]
+    fn a_dry_run_walk_s_records_are_held_back_and_its_warnings_and_errors_counted() {
+        let kept = Kept::default();
+        let logger = Masked::new(kept.clone());
+        let named = "Error reading xattrs for /srv/demo/CANARY-walked.txt, not excluding";
+        let ((), counted) = super::unlogged(|| {
+            for level in [Level::Error, Level::Warn, Level::Info, Level::Debug] {
+                log(&logger, level, "rustic_core::backend::ignore", named);
+            }
+        });
+        assert_eq!(counted, 2);
+        assert_eq!(kept.messages(), []);
+        let unwound =
+            std::panic::catch_unwind(|| super::unlogged(|| -> u8 { panic!("the walk panicked") }));
+        assert!(unwound.is_err());
+        log(&logger, Level::Warn, "ladderback", "after the walk");
+        assert_eq!(
+            kept.messages(),
+            [(
+                Level::Warn,
+                "ladderback".to_owned(),
+                "after the walk".to_owned()
+            )]
+        );
+    }
 
     #[test]
     fn while_an_open_runs_its_secrets_are_masked_in_every_record_whatever_its_crate() {

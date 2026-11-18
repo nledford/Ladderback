@@ -1178,3 +1178,37 @@ impl contract::config_drafts::DraftsHarness for InMemoryDrafts {
 async fn in_memory_config_store_meets_the_config_drafts_contract() {
     contract::config_drafts::run(&InMemoryDrafts::default()).await;
 }
+
+/// Builds each case's tree in memory, under `/srv/demo`.
+struct InMemoryTrees;
+
+impl contract::walk::WalkHarness for InMemoryTrees {
+    fn tree(
+        &self,
+        files: &[(&str, u64)],
+    ) -> (Arc<dyn app::ports::WalkSources>, domain::planning::Source) {
+        let root = "/srv/demo";
+        let mut entries = Vec::new();
+        for (path, size) in files {
+            let mut folder = root.to_owned();
+            let mut parts: Vec<&str> = path.split('/').collect();
+            let name = parts.pop().unwrap_or_default();
+            for part in parts {
+                folder = format!("{folder}/{part}");
+                if !entries.iter().any(|(path, _)| *path == folder) {
+                    entries.push((folder.clone(), None));
+                }
+            }
+            entries.push((format!("{folder}/{name}"), Some(*size)));
+        }
+        (
+            Arc::new(app::fakes::InMemoryTree::new(entries)),
+            domain::planning::Source::parse(root).expect("a source"),
+        )
+    }
+}
+
+#[tokio::test]
+async fn in_memory_tree_meets_the_walk_contract() {
+    contract::walk::run(&InMemoryTrees).await;
+}

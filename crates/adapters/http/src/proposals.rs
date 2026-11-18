@@ -167,7 +167,7 @@ pub enum ProposalsError {
 }
 
 /// Who asks: the API token the request presented, else no token.
-fn asker(token: Option<axum::Extension<TokenOf>>) -> Proposer {
+pub(crate) fn asker(token: Option<axum::Extension<TokenOf>>) -> Proposer {
     match token {
         Some(axum::Extension(token)) => Proposer::Token {
             id: token.grant.id,

@@ -768,7 +768,7 @@ fn masked_diff(config: &AgentConfig, before: &str, after: &str) -> String {
 }
 
 /// Whether `a` and `b` are one proposer: one token, or both no token.
-fn same_proposer(a: &Proposer, b: &Proposer) -> bool {
+pub(crate) fn same_proposer(a: &Proposer, b: &Proposer) -> bool {
     match (a, b) {
         (Proposer::Token { id: a, .. }, Proposer::Token { id: b, .. }) => a == b,
         (Proposer::NoToken, Proposer::NoToken) => true,

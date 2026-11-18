@@ -30,7 +30,7 @@ fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
 }
 
 /// A plan's source filter as the worker takes it, field for field.
-fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
+pub(crate) fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
     let SourceFilter {
         globs,
         iglobs,

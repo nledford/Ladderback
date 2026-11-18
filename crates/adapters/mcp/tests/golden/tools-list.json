@@ -4369,5 +4369,123 @@
       "type": "object"
     },
     "title": "Withdraw proposal"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Counts what a draft plan would back up, without backing anything up: the files and bytes its sources hold through its source filter, and what each exclude removes on its own. Counts and sizes only, never a path. Reads only within the folders a person allowed on Ladderback's Settings page; runs no hook and opens no repository. One runs at a time, none while a backup runs or waits, each stops after a short time or a number of entries and says so, and each client may start a few an hour.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "description": "The draft plan's table as TOML text: the keys of a `[[plans]]` entry\nin the configuration file, without the header (`id = \"home\"`,\n`repository`, `sources` and so on), as `propose_setup` takes a plan.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "type": "object"
+    },
+    "name": "dry_run_plan",
+    "outputSchema": {
+      "$defs": {
+        "DryRunStopDto": {
+          "oneOf": [
+            {
+              "const": "entries",
+              "type": "string"
+            },
+            {
+              "const": "time",
+              "type": "string"
+            },
+            {
+              "const": "gave-way",
+              "type": "string"
+            }
+          ]
+        },
+        "ExcludeTallyDto": {
+          "properties": {
+            "bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "entry": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "files": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "setting": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setting",
+            "files",
+            "bytes"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "excludes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExcludeTallyDto"
+          },
+          "type": "array"
+        },
+        "files": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stopped": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DryRunStopDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unreadable": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "files",
+        "bytes",
+        "unreadable",
+        "excludes"
+      ],
+      "type": "object"
+    },
+    "title": "Dry-run plan"
   }
 ]

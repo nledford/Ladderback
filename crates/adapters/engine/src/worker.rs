@@ -28,6 +28,8 @@ mod stdio;
 pub(crate) mod tmp_files;
 mod watchdog;
 
+pub(crate) use convert::backup_options;
+
 use std::cell::RefCell;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};

@@ -83,7 +83,7 @@ fn named(id: &str) -> Result<PlanId, PlansError> {
 }
 
 /// The plan `table` holds, read as the loader reads one of the file's.
-fn read(table: &api::PlanDto) -> Result<Plan, PlansError> {
+pub(super) fn read(table: &api::PlanDto) -> Result<Plan, PlansError> {
     config_adapter::read_plan(&table.0).map_err(|error| match error {
         ConfigError::Invalid {
             key: Some(field),

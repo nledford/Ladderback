@@ -54,6 +54,7 @@ table! {
         locale: String,
         check_for_updates: bool,
         restore_folder: String,
+        dry_run_allowlist: Vec<String>,
     }
 }
 

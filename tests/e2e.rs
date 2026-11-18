@@ -81,6 +81,8 @@ mod mcp_proposals_steps;
 mod mcp_steps;
 #[path = "steps/notifications.rs"]
 mod notifications_steps;
+#[path = "steps/plan_dry_run.rs"]
+mod plan_dry_run_steps;
 #[path = "steps/plan_settings.rs"]
 mod plan_settings_steps;
 #[path = "steps/plans.rs"]
@@ -151,6 +153,8 @@ struct Agent {
     core_dumps: core_dumps_steps::CoreDumpsE2e,
     restore: restore_steps::RestoreE2e,
     download: download_steps::DownloadE2e,
+    /// The daemon's answer to an API token setting the dry-run allowlist.
+    dry_run_refusal: Option<request_checks_steps::Response>,
 }
 
 impl std::fmt::Debug for Agent {
@@ -210,6 +214,7 @@ impl Agent {
             core_dumps: core_dumps_steps::CoreDumpsE2e::default(),
             restore: restore_steps::RestoreE2e::default(),
             download: download_steps::DownloadE2e::default(),
+            dry_run_refusal: None,
         }
     }
 

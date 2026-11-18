@@ -19,6 +19,7 @@ pub mod announce;
 pub mod browse;
 pub mod conditions;
 pub mod download;
+pub mod dry_run;
 pub mod event_bus;
 pub mod execution;
 pub mod full_disk_access;

@@ -26,8 +26,8 @@ use std::sync::Arc;
 
 use api::{
     BuildDto, ErrorCode, ErrorDto, ExposureDto, LocationsTestDto, MaintenancePreviewDto,
-    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanSummaryDto, PlansDto,
-    ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto,
+    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto, PlanSummaryDto,
+    PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use l10n::Localizer;
@@ -73,7 +73,7 @@ use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
     SnapshotsArguments, SnapshotsPage, page, page_length,
 };
-use proposals::{ProposalArguments, ProposeArguments, Proposing};
+use proposals::{DryRunArguments, ProposalArguments, ProposeArguments, Proposing};
 
 /// The revisions served, oldest first: the first with `structuredContent`
 /// and `outputSchema`, the one after it, and the current one, which has no
@@ -108,6 +108,7 @@ const EXPORT_PROFILE: &str = "export_profile";
 const PROPOSE_SETUP: &str = "propose_setup";
 const GET_PROPOSAL: &str = "get_proposal";
 const WITHDRAW_PROPOSAL: &str = "withdraw_proposal";
+const DRY_RUN_PLAN: &str = "dry_run_plan";
 
 /// A tool, as a call names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,11 +129,12 @@ pub(crate) enum ToolName {
     ProposeSetup,
     GetProposal,
     WithdrawProposal,
+    DryRunPlan,
 }
 
 impl ToolName {
     /// Every tool.
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::Status,
         Self::ListPlans,
         Self::ListRepositories,
@@ -149,6 +151,7 @@ impl ToolName {
         Self::ProposeSetup,
         Self::GetProposal,
         Self::WithdrawProposal,
+        Self::DryRunPlan,
     ];
 
     /// The tool named `name`, if there is one.
@@ -175,6 +178,7 @@ impl ToolName {
             Self::ProposeSetup => PROPOSE_SETUP,
             Self::GetProposal => GET_PROPOSAL,
             Self::WithdrawProposal => WITHDRAW_PROPOSAL,
+            Self::DryRunPlan => DRY_RUN_PLAN,
         }
     }
 
@@ -183,7 +187,7 @@ impl ToolName {
         offer == Offer::Connect
             || !matches!(
                 self,
-                Self::ProposeSetup | Self::GetProposal | Self::WithdrawProposal
+                Self::ProposeSetup | Self::GetProposal | Self::WithdrawProposal | Self::DryRunPlan
             )
     }
 }
@@ -520,6 +524,12 @@ impl Server {
                 };
                 answered(propose(proposing, tool, given).await)
             }
+            ToolName::DryRunPlan => {
+                let Some(proposing) = &self.proposing else {
+                    return Answer::Unwritten(format!("no tool is named {:?}", tool.name()));
+                };
+                answered(dry_run(proposing, given).await)
+            }
         }
     }
 
@@ -749,6 +759,15 @@ async fn propose(
             proposals.proposal(proposal).await
         }
     }
+}
+
+/// Runs `dry_run_plan` over the daemon's dry-run route: the plan's table
+/// read from its text, as `propose_setup` reads one.
+async fn dry_run(
+    proposing: &Proposing,
+    given: Option<JsonObject>,
+) -> Result<PlanDryRunDto, ErrorDto> {
+    todo!("{:?} {given:?}", proposing.tables.as_ref() as *const _)
 }
 
 /// A tool's result: what it read or did, or its refusal.
@@ -1022,6 +1041,20 @@ fn tools() -> Vec<Tool> {
         .with_title("Withdraw proposal")
         .with_raw_output_schema(output_schema::<ProposalDto>())
         .with_annotations(acting()),
+        Tool::new(
+            DRY_RUN_PLAN,
+            "Counts what a draft plan would back up, without backing anything up: the files \
+             and bytes its sources hold through its source filter, and what each exclude \
+             removes on its own. Counts and sizes only, never a path. Reads only within the \
+             folders a person allowed on Ladderback's Settings page; runs no hook and opens no \
+             repository. One runs at a time, none while a backup runs or waits, each stops \
+             after a short time or a number of entries and says so, and each client may start \
+             a few an hour.",
+            input_schema::<DryRunArguments>(),
+        )
+        .with_title("Dry-run plan")
+        .with_raw_output_schema(output_schema::<PlanDryRunDto>())
+        .with_annotations(read_only()),
     ]
 }
 

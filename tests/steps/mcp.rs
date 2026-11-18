@@ -330,7 +330,7 @@ pub(super) fn content(agent: &Agent) -> &Value {
 /// A tool's refusal: a result marked as an error, with no
 /// `structuredContent` (its tool's output schema doesn't take one), whose
 /// text content holds the `{code, args}` as JSON.
-fn refusal_of(result: &Value) -> Value {
+pub(super) fn refusal_of(result: &Value) -> Value {
     assert_eq!(result["isError"], true, "{result}");
     assert!(result.get("structuredContent").is_none(), "{result}");
     let text = result["content"][0]["text"]

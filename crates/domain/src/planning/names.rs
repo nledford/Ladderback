@@ -62,7 +62,7 @@ impl Source {
 
 /// An absolute path of at most [`MAX_PATH_BYTES`] without a NUL, as written:
 /// what the worker reads from the disk can't depend on where it was started.
-fn is_absolute_path(text: &str) -> bool {
+pub(super) fn is_absolute_path(text: &str) -> bool {
     text.starts_with('/') && text.len() <= MAX_PATH_BYTES && !text.contains('\0')
 }
 
