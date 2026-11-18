@@ -2204,3 +2204,21 @@ Feature: The shared components in the gallery
     Then every alert of the "Alert" demo holds its icon, its words and its Dismiss button inside its edge
     And the page doesn't scroll sideways
     And no text is clipped
+
+  # A word that fits on a line of its own wraps whole, never "Ladderbac" over
+  # "k"; only a word longer than the line, as the error's long path is, may
+  # break inside. Dismiss keeps to the end of its line, a line of its own if
+  # it doesn't fit beside the words (#972).
+  Scenario Outline: On a small screen with larger text, an alert's words wrap only between words and its Dismiss button keeps to the end, in a page that runs <direction>
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery asking for the locale "<locale>"
+    Then every alert of the alert demo breaks its words only between them, unless a word is longer than its line
+    And the Dismiss button of the alert demo stands at the end of its line, in a page that runs <direction>
+    And the page doesn't scroll sideways
+    And no text is clipped
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |

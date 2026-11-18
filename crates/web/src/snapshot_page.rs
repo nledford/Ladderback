@@ -30,7 +30,7 @@ use crate::components::button::{Appearance, Content};
 use crate::components::tree::rules::{Selection, folder_url};
 use crate::components::{
     Button, Confirmation, FolderLoader, FolderPage, RadioGroup, ReviewDialog, StepUp, StepUpField,
-    Tree, Working, sentence_view,
+    Tree, Working, dialog_refusal_alert,
 };
 use crate::download;
 use crate::live::{reply, say};
@@ -402,6 +402,7 @@ fn restore_dialog(
             }
         });
     });
+    let alert_localizer = Arc::clone(&localizer);
     view! {
         <ReviewDialog
             open=open
@@ -452,17 +453,7 @@ fn restore_dialog(
                         }
                     })
             }}
-            {move || {
-                alert
-                    .get()
-                    .map(|sentence| {
-                        view! {
-                            <p class="form-error" role="alert">
-                                {sentence_view(sentence)}
-                            </p>
-                        }
-                    })
-            }}
+            {move || alert.get().map(|sentence| dialog_refusal_alert(&alert_localizer, sentence))}
             <StepUpField
                 id="restore-step-up"
                 localizer=Arc::clone(&localizer)
@@ -595,6 +586,7 @@ fn download_dialog(
             />
         }
     });
+    let alert_localizer = Arc::clone(&localizer);
     view! {
         <ReviewDialog
             open=open
@@ -614,17 +606,7 @@ fn download_dialog(
         >
             <p id="download-summary">{summary}</p>
             {format}
-            {move || {
-                alert
-                    .get()
-                    .map(|sentence| {
-                        view! {
-                            <p class="form-error" role="alert">
-                                {sentence_view(sentence)}
-                            </p>
-                        }
-                    })
-            }}
+            {move || alert.get().map(|sentence| dialog_refusal_alert(&alert_localizer, sentence))}
             <StepUpField
                 id="download-step-up"
                 localizer=Arc::clone(&localizer)
