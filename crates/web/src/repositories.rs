@@ -1020,6 +1020,7 @@ mod tests {
     fn a_password_the_keyring_could_not_keep_belongs_to_the_password_field() {
         for code in [
             ErrorCode::KeyringUnavailable,
+            ErrorCode::KeyringLocked,
             ErrorCode::KeyringUnwritable,
             ErrorCode::KeyringEntryTaken,
         ] {

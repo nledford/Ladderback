@@ -202,11 +202,16 @@ pub enum ErrorCode {
     RepositoryPathRelative,
     /// The password typed for a repository was to be kept in the system
     /// keyring, and this computer has no keyring service to keep it in: on
-    /// Linux no Secret Service, no session bus to reach one by, or a locked
-    /// keyring. Nothing was saved or created. The argument `entry` names the
-    /// keyring entry (`service/name`); the platform's words, masked, are the
-    /// `detail`.
+    /// Linux no Secret Service, no session bus to reach one by, or one that
+    /// refused otherwise than as locked, as when its unlock prompt was
+    /// dismissed. Nothing was saved or created. The argument `entry` names
+    /// the keyring entry (`service/name`); the platform's words, masked, are
+    /// the `detail`.
     KeyringUnavailable,
+    /// The password typed for a repository was to be kept in the system
+    /// keyring, and the keyring service answered that its keyring is locked.
+    /// As `KeyringUnavailable`.
+    KeyringLocked,
     /// The password typed for a repository was to be kept in the system
     /// keyring, and the keyring refused it, failed or didn't answer in time.
     /// As `KeyringUnavailable`.
@@ -1119,13 +1124,14 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::KeyringUnavailable | Self::KeyringUnwritable | Self::KeyringEntryTaken => {
-                &[ArgSpec {
-                    name: "entry",
-                    kind: ArgKind::Text,
-                    optional: false,
-                }]
-            }
+            Self::KeyringUnavailable
+            | Self::KeyringLocked
+            | Self::KeyringUnwritable
+            | Self::KeyringEntryTaken => &[ArgSpec {
+                name: "entry",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::SecretsTooLargeToMask => &[
                 ArgSpec {
                     name: "limit",
@@ -2418,6 +2424,7 @@ mod tests {
         }
         for code in [
             ErrorCode::KeyringUnavailable,
+            ErrorCode::KeyringLocked,
             ErrorCode::KeyringUnwritable,
             ErrorCode::KeyringEntryTaken,
         ] {

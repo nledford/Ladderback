@@ -681,6 +681,12 @@ fn no_keyring_service(agent: &mut super::Agent) {
     agent.repositories.secrets.remove_keyring_service();
 }
 
+/// A desktop whose Secret Service runs, with its keyring not unlocked yet.
+#[given("a machine whose keyring is locked")]
+fn keyring_locked(agent: &mut super::Agent) {
+    agent.repositories.secrets.lock_keyring();
+}
+
 #[given(expr = "the keyring entry {string} holds {string}")]
 fn entry_holds(agent: &mut super::Agent, name: String, secret: String) {
     agent
@@ -751,6 +757,17 @@ fn refused_no_keyring(agent: &mut super::Agent) {
             error: KeyringError::Unavailable { .. },
         })) => assert_eq!(refused.to_string(), "ladderback/demo"),
         other => panic!("the request was not refused for a missing keyring: {other:?}"),
+    }
+}
+
+#[then("the request is refused because the keyring is locked")]
+fn refused_keyring_locked(agent: &mut super::Agent) {
+    match &agent.repositories.outcome {
+        Some(Outcome::Refused(RepositoryError::Keyring {
+            entry: refused,
+            error: KeyringError::Locked { .. },
+        })) => assert_eq!(refused.to_string(), "ladderback/demo"),
+        other => panic!("the request was not refused for a locked keyring: {other:?}"),
     }
 }
 

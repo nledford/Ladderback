@@ -21,7 +21,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::full_disk_access::FullDiskAccess;
-use domain::secrets::{CommandLine, KeyringEntry};
+use domain::secrets::{CommandLine, KeyringCause, KeyringEntry};
 use domain::{SignedDuration, Timestamp};
 
 fn epoch() -> Timestamp {
@@ -322,6 +322,16 @@ impl SecretsHarness for FakeSecretsHarness {
     fn with_locked_keyring(&self) -> Arc<dyn SecretResolver> {
         let secrets = FakeSecrets::new();
         secrets.lock_keyring();
+        Arc::new(secrets)
+    }
+
+    fn keyring_that_cannot_be_asked(&self, cause: KeyringCause) -> Arc<dyn app::ports::Keyring> {
+        let secrets = FakeSecrets::new();
+        match cause {
+            KeyringCause::NoService => secrets.remove_keyring_service(),
+            KeyringCause::Locked => secrets.lock_keyring(),
+            KeyringCause::Refused => secrets.dismiss_unlock_prompt(),
+        }
         Arc::new(secrets)
     }
 
