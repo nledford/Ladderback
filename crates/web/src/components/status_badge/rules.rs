@@ -1,13 +1,14 @@
-//! What a status badge shows for each state (components §4.5): its pill, a
-//! pair of Tailwind utilities, its words on its fill, whose tokens the
-//! contrast gate checks, a status tone's pair for an operation that ended
-//! (decision 108), and its icon, a shape of its own for every state, so a
-//! reader who can't tell the colors apart scans a table of them without
-//! reading each label (A2). `components/status_badge.rs`'s `StatusBadge` is
-//! the glue that draws them.
+//! What a status badge shows for each state (components §4.5): its badge's
+//! tone, one of the badge's tones (`badge/rules.rs`), a status tone's pair
+//! for an operation that ended (decision 108), whose words on its fill the
+//! contrast gate checks, and its icon, a shape of its own for every state,
+//! so a reader who can't tell the colors apart scans a table of them
+//! without reading each label (A2). `components/status_badge.rs`'s
+//! `StatusBadge` is the glue that draws them, as a `Badge`.
 
-use crate::variants::StatusTone;
 use lepticons_data::LucideGlyph;
+
+use crate::components::badge::rules::BadgeTone;
 
 /// A state a status badge shows: one an operation is in, or none to tell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,16 +42,15 @@ impl BadgeState {
         Self::Empty,
     ];
 
-    /// The pill the badge is drawn on, its words' utility and its fill's:
-    /// Success's pair for an operation that succeeded, with warnings too
-    /// (its icon and its words tell the warnings), Error's for one that
-    /// failed, and the badge's own Loading and Empty pairs for the rest.
-    pub fn pill(self) -> &'static str {
+    /// The badge's tone, whose pair of tokens its pill is drawn in: Ladder
+    /// Blue's while it runs, green once it ended well, red once it failed,
+    /// and gray while there is nothing to tell yet, or any longer.
+    pub fn tone(self) -> BadgeTone {
         match self {
-            Self::Running => "text-badge-loading-fg bg-badge-loading-bg",
-            Self::Succeeded | Self::SucceededWithWarnings => StatusTone::Success.pair(),
-            Self::Failed => StatusTone::Error.pair(),
-            Self::Queued | Self::Cancelled | Self::Empty => "text-badge-empty-fg bg-badge-empty-bg",
+            Self::Running => BadgeTone::Primary,
+            Self::Succeeded | Self::SucceededWithWarnings => BadgeTone::Success,
+            Self::Failed => BadgeTone::Error,
+            Self::Queued | Self::Cancelled | Self::Empty => BadgeTone::Secondary,
         }
     }
 
@@ -104,27 +104,18 @@ mod tests {
     }
 
     #[test]
-    fn each_state_is_drawn_on_its_pill_a_succeeded_or_failed_one_in_its_status_tones_pair() {
-        let pills = [
-            (BadgeState::Queued, "text-badge-empty-fg bg-badge-empty-bg"),
-            (
-                BadgeState::Running,
-                "text-badge-loading-fg bg-badge-loading-bg",
-            ),
-            (BadgeState::Succeeded, StatusTone::Success.pair()),
-            (
-                BadgeState::SucceededWithWarnings,
-                StatusTone::Success.pair(),
-            ),
-            (BadgeState::Failed, StatusTone::Error.pair()),
-            (
-                BadgeState::Cancelled,
-                "text-badge-empty-fg bg-badge-empty-bg",
-            ),
-            (BadgeState::Empty, "text-badge-empty-fg bg-badge-empty-bg"),
+    fn each_state_is_drawn_in_the_badge_tone_of_its_kind() {
+        let tones = [
+            (BadgeState::Queued, BadgeTone::Secondary),
+            (BadgeState::Running, BadgeTone::Primary),
+            (BadgeState::Succeeded, BadgeTone::Success),
+            (BadgeState::SucceededWithWarnings, BadgeTone::Success),
+            (BadgeState::Failed, BadgeTone::Error),
+            (BadgeState::Cancelled, BadgeTone::Secondary),
+            (BadgeState::Empty, BadgeTone::Secondary),
         ];
-        for (state, pill) in pills {
-            assert_eq!(state.pill(), pill, "{state:?}");
+        for (state, tone) in tones {
+            assert_eq!(state.tone(), tone, "{state:?}");
         }
     }
 }
