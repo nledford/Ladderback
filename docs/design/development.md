@@ -288,6 +288,8 @@ A port is four pieces:
 3. The contract suite in `crates/app/src/contract/`, run against the fake from `crates/app/tests/contracts.rs` and against the real adapter from that adapter's tests (`crates/adapters/store/tests/contract.rs` is one).
 4. The real adapter in its own crate under `crates/adapters/`, depending on no other adapter, and its wiring in the composition root (`src/main.rs` and its `composition` module).
 
+A hub port (decision 122) differs in two steps. A real adapter in a crate a release links, and its run of the contract suite, sit behind that crate's `hub` feature, on by default, which the root's `hub` feature turns on (`platform/hub` for `Identity`); `just architecture` fails a release build in which any workspace crate has its `hub`, so a new one needs no line there. An adapter in a crate of its own, as `Signing`'s is, needs no feature until the root depends on it, then as an optional dependency that `hub` turns on. Its wiring in the composition root lands with the first use case that calls it, as `Signing`'s and `Identity`'s do in #567's later slices.
+
 #### 13.7.3 A gated crate
 
 Add it to `mutants_packages` in the Justfile and to the list in §13.1, in the change that creates the crate. A crate added later has its whole code mutated by that pull request's `just mutants` run (§13.1), so its surviving mutants are fixed in the same change.
