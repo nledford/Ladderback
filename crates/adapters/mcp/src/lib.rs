@@ -53,6 +53,7 @@ mod checks;
 mod connect;
 mod one_shot;
 mod pages;
+mod proposals;
 
 pub use actions::{CANCELLABLE_KIND, DEFAULT_WAIT, MAX_WAIT, WAIT_STEP, not_cancellable};
 pub use connect::{
@@ -61,6 +62,7 @@ pub use connect::{
 };
 pub use one_shot::{Answer, Call, CallRefused, Outcome};
 pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
+pub use proposals::Proposals;
 
 use actions::{
     CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
@@ -102,6 +104,9 @@ const TEST_REPOSITORY: &str = "test_repository";
 const PREVIEW_FORGET: &str = "preview_forget";
 const PREVIEW_IMPORT: &str = "preview_import";
 const EXPORT_PROFILE: &str = "export_profile";
+const PROPOSE_SETUP: &str = "propose_setup";
+const GET_PROPOSAL: &str = "get_proposal";
+const WITHDRAW_PROPOSAL: &str = "withdraw_proposal";
 
 /// A tool, as a call names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,11 +124,14 @@ pub(crate) enum ToolName {
     PreviewForget,
     PreviewImport,
     ExportProfile,
+    ProposeSetup,
+    GetProposal,
+    WithdrawProposal,
 }
 
 impl ToolName {
     /// Every tool.
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 16] = [
         Self::Status,
         Self::ListPlans,
         Self::ListRepositories,
@@ -137,6 +145,9 @@ impl ToolName {
         Self::PreviewForget,
         Self::PreviewImport,
         Self::ExportProfile,
+        Self::ProposeSetup,
+        Self::GetProposal,
+        Self::WithdrawProposal,
     ];
 
     /// The tool named `name`, if there is one.
@@ -160,8 +171,27 @@ impl ToolName {
             Self::PreviewForget => PREVIEW_FORGET,
             Self::PreviewImport => PREVIEW_IMPORT,
             Self::ExportProfile => EXPORT_PROFILE,
+            Self::ProposeSetup => PROPOSE_SETUP,
+            Self::GetProposal => GET_PROPOSAL,
+            Self::WithdrawProposal => WITHDRAW_PROPOSAL,
         }
     }
+
+    /// Whether a server of `offer` offers the tool.
+    pub(crate) fn offered_in(self, offer: Offer) -> bool {
+        let _ = offer;
+        todo!()
+    }
+}
+
+/// Which tools a server offers (§4.6). Connect mode offers every tool: the
+/// daemon it drives serves the "Pending changes" page a person approves a
+/// proposal on. A session of its own, headless or scratch, has no web UI to
+/// approve in, so it offers no proposal tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Offer {
+    Connect,
+    InProcess,
 }
 
 /// How many of the newest operations `status` looks through for those
@@ -334,6 +364,7 @@ struct Status {
 /// of streams, saying each refusal in the catalog's words of its locale.
 pub struct Server {
     backend: Arc<dyn Backend>,
+    proposals: Option<Arc<dyn Proposals>>,
     build: BuildDto,
     localizer: Localizer,
 }
@@ -358,9 +389,23 @@ impl Server {
     pub fn new(backend: Arc<dyn Backend>, build: BuildDto, localizer: Localizer) -> Self {
         Self {
             backend,
+            proposals: None,
             build,
             localizer,
         }
+    }
+
+    /// This server, offering the proposal tools over `proposals`: connect
+    /// mode's, driving a daemon a person approves proposals on (§4.6).
+    #[must_use]
+    pub fn proposing(self, proposals: Arc<dyn Proposals>) -> Self {
+        let _ = proposals;
+        todo!()
+    }
+
+    /// Which tools the server offers.
+    pub fn offer(&self) -> Offer {
+        todo!()
     }
 
     /// The sentence the catalog says `error` in, in the server's locale,
@@ -456,6 +501,9 @@ impl Server {
             ToolName::PreviewForget => answered(self.preview_forget(given).await),
             ToolName::PreviewImport => answered(self.preview_import(given).await),
             ToolName::ExportProfile => answered(self.export_profile(given).await),
+            ToolName::ProposeSetup | ToolName::GetProposal | ToolName::WithdrawProposal => {
+                todo!()
+            }
         }
     }
 

@@ -6,9 +6,9 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use api::{
-    ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, OperationDetailDto,
-    OperationSummaryDto, OperationsPageDto, PlansDto, ProfileExportDto, ProfileImportDto,
-    RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
+    ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, NewProposalDto,
+    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlansDto, ProfileExportDto,
+    ProfileImportDto, ProposalDto, RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
@@ -18,8 +18,8 @@ use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use crate::{
-    Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, PlanStatus, RECENT_OPERATIONS,
-    not_cancellable, unfinished,
+    Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, PlanStatus, Proposals,
+    RECENT_OPERATIONS, not_cancellable, unfinished,
 };
 
 /// The daemon `--connect` reaches when it names none: `serve`'s default
@@ -568,6 +568,26 @@ impl Backend for Connect {
             &[("commands", "left-out")],
         )
         .await
+    }
+}
+
+/// The proposal routes, as the API token sent sees them: only its own
+/// proposals, and never an approval (decision 89).
+#[async_trait]
+impl Proposals for Connect {
+    async fn propose(&self, proposal: NewProposalDto) -> Result<ProposalDto, ErrorDto> {
+        let _ = proposal;
+        todo!()
+    }
+
+    async fn proposal(&self, id: String) -> Result<ProposalDto, ErrorDto> {
+        let _ = id;
+        todo!()
+    }
+
+    async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto> {
+        let _ = id;
+        todo!()
     }
 }
 

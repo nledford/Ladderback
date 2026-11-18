@@ -80,6 +80,32 @@ fn holds_only_the_repository(agent: &mut Agent, alias: String) {
     agent.proposals.config = Some(text);
 }
 
+/// The I4 canary: the repository's password, and a password in its
+/// address, written in the config file, which no proposal answer may hold.
+#[given(
+    expr = "the daemon's config file holds only the repository {string}, its password {string} and its address's password {string} written in it"
+)]
+fn holds_only_the_repository_with_secrets(
+    agent: &mut Agent,
+    alias: String,
+    password: String,
+    address_password: String,
+) {
+    let text = format!(
+        "schema = 1\n\n[repositories.{alias}]\nrepository = \"rest:http://demo:{address_password}@127.0.0.1:9/\"\npassword = \"{password}\"\n"
+    );
+    let file = config_file(agent);
+    std::fs::create_dir_all(file.parent().expect("the config folder"))
+        .expect("the daemon's config folder");
+    std::fs::write(&file, &text).expect("the daemon's config file");
+    agent.proposals.config = Some(text);
+}
+
+/// Keeps `id` as the proposal the scenario made, which later steps name.
+pub(super) fn keep(agent: &mut Agent, id: String) {
+    agent.proposals.proposal = Some(id);
+}
+
 #[when(expr = "the API token proposes adding the plan {string} over {string}")]
 async fn proposes(agent: &mut Agent, id: String, source: String) {
     propose(agent, &id, &source, "demo").await;
@@ -113,7 +139,7 @@ async fn withdraws(agent: &mut Agent) {
 }
 
 /// The ID of the proposal the API token made.
-fn the_proposal(agent: &Agent) -> String {
+pub(super) fn the_proposal(agent: &Agent) -> String {
     agent
         .proposals
         .proposal
