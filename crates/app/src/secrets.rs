@@ -150,7 +150,15 @@ pub fn unresolved_refusal(secret: &SecretError, redactor: &Redactor) -> SettingR
             detail: said(detail),
         },
         // The platform's words about the service, never about a secret it
-        // gave: none was read. Masked all the same.
+        // gave: none was read. Masked all the same. A locked keyring is told
+        // apart, as the person can unlock it (#993).
+        Problem::KeyringUnavailable {
+            detail,
+            cause: KeyringCause::Locked,
+        } => SettingRefusal::SecretKeyringLocked {
+            source,
+            detail: said(detail),
+        },
         Problem::KeyringUnavailable { detail, .. } => SettingRefusal::SecretKeyringUnavailable {
             source,
             detail: said(detail),
@@ -949,6 +957,28 @@ mod tests {
                 R::SecretKeyringUnavailable {
                     source: "ladderback/demo".to_owned(),
                     detail: said("no Secret Service runs"),
+                },
+            ),
+            (
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "Secret Service: object locked".to_owned(),
+                    cause: domain::secrets::KeyringCause::Locked,
+                },
+                R::SecretKeyringLocked {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said("Secret Service: object locked"),
+                },
+            ),
+            (
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "Secret Service: prompt dismissed".to_owned(),
+                    cause: domain::secrets::KeyringCause::Refused,
+                },
+                R::SecretKeyringUnavailable {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said("Secret Service: prompt dismissed"),
                 },
             ),
             (

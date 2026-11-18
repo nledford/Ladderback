@@ -72,16 +72,12 @@ jobs:
           # The check reads the PR's own commits, not the merge commit.
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      # Installs the toolchain rust-toolchain.toml names, so mbx keys on it.
-      - run: rustup toolchain install
-      # A build-cache outage must not fail this required check: with the step
-      # allowed to fail, the build runs uncached (slower, still correct), as
-      # in ci.yml.
-      - uses: $/.github/actions/rust-cache
-        continue-on-error: true
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      # The toolchain, the build cache and the tools, as in ci.yml. A
+      # build-cache outage doesn't fail this required check: the build then
+      # runs uncached (slower, still correct).
+      - uses: $/.github/actions/setup-rust
         with:
-          tool: just,trunk
+          tools: just,trunk
       # The wasm lane of the check (scripts/red-first.ts) runs a test: commit's
       # new wasm-bindgen tests under Node. The runner must be the version of
       # `wasm-bindgen` that Cargo.lock pins; the wasm32 target comes with the

@@ -60,6 +60,14 @@ const PAIRS = [
   // tab's words are the text on page; the list's rule the table rule.
   { name: "selected tab's bar on page", fg: "--accent", bg: "--bg", min: 3 },
   { name: "selected tab's bar on surface", fg: "--accent", bg: "--surface", min: 3 },
+  // A toast (components §4.5) in a status tone lies on its pair's fill:
+  // the focus ring around its Dismiss button against that fill (1.4.11),
+  // and the button's label, the toast's words' color, on the surface it
+  // takes on hover.
+  ...["success", "warning", "error"].flatMap((tone) => [
+    { name: `focus ring on the ${tone} fill`, fg: "--focus", bg: `--${tone}-bg`, min: 3 },
+    { name: `${tone} words on surface`, fg: `--${tone}-fg`, bg: "--surface", min: 4.5 },
+  ]),
 ];
 
 // Status fills that must be told apart, and how far apart in lightness, on

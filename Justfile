@@ -183,13 +183,42 @@ test *args:
 # for one test target: Cargo unifies features over the packages a command
 # selects, so `--package app` or the root package alone builds dependencies
 # with other features, and each of those commands rebuilt nearly all of them.
+# A suite that fails doesn't stop the next one: the run goes on and fails at
+# the end, naming each suite that failed, so one run lists every failure, as
+# the nextest `ci` profile's `fail-fast = false` means it to (#997). An
+# interrupt (Ctrl-C, a cancelled CI job) stops the run at the suite it reaches,
+# with the signal's status: the traps catch one that the suite handles itself
+# and exits from normally, as nextest does (exit 100), and the status check
+# one that ends the suite (status above 128).
 [positional-arguments]
 [private]
 _test-suites *args:
-    cargo nextest run --workspace "$@"
-    cargo test --doc --workspace
-    cargo test --workspace --test acceptance
-    cargo test --workspace --test e2e
+    #!/usr/bin/env bash
+    set -uo pipefail
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    failed=()
+    suite() {
+        local name=$1 status
+        shift
+        "$@"
+        status=$?
+        if [[ $status -gt 128 ]]; then
+            exit "$status"
+        elif [[ $status -ne 0 ]]; then
+            failed+=("$name (exit $status)")
+        fi
+    }
+    suite 'unit and contract tests (nextest)' cargo nextest run --workspace "$@"
+    suite 'doc tests' cargo test --doc --workspace
+    suite 'acceptance scenarios' cargo test --workspace --test acceptance
+    suite '@e2e scenarios' cargo test --workspace --test e2e
+    if [[ ${#failed[@]} -gt 0 ]]; then
+        echo
+        echo "Failed suites (${#failed[@]} of 4):"
+        printf '  %s\n' "${failed[@]}"
+        exit 1
+    fi
 
 # Arguments go to cucumber-rs as given, so `--name 'a job that runs'` stays
 # one pattern, and narrow this runner's scenarios (as for `test-e2e`). The
@@ -342,13 +371,15 @@ try *args: build
 # the same engine; a failure there stops the recipe, and so does a pattern that
 # matches no file (`failglob`), which `node --test` would read as its own glob
 # and pass with no test run. `just lint` runs only `scripts/*.test.ts`, so it
-# starts no browser.
+# starts no browser. The run writes `ui-tests/reports/`: the JUnit report, and
+# a trace and a screenshot of each failed scenario (`ui-tests/support/world.ts`);
+# the recipe empties it first, so what is there is this run's.
 [doc('Run the UI tooling browser tests, then the @ui scenarios, in a browser engine (default chromium) against a fresh build with the gallery.')]
 [group('test')]
 [positional-arguments]
 test-ui *args: web-test _ui-deps
     cargo build
-    shopt -s failglob && cd ui-tests && case "${1:-}" in chromium | firefox | webkit) export LADDERBACK_UI_BROWSER="$1"; shift ;; esac && node --test support/*.browser.test.ts && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
+    shopt -s failglob && cd ui-tests && rm -rf reports && case "${1:-}" in chromium | firefox | webkit) export LADDERBACK_UI_BROWSER="$1"; shift ;; esac && node --test support/*.browser.test.ts && node_modules/.bin/cucumber-js --config cucumber.ts "$@"
 
 # Installs the UI test dependencies when they are missing or older than the
 # lockfile, as in a new worktree: node_modules isn't tracked.

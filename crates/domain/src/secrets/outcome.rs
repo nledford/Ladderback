@@ -45,11 +45,11 @@ pub enum Problem {
     /// a program that can't be started, a keyring that can't be opened. The
     /// platform's own words, as they came.
     Unreachable { detail: String },
-    /// The source is a keyring entry, and the machine has no keyring service
-    /// that can be asked for it: on Linux no Secret Service runs, there is no
-    /// session bus to reach one by (a server, a system service), or the
-    /// service says its keyring is locked. What the platform said is the
-    /// detail, and `cause` which of these it is.
+    /// The source is a keyring entry, and the keyring couldn't be asked for
+    /// it: on Linux no Secret Service runs, there is no session bus to reach
+    /// one by (a server, a system service), or the service answered that its
+    /// keyring is locked or that its unlock prompt was dismissed. What the
+    /// platform said is the detail, and `cause` which of these it is.
     KeyringUnavailable { detail: String, cause: KeyringCause },
     /// A secret has to be text, and this isn't valid UTF-8.
     NotUnicode,
@@ -75,8 +75,13 @@ pub enum KeyringCause {
     /// the session bus, or there is no session bus. At login the daemon can
     /// start before the session's service does, so this one can pass.
     NoService,
-    /// The service answered and said no: its keyring is locked, or the
-    /// person dismissed its unlock prompt. Asking again would ask them again.
+    /// The service answered that its keyring is locked: nobody has unlocked
+    /// it since login, or it was locked again. Asking again would ask the
+    /// person to unlock it.
+    Locked,
+    /// The service answered and said no some other way: the person
+    /// dismissed its unlock prompt, or it has no collection to look in.
+    /// Asking again would ask them again.
     Refused,
 }
 

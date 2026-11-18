@@ -74,8 +74,9 @@ pub fn Alert(
             let button = NodeRef::<leptos::html::Button>::new();
             hand_focus_when_gone(button, then_focus);
             view! {
-                // At the line's end, never squeezed by the words.
-                <span class="alert-dismiss flex-none">
+                // At the line's end, never squeezed by the words; on a line
+                // of its own when it doesn't fit beside them.
+                <span class="alert-dismiss flex-none ms-auto">
                     <Tooltip tip=Tip::Names(name.clone())>
                         <Button
                             content=Content::IconOnly {
@@ -95,14 +96,21 @@ pub fn Alert(
     view! {
         <div class=rules::alert_class(tone)>
             // The icon, centered on the first line of the words (one line
-            // tall: `1lh`, which no utility names).
+            // tall: `1lh`, which no utility names), or on a line of its own
+            // above them.
             <span class="alert-icon flex flex-none items-center [min-block-size:1lh]">
                 <Icon glyph=tone.glyph() meaning=Meaning::Labelled(label) tone=tone.tone() />
             </span>
-            // The words take the room left and wrap, a long path too (The
-            // 320 Rule); `min-inline-size` lets them shrink below their
-            // longest word, which no logical utility names.
-            <div class="alert-words flex-auto [min-inline-size:0] wrap-anywhere">{children()}</div>
+            // The words take the room left and wrap between words (The 320
+            // Rule, #972). They start as wide as their longest word
+            // (`min-content`, which no utility names), so where that doesn't
+            // fit beside the icon they go under it, a line of the alert's
+            // own; `min-inline-size` (no logical utility names it) lets them
+            // shrink below a word longer than that whole line, a long path,
+            // which alone breaks inside.
+            <div class="alert-words flex-[1_1_min-content] [min-inline-size:0] wrap-break-word">
+                {children()}
+            </div>
             {dismiss}
         </div>
     }
