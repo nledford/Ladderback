@@ -872,16 +872,6 @@ main:focus {
   }
 }
 
-/* A toast: visually above its neighbors while it lasts (§4.5). */
-.toast {
-  background-color: var(--surface);
-  border: 1px solid var(--focus);
-  border-radius: 0.25rem;
-  margin-block: 0.5rem;
-  padding-block: 0.5rem;
-  padding-inline: 0.75rem;
-}
-
 /* A checkbox's or a radio's field, spaced from the next: its label in the
    Label weight and its description close under it. */
 .field {
