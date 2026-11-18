@@ -274,6 +274,26 @@ Feature: Each row of the Operations page names its operation and says what it di
     When the daemon reports that the backup of "demo-home" has succeeded with 3 files
     Then the row "demo-home" of the table "Operations" shows "Succeeded" in its "Status" column
 
+  # A start's wait for the run's end lasts two minutes of the page's clock;
+  # once they run out with the run still queued, the page says it is still
+  # waiting, in a toast, since the row still shows the run as it was.
+  Scenario: A start whose end the page stops waiting for is answered in a toast, said once, and focus stays on its button
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    And the daemon queues each backup the page starts
+    When I open the address "/operations"
+    And I skip to the content
+    And I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    And the polite region comes to contain "Backup started."
+    And the page's clock moves on until the page stops waiting for the run's end
+    Then the toast reads "Still waiting for Ladderback to say how the run ended." after its icon "Information"
+    And the toast is no live region, nor holds one
+    And focus stays on the button "Start backup of demo-home"
+    And the polite region reads "Still waiting for Ladderback to say how the run ended."
+    And the polite region keeps reading "Still waiting for Ladderback to say how the run ended."
+    And the page has no accessibility violations
+
   Scenario: Leaving the Operations page while it waits on a run and on its events stream ends both waits
     Given the daemon reports a running backup of "demo-home"
     And the daemon queues each backup the page starts

@@ -37,6 +37,14 @@ const UPDATE_PATIENCE_MS = 5_000;
 // page heard would have shown, as long as a live region's silence is.
 const STILL_MS = 2_500;
 
+// How often the page reads the history while it waits for a run's end
+// (`POLL_EVERY_MS` in `crates/web/src/ws.rs`), how long a read may take to
+// come before the clock moves on again, and how long the whole wait may take
+// in real time: 480 rounds, each a jump of the clock and a read.
+const SETTLE_POLL_MS = 250;
+const SETTLE_READ_MS = 1_000;
+const SETTLE_STEP_MS = 180_000;
+
 // The three sources a demo plan backs up: `tiny` ends at once, for journeys
 // that need several real snapshots; `small` runs long enough that its
 // Running row is there to be read (a second or two) and then ends; `big`
@@ -380,6 +388,29 @@ When("the page's clock moves on {int} seconds", async function (this: BrowserWor
   assert.ok(this.fakeClock, "the page's clock can't be moved on: no Given installed it");
   await this.page.clock.fastForward(seconds * 1000);
 });
+
+// After a start or a cancel the page reads the history every quarter of a
+// second until the run ends, 480 times (two minutes of its clock,
+// `ws::settle`), then answers in a toast. The page's clock moves on a
+// quarter of a second at each read, so the rounds pass at the speed of the
+// reads rather than in real time. A jump that lands before the page has set
+// its next pause, or a slow read, moves the clock on again after a second,
+// so the step ends only on the page's answer, never on a lull.
+When(
+  "the page's clock moves on until the page stops waiting for the run's end",
+  { timeout: SETTLE_STEP_MS },
+  async function (this: BrowserWorld) {
+    assert.ok(this.fakeClock, "the page's clock can't be moved on: no Given installed it");
+    const daemon = scripted(this);
+    const answer = this.page.locator("main .toast");
+    while ((await answer.count()) === 0) {
+      const reads = daemon.historyReads;
+      await this.page.clock.fastForward(SETTLE_POLL_MS);
+      const lull = Date.now() + SETTLE_READ_MS;
+      while (daemon.historyReads === reads && Date.now() < lull) await sleep(5);
+    }
+  },
+);
 
 // The page's clock, which a Given installed and which keeps real time until
 // then, stops: from here only a step moves it on, so the time the browser

@@ -148,6 +148,18 @@ Given("the page may use the clipboard", function (this: BrowserWorld) {
   this.contextOptions = { ...this.contextOptions, permissions: clipboardPermissions[engine] };
 });
 
+// A browser that won't let the page write to the clipboard, as one does whose
+// reader said no: each write is refused. Firefox and WebKit let a pressed
+// button write without asking, so the refusal is the page's clipboard's own.
+Given("the browser refuses the page the clipboard", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.addInitScript(() => {
+      Clipboard.prototype.writeText = () =>
+        Promise.reject(new DOMException("Write permission denied.", "NotAllowedError"));
+    });
+  });
+});
+
 Then(
   "the dialog {string} shows a token that starts with {string}",
   async function (this: BrowserWorld, name: string, prefix: string) {
