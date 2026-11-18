@@ -347,6 +347,7 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And the page's clock stands still until a step moves it on
     And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
     And I press Tab until focus is on the button "Demo work in progress"
@@ -477,6 +478,7 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And the page's clock stands still until a step moves it on
     And I press Tab until focus is on the button "<button>"
     And I press Enter
     And the page's clock moves on 5 seconds
@@ -493,6 +495,7 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And the page's clock stands still until a step moves it on
     And I press Tab until focus is on the button "<button>"
     And I press Enter
     And the page's clock moves on 600 seconds
@@ -507,6 +510,7 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And the page's clock stands still until a step moves it on
     And I press Tab until focus is on the button "Save the demo settings"
     And I press Enter
     And the page's clock moves on 3 seconds
@@ -523,6 +527,7 @@ Feature: The shared components in the gallery
     Given the page's clock can be moved on
     When I open the component gallery
     And I skip to the content
+    And the page's clock stands still until a step moves it on
     And I press Tab until focus is on the button "Save the demo settings"
     And I press Enter
     And the page's clock moves on 3 seconds

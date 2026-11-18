@@ -14,7 +14,7 @@ import { After, type DataTable, Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 import { expect } from "playwright/test";
 
-import { ISOLATION, namePattern } from "../support/keyboard.ts";
+import { clockStandsStill, ISOLATION, namePattern } from "../support/keyboard.ts";
 import { partsBrokenInside } from "../support/parts.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
@@ -379,6 +379,20 @@ When(
 When("the page's clock moves on {int} seconds", async function (this: BrowserWorld, seconds: number) {
   assert.ok(this.fakeClock, "the page's clock can't be moved on: no Given installed it");
   await this.page.clock.fastForward(seconds * 1000);
+});
+
+// The page's clock, which a Given installed and which keeps real time until
+// then, stops: from here only a step moves it on, so the time the browser
+// takes over the steps between (a slow engine, a run that keeps a trace)
+// lets no timer fall due that a step didn't ask for. It stops a tenth of a
+// second past the page's time as read, about as far as real time moves it
+// before the stop lands, since a clock can't be set back. Not for a scenario
+// that checks accessibility afterwards: axe-core runs on the page's timers.
+When("the page's clock stands still until a step moves it on", async function (this: BrowserWorld) {
+  assert.ok(this.fakeClock, "the page's clock can't stand still: no Given installed it");
+  const now = await this.page.evaluate(() => Date.now());
+  await this.page.clock.pauseAt(now + 100);
+  clockStandsStill(this.page);
 });
 
 When(
