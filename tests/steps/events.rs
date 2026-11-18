@@ -25,6 +25,16 @@ use tokio_tungstenite::{WebSocketStream, connect_async};
 
 use super::{Agent, blocking};
 
+/// The refusal of a data folder another process holds, as this platform's
+/// daemon words it: on Linux and macOS it names the service manager's stop.
+pub(crate) const DATA_DIR_IN_USE: l10n::MessageId = if cfg!(target_os = "linux") {
+    l10n::msg::CLI_DATA_DIR_IN_USE_SYSTEMD
+} else if cfg!(target_os = "macos") {
+    l10n::msg::CLI_DATA_DIR_IN_USE_LAUNCHD
+} else {
+    l10n::msg::CLI_DATA_DIR_IN_USE
+};
+
 /// How long a page may wait for an event a run already published.
 const EVENT_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long a daemon told to stop may take to exit: the 20 s it gives the

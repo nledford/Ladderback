@@ -11,7 +11,7 @@ use api::MsgArg;
 use cucumber::{given, then, when};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
 use domain::{OperationId, PlanId, RepositoryId, SignedDuration, Timestamp, Uuid};
-use l10n::{Localizer, msg};
+use l10n::Localizer;
 use platform::SystemClock;
 use store::SqliteStore;
 
@@ -210,7 +210,7 @@ fn the_second_is_refused(agent: &mut Agent) {
     // The refusal as the daemon's catalog words it for this folder and this
     // holder: bare digits could as well be a time in the log's own lines.
     let said = Localizer::new(&[]).message(
-        msg::CLI_DATA_DIR_IN_USE,
+        events_steps::DATA_DIR_IN_USE,
         &[
             ("path", MsgArg::Text(data.display().to_string())),
             ("pid", MsgArg::Text(holder.to_string())),
