@@ -83,3 +83,91 @@ impl From<IdentityError> for TlsKeyRefusal {
         Self::Identity(error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use domain::fleet::{HubPin, PublicKey, SeedFile, SigningSeed, TlsKey};
+
+    use super::HubTlsKey;
+    use crate::fakes::{FakeTlsKeys, InMemoryIdentity};
+    use crate::ports::{Attempt, Identity, IdentityError, TlsKeys};
+
+    /// The key files of a hub whose other first start keeps `theirs` after
+    /// this start found no key and before it keeps its own.
+    struct RacedBy {
+        files: InMemoryIdentity,
+        theirs: TlsKey,
+    }
+
+    #[async_trait]
+    impl Identity for RacedBy {
+        async fn seed(&self, file: SeedFile) -> Result<Option<SigningSeed>, IdentityError> {
+            self.files.seed(file).await
+        }
+
+        async fn keep_seed(
+            &self,
+            file: SeedFile,
+            seed: SigningSeed,
+        ) -> Result<SigningSeed, IdentityError> {
+            self.files.keep_seed(file, seed).await
+        }
+
+        async fn forget_recovery_seed(&self) -> Result<(), IdentityError> {
+            self.files.forget_recovery_seed().await
+        }
+
+        async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError> {
+            self.files.recovery_key().await
+        }
+
+        async fn keep_recovery_key(&self, key: PublicKey) -> Result<PublicKey, IdentityError> {
+            self.files.keep_recovery_key(key).await
+        }
+
+        async fn tls_key(&self) -> Result<Option<TlsKey>, IdentityError> {
+            self.files.tls_key().await
+        }
+
+        async fn keep_tls_key(&self, key: TlsKey) -> Result<TlsKey, IdentityError> {
+            self.files.keep_tls_key(self.theirs.clone()).await?;
+            self.files.keep_tls_key(key).await
+        }
+
+        async fn pin(&self) -> Result<Option<HubPin>, IdentityError> {
+            self.files.pin().await
+        }
+
+        async fn write_pin(&self, pin: &HubPin) -> Result<(), IdentityError> {
+            self.files.write_pin(pin).await
+        }
+
+        async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {
+            self.files.begin_attempt().await
+        }
+    }
+
+    /// Two first starts at once serve one key, the one kept first: the
+    /// start that lost serves the other's key, never the one it made.
+    #[tokio::test]
+    async fn a_first_start_another_beat_to_the_key_serves_the_others_key() {
+        let keys = Arc::new(FakeTlsKeys::default());
+        let theirs = keys.generate().unwrap();
+        let identity = Arc::new(RacedBy {
+            files: InMemoryIdentity::default(),
+            theirs: theirs.clone(),
+        });
+        let served = HubTlsKey::new(identity.clone(), keys.clone())
+            .take(None)
+            .await
+            .unwrap();
+        assert_eq!(keys.made(), 2, "this start made a key of its own");
+        assert_eq!(served.key.der(), theirs.der());
+        assert_eq!(served.fingerprint, keys.fingerprint(&theirs).unwrap());
+        let kept = identity.files.tls_key().await.unwrap().unwrap();
+        assert_eq!(kept.der(), theirs.der());
+    }
+}
