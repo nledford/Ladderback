@@ -112,6 +112,16 @@ fn run(localizer: &Localizer, args: CallArgs) -> io::Result<ExitCode> {
                     say(localizer, msg::CLI_MCP_CALL_RUN_ALONE, &[])?;
                     return Ok(ExitCode::from(2));
                 }
+                // Only connect mode offers the proposal tools (§4.6).
+                Ok(call)
+                    if !matches!(mode, McpMode::Connect(..))
+                        && !call.offered_in(::mcp::Offer::InProcess) =>
+                {
+                    let (id, message_args) =
+                        refusal_of_the_command_line(::mcp::CallRefused::NoTool, &tool);
+                    say(localizer, id, &message_args)?;
+                    return Ok(ExitCode::from(2));
+                }
                 Ok(call) => Calls::One(call),
                 Err(refused) => {
                     let (id, message_args) = refusal_of_the_command_line(refused, &tool);

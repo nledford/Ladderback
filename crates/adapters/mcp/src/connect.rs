@@ -317,6 +317,16 @@ fn unknown_operation(id: String) -> ErrorDto {
     )
 }
 
+/// `proposal-unknown` for `id`: the daemon holds no proposal it names that
+/// the token sees.
+fn unknown_proposal(id: String) -> ErrorDto {
+    ErrorDto::new(
+        ErrorCode::ProposalUnknown,
+        [("proposal", MsgArg::Text(id))],
+        None,
+    )
+}
+
 /// `daemon-answer-lost`: a request that changes something may have reached
 /// the daemon, and no answer of the API's came back.
 fn answer_lost() -> ErrorDto {
@@ -576,18 +586,29 @@ impl Backend for Connect {
 #[async_trait]
 impl Proposals for Connect {
     async fn propose(&self, proposal: NewProposalDto) -> Result<ProposalDto, ErrorDto> {
-        let _ = proposal;
-        todo!()
+        let body = serde_json::to_value(proposal).map_err(|_| no_answer())?;
+        self.post("api/v1/proposals", &[], &body, answer_lost).await
     }
 
     async fn proposal(&self, id: String) -> Result<ProposalDto, ErrorDto> {
-        let _ = id;
-        todo!()
+        let Some(segment) = segment(&id) else {
+            return Err(unknown_proposal(id));
+        };
+        self.get("api/v1/proposals", &[segment], &[]).await
     }
 
     async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto> {
-        let _ = id;
-        todo!()
+        let Some(segment) = segment(&id) else {
+            return Err(unknown_proposal(id));
+        };
+        let body = serde_json::json!({});
+        self.post(
+            "api/v1/proposals",
+            &[segment, "withdraw"],
+            &body,
+            answer_lost,
+        )
+        .await
     }
 }
 

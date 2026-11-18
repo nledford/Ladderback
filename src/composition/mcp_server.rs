@@ -115,11 +115,15 @@ pub(crate) fn connect(
             })?,
         None => backend,
     };
+    // One client serves both: the proposal tools reach the daemon as the
+    // other tools do, with the same token, which approves nothing.
+    let backend = Arc::new(backend);
     Ok(::mcp::Server::new(
-        Arc::new(backend),
+        Arc::clone(&backend) as Arc<dyn ::mcp::Backend>,
         crate::build_info::running(),
         localizer(),
-    ))
+    )
+    .proposing(backend))
 }
 
 /// The API token connect mode sends: the one in `token_file`, which must be

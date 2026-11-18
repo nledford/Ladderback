@@ -27,7 +27,7 @@ use std::sync::Arc;
 use api::{
     BuildDto, ErrorCode, ErrorDto, ExposureDto, LocationsTestDto, MaintenancePreviewDto,
     OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanSummaryDto, PlansDto,
-    ProfileExportDto, ProfileImportDto, RepositoriesDto, SnapshotsDto,
+    ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use l10n::Localizer;
@@ -73,6 +73,7 @@ use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
     SnapshotsArguments, SnapshotsPage, page, page_length,
 };
+use proposals::{ProposalArguments, ProposeArguments};
 
 /// The revisions served, oldest first: the first with `structuredContent`
 /// and `outputSchema`, the one after it, and the current one, which has no
@@ -179,8 +180,11 @@ impl ToolName {
 
     /// Whether a server of `offer` offers the tool.
     pub(crate) fn offered_in(self, offer: Offer) -> bool {
-        let _ = offer;
-        todo!()
+        offer == Offer::Connect
+            || !matches!(
+                self,
+                Self::ProposeSetup | Self::GetProposal | Self::WithdrawProposal
+            )
     }
 }
 
@@ -399,13 +403,19 @@ impl Server {
     /// mode's, driving a daemon a person approves proposals on (§4.6).
     #[must_use]
     pub fn proposing(self, proposals: Arc<dyn Proposals>) -> Self {
-        let _ = proposals;
-        todo!()
+        Self {
+            proposals: Some(proposals),
+            ..self
+        }
     }
 
     /// Which tools the server offers.
     pub fn offer(&self) -> Offer {
-        todo!()
+        if self.proposals.is_some() {
+            Offer::Connect
+        } else {
+            Offer::InProcess
+        }
     }
 
     /// The sentence the catalog says `error` in, in the server's locale,
@@ -502,7 +512,12 @@ impl Server {
             ToolName::PreviewImport => answered(self.preview_import(given).await),
             ToolName::ExportProfile => answered(self.export_profile(given).await),
             ToolName::ProposeSetup | ToolName::GetProposal | ToolName::WithdrawProposal => {
-                todo!()
+                let Some(proposals) = &self.proposals else {
+                    // A one-shot call of a tool this server doesn't offer:
+                    // refused before it asks anything, as `tools/call` is.
+                    return Answer::Unwritten(format!("no tool is named {:?}", tool.name()));
+                };
+                answered(propose(proposals.as_ref(), tool, given).await)
             }
         }
     }
@@ -711,6 +726,28 @@ impl Server {
     }
 }
 
+/// Runs the proposal tool `tool` over the daemon's proposal routes.
+async fn propose(
+    proposals: &dyn Proposals,
+    tool: ToolName,
+    given: Option<JsonObject>,
+) -> Result<ProposalDto, ErrorDto> {
+    match tool {
+        ToolName::ProposeSetup => {
+            let arguments: ProposeArguments = read(given)?;
+            proposals.propose(arguments.into()).await
+        }
+        ToolName::WithdrawProposal => {
+            let ProposalArguments { proposal } = read(given)?;
+            proposals.withdraw(proposal).await
+        }
+        _ => {
+            let ProposalArguments { proposal } = read(given)?;
+            proposals.proposal(proposal).await
+        }
+    }
+}
+
 /// A tool's result: what it read or did, or its refusal.
 fn answered(result: Result<impl Serialize, ErrorDto>) -> Answer {
     match result {
@@ -751,7 +788,8 @@ fn read_only() -> ToolAnnotations {
 }
 
 /// A tool that changes what Ladderback does, never what it keeps: starting
-/// or stopping a backup.
+/// or stopping a backup, or making or withdrawing a proposal, which changes
+/// no configuration until a person approves it.
 fn acting() -> ToolAnnotations {
     ToolAnnotations::new()
         .read_only(false)
@@ -950,6 +988,36 @@ fn tools() -> Vec<Tool> {
         .with_title("Export profile")
         .with_raw_output_schema(output_schema::<ProfileExportDto>())
         .with_annotations(read_only()),
+        Tool::new(
+            PROPOSE_SETUP,
+            "Proposes configuration changes for a person to approve in Ladderback's web UI: \
+             plans to add, change or remove, with the reason why. Changes nothing until a \
+             person approves; no tool approves. Returns the proposal kept, its ID and what \
+             the submission checks warn of. A plan names a repository by its alias, never a \
+             secret.",
+            input_schema::<ProposeArguments>(),
+        )
+        .with_title("Propose setup")
+        .with_raw_output_schema(output_schema::<ProposalDto>())
+        .with_annotations(acting()),
+        Tool::new(
+            GET_PROPOSAL,
+            "One proposal this AI agent made: its status, its changes, its rationale and the \
+             reasons a person gave for rejecting any of them.",
+            input_schema::<ProposalArguments>(),
+        )
+        .with_title("Get proposal")
+        .with_raw_output_schema(output_schema::<ProposalDto>())
+        .with_annotations(read_only()),
+        Tool::new(
+            WITHDRAW_PROPOSAL,
+            "Withdraws a pending proposal this AI agent made, so no person approves it, and \
+             returns it.",
+            input_schema::<ProposalArguments>(),
+        )
+        .with_title("Withdraw proposal")
+        .with_raw_output_schema(output_schema::<ProposalDto>())
+        .with_annotations(acting()),
     ]
 }
 
@@ -969,7 +1037,12 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult::with_all_items(tools()))
+        let offer = self.offer();
+        let offered = tools()
+            .into_iter()
+            .filter(|tool| ToolName::named(&tool.name).is_some_and(|named| named.offered_in(offer)))
+            .collect();
+        Ok(ListToolsResult::with_all_items(offered))
     }
 
     /// Calls the tool `request` names. An argument it can't take is its
@@ -981,7 +1054,9 @@ impl ServerHandler for Server {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        let Some(tool) = ToolName::named(&request.name) else {
+        let offer = self.offer();
+        let Some(tool) = ToolName::named(&request.name).filter(|tool| tool.offered_in(offer))
+        else {
             return Err(McpError::invalid_params(
                 format!("no tool is named {:?}", request.name.as_ref()),
                 None,
