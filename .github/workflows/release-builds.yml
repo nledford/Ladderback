@@ -1,11 +1,13 @@
-# Builds the release archives and smoke-tests them (technical design §12.1,
-# §16 decision 54). Each archive is a run artifact for a few days; the release
-# workflow (release.yml) calls this one for the Linux archives of the commit
-# it tags and attaches them to the GitHub release. `just release-build`
-# runs cargo-dist's `dist build` (dist-workspace.toml) for one target, and
-# `just smoke-release` checks the binary in it (scripts/smoke-release.ts): on
-# Linux in clean containers, Debian 12 and Ubuntu 22.04 among them, on macOS on
-# the runner.
+# Builds the release archives and the Linux .deb and .rpm packages, and
+# smoke-tests them (technical design §12.1, §16 decisions 54 and 123). Each
+# archive and package is a run artifact for a few days; the release workflow
+# (release.yml) calls this one for the Linux builds of the commit it tags and
+# attaches them to the GitHub release. `just release-build` runs cargo-dist's
+# `dist build` (dist-workspace.toml) for one target; `just package` builds the
+# two packages with nfpm from the binary in that archive, never a rebuild; and
+# `just smoke-release` checks the binary in it, and each package, on Linux
+# (scripts/smoke-release.ts): in clean containers, Debian 12 and 13, Ubuntu
+# 22.04 and 24.04 and Fedora, and on macOS the binary on the runner.
 #
 # It runs every night, by hand, from release.yml, and on pull requests
 # labelled `release`: release-plz labels each release PR so
@@ -119,6 +121,11 @@ jobs:
       # Not in install-action's list: the official release, checked against
       # the SHA-256 the script pins.
       - run: scripts/install-dist.sh
+      # Not in install-action's list either: nfpm, which builds the packages,
+      # from its official release, checked against the SHA-256 the script pins.
+      # Linux only: the packages are Linux's.
+      - if: runner.os == 'Linux'
+        run: scripts/install-nfpm.sh
       - run: just release-build "$TARGET"
       # The archive's own checksum, then the binary out of it, as a person
       # downloading it would.
@@ -128,15 +135,32 @@ jobs:
           if command -v sha256sum >/dev/null; then sha256sum -c "ladderback-$TARGET.tar.xz.sha256"; else shasum -a 256 -c "ladderback-$TARGET.tar.xz.sha256"; fi
           mkdir -p "$RUNNER_TEMP/release"
           tar -xJf "ladderback-$TARGET.tar.xz" -C "$RUNNER_TEMP/release"
+      # The .deb and .rpm of that binary, the one the archive holds and the
+      # smoke test checks: nfpm copies it, and nothing rebuilds it. A release's
+      # packages carry its tag's version; any other build's, the version its
+      # binary names, commit and all (decision 90).
+      - name: Build the .deb and .rpm
+        if: runner.os == 'Linux'
+        run: |
+          bin="$RUNNER_TEMP/release/ladderback-$TARGET/ladderback"
+          version=${TAG#v}
+          if [ -z "$version" ]; then version=$("$bin" --version | cut -d' ' -f2); fi
+          just package "$TARGET" "$bin" "$version"
       # Uploaded before the smoke test, so a failing build can be downloaded
       # and looked at. `overwrite`: a rerun's build replaces the failed one's,
-      # so a release never publishes an archive whose smoke test failed.
+      # so a release never publishes an archive or a package whose smoke test
+      # failed. The packages are on Linux only; on macOS their patterns match
+      # nothing, and the archive's files are enough.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ladderback-${{ matrix.target }}
           path: |
             target/distrib/ladderback-${{ matrix.target }}.tar.xz
             target/distrib/ladderback-${{ matrix.target }}.tar.xz.sha256
+            target/distrib/ladderback_*.deb
+            target/distrib/ladderback_*.deb.sha256
+            target/distrib/ladderback-*.rpm
+            target/distrib/ladderback-*.rpm.sha256
             target/distrib/release-build-manifest.json
           if-no-files-found: error
           retention-days: 7
@@ -148,9 +172,11 @@ jobs:
           bin="$RUNNER_TEMP/release/ladderback-$TARGET/ladderback"
           if [ "$RUNNER_OS" = macOS ]; then sections=$(otool -l "$bin"); else sections=$(readelf -SW "$bin"); fi
           grep -F .dep-v0 <<<"$sections" || { echo "::error::$bin has no .dep-v0 section, so it was built without cargo-auditable"; exit 1; }
-      # A release's binary must say exactly its version, with no commit.
+      # A release's binary must say exactly its version, with no commit, and
+      # so must each package's (the glob names the one .deb and the one .rpm
+      # this run built).
       - if: runner.os == 'Linux'
-        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" --container all ${TAG:+--version "${TAG#v}"}
+        run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" --container all --package target/distrib/ladderback_*.deb --package target/distrib/ladderback-*.rpm ${TAG:+--version "${TAG#v}"}
       - if: runner.os == 'macOS'
         run: just smoke-release "$RUNNER_TEMP/release/ladderback-$TARGET/ladderback" ${TAG:+--version "${TAG#v}"}
 

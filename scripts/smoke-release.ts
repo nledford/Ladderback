@@ -26,22 +26,50 @@
 //     pseudolocales nor the component gallery (§4.5);
 //   - a scratch local repository initialised through `/api/v1`, and one backup
 //     of a folder of demo files into it, which succeeds and leaves one snapshot.
+// With `--package <file>` (a .deb, a .rpm or both; §16 decision 123), each
+// container also installs the package of its system's format, the .deb in
+// Debian's and Ubuntu's and the .rpm in Fedora's, in a clean container of its
+// own with no network (the packages' own files are all it needs):
+//   - the person's configuration and data folders, seeded first, are the same
+//     after the install and after the removal;
+//   - the install puts `ladderback` at /usr/bin/ladderback, byte for byte the
+//     binary checked above (the packages hold the archive's binary, never a
+//     rebuild), and `--version` says the same version as that binary should;
+//   - the package holds the program and its licences only, has no maintainer
+//     scripts and carries the version nfpm writes for the release;
+//   - removing it takes the program away and leaves the person's folders alone.
 // The results go to standard output as Markdown, and are appended to the file
 // `--summary` names, or to $GITHUB_STEP_SUMMARY in a GitHub Actions job.
 //
 // Usage: node scripts/smoke-release.ts <binary> [--container <name>|all]...
-//          [--version <x.y.z>] [--summary <file>]
+//          [--package <file>]... [--version <x.y.z>] [--summary <file>]
 // Exit status: 0 when every check passed, 1 when one failed, 2 on bad usage.
 // Needs Docker for `--container`, and `otool` for a macOS binary.
 
 import { spawn } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { connect } from "node:net";
 import { platform, tmpdir } from "node:os";
 import path from "node:path";
 
 import { checkoutBuild, shown, workspaceVersion } from "./build-identity.ts";
+import {
+  containerFormat,
+  describeScript,
+  FOLDER_STATE_SCRIPT,
+  installCommand,
+  installedFilesScript,
+  installedVersionScript,
+  type PackageFormat,
+  packageFormat,
+  packageVersion,
+  removeCommand,
+  scriptsScript,
+  SEED_FOLDERS_SCRIPT,
+  unexpectedFiles,
+} from "./release-packages.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -51,6 +79,8 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 // imagetools inspect <image>` and record the tag beside it.
 const IMAGES: Record<string, string> = {
   "debian-12": "debian:12@sha256:268fb24c39bca92d326dd83ea3abebe4a3f7751c804ffef23bb6d857dd343ff8",
+  // The Raspberry Pi's OS.
+  "debian-13": "debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6",
   "ubuntu-22.04": "ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11",
   "ubuntu-24.04": "ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
   fedora: "fedora:latest@sha256:a7d72ba2745b100a3351087472e5ee7b2450af7cf331e7673007e3817612839c",
@@ -635,10 +665,87 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
 }
 
 // ---------------------------------------------------------------------------
+// The package
+
+/**
+ * Installs the package `file` in a clean container of `image`, the way a
+ * person does (`apt install ./file.deb`, `dnf install ./file.rpm`, without
+ * the network: a local file needs no repository), checks what it put there,
+ * removes it, and checks that the person's configuration and data folders
+ * were never touched. `binary` is the file the package must hold.
+ */
+async function checkPackage(name: string, image: string, file: string, binary: string, version: string, report: Report): Promise<void> {
+  const format: PackageFormat = packageFormat(file) as PackageFormat;
+  const container = `ladderback-smoke-package-${name.replace(/[^a-z0-9]+/g, "-")}-${process.pid}`;
+  const started = await docker(["run", "--detach", "--rm", "--network", "none", "--name", container, image, "sleep", "infinity"]);
+  if (started.status !== 0) throw new Error(`docker run ${image}: ${started.stderr.trim()}`);
+  try {
+    const inside = `/tmp/${path.basename(file)}`;
+    const copied = await docker(["cp", file, `${container}:${inside}`]);
+    if (copied.status !== 0) throw new Error(`docker cp: ${copied.stderr.trim()}`);
+    // A new shell for each command: none keeps a path it looked up before the
+    // install or the removal.
+    const shell = (script: string) => docker(["exec", container, "sh", "-c", script]);
+    const said = (output: Output) => output.stdout.toString().trim();
+    const exit = (output: Output) => (output.status === 0 ? "" : `, exit ${output.status}: ${output.stderr.trim().slice(-500)}`);
+
+    report.note(details(`${name}: ${path.basename(file)}`, said(await shell(describeScript(format, inside)))));
+
+    // What a person who used Ladderback has: a configuration, a repository, a cache.
+    const seeded = await shell(SEED_FOLDERS_SCRIPT);
+    const before = said(await shell(FOLDER_STATE_SCRIPT));
+    if (!report.add("the person's folders are seeded", seeded.status === 0 && before !== "", before === "" ? `nothing there${exit(seeded)}` : `${before.split("\n").length} lines of state`)) return;
+
+    const install = await docker(["exec", "--env", "DEBIAN_FRONTEND=noninteractive", container, ...installCommand(format, inside)]);
+    report.note(details(`${name}: the install`, `${install.stdout.toString()}${install.stderr}`));
+    if (!report.add(`${format} installs`, install.status === 0, `${installCommand(format, inside)[0]} exit ${install.status}${exit(install)}`)) return;
+
+    // Resolved: Fedora's /usr/sbin is a link to /usr/bin, and its PATH names it first.
+    const found = said(await shell('readlink -f "$(command -v ladderback)"'));
+    report.add("the program is at /usr/bin/ladderback", found === "/usr/bin/ladderback", `the shell finds ${JSON.stringify(found)}`);
+    const shown = await shell("ladderback --version");
+    report.add("--version", shown.status === 0 && said(shown) === `ladderback ${version}`, `said ${JSON.stringify(said(shown))}${exit(shown)}`);
+    const installed = said(await shell("sha256sum /usr/bin/ladderback")).split(/\s+/)[0] ?? "";
+    const expected = createHash("sha256").update(readFileSync(binary)).digest("hex");
+    report.add("the program is the archive's binary", installed === expected, installed === expected ? `SHA-256 ${installed}` : `SHA-256 ${installed}, the archive's binary has ${expected}`);
+    const mode = said(await shell("stat -c '%a %U' /usr/bin/ladderback"));
+    report.add("the program is root's and executable by all", mode === "755 root", `mode and owner ${JSON.stringify(mode)}`);
+
+    const recorded = await shell(installedVersionScript(format));
+    const wanted = packageVersion(version, format);
+    report.add("the package's version", recorded.status === 0 && said(recorded) === wanted, `${JSON.stringify(said(recorded))}, expected ${JSON.stringify(wanted)}`);
+    const files = said(await shell(installedFilesScript(format))).split("\n").filter((line) => line !== "");
+    const extra = unexpectedFiles(files);
+    report.add("the package holds the program and its licences only", files.length > 0 && extra.length === 0, extra.length > 0 ? `also: ${extra.join(", ")}` : `${files.length} files`);
+    const scripts = said(await shell(scriptsScript(format)));
+    report.add("the package has no maintainer scripts", scripts === "", scripts === "" ? "none" : scripts.slice(0, 300));
+    const afterInstall = said(await shell(FOLDER_STATE_SCRIPT));
+    report.add("the install leaves the person's folders as they were", afterInstall === before, afterInstall === before ? "unchanged" : `before:\n${before}\nafter:\n${afterInstall}`);
+
+    const removal = await docker(["exec", "--env", "DEBIAN_FRONTEND=noninteractive", container, ...removeCommand(format)]);
+    report.note(details(`${name}: the removal`, `${removal.stdout.toString()}${removal.stderr}`));
+    report.add(`${format} removes`, removal.status === 0, `${removeCommand(format)[0]} exit ${removal.status}${exit(removal)}`);
+    const left = await shell("test -e /usr/bin/ladderback && echo present || echo gone");
+    report.add("the program is gone", said(left) === "gone", said(left));
+    // An .rpm that doesn't own its licence folder leaves it behind, empty.
+    const leftovers = said(await shell("ls -d /usr/share/doc/ladderback /usr/share/licenses/ladderback 2>/dev/null || true"));
+    report.add("none of the package's folders is left", leftovers === "", leftovers === "" ? "none" : leftovers);
+    const still = await shell(installedVersionScript(format));
+    report.add("the package is no longer installed", still.status !== 0, still.status === 0 ? `still ${said(still)}` : "not installed");
+    const afterRemoval = said(await shell(FOLDER_STATE_SCRIPT));
+    report.add("the removal leaves the person's folders as they were", afterRemoval === before, afterRemoval === before ? "unchanged" : `before:\n${before}\nafter:\n${afterRemoval}`);
+  } finally {
+    await docker(["rm", "--force", container]);
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 function usage(message: string): never {
   console.error(`error: ${message}`);
-  console.error(`usage: node scripts/smoke-release.ts <binary> [--container <${Object.keys(IMAGES).join("|")}|all>]... [--version <x.y.z>] [--summary <file>]`);
+  console.error(
+    `usage: node scripts/smoke-release.ts <binary> [--container <${Object.keys(IMAGES).join("|")}|all>]... [--package <file.deb|file.rpm>]... [--version <x.y.z>] [--summary <file>]`,
+  );
   process.exit(2);
 }
 
@@ -647,6 +754,7 @@ async function main(argv: string[]): Promise<number> {
   let version: string | undefined;
   let summary = process.env["GITHUB_STEP_SUMMARY"];
   const containers: string[] = [];
+  const packages = new Map<PackageFormat, string>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
     const value = () => argv[++i] ?? usage(`${arg} needs a value`);
@@ -656,6 +764,12 @@ async function main(argv: string[]): Promise<number> {
       if (name === "all") containers.push(...Object.keys(IMAGES));
       else if (name in IMAGES) containers.push(name);
       else usage(`no container ${JSON.stringify(name)}`);
+    } else if (arg === "--package") {
+      const file = path.resolve(value());
+      const format = packageFormat(file) ?? usage(`${arg} takes a .deb or an .rpm: ${file}`);
+      if (!statSync(file, { throwIfNoEntry: false })?.isFile()) usage(`no package at ${file}`);
+      if (packages.has(format)) usage(`a second .${format}: ${file}`);
+      packages.set(format, file);
     } else if (arg === "--version") version = value();
     else if (arg === "--summary") summary = value();
     else if (arg.startsWith("-")) usage(`unknown option ${arg}`);
@@ -663,6 +777,10 @@ async function main(argv: string[]): Promise<number> {
     else usage(`a second binary: ${arg}`);
   }
   if (binary === undefined) usage("no binary given");
+  if (packages.size > 0 && containers.length === 0) usage("--package needs --container: a package is installed in a container");
+  for (const format of packages.keys()) {
+    if (!containers.some((name) => containerFormat(name) === format)) usage(`no --container installs a .${format}`);
+  }
   const build = checkoutBuild(ROOT);
   const expected = version ?? (build === undefined ? workspaceVersion(ROOT) : shown(build));
   const sections: string[] = [];
@@ -687,6 +805,23 @@ async function main(argv: string[]): Promise<number> {
     }
     sections.push(report.markdown(`Release smoke test: ${place?.name ?? name}`));
     failed ||= report.failed;
+
+    // The package of the container's format, in a clean container of its own.
+    // Given any package, each container needs the one its system installs, so
+    // a run that passes only one format can't skip the other silently.
+    if (packages.size > 0 && name !== "native") {
+      const format = containerFormat(name);
+      const file = packages.get(format);
+      const packageReport = new Report();
+      try {
+        if (file === undefined) packageReport.add(`a .${format} was given`, false, `${name} installs the .${format}, and --package named none`);
+        else await checkPackage(name, IMAGES[name] as string, file, binary, expected, packageReport);
+      } catch (error) {
+        packageReport.add("the run finishes", false, (error as Error).message);
+      }
+      sections.push(packageReport.markdown(`Release smoke test: the .${format} in ${name}`));
+      failed ||= packageReport.failed;
+    }
   }
 
   const text = sections.join("\n");

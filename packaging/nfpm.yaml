@@ -1,0 +1,70 @@
+# nfpm's configuration for the release's .deb and .rpm packages (technical
+# design §12.1, §16 decision 123). `just package` runs it once per format, from
+# the repository's root, with the three variables below; nothing else is read
+# from the environment.
+#
+# The package holds the binary the release's archive holds, and the licences.
+# It has no maintainer scripts and enables no service: Ladderback runs as the
+# person's own user service, which `ladderback install-service` writes and
+# starts (decision 64), so installing the package changes nothing but these
+# files, and removing it leaves the person's data and configuration alone.
+name: ladderback
+# nfpm's names for the architectures (Go's); it writes `x86_64` and `aarch64`
+# into an .rpm itself.
+arch: ${PACKAGE_ARCH} # amd64 or arm64
+platform: linux
+# The release's version, as `vX.Y.Z`'s `X.Y.Z`. nfpm reads it as a semantic
+# version: a release candidate's `-rc.1` becomes `~rc.1` (which sorts before
+# the release) and a build between releases' `+<commit>` stays as it is.
+version: ${PACKAGE_VERSION}
+version_schema: semver
+# No `release`: the .rpm's is nfpm's default, 1, and a .deb has no revision.
+section: utils
+priority: optional
+maintainer: Nathaniel Ledford <nate@nateledford.com>
+description: |-
+  Self-hosted backup manager for rustic
+  Ladderback schedules rustic backups and shows, restores and downloads them
+  in a web interface built into one program. It runs as the person's own user
+  service: `ladderback install-service` writes and starts it.
+vendor: Ladderback
+homepage: https://github.com/nledford/Ladderback
+license: MIT OR Apache-2.0
+
+contents:
+  # The binary the release's archive holds, copied as it is. `expand`: nfpm
+  # reads `${…}` in a path only when told to.
+  - src: ${PACKAGE_BINARY}
+    dst: /usr/bin/ladderback
+    expand: true
+    file_info:
+      mode: 0755
+  - src: LICENSE-MIT
+    dst: /usr/share/doc/ladderback/LICENSE-MIT
+    packager: deb
+  - src: LICENSE-APACHE
+    dst: /usr/share/doc/ladderback/LICENSE-APACHE
+    packager: deb
+  # The .rpm owns its licence folder, or removing it leaves the folder behind
+  # (rpm removes only what it owns; dpkg removes a folder it has no file in).
+  - dst: /usr/share/licenses/ladderback
+    type: dir
+    packager: rpm
+  - src: LICENSE-MIT
+    dst: /usr/share/licenses/ladderback/LICENSE-MIT
+    type: license
+    packager: rpm
+  - src: LICENSE-APACHE
+    dst: /usr/share/licenses/ladderback/LICENSE-APACHE
+    type: license
+    packager: rpm
+
+# The glibc floor the binary is built for: the release builds run on Ubuntu
+# 22.04 (glibc 2.35), and the smoke test fails a binary that needs more.
+overrides:
+  deb:
+    depends:
+      - libc6 (>= 2.35)
+  rpm:
+    depends:
+      - glibc >= 2.35
