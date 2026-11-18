@@ -567,6 +567,20 @@ fn connect_mode_offers_the_proposal_tools() {
     assert_eq!(server.offer(), mcp::Offer::Connect);
 }
 
+/// Connect mode reads a proposed plan's table with the configuration's own
+/// parser, as the same keys; text that isn't a TOML table reads as none.
+#[test]
+fn connect_mode_reads_a_proposed_plans_table_with_the_configurations_parser() {
+    use mcp::PlanTables;
+    let table = FileTables.read("id = \"home\"\nsources = [\"/home/demo\"]\n");
+    let expected = serde_json::json!({"id": "home", "sources": ["/home/demo"]});
+    let serde_json::Value::Object(expected) = expected else {
+        panic!("an object")
+    };
+    assert_eq!(table, Some(api::PlanDto(expected)));
+    assert_eq!(FileTables.read("id = "), None);
+}
+
 #[tokio::test]
 async fn both_backends_refuse_a_run_of_a_plan_the_configuration_doesnt_hold_alike() {
     let scratch = tempfile::tempdir().expect("a scratch dir");

@@ -123,7 +123,17 @@ pub(crate) fn connect(
         crate::build_info::running(),
         localizer(),
     )
-    .proposing(backend))
+    .proposing(backend, Arc::new(FileTables)))
+}
+
+/// A proposed plan's table, given as TOML text, read with the
+/// configuration's own parser (§4.6); the daemon checks the plan.
+struct FileTables;
+
+impl ::mcp::PlanTables for FileTables {
+    fn read(&self, text: &str) -> Option<api::PlanDto> {
+        config_adapter::plan_table(text).ok().map(api::PlanDto)
+    }
 }
 
 /// The API token connect mode sends: the one in `token_file`, which must be

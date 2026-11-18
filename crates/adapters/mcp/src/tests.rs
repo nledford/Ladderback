@@ -149,7 +149,8 @@ fn proposing(lists: Lists) -> Client {
 /// Connect mode's server over `lists`, which offers the proposal tools.
 fn proposing_server(lists: Lists) -> Server {
     let lists = Arc::new(lists);
-    Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english()).proposing(lists)
+    Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english())
+        .proposing(lists, Arc::new(Tables))
 }
 
 /// A client of one session of `server` over an in-memory pipe.
@@ -405,16 +406,38 @@ async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_ar
     assert_eq!(required, expected);
 }
 
-/// Asserts that the field `at`, whose schema is `schema`, and every field
-/// and item within it has one type, no choice of schemas, no `format` and no
-/// `minimum`.
+/// Asserts that the field `at`, whose schema is `schema`, and every field,
+/// item and map value within it has one type, no choice of schemas, no
+/// `format` and no `minimum`.
 fn assert_one_type(at: &str, schema: &Value) {
     assert!(schema["type"].is_string(), "{at}: {schema}");
-    for keyword in ["anyOf", "oneOf", "allOf", "format", "minimum"] {
+    // Gemini's function declarations refuse an object of no named fields.
+    if schema["type"] == "object" {
+        let fields = schema["properties"].as_object();
+        assert!(
+            fields.is_some_and(|fields| !fields.is_empty()),
+            "{at}: {schema}"
+        );
+    }
+    for keyword in [
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "not",
+        "prefixItems",
+        "format",
+        "minimum",
+    ] {
         assert!(schema.get(keyword).is_none(), "{at}: {schema}");
     }
     if let Some(items) = schema.get("items") {
         assert_one_type(&format!("{at}[]"), items);
+    }
+    if let Some(values) = schema
+        .get("additionalProperties")
+        .filter(|values| values.is_object())
+    {
+        assert_one_type(&format!("{at}.*"), values);
     }
     for (field, field_schema) in schema["properties"].as_object().into_iter().flatten() {
         assert_one_type(&format!("{at}.{field}"), field_schema);
@@ -746,6 +769,32 @@ impl Proposals for Lists {
     async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto> {
         self.ask(format!("withdraw {id}"));
         self.told(&a_proposal())
+    }
+}
+
+/// The plans' tables the tests propose, as TOML text and as the map the
+/// configuration's parser reads each as.
+fn tables() -> [(&'static str, Value); 2] {
+    [
+        (
+            "id = \"nightly\"\nrepository = \"nas\"\nsources = [\"/home\"]\n",
+            json!({"id": "nightly", "repository": "nas", "sources": ["/home"]}),
+        ),
+        (
+            "id = \"home\"\nrepository = \"nas\"\nsources = [\"/srv\"]\n",
+            json!({"id": "home", "repository": "nas", "sources": ["/srv"]}),
+        ),
+    ]
+}
+
+/// The configuration's parser, as far as the tests need it: it reads the
+/// tables of [`tables`] and no other text.
+struct Tables;
+
+impl PlanTables for Tables {
+    fn read(&self, text: &str) -> Option<api::PlanDto> {
+        let (_, table) = tables().into_iter().find(|(given, _)| *given == text)?;
+        serde_json::from_value(table).ok()
     }
 }
 
@@ -2169,9 +2218,10 @@ fn a_calls_line_is_its_tool_with_its_result_or_its_refusal() {
 fn both_over(lists: Lists) -> (Client, Server) {
     let lists = Arc::new(lists);
     let server = Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english())
-        .proposing(Arc::clone(&lists) as Arc<dyn Proposals>);
+        .proposing(Arc::clone(&lists) as Arc<dyn Proposals>, Arc::new(Tables));
     let client = serve(
-        Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english()).proposing(lists),
+        Server::new(Arc::clone(&lists) as Arc<dyn Backend>, build(), english())
+            .proposing(lists, Arc::new(Tables)),
     );
     (client, server)
 }
@@ -2370,8 +2420,9 @@ async fn a_one_shot_proposal_call_on_a_server_of_its_own_is_unwritten() {
 }
 
 /// `propose_setup` hands the changes and the rationale to the daemon as the
-/// proposal route takes them, a removal's `plan_id` as its `plan`, and
-/// returns the proposal it kept, warnings and all; `get_proposal` and
+/// proposal route takes them, each plan's TOML table as the configuration's
+/// parser reads it and a removal's `plan_id` as its `plan`, and returns the
+/// proposal it kept, warnings and all; `get_proposal` and
 /// `withdraw_proposal` name the proposal.
 #[tokio::test(start_paused = true)]
 async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
@@ -2379,18 +2430,28 @@ async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
     let asked = Arc::clone(&lists.asked);
     let mut client = proposing(lists);
     let kept = serde_json::to_value(a_proposal()).unwrap();
-    let add = json!({"kind": "add-plan", "plan": {"id": "nightly", "repository": "nas", "sources": ["/home"]}});
-    let change = json!({"kind": "change-plan", "plan": {"id": "home", "repository": "nas", "sources": ["/srv"]}});
-    let given = json!({"changes": [add.clone(), change.clone(), remove_home()], "rationale": "Every night."});
+    let [(nightly, nightly_table), (home, home_table)] = tables();
+    let add = json!({"kind": "add-plan", "plan": nightly});
+    let change = json!({"kind": "change-plan", "plan": home});
+    let given = json!({"changes": [add, change, remove_home()], "rationale": "Every night."});
     assert_eq!(client.listed("propose_setup", given).await, kept);
+    // A client that fills each field it leaves out with null.
+    let nulled = json!({"kind": "remove-plan", "plan": null, "plan_id": "home"});
     assert_eq!(
         client
-            .listed("propose_setup", json!({"changes": [remove_home()]}))
+            .listed("propose_setup", json!({"changes": [nulled]}))
             .await,
         kept
     );
     let removal = json!({"kind": "remove-plan", "plan": "home"});
-    let sent = json!({"changes": [add, change, removal.clone()], "rationale": "Every night."});
+    let sent = json!({
+        "changes": [
+            {"kind": "add-plan", "plan": nightly_table},
+            {"kind": "change-plan", "plan": home_table},
+            removal.clone(),
+        ],
+        "rationale": "Every night.",
+    });
     let id = "0197a000-0000-7000-8000-000000000001";
     assert_eq!(
         client.listed("get_proposal", json!({"proposal": id})).await,
@@ -2416,14 +2477,15 @@ async fn the_proposal_tools_ask_the_daemon_and_return_its_proposal() {
 
 /// A call the proposal tools can't read is `invalid-arguments` naming the
 /// argument, never the value given, and asks the daemon nothing. A change
-/// gives a new plan's table in `plan` or a removed plan's ID in `plan_id`:
-/// both, neither or the other one is a change the tool can't take.
+/// gives a new or changed plan's TOML table in `plan` or a removed plan's
+/// ID in `plan_id`: both, neither, the other one, a plan as an object or
+/// text that isn't a TOML table is a change the tool can't take.
 #[tokio::test(start_paused = true)]
 async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
     let lists = Lists::default();
     let asked = Arc::clone(&lists.asked);
     let mut client = proposing(lists);
-    let plan = json!({"id": "canary", "repository": "nas", "sources": ["/home"]});
+    let [(plan, _), _] = tables();
     for (tool, arguments, field, problem) in [
         ("propose_setup", json!({}), "changes", "missing"),
         (
@@ -2452,7 +2514,13 @@ async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
         ),
         (
             "propose_setup",
-            json!({"changes": [{"kind": "change-plan", "plan": plan.clone(), "plan_id": "canary"}]}),
+            json!({"changes": [{"kind": "add-plan", "plan": plan, "plan_id": "canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "change-plan", "plan": plan, "plan_id": "canary"}]}),
             "changes",
             "invalid",
         ),
@@ -2471,6 +2539,18 @@ async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
         (
             "propose_setup",
             json!({"changes": [{"kind": "remove-plan", "plan_id": "home", "canary": true}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "add-plan", "plan": "id = \"canary"}]}),
+            "changes",
+            "invalid",
+        ),
+        (
+            "propose_setup",
+            json!({"changes": [{"kind": "change-plan", "plan": {"id": "canary"}}]}),
             "changes",
             "invalid",
         ),

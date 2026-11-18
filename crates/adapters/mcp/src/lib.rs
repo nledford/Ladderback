@@ -62,7 +62,7 @@ pub use connect::{
 };
 pub use one_shot::{Answer, Call, CallRefused, Outcome};
 pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
-pub use proposals::Proposals;
+pub use proposals::{PlanTables, Proposals};
 
 use actions::{
     CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
@@ -73,7 +73,7 @@ use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
     SnapshotsArguments, SnapshotsPage, page, page_length,
 };
-use proposals::{ProposalArguments, ProposeArguments};
+use proposals::{ProposalArguments, ProposeArguments, Proposing};
 
 /// The revisions served, oldest first: the first with `structuredContent`
 /// and `outputSchema`, the one after it, and the current one, which has no
@@ -368,7 +368,7 @@ struct Status {
 /// of streams, saying each refusal in the catalog's words of its locale.
 pub struct Server {
     backend: Arc<dyn Backend>,
-    proposals: Option<Arc<dyn Proposals>>,
+    proposals: Option<Proposing>,
     build: BuildDto,
     localizer: Localizer,
 }
@@ -399,12 +399,13 @@ impl Server {
         }
     }
 
-    /// This server, offering the proposal tools over `proposals`: connect
-    /// mode's, driving a daemon a person approves proposals on (§4.6).
+    /// This server, offering the proposal tools over `proposals`, reading
+    /// a proposed plan's table with `tables`: connect mode's, driving a
+    /// daemon a person approves proposals on (§4.6).
     #[must_use]
-    pub fn proposing(self, proposals: Arc<dyn Proposals>) -> Self {
+    pub fn proposing(self, proposals: Arc<dyn Proposals>, tables: Arc<dyn PlanTables>) -> Self {
         Self {
-            proposals: Some(proposals),
+            proposals: Some(Proposing { proposals, tables }),
             ..self
         }
     }
@@ -512,12 +513,12 @@ impl Server {
             ToolName::PreviewImport => answered(self.preview_import(given).await),
             ToolName::ExportProfile => answered(self.export_profile(given).await),
             ToolName::ProposeSetup | ToolName::GetProposal | ToolName::WithdrawProposal => {
-                let Some(proposals) = &self.proposals else {
+                let Some(proposing) = &self.proposals else {
                     // A one-shot call of a tool this server doesn't offer:
                     // refused before it asks anything, as `tools/call` is.
                     return Answer::Unwritten(format!("no tool is named {:?}", tool.name()));
                 };
-                answered(propose(proposals.as_ref(), tool, given).await)
+                answered(propose(proposing, tool, given).await)
             }
         }
     }
@@ -728,10 +729,11 @@ impl Server {
 
 /// Runs the proposal tool `tool` over the daemon's proposal routes.
 async fn propose(
-    proposals: &dyn Proposals,
+    proposing: &Proposing,
     tool: ToolName,
     given: Option<JsonObject>,
 ) -> Result<ProposalDto, ErrorDto> {
+    let proposals = proposing.proposals.as_ref();
     match tool {
         ToolName::ProposeSetup => {
             let arguments: ProposeArguments = read(given)?;

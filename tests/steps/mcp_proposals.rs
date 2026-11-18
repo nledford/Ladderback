@@ -10,13 +10,15 @@ use serde_json::{Value, json};
 use super::{Agent, api_tokens_steps, mcp_steps, proposals_steps};
 
 /// Calls `propose_setup` with one change adding the plan `id` over
-/// `source` into the repository `demo`, and keeps the proposal's ID when
-/// the tool made one.
+/// `source` into the repository `demo`, the plan's table given as TOML text,
+/// and keeps the proposal's ID when the tool made one.
 async fn propose(agent: &mut Agent, id: &str, source: &str) {
+    // A JSON string is a TOML basic string, its escapes and all.
+    let source = serde_json::to_string(source).unwrap();
     let arguments = json!({
         "changes": [{
             "kind": "add-plan",
-            "plan": { "id": id, "repository": "demo", "sources": [source] },
+            "plan": format!("id = \"{id}\"\nrepository = \"demo\"\nsources = [{source}]\n"),
         }],
         "rationale": "Back up the demo home folder every night.",
     });

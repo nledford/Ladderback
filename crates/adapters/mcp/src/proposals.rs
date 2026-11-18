@@ -8,6 +8,7 @@ use api::{ErrorDto, NewProposalDto, PlanDto, ProposalChangeDto, ProposalDto};
 use async_trait::async_trait;
 use rmcp::schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::Deserialize;
+use std::sync::Arc;
 
 /// What the proposal tools reach: the daemon's proposal routes, as the API
 /// token the server sends, which sees and withdraws only the proposals it
@@ -24,6 +25,23 @@ pub trait Proposals: Send + Sync + 'static {
 
     /// Withdraws the pending proposal whose ID is `id`, and returns it.
     async fn withdraw(&self, id: String) -> Result<ProposalDto, ErrorDto>;
+}
+
+/// Reads a plan's table given as TOML text, in the configuration file's
+/// keys, as a `[[plans]]` entry writes it, with the configuration's own
+/// parser: `propose_setup` takes a plan as one string, as `preview_import`
+/// takes a profile (§4.6), so each field of its schema has one type. It
+/// reads the table's form only; the daemon checks the plan.
+pub trait PlanTables: Send + Sync + 'static {
+    /// The table `text` holds, or none when `text` isn't a TOML table.
+    fn read(&self, text: &str) -> Option<PlanDto>;
+}
+
+/// What a server offering the proposal tools reaches: the daemon's routes,
+/// and the reader of a proposed plan's table.
+pub(crate) struct Proposing {
+    pub(crate) proposals: Arc<dyn Proposals>,
+    pub(crate) tables: Arc<dyn PlanTables>,
 }
 
 /// The arguments of `propose_setup`: the body `POST /api/v1/proposals`

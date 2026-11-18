@@ -3705,7 +3705,7 @@
       "additionalProperties": false,
       "properties": {
         "changes": {
-          "description": "The changes, applied in this order when a person approves them. Each\nis an object with its `kind` and either `plan` or `plan_id`, never\nboth: `add-plan` adds the plan after the last one and `change-plan`\nputs it in place of the plan with its ID, each giving in `plan` the\nplan's table in the configuration file's keys, as a `[[plans]]` entry\nwrites it (`id`, `repository`, `sources` and so on); `remove-plan`\ngives in `plan_id` the ID of the plan to remove. A plan names a\nrepository by its alias, never a secret. A proposal can't add a\nhook, and a `change-plan` must keep the plan's hooks as they are.",
+          "description": "The changes, applied in this order when a person approves them. Each\nis an object with its `kind` and either `plan` or `plan_id`, never\nboth: `add-plan` adds the plan after the last one and `change-plan`\nputs it in place of the plan with its ID, each giving in `plan` the\nplan's table as TOML text in the configuration file's keys, as a\n`[[plans]]` entry writes it (`id = \"home\"`, `repository`, `sources`\nand so on); `remove-plan` gives in `plan_id` the ID of the plan to\nremove. A plan names a repository by its alias, never a secret. A\nproposal can't add a hook, and a `change-plan` must keep the plan's\nhooks as they are. `get_proposal` gives the changes back as the\ndaemon keeps them: a plan as an object of its keys, and a removal's\nID in `plan`.",
           "items": {
             "additionalProperties": false,
             "properties": {
@@ -3718,8 +3718,8 @@
                 "type": "string"
               },
               "plan": {
-                "description": "For `add-plan` and `change-plan`: the plan's table.",
-                "type": "object"
+                "description": "For `add-plan` and `change-plan`: the plan's table, as TOML text.",
+                "type": "string"
               },
               "plan_id": {
                 "description": "For `remove-plan`: the ID of the plan to remove.",
