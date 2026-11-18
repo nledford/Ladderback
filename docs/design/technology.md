@@ -29,7 +29,7 @@ The pages' buttons (§4.5, #780) turn on `arrows`, `multimedia` and `files` (713
 | Time | `jiff` with `tzdb-bundle-always`: the build carries the IANA time-zone database for a host that has none (§3.2, §16 decision 30) |
 | Embedding UI | `rust-embed` |
 | Auth | `argon2` (RustCrypto), `subtle` for comparing tokens in constant time, and a small cookie-session layer in the HTTP adapter (§10.1, decision 70) |
-| Crypto / identity | `ed25519-dalek`, `rustls` |
+| Crypto / identity | `aws-lc-rs` (Ed25519, `adapters/signing`), `rustls` and `tokio-rustls` (TLS 1.3 over aws-lc-rs, the one provider) and `rcgen` (the hub's self-signed certificate), both in `adapters/tls` (§16, decision 120) |
 | Secrets | `keyring` (macOS Keychain, Secret Service on Linux); `zeroize` wipes a resolved secret's bytes when it is dropped (§10.2) |
 | Notifications | `reqwest` (webhooks, ntfy, Gotify, healthchecks.io), `lettre` (SMTP) |
 | Localization | `fluent-bundle`, `fluent-langneg`, `unic-langid`; `icu` (ICU4X) for dates and numbers in daemon-rendered text (§8.4) |
@@ -76,6 +76,8 @@ ladderback/
 │     ├─ notify/              # webhook, ntfy, Gotify, Discord/Slack, SMTP, healthchecks
 │     ├─ releases/            # Ladderback's newest release from GitHub Releases (`ReleaseFeed` port, §10.7)
 │     ├─ signing/             # Ed25519 over aws-lc-rs (`Signing` port; §16, decision 120)
+│     ├─ tls/                 # the hub's built-in TLS 1.3 listener and certificate, the agent's pinned client
+│     │                       # (`TlsKeys` port, `app::hub_tls`; §16, decision 120)
 │     ├─ mcp/                 # `ladderback mcp`: JSON-RPC 2.0 over stdio; in-process and /api/v1 backends (§4.6)
 │     └─ platform/            # clock, power, network, service install (systemd/launchd); key files (`Identity`
 │                             # port, feature `hub` only; §16, decisions 120 and 122)
