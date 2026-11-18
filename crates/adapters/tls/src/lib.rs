@@ -4,9 +4,9 @@
 //! that key, and the session's `tls-exporter` value the handshake binds to.
 //!
 //! Every config is TLS 1.3 alone, from one crypto provider, aws-lc-rs, with
-//! its cipher suites and key exchange groups named here rather than taken
-//! from the provider's defaults, and with early data off. No process default
-//! provider is installed or read.
+//! its TLS 1.3 cipher suites alone and the key exchange groups named here
+//! rather than taken from the provider's defaults, and with early data off.
+//! No process default provider is installed or read.
 
 #![deny(
     clippy::unwrap_used,
@@ -283,6 +283,8 @@ impl PinnedConnector {
             .connect(name, io)
             .await
             .map_err(ConnectError::Handshake)?;
+        // rustls already refuses a group the client didn't offer, and the
+        // client offers the hybrid alone; this holds should either change.
         if session.is_post_quantum() {
             Ok(session)
         } else {
@@ -350,6 +352,8 @@ impl ServerCertVerifier for PinnedVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        // The pinned key is P-256, so webpki would refuse another scheme's
+        // signature too; this refuses it before any is checked.
         if dss.scheme != HUB_SCHEME {
             return Err(rustls::Error::PeerMisbehaved(
                 rustls::PeerMisbehaved::SignedHandshakeWithUnadvertisedSigScheme,
