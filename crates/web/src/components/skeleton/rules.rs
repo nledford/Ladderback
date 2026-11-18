@@ -101,23 +101,74 @@ pub enum Awaited {
     Text,
 }
 
+/// The share of its room each name of a table's header takes, shorter than
+/// every cell below it, as a column's name usually is.
+const HEADER_SHARE: u8 = 40;
+
+/// The share of its room each cell of a table's rows takes, row by row: a
+/// few rows, since how many the table holds is known only once it comes,
+/// each a little different, as rows of content are.
+const ROW_SHARES: [u8; 3] = [90, 70, 80];
+
+/// The share of its room a form's label takes.
+const LABEL_SHARE: u8 = 30;
+
+/// A form's field: as wide and as tall as the gallery's field.
+const FIELD: Shape = Shape::Block {
+    inline: Rem::tenths(200),
+    block: Rem::tenths(25),
+};
+
+/// A form's button: as tall as a field, and narrower.
+const BUTTON: Shape = Shape::Block {
+    inline: Rem::tenths(80),
+    block: Rem::tenths(25),
+};
+
+/// Words: two lines, the last one this share of its room.
+const WORDS_LAST_SHARE: u8 = 60;
+
 impl Awaited {
     /// A table of `columns` columns; none is one, since a table has one at
     /// least.
     pub fn table(columns: u8) -> Self {
-        todo!("{columns}")
+        Self::Table {
+            columns: NonZeroU8::new(columns).unwrap_or(NonZeroU8::MIN),
+        }
     }
 
     /// A form of `fields` fields; none is one, since a form has one at
     /// least.
     pub fn form(fields: u8) -> Self {
-        todo!("{fields}")
+        Self::Form {
+            fields: NonZeroU8::new(fields).unwrap_or(NonZeroU8::MIN),
+        }
     }
 
     /// The skeletons that stand for it, row by row: a row's skeletons stand
     /// side by side, each in an equal share of the row.
     pub fn rows(self) -> Vec<Vec<Shape>> {
-        todo!("{self:?}")
+        let line = |percent| Shape::Lines {
+            count: NonZeroU8::MIN,
+            last: Share::percent(percent),
+        };
+        match self {
+            Self::Table { columns } => {
+                let columns = usize::from(columns.get());
+                std::iter::once(HEADER_SHARE)
+                    .chain(ROW_SHARES)
+                    .map(|share| vec![line(share); columns])
+                    .collect()
+            }
+            Self::Form { fields } => (0..fields.get())
+                .flat_map(|_| [vec![line(LABEL_SHARE)], vec![FIELD]])
+                .chain([vec![BUTTON]])
+                .collect(),
+            Self::Text => vec![vec![Shape::Lines {
+                count: NonZeroU8::MIN.saturating_add(1),
+                last: Share::percent(WORDS_LAST_SHARE),
+            }]],
+        }
     }
 }
 
