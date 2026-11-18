@@ -53,7 +53,7 @@ pub enum Problem {
     KeyringUnavailable { detail: String, cause: KeyringCause },
     /// A secret has to be text, and this isn't valid UTF-8.
     NotUnicode,
-    /// More than [`MAX_SECRET_BYTES`](super::MAX_SECRET_BYTES), the cap on
+    /// More than [`MAX_SECRET_BYTES`], the cap on
     /// what is read from a file or from a command's output.
     TooLarge { limit: usize },
     /// The command ran and failed: its exit status (`None` when a signal

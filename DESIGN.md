@@ -153,13 +153,13 @@ components:
 
 Ladderback's web UI is a ledger of backups: ruled rows of facts, each with its unit, read top to bottom. A page is a heading, a sentence that says where things stand, and a table or a form. The person comes to check that every machine is backed up, notice the one that isn't, and act; nothing on the page competes with that.
 
-The look is plain, on purpose. Headings, checkboxes and dialogs are the browser's native controls, and a button is a native `<button>` drawn from the tokens, so it looks the same in every browser while it behaves the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and quiet pairs, dark words on a pale fill (pale on deep in dark mode), say what a run is doing. Everything else is text.
+The look is plain, on purpose. Headings and dialogs are the browser's native controls, and a button, a text field, a checkbox and a radio are native elements drawn from the tokens, so they look the same in every browser while they behave the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress, a chosen checkbox or radio and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and quiet pairs, dark words on a pale fill (pale on deep in dark mode), say what a run is doing. Everything else is text.
 
 Accessibility shapes the layout rather than decorating it: every layout holds at 320 px wide with text at 200 %, in both directions of writing, in light, dark and forced colors.
 
 **Key Characteristics:**
 
-- Native controls underneath, buttons drawn from the tokens, flat surfaces, no shadows.
+- Native controls underneath, buttons, fields and choices drawn from the tokens, flat surfaces, no shadows.
 - One accent, Ladder Blue, for action: links, the focus ring, progress and a row's one Filled button. Three status hues beside it, never alone.
 - State is a labeled badge with an icon, never color alone.
 - Tables with one muted rule per row and columns that don't move as rows change.
@@ -171,15 +171,15 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 
 ### Primary
 
-- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's and an information banner's icon and edge (the Primary tone, which covers Info) and the selected tab's bar. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
+- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's and an information banner's icon and edge (the Primary tone, which covers Info), the selected tab's bar and a chosen checkbox's or radio's edge and fill, under a mark in Paper. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
 
 ### Neutral
 
-- **Paper** (`--bg`): the page.
+- **Paper** (`--bg`): the page, and the mark on a chosen checkbox or radio.
 - **Graphite Ink** (`--fg`): all body text and headings.
 - **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and between a list of tabs and its panel, and the line around the pause banner.
 - **Ledger Gray** (`--surface`): the site header, toasts, alerts, banners, the pause banner, a progress bar's empty track and an unavailable text field.
-- **Field Edge** (`--field-edge`): a text field's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
+- **Field Edge** (`--field-edge`): a text field's, a checkbox's and a radio's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 - **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
 
 ### Status
@@ -290,7 +290,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Status Badges
 
-- **Style:** a badge in its state's tone: Success's pair or Error's for a run that succeeded or failed, the badge's own Loading (blue) pair while it runs and its Empty (gray) pair otherwise.
+- **Style:** a badge in its state's tone: Success's pair for a run that succeeded, Warning's for one that succeeded with warnings (a success with something to read, never a clean run's green), Error's for one that failed, the badge's own Loading (blue) pair while it runs and its Empty (gray) pair otherwise.
 - **Content:** the state's own icon, then the label.
 
 ### Inputs / Fields
@@ -302,7 +302,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 - **Read only and unavailable:** told in words by a note under the description; read only has a dashed edge and stays focusable, unavailable takes Ledger Gray with Slate Note text.
 - **Icon:** optional, decorative, inside the edge at the inline start.
 - **Forced colors:** the reader's `Field` and `FieldText`, an unavailable field `GrayText`; invalid keeps its 2 px edge and read only its dashes.
-- **Checkbox:** before its label, never under 24 px square, growing with the text; its description sits under the label.
+- **Checkbox and radio:** the box before its label, never under 24 px a side and 1.5 times the text, growing with it; a 1 px Field Edge round Paper, a checkbox with the small corner and a radio round; chosen, the edge and the fill in Ladder Blue under a check or a dot in Paper; its description, then its error, under the label (a radio group's under its legend), the error edging the box 2 px in Red Ink; under forced colors the reader's field colors, the mark telling chosen from not.
 - **Error:** the message above its field in error red and semibold, the field's edge 2 px in Red Ink; on submit, an error summary boxed in a 2 px error-red border, with its own heading, takes focus.
 
 ### Links

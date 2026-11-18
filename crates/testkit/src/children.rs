@@ -1,7 +1,7 @@
 //! Processes a test run starts and owns: a daemon above all, with the
 //! workers it starts. Each is ended when its [`Owned`] is dropped (a scenario
 //! that passes, fails or panics drops its world), and every one still running
-//! is ended by [`end_all`], which the scenario watch calls before it stops a
+//! is ended by `end_all`, which the scenario watch calls before it stops a
 //! run at its limit (#499): `std::process::exit` runs no destructor, and a
 //! daemon left running holds the runner's output pipe, so whatever waits for
 //! that pipe to close (`just red-first`) waits for its own timeout.
@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 /// How often [`Owned::wait`] looks whether the process has ended.
 const POLL: Duration = Duration::from_millis(10);
 
-/// How long [`end_all`] waits for the killed processes to end before the
+/// How long `end_all` waits for the killed processes to end before the
 /// run exits anyway: a kill takes milliseconds, and one stuck where SIGKILL
 /// can't reach it (a hung mount) must not hold the exit the watch exists
 /// for. Its pipes are closed with it either way.
