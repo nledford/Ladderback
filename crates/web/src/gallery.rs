@@ -18,6 +18,7 @@ use leptos_router::components::A;
 use crate::announcer::Politeness;
 use crate::backend::Progress as Reading;
 use crate::components::alert::rules::AlertTone;
+use crate::components::badge::rules::BadgeTone;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::icon::Meaning;
@@ -27,11 +28,11 @@ use crate::components::spinner::rules::LabelShown;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
 use crate::components::{
-    Alert, Align, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation, Dismissal,
-    FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name, PauseUpdates,
-    Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner, State,
-    StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, Tooltip, Tree,
-    show_toast, text_field,
+    Alert, Align, Badge, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation,
+    Dismissal, FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name,
+    PauseUpdates, Progress, RadioGroup, ReviewDialog, Sentences, Skeleton, Sort, SortKey, Spinner,
+    State, StatusBadge, StepUp, StepUpField, Tab, Table, Tabs, TextField, Tip, Toast, ToastTone,
+    Toasts, Tooltip, Tree, text_field,
 };
 use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::pause::{self, Ends};
@@ -47,6 +48,12 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let table_localizer = Arc::clone(&localizer);
     // The tab the manual demo's set tells it is chosen.
     let manual_chosen = RwSignal::new(0_usize);
+    // The badge demo's count, a number in its words.
+    let pending_changes = text_with(
+        &localizer,
+        msg::UI_GALLERY_BADGES_PENDING,
+        &[("count", MsgArg::Count(3))],
+    );
     let (heading, announcer_heading) = (
         t(msg::UI_GALLERY_HEADING),
         t(msg::UI_GALLERY_ANNOUNCER_HEADING),
@@ -103,8 +110,27 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         current: 6 * GIB,
         ..progress.get_untracked()
     };
-    let toast = RwSignal::<Option<String>>::new(None);
-    let settings_saved = t(msg::UI_GALLERY_SETTINGS_SAVED);
+    // The toast demo's toasts, and whether its restore's failure stands on
+    // the page, as a failure must beside its toast.
+    let toasts = Toasts::new();
+    let restore_failure_shown = RwSignal::new(false);
+    let toast_button = |id: &'static str, label, tone, words| {
+        let words: String = t(words);
+        view! {
+            <p>
+                <Button
+                    content=Content::Text(t(label).into())
+                    id=id
+                    on_press=Callback::new(move |()| {
+                        if tone == ToastTone::Error {
+                            restore_failure_shown.set(true);
+                        }
+                        toasts.show(tone, words.clone());
+                    })
+                />
+            </p>
+        }
+    };
     // Whether the icon demo's notifications are on, which its icon-only
     // toggle button shows and changes.
     let notifications = RwSignal::new(false);
@@ -469,6 +495,42 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
             </p>
         </section>
+        // `id`, so a step finds the demo under a pseudolocale too, which
+        // renames its heading.
+        <section id="badge-demo">
+            <h2>{t(msg::UI_GALLERY_BADGES_HEADING)}</h2>
+            // A count and two tags, each saying in words what it counts or
+            // names, the long one wrapping in a narrow room.
+            <p class="flex flex-wrap gap-2">
+                <Badge label=pending_changes icon=LucideGlyph::Pencil />
+                <Badge label=t(msg::UI_GALLERY_BADGES_TAG) />
+                <Badge label=t(msg::UI_GALLERY_BADGES_LONG) icon=LucideGlyph::CalendarClock />
+            </p>
+            // Every tone, named in words, so no tone is told by its color.
+            <p class="flex flex-wrap gap-2">
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_PRIMARY)
+                    tone=BadgeTone::Primary
+                    icon=LucideGlyph::Info
+                />
+                <Badge label=t(msg::UI_GALLERY_TONE_SECONDARY) tone=BadgeTone::Secondary />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_SUCCESS)
+                    tone=BadgeTone::Success
+                    icon=LucideGlyph::CircleCheck
+                />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_WARNING)
+                    tone=BadgeTone::Warning
+                    icon=LucideGlyph::TriangleAlert
+                />
+                <Badge
+                    label=t(msg::UI_GALLERY_TONE_ERROR)
+                    tone=BadgeTone::Error
+                    icon=LucideGlyph::CircleX
+                />
+            </p>
+        </section>
         <section>
             <h2>{t(msg::UI_GALLERY_VOCABULARY_HEADING)}</h2>
             // Every tone, its name and its swatch drawn in it, so the axe
@@ -559,15 +621,53 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                     .collect_view()}
             </ul>
         </section>
-        <section>
+        <section id="toast-demo">
             <h2>{t(msg::UI_GALLERY_TOAST_HEADING)}</h2>
-            <Toast text=toast />
-            <p>
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_SAVE_SETTINGS).into())
-                    on_press=Callback::new(move |()| show_toast(toast, settings_saved.clone()))
-                />
-            </p>
+            // A button for each tone, then the toast under them, so Tab
+            // reaches its Dismiss button from each.
+            {toast_button(
+                TOAST_DEMO_SAVE,
+                msg::UI_GALLERY_SAVE_SETTINGS,
+                ToastTone::Success,
+                msg::UI_GALLERY_SETTINGS_SAVED,
+            )}
+            {toast_button(
+                "toast-demo-queue",
+                msg::UI_GALLERY_QUEUE_CHECK,
+                ToastTone::Primary,
+                msg::UI_GALLERY_CHECK_QUEUED,
+            )}
+            {toast_button(
+                "toast-demo-back-up",
+                msg::UI_GALLERY_BACK_UP_PLAN,
+                ToastTone::Warning,
+                msg::UI_GALLERY_BACKUP_WARNED,
+            )}
+            {toast_button(
+                "toast-demo-restore",
+                msg::UI_GALLERY_RESTORE_SNAPSHOT,
+                ToastTone::Error,
+                msg::UI_GALLERY_DEMO_RESTORE_FAILED,
+            )}
+            // Dismissed, a toast hands focus to the first button.
+            <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=TOAST_DEMO_SAVE />
+            // The failure stays on the page after its toast has gone.
+            {
+                let localizer = Arc::clone(&localizer);
+                let detail = t(msg::UI_GALLERY_DEMO_RESTORE_FAILED_DETAIL);
+                move || {
+                    restore_failure_shown
+                        .get()
+                        .then(|| {
+                            let detail = detail.clone();
+                            view! {
+                                <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
+                                    {detail}
+                                </Alert>
+                            }
+                        })
+                }
+            }
         </section>
         <section>
             <h2>{t(msg::UI_GALLERY_REVIEW_HEADING)}</h2>
@@ -1893,6 +1993,10 @@ const BANNER_DEMO: &str = "gallery-demo";
 /// The ID of the banner demo's button that brings a newer edition of its
 /// notice, where focus goes when the notice is dismissed.
 const BANNER_DEMO_NEWER: &str = "banner-demo-newer";
+
+/// The ID of the toast demo's Save button, where focus goes when a toast is
+/// dismissed.
+const TOAST_DEMO_SAVE: &str = "toast-demo-save";
 
 /// A demo route. The gallery's literal paths all parse (the link's rules
 /// test their shapes); one that didn't would show no link, which the link
