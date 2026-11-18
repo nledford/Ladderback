@@ -93,6 +93,10 @@ impl SecretsHarness for RealHarness {
         Arc::new(self.system().with_keyring(Arc::new(Refusing)))
     }
 
+    fn with_locked_keyring(&self) -> Arc<dyn SecretResolver> {
+        Arc::new(self.system().with_keyring(Arc::new(LockedSecretService)))
+    }
+
     fn keyring_activated(&self, activation: KeyringActivation) -> Arc<dyn Keyring> {
         Arc::new(self.system().with_activation(move || activation))
     }
@@ -1176,6 +1180,47 @@ impl KeyringStore for Refusing {
     }
 }
 
+/// A Secret Service that answers that its keyring is locked.
+struct LockedSecretService;
+
+impl KeyringStore for LockedSecretService {
+    fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
+        Err(Failure::Locked("Secret Service: object locked".to_owned()))
+    }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        Err(Failure::Locked("Secret Service: object locked".to_owned()))
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        Err(Failure::Locked("Secret Service: object locked".to_owned()))
+    }
+}
+
+/// A Secret Service that says its keyring is locked is told apart from one
+/// that isn't there, in its own words: the entry may well be in it, and the
+/// person can unlock it (#993).
+#[tokio::test]
+async fn a_locked_keyring_says_so_and_why() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let result = resolver(Duration::from_secs(1))
+        .with_keyring(Arc::new(LockedSecretService))
+        .resolve(&SecretRef::Keyring(entry))
+        .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: SourceName::Keyring {
+                entry: "ladderback-demo/nas".to_owned()
+            },
+            problem: Problem::KeyringUnavailable {
+                detail: "Secret Service: object locked".to_owned(),
+                cause: KeyringCause::Locked,
+            },
+        })
+    );
+}
+
 #[tokio::test]
 async fn a_keyring_with_no_service_to_ask_says_so_and_why() {
     let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
@@ -1279,6 +1324,18 @@ async fn a_keyring_that_cannot_keep_a_password_says_why() {
         Err(unavailable.clone())
     );
     assert_eq!(no_service.remove(&entry).await, Err(unavailable));
+    // A Secret Service that says its keyring is locked keeps nothing either,
+    // as one with no service to ask.
+    let locked_service =
+        resolver(Duration::from_secs(1)).with_keyring(Arc::new(LockedSecretService));
+    let locked_unavailable = KeyringError::Unavailable {
+        detail: "Secret Service: object locked".to_owned(),
+    };
+    assert_eq!(
+        locked_service.keep(&entry, &password).await,
+        Err(locked_unavailable.clone())
+    );
+    assert_eq!(locked_service.remove(&entry).await, Err(locked_unavailable));
     let locked = resolver(Duration::from_secs(1)).with_keyring(Arc::new(Locked));
     let unwritable = KeyringError::Unwritable {
         detail: "the keychain is locked".to_owned(),
@@ -1472,20 +1529,20 @@ fn never_asked() -> crate::keyring_store::Lock {
 
 /// A Secret Service that finds no entry is asked whether its keyring is
 /// locked: oo7 finds no items in a locked collection, whether the entry is in
-/// it or not (#483). Locked, the entry is refused as no keyring service to
-/// ask, in the service's words; unlocked, it is missing; when the service
-/// can't say, the missing entry is unconfirmed, in the words why. The
-/// keychain, which says when it is locked, is never asked.
+/// it or not (#483). Locked, the entry is refused as a locked keyring, in the
+/// service's words; unlocked, it is missing; when the service can't say, the
+/// missing entry is unconfirmed, in the words why. The keychain, which says
+/// when it is locked, is never asked.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn a_secret_service_that_finds_no_entry_in_a_locked_keyring_is_no_keyring_service() {
+fn a_secret_service_that_finds_no_entry_in_a_locked_keyring_is_locked() {
     use crate::keyring_store::{Lock, OsStore, failure};
     let said = "Secret Service: object locked";
     assert_eq!(
         failure(keyring::Error::NoEntry, OsStore::SecretService, || {
             Lock::Locked(said.to_owned())
         }),
-        Failure::Refused(said.to_owned())
+        Failure::Locked(said.to_owned())
     );
     assert_eq!(
         failure(keyring::Error::NoEntry, OsStore::SecretService, || {
@@ -1542,25 +1599,34 @@ fn a_secret_service_that_is_not_on_the_bus_is_no_keyring_service() {
 
 /// A Secret Service that answered and refused, as the `keyring` crate
 /// reports it on Linux: its collection locked (its D-Bus error, or the
-/// `dbus-secret-service` error), missing, or its unlock prompt dismissed.
-/// Each is refused in the platform's words, never a service that isn't there:
-/// asking again would ask the person again.
+/// `dbus-secret-service` error) is locked; missing, or its unlock prompt
+/// dismissed, is refused. Each is in the platform's words, never a service
+/// that isn't there: asking again would ask the person again.
 #[cfg(target_os = "linux")]
 #[test]
-fn a_secret_service_that_is_locked_or_whose_prompt_was_dismissed_refused() {
+fn a_secret_service_that_is_locked_is_told_apart_from_one_that_refused() {
     use crate::keyring_store::{OsStore, failure};
     use dbus_secret_service::Error;
     let bus = |name: &str, message: &str| Error::Dbus(dbus::Error::new_custom(name, message));
-    let cases = [
+    let locked = [
         keyring::Error::PlatformFailure(Box::new(bus(
             "org.freedesktop.Secret.Error.IsLocked",
             "Cannot get secret of a locked object",
         ))),
         keyring::Error::NoStorageAccess(Box::new(Error::Locked)),
+    ];
+    for error in locked {
+        let said = error.to_string();
+        assert_eq!(
+            failure(error, OsStore::SecretService, never_asked),
+            Failure::Locked(said)
+        );
+    }
+    let refused = [
         keyring::Error::NoStorageAccess(Box::new(Error::NoResult)),
         keyring::Error::NoStorageAccess(Box::new(Error::Prompt)),
     ];
-    for error in cases {
+    for error in refused {
         let said = error.to_string();
         assert_eq!(
             failure(error, OsStore::SecretService, never_asked),
@@ -1656,7 +1722,7 @@ fn a_bus_error_names_a_missing_service_or_a_locked_keyring() {
     }
     assert_eq!(
         bus_error_cause("org.freedesktop.Secret.Error.IsLocked"),
-        Some(KeyringCause::Refused)
+        Some(KeyringCause::Locked)
     );
     for answered in [
         "org.freedesktop.DBus.Error.NoReply",

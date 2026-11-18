@@ -66,7 +66,7 @@ pub use step_up_field::{StepUp, StepUpField};
 pub use table::{Align, Column, Footer, Name, Sentences, Sort, SortKey, State, Table};
 pub use tabs::{Tab, Tabs};
 pub use text_field::TextField;
-pub(crate) use toast::{Toast, show_toast};
+pub use toast::{Toast, ToastTone, Toasts};
 pub use tooltip::{Tip, Tooltip};
 pub(crate) use tree::{FolderLoader, FolderPage, Tree};
 

@@ -620,13 +620,21 @@ error-secret-missing = { -brand-name } found no secret in { $source }, which the
 error-secret-unreadable = { -brand-name } could not read { $source }, which the repository's { $field } refers to. Check that it is there and that the user { -brand-name } runs as may read it.
     .with-detail = { -brand-name } could not read { $source }, which the repository's { $field } refers to ({ $detail }). Check that it is there and that the user { -brand-name } runs as may read it.
 
-# A repository's secret is in a keyring entry, and this computer has no keyring service that can be asked for it: no Secret Service runs, there is no session bus to reach one by, or the service says its keyring is locked. A server, or a service that starts before anyone logs in, usually has none.
+# A repository's secret is in a keyring entry, and this computer has no keyring service that can be asked for it: no Secret Service runs, there is no session bus to reach one by, or the service refused otherwise than as locked, as when its unlock prompt was dismissed. A server, or a service that starts before anyone logs in, usually has none.
 # $field (text): where in the settings the secret is.
 # $source (text): the keyring entry, as service/name.
 # $detail (text): the message of the platform, shown as it came with secrets masked.
 # `password-file`, `password-command` and `password-env` are settings, typed as they are: keep them string literals.
 error-secret-keyring-unavailable = { -brand-name } could not read the keyring entry { $source }, which the repository's { $field } refers to, because this computer has no keyring service it can use. A server, or a service that starts before anyone logs in, usually has none. Start a Secret Service in a session and unlock it, or keep the secret in a file, a command or an environment variable instead ({ "password-file" }, { "password-command" } or { "password-env" }).
     .with-detail = { -brand-name } could not read the keyring entry { $source }, which the repository's { $field } refers to, because this computer has no keyring service it can use ({ $detail }). A server, or a service that starts before anyone logs in, usually has none. Start a Secret Service in a session and unlock it, or keep the secret in a file, a command or an environment variable instead ({ "password-file" }, { "password-command" } or { "password-env" }).
+
+# A repository's secret is in a keyring entry, and the keyring service answered that its keyring is locked, so the entry couldn't be read, though it may well be there. Logging in to the desktop usually unlocks it; a run that starts at login can come before that.
+# $field (text): where in the settings the secret is.
+# $source (text): the keyring entry, as service/name.
+# $detail (text): the message of the platform, shown as it came with secrets masked.
+# `password-file`, `password-command` and `password-env` are settings, typed as they are: keep them string literals.
+error-secret-keyring-locked = { -brand-name } could not read the keyring entry { $source }, which the repository's { $field } refers to, because the keyring is locked. Unlock it in the system's keyring app (logging in to the desktop usually does that), then try again. To back up while the keyring is locked, keep the secret in a file, a command or an environment variable instead ({ "password-file" }, { "password-command" } or { "password-env" }).
+    .with-detail = { -brand-name } could not read the keyring entry { $source }, which the repository's { $field } refers to, because the keyring is locked ({ $detail }). Unlock it in the system's keyring app (logging in to the desktop usually does that), then try again. To back up while the keyring is locked, keep the secret in a file, a command or an environment variable instead ({ "password-file" }, { "password-command" } or { "password-env" }).
 
 # A repository's secret is not text.
 # $field (text): where in the settings the secret is.
