@@ -139,6 +139,7 @@ async fn the_plan_backs_up(agent: &mut Agent, plan: String) {
         label: None,
         host: None,
         filter: SourceFilter::default(),
+        left_out: Vec::new(),
         deadline_budget: SignedDuration::from_hours(1),
     });
     let engine = Arc::new(Refusing {

@@ -135,10 +135,10 @@ pub(crate) fn snapshot_tags(plan: &PlanTags, extra: &[String]) -> Result<StringL
 
 /// rustic's backup options with the plan's source filter: its globs and glob
 /// files as `Excludes`, the rest as `LocalSourceFilterOptions`, each field
-/// under its own name. What the filter doesn't set is rustic's default, and
-/// `exclude-larger-than`, which a plan never sets (§6.1), stays off. The
-/// filter is taken apart whole, so a field added to it fails to compile here
-/// until it is mapped.
+/// under its own name, and `left_out` after the plan's iglobs. What the
+/// filter doesn't set is rustic's default, and `exclude-larger-than`, which
+/// a plan never sets (§6.1), stays off. The filter is taken apart whole, so
+/// a field added to it fails to compile here until it is mapped.
 pub(crate) fn backup_options(filter: &SourceFilterSpec) -> BackupOptions {
     let SourceFilterSpec {
         globs,
@@ -151,10 +151,11 @@ pub(crate) fn backup_options(filter: &SourceFilterSpec) -> BackupOptions {
         exclude_if_present,
         exclude_if_xattr,
         one_file_system,
+        left_out,
     } = filter;
     let excludes = Excludes::default()
         .globs(globs.clone())
-        .iglobs(iglobs.clone())
+        .iglobs(iglobs.iter().chain(left_out).cloned().collect::<Vec<_>>())
         .glob_files(glob_files.clone())
         .iglob_files(iglob_files.clone());
     let filter_options = LocalSourceFilterOptions::default()
@@ -520,6 +521,7 @@ mod tests {
             exclude_if_present: vec![".nobackup".to_owned()],
             exclude_if_xattr: vec!["user.nobackup".to_owned()],
             one_file_system: true,
+            left_out: Vec::new(),
         }
     }
 

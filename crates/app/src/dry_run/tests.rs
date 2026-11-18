@@ -297,11 +297,14 @@ impl WalkSources for Counted {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
         self.walks.fetch_add(1, Ordering::AcqRel);
-        let walked = tree().walk(sources, filter, limits, give_way).await?;
+        let walked = tree()
+            .walk(sources, filter, left_out, limits, give_way)
+            .await?;
         Ok(Walked {
             warnings: 1,
             ..walked
@@ -333,8 +336,8 @@ async fn the_warnings_of_every_walk_of_a_dry_run_are_counted_together() {
 const KEY_GLOB: &str = "!/srv/demo/hub-key*";
 
 /// The tree with a key file, `/srv/demo/hub-key` (17 bytes), which a walk
-/// leaves out only when its filter's `iglobs` end with [`KEY_GLOB`]; any
-/// other filter is the tree's to apply.
+/// leaves out only when it is given [`KEY_GLOB`] alone to leave out after
+/// the filter; any other filter is the tree's to apply.
 struct WithKeyFile;
 
 #[async_trait]
@@ -343,13 +346,12 @@ impl WalkSources for WithKeyFile {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
-        let mut rest = filter.clone();
-        if rest.iglobs.last().map(String::as_str) == Some(KEY_GLOB) {
-            rest.iglobs.pop();
-            return tree().walk(sources, &rest, limits, give_way).await;
+        if left_out == [KEY_GLOB] {
+            return tree().walk(sources, filter, &[], limits, give_way).await;
         }
         let file = |path: &str, size| (path.to_owned(), Some(size));
         let folder = |path: &str| (path.to_owned(), None);
@@ -363,7 +365,7 @@ impl WalkSources for WithKeyFile {
             file("/srv/demo/docs/b.txt", 5),
             file("/srv/demo/docs/c.txt", 7),
         ])
-        .walk(sources, &rest, limits, give_way)
+        .walk(sources, filter, left_out, limits, give_way)
         .await
     }
 }
@@ -423,6 +425,7 @@ impl WalkSources for Held {
         &self,
         _: &[Source],
         _: &SourceFilter,
+        _: &[String],
         _: WalkLimits,
         _: GiveWay,
     ) -> Result<Walked, WalkError> {
@@ -488,6 +491,7 @@ impl WalkSources for Orphaned {
         &self,
         _: &[Source],
         _: &SourceFilter,
+        _: &[String],
         _: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
@@ -562,11 +566,14 @@ impl WalkSources for BackupArrives {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
         self.backups.store(true, Ordering::Release);
-        tree().walk(sources, filter, limits, give_way).await
+        tree()
+            .walk(sources, filter, left_out, limits, give_way)
+            .await
     }
 }
 
@@ -686,6 +693,7 @@ impl WalkSources for Slow {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
@@ -694,7 +702,9 @@ impl WalkSources for Slow {
             .unwrap_or_else(PoisonError::into_inner)
             .push(limits.time);
         self.clock.advance(SignedDuration::from_secs(8));
-        tree().walk(sources, filter, limits, give_way).await
+        tree()
+            .walk(sources, filter, left_out, limits, give_way)
+            .await
     }
 }
 

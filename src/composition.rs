@@ -1669,14 +1669,8 @@ impl PlanRunner {
             extra_tags: plan.tags.clone(),
             label: plan.label.clone(),
             host: plan.snapshot_host(config.agent()).cloned(),
-            filter: {
-                // Last, so a glob of the plan's own can't bring one back;
-                // iglobs, so a case-insensitive file system's other
-                // spellings stay out too.
-                let mut filter = plan.filter.clone();
-                filter.iglobs.extend(left_out.iter().cloned());
-                filter
-            },
+            filter: plan.filter.clone(),
+            left_out: left_out.to_vec(),
             deadline_budget: backup_budget(None, None),
         });
         // The agent, repository and plan hooks of §6.1 wrap the run.

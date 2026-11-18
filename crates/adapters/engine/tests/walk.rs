@@ -67,6 +67,7 @@ async fn a_glob_rustic_refuses_or_a_glob_file_it_cannot_read_is_a_filter_error()
             .walk(
                 std::slice::from_ref(&root),
                 &filter,
+                &[],
                 limits,
                 Arc::new(|| false),
             )
@@ -102,7 +103,7 @@ async fn a_glob_file_that_is_not_a_regular_file_or_is_over_a_mebibyte_is_refused
         let source = source.clone();
         async move {
             RusticWalk
-                .walk(&[source], &filter, limits, Arc::new(|| false))
+                .walk(&[source], &filter, &[], limits, Arc::new(|| false))
                 .await
         }
     };

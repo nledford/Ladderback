@@ -30,6 +30,7 @@ impl WalkSources for RusticWalk {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
@@ -43,7 +44,7 @@ impl WalkSources for RusticWalk {
             .chain(&filter.iglob_files)
             .map(|file| PathBuf::from(file.as_str()))
             .collect();
-        let options = backup_options(&filter_spec(filter.clone()));
+        let options = backup_options(&filter_spec(filter.clone(), left_out.to_vec()));
         let time = Duration::try_from(limits.time).unwrap_or(Duration::ZERO);
         tokio::task::spawn_blocking(move || {
             let (walked, warnings) = unlogged(|| {

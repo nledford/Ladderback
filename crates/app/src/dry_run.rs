@@ -160,9 +160,9 @@ impl PlanDryRuns {
     }
 
     /// Leaves out of every walk what `globs` name, as each backup leaves
-    /// out the secret key files in the data folder (§16, decision 120): in
-    /// rustic's `iglobs`, after the plan's own, and never tallied as one of
-    /// its excludes.
+    /// out the secret key files in the data folder (§16, decision 120):
+    /// after every glob of the plan's own, its glob files' included, and
+    /// never tallied as one of its excludes.
     #[must_use]
     pub fn with_left_out(mut self, globs: Vec<String>) -> Self {
         self.left_out = globs;
@@ -353,12 +353,14 @@ impl PlanDryRuns {
             entries: self.limits.entries,
             time,
         };
-        // Last, so a glob of the plan's own can't bring one back, as the
-        // backup's job has them.
-        let mut filter = filter.clone();
-        filter.iglobs.extend(self.left_out.iter().cloned());
         self.walk
-            .walk(sources, &filter, limits, Arc::clone(give_way))
+            .walk(
+                sources,
+                filter,
+                &self.left_out,
+                limits,
+                Arc::clone(give_way),
+            )
             .await
             .map_err(|error| match error {
                 WalkError::Filter => DryRunError::Filter,

@@ -595,6 +595,7 @@ async fn run_backup(agent: &mut Agent, repository: &str, trigger: Trigger) {
         label: None,
         host: None,
         filter: SourceFilter::default(),
+        left_out: Vec::new(),
         deadline_budget: SignedDuration::from_hours(1),
     });
     // The run's own clock moves only when everything in the run waits on
