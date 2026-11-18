@@ -25,16 +25,16 @@ Agent → hub:
 - `ReposSnapshot { repos: [{ repo_id, alias, requested_maintenance }] }`, sent on connect and on change.
 - `OpEvent { epoch, seq, op_id, event }`. `epoch` is a random ID created with the agent's outbox; `seq` increases within an epoch and is assigned when the event enters the persistent outbox, so the agent replays from the hub's last acknowledged `(epoch, seq)` after a disconnect. A rebuilt database starts a new epoch, so its events are never mistaken for already-acknowledged ones. Progress events are sent live but never stored or replayed.
 - `Heartbeat { running_ops: [{ op_id, repo_id, kind, index_read_at, deadline }], next_runs }`, every 30 s.
-- `RestoreResult { request_id, op_id | error }`
+- `RestoreResult { command_id, op_id | error }`
 - `ReleaseAck { repo_id, epoch }`: the old owner's acknowledgement that it dropped a lease, which lets the hub grant the new owner (§7.3).
 - `TransportAck { number }`: the agent holds the hub's list of addresses of that number.
 
 Hub → agent:
-- `Welcome { protocol, hub_protocols: [min, max], agent_protocols: [min, max], hub_handshakes, hub_version, signed_at, status }`, signed (below): `protocol` is the highest both sides speak, or absent when they share none; `hub_protocols` lets the agent say which side is out of date; `agent_protocols` echoes the range the hub saw, so an agent notices a range lowered on the way; `hub_handshakes` names the handshakes the hub speaks, which the agent keeps so a hub reinstalled as an older release leaves it "out of date" and never conflicted; `hub_version` is the hub's release; `signed_at` is the hub's clock; `status` is `pending` until a person approves the agent, then `approved` (decision 120). It answers `Hello`, the first message after both proofs (§7.1, step 4).
+- `Welcome { protocol, hub_protocols: [min, max], agent_protocols: [min, max], generation, hub_handshakes, hub_version, signed_at, status }`, signed (below): `protocol` is the highest both sides speak, or absent when they share none; `hub_protocols` lets the agent say which side is out of date; `agent_protocols` echoes the range the hub saw, so an agent notices a range lowered on the way; `generation` only rises, and an agent refuses a lower one than it holds; `hub_handshakes` names the handshakes the hub speaks, which the agent keeps so a hub reinstalled as an older release leaves it "out of date" and never conflicted; `hub_version` is the hub's release; `signed_at` is the hub's clock; `status` is `pending` until a person approves the agent, then `approved` (decision 120). It answers `Hello`, the first message after both proofs (§7.1, step 4).
 - `Ack { epoch, seq }`
-- `RepoGrants { grants: [{ repo_id, owner, epoch, expires_at, keep_delete, prune_margin }] }`: the owner lease and the deadline inputs for each repo (§7.3). Sent on connect and renewed with each heartbeat reply. The agent caches them. Signed (below).
+- `RepoGrants { generation, grants: [{ repo_id, owner, epoch, expires_at, keep_delete, prune_margin }] }`: the owner lease and the deadline inputs for each repo (§7.3). Sent on connect and renewed with each heartbeat reply. The agent caches them. Signed (below).
 - `RunPlan { plan_id }`, `CancelOp { op_id }` (milestone 9). Signed (below).
-- `RestoreRequest { request_id, repo_id, snapshot_id, paths, requested_by }` (milestone 9). Always restores into a new folder. Refused unless the agent sets `allow-hub-restore = true` (§10.4). Signed (below).
+- `RestoreRequest { command_id, repo_id, snapshot_id, paths, requested_by }` (milestone 9). Always restores into a new folder. Refused unless the agent sets `allow-hub-restore = true` (§10.4). Signed (below).
 - `FetchLog { op_id }` → agent replies `LogChunk`
 - `UpdatePlan { plan }`: **reserved for post-v1.** Opt-in per agent ("allow hub to edit my plans"). The message type is reserved in protocol v1 so that adding it later isn't a breaking change. Signed when it ships.
 - `TransportStatement { number, addresses }`: the addresses agents may reach the hub at, each with its kind (decision 120).

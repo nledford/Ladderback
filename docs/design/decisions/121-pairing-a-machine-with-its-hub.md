@@ -1,8 +1,8 @@
 # Decision 121: How a person pairs a machine with its hub
 
-**A person pairs a machine by moving one pairing token from the hub to the agent: as text, as a QR code of the same text (in the web UI, or drawn in a terminal by `ladderback pairing-token`) or through a phone's share sheet. Both ends show the same key fingerprint, in one rendering, to compare. The agent then waits for a person to approve it on the hub. Every error says what to do next, and no step needs a camera, a mouse or color** (recorded 2026-11-18, §7.1, §4.5, §13.7.5; #567, the maintainer's directions of 2026-11-18 on pairing by QR code, from a phone and from a headless machine; revised the same day after independent review).
+**A person pairs a machine by moving one pairing token from the hub to the agent: as text, as a QR code of the same text (in the web UI, or drawn in a terminal by `ladderback pairing-token`) or through a phone's share sheet. Both ends show the same key fingerprint, in one rendering, to compare. The agent then waits for a person to approve it on the hub. Every error says what to do next, and no step needs a camera, a mouse or color. The hub's recovery seed is shown as a Recovery Kit, one printable page the person stores and confirms** (recorded 2026-11-18, §7.1, §4.5, §13.7.5; #567, the maintainer's directions of 2026-11-18 on pairing by QR code, from a phone and from a headless machine, and on the Recovery Kit; revised the same day after independent review).
 
-[Decision 120](120-agent-hub-connection-security.md) decides what is secure: the token's format, its server side, pending approval, the step-up, the keys and the handshake. This decision decides what the person sees and does. It links 120 for every security rule rather than restating it; where the two seem to differ, 120 governs.
+[Decision 120](120-agent-hub-connection-security.md) decides what is secure: the token's format, its server side, pending approval, the step-up, the keys, the recovery seed and the handshake. This decision decides what the person sees and does. It links 120 for every security rule rather than restating it; where the two seem to differ, 120 governs.
 
 ## Where each item is answered
 
@@ -13,6 +13,7 @@
 | A phone as either end | "From a phone" |
 | A headless hub or agent over SSH; `pairing-token`, `pair` | "From a terminal" |
 | What the person compares, and where | "The fingerprint" |
+| The recovery seed, as a Recovery Kit | "The Recovery Kit" |
 | What each error says | "Errors and their next step" |
 | Where a token can leak | "Where a token can leak" |
 | Keyboard, screen-reader and color-free use | "Accessibility" |
@@ -137,6 +138,20 @@ Each is a catalog message in the web UI and the command line, with the code in t
 
 Messages are localized (Fluent). A code's text never includes a token.
 
+## The Recovery Kit
+
+The hub makes a recovery seed at its first start and after each `hub-recover` ([120, "The recovery key"](120-agent-hub-connection-security.md)). It is the one secret a person has to keep somewhere other than the hub, so the hub shows it the way a password manager shows its Emergency Kit: **one printable page, also a file, that holds everything needed to use it.**
+
+- **The kit holds** the seed, as text in groups of four (`K7QM-…`, 13 groups) and as a QR code of the same text; the hub's address and its full fingerprint, in the rendering of "The fingerprint" and as 64 hex digits; the date it was made, as `2026-11-18`; and three numbered steps: 1, on the machine that runs the hub, run `ladderback hub-recover`; 2, type or paste the seed at its prompt, which does not echo it, and check that the hub's fingerprint on the kit is the hub you mean; 3, the hub makes a new key and a new kit, and its agents follow it on their next connection, so print the new kit and destroy this one.
+- **The page is the kit and nothing else.** The hub shows it after the same step-up as making a token. It is served with `Cache-Control: no-store`, so no cache or history keeps it. The seed isn't in the page's title or its address: the page is reached by a plain `POST` from a button, and its title is "Ladderback recovery kit". A print rule hides everything but the kit, as for a token's dialog. A person who prints it holds one page with no menus.
+- **The file is the same kit.** "Download" gives `ladderback-recovery-kit-2026-11-18.html`, one file with no script, no external reference and the QR as inline SVG, so it prints the same later. It is sent with `Content-Disposition: attachment` and `no-store`. On a headless hub, `ladderback recovery-kit`, run by the user that owns the data folder, prints the kit's text and a code drawn as for a token ("The terminal's QR code"), or writes the file with `--out <path>` (mode 0600, and it refuses to overwrite).
+- **The seed file waits for the person.** Until they confirm they have stored the kit, the seed stays in `hub-recovery-seed` in the data folder, which the default backup exclusion leaves out of a plan ([120, "The recovery key"](120-agent-hub-connection-security.md)). Settings and a notice on the hub's pages say the kit is waiting.
+- **They confirm by typing back the seed's last group,** four characters, after a fresh step-up. A kit that was never saved can't be confirmed by accident, since the last group is on the kit and nowhere else the person can see. A wrong group is refused and nothing changes. The right one deletes the seed file.
+- **After the confirmation the hub has nothing to show.** The page says the hub no longer holds the seed and can't show it. A person who has lost the kit has a hub with a recovery seed nobody knows; [120, "The recovery key"](120-agent-hub-connection-security.md) says what that costs, and Settings tells them so they can decide.
+- **The QR is the seed's text and nothing more.** For 64 characters in alphanumeric mode it is version 3, 29 modules a side by the capacity tables (not rendered). It lets a person who keeps the kit in a password manager's attachments or on paper read the seed with a phone's camera and type or paste it at the prompt; no part of Ladderback scans it. It uses the crates of "Crates" and draws in the same module as the token's.
+- **Where a kit can leak.** A printer's spool, a download folder, a synced downloads directory, a screenshot, a photo of the screen, and the shoulder of anyone behind the person. The page says so in one line above the kit ("Print it or store the file offline; don't keep it in a folder that syncs to the cloud"), and the file's name carries no secret. A person who syncs it anyway has put the root key where the cloud's holder can read it; the choice is theirs, and `hub-recover` with a new kit ends the exposure.
+- **Accessibility.** The seed's groups are read by group and selectable; the page has headings and numbered steps in order; the confirm field has a visible label; and nothing is conveyed by color. The QR has a text alternative that doesn't hold the seed.
+
 ## Where a token can leak
 
 A token is a one-time, short-lived credential: whoever holds it unused can pair one agent, and the agent is held pending until a person approves it ([120, "Pending approval"](120-agent-hub-connection-security.md)). These are the ways it leaves the hub's page.
@@ -184,6 +199,7 @@ Each is a test that fails before the behavior exists (§13.1).
 - **The terminal.** `pairing-token` prints the hub fingerprint, the token, the one-time line and a code whose half blocks decode, in a test, to exactly the token, with a 4-module quiet zone and explicit colors. It prints the token alone to a pipe. `NO_COLOR`, `--plain` and `--no-qr` print text and a line that says why. A window too small waits, measures again on Enter and never mints a second token. The size shown matches the computed one for tokens from 191 to 420 characters. In a terminal it waits for the pairing and prompts, and `n` leaves the agent pending. The token and the code are in no log line, and the command refuses to run as another user than the one that owns the data folder.
 - **`pair`.** A token on argv is refused with how to give it. A token wrapped across lines, quoted or with a trailing newline is read; one with letters changed fails the checksum with the message. It echoes what it read and asks before it sends anything. A changed hub key needs `--replace-pin` with a standard input that isn't a terminal. A `--token-file` that others can read warns. `--hostname` pairs under that name.
 - **Errors.** Every code in the table has a message with a next step in the catalog, and none holds a token.
+- **The Recovery Kit.** The page holds the seed in 13 groups and a QR that decodes to exactly the seed's text, the hub's address, the full fingerprint, the date and the three steps. It is sent with `no-store`; its title and its address hold no part of the seed; a print rule leaves only the kit. The download is one file with no script and no external reference, and the same seed text. The seed file stays until the right last group is typed after a step-up, a wrong group deletes nothing, and the right one deletes it. After that the page shows nothing of the seed. `recovery-kit` prints the text and a code that decodes to the seed, refuses a user other than the data folder's owner and refuses to overwrite a file.
 - **Where they run.** The encoding and the checks in `domain` and `app` with fakes; the QR and the scanner `@ui` in the three engines, with a fake camera stream; the terminal flows `@e2e` against a pseudo-terminal.
 
 ## Appendix: the scenarios `fleet/pairing-experience.feature` takes
@@ -355,4 +371,51 @@ Feature: Pairing a machine with its hub
     Given a stolen token that another machine has used
     When the real agent pairs with it
     Then the agent says the token was used and to look at the hub's agents list
+```
+
+### The Recovery Kit
+
+```gherkin
+  Scenario: The hub shows the recovery seed as a kit
+    Given a hub that has just made its recovery seed
+    When the person opens the recovery kit after confirming with their password
+    Then the kit shows the seed in groups of four and as a code
+    And the kit shows the hub's address, its full key fingerprint and today's date
+    And the kit lists three numbered steps for recovering the hub
+    And the page isn't cached and its title and address don't hold the seed
+
+  Scenario: Printing the kit prints nothing but the kit
+    Given the recovery kit is open
+    When the person prints the page
+    Then the printout holds the kit and no menu, button or notice
+
+  Scenario: The kit can be downloaded as a file
+    Given the recovery kit is open
+    When the person downloads it
+    Then the file holds the same seed, address, fingerprint, date and steps
+    And the file asks for no script and no other file
+
+  Scenario: The seed file stays until the kit is confirmed
+    Given a hub that has just made its recovery seed
+    Then the seed is still in the hub's data folder
+    And the hub's pages say the recovery kit is waiting
+    And a plan over the data folder leaves the seed file out
+
+  Scenario: A wrong last group doesn't confirm the kit
+    Given the recovery kit is open
+    When the person types a group that isn't the seed's last one
+    Then the hub refuses and the seed file stays
+
+  Scenario: The kit is confirmed, and the seed file is then deleted
+    Given the recovery kit is open
+    When the person types back the seed's last group after confirming with their password
+    Then the hub deletes the seed file
+    And the hub's pages no longer say the kit is waiting
+    And the kit page says the hub no longer holds the seed and can't show it
+
+  Scenario: A headless hub prints the kit in its terminal
+    Given a hub with an unconfirmed recovery seed and no web browser
+    When the person runs the hub's recovery-kit command
+    Then it prints the kit's text and a code that a camera can read
+    And it writes no file unless it is given a path
 ```
