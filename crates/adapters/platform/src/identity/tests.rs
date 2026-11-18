@@ -342,3 +342,24 @@ async fn forgetting_the_recovery_seed_deletes_its_file_alone() {
     identity.forget_recovery_seed().await.unwrap();
     assert_eq!(names(&data), ["agent-key", "hub-key"]);
 }
+
+/// A write cut short by a crash leaves its staged copy, which holds the
+/// seed too: forgetting the seed forgets it, and leaves another file's
+/// staged copy alone.
+#[tokio::test]
+async fn forgetting_the_recovery_seed_deletes_its_staged_copies_too() {
+    let (data, identity) = identity();
+    identity
+        .keep_seed(SeedFile::RecoverySeed, SigningSeed::from_bytes([9; 32]))
+        .await
+        .unwrap();
+    for staged in [
+        "hub-recovery-seed.0190a1b2c3d4.tmp",
+        "hub-recovery-seed.0190a1b2c3d5.tmp",
+        "hub-key.0190a1b2c3d6.tmp",
+    ] {
+        fs::write(data.path().join(staged), "canary\n").unwrap();
+    }
+    identity.forget_recovery_seed().await.unwrap();
+    assert_eq!(names(&data), ["hub-key.0190a1b2c3d6.tmp"]);
+}
