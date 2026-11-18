@@ -191,28 +191,39 @@ test("--keep with no family after it fails", () => {
 // The families ci.yml's `cache-prune` job passes, read from the workflow, each
 // with the keys the repository has saved or will save under it, oldest first:
 // the layouts of today and of before (the engine sets, the manifest hash in
-// mbx's generation). Run through the script, every family must keep its newest
+// mbx's generation, the `target` payload before #1076's `objects` one). Run
+// through the script, every family must keep its newest
 // `keep` entries and delete the others, no key may match two families, and no
 // key may be left unclaimed. A family added to ci.yml without its keys here
 // fails, and so does a key that stops matching.
 const sha = "ec58f954cd12bc72680a8052d009fc144a0201d3";
 const lock = "ba36d31e3f5625414f85eb0bf8ce7c62f0b130a58ab02a6820f8513701ede9fb";
 const real: Record<string, { keep: number; keys: string[] }> = {
-  "^linux-x64-mbx-v1-(m[0-9a-f]+-)?target-rust-": {
+  "^linux-x64-mbx-v1-((m[0-9a-f]+-)?target-|dir-)?rust-": {
     keep: 1,
     keys: [
       `linux-x64-mbx-v1-target-rust-897e5912e8f5-${sha}`,
       `linux-x64-mbx-v1-m3459b49abe91-target-rust-897e5912e8f5-${sha}`,
       `linux-x64-mbx-v1-m3459b49abe91-target-rust-897e5912e8f5-${sha.replace("e", "f")}`,
+      `linux-x64-mbx-v1-rust-897e5912e8f5-${sha}`,
+      `linux-x64-mbx-v1-dir-rust-897e5912e8f5-${sha}`,
     ],
   },
-  "^linux-x64-mbx-v1-wasm-(m[0-9a-f]+-)?target-rust-": {
+  "^linux-x64-mbx-v1-wasm-((m[0-9a-f]+-)?target-|dir-)?rust-": {
     keep: 1,
-    keys: [`linux-x64-mbx-v1-wasm-target-rust-897e5912e8f5-${sha}`, `linux-x64-mbx-v1-wasm-m3459b49abe91-target-rust-897e5912e8f5-${sha}`],
+    keys: [
+      `linux-x64-mbx-v1-wasm-target-rust-897e5912e8f5-${sha}`,
+      `linux-x64-mbx-v1-wasm-m3459b49abe91-target-rust-897e5912e8f5-${sha}`,
+      `linux-x64-mbx-v1-wasm-dir-rust-897e5912e8f5-${sha}`,
+    ],
   },
-  "^darwin-arm64-mbx-v1-(m[0-9a-f]+-)?target-rust-": {
+  "^darwin-arm64-mbx-v1-((m[0-9a-f]+-)?target-|dir-)?rust-": {
     keep: 1,
-    keys: [`darwin-arm64-mbx-v1-target-rust-4a6d2236aaf2-${sha}`, `darwin-arm64-mbx-v1-m3459b49abe91-target-rust-4a6d2236aaf2-${sha}`],
+    keys: [
+      `darwin-arm64-mbx-v1-target-rust-4a6d2236aaf2-${sha}`,
+      `darwin-arm64-mbx-v1-m3459b49abe91-target-rust-4a6d2236aaf2-${sha}`,
+      `darwin-arm64-mbx-v1-dir-rust-4a6d2236aaf2-${sha}`,
+    ],
   },
   "^trunk-tools-Linux-": { keep: 1, keys: [`trunk-tools-Linux-${lock}`, `trunk-tools-Linux-${lock.replace("a", "b")}`] },
   "^node-cache-Linux-x64-npm-": { keep: 1, keys: [`node-cache-Linux-x64-npm-${lock}`, `node-cache-Linux-x64-npm-${lock.replace("a", "b")}`] },
