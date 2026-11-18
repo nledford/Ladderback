@@ -87,21 +87,38 @@ pub(crate) fn choose_language(tag: Option<&str>, section: &str) -> bool {
     if kept.is_err() {
         return false;
     }
+    // The fragment replaces the address's own, so Back doesn't stop at the
+    // page before the save. Failing, the page loads at its top.
+    name_section(section);
     if let Some(window) = web_sys::window() {
-        // The fragment replaces the address's own, so Back doesn't stop at
-        // the page before the save. Failing, the page loads at its top.
-        if let Ok(history) = window.history() {
-            let _ = history.replace_state_with_url(
-                &leptos::wasm_bindgen::JsValue::NULL,
-                "",
-                Some(&format!("#{section}")),
-            );
-        }
         // A failed reload leaves the page as it was, its language kept for
         // the next load.
         let _ = window.location().reload();
     }
     true
+}
+
+/// The fragment of the page's address, its `#` included (`#language`), or
+/// empty for none. Outside input: whoever reads it holds it to the parts of
+/// the page it can name.
+pub(crate) fn address_fragment() -> String {
+    web_sys::window()
+        .and_then(|window| window.location().hash().ok())
+        .unwrap_or_default()
+}
+
+/// Gives the page's address the fragment `#section` in place of its own, so
+/// loading the page again comes back to that part of it, as Settings' tabs
+/// do. It replaces the address rather than adding one, so Back doesn't stop
+/// at each part the reader has shown. Failing, the address stays as it was.
+pub(crate) fn name_section(section: &str) {
+    if let Some(history) = web_sys::window().and_then(|window| window.history().ok()) {
+        let _ = history.replace_state_with_url(
+            &leptos::wasm_bindgen::JsValue::NULL,
+            "",
+            Some(&format!("#{section}")),
+        );
+    }
 }
 
 /// The page width this browser keeps as chosen, if any. Outside input:
@@ -201,9 +218,7 @@ pub(crate) fn focus_on_arrival(heading: &HtmlElement) {
 /// then reads, once a page load: a page shown again after a save starts where
 /// the reader was, not at its top (technical design §4.5, "Route changes").
 pub(crate) fn focus_when_named(section: &str, heading: &HtmlElement) {
-    let named = web_sys::window()
-        .and_then(|window| window.location().hash().ok())
-        .is_some_and(|hash| hash.strip_prefix('#') == Some(section));
+    let named = address_fragment().strip_prefix('#') == Some(section);
     if named && NAMED_PENDING.replace(false) {
         // A failed focus leaves focus where it was.
         let _ = heading.focus();

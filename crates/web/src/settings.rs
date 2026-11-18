@@ -1,15 +1,17 @@
-//! The Settings page, the route `/settings` (§4.4): the language of the web
-//! UI (§8.4, decision 101), kept in this browser, whose glue is
-//! `settings/language.rs`; the width of its pages (§4.5), kept in this
-//! browser too, whose glue is `settings/page_width.rs`; its admin password
-//! (security §10.1, decision 70), set with sign-in off and changed in a
-//! session, whose glue is `settings/password.rs`; its API tokens
+//! The Settings page, the route `/settings` (§4.4), a tab for each section:
+//! the language of the web UI (§8.4, decision 101), kept in this browser,
+//! whose glue is `settings/language.rs`; the width of its pages (§4.5), kept
+//! in this browser too, whose glue is `settings/page_width.rs`; its admin
+//! password (security §10.1, decision 70), set with sign-in off and changed
+//! in a session, whose glue is `settings/password.rs`; its API tokens
 //! (decision 93), listed, created and revoked in a session; and the restart
-//! of Ladderback (decision 94). What the token form lacks, the request it
-//! sends, which field a refusal is about and how a token's row reads are
-//! `api_tokens.rs`'s, and what the restart section offers and waits for is
-//! `restart.rs`'s, all host-tested; this is the DOM glue, which the `@ui`
-//! scenarios of `features/security/api_tokens.feature` and
+//! of Ladderback (decision 94). The tabs, the address that opens each and
+//! what each panel holds are `settings_tabs.rs`'s; what the token form
+//! lacks, the request it sends, which field a refusal is about and how a
+//! token's row reads are `api_tokens.rs`'s, and what the restart section
+//! offers and waits for is `restart.rs`'s, all host-tested; this is the DOM
+//! glue, which the `@ui` scenarios of `features/ui/settings.feature`,
+//! `features/security/api_tokens.feature` and
 //! `features/execution/restart_from_settings.feature` run in Chromium.
 //!
 //! A new token's whole text is shown once, in a dialog, and held in one
@@ -43,9 +45,10 @@ use crate::api_tokens::{
     revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
 };
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
-    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
-    copy_text, hand_focus_when_gone, sentence_view, text_field,
+    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, Tab, Tabs, TextField,
+    Working, copy_text, hand_focus_when_gone, sentence_view, text_field,
 };
 use crate::live::reply;
 use crate::page_width::PageWidth;
@@ -54,11 +57,12 @@ use crate::restart::{
     self, ANSWER_PATIENCE, PENDING_EVERY, RESTART_PATH, Stage, WAIT_EVERY, Wait, Waited,
     confirm_said, offers_now, request, running_said, status_of,
 };
-use crate::routes::{PageHeading, instant, refused_sentence, text_with};
+use crate::routes::{PAGE_HEADING_ID, PageHeading, instant, refused_sentence, text_with};
 use crate::session::{Standing, waiting_password};
-use crate::text;
+use crate::settings_tabs::Section;
 use crate::variants::{Size, Tone};
 use crate::ws::{self, Got, Phase, Posted};
+use crate::{page, text};
 
 /// The text of `said` in the page's language.
 fn say(localizer: &Localizer, (id, args): Said) -> String {
@@ -74,44 +78,108 @@ const SCOPES_ERROR_ID: &str = "api-token-scopes-error";
 /// The `id` of the field that holds a new token's whole text.
 const SECRET_ID: &str = "api-token-secret";
 
-/// The Settings page. With sign-in off, it asks the daemon on opening whether
-/// an admin password has been set since it started, which waits for a restart
-/// to turn sign-in on (decision 70), and says so above the sections. The
-/// admin password's and the signing-in sections are offered with sign-in off
-/// and in a session; with the daemon unread, the page can't say which form
-/// they would be.
+/// The Settings page: a tab for each section (`settings_tabs.rs`), a column
+/// beside the section where the page has room and a row above it where it
+/// hasn't, starting on the one the page's address names, else the first.
+/// Choosing a tab gives the address that tab's name, so loading the page
+/// again comes back to it. With sign-in off, it asks the daemon on opening
+/// whether an admin password has been set since it started, which waits for
+/// a restart to turn sign-in on (decision 70), and says so above the tabs.
+/// The admin password's and the signing-in sections are offered with
+/// sign-in off and in a session; with the daemon unread, the page can't say
+/// which form they would be.
 #[component]
 pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_SETTINGS_HEADING);
     let waiting = RwSignal::new(None::<MessageId>);
     let standing = use_context::<RwSignal<Standing>>().map(|standing| standing.get_untracked());
     let off = matches!(standing, Some(Standing::Off));
+    let signed_in = matches!(standing, Some(Standing::SignedIn));
     if off {
         spawn_local(async move {
             let read = ws::session().await;
             waiting.set(waiting_password(read.as_ref()));
         });
     }
-    let password = matches!(standing, Some(Standing::Off | Standing::SignedIn)).then(|| {
-        view! {
-            <AdminPassword localizer=Arc::clone(&localizer) on=!off waiting=waiting />
-            <SignInSection localizer=Arc::clone(&localizer) on=!off />
+    let mut sections = Vec::new();
+    if let Some(width) = use_context::<RwSignal<PageWidth>>() {
+        let panel = view! { <PageWidthSection localizer=Arc::clone(&localizer) width=width /> };
+        sections.push((
+            Section::PageWidth,
+            msg::UI_PAGE_WIDTH_HEADING,
+            panel.into_any(),
+        ));
+    }
+    if matches!(standing, Some(Standing::Off | Standing::SignedIn)) {
+        let password =
+            view! { <AdminPassword localizer=Arc::clone(&localizer) on=!off waiting=waiting /> };
+        let signing_in = view! { <SignInSection localizer=Arc::clone(&localizer) on=!off /> };
+        sections.push((
+            Section::AdminPassword,
+            msg::UI_ADMIN_PASSWORD_HEADING,
+            password.into_any(),
+        ));
+        sections.push((
+            Section::SigningIn,
+            msg::UI_SIGNING_IN_HEADING,
+            signing_in.into_any(),
+        ));
+    }
+    let tokens = view! { <ApiTokens localizer=Arc::clone(&localizer) /> };
+    sections.push((
+        Section::ApiTokens,
+        msg::UI_API_TOKENS_HEADING,
+        tokens.into_any(),
+    ));
+    let restart = view! { <RestartSection localizer=Arc::clone(&localizer) /> };
+    sections.push((
+        Section::Restart,
+        msg::UI_RESTART_HEADING,
+        restart.into_any(),
+    ));
+
+    let named = Section::named(&page::address_fragment());
+    let tab = |section: Section, words: MessageId, panel: AnyView| {
+        Tab::new(text(&localizer, words), section.holds(signed_in), panel)
+            .selected_at_start(named == Some(section))
+    };
+    let language = view! { <LanguageSection localizer=Arc::clone(&localizer) /> };
+    let first = tab(
+        Section::Language,
+        msg::UI_LANGUAGE_HEADING,
+        language.into_any(),
+    );
+    let shown: Vec<Section> = std::iter::once(Section::Language)
+        .chain(sections.iter().map(|(section, _, _)| *section))
+        .collect();
+    let rest = sections
+        .into_iter()
+        .map(|(section, words, panel)| tab(section, words, panel))
+        .collect();
+    // A tab chosen names its section in the address; the tab the page
+    // starts on is named there already, or is the first, which the address
+    // needn't name.
+    let selected = RwSignal::new(0_usize);
+    Effect::new(move |seen: Option<usize>| {
+        let now = selected.get();
+        if seen.is_some_and(|seen| seen != now)
+            && let Some(section) = shown.get(now)
+        {
+            page::name_section(section.fragment());
         }
+        now
     });
     let waiting_localizer = Arc::clone(&localizer);
-    let restart_localizer = Arc::clone(&localizer);
-    let language_localizer = Arc::clone(&localizer);
-    let width = use_context::<RwSignal<PageWidth>>().map(|width| {
-        view! { <PageWidthSection localizer=Arc::clone(&localizer) width=width /> }
-    });
     view! {
         <PageHeading>{heading}</PageHeading>
         {move || waiting.get().map(|id| view! { <p>{text(&waiting_localizer, id)}</p> })}
-        <LanguageSection localizer=language_localizer />
-        {width}
-        {password}
-        <ApiTokens localizer=localizer />
-        <RestartSection localizer=restart_localizer />
+        <Tabs
+            id="settings"
+            name=TabsName::LabelledBy(PAGE_HEADING_ID.to_owned())
+            orientation=Orientation::Responsive
+            tabs=TabSet::new(first, rest)
+            selected=selected
+        />
     }
 }
 
