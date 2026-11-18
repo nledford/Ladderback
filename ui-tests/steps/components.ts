@@ -2698,4 +2698,17 @@ const SNAPSHOTS: Record<string, string> = {
 - button "Dismiss"
 - paragraph:
   - button "Show the demo notice again" [disabled]`,
+  Steps: `- heading "Steps" [level=2]
+- list "Demo hub move":
+  - listitem: Check Done
+  - listitem: Copy Done
+  - listitem: Commit the demo move once every demo snapshot has reached the new hub Current
+  - listitem: Switch the agents To do
+  - listitem: Clean up To do
+- paragraph:
+  - button "Advance the demo hub move"
+- list "Demo pairing":
+  - listitem: Token Done
+  - listitem: Connect Failed
+  - listitem: Approval To do`,
 };

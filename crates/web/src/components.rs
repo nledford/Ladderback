@@ -39,6 +39,7 @@ pub(crate) mod skeleton;
 pub(crate) mod spinner;
 pub(crate) mod status_badge;
 mod step_up_field;
+pub(crate) mod steps;
 pub(crate) mod table;
 pub(crate) mod tabs;
 pub(crate) mod text_field;

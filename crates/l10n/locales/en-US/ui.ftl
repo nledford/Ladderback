@@ -2028,6 +2028,39 @@ ui-banner-warning = Warning
 # tooltip shows. The browser remembers the choice.
 ui-banner-dismiss = Dismiss
 
+## The steps (§4.5): what a list of a process's steps says of each step, and
+## what is said when the process reaches another, the same on every page.
+
+# A step's state, in words under its name, which its icon's shape shows too:
+# the process has gone past it, is at it now, hasn't reached it yet, or
+# stopped at it, failed.
+ui-steps-done = Done
+ui-steps-current = Current
+ui-steps-to-do = To do
+ui-steps-failed = Failed
+
+# Said politely when a process reaches another of its steps, such as the
+# copy of a hub move.
+# $number (count): the step's place in the process, from 1.
+# $total (count): how many steps the process has, at least 1.
+# $name (text): the step's name, as its page shows it.
+ui-steps-reached = Step { $number } of { $total }: { $name }
+
+# Said politely when a step of a process fails, which stops the process
+# there.
+# $number (count): the failed step's place in the process, from 1.
+# $total (count): how many steps the process has, at least 1.
+# $name (text): the failed step's name, as its page shows it.
+ui-steps-failed-at = Step { $number } of { $total } failed: { $name }
+
+# Said politely when a process has done every one of its steps.
+# $total (count): how many steps the process has, at least 1.
+ui-steps-finished =
+    { $total ->
+        [one] The step is done.
+       *[other] All { $total } steps are done.
+    }
+
 ## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
 ## admin password with sign-in on, the short ID of what it confirms with
 ## sign-in off. Paste and password managers work in it.
