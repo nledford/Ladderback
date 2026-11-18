@@ -40,9 +40,12 @@ fn sign(signing: &dyn Signing, byte: u8, message: &SignedBytes) -> Option<Signat
     signature.ok()
 }
 
-/// A fixed public key, as a peer's arrives.
+/// A fixed public key, as a peer's arrives; `None`, after a failed
+/// assertion, if the domain refuses it.
 fn peer(byte: u8) -> Option<PublicKey> {
-    PublicKey::from_bytes([byte; 32]).ok()
+    let key = PublicKey::from_bytes([byte; 32]);
+    assert!(key.is_ok(), "the key {byte:#04x}… refused: {key:?}");
+    key.ok()
 }
 
 fn handover(made_at: u64) -> Option<SignedBytes> {

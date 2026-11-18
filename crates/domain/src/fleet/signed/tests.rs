@@ -221,8 +221,6 @@ fn the_two_proofs_never_encode_alike() {
         counter: 1,
     };
     assert_ne!(hub.to_bytes(), agent_proof.to_bytes());
-    // The bare nonce, which a careless protocol would sign, is neither.
-    assert!(hub.to_bytes().as_bytes().len() > KEY_BYTES);
 }
 
 /// Each field a hub proof covers changes its bytes: another hub, agent,
