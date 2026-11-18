@@ -29,7 +29,8 @@ use crate::announcer::Politeness;
 use crate::components::button::Content;
 use crate::components::tree::rules::snapshot_href;
 use crate::components::{
-    Button, Confirmation, ReviewDialog, Working, recover_focus, sentence_view,
+    Button, Confirmation, ReviewDialog, Working, dialog_refusal_alert, recover_focus,
+    refusal_alert, say_refusals, sentence_view,
 };
 use crate::live::{reply, say};
 use crate::maintenance::{
@@ -451,7 +452,7 @@ impl Page {
     /// Turns maintenance from this agent off when it `maintained` the
     /// repository as the dialog was asked for, on when it didn't. The
     /// dialog holds still until the daemon answers, and a refusal is an
-    /// alert inside it.
+    /// Error alert inside it, which the dialog says itself.
     fn switch_maintainer(self, maintained: bool) {
         if self.switch_busy.get_untracked() {
             return;
@@ -516,9 +517,12 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     let shown_alias = Memo::new(move |_| chosen.get());
     let picks = RwSignal::new(0_u32);
     // A list the daemon refused, as a configuration with a mistake in it is:
-    // said where the repositories to pick from would be (#347).
+    // an Error alert where the repositories to pick from would be (#347),
+    // said assertively.
     let refused = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(refused);
     let refused_localizer = Arc::clone(&localizer);
+    let alert_localizer = Arc::clone(&localizer);
     let repositories_url = format!("{}/api/v1/repositories", ws::origin());
     spawn_local(async move {
         match ws::get::<RepositoriesDto>(&repositories_url).await {
@@ -562,9 +566,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
         </PageHeading>
         <p>{body}</p>
         {move || { unreachable.get().then(|| view! { <p>{unreachable_body.clone()}</p> }) }}
-        {move || {
-            refused.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
-        }}
+        {move || refused.get().map(|sentence| refusal_alert(&alert_localizer, sentence))}
         {move || match repositories.get() {
             None => view! { <p>{loading.clone()}</p> }.into_any(),
             Some(aliases) => {
@@ -697,12 +699,16 @@ fn Repository(
     let loading = page.plain(msg::UI_LOADING);
     let empty = page.plain(msg::UI_NO_SNAPSHOTS);
     // Each part of the panel has a memo of its own, so that a change of one
-    // does not draw the others again: an alert drawn again is announced again.
+    // does not draw the others again, and a refusal read again in the same
+    // words is not said again (`say_refusals`).
     let step = Memo::new(move |_| page.panel.with(|panel| panel.step));
     let run = Memo::new(move |_| page.panel.with(|panel| panel.run.clone()));
     let ended = Memo::new(move |_| page.panel.with(|panel| panel.ended));
     let findings = Memo::new(move |_| page.panel.with(|panel| panel.findings.clone()));
     let refused = Memo::new(move |_| page.panel.with(|panel| panel.refusal.clone()));
+    say_refusals(Signal::derive(move || {
+        refused.get().map(|refused| page.refused_sentence(&refused))
+    }));
     let area = Memo::new(move |_| {
         let reading = page.reading.get();
         page.groups.with(|groups| shown(groups.as_ref(), reading))
@@ -744,9 +750,7 @@ fn Repository(
                 refused
                     .get()
                     .map(|refused| {
-                        view! {
-                            <p role="alert">{sentence_view(page.refused_sentence(&refused))}</p>
-                        }
+                        refusal_alert(&page.localizer.get_value(), page.refused_sentence(&refused))
                     })
             }}
             {move || {
@@ -813,11 +817,14 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
     let read = page.plain(msg::UI_STATS_READ);
     let reading_now = page.plain(msg::UI_STATS_READING);
     // A memo for each part, so a change of one does not draw the others
-    // again: an alert drawn again is announced again.
+    // again, and a refusal read again in the same words is not said again.
     let shown = Memo::new(move |_| page.stats.with(StatsPanel::shown));
     let latest = Memo::new(move |_| page.stats.with(|panel| panel.latest.clone()));
     let reading = Memo::new(move |_| page.stats.with(|panel| panel.reading));
     let refused = Memo::new(move |_| page.stats.with(|panel| panel.refusal.clone()));
+    say_refusals(Signal::derive(move || {
+        refused.get().map(|refused| page.refused_sentence(&refused))
+    }));
     view! {
         <section aria-labelledby=STATS_HEADING>
             <h2 id=STATS_HEADING>{heading}</h2>
@@ -841,9 +848,7 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
                 refused
                     .get()
                     .map(|refused| {
-                        view! {
-                            <p role="alert">{sentence_view(page.refused_sentence(&refused))}</p>
-                        }
+                        refusal_alert(&page.localizer.get_value(), page.refused_sentence(&refused))
                     })
             }}
         </section>
@@ -1131,7 +1136,7 @@ fn switch_view(page: Page, maintained: bool) -> impl IntoView {
             {move || {
                 page.switch_refused
                     .get()
-                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+                    .map(|sentence| dialog_refusal_alert(&page.localizer.get_value(), sentence))
             }}
         </ReviewDialog>
     }

@@ -688,16 +688,39 @@ Then(
 
 // What the sender of a refusal says in its own words, the engine's or the
 // daemon's, is English whatever the language of the page, and the page marks
-// it so (§4.5, §8.4).
+// it so (§4.5, §8.4). The pages #929 moved onto the shared Alert draw it as
+// an Error alert, which has no role; the others still in a `role="alert"`.
 Then("the alert marks the sender's words as English", async function (this: BrowserWorld) {
-  const words = this.page.getByRole("alert").locator('[lang="en"]');
+  const words = this.page.locator("[role~='alert'], .alert.tone-error").locator('[lang="en"]');
   await words.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
   assert.notEqual((await words.first().innerText()).trim(), "", "the sender's words in the alert");
 });
 
-// A refusal of the preview is told where a reader is looking, as an alert.
-// What the catalog filled in is set apart by bidi isolation marks, which a
-// reader never hears (§4.5): they may stand between any two characters.
+// A change of who maintains a repository is refused as a list's is when the
+// daemon can't read its configuration file.
+Given("the daemon refuses each change of who maintains a repository", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => /^\/api\/v1\/repositories\/[^/]+\/maintainer$/.test(url.pathname),
+      async (route) => {
+        if (route.request().method() !== "PUT") return route.continue();
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "config-unavailable",
+            args: { file: { type: "text", value: "/etc/ladderback/config.toml" } },
+          }),
+        });
+      },
+    );
+  });
+});
+
+// A refusal on a page #929 hasn't moved onto the shared Alert yet, told
+// where a reader is looking in a `role="alert"`. What the catalog filled in
+// is set apart by bidi isolation marks, which a reader never hears (§4.5):
+// they may stand between any two characters.
 Then("the page shows an alert containing {string}", async function (this: BrowserWorld, needle: string) {
   const heard = [...needle].map(escape).join(ISOLATION);
   await this.page
