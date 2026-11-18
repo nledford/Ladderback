@@ -57,10 +57,11 @@ mod focus;
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod formatting;
-// What the start page's Full Disk Access warning shows and says, decided on
-// the host; `full_disk_access_warning.rs` is its glue.
+// What the Full Disk Access warning, a banner on every page with the steps
+// on the start page, shows and says, decided on the host;
+// `full_disk_access_warning.rs` is its glue.
 mod full_disk_access;
-// The start page's Full Disk Access warning's DOM glue.
+// The Full Disk Access warning's DOM glue: the banner and the steps.
 mod full_disk_access_warning;
 #[cfg(feature = "gallery")]
 mod gallery;
@@ -153,6 +154,7 @@ use components::Link;
 use components::banner::rules::BannerTone;
 use components::link::rules::{Destination, LinkTone, Matching};
 use daemon_log_page::DaemonLog;
+use full_disk_access_warning::{FullDiskAccessBanner, FullDiskAccessFound};
 use page_width::PageWidth;
 use plans_page::Plans;
 use proposals_page::Proposals;
@@ -392,6 +394,9 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // before the choice reads it.
     let keep_offered = RwSignal::new(true);
     provide_context(sign_in::KeepOffered(keep_offered));
+    // What the agent's Full Disk Access probe found, which the banner reads
+    // on each page and the start page's steps check again (decision 115).
+    provide_context(FullDiskAccessFound(RwSignal::new(None)));
     ws::watch_session(warning, ended, told, keep_offered);
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
@@ -453,6 +458,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let idle = Arc::clone(&localizer);
     let main = NodeRef::<leptos::html::Main>::new();
     let on_the_network = text(&localizer, msg::UI_SIGN_IN_OFF_NETWORK);
+    let full_disk_access = Arc::clone(&localizer);
     let network_banner = Arc::clone(&localizer);
     view! {
         // The skip link moves focus into `<main>` itself and stops the click
@@ -523,6 +529,9 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                             }
                         })
                 }}
+                // On every page while the agent found the grant missing,
+                // after the network's notice: neither can be dismissed.
+                <FullDiskAccessBanner localizer=full_disk_access shown=shown />
                 {move || {
                     (shown.get() == Standing::SignedIn)
                         .then(|| {

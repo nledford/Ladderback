@@ -1,5 +1,6 @@
-//! What the start page's Full Disk Access warning shows and says (§4.4, §16
-//! decision 115), decided on the host; `full_disk_access_warning.rs` draws it.
+//! What the Full Disk Access warning, a banner on every page with the steps
+//! on the start page, shows and says (§4.4, §16 decision 115), decided on
+//! the host; `full_disk_access_warning.rs` draws it.
 
 use api::{FullDiskAccessDto, FullDiskAccessStateDto};
 use l10n::{MessageId, msg};
@@ -53,8 +54,11 @@ pub(crate) fn describing_the_heading(
     network_notice: Option<&'static str>,
     found: Option<&FullDiskAccessDto>,
 ) -> Option<String> {
-    let _ = (network_notice, found);
-    todo!()
+    let ids: Vec<&str> = network_notice
+        .into_iter()
+        .chain(warns(found).then_some(BANNER_ID))
+        .collect();
+    (!ids.is_empty()).then(|| ids.join(" "))
 }
 
 #[cfg(test)]

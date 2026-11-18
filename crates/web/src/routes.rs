@@ -27,7 +27,8 @@ use crate::components::{
     SummaryItem, TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view,
     sentence_view, text_field,
 };
-use crate::full_disk_access_warning::FullDiskAccessWarning;
+use crate::full_disk_access::describing_the_heading;
+use crate::full_disk_access_warning::{FullDiskAccessFound, FullDiskAccessSteps};
 use crate::live::{reply, say};
 use crate::operations::{self, Name, Said};
 use crate::pause::{self, Ends, Pausable};
@@ -59,13 +60,17 @@ pub(crate) const PAGE_HEADING_ID: &str = "page-heading";
 #[component]
 pub(crate) fn PageHeading(children: Children) -> impl IntoView {
     let heading = NodeRef::<leptos::html::H1>::new();
-    // With sign-in off on the network, the notice above every page is read
-    // after the heading, which takes focus when a reader navigates (§10.1).
+    // With sign-in off on the network, and while the agent found Full Disk
+    // Access missing, the notices above every page are read after the
+    // heading, which takes focus when a reader navigates (§10.1, #948).
     let notice = use_context::<RwSignal<SignInOffNotice>>();
+    let found = use_context::<FullDiskAccessFound>();
     let described_by = move || {
-        notice
+        let network = notice
             .is_some_and(|notice| notice.get().describes_the_heading())
-            .then_some(SIGN_IN_OFF_NETWORK_ID)
+            .then_some(SIGN_IN_OFF_NETWORK_ID);
+        let found = found.and_then(|FullDiskAccessFound(found)| found.get());
+        describing_the_heading(network, found.as_ref())
     };
     Effect::new(move |_| {
         if let Some(heading) = heading.get() {
@@ -163,7 +168,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
             }}
         </PageHeading>
         <SignInOff localizer=notice />
-        <FullDiskAccessWarning localizer=full_disk_access />
+        <FullDiskAccessSteps localizer=full_disk_access />
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
