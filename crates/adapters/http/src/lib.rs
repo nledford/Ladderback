@@ -818,7 +818,11 @@ async fn run_plan(
         ),
         Err(StartError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
         Err(StartError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
-        Err(StartError::KeyFilesNotLeftOut) => todo!(),
+        Err(StartError::KeyFilesNotLeftOut) => refused_with(
+            StatusCode::CONFLICT,
+            api::ErrorCode::KeyFilesNotLeftOut,
+            Vec::new(),
+        ),
     }
 }
 

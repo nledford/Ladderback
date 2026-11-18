@@ -100,8 +100,11 @@ pub fn left_out_globs(folder: &str) -> Vec<String> {
 /// `iglob` reads it. The name's bytes, as the file system gives them, so a
 /// name that isn't UTF-8 is judged too.
 pub fn is_left_out(name: &[u8]) -> bool {
-    let _ = name;
-    todo!()
+    LEFT_OUT_OF_BACKUPS.iter().any(|file| {
+        let prefix = file.file_name().as_bytes();
+        name.get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    })
 }
 
 /// Which seed a seed file holds.

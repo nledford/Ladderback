@@ -39,8 +39,18 @@ impl KeyFilesLeftOut {
     /// For the data folder at `given`, which resolves to `canonical` when
     /// it could be resolved.
     pub(super) fn over(given: &Path, canonical: Option<&Path>) -> Self {
-        let _ = (given, canonical);
-        todo!()
+        let mut folders = vec![given];
+        folders.extend(canonical.filter(|path| *path != given));
+        let named: Option<Vec<&str>> = folders.iter().map(|folder| folder.to_str()).collect();
+        match named {
+            Some(named) => Self::Globs(
+                named
+                    .into_iter()
+                    .flat_map(domain::fleet::left_out_globs)
+                    .collect(),
+            ),
+            None => Self::Unnamed(folders.into_iter().map(Path::to_path_buf).collect()),
+        }
     }
 
     /// The globs every walk of the data folder leaves the key files out
@@ -53,9 +63,46 @@ impl KeyFilesLeftOut {
     }
 
     /// The globs a backup of `sources` appends to its filter, or its
-    /// refusal when no glob can name the key files it would take.
+    /// refusal when no glob can name the key files it would take: a
+    /// source holds a form of the data folder while the folder holds one.
     pub(super) fn for_backup(&self, sources: &[Source]) -> Result<&[String], StartError> {
-        let _ = sources;
-        todo!()
+        match self {
+            Self::Globs(globs) => Ok(globs),
+            Self::Unnamed(folders) => {
+                let taken = folders.iter().any(|folder| {
+                    sources
+                        .iter()
+                        .any(|source| holds(Path::new(source.as_str()), folder))
+                        && holds_key_file(folder)
+                });
+                if taken {
+                    Err(StartError::KeyFilesNotLeftOut)
+                } else {
+                    Ok(&[])
+                }
+            }
+        }
+    }
+}
+
+/// Whether a backup of `source` walks `folder`: `folder` is the source or
+/// below it, as written or as the source resolves, which is how rustic
+/// walks it.
+fn holds(source: &Path, folder: &Path) -> bool {
+    folder.starts_with(source)
+        || std::fs::canonicalize(source).is_ok_and(|resolved| folder.starts_with(resolved))
+}
+
+/// Whether `folder` holds a file the globs would leave out. A folder that
+/// can't be read is taken to hold one, so the backup is refused rather
+/// than risk the keys; one that isn't there holds none.
+fn holds_key_file(folder: &Path) -> bool {
+    match std::fs::read_dir(folder) {
+        Ok(mut entries) => entries.any(|entry| {
+            entry.map_or(true, |entry| {
+                domain::fleet::is_left_out(entry.file_name().as_encoded_bytes())
+            })
+        }),
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
     }
 }

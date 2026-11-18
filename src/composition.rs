@@ -854,7 +854,7 @@ async fn state_over(
         writes: Arc::clone(&writes),
         resolve: Arc::clone(&resolve),
         agent_id,
-        left_out: KeyFilesLeftOut::Globs(left_out_of_backups(data_dir)),
+        left_out: KeyFilesLeftOut::of(data_dir),
         engine: Arc::clone(&engine),
         locations: Some(locations),
         store: Arc::clone(&store),
@@ -940,7 +940,8 @@ async fn state_over(
     }
     // The plan dry run reads outside the backup concurrency limit, one at a
     // time, and gives way to every backup the queue holds (decision 89,
-    // point 13).
+    // point 13). It leaves out the key files each backup does (decision
+    // 120), so it counts what a backup would take.
     let queue = Arc::clone(&runner.queue);
     let dry_runs: Arc<dyn http_adapter::DryRuns> = Arc::new(dry_runs::DryRunService::new(
         app::dry_run::PlanDryRuns::new(
@@ -950,7 +951,8 @@ async fn state_over(
             Arc::new(SystemClock),
             Arc::new(move || queue.is_busy()),
             app::dry_run::DryRunLimits::DAEMON,
-        ),
+        )
+        .with_left_out(runner.left_out.globs().to_vec()),
         app::dry_run::DryRunAllowlists::new(
             Arc::clone(&config),
             Arc::clone(&writes),
@@ -1595,21 +1597,6 @@ struct PlanRunner {
     left_out: KeyFilesLeftOut,
 }
 
-/// The globs that leave the secret key files out of a backup, for the data
-/// folder as given and as rustic walks it: rustic canonicalizes a source, so
-/// on macOS a folder under `/var` is walked as `/private/var`. A folder whose
-/// path isn't UTF-8 gets none, as a glob can't name it.
-fn left_out_of_backups(data_dir: &std::path::Path) -> Vec<String> {
-    let canonical = std::fs::canonicalize(data_dir).ok();
-    let mut folders = vec![data_dir];
-    folders.extend(canonical.as_deref().filter(|path| *path != data_dir));
-    folders
-        .into_iter()
-        .filter_map(std::path::Path::to_str)
-        .flat_map(domain::fleet::left_out_globs)
-        .collect()
-}
-
 impl PlanRunner {
     /// The backup job of plan `id`, the hooks around it and what reading its
     /// secrets told, as `config` stands now: a rewrite between runs is
@@ -1628,6 +1615,13 @@ impl PlanRunner {
         let repository = config
             .repository(&plan.repository)
             .ok_or(Unbuilt::Refused(StartError::UnknownPlan))?;
+        // The secret key files stay out of every backup that walks the data
+        // folder, in every build, or the backup is refused when no glob can
+        // name them (§16, decisions 120 and 122).
+        let left_out = self
+            .left_out
+            .for_backup(&plan.sources)
+            .map_err(Unbuilt::Refused)?;
         // The engine opens only the repository the configuration recorded,
         // when it recorded one (§7.3), and the job carries the entry it was
         // made from, so the ID it opens is recorded in an entry that records
@@ -1676,13 +1670,11 @@ impl PlanRunner {
             label: plan.label.clone(),
             host: plan.snapshot_host(config.agent()).cloned(),
             filter: {
-                // The secret key files stay out of every backup that walks
-                // the data folder, in every build (§16, decisions 120 and
-                // 122). Last, so a glob of the plan's own can't bring one
-                // back; iglobs, so a case-insensitive file system's other
+                // Last, so a glob of the plan's own can't bring one back;
+                // iglobs, so a case-insensitive file system's other
                 // spellings stay out too.
                 let mut filter = plan.filter.clone();
-                filter.iglobs.extend(self.left_out.globs().iter().cloned());
+                filter.iglobs.extend(left_out.iter().cloned());
                 filter
             },
             deadline_budget: backup_budget(None, None),
@@ -1895,7 +1887,11 @@ fn start_refused(error: &StartError) -> String {
                 wire_name(refusal.code)
             )
         }
-        StartError::KeyFilesNotLeftOut => todo!(),
+        StartError::KeyFilesNotLeftOut => format!(
+            "its sources hold the data folder, whose secret key files no glob can leave out, \
+             as its path isn't UTF-8 ({})",
+            wire_name(ErrorCode::KeyFilesNotLeftOut)
+        ),
     }
 }
 

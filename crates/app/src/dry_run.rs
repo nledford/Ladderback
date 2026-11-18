@@ -111,6 +111,9 @@ pub struct PlanDryRuns {
     backups: GiveWay,
     limits: DryRunLimits,
     running: Arc<AtomicBool>,
+    /// The globs every walk leaves out after the plan's own: the secret
+    /// key files in the data folder (§16, decision 120).
+    left_out: Vec<String>,
     records: Mutex<Vec<(Proposer, DryRunRecord)>>,
 }
 
@@ -151,6 +154,7 @@ impl PlanDryRuns {
             backups,
             limits,
             running: Arc::new(AtomicBool::new(false)),
+            left_out: Vec::new(),
             records: Mutex::new(Vec::new()),
         }
     }
@@ -160,9 +164,9 @@ impl PlanDryRuns {
     /// rustic's `iglobs`, after the plan's own, and never tallied as one of
     /// its excludes.
     #[must_use]
-    pub fn with_left_out(self, globs: Vec<String>) -> Self {
-        let _ = globs;
-        todo!()
+    pub fn with_left_out(mut self, globs: Vec<String>) -> Self {
+        self.left_out = globs;
+        self
     }
 
     /// Dry-runs `plan` for `asker`.
@@ -327,8 +331,9 @@ impl PlanDryRuns {
         Ok(dry_run)
     }
 
-    /// One walk, in the time left since `started`; none left stops it
-    /// before it starts.
+    /// One walk, in the time left since `started`, leaving out what every
+    /// backup leaves out besides `filter`; none left stops it before it
+    /// starts.
     async fn walked(
         &self,
         sources: &[Source],
@@ -348,8 +353,12 @@ impl PlanDryRuns {
             entries: self.limits.entries,
             time,
         };
+        // Last, so a glob of the plan's own can't bring one back, as the
+        // backup's job has them.
+        let mut filter = filter.clone();
+        filter.iglobs.extend(self.left_out.iter().cloned());
         self.walk
-            .walk(sources, filter, limits, Arc::clone(give_way))
+            .walk(sources, &filter, limits, Arc::clone(give_way))
             .await
             .map_err(|error| match error {
                 WalkError::Filter => DryRunError::Filter,
