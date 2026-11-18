@@ -160,7 +160,7 @@ fn keep_with(
     keep_named(path, old, at, "", flush_folder).map(|_| ())
 }
 
-/// [`keep_with`], the version's name ending in `suffix` before `.toml`;
+/// `keep_with`, the version's name ending in `suffix` before `.toml`;
 /// the name kept.
 fn keep_named(
     path: &Path,

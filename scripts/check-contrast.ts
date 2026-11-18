@@ -68,6 +68,12 @@ const PAIRS = [
     { name: `focus ring on the ${tone} fill`, fg: "--focus", bg: `--${tone}-bg`, min: 3 },
     { name: `${tone} words on surface`, fg: `--${tone}-fg`, bg: "--surface", min: 4.5 },
   ]),
+  // A checkbox and a radio (components §4.5): a chosen box's edge and fill
+  // against the page and a surface, and its mark, in the page's color, on
+  // that fill (1.4.11). An unchosen box's edge is the text field's edge.
+  { name: "chosen box on page", fg: "--accent", bg: "--bg", min: 3 },
+  { name: "chosen box on surface", fg: "--accent", bg: "--surface", min: 3 },
+  { name: "chosen box's mark on its fill", fg: "--bg", bg: "--accent", min: 3 },
 ];
 
 // Status fills that must be told apart, and how far apart in lightness, on

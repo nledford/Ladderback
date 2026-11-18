@@ -16,14 +16,14 @@ Feature: Buttons on every page
     And every button on the page is drawn from the tokens, none in the browser's own look
 
     Examples:
-      | page         | address       | button                    | look                           |
-      | Operations   | /operations   | Start backup of demo-home | outlined in Ladder Blue        |
-      | Plans        | /plans        | Add a plan                | filled in Ladder Blue          |
-      | Plans        | /plans        | Delete demo-home          | outlined in the color of errors |
-      | Repositories | /repositories | Test the repository       | outlined                       |
-      | Snapshots    | /snapshots    | Snapshots of demo         | outlined                       |
-      | Log          | /log          | Copy for a bug report     | outlined                       |
-      | Settings     | /settings     | Set the admin password    | filled in Ladder Blue          |
+      | page         | address                  | button                    | look                            |
+      | Operations   | /operations              | Start backup of demo-home | outlined in Ladder Blue         |
+      | Plans        | /plans                   | Add a plan                | filled in Ladder Blue           |
+      | Plans        | /plans                   | Delete demo-home          | outlined in the color of errors |
+      | Repositories | /repositories            | Test the repository       | outlined                        |
+      | Snapshots    | /snapshots               | Snapshots of demo         | outlined                        |
+      | Log          | /log                     | Copy for a bug report     | outlined                        |
+      | Settings     | /settings#admin-password | Set the admin password    | filled in Ladder Blue           |
 
   Scenario: A snapshot's own page restores as its main action and downloads beside it
     Given a demo plan "home" with a tiny scratch repository

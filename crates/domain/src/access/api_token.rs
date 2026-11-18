@@ -132,7 +132,7 @@ impl ApiTokenId {
         )
     }
 
-    /// Exactly [`ID_CHARS`] characters of lower-case base32.
+    /// Exactly `ID_CHARS` characters of lower-case base32.
     pub fn parse(text: &str) -> Option<Self> {
         (text.len() == ID_CHARS && text.bytes().all(|byte| BASE32.contains(&byte)))
             .then(|| Self(text.to_owned()))

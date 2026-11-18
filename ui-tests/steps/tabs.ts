@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 
-import { Then } from "@cucumber/cucumber";
+import { type DataTable, Then } from "@cucumber/cucumber";
 import { expect } from "playwright/test";
 import type { Locator } from "playwright";
 
@@ -211,6 +211,24 @@ Then(
     const id = await listOf(this, name).getAttribute("aria-describedby");
     assert.ok(id, `the tab list of the tab "${name}" names nothing that describes it`);
     await expect(this.page.locator(`[id="${id}"]`)).toHaveText(words);
+  },
+);
+
+// A page's tabs are named by an element that already shows the name, such as
+// its heading (`aria-labelledby`), read through the relation as above
+// (#774); the tabs are in the list in the order they stand.
+Then(
+  "the tab list of the tab {string} is named {string} and holds the tabs, in order:",
+  async function (this: BrowserWorld, name: string, named: string, tabs: DataTable) {
+    const id = await listOf(this, name).getAttribute("aria-labelledby");
+    assert.ok(id, `the tab list of the tab "${name}" names nothing that names it`);
+    await expect(this.page.locator(`[id="${id}"]`)).toHaveText(named);
+    const held = await listOf(this, name).getByRole("tab").allTextContents();
+    assert.deepEqual(
+      held.map((each) => each.trim()),
+      tabs.raw().map(([each]) => each),
+      `the tabs of the list of the tab "${name}"`,
+    );
   },
 );
 
