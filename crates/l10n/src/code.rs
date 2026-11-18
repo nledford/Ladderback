@@ -85,6 +85,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     SecretMissing => msg::ERROR_SECRET_MISSING,
     SecretUnreadable => msg::ERROR_SECRET_UNREADABLE,
     SecretKeyringUnavailable => msg::ERROR_SECRET_KEYRING_UNAVAILABLE,
+    SecretKeyringLocked => msg::ERROR_SECRET_KEYRING_LOCKED,
     SecretNotText => msg::ERROR_SECRET_NOT_TEXT,
     SecretTooLarge => msg::ERROR_SECRET_TOO_LARGE,
     SecretCommandFailed => msg::ERROR_SECRET_COMMAND_FAILED,

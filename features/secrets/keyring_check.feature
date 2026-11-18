@@ -33,7 +33,7 @@ Feature: Reading each keyring entry once, while someone is there
       Examples:
         | why                                       | code                       |
         | the keyring has no entry "ladderback/nas" | secret-missing             |
-        | the keyring is locked                     | secret-keyring-unavailable |
+        | the keyring is locked                     | secret-keyring-locked      |
         | the machine has no keyring service        | secret-keyring-unavailable |
 
     Scenario: Repositories that share an entry have it read once

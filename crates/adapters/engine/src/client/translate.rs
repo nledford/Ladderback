@@ -285,6 +285,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::SecretMissing
                 | ErrorCode::SecretUnreadable
                 | ErrorCode::SecretKeyringUnavailable
+                | ErrorCode::SecretKeyringLocked
                 | ErrorCode::SecretNotText
                 | ErrorCode::SecretTooLarge
                 | ErrorCode::SecretCommandFailed

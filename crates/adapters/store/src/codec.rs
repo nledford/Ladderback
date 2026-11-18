@@ -263,6 +263,7 @@ fn refusal_args(refusal: &SettingRefusal) -> Vec<(&'static str, MsgArg)> {
         R::SecretMissing { source: from }
         | R::SecretUnreadable { source: from, .. }
         | R::SecretKeyringUnavailable { source: from, .. }
+        | R::SecretKeyringLocked { source: from, .. }
         | R::SecretNotText { source: from }
         | R::SecretCommandFailed { source: from, .. }
         | R::SecretCommandOutputOpen { source: from } => vec![source(from)],
@@ -300,6 +301,7 @@ fn refusal_detail(refusal: &SettingRefusal) -> Option<&str> {
     match refusal {
         R::SecretUnreadable { detail, .. }
         | R::SecretKeyringUnavailable { detail, .. }
+        | R::SecretKeyringLocked { detail, .. }
         | R::SecretCommandFailed { detail, .. } => detail.as_deref(),
         _ => None,
     }
@@ -396,6 +398,10 @@ fn refused(
             detail: said,
         },
         "secret-keyring-unavailable" => R::SecretKeyringUnavailable {
+            source: source()?,
+            detail: said,
+        },
+        "secret-keyring-locked" => R::SecretKeyringLocked {
             source: source()?,
             detail: said,
         },
@@ -837,6 +843,14 @@ mod tests {
                 source: "ladderback/demo".to_owned(),
                 detail: None,
             },
+            R::SecretKeyringLocked {
+                source: "ladderback/demo".to_owned(),
+                detail: said(),
+            },
+            R::SecretKeyringLocked {
+                source: "ladderback/demo".to_owned(),
+                detail: None,
+            },
             R::SecretNotText { source: source() },
             R::SecretTooLarge {
                 source: source(),
@@ -900,7 +914,7 @@ mod tests {
             };
             assert_eq!(back, reason);
         }
-        assert_eq!(codes.len(), 15, "one code per refusal: {codes:?}");
+        assert_eq!(codes.len(), 16, "one code per refusal: {codes:?}");
     }
 
     /// A refusal's columns that lack what its code needs, or hold it as the
