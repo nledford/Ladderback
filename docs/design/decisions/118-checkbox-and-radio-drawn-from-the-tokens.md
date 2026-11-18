@@ -10,5 +10,5 @@
 
 ## Cost
 
-- **Forced colors needs its own rules.** With its drawing dropped, the box's fill would be forced to the page's, and a dot drawn as a fill would vanish; the box takes `Field` and `FieldText`, and the mark `FieldText` with `forced-color-adjust: none`, which `features/ui/components.feature` checks.
+- **Forced colors needs its own rules.** With its drawing dropped, the box's fill would be forced to the page's, and a dot drawn as a fill would vanish; the box takes `Field` and `FieldText`, and the mark `FieldText` with `forced-color-adjust: none`, which `features/ui/components/choices.feature` checks.
 - **No indeterminate state yet.** A drawn box shows only the marks it is given; a page that needs an indeterminate or unavailable box adds its mark then.
