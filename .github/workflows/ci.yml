@@ -148,11 +148,13 @@ env:
   __CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT: 1
 
 jobs:
-  # Tells a docs-only pull request from one that touches code, with plain git,
-  # so the jobs below can skip the Rust work. Anything that isn't clearly docs
-  # counts as code, and so does a failure here: the jobs below run unless this
-  # job says "true". Pushes to main and the nightly run skip this job and run
-  # everything.
+  # Tells a docs-only pull request from one that touches code, and one that
+  # can change what the `service` jobs check from one that can't, with plain
+  # git, so the jobs below can skip work. Anything that isn't clearly docs
+  # counts as code, anything that isn't clearly outside the service jobs'
+  # reach counts as inside it, and so does a failure here: the jobs below run
+  # unless this job says "true" (`docs-only`) or "false" (`service`). Pushes
+  # to main and the nightly run skip this job and run everything.
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
@@ -160,6 +162,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       docs-only: ${{ steps.diff.outputs.docs-only }}
+      service: ${{ steps.diff.outputs.service }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,6 +176,7 @@ jobs:
           # A failing git command fails this step, and then every job below runs.
           git diff -z --name-only --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
           docs_only=true
+          service=false
           count=0
           while IFS= read -r -d '' file; do
             count=$((count + 1))
@@ -185,10 +189,23 @@ jobs:
               docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
               *) docs_only=false ;;
             esac
+            # What the `service` jobs run (#995): `install-service` against
+            # the real service managers. The first two arms name what they
+            # exercise; the third names what they can't reach (the web UI,
+            # the UI tests and their scenarios, the TypeScript tooling, docs)
+            # and is the only way to stay false. Every other path, a new one
+            # too, runs the jobs.
+            case "$file" in
+              crates/adapters/platform/* | scripts/service-contract.sh | src/service.rs | src/main.rs) service=true ;;
+              .github/workflows/* | .github/actions/* | Justfile | Cargo.lock | Cargo.toml | */Cargo.toml) service=true ;;
+              crates/web/* | ui-tests/* | features/ui/* | scripts/*.ts | docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
+              *) service=true ;;
+            esac
           done < "$RUNNER_TEMP/changed-files"
-          # A change with no files isn't a docs change.
-          if [ "$count" -eq 0 ]; then docs_only=false; fi
+          # A change with no files isn't a docs change, and runs the jobs.
+          if [ "$count" -eq 0 ]; then docs_only=false; service=true; fi
           echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "service=$service" >> "$GITHUB_OUTPUT"
 
   check:
     name: Check (${{ matrix.name }})
@@ -509,11 +526,16 @@ jobs:
   # real manager, then the real binary: install, install again over the
   # running service, remove. Both fail, never skip, when no manager answers.
   # Not a required check: the maintainer may add it to the ruleset once it has
-  # a clean record (development.md §13.8).
+  # a clean record (development.md §13.8). A pull request runs it only when the
+  # `changes` job doesn't say its paths are out of reach of it (the `service`
+  # output).
   service:
     name: Service managers (${{ matrix.name }})
     needs: changes
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
+    # On a pull request, only when `changes` doesn't say "false": the jobs
+    # also run when it failed or was skipped (pushes to main). Not on the
+    # nightly run, as before.
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.service != 'false' }}
     strategy:
       fail-fast: false
       matrix:
