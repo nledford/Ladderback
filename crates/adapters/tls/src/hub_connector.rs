@@ -164,14 +164,7 @@ where
         route.host.clone()
     };
     let url = format!("{scheme}://{host}:{}{PATH}", route.port);
-    // Writes go out at once, and what a hub that doesn't read leaves queued,
-    // its pings' pongs among it, stays bounded.
-    let config = WebSocketConfig::default()
-        .max_message_size(Some(MAX_FRAME_BYTES))
-        .max_frame_size(Some(MAX_FRAME_BYTES))
-        .write_buffer_size(0)
-        .max_write_buffer_size(2 * MAX_FRAME_BYTES);
-    let (socket, _) = client_async_with_config(url, stream, Some(config))
+    let (socket, _) = client_async_with_config(url, stream, Some(config()))
         .await
         .map_err(|error| match error {
             WsError::Http(response) => LinkError::Unreachable {
@@ -181,12 +174,28 @@ where
                 detail: other.to_string(),
             },
         })?;
-    Ok(Box::new(WebSocketLink { socket, exporter }))
+    Ok(Box::new(WebSocketLink {
+        socket,
+        exporter,
+        within: ANSWER_WITHIN,
+    }))
+}
+
+/// Writes go out at once, and what a hub that doesn't read leaves queued,
+/// its pings' pongs among it, stays bounded.
+fn config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .max_message_size(Some(MAX_FRAME_BYTES))
+        .max_frame_size(Some(MAX_FRAME_BYTES))
+        .write_buffer_size(0)
+        .max_write_buffer_size(2 * MAX_FRAME_BYTES)
 }
 
 struct WebSocketLink<S> {
     socket: WebSocketStream<S>,
     exporter: Option<[u8; KEY_BYTES]>,
+    /// How long the hub may take over one frame.
+    within: Duration,
 }
 
 #[async_trait]
@@ -207,7 +216,7 @@ where
 
     async fn receive(&mut self) -> Result<HubFrame, LinkError> {
         // One deadline for the answer, however many pings come before it.
-        let deadline = tokio::time::Instant::now() + ANSWER_WITHIN;
+        let deadline = tokio::time::Instant::now() + self.within;
         loop {
             let next = tokio::time::timeout_at(deadline, self.socket.next())
                 .await
@@ -256,5 +265,36 @@ fn refused(error: &io::Error, pinned: bool) -> LinkError {
         Some(rustls::Error::InvalidCertificate(_)) => LinkError::Untrusted { detail },
         Some(_) => LinkError::TlsRefused { detail },
         None => LinkError::Unreachable { detail },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    use super::*;
+
+    /// A hub that stops reading, so a frame the agent writes can't leave:
+    /// the pipe holds 8 bytes and nothing empties it. The write gives up
+    /// within its deadline, with an error that has the caller drop the link.
+    #[tokio::test]
+    async fn a_frame_a_hub_never_reads_is_given_up_on_within_its_deadline() {
+        let (agent, _hub_that_never_reads) = tokio::io::duplex(8);
+        let socket = WebSocketStream::from_raw_socket(agent, Role::Client, Some(config())).await;
+        let mut link = WebSocketLink {
+            socket,
+            exporter: None,
+            within: Duration::from_millis(200),
+        };
+        let frame = AgentFrame::Connect {
+            agent_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            agent_nonce: "A".repeat(43),
+            binding_kind: 0,
+        };
+        let sent = tokio::time::timeout(Duration::from_secs(2), link.send(&frame)).await;
+        assert!(
+            matches!(sent, Ok(Err(LinkError::Unreachable { .. }))),
+            "the write gave no error within its deadline: {sent:?}"
+        );
     }
 }
