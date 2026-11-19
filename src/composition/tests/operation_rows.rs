@@ -1,5 +1,6 @@
 use super::support::*;
 use super::*;
+use crate::composition::catalog::snapshot_dto;
 
 fn listed(paths_truncated: bool, tags_truncated: bool) -> SnapshotSummary {
     SnapshotSummary {

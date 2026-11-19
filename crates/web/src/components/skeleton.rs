@@ -39,7 +39,7 @@ pub fn Skeleton(shape: Shape) -> impl IntoView {
                     // refuses.
                     view! {
                         <span
-                            class="skeleton-bar"
+                            class=rules::BAR
                             style:inline-size=bar.inline
                             style:block-size=bar.block
                         ></span>

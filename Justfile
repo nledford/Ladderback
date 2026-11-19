@@ -95,7 +95,10 @@ clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
 # Lint: `clippy`, clippy on the web UI (wasm32, its wasm-only tests included),
-# both again with `release_flags`, so the build without the hub (§16, decision
+# the web UI once more with the `gallery` feature (no other build turns it on,
+# so without it a warning in a demo of the component gallery goes unseen),
+# the host and the web UI (not the gallery, which no release build has) again
+# with `release_flags`, so the build without the hub (§16, decision
 # 122) has its dead code and warnings caught too, the type check of the
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
 # dev-dependency), Biome's format and lint check of that TypeScript
@@ -113,10 +116,11 @@ clippy:
 # for `web`, not its wasm32-only ones. CI runs `lint` on Linux alone, so a doc
 # comment on macOS-only code is checked only by a local run on a Mac; macOS CI
 # runs `clippy` (see `clippy`).
-[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index and component-index checks, and rustdoc with warnings as errors.')]
+[doc('Clippy on the host and the web UI, each also as a release is built, and on the web UI with its component gallery, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index and component-index checks, and rustdoc with warnings as errors.')]
 [group('quality')]
 lint: _ui-deps _shellcheck-pinned clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
+    cargo clippy --package web --all-targets --features gallery --target wasm32-unknown-unknown -- -D warnings
     cargo clippy --workspace --all-targets {{ release_flags }} -- -D warnings
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown {{ release_flags }} -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json

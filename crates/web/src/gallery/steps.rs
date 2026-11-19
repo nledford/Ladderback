@@ -25,7 +25,7 @@ pub(super) fn StepsDemo(localizer: Arc<Localizer>) -> impl IntoView {
             // the button moves it on, each change said.
             <Steps
                 localizer=Arc::clone(&localizer)
-                name=StepsName::Label(t(msg::UI_GALLERY_STEPS_MOVE))
+                name=StepsName(t(msg::UI_GALLERY_STEPS_MOVE))
                 steps=vec![
                     t(msg::UI_GALLERY_STEPS_CHECK),
                     t(msg::UI_GALLERY_STEPS_COPY),
@@ -53,7 +53,7 @@ pub(super) fn StepsDemo(localizer: Arc<Localizer>) -> impl IntoView {
             // One done, one failed, one to do.
             <Steps
                 localizer=Arc::clone(&localizer)
-                name=StepsName::Label(t(msg::UI_GALLERY_STEPS_PAIRING))
+                name=StepsName(t(msg::UI_GALLERY_STEPS_PAIRING))
                 steps=vec![
                     t(msg::UI_GALLERY_STEPS_TOKEN),
                     t(msg::UI_GALLERY_STEPS_CONNECT),

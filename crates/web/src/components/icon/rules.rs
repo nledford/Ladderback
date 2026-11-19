@@ -53,10 +53,21 @@ pub fn default_size() -> Size {
     Size::Small
 }
 
-/// The classes of the icon's drawing: its tone, which colors the glyph, and
-/// its size, which `style.css`'s shared scale makes its length.
+/// How an icon is drawn, in Tailwind utilities (decision 117), logical ones
+/// only: stroked in its tone (`--tone`, which its tone's class sets), whose
+/// tokens reach 4.5:1 on the page and on a surface, more than the 3:1 a part
+/// needs (1.4.11), and as long as the shared scale's length (`--size`, which
+/// its size's class sets), so it grows with the reader's text (1.4.4). In a
+/// line of text it is centered on the text as an inline image is; in a row
+/// it keeps its length. Under forced colors it is the text's own color, as
+/// the tone classes of `style.css` make every tone.
+const LOOK: &str = "flex-none inline-(--size) block-(--size) align-middle text-(--tone)";
+
+/// The classes of the icon's drawing: the icon's own, which names it, its
+/// tone's, which colors the glyph, its size's, which sets its length, and
+/// its look.
 pub fn icon_class(tone: Tone, size: Size) -> String {
-    format!("icon {} {}", tone.class(), size.class())
+    format!("icon {} {} {LOOK}", tone.class(), size.class())
 }
 
 #[cfg(test)]
@@ -88,13 +99,14 @@ mod tests {
 
     #[test]
     fn an_icon_takes_its_tone_and_its_size_from_the_shared_vocabulary() {
-        assert_eq!(
-            icon_class(Tone::Inherit, Size::Small),
-            "icon tone-inherit size-small"
-        );
-        assert_eq!(
-            icon_class(Tone::Error, Size::XLarge),
-            "icon tone-error size-xlarge"
-        );
+        for tone in Tone::ALL {
+            for size in Size::ALL {
+                let class = icon_class(tone, size);
+                let classes: Vec<&str> = class.split_whitespace().collect();
+                assert_eq!(classes.first(), Some(&"icon"), "{class}");
+                assert!(classes.contains(&tone.class()), "{class}");
+                assert!(classes.contains(&size.class()), "{class}");
+            }
+        }
     }
 }

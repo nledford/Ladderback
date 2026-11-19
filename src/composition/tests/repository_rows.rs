@@ -1,5 +1,6 @@
 use super::support::*;
 use super::*;
+use crate::composition::catalog::{listed_repository, mixed_link_note, repository_row};
 
 fn field_warning(field: &str) -> api::WarningDto {
     api::WarningDto {

@@ -530,6 +530,165 @@ impl SessionStore for Flaky {
     }
 }
 
+thread_local! {
+    /// The lines this module logged on this thread, with their levels.
+    static LOGGED: std::cell::RefCell<Vec<(log::Level, String)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Keeps each line `access` logs on the thread that logged it: each test
+/// runs its use cases on its own thread (`now_or_never`), so tests running
+/// at once in one process never see each other's lines.
+struct CapturingLogger;
+
+impl log::Log for CapturingLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata
+            .target()
+            .starts_with(module_path!().trim_end_matches("::tests"))
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            LOGGED.with_borrow_mut(|lines| lines.push((record.level(), record.args().to_string())));
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// Captures the log from here on, and forgets what this thread logged
+/// before.
+fn capture_the_log() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        log::set_logger(&CapturingLogger).expect("no other logger in app's tests");
+        log::set_max_level(log::LevelFilter::Trace);
+    });
+    logged();
+}
+
+/// What this thread has logged since this was last asked.
+fn logged() -> Vec<(log::Level, String)> {
+    LOGGED.with_borrow_mut(std::mem::take)
+}
+
+/// Uses the session of `token` once the store is due to keep its last use
+/// again, so the use writes to the store; whether it was live.
+fn used_a_minute_later(access: &Access, clock: &FakeClock, token: &Token) -> bool {
+    clock.advance(domain::access::SESSION_USE_KEPT_EVERY);
+    live(access, token).is_some()
+}
+
+/// An access over a store that keeps a session of its own, then starts
+/// failing; the capture forgets the lines logged before.
+fn over_a_store_that_starts_failing() -> (Arc<FakeClock>, Arc<Flaky>, Access, SignedIn) {
+    let clock = clock();
+    let kept = Arc::new(InMemoryAdminPassword::with("demo-admin-pass"));
+    let store = Arc::new(Flaky::default());
+    let access = over(&clock, kept, store.clone());
+    let session = signed_in(&access);
+    capture_the_log();
+    store.failing(true);
+    (clock, store, access, session)
+}
+
+#[test]
+fn the_first_write_the_store_fails_without_saying_so_is_logged_as_a_warning_with_its_code() {
+    let (clock, _store, access, session) = over_a_store_that_starts_failing();
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert_matches!(
+        logged.first(),
+        Some((log::Level::Warn, line)) if line.contains("store-unavailable")
+    );
+}
+
+#[test]
+fn a_store_that_keeps_failing_is_logged_once() {
+    let clock = clock();
+    let kept = Arc::new(InMemoryAdminPassword::with("demo-admin-pass"));
+    let store = Arc::new(Flaky::default());
+    let access = over(&clock, kept, store.clone());
+    let session = signed_in(&access);
+    let other = signed_in(&access);
+    capture_the_log();
+    store.failing(true);
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    assert_eq!(logged().len(), 1);
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    // The sign-out's failure is the caller's to say; the forgetting it
+    // leaves for the next write fails there again, and is not logged again.
+    assert!(sign_out(&access, &other.token).is_err());
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    assert_eq!(logged(), Vec::new());
+}
+
+#[test]
+fn a_store_that_fails_again_after_a_write_succeeded_is_logged_again() {
+    let (clock, store, access, session) = over_a_store_that_starts_failing();
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    assert_eq!(logged().len(), 1);
+    store.failing(false);
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    assert_eq!(logged(), Vec::new());
+    store.failing(true);
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert_matches!(logged.first(), Some((log::Level::Warn, _)));
+}
+
+#[test]
+fn a_forgetting_the_store_fails_is_logged_and_a_sign_out_it_refuses_is_left_to_the_caller() {
+    let clock = clock();
+    let kept = Arc::new(InMemoryAdminPassword::with("demo-admin-pass"));
+    let store = Arc::new(Flaky::default());
+    let access = over(&clock, kept, store.clone());
+    let session = signed_in(&access);
+    let other = signed_in(&access);
+    capture_the_log();
+    store.failing(true);
+    assert!(sign_out(&access, &other.token).is_err());
+    assert_eq!(logged(), Vec::new(), "the caller says the sign-out failed");
+    // No last use is due yet, so the use writes only the forgetting the
+    // sign-out left for later.
+    assert!(live(&access, &session.token).is_some());
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert_matches!(
+        logged.first(),
+        Some((log::Level::Warn, line)) if line.contains("store-unavailable")
+    );
+}
+
+#[test]
+fn a_session_the_store_keeps_is_a_write_that_succeeded() {
+    let (clock, store, access, session) = over_a_store_that_starts_failing();
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    assert_eq!(logged().len(), 1);
+    store.failing(false);
+    let other = signed_in(&access);
+    store.failing(true);
+    assert!(sign_out(&access, &other.token).is_err());
+    assert!(live(&access, &session.token).is_some());
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+}
+
+#[test]
+fn the_failed_write_logged_holds_no_token_csrf_token_or_the_stores_own_words() {
+    let (clock, _store, access, session) = over_a_store_that_starts_failing();
+    assert!(used_a_minute_later(&access, &clock, &session.token));
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    let shown = format!("{logged:?}");
+    assert!(!shown.contains(&session.token.to_text()), "{shown}");
+    assert!(!shown.contains(&session.csrf.to_text()), "{shown}");
+    assert!(!shown.contains("disk I/O error"), "{shown}");
+}
+
 #[test]
 fn a_session_the_store_cant_keep_never_starts_says_the_store_and_counts_no_guess() {
     let clock = clock();
