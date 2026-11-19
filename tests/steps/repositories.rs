@@ -504,24 +504,35 @@ fn api_password_in_a_missing_file(agent: &mut Agent) {
     agent.repositories.api_password_file = Some(path);
 }
 
-/// The password file at mode 0644, whatever the umask: its owner writes it,
-/// and everyone else can read it.
-#[given("the client's password is in a file other users can read")]
-fn api_password_in_a_readable_file(agent: &mut Agent) {
+/// The password file at a mode that lets everyone else read it (0644) or
+/// change it (0620), whatever the umask: its owner writes it.
+#[given(expr = "the client's password is in a file other users can {word}")]
+fn api_password_in_an_exposed_file(agent: &mut Agent, can: String) {
     use std::os::unix::fs::PermissionsExt;
+    let mode = match can.as_str() {
+        "read" => 0o644,
+        "change" => 0o620,
+        other => panic!("other users can't {other} a file"),
+    };
     let path = agent.scratch().join("password.txt");
     fs::write(&path, PASSWORD).expect("the password file");
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("the file's mode");
+    fs::set_permissions(&path, fs::Permissions::from_mode(mode)).expect("the file's mode");
     agent.repositories.api_password_file = Some(path);
 }
 
 /// The daemon logs the warning before it answers, and the thread that drains
 /// its log may be a moment behind: the line is looked for until it comes,
-/// for at most 5 s.
+/// for at most 5 s. Other users can `read` the file or `change` it, each
+/// told by its own code.
 #[then(
-    expr = "the daemon's log warns that other users can read the password file, of mode {string}"
+    expr = "the daemon's log warns that other users can {word} the password file, of mode {string}"
 )]
-async fn daemon_warns_readable_password_file(agent: &mut Agent, mode: String) {
+async fn daemon_warns_exposed_password_file(agent: &mut Agent, can: String, mode: String) {
+    let code = match can.as_str() {
+        "read" => "SecretFileReadable",
+        "change" => "SecretFileWritable",
+        other => panic!("no warning says other users can {other} a file"),
+    };
     let path = agent
         .repositories
         .api_password_file
@@ -533,7 +544,7 @@ async fn daemon_warns_readable_password_file(agent: &mut Agent, mode: String) {
         let log = agent.events.whole_log();
         let warned = log.lines().any(|line| {
             line.contains("WARN")
-                && line.contains("SecretFileReadable")
+                && line.contains(code)
                 && line.contains(&path)
                 && line.contains(&mode)
         });
@@ -542,7 +553,7 @@ async fn daemon_warns_readable_password_file(agent: &mut Agent, mode: String) {
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "no warning that others can read {path} (mode {mode}) in: {log}"
+            "no warning that others can {can} {path} (mode {mode}) in: {log}"
         );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }

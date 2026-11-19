@@ -16,7 +16,7 @@ import { expect } from "../support/expect.ts";
 import { said } from "../support/said.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
-// The gallery's lists of steps (`gallery.rs`): the hub move's five and the
+// The gallery's lists of steps (`gallery/steps.rs`): the hub move's five and the
 // pairing's three.
 const LISTS = 2;
 const STEPS = 8;

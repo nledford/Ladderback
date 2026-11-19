@@ -95,6 +95,12 @@ pub enum IdentityError {
     /// The file is there but doesn't hold what its name says. It is left
     /// as it is, never replaced.
     Damaged { file: KeyFile },
+    /// Other users than its owner can read or change the file: `mode` is its
+    /// permission bits (`0o644`), without its type. Ladderback writes every
+    /// key file `0600`, so another mode means it was changed after, and a
+    /// key others can read or replace is no longer this machine's alone
+    /// (#1137). It is refused, never used, and left as it is.
+    Exposed { file: KeyFile, mode: u32 },
     /// Another attempt holds the counter's lock.
     AttemptInFlight,
     /// The counter is at the most it can hold.

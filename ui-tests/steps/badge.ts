@@ -16,7 +16,7 @@ import { besideIconProblems, wordsBesideIcon } from "../support/parts.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "../support/gallery.ts";
 
-// The gallery's badges (`gallery.rs`): a count, a tag and a long tag, then
+// The gallery's badges (`gallery/badge.rs`): a count, a tag and a long tag, then
 // one badge named for each of its five tones.
 const BADGES = 8;
 

@@ -16,7 +16,7 @@ import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { eachOf } from "../support/gallery.ts";
 
-// The gallery's progress bars (`gallery.rs`): the one the reader advances,
+// The gallery's progress bars (`gallery/progress.rs`): the one the reader advances,
 // one of unknown size and one of a step, then one at each size and one in
 // each tone.
 const BARS = 13;
