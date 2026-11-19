@@ -27,6 +27,7 @@ mod session_store;
 mod signing;
 mod sources;
 mod stats_store;
+mod tls_keys;
 mod walk;
 
 pub use admin_password::InMemoryAdminPassword;
@@ -55,4 +56,5 @@ pub use session_store::InMemorySessionStore;
 pub use signing::FakeSigning;
 pub use sources::FakeSources;
 pub use stats_store::InMemoryStatsStore;
+pub use tls_keys::FakeTlsKeys;
 pub use walk::InMemoryTree;

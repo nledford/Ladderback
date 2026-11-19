@@ -28,6 +28,7 @@ mod session_store;
 mod signing;
 mod sources;
 mod stats_store;
+mod tls_keys;
 mod walk;
 
 pub use admin_password::{AdminPassword, AdminPasswordError};
@@ -79,4 +80,5 @@ pub use session_store::SessionStore;
 pub use signing::{Signing, SigningError};
 pub use sources::{NormalizeSources, SourcesError};
 pub use stats_store::StatsStore;
+pub use tls_keys::{TlsKeyError, TlsKeys};
 pub use walk::{GiveWay, WalkError, WalkLimits, WalkSources, WalkStop, Walked};

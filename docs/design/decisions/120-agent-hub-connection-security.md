@@ -377,6 +377,8 @@ A small-order key is also harmless in this protocol, even if one slipped in. The
 
 Already in the tree and used as they are: `sha2` (the payload digest, the public-key fingerprint, the token checksum), `base64`, `uuid` (v7), `axum` (`ws`) and `zeroize`. No HMAC crate is needed: the token's key signs, so no secret is stored on the hub or sent. The implementation PR extends `technology.md` §8.2's crypto row to name the crates above. The crates for QR codes and the camera belong to [decision 121](121-pairing-a-machine-with-its-hub.md).
 
+**Where it lives.** The TLS crates stay in `adapters/tls` (`tls-adapter`), behind the `TlsKeys` port, which makes the hub's ECDSA P-256 key and gives its fingerprint; `app::hub_tls` takes the key at the hub's start and refuses one that is gone or another than the fingerprint recorded. The certificate is made again at each start, valid from the start of the day before `now`, so a client whose clock is a little behind still takes it, until the start of the day 397 days after `now`'s, with a random serial number, since certificates of one issuer can't share one (RFC 5280). The agent's pinned client turns off session resumption as well as early data, so every connection runs a full handshake that the verifier sees. The verifier refuses a chain that carries any intermediate certificate, takes `ECDSA_NISTP256_SHA256` alone for `CertificateVerify`, and refuses every TLS 1.2 signature.
+
 ## Tests that pin it
 
 Each is a test that fails before the behavior exists (§13.1).
