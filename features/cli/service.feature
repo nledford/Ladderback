@@ -112,6 +112,27 @@ Feature: Install the agent as a service
       And standard error says "home folder"
       And the service manager was asked nothing
 
+  Rule: The service manager starts the agent again after any exit it didn't ask for
+    Only the manager's own stop keeps the agent stopped: `remove-service`,
+    and `systemctl --user stop` or `launchctl bootout` until the next login
+    (operations §12, #1035). After any other exit, a crash, a refusal to
+    start, a restart asked for in Settings or a stop another program asked
+    for, the manager starts the agent again, systemd 10 s later and launchd
+    within 10 s, so backups don't stop with it.
+
+    Scenario: The agent stopped by another program's SIGTERM is started again
+      Any program running as the owner can send the agent SIGTERM: a `kill`,
+      or a `pkill -f` whose pattern matches the agent's command line. The
+      agent stops in order and exits with status 0, as it does when its
+      manager stops it, and the manager, which didn't ask for that stop,
+      starts it again.
+
+      Given the service is installed
+      And Ladderback is serving on loopback under a service manager
+      When a program other than the service manager sends the agent SIGTERM
+      Then the daemon has exited with status 0
+      And the service manager starts the service again
+
   Rule: On Linux it says when a repository's password can't be read before login
     A `password-keyring` password is read from the Secret Service, which
     starts with the user's desktop session. A service that lingers starts at
@@ -142,6 +163,7 @@ Feature: Install the agent as a service
       When the owner runs "remove-service"
       Then the command exits with status 0
       And the service does not run
+      And the service manager does not start it again once its program has exited
       And there is no service file
       And standard output says "removed the service"
 

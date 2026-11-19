@@ -13,6 +13,9 @@
 #     when built with the release flags (`--no-default-features`, as a release is);
 #   - a release build leaves out the component gallery, the dev-only route
 #     `/_gallery` (the `web` feature `gallery`).
+#   - a release build leaves out the hub (§16, decision 122): `ladderback` and
+#     `web` have the `hub` feature by default, and with the release flags no
+#     crate has it, nor a crate only the hub uses.
 #   - cargo-dist (`dist-workspace.toml`) builds the release archives with the
 #     release flags these checks use (technical design §12.1).
 #   - the build has one version of `dbus-secret-service`, the error type
@@ -212,6 +215,43 @@ gallery() {
 gallery has --features gallery
 gallery lacks
 gallery lacks "${release_flags[@]}"
+
+# The hub stays out of a release until M8 (§16, decision 122, item 6). The
+# tree lists each package with the features it is built with, so each
+# workspace crate (a path package) whose `hub` is on is found;
+# dev-dependencies are in it on purpose, so no test support turns the hub on
+# in the build `just test-release` runs either. A release build must also lack every crate
+# only the hub uses, which a plain dependency added by mistake would bring in.
+# As for the pseudolocales, both sides are checked, so that a change that
+# blinds this check cannot pass it with nothing to find.
+hub_only_crates='^(qrcode|rqrr)$'
+hub() {
+  local want=$1 package=$2
+  shift 2
+  local tree found crates
+  # Separate from the pipeline, as in `check`: a failing `cargo tree` must
+  # stop the script, while "no match" must not.
+  tree=$(cargo tree --package "$package" --edges normal,build,dev --prefix none --format '{p}|{f}' "$@")
+  found=$(awk -F'|' '$1 ~ / \(\// { n = split($2, features, ","); for (i = 1; i <= n; i++) if (features[i] == "hub") print $1 }' <<<"$tree" | awk '{print $1}' | sort -u)
+  crates=$(awk '{print $1}' <<<"$tree" | sort -u | grep -E "$hub_only_crates" || true)
+  if [[ $want == has && -z $found ]]; then
+    echo "error: $package ${*:-(default features)} lacks the hub feature, so the development build has no hub" >&2
+    status=1
+  elif [[ $want == lacks && -n $found ]]; then
+    echo "error: $package ${*:-(default features)} has the hub feature of $(tr '\n' ' ' <<<"$found")which a release build must leave out" >&2
+    status=1
+  elif [[ $want == lacks && -n $crates ]]; then
+    echo "error: $package ${*:-(default features)} depends on $(tr '\n' ' ' <<<"$crates")which only the hub uses and a release build must leave out" >&2
+    status=1
+  else
+    echo "ok: $package ${*:-(default features)} $want the hub"
+  fi
+}
+
+hub has ladderback
+hub has web --target wasm32-unknown-unknown
+hub lacks ladderback "${release_flags[@]}"
+hub lacks web "${release_flags[@]}" --target wasm32-unknown-unknown
 
 # The release archives are built by cargo-dist (dist-workspace.toml, technical
 # design §12.1), which can't read the Justfile: its `[dist]` build keys must

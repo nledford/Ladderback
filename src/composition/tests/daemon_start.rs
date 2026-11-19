@@ -635,7 +635,7 @@ async fn a_data_folder_another_process_holds_is_refused_before_its_log_is_opened
         .await
         .err()
         .expect("a data folder another process holds refuses");
-    assert_eq!(refused.message, msg::CLI_DATA_DIR_IN_USE);
+    assert_eq!(refused.message, DATA_DIR_IN_USE[0]);
     assert!(
         !data.join("ladderback.db").exists(),
         "a refused daemon never opens the log"
@@ -673,7 +673,7 @@ async fn a_second_daemon_on_a_data_folder_is_refused_naming_the_first() {
         .await
         .err()
         .expect("a data folder another daemon holds refuses");
-    assert_eq!(refused.message, msg::CLI_DATA_DIR_IN_USE);
+    assert_eq!(refused.message, DATA_DIR_IN_USE[0]);
     assert!(
         refused
             .args
@@ -700,7 +700,7 @@ async fn a_daemon_refused_the_data_folder_has_not_read_the_configuration() {
         .await
         .err()
         .expect("a data folder another daemon holds refuses");
-    assert_eq!(refused.message, msg::CLI_DATA_DIR_IN_USE);
+    assert_eq!(refused.message, DATA_DIR_IN_USE[0]);
     drop(first);
 }
 
@@ -724,14 +724,29 @@ async fn a_data_folder_is_free_again_once_its_daemon_is_gone() {
 #[test]
 fn a_lock_that_cannot_be_taken_is_refused_by_what_is_known_of_it() {
     let folder = std::path::Path::new("/srv/demo/data");
+    // The installed service's manager starts a killed holder again (#1035):
+    // the refusal names that manager's stop where there is one.
+    let (named_id, unnamed_id) = if cfg!(target_os = "linux") {
+        (
+            msg::CLI_DATA_DIR_IN_USE_SYSTEMD,
+            msg::CLI_DATA_DIR_IN_USE_UNNAMED_SYSTEMD,
+        )
+    } else if cfg!(target_os = "macos") {
+        (
+            msg::CLI_DATA_DIR_IN_USE_LAUNCHD,
+            msg::CLI_DATA_DIR_IN_USE_UNNAMED_LAUNCHD,
+        )
+    } else {
+        (msg::CLI_DATA_DIR_IN_USE, msg::CLI_DATA_DIR_IN_USE_UNNAMED)
+    };
     let named = lock_refused(folder, LockError::InUse { holder: Some(4321) });
-    assert_eq!(named.message, msg::CLI_DATA_DIR_IN_USE);
+    assert_eq!(named.message, named_id);
     assert_eq!(
         named.args,
         vec![("path", text("/srv/demo/data")), ("pid", text(4321))]
     );
     let unnamed = lock_refused(folder, LockError::InUse { holder: None });
-    assert_eq!(unnamed.message, msg::CLI_DATA_DIR_IN_USE_UNNAMED);
+    assert_eq!(unnamed.message, unnamed_id);
     assert_eq!(unnamed.args, vec![("path", text("/srv/demo/data"))]);
     let unavailable = lock_refused(
         folder,

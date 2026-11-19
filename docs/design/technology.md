@@ -75,6 +75,7 @@ ladderback/
 │     ├─ secrets/             # command, keyring, file, env sources; `${…}` substitution (redaction: domain `Redactor`)
 │     ├─ notify/              # webhook, ntfy, Gotify, Discord/Slack, SMTP, healthchecks
 │     ├─ releases/            # Ladderback's newest release from GitHub Releases (`ReleaseFeed` port, §10.7)
+│     ├─ signing/             # Ed25519 over aws-lc-rs (`Signing` port; §16, decision 120)
 │     ├─ mcp/                 # `ladderback mcp`: JSON-RPC 2.0 over stdio; in-process and /api/v1 backends (§4.6)
 │     └─ platform/            # clock, power, network, identity key, service install (systemd/launchd)
 ├─ features/                  # Gherkin scenarios, one folder per bounded context (§13.2)

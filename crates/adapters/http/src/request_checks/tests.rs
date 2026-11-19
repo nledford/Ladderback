@@ -935,6 +935,7 @@ async fn the_checks_run_host_then_origin_then_content_type() {
     .await;
 }
 
+#[cfg(feature = "hub")]
 #[tokio::test]
 async fn the_agent_sync_routes_are_exempt() {
     // Agents authenticate with a signed nonce (§7.1), and reach the hub by

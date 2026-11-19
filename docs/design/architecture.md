@@ -48,6 +48,8 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Signed message | A message after the handshake, in either direction, signed by its sender for one agent and one connection, with a sequence number and, from the hub, an expiry. A receiver acts on none unsigned, replayed, out of sequence or expired (§7.2; §16, decision 120) |
 | Pending agent | An agent that has paired and waits for a person to approve it on the hub. It has no grants, claims, leases or commands, and its reports are kept and not acted on (§7.1; §16, decision 120) |
 | Handover | A statement signed by the old hub key, or by the recovery key, naming the new one, which lets agents that pinned the old key follow a rotation or a recovery (§7.1; §16, decision 120) |
+| Fingerprint | How a key is shown to a person to compare: the SHA-256 of the key (of a TLS certificate's public-key encoding for the hub's TLS key), as its first 100 bits in 20 characters of Crockford base32, five groups of four (`7K3Q-M9XD-2RTV-8HFA-QW5N`), the full 64 hex digits on demand (§16, decision 120) |
+| Key ID, token ID | The first 8 hex digits of a key's SHA-256 (`3F9A8B21`), a label beside a name and never a way to verify a key; a token ID is a pairing token's, of its one-time key (§16, decision 120) |
 | Service | An agent the user's **service manager** runs in the background, from login on: a systemd user unit on Linux, a launchd agent on macOS. Its **service file** says what the manager runs: this `ladderback` program's `serve`. `ladderback install-service` writes the file and has the manager start it; `ladderback remove-service` has the manager stop it and removes the file (§12). On Linux the service stops with the user's last session unless the user **lingers** (`loginctl enable-linger`) |
 | Build | The program as built from one commit: its **version**, the **commit** (unknown when the build had no `git` to ask), whether tracked files had uncommitted changes (**dirty**), and whether the commit is its version's **release** (the tag `v<version>` names it). Shown as `0.3.0` for a clean build of the release, otherwise as `0.3.0+3f937cf`, or `0.3.0+3f937cf.dirty` with changes (decision 90) |
 | Release check | The agent asking GitHub Releases for Ladderback's newest release while it serves: a day after its last check, never within 5 minutes of its start (5 to 65 minutes after it starts when it has never checked or that day is over), each time spread by up to an hour of jitter. On unless `[agent] check-for-updates = false`; the last one is kept in the store, so a restart neither asks again within the day nor forgets what it found (§5, §10.7; §16, decision 107) |
@@ -178,6 +180,7 @@ flowchart LR
     SEC[secrets]
     NOTE[notify]
     REL[releases: GitHub Releases]
+    SIGN[signing: Ed25519]
     PLAT[platform: clock, power, network, identity]
     SYNCOUT[sync: hub link]
   end
@@ -192,6 +195,7 @@ flowchart LR
   SEC -. implements port .-> APP
   NOTE -. implements port .-> APP
   REL -. implements port .-> APP
+  SIGN -. implements port .-> APP
   PLAT -. implements port .-> APP
   SYNCOUT -. implements port .-> APP
 ```
@@ -221,6 +225,7 @@ Each adapter translates its input, calls one use case, and maps the result; no a
 | `Random` | Jitter, session, CSRF and API tokens; later UUIDv7 IDs, epochs, pairing tokens | OS randomness | Seeded |
 | `AdminPassword` | Check an attempt against the admin password, set a new one, and a fingerprint that tells two kept passwords apart (§10.1) | argon2id hash file in the data dir, mode 0600 | In memory, as typed |
 | `Identity` | The agent's Ed25519 key: public key and signing | Key file in the data dir | Fixed test key |
+| `Signing` | Ed25519 (§16, decision 120): the public key a seed makes, a signature over the protocol's signed bytes (`domain::fleet::SignedBytes`, which only a message of decision 120's table makes), and the check of one. Keys and signatures arrive parsed by `domain::fleet`, which refuses a small-order key and a non-canonical one or signature | `aws-lc-rs` (`adapters/signing`), the crypto library rustls already links | SHA-256 stand-in with Ed25519's shape: deterministic, holds for its own key and message only |
 | `PowerSupply` | AC power or battery (§16, decision 63) | `/sys/class/power_supply` on Linux, `pmset -g batt` on macOS | Scripted fake |
 | `Network` | Whether the machine is online (§16, decision 63) | `/sys/class/net` on Linux, `scutil --nwi` on macOS | Scripted fake |
 | `NetworkLink` | The network link (§3.1): wired, Wi-Fi with its name when it can be read, other, or mixed (each IP family's default route apart), or why the platform can't say (§16, decision 80) | `/proc/net/route`, `/proc/net/ipv6_route`, `/sys/class/net` and NetworkManager's D-Bus API on Linux; `route`, `networksetup`, `ifconfig` and `system_profiler` run as decision 63 runs its commands, on macOS | Scripted fake |

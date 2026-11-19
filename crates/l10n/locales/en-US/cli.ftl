@@ -114,6 +114,24 @@ cli-data-dir-in-use = the data folder { $path } is in use by process { $pid }: s
 # $path (text): the data folder, as the user wrote it.
 cli-data-dir-in-use-unnamed = the data folder { $path } is in use by another process: stop that process, or start this one with a configuration folder and a data folder of its own ({ "LADDERBACK_CONFIG_DIR" } and { "LADDERBACK_DATA_DIR" })
 
+# As cli-data-dir-in-use, on Linux: the holder may be the installed service, which systemd starts again once its process is killed, so the message names how to stop it for good.
+# $path (text): the data folder, as the user wrote it.
+# $pid (text): the ID of the process that holds it.
+cli-data-dir-in-use-systemd = the data folder { $path } is in use by process { $pid }: stop that process, or start this one with a configuration folder and a data folder of its own ({ "LADDERBACK_CONFIG_DIR" } and { "LADDERBACK_DATA_DIR" }). If that process is the installed service, its service manager starts it again once it is killed: stop it with { "systemctl --user stop ladderback" }, or remove it with { "ladderback remove-service" }
+
+# As cli-data-dir-in-use-systemd, when the lock file names no process.
+# $path (text): the data folder, as the user wrote it.
+cli-data-dir-in-use-unnamed-systemd = the data folder { $path } is in use by another process: stop that process, or start this one with a configuration folder and a data folder of its own ({ "LADDERBACK_CONFIG_DIR" } and { "LADDERBACK_DATA_DIR" }). If that process is the installed service, its service manager starts it again once it is killed: stop it with { "systemctl --user stop ladderback" }, or remove it with { "ladderback remove-service" }
+
+# As cli-data-dir-in-use, on macOS: the holder may be the installed service, which launchd starts again once its process is killed, so the message names how to stop it for good.
+# $path (text): the data folder, as the user wrote it.
+# $pid (text): the ID of the process that holds it.
+cli-data-dir-in-use-launchd = the data folder { $path } is in use by process { $pid }: stop that process, or start this one with a configuration folder and a data folder of its own ({ "LADDERBACK_CONFIG_DIR" } and { "LADDERBACK_DATA_DIR" }). If that process is the installed service, its service manager starts it again once it is killed: stop it with { "launchctl bootout gui/$(id -u)/io.github.nledford.ladderback" }, or remove it with { "ladderback remove-service" }
+
+# As cli-data-dir-in-use-launchd, when the lock file names no process.
+# $path (text): the data folder, as the user wrote it.
+cli-data-dir-in-use-unnamed-launchd = the data folder { $path } is in use by another process: stop that process, or start this one with a configuration folder and a data folder of its own ({ "LADDERBACK_CONFIG_DIR" } and { "LADDERBACK_DATA_DIR" }). If that process is the installed service, its service manager starts it again once it is killed: stop it with { "launchctl bootout gui/$(id -u)/io.github.nledford.ladderback" }, or remove it with { "ladderback remove-service" }
+
 # The lock on the data folder could not be taken, so the daemon did not start. A file system that does not support locks gives this.
 # $path (text): the lock file.
 # $detail (text): the operating system's own message. It is shown as it came.
