@@ -49,16 +49,18 @@ setup:
     cd ui-tests && npm ci
     cd ui-tests && node_modules/.bin/playwright install chromium firefox webkit
 
-# Format Rust code: leptosfmt formats the `view!` blocks, which rustfmt leaves
-# alone, then rustfmt the rest. leptosfmt goes first because rustfmt settles
-# the code around a view it has laid out, never the other way round. The
-# comment check runs before either writes: leptosfmt drops a comment inside a
-# view's Rust code (§13.13).
+# Format the Rust and TypeScript code: leptosfmt formats the `view!` blocks,
+# which rustfmt leaves alone, then rustfmt the rest, then Biome the TypeScript
+# tooling (biome.json). leptosfmt goes first because rustfmt settles the code
+# around a view it has laid out, never the other way round. The comment check
+# runs before either writes: leptosfmt drops a comment inside a view's Rust
+# code (§13.13).
 [group('quality')]
-fmt: _leptosfmt-pinned
+fmt: _leptosfmt-pinned _ui-deps
     node scripts/leptosfmt-comments.ts leptosfmt.toml crates/web
     leptosfmt --quiet --config-file leptosfmt.toml crates/web
     cargo fmt --all
+    ui-tests/node_modules/.bin/biome format --write
 
 # Check formatting without changing files: rustfmt, leptosfmt, and no comment
 # that a leptosfmt run would drop.
@@ -84,7 +86,11 @@ clippy:
 # both again with `release_flags`, so the build without the hub (§16, decision
 # 122) has its dead code and warnings caught too, the type check of the
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
-# dev-dependency), the tooling's own tests (`scripts/*.test.ts`, under Node's
+# dev-dependency), Biome's format and lint check of that TypeScript
+# (biome.json, also a ui-tests dev-dependency; `biome ci` writes nothing, and
+# with `--error-on-warnings` a warning fails like an error, so a rule is on or
+# off, never advisory; `just fmt` writes the format), the tooling's own tests
+# (`scripts/*.test.ts`, under Node's
 # built-in runner), the journey lint, the check that every path AGENTS.md and
 # CLAUDE.md name exists, the check that no paragraph in docs/ runs over
 # 150 words, then the
@@ -94,13 +100,14 @@ clippy:
 # built for the host and, for `web`, not its wasm32-only ones. CI runs `lint`
 # on Linux alone, so a doc comment on macOS-only code is checked only by a
 # local run on a Mac; macOS CI runs `clippy` (see `clippy`).
-[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
+[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the Biome format and lint check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
     cargo clippy --workspace --all-targets {{ release_flags }} -- -D warnings
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown {{ release_flags }} -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json
+    ui-tests/node_modules/.bin/biome ci --error-on-warnings
     node --test scripts/*.test.ts
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
