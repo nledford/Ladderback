@@ -54,27 +54,6 @@ Given("the daemon holds back its answer to each read of the plans list after the
   });
 });
 
-// As above, but the daemon lets each held read go `seconds` after it came,
-// for a scenario that waits for the answer by what the page then does.
-Given(
-  "the daemon answers each read of the plans list after the first {int} seconds late",
-  function (this: BrowserWorld, seconds: number) {
-    let reads = 0;
-    this.contextRoutes.push(async (context) => {
-      await context.route(
-        (url) => url.pathname === "/api/v1/plans",
-        async (route) => {
-          if (route.request().method() === "GET") {
-            reads += 1;
-            if (reads > 1) await new Promise((done) => setTimeout(done, seconds * 1_000));
-          }
-          await route.continue();
-        },
-      );
-    });
-  },
-);
-
 // Every read of the plans list after the first, the one a save makes among
 // them, is answered by `answer` instead of the daemon.
 function answerReadsAfterFirst(world: BrowserWorld, answer: (route: Route) => Promise<void>): void {
