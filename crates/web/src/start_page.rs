@@ -1,3 +1,29 @@
+//! The start page, the route `/` (§4.4): the configured plans and when each
+//! runs next, where the format of a plan is described, and the ways to the
+//! Operations and Repositories pages. A plan's "Next run" cell is
+//! `routes::next_run_cell`'s, host-tested; this is the DOM glue, which the
+//! `@ui` scenarios of `features/ui/start_page.feature` run.
+
+use std::sync::Arc;
+
+use api::{PlanSummaryDto, PlansDto};
+use l10n::{Localizer, msg};
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+use crate::components::first_load;
+use crate::components::link::rules::{Destination, Matching};
+use crate::components::skeleton::rules::Awaited;
+use crate::components::{
+    Column, Link, Name as TableName, Sentences, State, Table, refusal_alert, say_refusals,
+};
+use crate::full_disk_access_warning::FullDiskAccessSteps;
+use crate::repositories::{Sentence, repository_notes};
+use crate::routes::{PageHeading, next_run_cell, refused_sentence, time_view};
+use crate::sign_in::SignInOff;
+use crate::text;
+use crate::variants::Rem;
+use crate::ws::{self, Got, Phase};
 
 /// Where the format of a plan in `config.toml` is described: §6.1 of the
 /// technical design, at the tag of the release this build is, so a reader

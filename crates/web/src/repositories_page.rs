@@ -1,3 +1,43 @@
+//! The Repositories page, the route `/repositories` (§4.4): the repositories
+//! Ladderback backs up to, each row's Test and Create, and the form that
+//! tests one, connects one that exists and creates one that doesn't. Its
+//! decisions are `repositories.rs`'s; this is the DOM glue, which the `@ui`
+//! scenarios of `features/ui/repositories.feature` run, with the form's own
+//! state tested on the host below.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use api::{
+    LocationDto, LocationTriedDto, MsgArg, RepositoriesDto, RepositoryDto, RepositoryNotesDto,
+};
+use l10n::{Localizer, msg};
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+use crate::announcer::Politeness;
+use crate::components::alert::rules::AlertTone;
+use crate::components::banner::rules::BannerTone;
+use crate::components::button::{Content, Kind};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
+use crate::components::{
+    Alert, Banner, Button, Checkbox, Column, ErrorSummary, Name as TableName, RadioGroup,
+    Sentences, State, SummaryItem, Table, TextField, address_view, refusal_alert, runs_view,
+    say_refusals, text_field,
+};
+use crate::live::reply;
+use crate::repositories::{
+    Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
+    create_saved_path, error_of, field_of, found_at, lists_locations, location_heading,
+    location_option, location_rule, location_tested, locations_label, locations_tested,
+    password_source, problems_of, repository_notes, rereads_list, row_refusal,
+    test_locations_label, test_locations_path, tested_announcement,
+};
+use crate::routes::{PAGE_HEADING_ID, PageHeading, refusal, refused_sentence, text_with};
+use crate::text;
+use crate::variants::{Rem, Size};
+use crate::ws::{self, Got, Phase, Posted};
 
 /// What a person has typed into the Repositories form, one signal per field,
 /// and whether they asked this agent to maintain the repository.
@@ -866,6 +906,10 @@ fn CreatedNote(confirmation: String, id_sentence: String) -> impl IntoView {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
     #[test]
     fn each_field_has_its_own_input_and_the_form_reads_them_all() {
         let inputs = Inputs::new();
@@ -973,3 +1017,4 @@ fn CreatedNote(confirmation: String, id_sentence: String) -> impl IntoView {
             );
         }
     }
+}

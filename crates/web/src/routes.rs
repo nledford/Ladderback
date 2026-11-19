@@ -2,52 +2,20 @@
 //! path shows. Each page has its own `<h1>`, the heading focus moves to when a
 //! reader navigates to it, so it carries `tabindex="-1"`.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use api::{
-    ErrorCode, LocationDto, LocationTriedDto, MsgArg, PlanSummaryDto, PlansDto, RepositoriesDto,
-    RepositoryDto, RepositoryNotesDto,
-};
+use api::{ErrorCode, MsgArg, PlanSummaryDto};
 use l10n::{Localizer, MessageId, msg};
-use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 use serde::Serialize;
 use std::str::FromStr;
 
-use crate::announcer::Politeness;
-use crate::backend::{OperationRow, OperationsState, ended};
-use crate::components::alert::rules::AlertTone;
-use crate::components::banner::rules::BannerTone;
-use crate::components::button::{Content, Kind};
-use crate::components::first_load;
+use crate::components::Link;
 use crate::components::link::rules::{Destination, Matching};
-use crate::components::skeleton::rules::Awaited;
-use crate::components::status_badge::rules::BadgeState;
-use crate::components::{
-    Alert, Banner, Button, Checkbox, Column, ErrorSummary, Link, Name as TableName, PauseUpdates,
-    Progress, RadioGroup, Sentences, Sort, SortKey, State, StatusBadge, SummaryItem, Table,
-    TextField, Toast, ToastTone, Toasts, address_view, cell_sentence_view, hand_focus_when_gone,
-    refusal_alert, runs_view, say_refusals, text_field,
-};
 use crate::full_disk_access::describing_the_heading;
-use crate::full_disk_access_warning::{FullDiskAccessFound, FullDiskAccessSteps};
-use crate::live::{reply, say};
-use crate::operations::{self, Name, Said};
-use crate::pause::{self, Ends, Pausable};
-use crate::repositories::{
-    Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
-    create_saved_path, error_of, field_of, found_at, lists_locations, location_heading,
-    location_option, location_rule, location_tested, locations_label, locations_tested,
-    password_source, problems_of, repository_notes, rereads_list, row_refusal,
-    test_locations_label, test_locations_path, tested_announcement,
-};
+use crate::full_disk_access_warning::FullDiskAccessFound;
+use crate::repositories::Sentence;
 use crate::session::SignInOffNotice;
-use crate::sign_in::SignInOff;
-use crate::variants::{Rem, Size, Tone};
-use crate::visit::Visit;
-use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
 
 /// The `id` of the notice, on every page, that sign-in is off on the network.

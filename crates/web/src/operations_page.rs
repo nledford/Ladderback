@@ -1,3 +1,40 @@
+//! The Operations page, the route `/operations` (§4.4): the backup history,
+//! live, a Start for each plan and a Cancel for each run still going. What a
+//! row says is `operations.rs`'s, the live state `backend.rs`'s and a paused
+//! page's `pause.rs`'s; this is the DOM glue, which the `@ui` scenarios of
+//! `features/ui/operations.feature` run, with what the page shows in its
+//! table's place and how a status is badged, tested on the host below.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use api::{MsgArg, PlanSummaryDto, PlansDto};
+use l10n::{Localizer, MessageId, msg};
+use lepticons_data::LucideGlyph;
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::Serialize;
+
+use crate::announcer::Politeness;
+use crate::backend::{OperationRow, OperationsState, ended};
+use crate::components::button::Content;
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
+use crate::components::status_badge::rules::BadgeState;
+use crate::components::{
+    Button, Column, Name as TableName, PauseUpdates, Progress, Sentences, Sort, SortKey, State,
+    StatusBadge, Table, Toast, ToastTone, Toasts, cell_sentence_view, hand_focus_when_gone,
+    refusal_alert, runs_view, say_refusals,
+};
+use crate::live::{reply, say};
+use crate::operations::{self, Name, Said};
+use crate::pause::{self, Ends, Pausable};
+use crate::repositories::Sentence;
+use crate::routes::{Empty, PAGE_HEADING_ID, PageHeading, instant, refused_sentence, text_with};
+use crate::text;
+use crate::variants::{Rem, Size, Tone};
+use crate::visit::Visit;
+use crate::ws::{self, Got, Phase, Posted};
 
 /// The body a start request carries: the plan to back up.
 #[derive(Serialize)]
@@ -720,6 +757,10 @@ fn announces_end(previous: &str, status: &str) -> bool {
     (previous == "queued" || previous == "running") && ended(status)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
     /// The full operation ID of the run numbered `n`.
     fn id_of(n: u32) -> String {
         format!("018f0000-0000-7000-8000-{n:012}")
@@ -858,3 +899,4 @@ fn announces_end(previous: &str, status: &str) -> bool {
             "history does not move"
         );
     }
+}
