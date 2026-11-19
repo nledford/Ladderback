@@ -20,7 +20,8 @@ pub const LAUNCHD_MARK: &str =
 /// the agent is pointed at (decision 59). systemd waits [`KILL_AFTER`] for it
 /// to stop, and starts it again 10 s after any exit systemd didn't ask for,
 /// a SIGTERM another program sent among them (#1035); a restart's
-/// [`RESTART_STATUS`] doesn't mark the unit failed (decision 94).
+/// [`RESTART_STATUS`] doesn't mark the unit failed (decision 94). Files the
+/// agent and its children create are its user's alone (`UMask=0077`, #1139).
 pub fn systemd_unit(program: &ServicePath) -> String {
     format!(
         "{SYSTEMD_MARK}\n\
@@ -35,6 +36,7 @@ pub fn systemd_unit(program: &ServicePath) -> String {
          CacheDirectoryMode=0700\n\
          Environment=LADDERBACK_CACHE_DIR=%C/ladderback\n\
          KillMode=mixed\n\
+         UMask=0077\n\
          TimeoutStopSec={kill_after}\n\
          Restart=always\n\
          RestartSec=10\n\
