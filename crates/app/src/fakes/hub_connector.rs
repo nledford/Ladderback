@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use api::sync::{AgentFrame, HubFrame, MAX_FRAME_BYTES};
@@ -95,7 +96,7 @@ impl HubConnector for LoopbackHubConnector {
             exporter,
             tap: self.tap.clone(),
             session,
-            inbox: None,
+            inbox: VecDeque::new(),
             closed: false,
             reason: None,
         }))
@@ -108,7 +109,8 @@ struct LoopLink {
     tap: Arc<Tap>,
     /// `None` once the hub couldn't open one.
     session: Option<HubSession>,
-    inbox: Option<String>,
+    /// What the hub sent that the agent hasn't read, in the order sent.
+    inbox: VecDeque<String>,
     closed: bool,
     reason: Option<String>,
 }
@@ -150,9 +152,9 @@ impl HubLink for LoopLink {
             }
         };
         match self.hub.step(session, &read).await {
-            HubStep::Reply(answer) => self.inbox = Some(answer.to_text()),
+            HubStep::Reply(answer) => self.inbox.push_back(answer.to_text()),
             HubStep::Last(answer) => {
-                self.inbox = Some(answer.to_text());
+                self.inbox.push_back(answer.to_text());
                 self.closed = true;
             }
             HubStep::Close(reason) => self.close(Some(reason)),
@@ -162,7 +164,7 @@ impl HubLink for LoopLink {
     }
 
     async fn receive(&mut self) -> Result<HubFrame, LinkError> {
-        match self.inbox.take() {
+        match self.inbox.pop_front() {
             Some(text) if text.len() <= MAX_FRAME_BYTES => {
                 HubFrame::from_text(&text).map_err(|_| LinkError::Unreadable)
             }
