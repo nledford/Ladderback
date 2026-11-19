@@ -721,7 +721,10 @@ fn operations_table(
     let result_localizer = Arc::clone(localizer);
     let result = Column::new(
         text(localizer, msg::UI_COLUMN_RESULT),
-        Rem::tenths(180),
+        // The rest of the page's 58 rem: room for a long path such as
+        // "/srv/backups/home-laptop.password" (18.1 rem in DejaVu Sans,
+        // Linux's default) on one line, beside its 1 rem of padding.
+        Rem::tenths(195),
         move |row: Signal<OperationRow>| result_view(&result_localizer, row),
     );
     let cancel_localizer = Arc::clone(localizer);
