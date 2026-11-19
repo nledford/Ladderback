@@ -14,5 +14,6 @@ mod offered;
 mod pseudo;
 #[cfg(not(feature = "pseudo"))]
 mod release;
+mod review_wording;
 mod support;
 mod unused_ids;
