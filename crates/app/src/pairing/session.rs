@@ -42,14 +42,41 @@ impl HubPairing {
         &self,
         exporter: Option<[u8; KEY_BYTES]>,
     ) -> Result<HubSession, HubPairingError> {
-        todo!()
+        Ok(HubSession {
+            keys: self.keys().await?,
+            exporter,
+            handshake: None,
+        })
     }
 
     /// The hub's step on the agent's next frame: a `Challenge` to its
     /// `Connect`, the answer to its `Pair`, and a closed connection for a
     /// message out of turn.
     pub async fn step(&self, session: &mut HubSession, frame: &AgentFrame) -> HubStep {
-        todo!()
+        let Ok(message) = agent_message(frame) else {
+            return HubStep::Close(PROTOCOL_ERROR);
+        };
+        match (message, session.handshake.as_ref()) {
+            (AgentMessage::Connect(connect), None) => {
+                match self.challenge(&session.keys, &connect, session.exporter) {
+                    Ok((challenge, handshake)) => {
+                        session.handshake = Some(handshake);
+                        HubStep::Reply(challenge_frame(&challenge))
+                    }
+                    Err(HubPairingError::BindingUnavailable) => HubStep::Close(BINDING_UNAVAILABLE),
+                    Err(error) => HubStep::Fail(error),
+                }
+            }
+            (AgentMessage::Pair(pair), Some(handshake)) => {
+                match self.pair(&session.keys, handshake, &pair).await {
+                    Ok(answer) => HubStep::Last(answer_frame(&answer)),
+                    Err(error) => HubStep::Fail(error),
+                }
+            }
+            (AgentMessage::Connect(_), Some(_)) | (AgentMessage::Pair(_), None) => {
+                HubStep::Close(PROTOCOL_ERROR)
+            }
+        }
     }
 }
 

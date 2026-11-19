@@ -83,32 +83,51 @@ pub struct UnreadableFrame;
 impl AgentFrame {
     /// The frame `text` holds.
     pub fn from_text(text: &str) -> Result<Self, UnreadableFrame> {
-        todo!()
+        serde_json::from_str(text).map_err(|_| UnreadableFrame)
     }
 
     /// The frame's text.
     pub fn to_text(&self) -> String {
-        todo!()
+        written(self)
     }
 }
 
 impl HubFrame {
     /// The frame `text` holds.
     pub fn from_text(text: &str) -> Result<Self, UnreadableFrame> {
-        todo!()
+        serde_json::from_str(text).map_err(|_| UnreadableFrame)
     }
 
     /// The frame's text.
     pub fn to_text(&self) -> String {
-        todo!()
+        written(self)
     }
 }
 
 /// The error code a refusal's code names, as the agent shows it:
 /// [`ErrorCode::Unknown`] for one this build doesn't know.
 pub fn refusal_code(code: &str) -> ErrorCode {
-        todo!()
+    let named = serde_json::from_value(serde_json::Value::String(code.to_owned()))
+        .unwrap_or(ErrorCode::Unknown);
+    // Only the handshake's refusals: a hub can't make an agent show the
+    // message of a code that means something else.
+    if matches!(
+        named,
+        ErrorCode::TokenUsed
+            | ErrorCode::TokenExpired
+            | ErrorCode::TokenRevoked
+            | ErrorCode::HostnameTaken
+            | ErrorCode::AgentKeyMismatch
+            | ErrorCode::HubKeyMismatch
+            | ErrorCode::ProofRefused
+            | ErrorCode::PendingLimit
+            | ErrorCode::BindingUnavailable
+    ) {
+        named
+    } else {
+        ErrorCode::Unknown
     }
+}
 
 /// A frame's JSON text.
 #[expect(
@@ -116,8 +135,8 @@ pub fn refusal_code(code: &str) -> ErrorCode {
     reason = "the frames hold only strings, integers and optional structs of them, which JSON always writes"
 )]
 fn written(frame: &impl Serialize) -> String {
-        todo!()
-    }
+    serde_json::to_string(frame).expect("a frame is always JSON")
+}
 
 #[cfg(test)]
 mod tests;

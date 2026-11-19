@@ -30,19 +30,19 @@ pub enum PairFailure {
 
 impl From<LinkError> for PairFailure {
     fn from(error: LinkError) -> Self {
-        todo!()
+        Self::Link(error)
     }
 }
 
 impl From<AgentPairingError> for PairFailure {
     fn from(error: AgentPairingError) -> Self {
-        todo!()
+        Self::Pairing(error)
     }
 }
 
 impl PairWithHub {
     pub fn new(pairing: AgentPairing, connector: Arc<dyn HubConnector>) -> Self {
-        todo!()
+        Self { pairing, connector }
     }
 
     /// Pairs this machine, as `agent_id` under `hostname`, with the hub
@@ -54,13 +54,28 @@ impl PairWithHub {
         agent_id: AgentId,
         hostname: Hostname,
     ) -> Result<PairedHub, PairFailure> {
-        todo!()
+        let route = HubRoute::of(token.address(), token.tls()).map_err(PairFailure::Route)?;
+        let (connect, handshake) = self.pairing.connect(token, agent_id, hostname).await?;
+        let mut link = self.connector.connect(&route).await?;
+        link.send(&connect_frame(&connect)).await?;
+        let HubMessage::Challenge(challenge) = read(link.receive().await?)? else {
+            return Err(PairFailure::OutOfTurn);
+        };
+        let (pair, awaiting) = self
+            .pairing
+            .answer_challenge(handshake, &challenge, link.exporter())
+            .await?;
+        link.send(&pair_frame(&pair)).await?;
+        let HubMessage::Answer(answer) = read(link.receive().await?)? else {
+            return Err(PairFailure::OutOfTurn);
+        };
+        Ok(self.pairing.take_answer(awaiting, &answer).await?)
     }
 }
 
 fn read(frame: api::sync::HubFrame) -> Result<HubMessage, PairFailure> {
-        todo!()
-    }
+    hub_message(&frame).map_err(|_| PairFailure::OutOfTurn)
+}
 
 #[cfg(test)]
 mod tests;
