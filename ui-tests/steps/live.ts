@@ -96,7 +96,7 @@ export async function serveDemoPlans(
   const source = path.join(scratch, "source");
   await mkdir(source);
   for (let n = 1; n <= SOURCE_FILES[size]; n += 1) {
-    await writeFile(path.join(source, `demo-${n}.txt`), `${n}:` + "d".repeat(FILE_BYTES));
+    await writeFile(path.join(source, `demo-${n}.txt`), `${n}:${"d".repeat(FILE_BYTES)}`);
   }
   // The shape of the e2e `serving_with_plan` step: one repository, which this
   // agent maintains, and each plan backing the source up into it.

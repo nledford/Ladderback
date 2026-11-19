@@ -181,7 +181,7 @@ Given(
     assert.ok(at >= 0, `the config has no repository ${alias}`);
     const from = config.indexOf(own, at);
     assert.ok(from >= 0, `the repository ${alias} has no password of its own`);
-    await writeFile(file, config.slice(0, from) + `password = ${JSON.stringify(password)}` + config.slice(from + own.length));
+    await writeFile(file, `${config.slice(0, from)}password = ${JSON.stringify(password)}${config.slice(from + own.length)}`);
   },
 );
 
@@ -199,7 +199,7 @@ Given(
     const from = config.indexOf(key, at);
     assert.ok(from >= 0, `the repository ${alias} has no location`);
     const end = config.indexOf('"', from + key.length);
-    await writeFile(file, config.slice(0, end) + "-not-there" + config.slice(end));
+    await writeFile(file, `${config.slice(0, end)}-not-there${config.slice(end)}`);
   },
 );
 
