@@ -3,9 +3,10 @@
 import assert from "node:assert/strict";
 
 import { type DataTable, Given, Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { journey } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // Where the page keeps the language chosen, in the browser's local storage
@@ -70,8 +71,8 @@ Then(
 // Saving a language shows the page again in it: the press loads the page anew,
 // and the step waits for the new page's heading.
 When("I press Enter, and the page loads again", async function (this: BrowserWorld) {
-  await Promise.all([this.page.waitForEvent("load"), journey(this.page).press("Enter")]);
-  await this.page.getByRole("heading", { level: 1 }).waitFor();
+  await Promise.all([this.page.waitForEvent("load", { timeout: patienceMs() }), journey(this.page).press("Enter")]);
+  await this.page.getByRole("heading", { level: 1 }).waitFor({ timeout: patienceMs() });
 });
 
 Then("no language is chosen in this browser", async function (this: BrowserWorld) {

@@ -300,4 +300,70 @@ fn a_hub_address_is_https_or_http_and_a_host() {
     }
 }
 
+/// A token wrapped across lines, quoted, with a trailing newline, with
+/// zero-width characters a chat app added, or with its prefix's case and
+/// underscores changed is read as the token it is (decision 121, "`pair`").
+#[test]
+fn a_pasted_token_is_read_through_what_a_paste_adds() {
+    let (head, tail) = PINNED.split_at(60);
+    let (prefix, body) = PINNED.split_at(TOKEN_PREFIX.len());
+    for pasted in [
+        format!("{PINNED}\n"),
+        format!("  {head}\n{tail}\r\n"),
+        format!("\"{PINNED}\""),
+        format!("'{PINNED}'"),
+        format!("<{PINNED}>"),
+        format!("\u{201c}{PINNED}\u{201d}"),
+        format!("`\"{PINNED}\"`"),
+        format!("{head}\u{200b}{tail}\u{feff}"),
+        format!("{}{body}", prefix.to_uppercase()),
+        format!("{}{body}", prefix.replace('_', "-")),
+    ] {
+        let read = PairingToken::parse_pasted(&pasted);
+        assert_eq!(
+            read.map(|token| token.to_text().expose().to_owned()),
+            Ok(PINNED.to_owned()),
+            "{pasted:?}"
+        );
+    }
+}
+
+/// Base64 is case-sensitive: a letter of the body whose case a chat app
+/// changed fails the checksum, and so does a body cut short. Text far
+/// longer than any paste of a token is refused unread.
+#[test]
+fn a_pasted_token_with_its_body_changed_is_malformed() {
+    let (prefix, body) = PINNED.split_at(TOKEN_PREFIX.len());
+    for pasted in [
+        format!("{prefix}{}", body.to_lowercase()),
+        PINNED.get(..PINNED.len() - 3).unwrap().to_owned(),
+        format!("\"{PINNED}"),
+        format!("ladderback-pair{body}"),
+        String::new(),
+        " ".repeat(MAX_PASTED_TEXT + 1),
+    ] {
+        assert_eq!(
+            PairingToken::parse_pasted(&pasted).map(|_| ()),
+            Err(TokenRefused::Malformed),
+            "{pasted:?}"
+        );
+    }
+    let spaced = format!("{PINNED}{}", " ".repeat(MAX_PASTED_TEXT - PINNED.len()));
+    assert!(PairingToken::parse_pasted(&spaced).is_ok());
+}
+
+/// `pair <address>` keeps the token's hub key, certificate and seed, and
+/// connects to the address given.
+#[test]
+fn a_token_with_another_address_keeps_its_keys() {
+    let address = HubAddress::parse("https://192.0.2.7:9899").unwrap();
+    let moved = PairingToken::parse(PINNED)
+        .unwrap()
+        .with_address(address.clone());
+    assert_eq!(moved.address(), &address);
+    assert_eq!(moved.hub_key().as_bytes(), &[0x11; KEY_BYTES]);
+    assert_eq!(moved.tls(), pinned());
+    assert_eq!(moved.pairing_seed().expose(), &[0x66; KEY_BYTES]);
+}
+
 use super::super::keys::SMALL_ORDER_KEYS;

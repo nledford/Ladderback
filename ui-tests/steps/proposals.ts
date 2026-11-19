@@ -9,17 +9,15 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
+import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
-import { PASSWORD, serveDemoPlans, until } from "./live.ts";
+import { PASSWORD, serveDemoPlans } from "./live.ts";
 import { focusComesTo } from "./repositories.ts";
 import { toastReads } from "./toast.ts";
-
-// The page reads the proposal and the daemon applies it in well under this.
-const ANSWER_PATIENCE_MS = 10_000;
 
 // The proposal each scenario made, by its ID.
 const proposals = new WeakMap<BrowserWorld, string>();
@@ -112,13 +110,13 @@ When("I type the proposal's short ID", async function (this: BrowserWorld) {
 });
 
 Then("the proposal says {string}", async function (this: BrowserWorld, text: string) {
-  await openProposal(this).getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
+  await openProposal(this).getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // A sentence of the page, wherever it stands, the values in it read whether
 // or not bidi isolation marks surround them.
 Then("the page says {string}", async function (this: BrowserWorld, text: string) {
-  await this.page.getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
+  await this.page.getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // The context of the diff holds the repository's inline password (I4).
@@ -130,25 +128,26 @@ Then("the changes to the configuration file show the repository's password maske
   assert.ok(!page.includes(PASSWORD), "the page shows the repository's password");
 });
 
+/** The IDs of the plans the daemon lists. */
+async function listedPlans(world: BrowserWorld): Promise<string[]> {
+  const { plans } = (await api(world, "GET", "/api/v1/plans")) as { plans: { id: string }[] };
+  return plans.map((listed) => listed.id);
+}
+
+// The daemon applies a proposal a moment after the page sends its approval.
 Then("the daemon lists the plan {string}", async function (this: BrowserWorld, plan: string) {
-  await until(
-    async () => {
-      const { plans } = (await api(this, "GET", "/api/v1/plans")) as { plans: { id: string }[] };
-      return plans.some((listed) => listed.id === plan) ? true : null;
-    },
-    ANSWER_PATIENCE_MS,
-    `the daemon never listed the plan ${plan}`,
+  await untilStepLimit(
+    `the daemon's plans include ${plan}`,
+    () => listedPlans(this),
+    (plans) => plans.includes(plan),
   );
 });
 
 Then("the daemon no longer lists the plan {string}", async function (this: BrowserWorld, plan: string) {
-  await until(
-    async () => {
-      const { plans } = (await api(this, "GET", "/api/v1/plans")) as { plans: { id: string }[] };
-      return plans.some((listed) => listed.id === plan) ? null : true;
-    },
-    ANSWER_PATIENCE_MS,
-    `the daemon still lists the plan ${plan}`,
+  await untilStepLimit(
+    `the daemon's plans leave out ${plan}`,
+    () => listedPlans(this),
+    (plans) => !plans.includes(plan),
   );
 });
 
@@ -169,7 +168,7 @@ Then("the open proposal shows an error alert containing {string}", async functio
     .locator(".alert.tone-error")
     .filter({ hasText: new RegExp([...needle].map(escapeRegExp).join(ISOLATION)) })
     .first()
-    .waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // One failure, one alert (DESIGN.md): once the refusal of the last press
@@ -185,7 +184,7 @@ Then("the open proposal shows one alert, after the button {string}", async funct
         after: alerts.filter((alert) => pressed.compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).length,
       };
     });
-  await expect.poll(async () => (await count()).after, { timeout: ANSWER_PATIENCE_MS }).toBeGreaterThan(0);
+  await expect.poll(async () => (await count()).after).toBeGreaterThan(0);
   assert.deepEqual(await count(), { all: 1, after: 1 }, `the alerts in the open proposal, and those after the button "${name}"`);
 });
 

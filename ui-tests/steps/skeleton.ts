@@ -9,12 +9,12 @@
 import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import { composite, contrastRatio } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { demoSection, eachOf } from "./components.ts";
+import { demoSection, eachOf } from "../support/gallery.ts";
 import { saidJustBeforeBusy } from "./first_load.ts";
 
 // The gallery's skeletons while its region waits (`gallery.rs`): a

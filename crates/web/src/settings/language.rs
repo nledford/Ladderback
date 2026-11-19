@@ -10,9 +10,12 @@ use std::sync::Arc;
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
+use crate::announcer::Politeness;
+use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
-use crate::components::{Button, LabelLanguage, RadioGroup};
+use crate::components::{Alert, Button, LabelLanguage, RadioGroup};
 use crate::language_choice::{GROUP, HEADING_ID, chosen, options, to_keep};
+use crate::live::reply;
 use crate::page;
 use crate::settings_tabs::Section;
 use crate::text;
@@ -22,7 +25,8 @@ use crate::variants::Tone;
 /// this build offers, named in itself and marked as written in it, and a
 /// button that keeps the choice and shows the page again in it, with focus
 /// back on the section's heading. A browser that refuses to keep it is said
-/// so, and the page stays as it was.
+/// so in an error alert, and assertively, as the press's answer, since the
+/// alert is no live region; the page stays as it was.
 #[component]
 pub(super) fn LanguageSection(localizer: Arc<Localizer>) -> impl IntoView {
     let languages = l10n::languages();
@@ -48,6 +52,8 @@ pub(super) fn LanguageSection(localizer: Arc<Localizer>) -> impl IntoView {
         }
     });
     let not_kept = text(&localizer, msg::UI_LANGUAGE_NOT_KEPT);
+    let said = not_kept.clone();
+    let alert_localizer = Arc::clone(&localizer);
     view! {
         <section aria-labelledby=HEADING_ID>
             <h2 id=HEADING_ID node_ref=heading tabindex="-1">
@@ -58,7 +64,11 @@ pub(super) fn LanguageSection(localizer: Arc<Localizer>) -> impl IntoView {
                 on:submit=move |event| {
                     event.prevent_default();
                     let tag = to_keep(chosen.get_untracked(), &languages);
-                    refused.set(!page::choose_language(tag, Section::Language.fragment()));
+                    let kept = page::choose_language(tag, Section::Language.fragment());
+                    if !kept {
+                        reply(Politeness::Assertive, &said);
+                    }
+                    refused.set(!kept);
                 }
             >
                 <RadioGroup
@@ -78,7 +88,18 @@ pub(super) fn LanguageSection(localizer: Arc<Localizer>) -> impl IntoView {
                     />
                 </p>
             </form>
-            <p role="alert">{move || refused.get().then(|| not_kept.clone())}</p>
+            {move || {
+                refused
+                    .get()
+                    .then(|| {
+                        let words = not_kept.clone();
+                        view! {
+                            <Alert localizer=Arc::clone(&alert_localizer) tone=AlertTone::Error>
+                                {words}
+                            </Alert>
+                        }
+                    })
+            }}
         </section>
     }
 }

@@ -10,13 +10,10 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { Request, Route } from "playwright";
 
 import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
+import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { plannedRun, rowNamed, until } from "./live.ts";
+import { plannedRun, rowNamed } from "./live.ts";
 import { expand } from "./repositories.ts";
-
-// A saved plan's list is read again as soon as the daemon answers, and the
-// scheduler plans its run a moment later; ten seconds is generous for both.
-const SAVE_PATIENCE_MS = 10_000;
 
 // The reads of the plans list each world's daemon holds back, as the page's
 // requests, and what lets them go, so a step can release them and wait until
@@ -142,27 +139,33 @@ When("I select all the text and type {string}", async function (this: BrowserWor
   await keys.type(await expand(this, text));
 });
 
+// A plan deleted leaves the table as soon as the page has read the list again.
 Then("the table {string} has no row {string}", async function (this: BrowserWorld, name: string, row: string) {
   const rows = rowNamed(this, name, row);
-  await until(async () => ((await rows.count()) === 0 ? true : null), SAVE_PATIENCE_MS, `the table ${name} still has the row ${row}`);
+  await untilStepLimit(
+    `the rows ${row} of the table ${name} go down to 0`,
+    () => rows.count(),
+    (count) => count === 0,
+  );
 });
 
 // The cell of a plan's next run gives in its `<time datetime>` the run the
-// daemon planned, as the plans list sends it.
+// daemon planned, as the plans list sends it: a saved plan's list is read
+// again as soon as the daemon answers, and the scheduler plans its run a
+// moment later.
 Then("the row {string} of the table {string} shows a next run", async function (this: BrowserWorld, row: string, name: string) {
   const found = rowNamed(this, name, row).first();
-  await until(
+  await untilStepLimit(
+    `the daemon's planned run of ${row} is the datetime of a cell of the row ${row} of the table ${name}`,
     async () => {
       const planned = await plannedRun(this, row);
-      if (planned === null) return null;
       const given = await found
         .getByRole("cell")
         .evaluateAll((cells) => cells.map((cell) => cell.querySelector("time")?.getAttribute("datetime") ?? null))
         .catch((): (string | null)[] => []);
-      return given.includes(planned) ? planned : null;
+      return { planned, given };
     },
-    SAVE_PATIENCE_MS,
-    `the row ${row} of the table ${name} never showed the run the daemon planned`,
+    ({ planned, given }) => planned !== null && given.includes(planned),
   );
 });
 
@@ -174,7 +177,7 @@ When("I press Tab until focus is on the first button of the plan {string}", asyn
     .filter({ has: this.page.getByRole("rowheader", { name: namePattern(plan) }) })
     .getByRole("button")
     .first();
-  await button.waitFor({ timeout: SAVE_PATIENCE_MS });
+  await button.waitFor({ timeout: patienceMs() });
   await pressUntilFocused(this.page, "Tab", button, `the first button of the plan ${plan}`);
 });
 
@@ -182,6 +185,6 @@ When("I press Tab until focus is on the first button of the plan {string}", asyn
 // shows once the plan is read.
 Then("the page shows the form of the plan {string}", async function (this: BrowserWorld, plan: string) {
   const pattern = new RegExp(plan.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  await this.page.getByRole("heading", { level: 2, name: pattern }).waitFor({ timeout: SAVE_PATIENCE_MS });
-  await this.page.getByRole("form", { name: pattern }).getByRole("textbox").first().waitFor({ timeout: SAVE_PATIENCE_MS });
+  await this.page.getByRole("heading", { level: 2, name: pattern }).waitFor({ timeout: patienceMs() });
+  await this.page.getByRole("form", { name: pattern }).getByRole("textbox").first().waitFor({ timeout: patienceMs() });
 });

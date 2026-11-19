@@ -8,13 +8,13 @@ import assert from "node:assert/strict";
 
 import { Then } from "@cucumber/cucumber";
 import type { DataTable } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import { composite, contrastRatio, whereFocusIs } from "../support/keyboard.ts";
 import { besideIconProblems, wordsBesideIcon } from "../support/parts.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { demoSection, eachOf } from "./components.ts";
+import { demoSection, eachOf } from "../support/gallery.ts";
 
 // The gallery's badges (`gallery.rs`): a count, a tag and a long tag, then
 // one badge named for each of its five tones.

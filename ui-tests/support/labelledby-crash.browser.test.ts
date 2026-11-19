@@ -30,7 +30,7 @@ const browserType = engines[engine];
 // A scenario step's limit (support/world.ts), for the launch and for each test.
 const LIMIT_MS = 30_000;
 
-// The scenarios' scan (steps/components.ts).
+// The scenarios' scan (steps/gallery.ts).
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 // A table and a button, each named by a heading through aria-labelledby, as

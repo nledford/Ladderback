@@ -83,6 +83,9 @@ mod mcp_proposals_steps;
 mod mcp_steps;
 #[path = "steps/notifications.rs"]
 mod notifications_steps;
+#[cfg(feature = "hub")]
+#[path = "steps/pairing_terminal.rs"]
+mod pairing_terminal_steps;
 #[path = "steps/plan_dry_run.rs"]
 mod plan_dry_run_steps;
 #[path = "steps/plan_settings.rs"]
@@ -155,6 +158,8 @@ struct Agent {
     core_dumps: core_dumps_steps::CoreDumpsE2e,
     restore: restore_steps::RestoreE2e,
     download: download_steps::DownloadE2e,
+    #[cfg(feature = "hub")]
+    pairing_terminal: pairing_terminal_steps::PairingTerminal,
     /// The daemon's answer to an API token setting the dry-run allowlist.
     dry_run_refusal: Option<request_checks_steps::Response>,
 }
@@ -216,6 +221,8 @@ impl Agent {
             core_dumps: core_dumps_steps::CoreDumpsE2e::default(),
             restore: restore_steps::RestoreE2e::default(),
             download: download_steps::DownloadE2e::default(),
+            #[cfg(feature = "hub")]
+            pairing_terminal: pairing_terminal_steps::PairingTerminal::default(),
             dry_run_refusal: None,
         }
     }

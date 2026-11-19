@@ -84,7 +84,7 @@ static LOGS: AtomicUsize = AtomicUsize::new(0);
 /// The wait is on a blocking thread: see [`blocking`]. The daemon uses the
 /// folders under `home`, or folders of its own; `rust_log`, when given, is
 /// the `RUST_LOG` it logs at.
-async fn start(
+pub(crate) async fn start(
     scratch: &Path,
     home: Option<&Path>,
     args: &[&str],

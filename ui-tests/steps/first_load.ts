@@ -10,9 +10,9 @@
 import assert from "node:assert/strict";
 
 import { Given, Then } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // A pixel of rounding between skeletons laid out side by side.

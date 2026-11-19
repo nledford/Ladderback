@@ -4,8 +4,8 @@ import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { Page } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { journey, pressUntilFocused } from "../support/keyboard.ts";
 import { type BrowserWorld, repoRoot } from "../support/world.ts";
 

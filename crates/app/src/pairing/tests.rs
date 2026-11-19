@@ -10,17 +10,17 @@ use super::*;
 use crate::fakes::{FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, SeededRandom};
 use crate::ports::{AgentRegistry, Clock, Identity, Signing};
 
-const EXPORTER: [u8; 32] = [0xee; 32];
+pub(super) const EXPORTER: [u8; 32] = [0xee; 32];
 
-struct Hub {
-    registry: Arc<InMemoryAgentRegistry>,
+pub(super) struct Hub {
+    pub(super) registry: Arc<InMemoryAgentRegistry>,
     identity: Arc<InMemoryIdentity>,
     clock: Arc<FakeClock>,
-    pairing: HubPairing,
+    pub(super) pairing: HubPairing,
 }
 
 impl Hub {
-    fn new(seed: u64) -> Self {
+    pub(super) fn new(seed: u64) -> Self {
         let registry = Arc::new(InMemoryAgentRegistry::new());
         let identity = Arc::new(InMemoryIdentity::default());
         let clock = Arc::new(FakeClock::new(
@@ -41,7 +41,7 @@ impl Hub {
         }
     }
 
-    async fn token(&self, tls: TokenTls) -> PairingToken {
+    pub(super) async fn token(&self, tls: TokenTls) -> PairingToken {
         let keys = self.pairing.keys().await.unwrap();
         let address = HubAddress::parse("https://hub.example:9443").unwrap();
         self.pairing
@@ -51,11 +51,11 @@ impl Hub {
     }
 }
 
-fn pinned() -> TokenTls {
+pub(super) fn pinned() -> TokenTls {
     TokenTls::Pinned(Fingerprint::from_digest([7; 32]))
 }
 
-fn agent(identity: Arc<InMemoryIdentity>) -> AgentPairing {
+pub(super) fn agent(identity: Arc<InMemoryIdentity>) -> AgentPairing {
     AgentPairing::new(
         identity,
         Arc::new(FakeSigning),
@@ -63,11 +63,11 @@ fn agent(identity: Arc<InMemoryIdentity>) -> AgentPairing {
     )
 }
 
-fn agent_id() -> AgentId {
+pub(super) fn agent_id() -> AgentId {
     AgentId::from_uuid(Uuid::from_u128(1))
 }
 
-fn laptop() -> Hostname {
+pub(super) fn laptop() -> Hostname {
     Hostname::parse("laptop").unwrap()
 }
 

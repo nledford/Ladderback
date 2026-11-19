@@ -57,7 +57,7 @@ use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
     Banner, Button, Checkbox, Column, Confirmation, ErrorSummary, Name, ReviewDialog, Sentences,
     State, SummaryItem, Tab, Table, Tabs, TextField, Toast, ToastTone, Toasts, Working, copy_text,
-    hand_focus_when_gone, sentence_view, text_field,
+    dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals, text_field,
 };
 use crate::live::reply;
 use crate::page_width::PageWidth;
@@ -458,7 +458,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                 Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
                 Phase::Ready => {
                     match (refused.get(), tokens.get()) {
-                        (Some(sentence), _) => view! { <p>{sentence_view(sentence)}</p> }.into_any(),
+                        (Some(sentence), _) => refusal_alert(&list_localizer, sentence).into_any(),
                         (None, Some(list)) if !list.is_empty() => {
                             tokens_table(&list_localizer, list, ask_revoke, viewer.as_ref())
                                 .into_any()
@@ -806,6 +806,7 @@ fn RevokeDialog(
         active: busy.into(),
         status: text(&localizer, msg::UI_API_TOKEN_REVOKING),
     };
+    let error_localizer = Arc::clone(&localizer);
     view! {
         <ReviewDialog
             open=open
@@ -818,9 +819,7 @@ fn RevokeDialog(
             fallback=HEADING_ID.to_owned()
         >
             <p id=REVOKE_BODY_ID>{text(&localizer, msg::UI_API_TOKEN_REVOKE_BODY)}</p>
-            {move || {
-                error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
-            }}
+            {move || error.get().map(|sentence| dialog_refusal_alert(&error_localizer, sentence))}
         </ReviewDialog>
     }
 }
@@ -1033,6 +1032,16 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
     let stage_localizer = Arc::clone(&localizer);
     let status_localizer = Arc::clone(&localizer);
     let dialog_localizer = Arc::clone(&localizer);
+    let pending_localizer = Arc::clone(&localizer);
+    // A cancel refused while the restart waits is shown in the section and
+    // said assertively, as the page's answer; one refused in the dialog is
+    // said by the dialog's own alert alone.
+    let pending_refused = Signal::derive(move || {
+        (section.stage.get() == Stage::Pending)
+            .then(|| error.get())
+            .flatten()
+    });
+    say_refusals(pending_refused);
     view! {
         <section aria-labelledby=restart::HEADING_ID>
             <h2 id=restart::HEADING_ID tabindex="-1">
@@ -1090,10 +1099,7 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
             }}
             <p>{move || status.get().map(|id| text(&status_localizer, id))}</p>
             {move || {
-                (section.stage.get() == Stage::Pending)
-                    .then(|| error.get())
-                    .flatten()
-                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+                pending_refused.get().map(|sentence| refusal_alert(&pending_localizer, sentence))
             }}
             {move || {
                 asking
@@ -1144,6 +1150,7 @@ fn RestartDialog(
         tone: Tone::Error,
         action: Callback::new(move |()| ask.run(RestartWhenDto::Now)),
     });
+    let error_localizer = Arc::clone(&localizer);
     view! {
         <ReviewDialog
             open=open
@@ -1160,9 +1167,7 @@ fn RestartDialog(
                 <p>{say(&localizer, running_said(running))}</p>
                 <p>{text(&localizer, msg::UI_RESTART_QUEUED)}</p>
             </div>
-            {move || {
-                error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
-            }}
+            {move || error.get().map(|sentence| dialog_refusal_alert(&error_localizer, sentence))}
         </ReviewDialog>
     }
 }

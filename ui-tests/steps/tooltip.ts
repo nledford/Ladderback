@@ -7,15 +7,16 @@
 import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { expect } from "../support/expect.ts";
+import { untilStepLimit } from "../support/patience.ts";
 import { pointer } from "../support/pointer.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
-// Longer than the 300 ms a pointer rests before a tooltip shows, and the
-// 150 ms grace after it leaves, with room for a busy machine.
-const PATIENCE_MS = 2_000;
+// A tooltip shows once a pointer has rested 300 ms, or at once for focus,
+// and goes 150 ms after the pointer leaves: the steps wait for either until
+// the step's limit (#1104).
 
 // A tooltip shows only once the pointer has rested this long: a little less
 // than its 300 ms, for the time a step takes to start.
@@ -125,13 +126,11 @@ function drawn(found: Locator): Promise<Drawn> {
 /** The button and its tooltip once the tooltip shows. */
 async function shown(page: Page, name: string): Promise<Drawn> {
   const found = await button(page, name);
-  const deadline = Date.now() + PATIENCE_MS;
-  for (;;) {
-    const now = await drawn(found);
-    if (now.open) return now;
-    assert.ok(Date.now() < deadline, `the tooltip of the button "${name}" doesn't show`);
-    await sleep(25);
-  }
+  return untilStepLimit(
+    `the tooltip of the button "${name}" shows`,
+    () => drawn(found),
+    (now) => now.open,
+  );
 }
 
 const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -165,12 +164,13 @@ Then(
   },
 );
 
+// The step before took the pointer or focus away, or pressed Escape.
 Then("no tooltip shows", async function (this: BrowserWorld) {
-  const deadline = Date.now() + PATIENCE_MS;
-  while (await anyShown(this.page)) {
-    assert.ok(Date.now() < deadline, "a tooltip still shows");
-    await sleep(25);
-  }
+  await untilStepLimit(
+    "no tooltip shows",
+    () => anyShown(this.page),
+    (any) => !any,
+  );
   await expect(this.page.getByRole("tooltip")).toHaveCount(0);
 });
 
@@ -199,7 +199,7 @@ Then("the tooltip {string} shows only once the pointer has rested a moment", asy
     assert.equal(look.shown, false, `a tooltip showed ${look.at - since} ms after the pointer came`);
     await sleep(25);
   }
-  await expect(this.page.getByRole("tooltip", { name: text, exact: true })).toBeVisible({ timeout: PATIENCE_MS });
+  await expect(this.page.getByRole("tooltip", { name: text, exact: true })).toBeVisible();
 });
 
 // 1.4.13, Hoverable: the pointer can move onto the tooltip, across the gap
@@ -210,6 +210,8 @@ When("I move the pointer onto the tooltip {string}", async function (this: Brows
   await pointer(this.page).restOn(tip);
 });
 
+// A look at once, past the grace: a check that the tooltip didn't go, so it
+// must not wait for one that went to come back (#1104).
 Then("the tooltip {string} still shows a moment later", async function (this: BrowserWorld, text: string) {
   await sleep(PAST_GRACE_MS);
   await expect(this.page.getByRole("tooltip", { name: text, exact: true })).toBeVisible({ timeout: 1 });

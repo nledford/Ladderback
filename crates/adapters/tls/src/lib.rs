@@ -1,7 +1,8 @@
 //! The hub's built-in TLS (§16, decision 120, "Binding to the TLS session",
 //! "The hub key" and "Crates"): the listener, its self-signed certificate
 //! made with `rcgen` from the hub's TLS key, the agent's client pinned to
-//! that key, and the session's `tls-exporter` value the handshake binds to.
+//! that key, the session's `tls-exporter` value the handshake binds to, and
+//! the agent's WebSocket connector to its hub's `/sync/v1`.
 //!
 //! Every config is TLS 1.3 alone, from one crypto provider, aws-lc-rs, with
 //! its TLS 1.3 cipher suites alone and the key exchange groups named here
@@ -40,6 +41,10 @@ use rustls::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{TlsAcceptor, TlsConnector, client, server};
+
+mod hub_connector;
+
+pub use hub_connector::{ANSWER_WITHIN, CONNECT_WITHIN, WebSocketHubConnector};
 
 /// The label of the `tls-exporter` channel binding (RFC 9266), with an
 /// empty context and 32 bytes.

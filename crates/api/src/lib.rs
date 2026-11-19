@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod sync;
+
 /// Why something failed. Closed: a code this version doesn't know, say from
 /// a newer agent, reads as [`ErrorCode::Unknown`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -548,6 +550,57 @@ pub enum ErrorCode {
     /// No route of the API serves the path asked for under `/api`: a typo,
     /// or a route of a newer or older Ladderback (§4.2). Nothing ran.
     RouteUnknown,
+    /// The pairing token was already spent on another pairing (§16,
+    /// decision 121, "Errors and their next step").
+    TokenUsed,
+    /// The pairing token lapsed unused.
+    TokenExpired,
+    /// A person revoked the pairing token on the hub.
+    TokenRevoked,
+    /// The text isn't a whole pairing token: its prefix, its encoding, its
+    /// length or its checksum is wrong.
+    TokenMalformed,
+    /// The pairing token is of a later layout than this agent reads.
+    TokenUnsupported,
+    /// Another agent of the hub holds the hostname, named by the argument
+    /// `hostname`, last heard from as the argument `last_seen` says. The
+    /// token stays good.
+    HostnameTaken,
+    /// The hub has another key under this agent's ID.
+    AgentKeyMismatch,
+    /// The hub's key isn't the one the agent trusts, or the one its token
+    /// names: nothing of the token was sent.
+    HubKeyMismatch,
+    /// The hub didn't prove it holds its key on this connection: nothing of
+    /// the token was sent.
+    HubProofInvalid,
+    /// The hub refused the agent's proof: one code for every cause.
+    ProofRefused,
+    /// As many agents as the hub allows wait for approval already. The
+    /// token stays good.
+    PendingLimit,
+    /// The hub closed the connection because it can't offer the binding
+    /// the agent's token names, before it proved itself.
+    BindingUnavailable,
+    /// No hub answered at the argument `address`: the connection was
+    /// refused, the name didn't resolve, or nothing answered in time.
+    /// Nothing was sent.
+    HubUnreachable,
+    /// The certificate at the pinned argument `address` isn't the one the
+    /// token names. Nothing was sent.
+    HubPinMismatch,
+    /// The certificate at the CA-checked argument `address` isn't one this
+    /// machine's trust store accepts for its name. Nothing was sent.
+    HubUntrusted,
+    /// TLS with the hub at the argument `address` failed on its version or
+    /// its key exchange. Nothing was sent.
+    HubTlsRefused,
+    /// The token's address is plain `http://` off this computer, which would
+    /// show the token to the network. Nothing was sent.
+    PlainAddress,
+    /// The connection to the hub ended before the pairing was answered, or
+    /// the hub sent what isn't the handshake's next message.
+    HubConnectionLost,
     #[serde(other)]
     Unknown,
 }
@@ -973,6 +1026,14 @@ impl ErrorCode {
     /// own here, so the compiler asks for them.
     pub const fn args(self) -> &'static [ArgSpec] {
         match self {
+            Self::HubUnreachable
+            | Self::HubPinMismatch
+            | Self::HubUntrusted
+            | Self::HubTlsRefused => &[ArgSpec {
+                name: "address",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::EngineExited => &[ArgSpec {
                 name: "exit_code",
                 kind: ArgKind::Text,
@@ -1003,6 +1064,18 @@ impl ErrorCode {
                 kind: ArgKind::Count,
                 optional: false,
             }],
+            Self::HostnameTaken => &[
+                ArgSpec {
+                    name: "hostname",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "last_seen",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::ApiTokenLimit => &[ArgSpec {
                 name: "limit",
                 kind: ArgKind::Count,
@@ -1513,6 +1586,19 @@ impl ErrorCode {
             | Self::DownloadsUnavailable
             | Self::DownloadUnknown
             | Self::RouteUnknown
+            | Self::TokenUsed
+            | Self::TokenExpired
+            | Self::TokenRevoked
+            | Self::TokenMalformed
+            | Self::TokenUnsupported
+            | Self::AgentKeyMismatch
+            | Self::HubKeyMismatch
+            | Self::HubProofInvalid
+            | Self::ProofRefused
+            | Self::PendingLimit
+            | Self::BindingUnavailable
+            | Self::PlainAddress
+            | Self::HubConnectionLost
             | Self::Unknown => &[],
         }
     }

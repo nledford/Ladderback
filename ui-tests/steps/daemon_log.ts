@@ -5,14 +5,11 @@
 
 import { Given, Then } from "@cucumber/cucumber";
 import type { DataTable } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { table } from "./live.ts";
 import { runningBuild } from "./start_page.ts";
-
-// How long the page takes to show what the daemon answered, with room.
-const PAGE_PATIENCE_MS = 10_000;
 
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
@@ -70,12 +67,12 @@ async function messages(world: BrowserWorld, name: string): Promise<string[] | s
 
 Then("the table {string} lists, from the top, the messages:", async function (this: BrowserWorld, name: string, expected: DataTable) {
   const listed = expected.raw().map(([message]) => message);
-  await expect.poll(() => messages(this, name), { timeout: PAGE_PATIENCE_MS }).toEqual(listed);
+  await expect.poll(() => messages(this, name)).toEqual(listed);
 });
 
 // The program and its build as `--version` prints them, then each line as the
 // log writes it, one to a line.
 Then("the clipboard holds the running version, then the lines:", async function (this: BrowserWorld, lines: string) {
   const expected = `ladderback ${await runningBuild()}\n${lines}\n`;
-  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS }).toBe(expected);
+  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
 });

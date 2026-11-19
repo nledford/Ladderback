@@ -2,18 +2,15 @@ import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
 import { errors, type Locator } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { journey, namePattern, pressUntilFocused, whereFocusIs } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
-// Some of what a walk is after shows only once the daemon answers the page's
-// first read, as the pages' own steps wait for it; ten seconds is generous.
-const TARGET_PATIENCE_MS = 10_000;
-
-// A polite message waits up to two seconds for company, and its text is set a
-// moment after the region is cleared (§4.5); five seconds is generous.
-const REGION_PATIENCE_MS = 5_000;
+// How long a wait for a region's next change goes before it reads the region
+// anew: a page that renders the region again leaves the old one unchanged.
+const REGION_REREAD_MS = 1_000;
 
 // The time a region stays silent: past the merge window and the set delay.
 const SILENCE_MS = 2_500;
@@ -55,7 +52,7 @@ When("I open the {string} demo", async function (this: BrowserWorld, demo: strin
   // The section the address names, by its `id`, as the browser finds it.
   const heading = this.page.locator(`#${anchor}`).getByRole("heading", { level: 2 }).first();
   try {
-    await expect(heading).toBeFocused({ timeout: TARGET_PATIENCE_MS });
+    await expect(heading).toBeFocused();
   } catch {
     assert.fail(
       `the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`,
@@ -73,7 +70,7 @@ When("I open the {string} demo asking for the locale {string}", async function (
   await this.open(address);
   const heading = this.page.locator(`#${anchor}`).getByRole("heading", { level: 2 }).first();
   try {
-    await expect(heading).toBeFocused({ timeout: TARGET_PATIENCE_MS });
+    await expect(heading).toBeFocused();
   } catch {
     assert.fail(
       `the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`,
@@ -94,10 +91,10 @@ export async function pressUntilFocusIsOn(world: BrowserWorld, key: string, role
   const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
   try {
-    await target.first().waitFor({ state: "visible", timeout: TARGET_PATIENCE_MS });
+    await target.first().waitFor({ state: "visible", timeout: patienceMs() });
   } catch (error) {
     if (!(error instanceof errors.TimeoutError)) throw error;
-    assert.fail(`the ${role} "${name}" did not show within ${TARGET_PATIENCE_MS / 1_000} s, so no ${key} press could reach it`);
+    assert.fail(`the ${role} "${name}" did not show by the step's limit, so no ${key} press could reach it`);
   }
   await pressUntilFocused(world.page, key, target, `the ${role} "${name}"`);
 }
@@ -234,19 +231,39 @@ async function region(world: BrowserWorld, politeness: string): Promise<Locator>
 
 const textOf = async (found: Locator) => ((await found.textContent()) ?? "").trim();
 
-// The text is read until it matches or the patience runs out, so that the
-// two seconds a polite message waits don't fail the step. What it reports
-// when it never matches is the last text read.
-Then("the {word} region reads {string}", async function (this: BrowserWorld, politeness: string, expected: string) {
-  const found = await region(this, politeness);
-  const deadline = Date.now() + REGION_PATIENCE_MS;
-  // What a reader hears has no bidi isolation marks (§4.5).
-  let actual = (await textOf(found)).replace(ISOLATION_MARKS, "");
-  while (actual !== expected && Date.now() < deadline) {
-    await sleep(100);
-    actual = (await textOf(found)).replace(ISOLATION_MARKS, "");
+/** Waits until what a region says, without the bidi isolation marks a reader
+ *  never hears (§4.5), is `wanted`, and returns it, or fails at the step's
+ *  limit with the last text read. The page tells of each change to the region
+ *  as it sets an announcement, so the wait ends then, and a text said only for
+ *  a moment is heard too. */
+async function untilRegionSays(found: Locator, politeness: string, wanted: (said: string) => boolean): Promise<string> {
+  const ends = Date.now() + patienceMs();
+  let said = (await textOf(found)).replace(ISOLATION_MARKS, "");
+  while (!wanted(said)) {
+    const left = ends - Date.now();
+    if (left <= 0) assert.fail(`the ${politeness} region (last read ${JSON.stringify(said)})`);
+    const changed = found.evaluate((region) => {
+      const { promise, resolve } = Promise.withResolvers<string>();
+      const observer = new MutationObserver(() => {
+        observer.disconnect();
+        resolve((region.textContent ?? "").trim());
+      });
+      observer.observe(region, { childList: true, characterData: true, subtree: true });
+      return promise;
+    });
+    // A page that goes away before its region changes is read anew, as is one
+    // whose region didn't change for a while.
+    const unheard = () => null;
+    const told = await Promise.race([changed.catch(unheard), sleep(Math.min(REGION_REREAD_MS, left)).then(unheard)]);
+    said = (told ?? (await textOf(found))).replace(ISOLATION_MARKS, "");
   }
-  assert.equal(actual, expected, `the ${politeness} region`);
+  return said;
+}
+
+// The region is waited on, so that the two seconds a polite message waits
+// don't fail the step.
+Then("the {word} region reads {string}", async function (this: BrowserWorld, politeness: string, expected: string) {
+  await untilRegionSays(await region(this, politeness), politeness, (said) => said === expected);
 });
 
 // The regions merge what arrives within the merge window (§4.5), so a live
@@ -254,16 +271,7 @@ Then("the {word} region reads {string}", async function (this: BrowserWorld, pol
 // that ends quickly may finish before the journey reads the start: what a
 // journey checks is that the region comes to contain the message it expects.
 Then("the {word} region comes to contain {string}", async function (this: BrowserWorld, politeness: string, expected: string) {
-  const found = await region(this, politeness);
-  const deadline = Date.now() + REGION_PATIENCE_MS;
-  // What a reader hears has no bidi isolation marks (§4.5).
-  const heard = async () => (await textOf(found)).replace(ISOLATION_MARKS, "");
-  let actual = await heard();
-  while (!actual.includes(expected) && Date.now() < deadline) {
-    await sleep(100);
-    actual = await heard();
-  }
-  assert.ok(actual.includes(expected), `the ${politeness} region (last read ${JSON.stringify(actual)})`);
+  await untilRegionSays(await region(this, politeness), politeness, (said) => said.includes(expected));
 });
 
 Then("the {word} region is empty", async function (this: BrowserWorld, politeness: string) {
@@ -312,4 +320,10 @@ Then("the live regions stay silent", async function (this: BrowserWorld) {
     for (const found of regions) assert.equal(await textOf(found), "", "a live region");
     await sleep(100);
   } while (Date.now() < until);
+});
+
+// The reader asks her system for less motion while the page is open, and the
+// page follows at once (WCAG 2.3.3).
+When("the reader asks for less motion", async function (this: BrowserWorld) {
+  await this.page.emulateMedia({ reducedMotion: "reduce" });
 });

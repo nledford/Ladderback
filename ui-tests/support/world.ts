@@ -19,6 +19,7 @@ import {
   BeforeAll,
   type ITestCaseHookParameter,
   setDefaultTimeout,
+  setDefinitionFunctionWrapper,
   setWorldConstructor,
   Status,
   World,
@@ -36,9 +37,12 @@ import {
 } from "playwright";
 
 import { avoidLabelledByCrash } from "./labelledby-crash.ts";
+import { patienceMs, STEP_LIMIT_MS, timed } from "./patience.ts";
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
 
-setDefaultTimeout(30_000);
+setDefaultTimeout(STEP_LIMIT_MS);
+// Each step and hook starts its clock, which its waits run until (#1104).
+setDefinitionFunctionWrapper(timed);
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -300,8 +304,14 @@ export class BrowserWorld extends World {
   async open(pathname = "/"): Promise<void> {
     if (browser === undefined) throw new Error("the browser is not running: BeforeAll failed");
     // A second page of the scenario gets a context of its own; the first
-    // one's trace ends here rather than record for the rest of the run.
+    // one's trace ends here rather than record for the rest of the run, and
+    // the first context closes, so contexts don't pile up until AfterAll's
+    // `browser.close()` has to close them all at once within its limit.
     await this.discardTrace();
+    await (this.context as BrowserContext | undefined)?.close();
+    // Its pages and downloads went with it.
+    this.firstTab = null;
+    this.downloads = [];
     this.context = await browser.newContext(this.contextOptions);
     // Screenshots and DOM snapshots of every action, kept only when the
     // scenario fails (`keepFailureEvidence`), so a failure that shows only on
@@ -324,7 +334,7 @@ export class BrowserWorld extends World {
     this.#watch(this.page);
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
-    await this.page.getByRole("heading", { level: 1 }).waitFor();
+    await this.page.getByRole("heading", { level: 1 }).waitFor({ timeout: patienceMs() });
     // As a constructed sheet, not a <style> element: the page's content
     // security policy refuses an inline one, and a reader's own styles are not
     // the page's to refuse.
@@ -344,7 +354,7 @@ export class BrowserWorld extends World {
     this.page = await this.context.newPage();
     this.#watch(this.page);
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
-    await this.page.getByRole("heading", { level: 1 }).waitFor();
+    await this.page.getByRole("heading", { level: 1 }).waitFor({ timeout: patienceMs() });
   }
 
   /** The steps act in the first tab again, brought to the front. */
@@ -383,6 +393,8 @@ export class BrowserWorld extends World {
       this.attach(`no trace: ${message(error)}`);
     }
     try {
+      // Not a wait for the page but a picture of a failed one, capped so that a
+      // page that won't draw leaves the hook its time for the rest.
       await this.page.screenshot({ path: `${base}.png`, timeout: 5_000 });
       this.attach(`screenshot: ${shown}.png`);
     } catch (error) {
