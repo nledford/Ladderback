@@ -6,7 +6,9 @@ Feature: The Full Disk Access warning on the start page
   the same Mac gets a button that opens the System Settings pane and shows
   the installed program in Finder; any other browser gets the steps. "Check
   again" asks the agent to run the probe again, and the warning goes once the
-  grant is found. A grant found or unknown shows no warning.
+  grant is found; while it is still missing, a toast in the warning says so,
+  since the warning itself doesn't change. A grant found or unknown shows no
+  warning.
 
   Scenario: A missing grant is a warning with Open Settings and Check again
     Given the agent has found Full Disk Access missing
@@ -33,6 +35,20 @@ Feature: The Full Disk Access warning on the start page
     And I press Enter
     Then the page doesn't warn of Full Disk Access
     And focus is on the main heading "Welcome to Ladderback"
+    And the page has no accessibility violations
+
+  Scenario: Check again that finds the grant still missing is answered in a toast in the warning, said once, and focus stays on it
+    Given the agent has found Full Disk Access missing
+    When I open the web UI
+    And I skip to the content
+    And I press Tab until focus is on the button "Check again"
+    And I press Enter
+    Then the toast reads "Full Disk Access is still missing." after its icon "Information"
+    And the toast is no live region, nor holds one
+    And focus stays on the button "Check again"
+    And the page warns that Full Disk Access is missing
+    And the polite region reads "Full Disk Access is still missing."
+    And the polite region keeps reading "Full Disk Access is still missing."
     And the page has no accessibility violations
 
   Scenario Outline: A grant found or unknown shows no warning

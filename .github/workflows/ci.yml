@@ -177,8 +177,9 @@ jobs:
   # service jobs' reach counts as inside it, and so does a failure here: the
   # jobs below run unless this job says "true" (`docs-only`) or "false"
   # (`service`, `ui`). The `ui` output is the other way round: false unless a
-  # path names the UI, because Chromium's required job covers the rest. Pushes
-  # to main and the nightly run skip this job and run everything.
+  # path names the UI, because Chromium's required job covers the rest. It
+  # also estimates how many mutation shards the change needs. Pushes to main
+  # and the nightly run skip this job and run everything.
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
@@ -188,6 +189,8 @@ jobs:
       docs-only: ${{ steps.diff.outputs.docs-only }}
       service: ${{ steps.diff.outputs.service }}
       ui: ${{ steps.diff.outputs.ui }}
+      mutant-shards: ${{ steps.diff.outputs.mutant-shards }}
+      mutant-shard-count: ${{ steps.diff.outputs.mutant-shard-count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -252,6 +255,15 @@ jobs:
             echo "service=$service"
             echo "ui=$ui"
           } >> "$GITHUB_OUTPUT"
+          # The mutation shards (`mutants-shard`): one to four by the lines
+          # the change touches in the gated crates' source. A docs-only
+          # change skips them. If the estimate fails, it writes nothing, and
+          # the shards fall back to four, the most there are.
+          if [ "$docs_only" != true ] && estimate=$(scripts/estimate-mutant-shards.sh "$BASE_SHA" "$HEAD_SHA"); then
+            echo "$estimate" >> "$GITHUB_OUTPUT"
+          elif [ "$docs_only" != true ]; then
+            echo "::warning::The mutation shard estimate failed, so the pull request runs four shards."
+          fi
 
   check:
     name: Check (${{ matrix.name }})
@@ -714,12 +726,17 @@ jobs:
           title: Nightly dependency check failed
           body: "The nightly dependency check (`just deny`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A new RustSec advisory is the usual cause; the job's log names it."
 
-  # The pull request's mutants, split over four runners. One runner, even two
-  # mutants at a time, outran the 60-minute limit on a large change (#443:
-  # 371 mutants), so each shard takes every fourth mutant (round-robin, which
-  # spreads the slow `app` mutants evenly) within that limit.
+  # The pull request's mutants, split over one to four runners by how many
+  # there are, which `changes` estimates from the diff alone
+  # (scripts/estimate-mutant-shards.sh, development.md §13.1). A runner's wait
+  # for a job to start is far longer than a shard's run, so a small change
+  # gets one shard, not four. One runner, even two mutants at a time, outran
+  # the 60-minute limit on a large change (#443: 371 mutants), so a shard
+  # takes every nth mutant (round-robin, which spreads the slow `app` mutants
+  # evenly) within that limit. If `changes` gives no estimate, the matrix is
+  # the four shards this job always ran.
   mutants-shard:
-    name: Mutation testing (shard ${{ matrix.shard }} of 4)
+    name: Mutation testing (shard ${{ matrix.shard }} of ${{ needs.changes.outputs.mutant-shard-count || '4' }})
     needs: changes
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
@@ -727,7 +744,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: ${{ fromJSON(needs.changes.outputs.mutant-shards || '[0,1,2,3]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -739,10 +756,11 @@ jobs:
       # Two mutants at a time: each builds in its own copy of the tree, and the
       # runner has four cores. `--caught --unviable` print every outcome as it
       # comes, so a shard that runs out of time shows how far it got.
-      - run: just mutants "origin/$BASE_REF" --jobs 2 --shard "$SHARD/4" --sharding round-robin --caught --unviable
+      - run: just mutants "origin/$BASE_REF" --jobs 2 --shard "$SHARD/$SHARDS" --sharding round-robin --caught --unviable
         env:
           BASE_REF: ${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ needs.changes.outputs.mutant-shard-count || '4' }}
       # On a timeout too, which GitHub reports as a cancel, not a failure.
       - if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

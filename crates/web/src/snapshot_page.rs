@@ -24,16 +24,15 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use leptos_router::hooks::use_params_map;
 
-use crate::announcer::Politeness;
 use crate::components::button::{Appearance, Content};
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::tree::rules::{Selection, folder_url};
 use crate::components::{
     Button, Confirmation, FolderLoader, FolderPage, Link, RadioGroup, ReviewDialog, StepUp,
-    StepUpField, Tree, Working, dialog_refusal_alert,
+    StepUpField, Toast, ToastTone, Toasts, Tree, Working, dialog_refusal_alert,
 };
 use crate::download;
-use crate::live::{reply, say};
+use crate::live::say;
 use crate::repositories::Sentence;
 use crate::restore::{self, Asks, Dialog};
 use crate::routes::{PageHeading, refused_sentence, short_id, text_with};
@@ -54,6 +53,31 @@ const DOWNLOAD_BUTTON: &str = "download-open";
 /// The values of the choice of where to restore.
 const NEW_FOLDER: &str = "new-folder";
 const IN_PLACE: &str = "in-place";
+
+/// The pane's toast, which answers a restore or a download started, and the
+/// button its dismissal hands focus back to: the one whose dialog started
+/// what it says (2.4.3).
+#[derive(Clone, Copy)]
+struct Started {
+    toasts: Toasts,
+    returns_to: RwSignal<&'static str>,
+}
+
+impl Started {
+    fn new() -> Self {
+        Self {
+            toasts: Toasts::new(),
+            returns_to: RwSignal::new(RESTORE_BUTTON),
+        }
+    }
+
+    /// Shows `words` as information, its dismissal handing focus to the
+    /// button with the ID `button`.
+    fn show(self, button: &'static str, words: String) {
+        self.returns_to.set(button);
+        self.toasts.show(ToastTone::Primary, words);
+    }
+}
 
 /// The page of one snapshot of one repository, both named by its address.
 #[component]
@@ -131,9 +155,10 @@ fn snapshot_view(localizer: Arc<Localizer>, alias: String, snapshot: String) -> 
 }
 
 /// The pane beside the tree: a Restore and a Download button named for the
-/// entry the tree selects, and the dialogs they open, each drawn anew at
-/// each opening for the entry selected then, so the tree moving under it
-/// changes nothing.
+/// entry the tree selects, the toast that answers a restore or a download
+/// started, which nothing else on the page shows, and the dialogs they
+/// open, each drawn anew at each opening for the entry selected then, so
+/// the tree moving under it changes nothing.
 #[component]
 fn EntryPane(
     localizer: Arc<Localizer>,
@@ -147,6 +172,7 @@ fn EntryPane(
     let restoring = RwSignal::new(None::<(u32, Selection)>);
     let download_open = RwSignal::new(false);
     let downloading = RwSignal::new(None::<(u32, Selection)>);
+    let started = Started::new();
     let button_localizer = Arc::clone(&localizer);
     let empty = text(&localizer, msg::UI_RESTORE_PANE_EMPTY);
     let button = move || match selected.get() {
@@ -195,6 +221,7 @@ fn EntryPane(
                 selection,
                 asks,
                 restore_open,
+                started,
             )
         })
     };
@@ -208,6 +235,7 @@ fn EntryPane(
                 selection,
                 asks,
                 download_open,
+                started,
             )
         })
     };
@@ -215,6 +243,14 @@ fn EntryPane(
         <section aria-labelledby="entry-pane-heading">
             <h2 id="entry-pane-heading">{text(&localizer, msg::UI_RESTORE_PANE)}</h2>
             {button}
+            // Dismissed, a toast hands focus to the button whose dialog
+            // started what it says, there while an entry is selected, as it
+            // is once either has started.
+            <Toast
+                localizer=Arc::clone(&localizer)
+                toasts=started.toasts
+                then_focus=Signal::derive(move || started.returns_to.get().to_owned())
+            />
             {restore}
             {download}
         </section>
@@ -235,8 +271,8 @@ fn opened(
 
 /// The restore dialog of `selection`: what it restores, where to, what a
 /// restore in place would change, and the step-up field it is confirmed
-/// with. On the daemon's start it closes and the page says the restore runs,
-/// then how it ended.
+/// with. On the daemon's start it closes and the pane's toast answers that
+/// the restore started; the page then says how it ended.
 fn restore_dialog(
     localizer: Arc<Localizer>,
     alias: String,
@@ -244,6 +280,7 @@ fn restore_dialog(
     selection: Selection,
     asks: Asks,
     open: RwSignal<bool>,
+    started: Started,
 ) -> impl IntoView {
     let base = ws::origin();
     let words = {
@@ -383,7 +420,7 @@ fn restore_dialog(
                             error.set(None);
                             value.set(String::new());
                             open.set(false);
-                            reply(Politeness::Polite, &words(&restore::running(&name)));
+                            started.show(RESTORE_BUTTON, words(&restore::running(&name)));
                             let awaited = ws::await_operation(&base, &operation, || true).await;
                             if let Some((said, politeness)) =
                                 restore::ended(&name, folder.as_deref(), &awaited)
@@ -479,8 +516,9 @@ fn restore_dialog(
 
 /// The download dialog of `selection`: what it downloads, as which archive
 /// when it is a folder, and the step-up field it is confirmed with. On the
-/// daemon's ticket it closes, the page says the download started, and the
-/// browser is sent to the ticket's address, which it saves as a download.
+/// daemon's ticket it closes, the pane's toast answers that the download
+/// started, and the browser is sent to the ticket's address, which it saves
+/// as a download.
 fn download_dialog(
     localizer: Arc<Localizer>,
     alias: String,
@@ -488,6 +526,7 @@ fn download_dialog(
     selection: Selection,
     asks: Asks,
     open: RwSignal<bool>,
+    started: Started,
 ) -> impl IntoView {
     let base = ws::origin();
     let state = RwSignal::new(download::Dialog::new(
@@ -557,7 +596,7 @@ fn download_dialog(
                             error.set(None);
                             value.set(String::new());
                             open.set(false);
-                            reply(Politeness::Polite, &words(&download::handed(&name)));
+                            started.show(DOWNLOAD_BUTTON, words(&download::handed(&name)));
                         } else {
                             alert.set(Some(unreachable));
                         }

@@ -16,6 +16,7 @@ import type { BrowserWorld } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
 import { PASSWORD, serveDemoPlans, until } from "./live.ts";
 import { focusComesTo } from "./repositories.ts";
+import { toastReads } from "./toast.ts";
 
 // The page reads the proposal and the daemon applies it in well under this.
 const ANSWER_PATIENCE_MS = 10_000;
@@ -93,6 +94,15 @@ Then("focus is on the proposal's heading", async function (this: BrowserWorld) {
   const name = `Proposal ${proposalOf(this)}`;
   await focusComesTo(this, "heading", name, `the heading "${name}"`);
 });
+
+// The toast that answers a decision names the proposal by its ID, which only
+// the scenario's proposal knows.
+Then(
+  "the toast names the proposal, then reads {string} after its icon {string}",
+  async function (this: BrowserWorld, words: string, name: string) {
+    await toastReads(this.page, `Proposal ${proposalOf(this)} ${words}`, name);
+  },
+);
 
 // What a person reads in the field's hint and copies, read here from the
 // review the page was given.

@@ -381,12 +381,26 @@ where
     E: leptos::html::ElementType,
     E::Output: JsCast + Clone + AsRef<web_sys::Element> + 'static,
 {
+    hand_focus_when_gone_to(node, move || Some(then_focus));
+}
+
+/// As [`hand_focus_when_gone`], to the element whose ID `then_focus` gives
+/// as the element goes, for a target that changes while the element stays;
+/// `None` hands focus to nothing.
+pub(crate) fn hand_focus_when_gone_to<E>(
+    node: NodeRef<E>,
+    then_focus: impl FnOnce() -> Option<String> + Send + Sync + 'static,
+) where
+    E: leptos::html::ElementType,
+    E::Output: JsCast + Clone + AsRef<web_sys::Element> + 'static,
+{
     on_cleanup(move || {
         if node
             .get_untracked()
             .is_some_and(|element| holds_focus(element.as_ref()))
+            && let Some(id) = then_focus()
         {
-            focus_element(&then_focus);
+            focus_element(&id);
         }
     });
 }

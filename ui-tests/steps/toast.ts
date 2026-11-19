@@ -23,6 +23,10 @@ const ROUNDING_PX = 0.5;
 
 const near = (a: number, b: number, slack = ROUNDING_PX) => Math.abs(a - b) <= slack;
 
+// A page's words isolate each name they hold (§4.5), as `\u2068…\u2069`;
+// what a reader hears has no such marks.
+const ISOLATION_MARKS = /[\u2066-\u2069]/g;
+
 // The page's toast: one at a time, a new one taking the place of the one shown.
 const toast = async (page: Page): Promise<Locator> => {
   const found = page.locator("main .toast");
@@ -36,16 +40,24 @@ const toast = async (page: Page): Promise<Locator> => {
 // name. Nothing is said by the toast itself (the announcer says it). Read
 // with locator.ariaSnapshot(), since toMatchAriaSnapshot() only works inside
 // a Playwright test; it quotes words that hold a colon before a space, as
-// YAML must.
-Then("the toast reads {string} after its icon {string}", async function (this: BrowserWorld, words: string, name: string) {
-  const found = await toast(this.page);
-  const text = /:(\s|$)/.test(words) ? JSON.stringify(words) : words;
-  assert.equal(
-    (await found.ariaSnapshot()).trim(),
-    `- img ${JSON.stringify(name)}
+// YAML must, and words that hold a name, as it does around any mark.
+export async function toastReads(page: Page, words: string, name: string): Promise<void> {
+  const found = await toast(page);
+  const snapshot = (await found.ariaSnapshot()).trim().replace(ISOLATION_MARKS, "");
+  const quoted = /:(\s|$)/.test(words) ? JSON.stringify(words) : words;
+  const expected = (text: string) => `- img ${JSON.stringify(name)}
 - paragraph: ${text}
-- button "Dismiss"`,
+- button "Dismiss"`;
+  // The marks a name carries make the snapshot quote the words; once they
+  // are taken out, the words are read either way.
+  assert.ok(
+    snapshot === expected(quoted) || snapshot === expected(JSON.stringify(words)),
+    `the toast reads:\n${snapshot}\nnot:\n${expected(quoted)}`,
   );
+}
+
+Then("the toast reads {string} after its icon {string}", async function (this: BrowserWorld, words: string, name: string) {
+  await toastReads(this.page, words, name);
 });
 
 // The toast's own Dismiss button: the alert demo further down has buttons
@@ -57,6 +69,11 @@ When("I press Tab until focus is on the toast's Dismiss button", async function 
 
 Then("the {string} demo shows no toast", async function (this: BrowserWorld, component: string) {
   await expect(demoSection(this.page, component).locator(".toast")).toHaveCount(0);
+});
+
+// A refusal is answered where it happened, never with a toast of success.
+Then("the page shows no toast", async function (this: BrowserWorld) {
+  await expect(this.page.locator("main .toast")).toHaveCount(0);
 });
 
 // Not a live region (§4.5): the announcer says a toast, once, so neither the

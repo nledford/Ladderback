@@ -217,6 +217,30 @@ Feature: Restoring files from a snapshot
     And the page has no accessibility violations
 
   @ui
+  Scenario: A started restore is answered in a toast, and focus returns to its button
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    When I open the newest snapshot of the plan "home"
+    And I skip to the content
+    And I press Tab until focus is on a tree item
+    And I press ArrowRight until focus is on the tree item "demo-1.txt"
+    And I press Tab until focus is on the button "Restore demo-1.txt"
+    And I press Enter
+    And I press Tab until focus is on the textbox "Snapshot ID"
+    And I type the newest snapshot's short ID of the plan "home"
+    And I press Tab until focus is on the button "Restore"
+    And I press Enter
+    Then the toast reads "Restore of demo-1.txt started." after its icon "Information"
+    And the toast is no live region, nor holds one
+    And focus is on the button "Restore demo-1.txt"
+    And the polite region comes to contain "Restore of demo-1.txt started."
+    When I press Tab until focus is on the toast's Dismiss button
+    And I press Enter
+    Then the page shows no toast
+    And focus is on the button "Restore demo-1.txt"
+    And the page has no accessibility violations
+
+  @ui
   Scenario: A restored file is named in its row on the Operations page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
@@ -298,4 +322,5 @@ Feature: Restoring files from a snapshot
     And I press Enter
     Then the dialog "Restore demo-1.txt" alerts "That is not this snapshot's ID. Type or paste 8 characters shown above."
     And the field "Snapshot ID" is marked invalid
+    And the page shows no toast
     And the page has no accessibility violations
