@@ -60,24 +60,45 @@ impl BadgeTone {
 }
 
 /// How a badge is drawn, in Tailwind utilities (decision 117), logical ones
-/// only, the same in every tone: a pill (`rounded-full`) 0.125rem by 0.5rem
-/// around its words, in rem, so it grows with the reader's text. Its icon
-/// and its words are two flex items, 0.25em apart only where they share a
-/// line: where they don't fit side by side (a narrow column with larger
-/// text), the words wrap onto a line of their own below the icon rather than
-/// a letter a line beside it. The badge sits on its words' baseline, as
-/// plain text does, and the icon, its one child element (`*:`), is centered
-/// on their line. Under forced colors the system drops the fill, so the
-/// words take the color of the text around them, as the vocabulary's tones
-/// do (the system's text color), whether or not the engine forces it, and a
-/// 1px edge in that color, drawn inside the box (an outline with a negative
-/// offset), so a frame that clips its content or the badge beside it never
-/// cuts or covers the edge, keeps each badge apart from the text and the
-/// badge beside it.
-const LOOK: &str = "inline-flex flex-wrap items-baseline gap-x-[0.25em] rounded-full py-0.5 px-2 \
-    *:self-center \
+/// only, the same in every tone: a pill 0.125rem by 0.5rem around its words,
+/// in rem, so it grows with the reader's text, and never wider than its room
+/// (`max-inline-full`), so its words wrap inside it rather than run past a
+/// narrow column. Its corner radius is half a line plus its block padding
+/// (`0.5lh + 0.125rem`, which no utility names): a pill on one line, a
+/// rounded box on two, where a full radius would cut into the words. Its
+/// icon ([`ICON`]) and its words ([`WORDS`]) are two flex items, 0.25em
+/// apart where they share a line. The badge sits on its words' baseline, as
+/// plain text does, while they share the first line with the icon, whose
+/// box takes no part in baseline alignment; words wrapped under the icon
+/// leave the badge on the icon's box. Under forced colors the system drops
+/// the fill, so the words take the color of the text around them, as the
+/// vocabulary's tones do (the system's text color), whether or not the
+/// engine forces it, and a 1px edge in that color, drawn inside the box (an
+/// outline with a negative offset), so a frame that clips its content or
+/// the badge beside it never cuts or covers the edge, keeps each badge apart
+/// from the text and the badge beside it.
+const LOOK: &str = "inline-flex max-inline-full flex-wrap items-baseline gap-x-[0.25em] \
+    rounded-[calc(0.5lh_+_0.125rem)] py-0.5 px-2 \
     forced-colors:text-inherit forced-colors:outline-1 forced-colors:outline-solid \
     forced-colors:-outline-offset-1 forced-colors:outline-current";
+
+/// The box around a badge's icon: one line of its words tall (`1lh`, which
+/// no utility names), the icon centered in it, at the start of the badge's
+/// line, so the icon stands centered on the words' first line however many
+/// lines they take.
+pub const ICON: &str = "flex flex-none self-start items-center [min-block-size:1lh]";
+
+/// A badge's words (#1070): they take the room the icon leaves and wrap
+/// there between words. They start as wide as their longest word
+/// (`min-content`, which no utility names), so where that doesn't fit beside
+/// the icon (a narrow column, larger text) they go under it, a line of the
+/// badge's own, rather than break a word beside it; an alert's words, which
+/// may hold a long path, never go under its icon. There a word longer than
+/// the whole line breaks inside (`break-word`); `anywhere`, the page's,
+/// would count a break between any two letters as their narrowest and keep
+/// them beside the icon a letter or two a line. `min-inline-size: 0` lets
+/// them narrow to that line.
+pub const WORDS: &str = "flex-[1_1_min-content] [min-inline-size:0] wrap-break-word";
 
 /// The classes of a badge in `tone`: the badge's own, which names it, its
 /// tone's pair of tokens and its look.
