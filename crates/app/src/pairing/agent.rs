@@ -126,11 +126,31 @@ impl AgentPairing {
     /// carries nothing of the token.
     pub async fn connect(
         &self,
-        _token: PairingToken,
-        _agent_id: AgentId,
-        _hostname: Hostname,
+        token: PairingToken,
+        agent_id: AgentId,
+        hostname: Hostname,
     ) -> Result<(Connect, AgentHandshake), AgentPairingError> {
-        todo!()
+        if let Some(pin) = self.identity.pin().await?
+            && pin.hub_key != *token.hub_key()
+        {
+            return Err(AgentPairingError::PinnedToAnotherHub {
+                pinned: pin.hub_key,
+                token: *token.hub_key(),
+            });
+        }
+        let handshake = AgentHandshake {
+            kind: BindingKind::of_token(token.tls()),
+            token,
+            agent_id,
+            hostname,
+            agent_nonce: Nonce::from_bytes(self.random.token()?),
+        };
+        let connect = Connect {
+            agent_id,
+            agent_nonce: handshake.agent_nonce,
+            binding_kind: handshake.kind,
+        };
+        Ok((connect, handshake))
     }
 
     /// The agent's `Pair`, once the hub's `Challenge` proves it holds the
@@ -138,11 +158,67 @@ impl AgentPairing {
     /// pairing key leaves the agent before that.
     pub async fn answer_challenge(
         &self,
-        _handshake: AgentHandshake,
-        _challenge: &Challenge,
-        _exporter: Option<[u8; KEY_BYTES]>,
+        handshake: AgentHandshake,
+        challenge: &Challenge,
+        exporter: Option<[u8; KEY_BYTES]>,
     ) -> Result<(Pair, AwaitingPaired), AgentPairingError> {
-        todo!()
+        let hub_key = *handshake.token.hub_key();
+        if challenge.hub_key != hub_key {
+            return Err(AgentPairingError::HubKeyMismatch);
+        }
+        let binding = handshake
+            .kind
+            .binding(exporter)
+            .ok_or(AgentPairingError::BindingUnavailable)?;
+        let proof = SignedMessage::HubProof {
+            hub_key,
+            agent_id: handshake.agent_id,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: challenge.hub_nonce,
+            binding,
+            handshakes: challenge.hub_handshakes,
+        };
+        if !self
+            .signing
+            .verify(&hub_key, &proof.to_bytes(), &challenge.hub_proof)
+        {
+            return Err(AgentPairingError::HubProofInvalid);
+        }
+        if challenge.hub_handshakes.bits() & HANDSHAKES.bits() == 0 {
+            return Err(AgentPairingError::NoCommonHandshake);
+        }
+        let agent_seed = self.agent_seed().await?;
+        let agent_key = self.signing.public_key(&agent_seed)?;
+        let attempt = self.identity.begin_attempt().await?;
+        let counter = attempt.counter().get();
+        let message = SignedMessage::Pair {
+            hub_key,
+            agent_id: handshake.agent_id,
+            agent_key,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: challenge.hub_nonce,
+            binding,
+            counter,
+            hostname: &handshake.hostname,
+        }
+        .to_bytes();
+        let pairing_seed = handshake.token.pairing_seed();
+        let pair = Pair {
+            pairing_key: self.signing.public_key(pairing_seed)?,
+            agent_key,
+            counter,
+            hostname: handshake.hostname.clone(),
+            pairing_signature: self.signing.sign(pairing_seed, &message)?,
+            agent_signature: self.signing.sign(&agent_seed, &message)?,
+        };
+        let awaiting = AwaitingPaired {
+            handshake,
+            agent_key,
+            hub_nonce: challenge.hub_nonce,
+            binding,
+            attempt,
+        };
+        Ok((pair, awaiting))
     }
 
     /// The hub's answer, checked against the token's hub key. A signed
@@ -151,9 +227,84 @@ impl AgentPairing {
     /// dropped connection.
     pub async fn take_answer(
         &self,
-        _awaiting: AwaitingPaired,
-        _answer: &PairAnswer,
+        awaiting: AwaitingPaired,
+        answer: &PairAnswer,
     ) -> Result<PairedHub, AgentPairingError> {
-        todo!()
+        let AwaitingPaired {
+            handshake,
+            agent_key,
+            hub_nonce,
+            binding,
+            attempt,
+        } = awaiting;
+        let hub_key = *handshake.token.hub_key();
+        let paired = match answer {
+            PairAnswer::Paired(paired) => paired,
+            PairAnswer::Refused(refused) => {
+                let signed = SignedMessage::Refusal {
+                    hub_key,
+                    agent_id: handshake.agent_id,
+                    agent_nonce: handshake.agent_nonce,
+                    hub_nonce,
+                    binding,
+                    code: &refused.code,
+                };
+                return Err(
+                    if self
+                        .signing
+                        .verify(&hub_key, &signed.to_bytes(), &refused.signature)
+                    {
+                        AgentPairingError::Refused(refused.clone())
+                    } else {
+                        AgentPairingError::Unsigned
+                    },
+                );
+            }
+        };
+        let signed = SignedMessage::Paired {
+            hub_key,
+            agent_id: handshake.agent_id,
+            agent_key,
+            recovery_key: paired.recovery_key,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce,
+            binding,
+        };
+        if !self
+            .signing
+            .verify(&hub_key, &signed.to_bytes(), &paired.signature)
+        {
+            return Err(AgentPairingError::Unsigned);
+        }
+        let pin = match self.identity.pin().await? {
+            Some(kept) if kept.hub_key == hub_key => kept,
+            Some(other) => {
+                return Err(AgentPairingError::PinnedToAnotherHub {
+                    pinned: other.hub_key,
+                    token: hub_key,
+                });
+            }
+            None => {
+                let pin = HubPin::new(
+                    hub_key,
+                    handshake.token.tls(),
+                    paired.recovery_key,
+                    handshake.token.address().clone(),
+                );
+                self.identity.write_pin(&pin).await?;
+                pin
+            }
+        };
+        drop(attempt);
+        Ok(PairedHub { pin, agent_key })
+    }
+
+    /// The agent key's seed, made the first time the agent pairs.
+    async fn agent_seed(&self) -> Result<SigningSeed, AgentPairingError> {
+        if let Some(seed) = self.identity.seed(SeedFile::AgentKey).await? {
+            return Ok(seed);
+        }
+        let fresh = SigningSeed::from_bytes(self.random.token()?);
+        Ok(self.identity.keep_seed(SeedFile::AgentKey, fresh).await?)
     }
 }

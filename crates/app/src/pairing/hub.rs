@@ -127,28 +127,109 @@ impl HubPairing {
         }
     }
 
+    /// A seed no one can guess.
+    fn fresh_seed(&self) -> Result<SigningSeed, HubPairingError> {
+        Ok(SigningSeed::from_bytes(self.random.token()?))
+    }
+
+    /// A new hub key's seed, kept in its file: made only while no agent is
+    /// registered, and only once every unused token, each of which carries
+    /// the key it replaces, is voided (§16, decision 120, "Rotation,
+    /// recovery and the handover chain"). The tokens are voided first, so
+    /// a start cut short between the two leaves no token of the old key
+    /// usable, and the next start makes the key.
+    async fn new_hub_seed(&self) -> Result<SigningSeed, HubPairingError> {
+        if !self.registry.void_tokens_for_new_key().await? {
+            return Err(HubPairingError::KeyMissing {
+                file: KeyFile::HubKey,
+            });
+        }
+        let seed = self.fresh_seed()?;
+        Ok(self.identity.keep_seed(SeedFile::HubKey, seed).await?)
+    }
+
+    /// The recovery seed its file holds, or a new one kept in it while no
+    /// agent is registered.
+    async fn recovery_seed(&self) -> Result<SigningSeed, HubPairingError> {
+        if let Some(seed) = self.identity.seed(SeedFile::RecoverySeed).await? {
+            return Ok(seed);
+        }
+        if !self.registry.agents().await?.is_empty() {
+            return Err(HubPairingError::KeyMissing {
+                file: KeyFile::RecoveryKey,
+            });
+        }
+        let seed = self.fresh_seed()?;
+        Ok(self
+            .identity
+            .keep_seed(SeedFile::RecoverySeed, seed)
+            .await?)
+    }
+
     /// The hub's keys: the hub key and the recovery key, made while no
     /// agent is registered and read from the data folder after that (§16,
-    /// decision 120, "The key's life").
+    /// decision 120, "The key's life"). A new hub key voids every unused
+    /// token. The recovery seed is kept before its public half, so a start
+    /// cut short between the two makes the same recovery key the next
+    /// time; once the Recovery Kit is confirmed only the public half is
+    /// left, and it is enough.
     pub async fn keys(&self) -> Result<HubKeys, HubPairingError> {
-        todo!()
+        let seed = match self.identity.seed(SeedFile::HubKey).await? {
+            Some(seed) => seed,
+            None => self.new_hub_seed().await?,
+        };
+        let key = self.signing.public_key(&seed)?;
+        let recovery_key = match self.identity.recovery_key().await? {
+            Some(kept) => kept,
+            None => {
+                let public = self.signing.public_key(&self.recovery_seed().await?)?;
+                self.identity.keep_recovery_key(public).await?
+            }
+        };
+        Ok(HubKeys {
+            seed,
+            key,
+            recovery_key,
+        })
     }
 
     /// A pairing token for `address`, of `tls`'s kind, living `life` or 15
-    /// minutes.
+    /// minutes. The hub keeps its pairing key's public half, never the
+    /// seed, which only the token's text holds.
     pub async fn make_token(
         &self,
-        _keys: &HubKeys,
-        _address: HubAddress,
-        _tls: TokenTls,
-        _life: Option<SignedDuration>,
+        keys: &HubKeys,
+        address: HubAddress,
+        tls: TokenTls,
+        life: Option<SignedDuration>,
     ) -> Result<PairingToken, HubPairingError> {
-        todo!()
+        let life = token_life(life).map_err(|_| HubPairingError::TokenLife)?;
+        let now = self.clock.now();
+        let expires_at = now
+            .checked_add(life)
+            .map_err(|_| HubPairingError::TokenLife)?;
+        let pairing_seed = self.fresh_seed()?;
+        let record = TokenRecord {
+            pairing_key: self.signing.public_key(&pairing_seed)?,
+            hub_key: keys.key,
+            kind: BindingKind::of_token(tls),
+            made_at: now,
+            expires_at,
+            state: TokenUse::Unused,
+        };
+        match self
+            .registry
+            .add_token(&record, UNUSED_TOKEN_LIMIT, now)
+            .await?
+        {
+            Added::Kept => Ok(PairingToken::new(keys.key, tls, pairing_seed, address)),
+            Added::Full => Err(HubPairingError::TooManyUnusedTokens),
+        }
     }
 
     /// Revokes the unused token `id`, and answers whether there was one.
-    pub async fn revoke_token(&self, _id: TokenId) -> Result<bool, HubPairingError> {
-        todo!()
+    pub async fn revoke_token(&self, id: TokenId) -> Result<bool, HubPairingError> {
+        Ok(self.registry.revoke_token(id, self.clock.now()).await?)
     }
 
     /// The hub's answer to `connect` on a session whose `tls-exporter`
@@ -156,20 +237,127 @@ impl HubPairing {
     /// connection.
     pub fn challenge(
         &self,
-        _keys: &HubKeys,
-        _connect: &Connect,
-        _exporter: Option<[u8; KEY_BYTES]>,
+        keys: &HubKeys,
+        connect: &Connect,
+        exporter: Option<[u8; KEY_BYTES]>,
     ) -> Result<(Challenge, HubHandshake), HubPairingError> {
-        todo!()
+        let binding = connect
+            .binding_kind
+            .binding(exporter)
+            .ok_or(HubPairingError::BindingUnavailable)?;
+        let handshake = HubHandshake {
+            agent_id: connect.agent_id,
+            agent_nonce: connect.agent_nonce,
+            hub_nonce: Nonce::from_bytes(self.random.token()?),
+            kind: connect.binding_kind,
+            binding,
+        };
+        let proof = SignedMessage::HubProof {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding,
+            handshakes: HANDSHAKES,
+        };
+        let challenge = Challenge {
+            hub_nonce: handshake.hub_nonce,
+            hub_key: keys.key,
+            hub_handshakes: HANDSHAKES,
+            hub_proof: self.signing.sign(&keys.seed, &proof.to_bytes())?,
+        };
+        Ok((challenge, handshake))
     }
 
-    /// The hub's answer to `pair`.
+    /// The hub's answer to `pair`: a signed `Paired` for a new agent, kept
+    /// pending, for the same identity again, or for the same pairing
+    /// again; a signed refusal for any other, which changes nothing. Both
+    /// signatures are checked before the registry is asked.
     pub async fn pair(
         &self,
-        _keys: &HubKeys,
-        _handshake: &HubHandshake,
-        _pair: &Pair,
+        keys: &HubKeys,
+        handshake: &HubHandshake,
+        pair: &Pair,
     ) -> Result<PairAnswer, HubPairingError> {
-        todo!()
+        let message = SignedMessage::Pair {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_key: pair.agent_key,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding: handshake.binding,
+            counter: pair.counter,
+            hostname: &pair.hostname,
+        }
+        .to_bytes();
+        let authorized = self
+            .signing
+            .verify(&pair.pairing_key, &message, &pair.pairing_signature);
+        let holds_its_key = self
+            .signing
+            .verify(&pair.agent_key, &message, &pair.agent_signature);
+        if !(authorized && holds_its_key) {
+            return self.refuse(keys, handshake, &PairRefusal::ProofRefused);
+        }
+        let request = PairRequest {
+            pairing_key: pair.pairing_key,
+            agent_id: handshake.agent_id,
+            agent_key: pair.agent_key,
+            hostname: pair.hostname.clone(),
+            counter: pair.counter,
+            kind: handshake.kind,
+            hub_key: keys.key,
+        };
+        match self.registry.pair(&request, self.clock.now()).await? {
+            Ok(_) => {
+                let paired = SignedMessage::Paired {
+                    hub_key: keys.key,
+                    agent_id: handshake.agent_id,
+                    agent_key: pair.agent_key,
+                    recovery_key: keys.recovery_key,
+                    agent_nonce: handshake.agent_nonce,
+                    hub_nonce: handshake.hub_nonce,
+                    binding: handshake.binding,
+                };
+                Ok(PairAnswer::Paired(Paired {
+                    recovery_key: keys.recovery_key,
+                    signature: self.signing.sign(&keys.seed, &paired.to_bytes())?,
+                }))
+            }
+            Err(refusal) => self.refuse(keys, handshake, &refusal),
+        }
+    }
+
+    /// `refusal`, signed over its code and the connection. A taken
+    /// hostname names its holder beside the signed code.
+    fn refuse(
+        &self,
+        keys: &HubKeys,
+        handshake: &HubHandshake,
+        refusal: &PairRefusal,
+    ) -> Result<PairAnswer, HubPairingError> {
+        let code = refusal.code();
+        let signed = SignedMessage::Refusal {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding: handshake.binding,
+            code: &code,
+        };
+        let signature = self.signing.sign(&keys.seed, &signed.to_bytes())?;
+        let holder = match refusal {
+            PairRefusal::HostnameTaken { holder, last_seen } => Some(Holder {
+                hostname: holder.clone(),
+                last_seen: EpochSeconds::from_timestamp(*last_seen)
+                    .unwrap_or(EpochSeconds::from_seconds(0)),
+            }),
+            _ => None,
+        };
+        Ok(PairAnswer::Refused(Refused {
+            code,
+            holder,
+            signature,
+        }))
     }
 }
