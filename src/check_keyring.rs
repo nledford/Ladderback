@@ -39,7 +39,7 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
     let config = match read_config(&folder.join("config.toml")) {
         Ok(config) => config,
         Err(error) => {
-            let refused = crate::composition::config_refused(error);
+            let refused = crate::composition::startup::config_refused(error);
             say(localizer, refused.message, &refused.args)?;
             return Ok(ExitCode::FAILURE);
         }

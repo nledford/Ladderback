@@ -18,7 +18,8 @@ use http_adapter::{MaintenanceRefusal, RestoreRefusal, RestoreStart, SignIn};
 use platform::SystemClock;
 use uuid::Uuid;
 
-use super::{CancelRegistry, PlanRunner, maintenance, runs};
+use super::plan_runner::PlanRunner;
+use super::{CancelRegistry, maintenance, runs};
 
 /// The restores of the agent: one use case, so one restore runs at a time.
 pub(super) struct RestoreService {

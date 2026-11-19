@@ -17,7 +17,32 @@ use http_adapter::{CatalogError, FolderError, MaintenanceRefusal, SnapshotsError
 use uuid::Uuid;
 
 use super::*;
-use crate::composition::plan_runner::{BuiltBackup, Unbuilt, log_ended, operation_of, run_named};
+use crate::composition::catalog::ConfigCatalog;
+use crate::composition::key_files::KeyFilesLeftOut;
+use crate::composition::plan_runner::{
+    BuiltBackup, PlanRunner, Unbuilt, log_ended, operation_of, run_named,
+};
+use crate::composition::repositories::RepositoryService;
+use crate::composition::startup::{
+    DATA_DIR_IN_USE, WithinLimit, daemon_at, daemon_resolve, lock_refused, log_location,
+    log_recording, recovery_refused, report_line, resume_queued, workers_cache,
+};
+use app::conditions::NameWatch;
+use app::event_bus::BroadcastEventBus;
+use app::locations::LocationReport;
+use app::notifications::Report;
+use app::ports::{ConfigStore, OperationStore, ScheduleStore};
+use app::queue::RunQueue;
+use app::repositories::Recording;
+use app::schedule::PlanRuns;
+use app::secrets::ResolveRepository;
+use config_adapter::FileConfigStore;
+use domain::execution::locations::LocationOutcome;
+use hooks::ProcessHookRunner;
+use http_adapter::{Catalog, Operations, Repositories, SignIn};
+use platform::agent_id;
+use platform::data_dir_lock::LockError;
+use secrets::SystemSecrets;
 
 mod announcements;
 mod cancels;

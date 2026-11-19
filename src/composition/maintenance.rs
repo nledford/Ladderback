@@ -25,7 +25,8 @@ use platform::SystemClock;
 use secrets::SystemSecrets;
 use uuid::Uuid;
 
-use super::{PlanRunner, secret_refusal};
+use super::plan_runner::PlanRunner;
+use super::secret_refusal;
 
 impl PlanRunner {
     /// The maintenance use case over this runner's parts.

@@ -25,9 +25,10 @@ use http_adapter::{Repositories, RepositoriesError, SecretRefusal};
 use secrets::SystemSecrets;
 use uuid::Uuid;
 
+use super::startup::log_location;
 use super::{
-    config_unusable, failure_redactor, locations_tried, log_location, redacted_location,
-    secret_refusal, text, too_much_to_mask, unavailable,
+    config_unusable, failure_redactor, locations_tried, redacted_location, secret_refusal, text,
+    too_much_to_mask, unavailable,
 };
 
 /// Tests, connects and initialises repositories for the API (§4.2): each
