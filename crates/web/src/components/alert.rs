@@ -96,22 +96,31 @@ pub fn Alert(
     view! {
         <div class=rules::alert_class(tone)>
             // The icon, centered on the first line of the words (one line
-            // tall: `1lh`, which no utility names), or on a line of its own
-            // above them.
+            // tall: `1lh`, which no utility names).
             <span class="alert-icon flex flex-none items-center [min-block-size:1lh]">
                 <Icon glyph=tone.glyph() meaning=Meaning::Labelled(label) tone=tone.tone() />
             </span>
-            // The words take the room left and wrap between words (The 320
-            // Rule, #972). They start as wide as their longest word
-            // (`min-content`, which no utility names), so where that doesn't
-            // fit beside the icon they go under it, a line of the alert's
-            // own; `min-inline-size` (no logical utility names it) lets them
-            // shrink below a word longer than that whole line, a long path,
-            // which alone breaks inside.
-            <div class="alert-words flex-[1_1_min-content] [min-inline-size:0] wrap-break-word">
-                {children()}
+            // The words and Dismiss take all the room beside the icon
+            // (`flex-1`; `min-inline-size: 0` lets them narrow below their
+            // longest word), so the words never go under the icon: a long
+            // path breaks beside it (#1071), where it once sent every word
+            // under the icon.
+            <div class="flex flex-1 flex-wrap items-start gap-2 [min-inline-size:0]">
+                // The words take the room Dismiss leaves and wrap between
+                // words (The 320 Rule, #972). They start as wide as their
+                // longest word (`min-content`, which no utility names), so
+                // where that doesn't fit beside Dismiss, Dismiss goes onto a
+                // line of its own under them. A word longer than the whole
+                // room beside the icon, a long path, alone breaks inside
+                // (`break-word`): `anywhere` would count a break between any
+                // two letters as the words' narrowest, keep Dismiss beside
+                // them and break ordinary words beside it ("Ladderbac" over
+                // "k").
+                <div class="alert-words flex-[1_1_min-content] [min-inline-size:0] wrap-break-word">
+                    {children()}
+                </div>
+                {dismiss}
             </div>
-            {dismiss}
         </div>
     }
     .into_any()
