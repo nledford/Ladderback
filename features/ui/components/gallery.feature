@@ -41,6 +41,7 @@ Feature: The component gallery
       | Responsive tabs   |
       | Text field        |
       | Progress          |
+      | Tabs starting on a marked tab |
       | Table             |
       | Tooltip           |
 
@@ -73,6 +74,7 @@ Feature: The component gallery
       | Tabs        |
       | Vertical tabs |
       | Responsive tabs |
+      | Tabs starting on a marked tab |
       | Shared vocabulary |
       | Spinner     |
       | Icon        |
@@ -105,6 +107,7 @@ Feature: The component gallery
       | Tabs        |
       | Vertical tabs |
       | Responsive tabs |
+      | Tabs starting on a marked tab |
       | Shared vocabulary |
       | Spinner     |
       | Icon        |
