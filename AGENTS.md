@@ -14,7 +14,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 |---|---|
 | `just verify` | Everything CI checks except mutants, red-first and `deny`: the full local lane (see "Local checks, then CI") |
 | `just quick-ci [args]` | The quick local lane: `fmt-check`, `lint`, `architecture`, then the unit, contract and acceptance tests (`args` narrow nextest) |
-| `just lint` | Clippy `-D warnings` on the host and on the web UI (wasm32), `tsc` over the TypeScript tooling (`tsconfig.json`), Biome's format and lint check of it (`biome.json`; `just fmt` writes the format), shellcheck on `scripts/*.sh` (warnings and errors fail; `just setup` installs the pinned release), the tooling's own tests (`node --test`), the journey lint, then `scripts/check-doc-paths.sh`: every repository path `AGENTS.md` and `CLAUDE.md` name exists, written in full, then `scripts/check-paragraph-length.ts`: no paragraph or list item in `docs/` runs over 150 words, then `scripts/decision-index.ts`: the §16 index matches the decision files (CI runs these three docs checks on docs-only pull requests too), then `cargo doc` with `RUSTDOCFLAGS="-D warnings"` on every crate, private items included: a broken link or malformed markup in a doc comment fails (CI runs `lint` on Linux only) |
+| `just lint` | The static checks: clippy `-D warnings` on the host and the web UI (wasm32), `tsc` and Biome over the TypeScript tooling (`just fmt` writes Biome's format), shellcheck on `scripts/*.sh` (the pinned release `just setup` installs), the tooling's own tests (`node --test`), the journey lint, the docs checks, and `cargo doc` with warnings as errors. The docs checks: every repository path `AGENTS.md` and `CLAUDE.md` name exists, written in full (`scripts/check-doc-paths.sh`); no paragraph or list item in `docs/` runs over 150 words (`scripts/check-paragraph-length.ts`); the §16 index matches the decision files (`scripts/decision-index.ts`). CI runs `lint` on Linux only, and the docs checks on docs-only pull requests too |
 | `just architecture` | Dependency and build rules: banned crates in `domain` and `app`, the allowed graph of workspace crates and the owners of foreign models (`scripts/check-crate-graph.ts`), no `async` in `domain`, pseudolocales in a default build and out of a release build, the `gallery` feature in neither, the `hub` feature in a default build of `ladderback` and `web` and in no crate of a release build, nor a crate only the hub uses (§16, decision 122), the no-panic settings, `testkit` only as a dev-dependency |
 | `just deny` | `cargo deny` (§13.6). Needs the network; a new advisory can fail it with no change of yours. Not a required check |
 | `just test [args]` | Unit and contract tests (nextest; `args` go to it), doc tests, the acceptance and `@e2e` runners (each runs even when one before it fails; the recipe then names the failed ones), then the skipped-test list. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
@@ -22,7 +22,27 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, and on the whole of a crate the branch adds to the gate |
 | `just red-first [base]` | Checks that the first commit is a `test:` commit whose tests fail at run time (§13.1) |
 
-Also: `just setup` (tools, rustic CLI, Chromium, Firefox and WebKit), `just fmt`, `just clippy` (host clippy only, the part of `lint` that can differ by OS), `just lint-workflows` (actionlint, zizmor), `just test-acceptance` / `just test-e2e` (one cucumber-rs runner; `--name <regex>` or `--tags <expr>` narrows it), `just test-ui [engine]` (builds the UI with the gallery and the binary, runs the UI tooling's browser tests, then the `@ui` scenarios, in Chromium, or in `firefox` or `webkit`), `just test-wasm` (`wasm-bindgen` tests under Node), `just test-contrast` (WCAG 2.2 AA token gate), `just check-pr-title "<title>"` (as CI does), `just translations [tags]` (each translation's missing, unreviewed and stale messages) and `just accept-translations <tag> <ids>` (records the English of messages accepted after review; scripts/translations.ts), `just serve` (`127.0.0.1:9898`, your real configuration), `just try [args]` (the daemon on scratch folders and a free port; arguments replace `serve`, as in `just try import-profile demo.toml`), `just install [args]` (installs the release binary, with the release web UI, from this checkout; arguments go to `cargo install`), `just install-restart [args]` (`install`, then restarts the service once it has nothing running or queued and checks it runs the new build; `--now`, `--wait <minutes>`; `INSTALL_RESTART_ADDRESS`, `INSTALL_RESTART_JUST` and `INSTALL_RESTART_LADDERBACK` try it against a `just try` daemon, scripts/install-restart.ts), `just release-preview` (the next release's bump and changelog entry, §12.1), `just release-pr [version]` (the maintainer's: opens or updates the release PR, §12.1).
+The other recipes:
+
+| Command | Does |
+|---|---|
+| `just setup` | Installs the tools, the rustic CLI, Chromium, Firefox and WebKit |
+| `just fmt` | Formats the Rust and the TypeScript tooling |
+| `just clippy` | Host clippy only: the part of `lint` that can differ by OS |
+| `just lint-workflows` | actionlint and zizmor |
+| `just test-acceptance`, `just test-e2e` | One cucumber-rs runner each; `--name <regex>` or `--tags <expr>` narrows it |
+| `just test-ui [engine]` | Builds the UI with the gallery and the binary, runs the UI tooling's browser tests, then the `@ui` scenarios, in Chromium, or in `firefox` or `webkit` |
+| `just test-wasm` | `wasm-bindgen` tests under Node |
+| `just test-contrast` | The WCAG 2.2 AA token gate |
+| `just check-pr-title "<title>"` | Checks a pull request title as CI does |
+| `just translations [tags]` | Each translation's missing, unreviewed and stale messages |
+| `just accept-translations <tag> <ids>` | Records the English of messages accepted after review (`scripts/translations.ts`) |
+| `just serve` | The daemon on `127.0.0.1:9898` with your real configuration |
+| `just try [args]` | The daemon on scratch folders and a free port; arguments replace `serve`, as in `just try import-profile demo.toml` |
+| `just install [args]` | Installs the release binary, with the release web UI, from this checkout; arguments go to `cargo install` |
+| `just install-restart [args]` | `install`, then restarts the service once it has nothing running or queued and checks it runs the new build; `--now`, `--wait <minutes>`. `INSTALL_RESTART_ADDRESS`, `INSTALL_RESTART_JUST` and `INSTALL_RESTART_LADDERBACK` try it against a `just try` daemon (`scripts/install-restart.ts`) |
+| `just release-preview` | The next release's bump and changelog entry (§12.1) |
+| `just release-pr [version]` | The maintainer's: opens or updates the release PR (§12.1) |
 
 Don't hand-edit the version or `CHANGELOG.md`: the release PR does both (§12.1).
 
