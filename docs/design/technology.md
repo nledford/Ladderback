@@ -55,6 +55,10 @@ ladderback/
 │  ├─ spawn-gate/             # the spawn gate: one child process starts at a time (decision 58); shared by every
 │  │                          # adapter that starts a child, the HTTP server's accept on macOS (decision 66) and the @e2e runner
 │  ├─ web/                    # Leptos CSR app (trunk); inbound adapter in the browser
+│  │  ├─ src/<page>.rs        # one module per page: what the page decides, tested on the host; `<page>_page.rs`
+│  │  │                       # is the glue that draws it (`plans.rs`, `plans_page.rs`); older pages still mix the two (#739)
+│  │  ├─ src/routes.rs        # what the pages share, each path's title and `NotFound`; the route table is
+│  │  │                       # `main.rs`'s
 │  │  └─ src/components/      # the shared component set (§4.5): one file per component, its host-tested
 │  │                          # decisions in a child module, `<component>/rules.rs`
 │  ├─ l10n/                   # wasm-safe: Fluent bundle chain, locale negotiation, formatters (features icu,

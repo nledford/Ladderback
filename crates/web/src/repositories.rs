@@ -2,7 +2,7 @@
 //! form is missing, the request each button sends, which field a refusal
 //! belongs to, what a password source reads as, and what an answer means for
 //! the form and the list. Host-tested here; the DOM glue that holds the
-//! signals and sends the requests is `routes.rs` and `ws.rs`.
+//! signals and sends the requests is `repositories_page.rs` and `ws.rs`.
 
 use std::collections::BTreeMap;
 

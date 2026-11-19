@@ -276,7 +276,7 @@ This section decides what the daemon does: its HTTP server and API, the schedule
 
   The start page lists them, with each next run in the reader's own time zone; the operations page offers a start button for each.
 
-  Without plans, the start page says to connect a repository first, since a plan backs up to one by name, and links to the Repositories page; it always links to where a plan's format is described, §6.1 at the tag of the build's release on GitHub, so a build from `main` between releases links to the previous release's text (`routes::PLAN_FORMAT_URL`, #477).
+  Without plans, the start page says to connect a repository first, since a plan backs up to one by name, and links to the Repositories page; it always links to where a plan's format is described, §6.1 at the tag of the build's release on GitHub, so a build from `main` between releases links to the previous release's text (`start_page::PLAN_FORMAT_URL`, #477).
 - **Status API** (§4.6, #955). `GET /api/v1/status` answers the status summary (§3.1) that the MCP `status` tool and its resource serve: `plans`, each plan's row as `GET /api/v1/plans` gives it, with `last` (its newest operation), `last-success` (`operation`, `finished-at` and `ago-seconds` of its newest successful backup, warnings or not, however far back the log holds it; absent when there is none) and `overdue`; `running`, the operations queued or running among the agent's newest 200, newest first; `unreadable-repositories`, in alias order; and `full-disk-access`, the state `GET /api/v1/full-disk-access` gives. An API token reads it with the `read` scope (decision 93). A configuration the daemon can't use is refused as the plans list refuses it, and a log that can't be read is `503 operation-failed`.
 
   A plan is overdue when it has a schedule and the schedule's second moment after its last success started has passed, or it has never succeeded: one missed run is a run still due, two are a plan behind. A plan without a schedule never is. A repository is unreadable when its newest operation that tells of reading it failed because it couldn't be opened or read where it was looked for (no repository or another one there, its credentials or password refused, no location usable, a secret unresolved); a success reads it, and a failure of another kind tells nothing. The entry gives the repository's alias and that operation, whose `failure` says why. A backup's repository is its plan's as the configuration names it now, since a backup records no alias.
@@ -599,7 +599,7 @@ A job that is no operation (the repository's ID, a snapshot list, the groups, a 
 
 The events WebSocket answers a client's ping with a pong, so a live page survives an idle network.
 
-**Settled in the live-pages build** (`crates/web/src/backend.rs`, `ws.rs`, `routes.rs`):
+**Settled in the live-pages build** (`crates/web/src/backend.rs`, `ws.rs`, `operations_page.rs`):
 
 - **State model.** Each live page holds its state in one `RwSignal`. The operations page's is `OperationsState`: the history rows (newest first) plus the live progress of a run still going. The initial REST fetch builds it; every `UiEvent` is applied to it by a pure function (`apply`) in the host-tested module, so a missed event cannot be represented wrongly; an event about an operation the state doesn't hold is ignored — the reconnect's re-fetch brings the whole story, never a half-invented row.
 
@@ -658,7 +658,7 @@ The events WebSocket answers a client's ping with a pong, so a live page survive
 
   It counts the events streams the page has open and has opened, and its reads of the history, so a journey can tell that a page the reader left stops listening. Only the daemon's answers are played: the page is the real one, and a request the script doesn't answer (a start or a cancel, unless a step has the script queue the backup or accept the cancel itself) goes on to the real daemon.
 
-**Settled in the repositories-page build** (`crates/web/src/repositories.rs` for the decisions, `routes.rs`, `components.rs` and `main.rs` for the glue):
+**Settled in the repositories-page build** (`crates/web/src/repositories.rs` for the decisions, `repositories_page.rs`, `components.rs` and `main.rs` for the glue):
 
 - **Navigation.** The header's first line is the product's name, a link to the start page (`/`) marked `aria-current="page"` there. Before the name is the product's mark (`BrandMark` in `main.rs`), as tall as the name's letters: the shapes of `assets/brand/icon.svg` drawn inline, filled from `--accent` and `--bg` so it follows the theme (`CanvasText` and `Canvas` under forced colors), and hidden from screen readers, so the link's name is the product's name alone.
 
@@ -1176,7 +1176,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 
   An underlined link needs no pair against nearby text. A progress bar's fill in each tone is held to 3:1 on its Ledger Gray track and on the page (1.4.11; the weakest is 4.56:1, Success and Warning on the track in light). The gate needs only Node; `just verify` runs it, and CI runs it in the `Check` job.
 
-**Settled in the pause build** (`crates/web/src/pause.rs` and `announcer.rs` for the decisions, `components.rs`, `live.rs` and `routes.rs` for the glue; decision 65):
+**Settled in the pause build** (`crates/web/src/pause.rs` and `announcer.rs` for the decisions, `components.rs`, `live.rs` and `operations_page.rs` for the glue; decision 65):
 
 - **The stream goes on; the page shows a copy.** `Pausable` holds the copy of the Operations page's state and connection phase taken at the press; every view of the page (the heading, which rows show and in what order, each row's cells) reads through it, so while paused no update reaches them. `ws::watch`, its reconnects, the settle-poll and the end announcements read the live state. The resume drops the copy, and the page shows the live state at once: nothing replayed, nothing lost, no row twice. A sort while paused orders the copy.
 - **The banner** counts each row that will look different on the resume, one however many events changed it, plus one when the connection's phase changed (`OperationsState::changes_since`). It reads "Live updates are paused. 2 changes are waiting." and is a paragraph the button's `aria-describedby` points at, present only while paused. Its edge has the table rule's color (`--muted`), not the focus ring's, so beside the focused button it never reads as a second focus ring.

@@ -11,10 +11,10 @@
 //!    without an `Origin`: a browser or extension that strips it must not let
 //!    a cross-site form post through.
 //!
-//! Each refusal is a typed [`ErrorCode`]. In a build with the `hub` feature,
-//! `/sync/v1` is exempt from all three, since agents authenticate there with
-//! a signed nonce (§7.1); a build without it has no agent routes to exempt
-//! (§16, decision 122).
+//! Each refusal is a typed [`ErrorCode`]. Every request to the UI and the
+//! API passes them, and no path is exempt; in a build with the `hub`
+//! feature, the agent routes under `/sync/` are a router of their own, with
+//! a check of their own instead (`crate::sync`; §16, decision 122).
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -44,10 +44,6 @@ impl RequestChecks {
     }
 
     fn check(&self, method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<(), ErrorCode> {
-        #[cfg(feature = "hub")]
-        if is_agent_route(uri.path()) {
-            return Ok(());
-        }
         let host = match one(headers, &HOST) {
             Header::Text(host) => host,
             Header::Absent => uri.authority().map_or("", |authority| authority.as_str()),
@@ -85,14 +81,6 @@ impl RequestChecks {
                 .iter()
                 .any(|allowed| allowed.eq_ignore_ascii_case(host))
     }
-}
-
-/// The agent routes authenticate with a signed nonce (§7.1), are reached by
-/// whatever name the hub has, and aren't browsers.
-#[cfg(feature = "hub")]
-fn is_agent_route(path: &str) -> bool {
-    path.strip_prefix("/sync/v1")
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// What a header that must appear at most once holds.
@@ -203,7 +191,7 @@ struct Refusal {
     code: ErrorCode,
 }
 
-fn refusal(code: ErrorCode) -> Response {
+pub(crate) fn refusal(code: ErrorCode) -> Response {
     let status = match code {
         ErrorCode::JsonRequired => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         _ => StatusCode::FORBIDDEN,

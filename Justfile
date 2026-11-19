@@ -190,6 +190,22 @@ architecture:
 deny:
     cargo deny --locked --all-features --workspace check
 
+# Checks the two npm lockfiles against the registry's advisories (technical
+# design §13.6). Every package there is build or test tooling, a dev dependency,
+# so `--omit=dev` would audit nothing: all of them count. It fails on a high or
+# critical advisory. It needs the network, and a new advisory can fail it
+# without any change here: `verify` leaves it out, and CI runs it in the `deny`
+# job, nightly too.
+[doc('Check the npm lockfiles for high or critical advisories (npm audit; needs the network).')]
+[group('quality')]
+npm-audit:
+    #!/usr/bin/env bash
+    # Audit both before failing, so the log names every advisory.
+    status=0
+    (cd crates/web && npm audit --audit-level=high) || status=1
+    (cd ui-tests && npm audit --audit-level=high) || status=1
+    exit "$status"
+
 # Runs unit, contract and doc tests with cargo-nextest, then the acceptance and
 # @e2e cucumber runners; extra arguments go to nextest (a filterset, a test
 # name). Every test process has a scratch home, and the run fails if a test
