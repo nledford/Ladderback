@@ -47,7 +47,7 @@ pub(crate) fn limit_for(path: &str) -> u64 {
     }
 }
 
-fn too_large(limit: u64) -> Response {
+pub(crate) fn too_large(limit: u64) -> Response {
     refused_with(
         StatusCode::PAYLOAD_TOO_LARGE,
         ErrorCode::BodyTooLarge,

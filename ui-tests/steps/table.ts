@@ -284,9 +284,9 @@ Then(
 // A word ends where its box does: text in another block or flex item, such as
 // the next line of a cell or a header's sort button, starts a word of its own.
 // A column keeps its width in rem however narrow the frame (the frame
-// scrolls), but a pinned header is at most 40 % of the frame: a word wider
-// than its cell's room breaks rather than run over the cells beside it, and
-// only such a word.
+// scrolls), but a pinned header is at most 40 % of the frame (60 % where its
+// words must read whole): a word wider than its cell's room breaks rather
+// than run over the cells beside it, and only such a word.
 Then("no word of a table breaks inside, an address only between its parts", async function (this: BrowserWorld) {
   const broken = await this.page.evaluate(async () => {
     await document.fonts.ready;
@@ -346,4 +346,24 @@ Then("no word of a table breaks inside, an address only between its parts", asyn
     return found;
   });
   assert.deepEqual(broken, [], "words of tables broken inside");
+});
+
+// A pinned row header covers the cells that scroll beneath it, so however
+// wide its words make it, it leaves the cells beside it two fifths of its
+// frame to be read in, at 320 px with 200 % text too (#1129). Each frame is
+// the region around its table.
+Then("each table's row header leaves two fifths of its frame to the cells beside it", async function (this: BrowserWorld) {
+  const covering = await this.page.evaluate(() => {
+    const found: string[] = [];
+    for (const header of document.querySelectorAll("table th[scope=row]")) {
+      const frame = header.closest('[role="region"]');
+      if (frame === null || !header.checkVisibility()) continue;
+      const left = frame.clientWidth - header.getBoundingClientRect().width;
+      if (left < frame.clientWidth * 0.4 - 1) {
+        found.push(`"${header.textContent?.trim()}" leaves ${left.toFixed(1)} of its frame's ${frame.clientWidth} px`);
+      }
+    }
+    return found;
+  });
+  assert.deepEqual(covering, [], "row headers that leave the cells beside them less than two fifths of their frame");
 });

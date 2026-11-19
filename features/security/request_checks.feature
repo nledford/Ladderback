@@ -279,24 +279,9 @@ Feature: Request checks
         | PUT    | application/json                 |
         | DELETE | application/json                 |
 
-  Rule: Agents reach /sync/v1 by their own authentication, not the browser checks
+  Rule: Only the hub's sync routes skip these checks, for a check of their own (fleet/sync_routes.feature)
 
-    Scenario Outline: A <method> request to <path> from any host and origin is served
-      Given a "<method>" request for "<path>"
-      And the request has the header "Host: hub.other.example:8443"
-      And the request has the header "Origin: http://evil.example"
-      And the request has the header "Content-Type: text/plain"
-      When the request is sent
-      Then the request isn't refused by a request check
-
-      Examples:
-        | method | path             |
-        | GET    | /sync/v1         |
-        | GET    | /sync/v1?x=1     |
-        | GET    | /sync/v1/connect |
-        | POST   | /sync/v1/connect |
-
-    Scenario Outline: Only /sync/v1 itself is exempt: <path> is refused
+    Scenario Outline: A path beside the sync routes gets these checks: <path> is refused
       Given a "GET" request for "<path>"
       And the request has the header "Host: hub.other.example:8443"
       When the request is sent
@@ -304,9 +289,6 @@ Feature: Request checks
 
       Examples:
         | path                        |
-        | /sync/v10                   |
-        | /sync/v1x/a                 |
-        | /sync                       |
         | /api/v1/sync/v1             |
         | //sync/v1                   |
         | /api/v1/plans?next=/sync/v1 |

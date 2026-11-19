@@ -948,43 +948,11 @@ async fn the_checks_run_host_then_origin_then_content_type() {
     .await;
 }
 
-#[cfg(feature = "hub")]
+/// Only the sync routes, every path under `/sync/`, have a check of their
+/// own; a path that only mentions them gets the browser's.
 #[tokio::test]
-async fn the_agent_sync_routes_are_exempt() {
-    // Agents authenticate with a signed nonce (§7.1), and reach the hub by
-    // whatever name it has. They aren't browsers and send no Origin.
+async fn paths_beside_the_sync_routes_get_the_browser_checks() {
     for path in [
-        "/sync/v1",
-        "/sync/v1/",
-        "/sync/v1/connect",
-        "/sync/v1/a/b?x=1",
-        "/sync/v1?x=1",
-    ] {
-        for method in ["GET", "POST"] {
-            assert_served(
-                request(
-                    method,
-                    path,
-                    &[
-                        ("host", "hub.other.example:8443"),
-                        ("origin", "http://evil.example"),
-                        ("content-type", "text/plain"),
-                    ],
-                ),
-                &format!("{method} {path}"),
-            )
-            .await;
-        }
-    }
-}
-
-#[tokio::test]
-async fn only_the_sync_route_itself_is_exempt() {
-    for path in [
-        "/sync/v10",
-        "/sync/v1x/connect",
-        "/sync/v2",
-        "/sync",
         "/api/v1/sync/v1",
         "/x/sync/v1",
         "/Sync/v1",
