@@ -639,19 +639,21 @@ async fn the_in_memory_event_bus_meets_the_event_bus_contract() {
     contract::event_bus::run(&InMemoryEventBusHarness).await;
 }
 
-struct InMemoryRecentLogHarness;
+/// The daemon's own recent log, `app::recent_log::RecentLogRing`: the real
+/// adapter of the `RecentLogStore` port, which keeps its lines in memory
+/// already, so it has no I/O to fake (`app::fakes::InMemoryRecentLog` is the
+/// same type under the fakes' name).
+struct RecentLogRingHarness;
 
-impl contract::recent_log::RecentLogHarness for InMemoryRecentLogHarness {
+impl contract::recent_log::RecentLogHarness for RecentLogRingHarness {
     fn log(&self) -> Arc<dyn app::ports::RecentLogStore> {
-        Arc::new(app::fakes::InMemoryRecentLog::new())
+        Arc::new(app::recent_log::RecentLogRing::new())
     }
 }
 
-/// The in-memory recent log is the daemon's own (`app::recent_log`), so this
-/// run covers the real adapter too.
 #[test]
-fn the_in_memory_recent_log_meets_the_recent_log_contract() {
-    contract::recent_log::run(&InMemoryRecentLogHarness);
+fn the_daemons_recent_log_ring_meets_the_recent_log_contract() {
+    contract::recent_log::run(&RecentLogRingHarness);
 }
 
 /// The fake reader gives the profile a harness method scripted, at the path
