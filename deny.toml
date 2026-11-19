@@ -31,7 +31,7 @@ yanked = "deny"
 # inside the requirements of `Cargo.toml` and of the crates that depend on it.
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "`paste` 1.0.15 is unmaintained (archived by its author). It is a proc-macro that Leptos 0.8 (`either_of`, `reactive_graph`, `tachys`) expands when the `web` crate is compiled; it is not linked into any binary and takes no input at run time. Nothing to upgrade to: the latest Leptos 0.8 release still uses it, and `pastey`, the drop-in fork, is a swap for Leptos to make. Remove this entry when Leptos moves off `paste`." },
-    { id = "RUSTSEC-2023-0071", reason = "`rsa` 0.9.10, the Marvin timing side channel in RSA private-key operations. It reaches the build only through OpenDAL's `reqsign` crates (`rustic_backend`), which sign a JWT with the RSA key of a cloud credential (an Azure client certificate, a Google service account) the person has configured. Ladderback is the client there: it decrypts nothing and takes no RSA input from a peer, so nobody can observe or time its signing the way the attack needs. No patched 0.9 release exists, and `rsa` 0.10 needs a release of `reqsign` that moves to it, under the `rustic_core` revision the workspace pins. Remove this entry when the pin moves to one." },
+    { id = "RUSTSEC-2023-0071", reason = "`rsa` 0.9.10, the Marvin timing side channel in RSA private-key operations. It reaches the build only through OpenDAL's `reqsign` crates (`rustic_backend`), which sign a JWT with the RSA key of a cloud credential (an Azure client certificate, a Google service account) the person has configured. Ladderback is the client there: it decrypts nothing and takes no RSA input from a peer, so nobody can observe or time its signing the way the attack needs. No patched 0.9 release exists, and every `reqsign` release (`reqsign-core`, `reqsign-azure-storage`, `reqsign-google`) still asks for `rsa` 0.9. Remove this entry when `reqsign` moves to `rsa` 0.10 and the `opendal` that `rustic_backend` uses takes that release." },
     { id = "RUSTSEC-2026-0543", reason = "`chrono` 0.4.45 is unmaintained; no vulnerability is reported. No Ladderback crate uses it (the `chrono` ban above, decision 22): it comes only through `rmcp` (the MCP server), `schemars` (the API's JSON schemas) and `suppaftp` (OpenDAL's FTP backend under `rustic_backend`), none of which offers a build without it. Nothing to upgrade to: every version is affected. Remove this entry when those three move off `chrono`, or replace it if the advisory turns into a vulnerability." },
     { id = "RUSTSEC-2026-0542", reason = "`humantime` 2.4.0 is unmaintained because it wraps `chrono` (RUSTSEC-2026-0543); no vulnerability is reported. It comes only through `cucumber`, a dev-dependency of the acceptance and e2e runners, so it is in no binary Ladderback ships. Nothing to upgrade to: every version is affected. Remove this entry when `cucumber` moves off `humantime`." },
 ]
@@ -96,7 +96,3 @@ deny = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# `rustic_core` and `rustic_backend` come from the one commit the workspace
-# `Cargo.toml` pins, because `Progress::error` is not in a crates.io release
-# yet (§16, decision 7). The sources go back to crates.io alone when it is.
-allow-git = ["https://github.com/rustic-rs/rustic_core"]

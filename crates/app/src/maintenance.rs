@@ -275,8 +275,9 @@ pub struct PrunePreview {
     /// Packs it would delete now: marked by an earlier prune and past
     /// `keep_delete`.
     pub packs_deleted: u64,
-    /// Packs an earlier prune marked and this one would bring back, because
-    /// something uses them again.
+    /// Packs an earlier prune marked that something uses again: this one
+    /// would mark them for recovery, or bring back the ones marked for
+    /// recovery at least `keep_delete` ago.
     pub packs_recovered: u64,
     /// The bytes the deletions would free.
     pub bytes_deleted: u64,

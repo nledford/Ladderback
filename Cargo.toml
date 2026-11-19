@@ -203,11 +203,10 @@ rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs
 # in `adapters/tls` only, on the same provider. Already in the tree through
 # `reqwest`.
 rustls-platform-verifier = "0.7.1"
-# One git revision of rustic's `main`, because `Progress::error` is unreleased
-# (technical design §2.1). The `engine` crate depends on them, and so do the
-# root tests, which initialize scratch repositories and list their snapshots.
-rustic_backend = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284ac43d34bde9334210bcd40f824a0d8c69" }
-rustic_core = { git = "https://github.com/rustic-rs/rustic_core", rev = "01fe284ac43d34bde9334210bcd40f824a0d8c69" }
+# The engine. The `engine` crate depends on them, and so do the root tests,
+# which initialize scratch repositories and list their snapshots.
+rustic_backend = "0.8.0"
+rustic_core = "0.14.0"
 # JSON schemas of the `api` wire types, behind its `schemars` feature, for
 # the MCP server's output schemas (decision 95). Already in the tree through
 # `rmcp`, so it adds no package.
