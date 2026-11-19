@@ -1264,16 +1264,35 @@ async fn close_within(
     }
 }
 
+/// The refusal of a data folder another process holds, named and unnamed. On
+/// Linux and macOS that process may be the installed service, which its
+/// manager starts again once killed (#1035): the message names the manager's
+/// stop and `remove-service`.
+#[cfg(target_os = "linux")]
+const DATA_DIR_IN_USE: [MessageId; 2] = [
+    msg::CLI_DATA_DIR_IN_USE_SYSTEMD,
+    msg::CLI_DATA_DIR_IN_USE_UNNAMED_SYSTEMD,
+];
+#[cfg(target_os = "macos")]
+const DATA_DIR_IN_USE: [MessageId; 2] = [
+    msg::CLI_DATA_DIR_IN_USE_LAUNCHD,
+    msg::CLI_DATA_DIR_IN_USE_UNNAMED_LAUNCHD,
+];
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+const DATA_DIR_IN_USE: [MessageId; 2] =
+    [msg::CLI_DATA_DIR_IN_USE, msg::CLI_DATA_DIR_IN_USE_UNNAMED];
+
 /// A data folder another process holds, or a lock that couldn't be taken, as
 /// the message for whoever started the daemon.
 fn lock_refused(data_dir: &std::path::Path, error: LockError) -> Refused {
+    let [named, unnamed] = DATA_DIR_IN_USE;
     match error {
         LockError::InUse { holder: Some(pid) } => Refused {
-            message: msg::CLI_DATA_DIR_IN_USE,
+            message: named,
             args: vec![("path", text(data_dir.display())), ("pid", text(pid))],
         },
         LockError::InUse { holder: None } => Refused {
-            message: msg::CLI_DATA_DIR_IN_USE_UNNAMED,
+            message: unnamed,
             args: vec![("path", text(data_dir.display()))],
         },
         LockError::Unavailable { detail } => Refused {

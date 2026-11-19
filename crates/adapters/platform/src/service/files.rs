@@ -18,8 +18,9 @@ pub const LAUNCHD_MARK: &str =
 /// The systemd user unit that runs `program serve --service-managed`. Its
 /// cache folder is the one systemd makes for it, private to the user, which
 /// the agent is pointed at (decision 59). systemd waits [`KILL_AFTER`] for it
-/// to stop, and starts it again after a failure or a restart's
-/// [`RESTART_STATUS`], which doesn't mark the unit failed (decision 94).
+/// to stop, and starts it again 10 s after any exit systemd didn't ask for,
+/// a SIGTERM another program sent among them (#1035); a restart's
+/// [`RESTART_STATUS`] doesn't mark the unit failed (decision 94).
 pub fn systemd_unit(program: &ServicePath) -> String {
     format!(
         "{SYSTEMD_MARK}\n\
@@ -35,9 +36,8 @@ pub fn systemd_unit(program: &ServicePath) -> String {
          Environment=LADDERBACK_CACHE_DIR=%C/ladderback\n\
          KillMode=mixed\n\
          TimeoutStopSec={kill_after}\n\
-         Restart=on-failure\n\
+         Restart=always\n\
          RestartSec=10\n\
-         RestartForceExitStatus={RESTART_STATUS}\n\
          SuccessExitStatus={RESTART_STATUS}\n\
          \n\
          [Install]\n\
@@ -57,9 +57,10 @@ fn systemd_word(text: &str) -> String {
 }
 
 /// The launchd agent labelled `label` that runs `program serve
-/// --service-managed` from login on, again after a crash or a restart's
-/// [`RESTART_STATUS`] (any exit but a successful one), and writes its log to
-/// `log`. launchd waits [`KILL_AFTER`] for it to stop.
+/// --service-managed` from login on, and again after any exit launchd didn't
+/// ask for (`KeepAlive` true, #1035): a `bootout` unloads the agent, so only
+/// that stops it for good. It writes its log to `log`, and launchd waits
+/// [`KILL_AFTER`] for it to stop.
 pub fn launchd_plist(label: &str, program: &ServicePath, log: &ServicePath) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -78,10 +79,7 @@ pub fn launchd_plist(label: &str, program: &ServicePath, log: &ServicePath) -> S
          \t<key>RunAtLoad</key>\n\
          \t<true/>\n\
          \t<key>KeepAlive</key>\n\
-         \t<dict>\n\
-         \t\t<key>SuccessfulExit</key>\n\
-         \t\t<false/>\n\
-         \t</dict>\n\
+         \t<true/>\n\
          \t<key>ExitTimeOut</key>\n\
          \t<integer>{kill_after}</integer>\n\
          \t<key>StandardErrorPath</key>\n\

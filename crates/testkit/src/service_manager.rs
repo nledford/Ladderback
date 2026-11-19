@@ -23,6 +23,11 @@
 //! real one waits for the stop ([`FakeServiceManagers::stop_taking`]), and the
 //! `loginctl` says the user lingers ([`FakeServiceManagers::linger`]) or fails
 //! ([`FakeServiceManagers::refuse_linger_check`]).
+//!
+//! Each keeps the service file it loaded, at `enable` or `bootstrap`, until
+//! it lets the service go, at `disable --now` or `bootout`. A service whose
+//! program ends of itself ([`FakeServiceManagers::exits`]) is started again
+//! when that file says to, as the real manager reads it.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -64,7 +69,8 @@ case "$2" in
   daemon-reload) ;;
   enable)
     [ -f "$3" ] || { echo "Failed to enable unit: Unit file $3 does not exist." >&2; exit 1; }
-    : > "$state/enabled-${3##*/}" ;;
+    : > "$state/enabled-${3##*/}"
+    /bin/cp "$3" "$state/loaded-${3##*/}" ;;
   restart)
     [ -f "$state/enabled-$3" ] || { echo "Failed to restart $3: Unit $3 not found." >&2; exit 5; }
     [ ! -f "$state/stop-takes" ] || { read -r took < "$state/stop-takes"; /bin/sleep "$took"; }
@@ -72,7 +78,7 @@ case "$2" in
   disable)
     [ "$3" = --now ] || { echo "only disable --now is faked" >&2; exit 64; }
     [ ! -f "$state/stop-takes" ] || { read -r took < "$state/stop-takes"; /bin/sleep "$took"; }
-    /bin/rm -f "$state/enabled-$4" "$state/runs-$4" ;;
+    /bin/rm -f "$state/enabled-$4" "$state/runs-$4" "$state/loaded-$4" ;;
   show)
     [ "$3" = -p ] && [ "$4" = MainPID ] && [ "$5" = --value ] || { echo "only show -p MainPID --value is faked" >&2; exit 64; }
     if [ -f "$state/runs-$6" ]; then /bin/cat "$state/runs-$6"; else echo 0; fi ;;
@@ -99,9 +105,11 @@ const LAUNCHCTL: &str = r#"case "$1" in
     [ -f "$3" ] || { echo "Bootstrap failed: 2: No such file or directory" >&2; exit 2; }
     label=${3##*/}; label=${label%.plist}
     [ ! -f "$state/runs-$label" ] || { echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; }
+    /bin/cp "$3" "$state/loaded-$label"
     start "$label" ;;
   bootout)
     [ -f "$state/runs-${2##*/}" ] || { echo "Boot-out failed: 3: No such process" >&2; exit 3; }
+    /bin/rm -f "$state/loaded-${2##*/}"
     if [ -f "$state/stop-slowly" ]; then
       /bin/cp "$state/stop-slowly" "$state/stopping-${2##*/}"
     else
@@ -213,6 +221,48 @@ impl FakeServiceManagers {
         }
     }
 
+    /// The service `name`'s program ends with `status` of itself, not
+    /// because its manager stopped it: a crash, a restart's status, or a
+    /// SIGTERM another program sent. A manager that still has the service
+    /// starts it again, with a new process, when the service file it loaded
+    /// says to (`starts_again`, below); one that has let it go (`disable
+    /// --now`, `bootout`) starts nothing.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be read or written.
+    pub fn exits(&self, name: &str, status: u8) {
+        self.end(name);
+        let file = match fs::read_to_string(self.state().join(format!("loaded-{name}"))) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => panic!("the service file the manager loaded: {error}"),
+        };
+        if starts_again(&file, status) {
+            self.start(name);
+        }
+    }
+
+    /// Starts the service `name` as the stand-ins' `start` does: with the
+    /// next process ID, or the last one again when told to keep it.
+    fn start(&self, name: &str) {
+        let last = fs::read_to_string(self.state().join("last-pid"))
+            .ok()
+            .and_then(|text| text.trim().parse::<u32>().ok())
+            .unwrap_or(4100);
+        let pid = if self.state().join("same-pid").exists() {
+            last
+        } else {
+            last + 1
+        };
+        fs::write(self.state().join("last-pid"), format!("{pid}\n")).expect("the last process ID");
+        fs::write(
+            self.state().join(format!("runs-{name}")),
+            format!("{pid}\n"),
+        )
+        .expect("the service runs");
+    }
+
     /// Makes each start from now on keep the process ID the last one gave,
     /// as if the restart never happened.
     ///
@@ -317,5 +367,155 @@ impl FakeServiceManagers {
             format!("{:.3}\n", took.as_secs_f64()),
         )
         .expect("the stop's length");
+    }
+}
+
+/// Whether a manager that loaded `file` starts its service again once the
+/// program ends with `status` of itself, as the manager's manual says for
+/// the settings a service file of Ladderback's can hold.
+///
+/// - launchd (`launchd.plist(5)`): `KeepAlive` true keeps the agent running
+///   whatever ended it; a `KeepAlive` dictionary whose `SuccessfulExit` is
+///   false starts it again only after a status other than 0, and one whose
+///   `SuccessfulExit` is true only after 0. With no `KeepAlive`, never.
+/// - systemd (`systemd.service(5)`): after a status `RestartForceExitStatus=`
+///   names, whatever `Restart=` says; otherwise `Restart=always` after any
+///   status, `on-failure` after an unclean one (neither 0 nor one
+///   `SuccessExitStatus=` names), and `no`, the default, never.
+fn starts_again(file: &str, status: u8) -> bool {
+    if file.starts_with("<?xml") {
+        launchd_starts_again(file, status)
+    } else {
+        systemd_starts_again(file, status)
+    }
+}
+
+fn launchd_starts_again(plist: &str, status: u8) -> bool {
+    let Some((_, keep_alive)) = plist.split_once("<key>KeepAlive</key>") else {
+        return false;
+    };
+    let keep_alive = keep_alive.trim_start();
+    if keep_alive.starts_with("<true/>") {
+        return true;
+    }
+    let Some(dict) = keep_alive.strip_prefix("<dict>") else {
+        return false;
+    };
+    let dict = dict.split_once("</dict>").map_or(dict, |(dict, _)| dict);
+    match dict
+        .split_once("<key>SuccessfulExit</key>")
+        .map(|(_, value)| value.trim_start())
+    {
+        Some(value) if value.starts_with("<false/>") => status != 0,
+        Some(value) if value.starts_with("<true/>") => status == 0,
+        _ => false,
+    }
+}
+
+fn systemd_starts_again(unit: &str, status: u8) -> bool {
+    let setting = |key: &str| {
+        unit.lines()
+            .filter_map(|line| line.strip_prefix(key))
+            .next_back()
+    };
+    let names_status = |key: &str| {
+        setting(key).is_some_and(|statuses| {
+            statuses
+                .split_whitespace()
+                .any(|named| named.parse::<u8>() == Ok(status))
+        })
+    };
+    let clean = status == 0 || names_status("SuccessExitStatus=");
+    names_status("RestartForceExitStatus=")
+        || match setting("Restart=") {
+            Some("always") => true,
+            Some("on-failure") => !clean,
+            _ => false,
+        }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::starts_again;
+
+    const PLIST_HEAD: &str =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n";
+
+    fn plist(keep_alive: &str) -> String {
+        format!(
+            "{PLIST_HEAD}\t<key>RunAtLoad</key>\n\t<true/>\n{keep_alive}\t<key>ExitTimeOut</key>\n\t<integer>75</integer>\n</dict>\n</plist>\n"
+        )
+    }
+
+    fn unit(restart: &str) -> String {
+        format!(
+            "[Service]\nType=exec\n{restart}RestartSec=10\n\n[Install]\nWantedBy=default.target\n"
+        )
+    }
+
+    #[test]
+    fn launchd_keeps_an_agent_alive_whatever_ended_it() {
+        let file = plist("\t<key>KeepAlive</key>\n\t<true/>\n");
+        for status in [0, 1, 75] {
+            assert!(starts_again(&file, status), "status {status}");
+        }
+    }
+
+    #[test]
+    fn launchd_with_successful_exit_false_starts_again_only_after_a_failure() {
+        let file = plist(
+            "\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n",
+        );
+        assert!(!starts_again(&file, 0));
+        assert!(starts_again(&file, 1));
+        assert!(starts_again(&file, 75));
+    }
+
+    #[test]
+    fn launchd_with_successful_exit_true_starts_again_only_after_a_success() {
+        let file = plist(
+            "\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<true/>\n\t</dict>\n",
+        );
+        assert!(starts_again(&file, 0));
+        assert!(!starts_again(&file, 1));
+    }
+
+    #[test]
+    fn launchd_without_keep_alive_never_starts_again() {
+        let file = plist("");
+        assert!(!starts_again(&file, 0));
+        assert!(!starts_again(&file, 1));
+        let other = plist("\t<key>KeepAlive</key>\n\t<false/>\n");
+        assert!(!starts_again(&other, 1));
+    }
+
+    #[test]
+    fn systemd_restart_always_starts_again_after_any_status() {
+        let file = unit("Restart=always\nSuccessExitStatus=75\n");
+        for status in [0, 1, 75] {
+            assert!(starts_again(&file, status), "status {status}");
+        }
+    }
+
+    #[test]
+    fn systemd_on_failure_starts_again_only_after_an_unclean_status() {
+        let file = unit("Restart=on-failure\nSuccessExitStatus=75\n");
+        assert!(!starts_again(&file, 0));
+        assert!(starts_again(&file, 1));
+        // 75 is clean here, so only a force brings the unit back.
+        assert!(!starts_again(&file, 75));
+        let forced = unit("Restart=on-failure\nRestartForceExitStatus=75\nSuccessExitStatus=75\n");
+        assert!(starts_again(&forced, 75));
+        assert!(!starts_again(&forced, 0));
+    }
+
+    #[test]
+    fn systemd_without_restart_starts_again_only_on_a_forced_status() {
+        let file = unit("");
+        assert!(!starts_again(&file, 1));
+        let forced = unit("RestartForceExitStatus=3 75\n");
+        assert!(starts_again(&forced, 75));
+        assert!(starts_again(&forced, 3));
+        assert!(!starts_again(&forced, 1));
     }
 }

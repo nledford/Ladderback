@@ -8,11 +8,11 @@
 use std::assert_matches;
 use std::path::PathBuf;
 
-use cucumber::{given, then};
+use cucumber::{given, then, when};
 use testkit::service_manager::FakeServiceManagers;
 
 use super::interop_steps::{ran, run};
-use super::{Agent, LADDERBACK};
+use super::{Agent, LADDERBACK, events_steps};
 
 #[derive(Debug, Default)]
 pub(super) struct ServiceE2e {
@@ -173,6 +173,48 @@ fn service_does_not_run(agent: &mut Agent) {
     assert!(!managers(agent).runs(NAME), "{}", managers(agent).calls());
 }
 
+/// The program of the service the stand-in runs ends with `status` of
+/// itself, and the manager starts it again as the file it loaded says: a
+/// new process.
+fn starts_again_after(agent: &Agent, status: u8) {
+    let managers = managers(agent);
+    let before = managers.process(NAME).expect("the service runs");
+    managers.exits(NAME, status);
+    let after = managers.process(NAME);
+    assert!(
+        after.is_some_and(|after| after != before),
+        "the service manager left the service stopped after it exited with status {status}:\n{}",
+        service_text(agent)
+    );
+}
+
+/// The SIGTERM comes from the scenario, not from a service manager: the
+/// stop systemd and launchd would make, sent by someone else.
+#[when("a program other than the service manager sends the agent SIGTERM")]
+async fn sigterm_from_another_program(agent: &mut Agent) {
+    events_steps::Events::stop(agent).await;
+}
+
+/// The daemon's exit, as the service's: the status it ended with is the one
+/// the stand-in reads its service file for.
+#[then("the service manager starts the service again")]
+fn manager_starts_again(agent: &mut Agent) {
+    let stopped = agent.events.stopped();
+    let status = stopped
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .unwrap_or_else(|| panic!("the daemon ended with {stopped}, not a status"));
+    starts_again_after(agent, status);
+}
+
+/// The program's exit that follows the manager's own stop: the manager has
+/// let the service go, so nothing starts it.
+#[then("the service manager does not start it again once its program has exited")]
+fn stays_stopped(agent: &mut Agent) {
+    managers(agent).exits(NAME, 0);
+    assert!(!managers(agent).runs(NAME), "{}", managers(agent).calls());
+}
+
 #[then("there is no service file")]
 fn no_service_file(agent: &mut Agent) {
     let file = service_file(agent);
@@ -239,24 +281,15 @@ fn manager_waits_to_kill(agent: &mut Agent, seconds: u64) {
     );
 }
 
-// launchd starts an agent again on any exit but a successful one; systemd on
-// the statuses `RestartForceExitStatus=` names, whatever `Restart=` says, and
-// `SuccessExitStatus=` keeps that exit from marking the unit failed.
+// Any exit the manager didn't ask for is followed by a start (#1035), and
+// systemd marks the unit failed after a status other than 0 unless
+// `SuccessExitStatus=` names it.
 #[then(expr = "the service manager starts the service again when it exits with status {int}")]
 fn manager_restarts_on(agent: &mut Agent, status: u8) {
-    let text = service_text(agent);
-    let wanted: Vec<String> = if cfg!(target_os = "macos") {
-        vec![
-            "<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n"
-                .to_owned(),
-        ]
-    } else {
-        vec![
-            format!("\nRestartForceExitStatus={status}\n"),
-            format!("\nSuccessExitStatus={status}\n"),
-        ]
-    };
-    for wanted in wanted {
+    starts_again_after(agent, status);
+    if cfg!(target_os = "linux") {
+        let text = service_text(agent);
+        let wanted = format!("\nSuccessExitStatus={status}\n");
         assert!(
             text.contains(&wanted),
             "the service file lacks {wanted:?}:\n{text}"
