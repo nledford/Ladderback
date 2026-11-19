@@ -148,7 +148,7 @@ If you think a check is wrong, name it, say why, and stop for the maintainer.
 | Lane | What it runs | Use it |
 |---|---|---|
 | Quick, local | `just quick-ci`, the scenarios the change touches (`just test-e2e --name`, `just test-ui --name` for UI work), and `just red-first` on a `behaviour` branch | Before every push, and while iterating |
-| Full, CI | CI's checks on the pull request: `just test` (doc tests and `@e2e` too) on Linux and macOS, `just test-release`, `just mutants`, the whole `@ui` suite in Chromium, and in Firefox and WebKit when the pull request touches the UI, red-first on Linux | Defer to it for everything the quick lane leaves out. A pull request is done when its required checks pass on its current head commit: quote that run |
+| Full, CI | CI's checks on the pull request: `just test` (doc tests and `@e2e` too) on Linux and macOS, `just test-release`, `just mutants`, the whole `@ui` suite in Chromium, and in Firefox and WebKit when the pull request touches the UI, red-first on Linux. While the variable `CI_MODE` is `mvp`, a pull request runs a reduced set ([decision 124](docs/design/decisions/124-mvp-ci-mode.md)) | Defer to it for everything the quick lane leaves out. A pull request is done when its required checks pass on its current head commit: quote that run |
 | Full, local | `just verify`, or one full recipe | Only to reproduce a CI failure, or for evidence CI can't give yet (Linux behaviour on a Mac: a container run) |
 
 ## Independent adversarial review
