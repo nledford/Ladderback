@@ -53,7 +53,7 @@ Feature: Restarting after a crash
     And the plan's after hook waits until it is let go
     And the daemon is running a backup of the plan "home"
     When a second Ladderback is started on the same folders
-    Then the second Ladderback is refused, naming the data folder and the process that holds it
+    Then the second Ladderback is refused, naming the data folder, the process that holds it and how to stop the installed service for good
     And the history page shows the operation running
     When the plan's after hook is let go
     Then the history page shows the operation succeeded

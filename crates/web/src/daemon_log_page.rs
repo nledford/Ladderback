@@ -13,6 +13,8 @@ use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::button::Content;
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::{Button, RadioGroup, refusal_alert, say_refusals, write_clipboard};
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
 use crate::live::reply;
@@ -78,7 +80,7 @@ pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
         </PageHeading>
         <p>{body}</p>
         {move || match phase.get() {
-            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(4)).into_any(),
             Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match refused.get() {

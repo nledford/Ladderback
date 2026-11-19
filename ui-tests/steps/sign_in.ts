@@ -126,8 +126,8 @@ When("the admin password is set anew to {string}", async function (this: Browser
   this.scriptedDaemon?.endSessions();
 });
 
-// The start page's reading of the plans list the daemon holds back: whether
-// it has reached the daemon, and how to let it through.
+// A page's reading the daemon holds back: whether it has reached the daemon,
+// and how to let it through.
 interface HeldReading {
   arrived: Promise<void>;
   letThrough: () => void;
@@ -136,19 +136,25 @@ interface HeldReading {
 // One per scenario: the world is new for each.
 const heldReadings = new WeakMap<BrowserWorld, HeldReading>();
 
-// The first reading of the plans list waits at the daemon's door until the
-// scenario lets it through, so the daemon answers it only after what the
-// scenario does meanwhile. Every later reading goes through at once.
-Given(
-  "the daemon holds back its answer to the start page's reading of the plans list",
-  function (this: BrowserWorld) {
+// The readings a scenario can hold back, by what the page reads, and the
+// address each is read from.
+const HELD_READINGS: Record<string, string> = {
+  "the start page's reading of the plans list": "/api/v1/plans",
+  "the Settings page's reading of how long signing in lasts": "/api/v1/settings/sign-in",
+};
+
+for (const [reading, address] of Object.entries(HELD_READINGS)) {
+  // The first reading waits at the daemon's door until the scenario lets it
+  // through, so the daemon answers it only after what the scenario does
+  // meanwhile. Every later reading goes through at once.
+  Given(`the daemon holds back its answer to ${reading}`, function (this: BrowserWorld) {
     const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
     const { promise: through, resolve: letThrough } = Promise.withResolvers<void>();
     heldReadings.set(this, { arrived, letThrough });
     let readings = 0;
     this.contextRoutes.push(async (context) => {
       await context.route(
-        (url) => url.pathname === "/api/v1/plans",
+        (url) => url.pathname === address,
         async (route) => {
           if (route.request().method() === "GET") {
             readings += 1;
@@ -161,22 +167,19 @@ Given(
         },
       );
     });
-  },
-);
+  });
 
-When(
-  "the daemon gives the answer it held back to the start page's reading of the plans list",
-  async function (this: BrowserWorld) {
+  When(`the daemon gives the answer it held back to ${reading}`, async function (this: BrowserWorld) {
     const held = heldReadings.get(this);
-    assert.ok(held, "no Given held back the start page's reading of the plans list");
+    assert.ok(held, `no Given held back ${reading}`);
     const { promise: late, resolve: tooLate } = Promise.withResolvers<"late">();
     const timer = setTimeout(() => tooLate("late"), PAGE_PATIENCE_MS);
     const outcome = await Promise.race([held.arrived.then(() => "arrived" as const), late]);
     clearTimeout(timer);
-    assert.equal(outcome, "arrived", "the start page never read the plans list");
+    assert.equal(outcome, "arrived", `the page never made ${reading}`);
     held.letThrough();
-  },
-);
+  });
+}
 
 // A page that lost its session reads the history again on its own, a back-off
 // after the reading the dialog was closed on: this waits for the daemon's

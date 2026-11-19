@@ -26,6 +26,8 @@ use leptos::wasm_bindgen::JsValue;
 
 use crate::announcer::Politeness;
 use crate::components::button::Content;
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::tree::rules::snapshot_link;
 use crate::components::{
     Button, Confirmation, Link, ReviewDialog, Working, dialog_refusal_alert, recover_focus,
@@ -567,7 +569,8 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
         {move || { unreachable.get().then(|| view! { <p>{unreachable_body.clone()}</p> }) }}
         {move || refused.get().map(|sentence| refusal_alert(&alert_localizer, sentence))}
         {move || match repositories.get() {
-            None => view! { <p>{loading.clone()}</p> }.into_any(),
+            None if unreachable.get() => ().into_any(),
+            None => first_load(loading.clone(), Awaited::Text).into_any(),
             Some(aliases) => {
                 aliases
                     .into_iter()
@@ -577,6 +580,8 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                             msg::UI_SNAPSHOTS_OF,
                             &[("alias", MsgArg::Text(alias.clone()))],
                         );
+                        // A reading that reached no daemon brings no repositories: the
+                        // page says it can't reach Ladderback, and waits for nothing.
                         view! {
                             <Button
                                 content=Content::Text(label.into())
@@ -794,7 +799,7 @@ fn Repository(
             }}
         </section>
         {move || match area.get() {
-            Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Shown::Loading => first_load(loading.clone(), Awaited::table(2)).into_any(),
             Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
             Shown::Nothing => ().into_any(),
             Shown::Lists => {
@@ -828,7 +833,7 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
         <section aria-labelledby=STATS_HEADING>
             <h2 id=STATS_HEADING>{heading}</h2>
             {move || match shown.get() {
-                stats::Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+                stats::Shown::Loading => first_load(loading.clone(), Awaited::table(2)).into_any(),
                 stats::Shown::Never => view! { <p>{never.clone()}</p> }.into_any(),
                 stats::Shown::Table => {
                     (move || latest.get().map(|reading| stats_table(page, reading))).into_any()

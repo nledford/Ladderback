@@ -1,0 +1,102 @@
+// Journey steps for a page's first load (technical design §4.5, the
+// skeleton's caller): while the daemon's first answer is on its way, the
+// region it fills is busy, says the wait in words and shows the still shape
+// of what is coming. A skeleton is hidden from a screen reader and has no
+// role, so it is found by its class inside the busy region, which is found by
+// the attribute that makes it busy, as the gallery's skeleton steps do.
+
+import assert from "node:assert/strict";
+
+import { Given, Then } from "@cucumber/cucumber";
+import { expect } from "playwright/test";
+import type { Locator } from "playwright";
+
+import type { BrowserWorld } from "../support/world.ts";
+
+// A pixel of rounding between skeletons laid out side by side.
+const ROUNDING_PX = 1;
+
+interface Box {
+  top: number;
+  height: number;
+}
+
+/** The main content's one busy region in view, once it says the wait in
+ *  `words` beside skeletons that a screen reader skips. */
+async function busyRegion(world: BrowserWorld, words: string): Promise<Locator> {
+  const busy = world.page.getByRole("main").locator('[aria-busy="true"]:visible');
+  await expect(busy).toHaveCount(1);
+  await expect(busy.getByText(words, { exact: true })).toBeVisible();
+  const skeletons = busy.locator(".skeleton");
+  assert.ok((await skeletons.count()) > 0, "the busy region shows no skeleton");
+  for (const skeleton of await skeletons.all()) {
+    await expect(skeleton).toHaveAttribute("aria-hidden", "true");
+  }
+  return busy;
+}
+
+/** The region's skeletons line by line, top to bottom: those that stand
+ *  side by side share a line. */
+async function linesOf(busy: Locator): Promise<Box[][]> {
+  const boxes: Box[] = await busy.locator(".skeleton").evaluateAll((all) =>
+    all.map((skeleton) => {
+      const { top, height } = skeleton.getBoundingClientRect();
+      return { top, height };
+    }),
+  );
+  const lines: Box[][] = [];
+  for (const box of boxes.sort((a, b) => a.top - b.top)) {
+    const line = lines.at(-1);
+    const first = line?.at(0);
+    if (line && first && Math.abs(first.top - box.top) <= ROUNDING_PX) {
+      line.push(box);
+    } else {
+      lines.push([box]);
+    }
+  }
+  return lines;
+}
+
+// A table's shape: its header, then its rows, each a skeleton per column.
+Then(
+  "a region of the page is busy and shows the words {string} beside the still shape of a table, its header and {int} rows of {int} columns",
+  async function (this: BrowserWorld, words: string, rows: number, columns: number) {
+    const lines = await linesOf(await busyRegion(this, words));
+    assert.equal(lines.length, rows + 1, `the skeleton has ${lines.length} lines, not a header and ${rows} rows`);
+    lines.forEach((line, index) =>
+      assert.equal(line.length, columns, `line ${index + 1} of the skeleton has ${line.length} columns, not ${columns}`),
+    );
+  },
+);
+
+// A form's shape: each field a label above its box, which is taller than the
+// label's line, then the button below them.
+Then(
+  "a region of the page is busy and shows the words {string} beside the still shape of a form, {int} field(s) and its button",
+  async function (this: BrowserWorld, words: string, fields: number) {
+    const lines = await linesOf(await busyRegion(this, words));
+    assert.equal(lines.length, fields * 2 + 1, `the skeleton has ${lines.length} lines, not ${fields} fields and a button`);
+    assert.ok(
+      lines.every((line) => line.length === 1),
+      "a form's skeleton stands one part to a line",
+    );
+    const parts = lines.flat();
+    for (let field = 0; field < fields; field += 1) {
+      const [label, box] = [parts.at(field * 2), parts.at(field * 2 + 1)];
+      assert.ok(label && box && box.height > label.height, `field ${field + 1} is no taller than its label`);
+    }
+    const [label, button] = [parts.at(0), parts.at(-1)];
+    assert.ok(label && button && button.height > label.height, "the button is no taller than a label");
+  },
+);
+
+Then("no region of the page is busy", async function (this: BrowserWorld) {
+  await expect(this.page.getByRole("main").locator('[aria-busy="true"]')).toHaveCount(0);
+});
+
+// The reading is refused at the browser's door, as a stopped daemon's is.
+Given("the Snapshots page's reading of the repositories reaches no daemon", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/repositories", (route) => route.abort("connectionrefused"));
+  });
+});
