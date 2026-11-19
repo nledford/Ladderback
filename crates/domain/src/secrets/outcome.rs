@@ -533,7 +533,24 @@ mod tests {
             "/var/run/secrets/kubernetes.io/serviceaccount/token",
             "/run/secrets/a/b/c",
         ] {
-            assert!(!warns(path, 0o644, None), "{path}");
+            // Neither warning: the runtime sets read and write bits alike.
+            for mode in [0o644, 0o666, 0o602] {
+                assert!(!warns(path, mode, None), "{path} {mode:o}");
+                assert!(
+                    !warns(path, mode, Some("/run/credentials/demo.service")),
+                    "{path} {mode:o}"
+                );
+            }
+        }
+        for mode in [0o644, 0o620] {
+            assert!(
+                !warns(
+                    "/run/credentials/demo.service/nas",
+                    mode,
+                    Some("/run/credentials/demo.service")
+                ),
+                "{mode:o}"
+            );
         }
     }
 

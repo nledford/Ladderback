@@ -236,6 +236,8 @@ async fn a_key_file_others_can_read_or_change_is_refused_and_left_alone() {
         let (data, identity) = identity();
         let files = [
             (KeyFile::AgentKey, "cd".repeat(32)),
+            (KeyFile::HubKey, "ef".repeat(32)),
+            (KeyFile::RecoverySeed, "12".repeat(32)),
             (KeyFile::RecoveryKey, KEY.to_owned()),
             (KeyFile::HubTlsKey, pem.to_owned()),
             (KeyFile::HubPin, pin().to_text()),
@@ -246,11 +248,13 @@ async fn a_key_file_others_can_read_or_change_is_refused_and_left_alone() {
             fs::set_permissions(path(&data, *file), fs::Permissions::from_mode(mode)).unwrap();
         }
         let exposed = |file| Err(IdentityError::Exposed { file, mode });
-        assert_eq!(
-            identity.seed(SeedFile::AgentKey).await.map(|_| ()),
-            exposed(KeyFile::AgentKey),
-            "{mode:o}"
-        );
+        for seed_file in SeedFile::ALL {
+            assert_eq!(
+                identity.seed(seed_file).await.map(|_| ()),
+                exposed(seed_file.key_file()),
+                "{mode:o}"
+            );
+        }
         assert_eq!(
             identity
                 .keep_seed(SeedFile::AgentKey, SigningSeed::from_bytes([1; 32]))
@@ -285,6 +289,28 @@ async fn a_key_file_others_can_read_or_change_is_refused_and_left_alone() {
             let left = fs::metadata(&at).unwrap().permissions().mode() & 0o777;
             assert_eq!(left, mode, "{file}");
         }
+    }
+}
+
+/// A key file only its owner can read or change is read whatever else its
+/// mode says: no group or world bit is what counts (#1137).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_key_file_only_its_owner_can_use_is_read_whatever_its_owner_bits() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for mode in [0o400, 0o600, 0o700] {
+        let (data, identity) = identity();
+        write(&data, KeyFile::AgentKey, "cd".repeat(32));
+        fs::set_permissions(
+            path(&data, KeyFile::AgentKey),
+            fs::Permissions::from_mode(mode),
+        )
+        .unwrap();
+        assert!(
+            identity.seed(SeedFile::AgentKey).await.unwrap().is_some(),
+            "{mode:o}"
+        );
     }
 }
 
