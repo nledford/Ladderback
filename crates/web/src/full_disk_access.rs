@@ -1,5 +1,6 @@
-//! What the start page's Full Disk Access warning shows and says (§4.4, §16
-//! decision 115), decided on the host; `full_disk_access_warning.rs` draws it.
+//! What the Full Disk Access warning, a banner on every page with the steps
+//! on the start page, shows and says (§4.4, §16 decision 115), decided on
+//! the host; `full_disk_access_warning.rs` draws it.
 
 use api::{FullDiskAccessDto, FullDiskAccessStateDto};
 use l10n::{MessageId, msg};
@@ -37,6 +38,27 @@ pub(crate) fn said_after_check(state: FullDiskAccessStateDto) -> MessageId {
             msg::UI_FULL_DISK_ACCESS_UNKNOWN
         }
     }
+}
+
+/// The `id` of the Full Disk Access banner, which each page's heading names
+/// in `aria-describedby` while it shows.
+pub(crate) const BANNER_ID: &str = "full-disk-access-banner";
+
+/// What describes each page's heading, the IDs space-separated: the notices
+/// above every page, read after the heading that takes focus when a reader
+/// navigates, so neither is passed over (A3). `network_notice` is the ID of
+/// the notice that sign-in is off on the network, while it shows; the
+/// banner's is there while the agent `found` the grant missing. `None` when
+/// neither shows.
+pub(crate) fn describing_the_heading(
+    network_notice: Option<&'static str>,
+    found: Option<&FullDiskAccessDto>,
+) -> Option<String> {
+    let ids: Vec<&str> = network_notice
+        .into_iter()
+        .chain(warns(found).then_some(BANNER_ID))
+        .collect();
+    (!ids.is_empty()).then(|| ids.join(" "))
 }
 
 #[cfg(test)]
@@ -87,5 +109,44 @@ mod tests {
         ] {
             assert_eq!(said_after_check(state), msg::UI_FULL_DISK_ACCESS_UNKNOWN);
         }
+    }
+
+    #[test]
+    fn the_heading_is_described_by_each_notice_above_every_page() {
+        let missing = found(FullDiskAccessStateDto::Missing, false);
+        assert_eq!(
+            describing_the_heading(Some("network"), Some(&missing)).as_deref(),
+            Some("network full-disk-access-banner")
+        );
+        assert_eq!(
+            describing_the_heading(None, Some(&missing)).as_deref(),
+            Some(BANNER_ID)
+        );
+    }
+
+    #[test]
+    fn a_grant_not_found_missing_leaves_the_heading_to_the_network_notice() {
+        for state in [
+            FullDiskAccessStateDto::Granted,
+            FullDiskAccessStateDto::Unknown,
+            FullDiskAccessStateDto::NotApplicable,
+        ] {
+            let found = found(state, true);
+            assert_eq!(
+                describing_the_heading(Some("network"), Some(&found)).as_deref(),
+                Some("network"),
+                "{state:?}"
+            );
+            assert_eq!(
+                describing_the_heading(None, Some(&found)),
+                None,
+                "{state:?}"
+            );
+        }
+        assert_eq!(describing_the_heading(None, None), None);
+        assert_eq!(
+            describing_the_heading(Some("network"), None).as_deref(),
+            Some("network")
+        );
     }
 }
