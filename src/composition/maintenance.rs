@@ -1263,6 +1263,38 @@ mod tests {
                 FailureReason::DaemonShutDown,
                 unavailable_with(ErrorCode::DaemonShutDown, Vec::new(), None),
             ),
+            (
+                FailureReason::RestoreTargetUnwritable,
+                unavailable_with(ErrorCode::RestoreTargetUnwritable, Vec::new(), None),
+            ),
+            (
+                FailureReason::NoLocationUsable,
+                unavailable_with(ErrorCode::NoLocationUsable, Vec::new(), None),
+            ),
+            (
+                FailureReason::NoLocationRuleHolds,
+                unavailable_with(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
+            ),
+            (
+                FailureReason::PasswordNotAccepted,
+                unavailable_with(ErrorCode::PasswordNotAccepted, Vec::new(), None),
+            ),
+            (
+                FailureReason::SecretRefused {
+                    field: "password".to_owned(),
+                    refusal: domain::execution::refusal::SettingRefusal::SecretMissing {
+                        source: "DEMO_PASSWORD".to_owned(),
+                    },
+                },
+                MaintenanceRefusal::SecretRefused(SecretRefusal {
+                    code: ErrorCode::SecretMissing,
+                    args: vec![
+                        ("field", text("password")),
+                        ("source", text("DEMO_PASSWORD")),
+                    ],
+                    detail: None,
+                }),
+            ),
         ];
         let config = InMemoryConfigStore::new();
         for (reason, expected) in cases {
