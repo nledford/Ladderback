@@ -1,3 +1,5 @@
+# The review dialog
+
 - **The review dialog** is `ReviewDialog` (`components/review_dialog.rs`), a seventh component drawn with `ModalDialog` (#989), so it keeps that dialog's wrap of Tab from its last stop to its first and of Shift-Tab from its first to its last, its late `close` event left alone and its opens counted by the announcer. It is titled at level 3, starts on its dismiss button (or `starts_on`), and returns focus to `returns_to`, the control that asked for the review. Its dismiss button and Escape (`on_cancel`) close it through `open`. It takes `working` (while the page starts the run: Confirm and the dismiss button carry `aria-disabled` and ignore clicks, Escape does nothing, and a paragraph with `aria-live="polite"` says what is going on) and `fallback` (where focus goes when the control that opened the dialog is gone). The paragraph is not `role="status"`, because the page keeps exactly one `status` region, the announcer's.
 
   Chromium may close the dialog on a second Escape in spite of the prevented `cancel`; the page keeps its own visible "Starting the forget…" line, so that is not silent.

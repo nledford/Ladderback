@@ -1,4 +1,6 @@
-  - `Toast` (rendered through the announcer, polite; it disappears without an announcement), since moved onto the shared look (*The toast*, below).
+# The toast
+
+- `Toast` (rendered through the announcer, polite; it disappears without an announcement), since moved onto the shared look (*The toast*, below).
 
 - **The toast** is `Toast` (`components/toast.rs`), the answer to what the reader just did, shown where its page puts it: an icon, the words, then a Dismiss button. A page keeps one `Toasts` handle, the first build's `show_toast` gone, passes it to the `Toast` it draws and calls `show(tone, words)` on it. Its tone is a `ToastTone` (`components/toast/rules.rs`, decided on the host), `Primary` (information, the default), `Success`, `Warning` or `Error`, whose icon and the word that names it are the alert's for that tone, so one tone has one shape across the set. `Secondary` and `Inherit` are left out, as for the alert.
   - *Said, not shown, to a screen reader.* `show` says the words through the announcer as a reply (decision 65), politely, and assertively for `Error`, a failure of what the reader asked for, which needs them now; the toast itself is no live region, so it is said once, and its going is not said. It never takes focus: focus stays on the control the reader pressed.

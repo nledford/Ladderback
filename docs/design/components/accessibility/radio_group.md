@@ -1,3 +1,5 @@
+# The radio group
+
 - **The radio group** is `RadioGroup` (`components/radio_group.rs`), a tenth component, for one choice of a few, such as Settings' **Stay signed in for** (§10.1): a `<fieldset class="choices" role="radiogroup">` named by its `<legend>`, with an optional description under the legend and its error while it has one, under the description, both wired to the fieldset through `aria-describedby`, so a screen reader reads them on entering the group, then one native `<input type="radio">` per choice, all sharing the group's `name`, each with its visible `<label>` beside it as its click target, its box drawn as a checkbox's but round, with a dot in the page's color once chosen.
 
   Its error marks the group invalid (`aria-invalid` on the `radiogroup`, which ARIA 1.2 supports there and not on a `radio`), and each choice is edged 2 px in the Error tone by a rule keyed on the group's invalid state, not on an attribute of its own.

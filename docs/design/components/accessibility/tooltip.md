@@ -1,3 +1,5 @@
+# The tooltip
+
 - **The tooltip** is `Tooltip` (`components/tooltip.rs`): a short note beside the one control it wraps, `<span class="tooltip-anchor">` holding the control and the note, a `popover="manual"` `<span class="tooltip">` in the top layer, so no container clips it; Chromium, Firefox and WebKit all have manual popovers. The page places it itself rather than through `popover="hint"` or CSS anchor positioning, so one host-tested rule decides where it stands in every engine: `position: fixed`, `left` and `top` from the viewport's top-left corner (the browser's own measures, physical in every direction of writing), set again as any scroller scrolls or the window changes size.
 
   What a screen reader meets, when it shows and where it stands are `components/tooltip/rules.rs`, decided on the host, so a popover (#784) places itself the same way. `Tip` keeps the two purposes apart: `Describes` is a description (`role="tooltip"`, the control's `aria-describedby`, added to any it has), `Names` an icon-only control's name (the control's `aria-label`, the tooltip `aria-hidden`).

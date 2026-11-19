@@ -1,4 +1,6 @@
-  - `FormField` (a `<label>`, a hint and an error wired through `aria-describedby`, `aria-invalid` on error), since replaced by `TextField` (the text field, below), which keeps its wiring and its multi-line field.
+# The text field
+
+- `FormField` (a `<label>`, a hint and an error wired through `aria-describedby`, `aria-invalid` on error), since replaced by `TextField` (the text field, below), which keeps its wiring and its multi-line field.
 
 - **The text field** is `TextField` (`components/text_field.rs`), for what a reader types, and it replaces `FormField`: every page's field moved onto it. A native `<input>`, or a `<textarea>` for many lines, drawn from the tokens rather than in the browser's own look (decision 113). What each kind asks of the browser, the ids its parts are wired by and what it says of its state are `components/text_field/rules.rs`, decided on the host. Its `id` is a constant, or one built for a field of a list, as each reason field of a proposal's review is; `components/text_field/tests.rs` renders a list's fields and checks each is wired by its own.
 

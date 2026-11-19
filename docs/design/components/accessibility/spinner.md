@@ -1,3 +1,5 @@
+# The spinner
+
 - **The spinner** is `Spinner` (`components.rs`), a twelfth component, for a wait for something the page can't show yet: a track and a quarter arc of one SVG circle, stroked in the drawing's color, the arc turning once in 0.9 s, linear. Its `label` is a required prop, so a spinner without one doesn't compile, and it must say what the page waits for: an empty one leaves a spinner whose label is hidden an image without a name (1.1.1).
 
   It takes its `tone`, `size` and `placement` from the shared vocabulary. Every tone makes sense for it, so it leaves none out: `Primary` (the default), `Secondary`, `Success`, `Warning`, `Error`, and `Inherit` for a spinner inside a button or a toast. The tone's class sets `--tone` on the spinner, and the drawing alone is drawn in it (`color: var(--tone)`), the label keeping the text's color: a status tone may tint a wait, but the label says what the page waits for.

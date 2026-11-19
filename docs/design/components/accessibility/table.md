@@ -1,4 +1,6 @@
-  - `SortableTable` (a real `<table>` with a `<caption>`, `scope`d headers and a sort button whose result is announced politely), since replaced by `Table` (below).
+# The table
+
+- `SortableTable` (a real `<table>` with a `<caption>`, `scope`d headers and a sort button whose result is announced politely), since replaced by `Table` (below).
 
 - **The table** is `Table` (`components/table.rs`), which replaced `SortableTable`, and every table of the app is one (#876): Operations, Repositories, the plans, the start page's plans, API tokens, the Log, a repository's snapshots and its stats, the forget review's lists and a proposal's forget preview. It is a real `<table class="data-table">` inside a frame, `<div class="data-table-frame" role="region" tabindex="0">`, named as the table is (`Name::Caption` or `Name::Heading`).
 

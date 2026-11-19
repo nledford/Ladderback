@@ -1,3 +1,5 @@
+# The icon
+
 - **The icon** is `Icon` (`components/icon.rs`), a thirteenth component: one Lucide glyph from `lepticons-data` (`LucideGlyph`, a signal, so the drawing can follow a state), its shapes the crate's own markup inside an `<svg>` root of the icon's own, stroked in `currentColor`. The status badge draws with it (decision 103). It is never a tab stop (`focusable="false"`).
 
   What a screen reader meets is `components/icon/rules.rs`, decided on the host. `Meaning::Decorative`, the default, is `aria-hidden`: decoration beside words that say what it shows, or inside a control its own label names. `Meaning::Labelled(label)` is an image (`role="img"`) named by the label (`aria-label`), for an icon that says something no words beside it say. A meaningful icon can't be made without a label, but the type can't stop an empty one, which leaves an image without a name (1.1.1): the caller's duty, as a spinner's label is.
