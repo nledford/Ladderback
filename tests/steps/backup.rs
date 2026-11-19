@@ -728,6 +728,7 @@ impl Agent {
             label: None,
             host: None,
             filter: domain::planning::SourceFilter::default(),
+            left_out: Vec::new(),
             deadline_budget: self
                 .backup
                 .deadline_budget

@@ -4,7 +4,9 @@ Feature: The Log page
   daemon started, newest first, as the log writes them, secrets masked
   (§4.4, #618). A choice of levels narrows the lines without moving focus, and
   "Copy for a bug report" puts the lines shown on the clipboard as the log
-  writes them, with the running version first.
+  writes them, with the running version first, and answers in a toast, since
+  nothing else on the page shows that they were copied, or that the browser
+  refused to let it copy them.
 
   Background:
     Given the recent log holds:
@@ -56,6 +58,32 @@ Feature: The Log page
       [2026-11-15T09:00:02.500Z ERROR ladderback::notify] the notification to demo-channel failed
       [2026-11-15T09:00:01.250Z WARN  ladderback::config] repository nas: a demo warning
       """
+
+  Scenario: Copying for a bug report is answered in a toast, said once, and focus stays on the button
+    Given the page may use the clipboard
+    When I open the address "/log"
+    And I skip to the content
+    And I press Tab until focus is on the button "Copy for a bug report"
+    And I press Enter
+    Then the toast reads "Copied the lines shown." after its icon "Success"
+    And the toast is no live region, nor holds one
+    And focus stays on the button "Copy for a bug report"
+    And the polite region reads "Copied the lines shown."
+    And the polite region keeps reading "Copied the lines shown."
+    And the page has no accessibility violations
+
+  Scenario: A copy the browser refuses is answered in an error toast, said assertively once, and focus stays on the button
+    Given the browser refuses the page the clipboard
+    When I open the address "/log"
+    And I skip to the content
+    And I press Tab until focus is on the button "Copy for a bug report"
+    And I press Enter
+    Then the toast reads "The browser would not let the page copy the lines. Select them in the table and copy them yourself." after its icon "Error"
+    And the toast is no live region, nor holds one
+    And focus stays on the button "Copy for a bug report"
+    And the assertive region reads "The browser would not let the page copy the lines. Select them in the table and copy them yourself."
+    And the assertive region keeps reading "The browser would not let the page copy the lines. Select them in the table and copy them yourself."
+    And the page has no accessibility violations
 
   Scenario: A read of the recent log the daemon refuses is an error alert in the lines' place, said assertively once
     Given the daemon can't read its sessions when the recent log is read

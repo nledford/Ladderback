@@ -257,6 +257,7 @@ pub fn backup_job(location: &Location, source: &Path, plan: &str, budget: Signed
         label: Some("home".to_owned()),
         host: None,
         filter: SourceFilter::default(),
+        left_out: Vec::new(),
         deadline_budget: budget,
     })
 }

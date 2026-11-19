@@ -572,6 +572,7 @@ mod tests {
                 label: None,
                 host: None,
                 filter: Default::default(),
+                left_out: Vec::new(),
                 deadline_budget: SignedDuration::from_hours(1),
             }),
             Job::Check(CheckJob {

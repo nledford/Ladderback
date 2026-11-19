@@ -20,12 +20,14 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::first_load;
 use crate::components::link::rules::{Destination, Matching};
+use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Banner, Button, Checkbox, ErrorSummary, Link, PauseUpdates, Progress, RadioGroup, StatusBadge,
-    SummaryItem, TextField, address_view, cell_sentence_view, hand_focus_when_gone, runs_view,
-    sentence_view, text_field,
+    SummaryItem, TextField, Toast, ToastTone, Toasts, address_view, cell_sentence_view,
+    hand_focus_when_gone, runs_view, sentence_view, text_field,
 };
 use crate::full_disk_access_warning::FullDiskAccessWarning;
 use crate::live::{reply, say};
@@ -166,7 +168,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
         <FullDiskAccessWarning localizer=full_disk_access />
         <p>{body}</p>
         {move || match phase.get() {
-            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(2)).into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match (refused.get(), plans.get()) {
@@ -323,6 +325,16 @@ struct Connection {
     visit: Visit,
 }
 
+/// Where the operations page answers a start or a cancel that its table
+/// doesn't: a refusal in the page's error alert, and a wait for the run's
+/// end that ran out in its toast, since the row still shows the run as it
+/// was (#983).
+#[derive(Clone, Copy)]
+struct Answers {
+    refused: RwSignal<Option<Sentence>>,
+    toasts: Toasts,
+}
+
 /// The operations page, the route `/operations`: the backup history, live —
 /// a running operation's progress and its end arrive over the events
 /// stream (§4.4). Its decisions are `backend::OperationsState`; its glue is
@@ -374,6 +386,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
     // A start or a cancel the daemon refused, its own words marked (§8.4).
     let error = RwSignal::<Option<Sentence>>::new(None);
+    let toasts = Toasts::new();
     let sort = RwSignal::new(SortOrder::History);
     let base = ws::origin();
     // The reader's visit to the page: the connection and the settle-polls of
@@ -577,7 +590,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                         && visit.during(ws::settle(&base, ops, &operation)).await
                                                             == Some(false)
                                                     {
-                                                        reply(Politeness::Polite, &still_waiting);
+                                                        toasts.show(ToastTone::Primary, still_waiting);
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
@@ -604,6 +617,10 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 });
             (!buttons.is_empty()).then(|| view! { <p class="actions">{buttons}</p> })
         }}
+        // After the start buttons, whose press it mostly answers. Dismissed,
+        // it hands focus to the page's heading: the button whose press it
+        // answers may be a row's Cancel, gone with its run.
+        <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=PAGE_HEADING_ID />
         // Per render: the sort button's and rows' closures own what they
         // say and show. A render is a change of what the page shows, never
         // an update to a row.
@@ -614,7 +631,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             let rows_connection = connection.clone();
             let rows_zone = viewer.clone();
             match showing.get() {
-                Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+                Shown::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
                 Shown::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
                 Shown::Refused => {
                     history_refused
@@ -689,7 +706,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                                 page,
                                                 cancelled,
                                                 id,
-                                                error,
+                                                Answers { refused: error, toasts },
                                                 rows_zone.clone(),
                                             )
                                         }
@@ -733,7 +750,7 @@ fn row_view(
     page: Pausable,
     cancelled: StoredValue<HashSet<String>>,
     id: String,
-    error: RwSignal<Option<Sentence>>,
+    answers: Answers,
     zone: Option<api::IanaZone>,
 ) -> impl IntoView {
     // Its refusals are worded in the same language as the rest of it.
@@ -930,7 +947,7 @@ fn row_view(
                                                     if visit.during(ws::settle(&base, ops, &operation)).await
                                                         == Some(false)
                                                     {
-                                                        reply(Politeness::Polite, &still_waiting);
+                                                        answers.toasts.show(ToastTone::Primary, still_waiting);
                                                     }
                                                 }
                                                 Some(Posted::Refused(code, args, detail)) => {
@@ -938,7 +955,8 @@ fn row_view(
                                                         .update_value(|cancelled| {
                                                             cancelled.remove(&operation);
                                                         });
-                                                    error
+                                                    answers
+                                                        .refused
                                                         .set(
                                                             Some(
                                                                 refused_sentence(
@@ -1517,7 +1535,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 .collect_view()
         }}
         {move || match phase.get() {
-            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(4)).into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match (refused.get(), rows.get()) {

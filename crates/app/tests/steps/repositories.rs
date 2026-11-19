@@ -1110,6 +1110,7 @@ async fn job_of(agent: &super::Agent, kind: &str, name: &str) -> Job {
             label: None,
             host: None,
             filter: Default::default(),
+            left_out: Vec::new(),
             deadline_budget: domain::SignedDuration::from_hours(1),
         }),
         "check" => Job::Check(CheckJob {

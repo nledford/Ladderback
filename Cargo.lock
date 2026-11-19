@@ -4929,6 +4929,7 @@ dependencies = [
  "app",
  "argon2",
  "async-trait",
+ "base64 0.22.1",
  "dbus",
  "domain",
  "hostname",
@@ -4941,6 +4942,7 @@ dependencies = [
  "testkit",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

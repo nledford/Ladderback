@@ -21,6 +21,7 @@ use crate::focus::{FocusWrap, focus_wrap};
 use crate::live::reply;
 use crate::repositories::{Run, Sentence, address_parts, runs};
 use alert::rules::AlertTone;
+use skeleton::rules::Awaited;
 
 pub(crate) mod alert;
 pub(crate) mod badge;
@@ -216,6 +217,40 @@ pub(crate) fn dialog_refusal_alert(
     view! { <div role="alert">{refusal_alert(localizer, sentence)}</div> }
 }
 
+/// A region's first load (§4.5, the skeleton's caller): busy, saying the
+/// wait in `words`, visible, and showing beside them the still shape of
+/// what is coming, row by row as [`Awaited::rows`] decides. The page draws
+/// it where its content will stand and drops it whole when the content
+/// comes, so nothing busy or saying the wait stays, focus stays where it
+/// was, and nothing is announced: the announcer stays the page's.
+pub(crate) fn first_load(words: String, awaited: Awaited) -> impl IntoView + use<> {
+    view! {
+        <div aria-busy="true">
+            <p>{words}</p>
+            {awaited
+                .rows()
+                .into_iter()
+                .map(|row| {
+                    view! {
+                        <div class="my-2 flex gap-4">
+                            {row
+                                .into_iter()
+                                .map(|shape| {
+                                    view! {
+                                        <div class="min-w-0 flex-1">
+                                            <Skeleton shape=shape />
+                                        </div>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    }
+                })
+                .collect_view()}
+        </div>
+    }
+}
+
 /// Says each refusal `refused` comes to hold through the announcer's
 /// assertive region, as the page's answer (4.1.3), since its
 /// [`refusal_alert`] is no live region. Each is said once: a page that reads
@@ -348,12 +383,26 @@ where
     E: leptos::html::ElementType,
     E::Output: JsCast + Clone + AsRef<web_sys::Element> + 'static,
 {
+    hand_focus_when_gone_to(node, move || Some(then_focus));
+}
+
+/// As [`hand_focus_when_gone`], to the element whose ID `then_focus` gives
+/// as the element goes, for a target that changes while the element stays;
+/// `None` hands focus to nothing.
+pub(crate) fn hand_focus_when_gone_to<E>(
+    node: NodeRef<E>,
+    then_focus: impl FnOnce() -> Option<String> + Send + Sync + 'static,
+) where
+    E: leptos::html::ElementType,
+    E::Output: JsCast + Clone + AsRef<web_sys::Element> + 'static,
+{
     on_cleanup(move || {
         if node
             .get_untracked()
             .is_some_and(|element| holds_focus(element.as_ref()))
+            && let Some(id) = then_focus()
         {
-            focus_element(&then_focus);
+            focus_element(&id);
         }
     });
 }

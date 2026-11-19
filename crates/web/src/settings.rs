@@ -4,8 +4,10 @@
 //! in this browser too, whose glue is `settings/page_width.rs`; its admin
 //! password (security §10.1, decision 70), set with sign-in off and changed
 //! in a session, whose glue is `settings/password.rs`; its API tokens
-//! (decision 93), listed, created and revoked in a session; and the restart
-//! of Ladderback (decision 94). The tabs, the address that opens each and
+//! (decision 93), listed, created and revoked in a session; the dry-run
+//! allowlist (decision 89), whose glue is `settings/dry_run_allowlist.rs`;
+//! and the restart of Ladderback (decision 94). The tabs, the address that
+//! opens each and
 //! what each panel holds are `settings_tabs.rs`'s; what the token form
 //! lacks, the request it sends, which field a refusal is about and how a
 //! token's row reads are `api_tokens.rs`'s, and what the restart section
@@ -18,11 +20,13 @@
 //! signal only while that dialog is open: leaving the dialog, however it is
 //! left, clears it from the page (I4).
 
+mod dry_run_allowlist;
 mod language;
 mod page_width;
 mod password;
 mod sign_in;
 
+use dry_run_allowlist::DryRunAllowlistSection;
 use language::LanguageSection;
 use page_width::PageWidthSection;
 use password::AdminPassword;
@@ -45,10 +49,13 @@ use crate::api_tokens::{
     revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
 };
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
     Banner, Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, Tab, Tabs,
-    TextField, Working, copy_text, hand_focus_when_gone, sentence_view, text_field,
+    TextField, Toast, ToastTone, Toasts, Working, copy_text, hand_focus_when_gone, sentence_view,
+    text_field,
 };
 use crate::live::reply;
 use crate::page_width::PageWidth;
@@ -132,6 +139,12 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
         tokens.into_any(),
     ));
     let restart = view! { <RestartSection localizer=Arc::clone(&localizer) /> };
+    let allowlist = view! { <DryRunAllowlistSection localizer=Arc::clone(&localizer) /> };
+    sections.push((
+        Section::DryRunAllowlist,
+        msg::UI_DRY_RUN_ALLOWLIST_HEADING,
+        allowlist.into_any(),
+    ));
     sections.push((
         Section::Restart,
         msg::UI_RESTART_HEADING,
@@ -254,9 +267,10 @@ impl Problems {
     }
 }
 
-/// The API tokens' section: the list, the form that creates one, the dialog
-/// that shows a new one's whole text once, and the dialog that asks before
-/// one is revoked. With sign-in off the daemon refuses the list
+/// The API tokens' section: the list, the toast that answers a token
+/// revoked, which nothing else in it confirms, the form that creates one,
+/// the dialog that shows a new one's whole text once, and the dialog that
+/// asks before one is revoked. With sign-in off the daemon refuses the list
 /// (`sign-in-off`), and the section says why in its place, with no form.
 #[component]
 fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
@@ -375,6 +389,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
         revoking.set(Some(token));
         revoke_open.set(true);
     });
+    let toasts = Toasts::new();
     let revoke_localizer = Arc::clone(&localizer);
     let revoke = Callback::new(move |token: ApiTokenDto| {
         if revoke_busy.get_untracked() {
@@ -393,7 +408,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
             match answer {
                 Some(Posted::Done(_)) => {
                     revoke_open.set(false);
-                    reply(Politeness::Polite, &say(&localizer, revoked(&token.label)));
+                    toasts.show(ToastTone::Success, say(&localizer, revoked(&token.label)));
                     load.run(());
                 }
                 Some(Posted::Refused(code, args, detail)) => revoke_error.set(Some(
@@ -422,8 +437,10 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                 {heading}
             </h2>
             <p>{body}</p>
+            // Dismissed, a toast hands focus to the heading just before it.
+            <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=HEADING_ID />
             {move || match phase.get() {
-                Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+                Phase::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
                 Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
                 Phase::Ready => {
                     match (refused.get(), tokens.get()) {
@@ -995,7 +1012,9 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
             {move || {
                 let localizer = &stage_localizer;
                 match section.stage.get() {
-                    Stage::Loading => view! { <p>{text(localizer, msg::UI_LOADING)}</p> }.into_any(),
+                    Stage::Loading => {
+                        first_load(text(localizer, msg::UI_LOADING), Awaited::Text).into_any()
+                    }
                     Stage::Unreachable => {
                         view! { <p>{text(localizer, msg::UI_UNREACHABLE_BODY)}</p> }.into_any()
                     }

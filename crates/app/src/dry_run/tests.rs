@@ -99,6 +99,7 @@ struct Setup {
     clock: Arc<FakeClock>,
     backups: Arc<AtomicBool>,
     limits: DryRunLimits,
+    left_out: LeftOut,
 }
 
 impl Default for Setup {
@@ -108,6 +109,7 @@ impl Default for Setup {
             clock: Arc::new(FakeClock::new(epoch())),
             backups: Arc::new(AtomicBool::new(false)),
             limits: DryRunLimits::DAEMON,
+            left_out: Arc::new(|_: &[Source]| Some(Vec::new())),
         }
     }
 }
@@ -122,6 +124,7 @@ impl Setup {
             self.clock.clone(),
             Arc::new(move || backups.load(Ordering::Acquire)),
             self.limits,
+            Arc::clone(&self.left_out),
         )
     }
 }
@@ -297,11 +300,14 @@ impl WalkSources for Counted {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
         self.walks.fetch_add(1, Ordering::AcqRel);
-        let walked = tree().walk(sources, filter, limits, give_way).await?;
+        let walked = tree()
+            .walk(sources, filter, left_out, limits, give_way)
+            .await?;
         Ok(Walked {
             warnings: 1,
             ..walked
@@ -327,6 +333,94 @@ async fn the_warnings_of_every_walk_of_a_dry_run_are_counted_together() {
     // The plan, then none of its excludes, then each of the two alone.
     assert_eq!(walks.walks.load(Ordering::Acquire), 4);
     assert_eq!(counted.warnings, 4);
+}
+
+/// The glob that leaves out [`WithKeyFile`]'s key file.
+const KEY_GLOB: &str = "!/srv/demo/hub-key*";
+
+/// The tree with a key file, `/srv/demo/hub-key` (17 bytes), which a walk
+/// leaves out only when it is given [`KEY_GLOB`] alone to leave out after
+/// the filter; any other filter is the tree's to apply.
+struct WithKeyFile;
+
+#[async_trait]
+impl WalkSources for WithKeyFile {
+    async fn walk(
+        &self,
+        sources: &[Source],
+        filter: &SourceFilter,
+        left_out: &[String],
+        limits: WalkLimits,
+        give_way: GiveWay,
+    ) -> Result<Walked, WalkError> {
+        if left_out == [KEY_GLOB] {
+            return tree().walk(sources, filter, &[], limits, give_way).await;
+        }
+        let file = |path: &str, size| (path.to_owned(), Some(size));
+        let folder = |path: &str| (path.to_owned(), None);
+        InMemoryTree::new([
+            folder("/srv/demo"),
+            file("/srv/demo/a.txt", 3),
+            file("/srv/demo/hub-key", 17),
+            folder("/srv/demo/cache"),
+            file("/srv/demo/cache/x", 11),
+            folder("/srv/demo/docs"),
+            file("/srv/demo/docs/b.txt", 5),
+            file("/srv/demo/docs/c.txt", 7),
+        ])
+        .walk(sources, filter, left_out, limits, give_way)
+        .await
+    }
+}
+
+/// A dry run counts what a backup takes, so it leaves out the key files
+/// each backup does (§16, decision 120), in every walk, and its tally of
+/// what each exclude removes counts the plan's own alone.
+#[tokio::test]
+async fn a_dry_run_leaves_out_what_every_backup_leaves_out() {
+    let setup = Setup {
+        walk: Arc::new(WithKeyFile),
+        // Given the plan's sources, resolved, as the backup's check is.
+        left_out: Arc::new(|sources: &[Source]| {
+            (sources == [Source::parse("/srv/demo").expect("a source")])
+                .then(|| vec![KEY_GLOB.to_owned()])
+        }),
+        ..Setup::default()
+    };
+    let dry_runs = setup.dry_runs(&["/srv/demo"]).await;
+    let counted = dry_runs
+        .run(&Proposer::NoToken, &plan(&["/srv/demo"], &["!docs"]))
+        .await;
+    assert_eq!(
+        counted,
+        Ok(PlanDryRun {
+            files: 2,
+            bytes: 14,
+            unreadable: 0,
+            excludes: vec![tally("globs", 0, 2, 12)],
+            stopped: None,
+            warnings: 0,
+        })
+    );
+}
+
+/// A dry run predicts what the backup does, so it is refused as the
+/// backup is when the walks would take key files no glob can name (§16,
+/// decision 120).
+#[tokio::test]
+async fn a_dry_run_that_would_take_key_files_no_glob_can_name_is_refused() {
+    let setup = Setup {
+        walk: Arc::new(WithKeyFile),
+        left_out: Arc::new(|_: &[Source]| None),
+        ..Setup::default()
+    };
+    let dry_runs = setup.dry_runs(&["/srv/demo"]).await;
+    assert_eq!(
+        dry_runs
+            .run(&Proposer::NoToken, &plan(&["/srv/demo"], &[]))
+            .await,
+        Err(DryRunError::KeyFilesNotLeftOut)
+    );
 }
 
 /// How long a test waits on a held walk or on a dry run: both run in
@@ -355,6 +449,7 @@ impl WalkSources for Held {
         &self,
         _: &[Source],
         _: &SourceFilter,
+        _: &[String],
         _: WalkLimits,
         _: GiveWay,
     ) -> Result<Walked, WalkError> {
@@ -420,6 +515,7 @@ impl WalkSources for Orphaned {
         &self,
         _: &[Source],
         _: &SourceFilter,
+        _: &[String],
         _: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
@@ -494,11 +590,14 @@ impl WalkSources for BackupArrives {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
         self.backups.store(true, Ordering::Release);
-        tree().walk(sources, filter, limits, give_way).await
+        tree()
+            .walk(sources, filter, left_out, limits, give_way)
+            .await
     }
 }
 
@@ -618,6 +717,7 @@ impl WalkSources for Slow {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
@@ -626,7 +726,9 @@ impl WalkSources for Slow {
             .unwrap_or_else(PoisonError::into_inner)
             .push(limits.time);
         self.clock.advance(SignedDuration::from_secs(8));
-        tree().walk(sources, filter, limits, give_way).await
+        tree()
+            .walk(sources, filter, left_out, limits, give_way)
+            .await
     }
 }
 

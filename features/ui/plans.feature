@@ -73,6 +73,7 @@ Feature: Plans page
     Then focus is on the textbox "Cron schedule"
     And the field "Cron schedule" is marked invalid
     And the table "Plans" has no row "demo-docs"
+    And the page shows no toast
 
   Scenario: Changing a plan's schedule by keyboard alone keeps it in the list
     Given a demo plan "demo-home" with a scratch repository
@@ -89,6 +90,20 @@ Feature: Plans page
     And the button "Save the plan" leaves the page
     And focus is on the button "Change demo-home"
     And the table "Plans" has a row "demo-home" that shows "demo"
+    And the page has no accessibility violations
+
+  Scenario: A saved plan is answered in a toast, and focus returns to the button that opened the form
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/plans"
+    And I skip to the content
+    And I press Tab until focus is on the button "Change demo-home"
+    And I press Enter
+    And I press Tab until focus is on the button "Save the plan"
+    And I press Enter
+    Then the toast reads "The plan demo-home is saved." after its icon "Success"
+    And the button "Save the plan" leaves the page
+    And focus is on the button "Change demo-home"
+    And the polite region comes to contain "The plan demo-home is saved."
     And the page has no accessibility violations
 
   Scenario: A save whose list can't be read again moves focus to the page's heading
@@ -214,6 +229,21 @@ Feature: Plans page
     And I press Enter
     Then the polite region comes to contain "The plan demo-home is deleted. Its snapshots stay in the repository."
     And the table "Plans" has no row "demo-home"
+
+  Scenario: A deleted plan is answered in a toast, said once, and focus goes to the page's heading as its row goes
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/plans"
+    And I skip to the content
+    And I press Tab until focus is on the button "Delete demo-home"
+    And I press Enter
+    And I press Tab until focus is on the button "Delete the plan"
+    And I press Enter
+    Then the toast reads "The plan demo-home is deleted. Its snapshots stay in the repository." after its icon "Success"
+    And the toast is no live region, nor holds one
+    And focus is on the main heading "Plans"
+    And the polite region reads "The plan demo-home is deleted. Its snapshots stay in the repository."
+    And the polite region keeps reading "The plan demo-home is deleted. Its snapshots stay in the repository."
+    And the page has no accessibility violations
 
   Scenario: Deleting a plan says a new plan with its ID would take its snapshots over
     Given a demo plan "demo-home" with a scratch repository

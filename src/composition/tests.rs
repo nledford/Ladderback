@@ -13,6 +13,7 @@ mod daemon_start;
 mod download_sweep;
 mod engine_jobs;
 mod hook_output;
+mod key_files;
 mod keyring_passwords;
 mod log_lines;
 mod maintenance_runs;

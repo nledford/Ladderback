@@ -64,6 +64,9 @@ pub enum DryRunsError {
     ReadsAbove { setting: &'static str },
     /// The engine can't apply the plan's source filter.
     Filter,
+    /// The walks would take secret key files in the data folder that no
+    /// glob can name: refused as a backup of the plan is.
+    KeyFilesNotLeftOut,
     /// The walk failed; the daemon's log has the engine's words.
     Failed,
     /// The allowlist's folder `entry`, from 1, isn't an absolute path.
@@ -164,6 +167,11 @@ fn refusal(error: &DryRunsError) -> Response {
         DryRunsError::Filter => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::DryRunFilter,
+            Vec::new(),
+        ),
+        DryRunsError::KeyFilesNotLeftOut => (
+            StatusCode::CONFLICT,
+            ErrorCode::KeyFilesNotLeftOut,
             Vec::new(),
         ),
         DryRunsError::Failed => (

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use app::contract::walk::{WalkHarness, run};
 use app::ports::{WalkError, WalkLimits, WalkSources};
 use domain::SignedDuration;
+use domain::fleet::{LEFT_OUT_OF_BACKUPS, left_out_globs};
 use domain::planning::{GlobFile, Source, SourceFilter};
 use engine::RusticWalk;
 use tempfile::TempDir;
@@ -67,6 +68,7 @@ async fn a_glob_rustic_refuses_or_a_glob_file_it_cannot_read_is_a_filter_error()
             .walk(
                 std::slice::from_ref(&root),
                 &filter,
+                &[],
                 limits,
                 Arc::new(|| false),
             )
@@ -102,7 +104,7 @@ async fn a_glob_file_that_is_not_a_regular_file_or_is_over_a_mebibyte_is_refused
         let source = source.clone();
         async move {
             RusticWalk
-                .walk(&[source], &filter, limits, Arc::new(|| false))
+                .walk(&[source], &filter, &[], limits, Arc::new(|| false))
                 .await
         }
     };
@@ -127,5 +129,53 @@ async fn a_glob_file_that_is_not_a_regular_file_or_is_over_a_mebibyte_is_refused
         ] {
             assert_eq!(walk(filter).await, Err(WalkError::Filter), "{refused:?}");
         }
+    }
+}
+
+/// The key files stay out of a walk of the data folder whatever the plan's
+/// own globs say: the globs that leave them out are matched after every
+/// glob of the plan's, its iglob files' lines included, so an iglob file
+/// that takes in everything brings none back (§16, decisions 120 and 122).
+/// The folder's name holds glob characters, matched as themselves.
+#[tokio::test]
+async fn an_iglob_file_that_takes_in_everything_brings_no_key_file_back() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let root = std::fs::canonicalize(scratch.path()).expect("resolved");
+    let data = root.join("a[b]{c}*?");
+    std::fs::create_dir(&data).expect("the data folder");
+    for file in LEFT_OUT_OF_BACKUPS {
+        std::fs::write(data.join(file.file_name()), b"canary").expect("a key file");
+    }
+    std::fs::write(data.join("hub-pin"), b"kept").expect("a kept file");
+    let everything = root.join("everything");
+    std::fs::write(&everything, b"*\n").expect("an iglob file");
+    let folder = data.to_str().expect("UTF-8");
+    let source = Source::parse(folder).expect("a source");
+    let left_out = left_out_globs(folder);
+    let limits = WalkLimits {
+        entries: 100,
+        time: SignedDuration::from_secs(10),
+    };
+    for filter in [
+        SourceFilter::default(),
+        SourceFilter {
+            iglob_files: vec![
+                GlobFile::parse(everything.to_str().expect("UTF-8")).expect("a path"),
+            ],
+            ..SourceFilter::default()
+        },
+    ] {
+        let walked = RusticWalk
+            .walk(
+                std::slice::from_ref(&source),
+                &filter,
+                &left_out,
+                limits,
+                Arc::new(|| false),
+            )
+            .await
+            .expect("a walk");
+        // `hub-pin` alone.
+        assert_eq!(walked.files, 1, "{filter:?}: {walked:?}");
     }
 }

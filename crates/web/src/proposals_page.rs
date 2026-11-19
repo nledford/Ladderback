@@ -21,9 +21,11 @@ use leptos::task::{spawn_local, tick};
 use crate::announcer::Politeness;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Banner, Button, StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone,
-    refusal_alert, say_refusals, text_field,
+    Banner, Button, StepUp, StepUpField, TextField, Toast, ToastTone, Toasts, focus_element,
+    hand_focus_when_gone, refusal_alert, say_refusals, text_field,
 };
 use crate::live::reply;
 use crate::plans::Said;
@@ -127,14 +129,17 @@ impl List {
 }
 
 /// The "Pending changes" page: the heading, which says when the daemon
-/// can't be reached, what the page is for, the list of pending proposals
-/// with a Review button each, and the proposal opened, in a section below.
+/// can't be reached, what the page is for, the toast that answers a
+/// proposal decided, which nothing else on the page confirms once it has
+/// left the list, the list of pending proposals with a Review button each,
+/// and the proposal opened, in a section below.
 #[component]
 pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
     let list = List::new();
     say_refusals(list.refused);
     let read_localizer = Arc::clone(&localizer);
     spawn_local(async move { list.read(&read_localizer).await });
+    let toasts = Toasts::new();
 
     // The proposal open, as the daemon showed it, and why it could not
     // open, an Error alert in its place.
@@ -218,9 +223,11 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
             }}
         </PageHeading>
         <p>{body}</p>
+        // Dismissed, a toast hands focus to the heading just before it.
+        <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=PAGE_HEADING_ID />
         {off}
         {move || match shape.get() {
-            (Phase::Loading, _, _) => view! { <p>{loading.clone()}</p> }.into_any(),
+            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::Text).into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
                 refusal_alert(&refusal_localizer, sentence).into_any()
@@ -243,6 +250,7 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
                             list=list
                             review=review
                             reviewing=reviewing
+                            toasts=toasts
                         />
                     }
                 })
@@ -305,15 +313,16 @@ fn summary_item(localizer: &Localizer, line: &SummaryLineDto) -> impl IntoView +
 /// whether the file changed since it was drafted, how often its proposer
 /// was rejected, the exact diff, then Approve, with the step-up field, and
 /// Reject, with a reason for each change. Once the daemon applies or
-/// rejects it, the page says so, reads the list again, closes the section
-/// and hands focus to the page's heading. A proposal that could delete
-/// snapshots offers no Approve and says why.
+/// rejects it, the page's `toasts` answer so, the list is read again, the
+/// section closes and focus goes to the page's heading. A proposal that
+/// could delete snapshots offers no Approve and says why.
 #[component]
 fn Review(
     localizer: Arc<Localizer>,
     list: List,
     review: ProposalReviewDto,
     reviewing: RwSignal<Option<ProposalReviewDto>>,
+    toasts: Toasts,
 ) -> impl IntoView {
     let id = review.proposal.id.clone();
     let asks =
@@ -331,11 +340,11 @@ fn Review(
         }
     });
 
-    // Once decided: said, the list read again, the section closed and
-    // focus handed to the page's heading, since the proposal's button has
-    // gone from the list.
+    // Once decided: answered in a toast, the list read again, the section
+    // closed and focus handed to the page's heading, since the proposal's
+    // button has gone from the list.
     let decided = move |localizer: Arc<Localizer>, said: Said| async move {
-        reply(Politeness::Polite, &say(&localizer, said));
+        toasts.show(ToastTone::Success, say(&localizer, said));
         list.read(&localizer).await;
         if reviewing.try_set(None).is_some() {
             return;

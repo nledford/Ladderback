@@ -33,7 +33,7 @@ pub use dry_run::{
     MAX_DRY_RUN_FOLDERS, MAX_DRY_RUNS_PER_HOUR, is_file_name, is_within,
 };
 pub use duration::{MAX_DURATION, format_duration, parse_duration};
-pub use filter::{NeverMatchingGlob, Placement, SourceFilter};
+pub use filter::{NeverMatchingGlob, Placement, SourceFilter, escape_glob};
 pub use hooks::{HookEntry, Hooks, OnFailure};
 pub use link::{
     DefaultRoute, DefaultRoutes, Family, InterfaceKind, Link, Outgoing, RouteState, WiFiNames,

@@ -1,8 +1,7 @@
 //! The Log page's DOM glue (technical design §4.4, #618): it reads the recent
 //! log once as the page opens, holds the choice of levels, lists the lines
-//! the choice keeps and copies them for a bug report, saying through the
-//! announcer whether they are on the clipboard. `daemon_log.rs` decides for
-//! it.
+//! the choice keeps and copies them for a bug report, answering in a toast
+//! whether they are on the clipboard. `daemon_log.rs` decides for it.
 
 use std::sync::Arc;
 
@@ -11,16 +10,22 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::announcer::Politeness;
 use crate::components::button::Content;
-use crate::components::{Button, RadioGroup, refusal_alert, say_refusals, write_clipboard};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
+use crate::components::{
+    Button, RadioGroup, Toast, ToastTone, Toasts, refusal_alert, say_refusals, write_clipboard,
+};
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
-use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence};
 use crate::session::Told;
 use crate::text;
 use crate::ws::{self, Got, Phase};
+
+/// The id of the button that copies, which a dismissed toast hands focus
+/// to.
+const COPY_ID: &str = "log-copy";
 
 /// The Log page at `/log`: the recent log, newest line first, with the
 /// choice of levels and the button that copies the lines listed. A read the
@@ -78,7 +83,7 @@ pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
         </PageHeading>
         <p>{body}</p>
         {move || match phase.get() {
-            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(4)).into_any(),
             Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match refused.get() {
@@ -94,9 +99,9 @@ pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
-/// The choice of levels, the button that copies, and the table of the lines
-/// the choice keeps. Only the table follows the choice, so focus stays on
-/// the radio button the reader moved to.
+/// The choice of levels, the button that copies, the toast that answers it,
+/// and the table of the lines the choice keeps. Only the table follows the
+/// choice, so focus stays on the radio button the reader moved to.
 #[component]
 fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl IntoView {
     let chosen = RwSignal::new(Levels::All.value());
@@ -104,6 +109,7 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
     // The build the daemon told the page it runs (decision 90), for the
     // report's first line.
     let told = use_context::<RwSignal<Option<Told>>>();
+    let toasts = Toasts::new();
     let copied = text(&localizer, msg::UI_LOG_COPIED);
     let refused = text(&localizer, msg::UI_LOG_COPY_FAILED);
     let copy = move |_| {
@@ -112,8 +118,15 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
             .map(|told| told.build);
         let report = listed.with_untracked(|listed| bug_report(build.as_ref(), listed));
         let (copied, refused) = (copied.clone(), refused.clone());
+        // Nothing else on the page shows whether the lines were copied, so a
+        // toast does, said once. A refusal is an Error toast, which stays
+        // beside the button until the reader dismisses it (§4.5).
         write_clipboard(&report, move |done| {
-            reply(Politeness::Polite, if done { &copied } else { &refused });
+            if done {
+                toasts.show(ToastTone::Success, copied.clone());
+            } else {
+                toasts.show(ToastTone::Error, refused.clone());
+            }
         });
     };
     let options = Levels::ALL
@@ -139,9 +152,11 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
         <p class="actions">
             <Button
                 content=Content::Text(text(&localizer, msg::UI_LOG_COPY).into())
+                id=COPY_ID
                 on_press=Callback::new(copy)
             />
         </p>
+        <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=COPY_ID />
         {move || {
             let listed = listed.get();
             if listed.is_empty() {

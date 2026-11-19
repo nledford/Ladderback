@@ -1,11 +1,12 @@
 //! The DOM glue of the start page's Full Disk Access warning (§4.4, §16
 //! decision 115), a warning banner: it reads what the agent's probe found,
 //! draws the warning, sends Check again and the request to open System
-//! Settings, and hands focus to the page's heading when the warning goes
-//! from under it. Whether it warns, whether it offers the settings button,
-//! its steps and what each answer says are `full_disk_access.rs`'s, on the
-//! host; the `@ui` scenarios of `features/ui/full_disk_access.feature` run
-//! this in Chromium.
+//! Settings, answers a check that finds the grant still missing in a toast
+//! in the warning, and hands focus to the page's heading when the warning
+//! goes from under it. Whether it warns, whether it offers the settings
+//! button, its steps and what each answer says are `full_disk_access.rs`'s,
+//! on the host; the `@ui` scenarios of `features/ui/full_disk_access.feature`
+//! run this in Chromium.
 
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use leptos::task::spawn_local;
 use crate::announcer::Politeness;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Button, Content};
-use crate::components::{Banner, hand_focus_when_gone, sentence_view};
+use crate::components::{Banner, Toast, ToastTone, Toasts, hand_focus_when_gone, sentence_view};
 use crate::full_disk_access::{STEPS, opens_settings, said_after_check, warns};
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -28,6 +29,9 @@ use crate::ws::{self, Got, Posted};
 
 /// The warning's heading, which names its region.
 const HEADING_ID: &str = "full-disk-access-heading";
+
+/// The Check again button, which a dismissed toast hands focus back to.
+const CHECK_ID: &str = "full-disk-access-check";
 
 /// The routes the warning reads and posts to (§4.2).
 const READ_PATH: &str = "/api/v1/full-disk-access";
@@ -53,6 +57,8 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
     let pending = RwSignal::<Option<Request>>::new(None);
     // A button's answer that isn't a new reading: a refusal, or none at all.
     let problem = RwSignal::<Option<Sentence>>::new(None);
+    // The answer to a check that leaves the warning as it was.
+    let toasts = Toasts::new();
     let url = format!("{}{READ_PATH}", ws::origin());
     spawn_local(async move {
         // A refusal or no answer shows nothing: the page warns only of a
@@ -79,10 +85,16 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
                 Some(Posted::Done(answer)) => {
                     match serde_json::from_str::<FullDiskAccessDto>(&answer) {
                         Ok(read) => {
-                            reply(
-                                Politeness::Polite,
-                                &text(&localizer, said_after_check(read.state)),
-                            );
+                            let said = text(&localizer, said_after_check(read.state));
+                            // A grant still missing leaves the warning as it
+                            // was, so a toast in it answers the press; one
+                            // found or unknown takes the warning away, which
+                            // shows the answer, and the announcer says it.
+                            if warns(Some(&read)) {
+                                toasts.show(ToastTone::Primary, said);
+                            } else {
+                                reply(Politeness::Polite, &said);
+                            }
                             found.try_set(Some(read));
                         }
                         Err(_) => {
@@ -147,6 +159,7 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
             hand_focus_when_gone(check_button, PAGE_HEADING_ID.to_owned());
             let (open_label, check_label) = (open_label.clone(), check_label.clone());
             let (heading, body, steps) = (heading.clone(), body.clone(), steps.clone());
+            let toast_localizer = Arc::clone(&localizer);
             view! {
                 // A warning banner, its words the region its heading names,
                 // which a screen reader lists by that name as before.
@@ -185,6 +198,7 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
                             }}
                             <Button
                                 content=Content::Text(check_label.clone().into())
+                                id=CHECK_ID
                                 node_ref=check_button
                                 busy=Signal::derive(move || pending.get() == Some(Request::Check))
                                 disabled=Signal::derive(move || {
@@ -193,6 +207,7 @@ pub(crate) fn FullDiskAccessWarning(localizer: Arc<Localizer>) -> impl IntoView 
                                 on_press=check
                             />
                         </div>
+                        <Toast localizer=toast_localizer toasts=toasts then_focus=CHECK_ID />
                         <p role="alert">{move || problem.get().map(sentence_view)}</p>
                     </section>
                 </Banner>

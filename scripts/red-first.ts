@@ -11,7 +11,8 @@
 // paths, target/red-first/trees/base and trees/first, each with its own target
 // dir, target/red-first/base and first. Paths that stay the same from run to
 // run let a target dir outlive its run. The base tree can start from a copy of
-// another build (RED_FIRST_SEED, below; CI passes it main's), and the first
+// another build (RED_FIRST_SEED, below; CI leaves it unset, since its build
+// cache is the compiler outputs mbx restores, #1076), and the first
 // tree starts from a copy of the base tree's. Run one at a time per checkout.
 //
 // Usage: node scripts/red-first.ts <base-ref>
@@ -181,10 +182,12 @@ const CLONE_FLAGS = process.platform === "darwin" ? ["-a", "-c"] : ["-a", "--ref
 
 /**
  * Gives the base tree a copy of the build that RED_FIRST_SEED names to start
- * from, unless it already has a target dir. CI names the build of main it
- * restored, so only what changed since then builds again, the workspace crates
- * at least. Opt-in: a local target dir can be many gigabytes, and locally the
- * base tree's own target dir outlives the run anyway.
+ * from, unless it already has a target dir. Before #1076 CI named the build of
+ * main it restored, so only what changed since then built again, the workspace
+ * crates at least; with mbx's `objects` cache the dependencies are hits in its
+ * store and CI leaves it unset. Opt-in: a local target dir can be many
+ * gigabytes, and locally the base tree's own target dir outlives the run
+ * anyway.
  */
 function seedBaseTarget(): void {
   const seed = process.env.RED_FIRST_SEED;

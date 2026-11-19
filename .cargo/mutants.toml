@@ -168,6 +168,21 @@
 # `full_disk_access.rs`'s, mutated on the host; the `@ui` scenarios of
 # `features/ui/full_disk_access.feature` run the glue in Chromium.
 #
+# `crates/web/src/settings/dry_run_allowlist.rs` is the DOM glue of Settings'
+# dry-run allowlist section (§16, decision 89, point 13): it sends the read
+# and each save, opens and closes the remove and home folder dialogs, says
+# each answer, and leaves a press alone while `Allowlist::start` refuses it
+# (the `!` of each `if !list.start()`). What each row shows, the list a
+# change saves, why a folder typed can't be added, when it warns as the home
+# folder does, which refusal is the field's, the words of each button and
+# dialog, what the section holds, one save at a time and when the Folder
+# field empties are `dry_run_allowlist.rs`'s, mutated on the host; the `@ui`
+# scenarios of `features/ui/dry_run_allowlist.feature` run the glue in
+# Chromium, Firefox and WebKit ("A folder added by keyboard alone is listed,
+# and removing it asks first, starting on Cancel" adds and removes a folder,
+# "Adding the home folder warns of what it opens, starting on Cancel, and
+# suggests a narrower folder" adds the home folder).
+#
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
 # `main.rs`), and their tests run in `just test-wasm`.
@@ -192,6 +207,7 @@ exclude_globs = [
     "crates/web/src/settings/language.rs",
     "crates/web/src/settings/page_width.rs",
     "crates/web/src/full_disk_access_warning.rs",
+    "crates/web/src/settings/dry_run_allowlist.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [
@@ -225,10 +241,11 @@ exclude_re = [
     # byte. A ticket that parses to other bytes (`&`) is caught.
     'crates/domain/src/restore/download\.rs.*: replace \| with \^ in DownloadTicket::parse$',
     # The hub's fixed keys are read the same way when the build evaluates
-    # them (`hex32`): a high hex digit shifted left four bits and a low one
+    # them (`hex32`), and so is a key file's hex when it is read
+    # (`decode_hex32`): a high hex digit shifted left four bits and a low one
     # below it never share a bit, so `|` and `^` give the same byte. Other
     # bytes (`&`) are caught.
-    'crates/domain/src/fleet/keys\.rs.*: replace \| with \^ in hex32$',
+    'crates/domain/src/fleet/keys\.rs.*: replace \| with \^ in (hex32|decode_hex32)$',
     # An API token's ID gathers its first eight bytes by shifting what it has
     # eight bits left and joining the next byte below; its secret is read
     # back six bits a character the same way, and the last three characters

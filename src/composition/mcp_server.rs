@@ -521,6 +521,9 @@ impl ::mcp::Backend for InProcess {
                 StartError::Unavailable { code, args, detail } => {
                     api::ErrorDto::new(code, args, detail)
                 }
+                StartError::KeyFilesNotLeftOut => {
+                    api::ErrorDto::new(api::ErrorCode::KeyFilesNotLeftOut, [], None)
+                }
             })
     }
 
