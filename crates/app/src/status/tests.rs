@@ -8,8 +8,8 @@ use domain::execution::{
     FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
 };
 use domain::planning::{
-    AgentConfig, AgentSettings, Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings,
-    Source,
+    AgentConfig, AgentSettings, CronExpression, Hooks, Maintenance, Plan, RepositoryConfig,
+    RepositorySettings, Schedule, Source,
 };
 use domain::secrets::{SecretRef, SecretValue};
 use domain::{OperationId, PlanId, RepositoryAlias, SignedDuration, TimeZone, Timestamp, Uuid};
@@ -67,6 +67,27 @@ fn config() -> AgentConfig {
     )
     .unwrap_or_else(|e| panic!("a valid configuration: {e:?}"))
 }
+
+/// The same, with the plan "home" run daily at 03:00 UTC.
+fn daily_config() -> AgentConfig {
+    let base = config();
+    let home = Plan {
+        schedule: Some(Schedule::new(
+            CronExpression::parse("0 3 * * *").unwrap_or_else(|e| panic!("a cron: {e:?}")),
+        )),
+        ..base.plans()[0].clone()
+    };
+    AgentConfig::new(
+        AgentSettings::default(),
+        Hooks::default(),
+        base.repositories().clone(),
+        vec![home],
+    )
+    .unwrap_or_else(|e| panic!("a valid configuration: {e:?}"))
+}
+
+/// More operations than the summary reads in one page.
+const MORE_THAN_A_PAGE: usize = 205;
 
 /// The operation log, each operation queued a minute after the one before,
 /// with time-ordered IDs as the log's are.
@@ -253,4 +274,48 @@ async fn an_operation_that_tells_nothing_of_reading_leaves_the_last_that_did() {
             reason: FailureReason::RepositoryNotFound
         }
     );
+}
+
+#[tokio::test]
+async fn a_plan_whose_last_success_is_older_than_the_newest_page_is_not_overdue() {
+    let mut log = Log::default();
+    log.succeeded(OperationKind::Backup, Some("home"), None)
+        .await;
+    for _ in 0..MORE_THAN_A_PAGE {
+        log.failed(Some("home"), None, FailureReason::DeadlinePassed)
+            .await;
+    }
+    let status = log.read(&daily_config()).await;
+    let standing = &status.plans[0];
+    assert_eq!(
+        standing.last_success.as_ref().map(|s| s.ago),
+        Some(SignedDuration::from_hours(5) - SignedDuration::from_mins(1)),
+        "the last success is the one older than the page"
+    );
+    assert!(!standing.overdue, "its next run isn't due");
+}
+
+#[tokio::test]
+async fn a_scheduled_plan_that_never_succeeded_stays_overdue_through_a_long_history() {
+    let mut log = Log::default();
+    for _ in 0..MORE_THAN_A_PAGE {
+        log.failed(Some("home"), None, FailureReason::DeadlinePassed)
+            .await;
+    }
+    let status = log.read(&daily_config()).await;
+    assert_eq!(status.plans[0].last_success, None);
+    assert!(status.plans[0].overdue);
+}
+
+#[tokio::test]
+async fn a_repository_whose_last_reading_failed_before_the_newest_page_is_still_unreadable() {
+    let mut log = Log::default();
+    log.failed(Some("home"), None, FailureReason::RepositoryNotFound)
+        .await;
+    for _ in 0..MORE_THAN_A_PAGE {
+        log.succeeded(OperationKind::Check, None, Some("office"))
+            .await;
+    }
+    let status = log.read(&config()).await;
+    assert_eq!(unreadable(&status), vec![("nas", OperationKind::Backup)]);
 }
