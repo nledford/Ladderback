@@ -4,9 +4,6 @@
 //! Host-tested here; the DOM glue is `settings/page_width.rs`, and `page.rs`
 //! keeps and reads the choice.
 
-/// The `id` of the section.
-pub(crate) const SECTION_ID: &str = "page-width";
-
 /// The `id` of the section's heading.
 pub(crate) const HEADING_ID: &str = "page-width-heading";
 

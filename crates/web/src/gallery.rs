@@ -1326,17 +1326,21 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
             <div class="bg-surface my-4 p-4">
                 <Skeleton shape=note />
             </div>
-            // A region whose content is on its way: busy, and saying the
-            // wait in words beside its skeleton, until the toggle below
-            // brings the content, three lines in the place of the
-            // skeleton's three, so nothing below moves and focus stays on
-            // the toggle. Nothing announces the arrival.
-            <div aria-busy=move || if plan_shown.get() { "false" } else { "true" }>
-                <p>
-                    {move || {
-                        if plan_shown.get() { plan_name.clone() } else { plan_loading.clone() }
-                    }}
-                </p>
+            // A region whose content is on its way: busy, with its skeleton,
+            // until the toggle below brings the content, three lines in the
+            // place of the skeleton's three, so the region keeps its height
+            // and focus stays on the toggle. The wait is said in words on
+            // the line just before the region, outside it, since a screen
+            // reader may leave a busy region unread; the plan's name takes
+            // that line when the plan comes. Nothing announces the arrival.
+            <p>
+                {move || {
+                    if plan_shown.get() { plan_name.clone() } else { plan_loading.clone() }
+                }}
+            </p>
+            <div aria-busy=move || {
+                if plan_shown.get() { "false" } else { "true" }
+            }>
                 {move || {
                     if plan_shown.get() {
                         view! {

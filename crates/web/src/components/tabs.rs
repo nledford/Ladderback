@@ -115,8 +115,10 @@ pub fn Tabs(
     /// Follows the selected tab, its index in `tabs` (0, the first, to
     /// begin with), set once for each change, and once as the tabs are
     /// drawn when they start on another: a caller that reads a panel's
-    /// content only once its tab is chosen watches it. The tabs set it; a
-    /// caller only reads it.
+    /// content only once its tab is chosen watches it. A caller writes it
+    /// to choose a tab, as Settings does for an address changed while it is
+    /// open: the tab is selected and its panel shown, focus left where it
+    /// is; a tab the set doesn't hold changes nothing.
     #[prop(optional)]
     selected: Option<RwSignal<usize>>,
 ) -> impl IntoView {
@@ -133,6 +135,19 @@ pub fn Tabs(
             let now = selection.get();
             if selected.get_untracked() != now {
                 selected.set(now);
+            }
+        });
+        // A caller's choice, not the value the caller starts it at: the set
+        // starts on its own tab (`selected_at_start`).
+        Effect::new(move |seen: Option<()>| {
+            let chosen = selected.get();
+            if seen.is_none() {
+                return;
+            }
+            if let Some(chosen) =
+                rules::selection_on_choice(selection.get_untracked(), chosen, last)
+            {
+                selection.set(chosen);
             }
         });
     }

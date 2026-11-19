@@ -3,7 +3,8 @@
 // screen reader and has no role, so it has no name to find it by: it is
 // found by its class inside its demo, which is found by its heading, as a
 // spinner's drawing is. Its busy region is found by the attribute that makes
-// it busy, and its control by role and name, by keyboard alone.
+// it busy, the words that say its wait by their text, and its control by
+// role and name, by keyboard alone.
 
 import assert from "node:assert/strict";
 
@@ -14,6 +15,7 @@ import type { Locator, Page } from "playwright";
 import { composite, contrastRatio } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "./components.ts";
+import { saidJustBeforeBusy } from "./first_load.ts";
 
 // The gallery's skeletons while its region waits (`gallery.rs`): a
 // paragraph's lines, a field's block, lines on Ledger Gray and the region's
@@ -53,16 +55,24 @@ Then(
   },
 );
 
-// The page still says the wait in words, visible, and marks the region the
-// skeleton stands for busy until its content arrives.
+// The region the skeleton stands for is busy until its content arrives.
 Then(
-  "the region of the {string} demo is busy and shows the words {string} beside a skeleton",
-  async function (this: BrowserWorld, component: string, words: string) {
+  "the region of the {string} demo is busy and shows a skeleton",
+  async function (this: BrowserWorld, component: string) {
     const busy = await region(this.page, component);
     await expect(busy).toHaveAttribute("aria-busy", "true");
-    await expect(busy.getByText(words, { exact: true })).toBeVisible();
     await expect(busy.locator(".skeleton")).toHaveCount(1);
     await expect(busy.locator(".skeleton")).toBeVisible();
+  },
+);
+
+// The page still says the wait in words, visible, just before the busy
+// region and outside it, so a screen reader that leaves a busy region unread
+// reads them: the skeleton's and the table's.
+Then(
+  "the {string} demo says {string} just before its busy region, outside it",
+  async function (this: BrowserWorld, component: string, words: string) {
+    await saidJustBeforeBusy(demoSection(this.page, component), words);
   },
 );
 

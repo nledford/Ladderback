@@ -19,7 +19,9 @@ pub(crate) mod rules;
 /// What the caller owes, since the skeleton says nothing:
 ///
 /// - **Words.** It is never a stand-in for words: the page says the wait in
-///   words ("Loading…"), visible, beside it.
+///   words ("Loading…"), visible, on a line just before the region it stands
+///   for and outside it, since a screen reader may leave a busy region
+///   unread (§4.5).
 /// - **Busy.** The region it stands for carries `aria-busy="true"` until the
 ///   content arrives.
 /// - **Arrival.** The content takes its place without moving focus and

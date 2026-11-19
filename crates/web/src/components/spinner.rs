@@ -42,7 +42,9 @@ pub(crate) mod rules;
 ///   5 s, or one that is all the page shows while nothing on it can be used
 ///   yet needs nothing. Technical design §4.5 has the rule in full.
 /// - **Busy.** The region it stands for, such as the table being read, gets
-///   `aria-busy="true"` until it is filled.
+///   `aria-busy="true"` until it is filled, the spinner and its label
+///   standing just before it and outside it, since a screen reader may leave
+///   a busy region unread.
 /// - **A busy button** keeps focus while the spinner stands in it: it takes
 ///   `aria-disabled="true"`, not `disabled`, which would drop focus to the
 ///   page (A1), and its handler ignores presses until the work ends, as
