@@ -4,7 +4,7 @@
 
 ## Why
 
-A pull request's CI takes a median of 83 minutes, and most of it is waiting for runners: macOS has the smallest pool. A pull request has also passed local checks before it opens: the quick lane of AGENTS.md, and the maintainer's own run of `just quick-ci`, red-first, the mutants and the UI journeys. So the full run mostly repeats work that has already passed, at the price of the queue.
+A pull request's CI takes a median of 83 minutes, and most of it is waiting for runners: macOS has the smallest pool. A pull request has also passed local checks before it opens: the quick lane of AGENTS.md, and the maintainer's own run of `just quick-ci`, red-first and the Chromium UI journeys. So the full run mostly repeats work that has already passed, at the price of the queue.
 
 The maintainer accepts the cost: a breakage that only macOS, the release build, Firefox or WebKit shows is found after the merge, not before it.
 
@@ -25,7 +25,8 @@ The maintainer accepts the cost: a breakage that only macOS, the release build, 
 ## What is lost, and how it is covered
 
 - **macOS-only, release-build-only, Firefox- and WebKit-only breakage,** what the service managers and the wasm tests find, and what a change outside the UI's paths breaks in the Chromium journeys, shows after the merge. It is covered by `main`'s run after each merge, which runs all of those jobs, and by the merge train's pause on a required job that fails on `main`.
-- **Red-first and the mutants** have run in the maintainer's local checks before a pull request opens, which AGENTS.md's quick lane doesn't require of every author (it asks for red-first on a `behaviour` branch, not for the mutants). In MVP mode CI doesn't run red-first at all, and runs the mutants only in the nightly full run, a day after the merge at the latest.
+- **Red-first** has run in the maintainer's local checks before a pull request opens, which AGENTS.md's quick lane asks for on a `behaviour` branch; in MVP mode CI doesn't run it at all.
+- **The mutants** run nowhere before the merge: not on the pull request, and not locally (the maintainer's decision, 2026-11-19), so a change can merge with behaviour no test asserts. The nightly full run tests every mutant, a day after the merge at the latest, and a surviving one is fixed then.
 - **The risk the maintainer accepts:** a break lands on `main`, is found by its run, and costs a fix or revert pull request.
 
 ## Exit condition
