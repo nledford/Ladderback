@@ -337,3 +337,78 @@ Feature: The tabs
       | light colors  |
       | dark colors   |
       | forced colors |
+
+  # A caller may start a set on another tab than the first by marking it, as
+  # Settings does for the tab its address names. The pseudolocale ar-XB
+  # writes the demo's words upside down, so its rows name the tabs as a
+  # reader of that page hears them.
+  Scenario Outline: A set started on a marked tab selects it, shows its panel and makes it the one Tab stop into the set, in a page that runs <direction>
+    When I open the "Tabs starting on a marked tab" demo asking for the locale "<locale>"
+    Then the text direction is "<dir>"
+    When I press Tab
+    Then focus is on the tab "<marked>"
+    And the tab "<marked>" is selected and the one Tab stop of its list
+    And the tab "<marked>" shows its panel, and every other panel of its list is drawn but hidden
+    When I press Tab
+    Then focus is on the panel of the tab "<marked>", which the tab names
+    When I press Shift+Tab
+    Then focus is on the tab "<marked>"
+    And the live regions stay silent
+
+    Examples:
+      | locale | direction     | dir | marked      |
+      | en-US  | left to right | ltr | Demo files  |
+      | ar-XB  | right to left | rtl | ᗡǝɯo ɟıʅǝs |
+
+  Scenario Outline: From a marked tab the arrow to the next tab moves on, and wraps from the last tab to the first, in a page that runs <direction>
+    When I open the "Tabs starting on a marked tab" demo asking for the locale "<locale>"
+    And I press Tab
+    Then focus is on the tab "<marked>"
+    And the tab "<left>" stands to the left of the tab "<right>"
+    When I press <next>
+    Then focus is on the tab "<last>"
+    And the tab "<last>" is selected and the one Tab stop of its list
+    And the tab "<last>" shows its panel, and every other panel of its list is drawn but hidden
+    When I press <next>
+    Then focus is on the tab "<first>"
+    And the tab "<first>" is selected and the one Tab stop of its list
+
+    Examples:
+      | locale | direction     | first        | marked      | last       | left         | right        | next       |
+      | en-US  | left to right | Demo summary | Demo files  | Demo tags  | Demo summary | Demo files   | ArrowRight |
+      | ar-XB  | right to left | ᗡǝɯo snɯɯɐɹʎ | ᗡǝɯo ɟıʅǝs | ᗡǝɯo ʇɐƃs | ᗡǝɯo ɟıʅǝs  | ᗡǝɯo snɯɯɐɹʎ | ArrowLeft  |
+
+  Scenario Outline: From a marked tab the arrow to the tab before moves on, and wraps from the first tab to the last, in a page that runs <direction>
+    When I open the "Tabs starting on a marked tab" demo asking for the locale "<locale>"
+    And I press Tab
+    Then focus is on the tab "<marked>"
+    When I press <previous>
+    Then focus is on the tab "<first>"
+    And the tab "<first>" is selected and the one Tab stop of its list
+    And the tab "<first>" shows its panel, and every other panel of its list is drawn but hidden
+    When I press <previous>
+    Then focus is on the tab "<last>"
+    And the tab "<last>" is selected and the one Tab stop of its list
+
+    Examples:
+      | locale | direction     | first        | marked      | last       | previous   |
+      | en-US  | left to right | Demo summary | Demo files  | Demo tags  | ArrowLeft  |
+      | ar-XB  | right to left | ᗡǝɯo snɯɯɐɹʎ | ᗡǝɯo ɟıʅǝs | ᗡǝɯo ʇɐƃs | ArrowRight |
+
+  Scenario Outline: From a marked tab Home goes to the first tab and End to the last, in a page that runs <direction>
+    When I open the "Tabs starting on a marked tab" demo asking for the locale "<locale>"
+    Then the text direction is "<dir>"
+    When I press Tab
+    Then focus is on the tab "<marked>"
+    When I press Home
+    Then focus is on the tab "<first>"
+    And the tab "<first>" is selected and the one Tab stop of its list
+    When I press End
+    Then focus is on the tab "<last>"
+    And the tab "<last>" is selected and the one Tab stop of its list
+    And the tab "<last>" shows its panel, and every other panel of its list is drawn but hidden
+
+    Examples:
+      | locale | direction     | dir | first        | marked      | last       |
+      | en-US  | left to right | ltr | Demo summary | Demo files  | Demo tags  |
+      | ar-XB  | right to left | rtl | ᗡǝɯo snɯɯɐɹʎ | ᗡǝɯo ɟıʅǝs | ᗡǝɯo ʇɐƃs |

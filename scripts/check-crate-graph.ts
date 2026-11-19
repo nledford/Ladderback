@@ -81,6 +81,7 @@ export const GRAPH: Readonly<Record<string, Row | typeof ANY>> = {
   platform: adapter(),
   "releases-adapter": adapter(),
   secrets: adapter(),
+  "signing-adapter": adapter(),
   store: adapter(),
   ladderback: ANY,
 };
@@ -105,6 +106,8 @@ export const OWNERS: readonly Model[] = [
   { name: "dbus-secret-service", crates: /^dbus-secret-service([-_]|$)/, owners: ["secrets"] },
   { name: "rmcp", crates: /^rmcp([-_]|$)/, owners: ["mcp"] },
   { name: "axum", crates: /^axum([-_]|$)/, owners: ["http-adapter", "ladderback"] },
+  // Ed25519 for the hub and its agents goes through the `Signing` port (§16, decision 120).
+  { name: "aws-lc", crates: /^aws-lc([-_]|$)/, owners: ["signing-adapter"] },
 ];
 
 const own = <T>(record: Readonly<Record<string, T>>, key: string): T | undefined =>
