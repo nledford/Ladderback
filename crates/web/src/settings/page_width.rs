@@ -10,7 +10,10 @@ use std::sync::Arc;
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
-use crate::components::RadioGroup;
+use crate::announcer::Politeness;
+use crate::components::alert::rules::AlertTone;
+use crate::components::{Alert, RadioGroup};
+use crate::live::reply;
 use crate::page;
 use crate::page_width::{GROUP, HEADING_ID, PageWidth, options};
 use crate::text;
@@ -18,8 +21,9 @@ use crate::text;
 /// The section: a radio group of Narrow and Full width, the one in effect
 /// chosen. A choice applies at once, with no button and no reload, to
 /// `width`, the page's own (`App`), once this browser has kept it. A browser
-/// that refuses to keep it is said so, and the page and the group stay as
-/// they were.
+/// that refuses to keep it is said so in an error alert, and assertively,
+/// as the choice's answer, since the alert is no live region; the page and
+/// the group stay as they were.
 #[component]
 pub(super) fn PageWidthSection(
     localizer: Arc<Localizer>,
@@ -27,6 +31,8 @@ pub(super) fn PageWidthSection(
 ) -> impl IntoView {
     let chosen = RwSignal::new(width.get_untracked().value());
     let refused = RwSignal::new(false);
+    let not_kept = text(&localizer, msg::UI_PAGE_WIDTH_NOT_KEPT);
+    let said = not_kept.clone();
     // Arrowing through the group sets `chosen` at each step: each choice is
     // kept and applied as it is made.
     Effect::new(move |_| {
@@ -40,6 +46,7 @@ pub(super) fn PageWidthSection(
             width.set(wanted);
         } else {
             refused.set(true);
+            reply(Politeness::Assertive, &said);
             chosen.set(current.value());
         }
     });
@@ -47,7 +54,7 @@ pub(super) fn PageWidthSection(
         text(&localizer, msg::UI_PAGE_WIDTH_NARROW),
         text(&localizer, msg::UI_PAGE_WIDTH_FULL),
     );
-    let not_kept = text(&localizer, msg::UI_PAGE_WIDTH_NOT_KEPT);
+    let alert_localizer = Arc::clone(&localizer);
     view! {
         <section aria-labelledby=HEADING_ID>
             <h2 id=HEADING_ID>{text(&localizer, msg::UI_PAGE_WIDTH_HEADING)}</h2>
@@ -58,7 +65,18 @@ pub(super) fn PageWidthSection(
                 options=choices
                 chosen=chosen
             />
-            <p role="alert">{move || refused.get().then(|| not_kept.clone())}</p>
+            {move || {
+                refused
+                    .get()
+                    .then(|| {
+                        let words = not_kept.clone();
+                        view! {
+                            <Alert localizer=Arc::clone(&alert_localizer) tone=AlertTone::Error>
+                                {words}
+                            </Alert>
+                        }
+                    })
+            }}
         </section>
     }
 }

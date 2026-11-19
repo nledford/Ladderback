@@ -14,10 +14,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
-use crate::components::{Button, Confirmation, RadioGroup, ReviewDialog, Working, sentence_view};
+use crate::components::{
+    Alert, Button, Confirmation, RadioGroup, ReviewDialog, Working, dialog_refusal_alert,
+    refusal_alert, say_refusals,
+};
 use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::refused_sentence;
@@ -99,6 +103,7 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
     let busy = RwSignal::new(false);
     let saved = RwSignal::new(false);
     let save_error = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(save_error);
     let save_localizer = Arc::clone(&localizer);
     let save = Callback::new(move |()| {
         if busy.get_untracked() {
@@ -179,11 +184,15 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
     let form_localizer = Arc::clone(&localizer);
     let saving = text(&localizer, msg::UI_SESSION_LENGTH_SAVING);
     let saved_text = text(&localizer, msg::UI_SESSION_LENGTH_SAVED);
+    let saved_localizer = Arc::clone(&localizer);
+    let save_error_localizer = Arc::clone(&localizer);
+    let everywhere_error_localizer = Arc::clone(&localizer);
     let form = move || match phase.get() {
         Phase::Loading => first_load(loading.clone(), Awaited::form(1)).into_any(),
         Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
         Phase::Ready => match refused.get() {
-            Some(sentence) => view! { <p>{sentence_view(sentence)}</p> }.into_any(),
+            // A read refused, shown in the form's place.
+            Some(sentence) => refusal_alert(&form_localizer, sentence).into_any(),
             None => {
                 let options = options(|id| text(&form_localizer, id));
                 view! {
@@ -230,8 +239,21 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
     view! {
         {form}
         {move || busy.get().then(|| view! { <p>{saving.clone()}</p> })}
-        {move || saved.get().then(|| view! { <p>{saved_text.clone()}</p> })}
-        <p role="alert">{move || save_error.get().map(sentence_view)}</p>
+        {move || {
+            saved
+                .get()
+                .then(|| {
+                    let words = saved_text.clone();
+                    view! {
+                        <Alert localizer=Arc::clone(&saved_localizer) tone=AlertTone::Success>
+                            {words}
+                        </Alert>
+                    }
+                })
+        }}
+        {move || {
+            save_error.get().map(|sentence| refusal_alert(&save_error_localizer, sentence))
+        }}
         <p>{text(&localizer, msg::UI_SIGN_OUT_EVERYWHERE_BODY)}</p>
         <p class="actions">
             <Button
@@ -260,7 +282,7 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
             {move || {
                 everywhere_error
                     .get()
-                    .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+                    .map(|sentence| dialog_refusal_alert(&everywhere_error_localizer, sentence))
             }}
         </ReviewDialog>
     }

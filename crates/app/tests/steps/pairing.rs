@@ -5,12 +5,17 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use app::fakes::{FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, SeededRandom};
-use app::pairing::{AgentPairing, AgentPairingError, HubKeys, HubPairing, PairedHub};
-use app::ports::{AgentRegistry, Clock, Identity, Signing};
+use app::fakes::{
+    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, LoopbackHubConnector,
+    SeededRandom,
+};
+use app::pairing::{
+    AgentPairing, AgentPairingError, HubKeys, HubPairing, PairFailure, PairWithHub, PairedHub,
+};
+use app::ports::{AgentRegistry, Clock, Identity, LinkError, Signing};
 use cucumber::{given, then, when};
 use domain::fleet::{
-    AgentStatus, Fingerprint, Hostname, HubAddress, PairingToken, TokenId, TokenTls,
+    AgentStatus, Fingerprint, Hostname, HubAddress, PairingToken, RouteRefused, TokenId, TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -22,7 +27,7 @@ const EXPORTER: [u8; 32] = [0xee; 32];
 struct Hub {
     registry: Arc<InMemoryAgentRegistry>,
     clock: Arc<FakeClock>,
-    pairing: HubPairing,
+    pairing: Arc<HubPairing>,
     keys: HubKeys,
 }
 
@@ -32,13 +37,13 @@ impl Hub {
         let clock = Arc::new(FakeClock::new(
             Timestamp::from_second(1_800_000_000).unwrap(),
         ));
-        let pairing = HubPairing::new(
+        let pairing = Arc::new(HubPairing::new(
             registry.clone(),
             Arc::new(InMemoryIdentity::default()),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(seed)),
             clock.clone(),
-        );
+        ));
         let keys = pairing.keys().await.expect("the hub's keys");
         Self {
             registry,
@@ -60,13 +65,13 @@ impl Hub {
     /// This hub started again on its registry with its key files gone,
     /// which makes new keys while no agent is registered.
     async fn without_key_files(&self) -> Self {
-        let pairing = HubPairing::new(
+        let pairing = Arc::new(HubPairing::new(
             self.registry.clone(),
             Arc::new(InMemoryIdentity::default()),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(2)),
             self.clock.clone(),
-        );
+        ));
         let keys = pairing.keys().await.expect("the hub's new keys");
         assert_ne!(keys.key(), self.keys.key());
         Self {
@@ -116,6 +121,11 @@ pub struct PairingWorld {
     /// Whether the agent sent a `Pair`, the one message signed with the
     /// token's pairing key.
     sent_pair: AtomicBool,
+    /// The connector the last pairing over a connection went through.
+    connector: Option<Arc<LoopbackHubConnector>>,
+    /// Why the last pairing over a connection stopped short of the
+    /// handshake, when it did.
+    failure: Option<PairFailure>,
 }
 
 impl std::fmt::Debug for PairingWorld {
@@ -199,6 +209,35 @@ impl PairingWorld {
     async fn agents(&self) -> Vec<domain::fleet::AgentRecord> {
         self.hub().registry.agents().await.expect("the agents")
     }
+
+    /// The world's token as a person pastes it: between quotes, with
+    /// spaces and a line break around it.
+    fn pasted_token(&self) -> PairingToken {
+        let token = self.token.as_ref().expect("a token");
+        let pasted = format!("  \"{}\"\n", token.to_text().expose());
+        PairingToken::parse_pasted(&pasted).expect("the pasted token reads")
+    }
+
+    /// A first agent pairs with `token` over a connection from `connector`,
+    /// as `ladderback pair` does.
+    async fn pair_over(&mut self, token: PairingToken, connector: LoopbackHubConnector) {
+        let machine = Machine::new(1, "laptop");
+        let connector = Arc::new(connector);
+        let outcome = PairWithHub::new(machine.pairing(), connector.clone())
+            .pair(token, machine.agent_id, machine.hostname.clone())
+            .await;
+        (self.outcome, self.failure) = match outcome {
+            Ok(paired) => (Some(Ok(paired)), None),
+            Err(PairFailure::Pairing(error)) => (Some(Err(error)), None),
+            Err(failure) => (None, Some(failure)),
+        };
+        self.connector = Some(connector);
+        self.first = Some(machine);
+    }
+
+    fn hub_link(&self) -> LoopbackHubConnector {
+        LoopbackHubConnector::to(self.hub().pairing.clone())
+    }
 }
 
 #[given(regex = r"^(?:a hub with )?a pairing token$")]
@@ -211,6 +250,20 @@ async fn a_lapsed_token(agent: &mut Agent) {
     let world = &mut agent.pairing;
     world.new_token().await;
     world.hub().clock.advance(SignedDuration::from_mins(15));
+}
+
+#[given(expr = "a hub with a pairing token for the address {string}")]
+async fn a_token_for(agent: &mut Agent, address: String) {
+    let world = &mut agent.pairing;
+    world.ensure_hub().await;
+    let hub = world.hub();
+    let address = HubAddress::parse(&address).expect("a hub address");
+    let token = hub
+        .pairing
+        .make_token(&hub.keys, address, TokenTls::Ca, None)
+        .await
+        .expect("a token");
+    world.token = Some(token);
 }
 
 #[given(regex = r#"^an agent paired under the hostname "([^"]+)"( in one Unicode form)?$"#)]
@@ -254,6 +307,31 @@ async fn an_agent_pairs(agent: &mut Agent) {
     let machine = Machine::new(1, "laptop");
     world.pair_and_keep(&machine).await;
     world.first = Some(machine);
+}
+
+#[when("an agent pairs over its connection with the token pasted between quotes")]
+async fn pairs_pasted(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let token = world.pasted_token();
+    let link = world.hub_link();
+    world.pair_over(token, link).await;
+}
+
+#[when("an agent pairs over its connection with the token")]
+async fn pairs_over(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let token = world.token.clone().expect("a token");
+    let link = world.hub_link();
+    world.pair_over(token, link).await;
+}
+
+#[when("an agent pairs over its connection with the token and nothing answers")]
+async fn pairs_unanswered(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let token = world.token.clone().expect("a token");
+    world
+        .pair_over(token, LoopbackHubConnector::unanswered())
+        .await;
 }
 
 #[when("the person revokes the token")]
@@ -440,4 +518,30 @@ async fn still_unused(agent: &mut Agent) {
     let hub = world.hub();
     let unused = hub.registry.unused_tokens(hub.clock.now()).await.unwrap();
     assert!(unused.iter().any(|kept| kept.pairing_key == key));
+}
+
+#[then("the agent stops because the address would show the token to the network")]
+fn stops_on_plain(agent: &mut Agent) {
+    assert_eq!(
+        agent.pairing.failure,
+        Some(PairFailure::Route(RouteRefused::PlainOffLoopback))
+    );
+}
+
+#[then("the agent stops because the hub can't be reached")]
+fn stops_unreached(agent: &mut Agent) {
+    let failure = agent.pairing.failure.as_ref();
+    assert!(
+        matches!(
+            failure,
+            Some(PairFailure::Link(LinkError::Unreachable { .. }))
+        ),
+        "{failure:?}"
+    );
+}
+
+#[then("the agent connected to nothing")]
+fn connected_nowhere(agent: &mut Agent) {
+    let connector = agent.pairing.connector.as_ref().expect("a connector");
+    assert_eq!(connector.routes(), Vec::new());
 }

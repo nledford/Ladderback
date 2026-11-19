@@ -324,10 +324,10 @@ Feature: API tokens
       And the page offers no button "Create the token"
       And the page has no accessibility violations
 
-    Scenario: Tokens Ladderback can't read are said calmly in the list's place
+    Scenario: Tokens Ladderback can't read are said calmly in an error alert in the list's place
       Given the daemon can't read its API tokens
       When I open the address "/settings#api-tokens"
-      Then the page shows a message containing "could not read or keep its API tokens"
+      Then the page shows an error alert containing "could not read or keep its API tokens"
       And the page has no accessibility violations
 
     Scenario: The API tokens fit a small screen

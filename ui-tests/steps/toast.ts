@@ -16,7 +16,7 @@ import { expect } from "../support/expect.ts";
 import { journey, pressUntilFocused } from "../support/keyboard.ts";
 import { pointer } from "../support/pointer.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { demoSection } from "./components.ts";
+import { demoSection } from "../support/gallery.ts";
 
 // Half a pixel of rounding in a laid-out length.
 const ROUNDING_PX = 0.5;
@@ -266,4 +266,10 @@ Then("the toast holds its icon, its words and its Dismiss button inside its edge
   });
   assert.equal(drawn.overflows, false, "the toast's words run out of their room");
   for (const part of drawn.parts) assert.ok(part.inside, `${part.selector} lies outside the toast`);
+});
+
+// A toast is transient: the step waits until it has gone.
+// Scoped to main: the polite live region carries the same text.
+When("the toast {string} is gone", async function (this: BrowserWorld, text: string) {
+  await expect(this.page.locator("main").getByText(text)).toBeHidden();
 });

@@ -47,6 +47,15 @@
 # The folders a plan dry run may read, set by a person on the Settings page. A plan dry run counts what a draft plan would back up without backing anything up.
 -dry-run-allowlist = dry-run allowlist
 
+# A machine that runs Ladderback and is paired with a hub (technical design §3.1). Not an AI agent, which is a program that acts through MCP or the API.
+-agent = { $form ->
+   *[one] agent
+    [other] agents
+}
+
+# The agent that runs with `--hub`: it holds the registry of the machines that pair with it, who owns what, and their history (technical design §3.1).
+-hub = hub
+
 ## Sizes and durations. The program splits the value and picks the form; the
 ## catalog arranges the parts, so word order stays with the translator.
 
@@ -490,6 +499,94 @@ error-download-unknown = This download is no longer waiting: it was already fetc
 # No route of the daemon's API serves the path a program asked for: a mistyped
 # path, or a program newer or older than the daemon. Nothing was done.
 error-route-unknown = This version of { -brand-name } has no such route, so nothing was done. Check the path the program asked for; if the program is newer or older than this { -brand-name }, update the older one.
+
+# The pairing token was already spent. The hub answers the same agent with
+# the same key as before, so a pairing whose answer was lost can be repeated.
+# `pair` is typed as it is: keep it a string literal.
+error-token-used = This token was already used. If this machine paired a moment ago and the reply was lost, run { "pair" } again with the same token: the { -hub } recognizes the same { -agent } and key and answers as before. If it says this again, another machine may have used the token first: look at the list of { -agent(form: "other") } on the { -hub }, reject any { -agent } you don't know, then make a new token.
+
+# The pairing token lapsed before anyone used it.
+error-token-expired = This token lapsed. Make a new one on the { -hub }.
+
+# Someone canceled the pairing token on the hub.
+error-token-revoked = This token was canceled on the { -hub }. Make a new one.
+
+# The text isn't a whole pairing token: cut short, or changed by a wrapped
+# line or a chat app.
+error-token-malformed = That isn't a whole token. Copy all of it again: a wrapped line or a chat app may have cut or changed it.
+
+# The pairing token was made by a newer hub than this agent can read.
+error-token-unsupported = This token is newer than this { -agent }. Update the { -agent }, then pair.
+
+# Another agent of the hub already has this machine's hostname. The token
+# stays good.
+# $hostname (text): the hostname the other agent registered, as it was given.
+# $last_seen (text): when the hub last heard from it, such as "3 days ago".
+# `--hostname` is typed as it is: keep it a string literal.
+error-hostname-taken = The { -hub } already has an { -agent } named { $hostname } (last seen { $last_seen }). If this is a different machine, pair under another name: add { "--hostname" }. If it is the same machine and its data folder was lost, don't rename it: remove the old { -agent } on the { -hub }, then pair with this same token.
+
+# The hub has another machine under this agent's ID.
+error-agent-key-mismatch = The { -hub } has another machine under this { -agent } ID. Don't pair again; ask whoever runs the { -hub }.
+
+# The hub's key isn't the one this agent trusts or its token names. Nothing
+# of the token was sent.
+error-hub-key-mismatch = This { -hub }'s key isn't the one this { -agent } trusts. If you reset or reinstalled the { -hub } on purpose, make a new token on the { -hub } and pair again, and compare the { -hub } key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it.
+
+# The hub didn't prove it holds its key on this connection. Nothing of the
+# token was sent.
+error-hub-proof-invalid = The { -hub } didn't prove its key. If you reset or reinstalled the { -hub } on purpose, make a new token on the { -hub } and pair again, and compare the { -hub } key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it.
+
+# The hub refused this agent's proof. The hub gives one answer for every
+# cause, so the message names them all.
+error-proof-refused = The { -hub } refused this { -agent }. It may have been removed, or its key may have changed. Look at the list of { -agent(form: "other") } on the { -hub }; to bring it back, make a replacement token for it. If this machine was never approved, its wait may have lapsed: make a new token and pair again.
+
+# The hub already has as many agents waiting for approval as it allows. The
+# token stays good.
+error-pending-limit = The { -hub } already has 20 { -agent(form: "other") } waiting for approval. Approve or reject some, then pair again with this token.
+
+# The hub closed the connection before proving itself: it can't offer the
+# kind of connection this machine's token names, as when a proxy ends TLS in
+# front of it. This build makes only tokens of CA-checked addresses, so the
+# way on is a token for the address of a proxy that serves https with a
+# certificate an authority signed.
+error-binding-unavailable = Not connected: the { -hub } closed the connection because it can't offer this machine's kind of connection. Make a new token for the { -hub }'s https address, served by a proxy with a certificate that a certificate authority signed, and pair again with it. Update the { -hub } if it is old.
+
+# No hub answered at the token's address: the connection was refused, the
+# name didn't resolve, or nothing answered in 10 seconds. Nothing was sent.
+# $address (text): the hub's address, as the token or the command names it.
+# $detail (text): the system's own words for the failure.
+# `ladderback pair <address>` is typed as it is: keep it a string literal.
+error-hub-unreachable = This machine couldn't reach the { -hub } at { $address } (connection refused, or no answer in 10 seconds). Check the address and that the { -hub } is running. If the address is wrong, give the right one: { "ladderback pair <address>" }.
+    .with-detail = This machine couldn't reach the { -hub } at { $address } ({ $detail }). Check the address and that the { -hub } is running. If the address is wrong, give the right one: { "ladderback pair <address>" }.
+
+# The hub's certificate at a pinned address isn't the one its token names.
+# Nothing was sent.
+# $address (text): the hub's address.
+error-hub-pin-mismatch = The { -hub } at { $address } showed a certificate that isn't the one its token names. Don't pair. Check the address with whoever runs the { -hub }; if they replaced the { -hub }'s certificate key, make a new token and compare the fingerprint.
+
+# The hub's certificate at an https address isn't one this machine's trust
+# store accepts for the address's name. Nothing was sent.
+# $address (text): the hub's address.
+# $detail (text): the TLS library's own words for the refusal.
+error-hub-untrusted = The { -hub } at { $address } showed a certificate this machine doesn't trust for that name. Don't pair. Check the address with whoever runs the { -hub }: the { -hub } or the proxy in front of it has to serve a certificate that a certificate authority this machine trusts signed for that name.
+    .with-detail = The { -hub } at { $address } showed a certificate this machine doesn't trust for that name ({ $detail }). Don't pair. Check the address with whoever runs the { -hub }: the { -hub } or the proxy in front of it has to serve a certificate that a certificate authority this machine trusts signed for that name.
+
+# The TLS handshake with the hub failed on its version or its key exchange.
+# Nothing was sent.
+# $address (text): the hub's address.
+# $detail (text): the TLS library's own words for the failure.
+error-hub-tls-refused = The { -hub } at { $address }, or a proxy in front of it, doesn't speak TLS 1.3, or, for a pinned address, the hybrid key exchange X25519MLKEM768 this machine needs. Update the proxy or the { -hub }. Don't pair over anything lower.
+    .with-detail = The { -hub } at { $address }, or a proxy in front of it, doesn't speak TLS 1.3, or, for a pinned address, the hybrid key exchange X25519MLKEM768 this machine needs ({ $detail }). Update the proxy or the { -hub }. Don't pair over anything lower.
+
+# The token's address is plain http:// and not this computer. Nothing was
+# sent.
+# `http://`, `https://` and `ladderback pair https://…` are typed as they
+# are: keep them string literals.
+error-plain-address = This address starts with { "http://" }, which shows the token to the network. This machine pairs only over { "https://" } or to localhost. Use the { -hub }'s https address ({ "ladderback pair https://…" }), served by a proxy with a certificate that a certificate authority signed.
+
+# The connection to the hub ended before the hub answered the pairing, or
+# the hub sent what isn't the next message of the handshake.
+error-hub-connection-lost = The connection to the { -hub } ended before the pairing was answered. Check that the { -hub } is running, then pair again with the same token: a token is used only once the { -hub } answers.
 
 # This agent doesn't maintain the repository: its entry doesn't ask this
 # agent to maintain it, so a forget, a prune, a check or an adoption, or the

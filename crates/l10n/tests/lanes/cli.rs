@@ -63,3 +63,27 @@ fn a_cli_message_shows_each_argument_exactly_as_given() {
         }
     }
 }
+
+#[test]
+fn what_pair_read_is_said_as_one_whole_sentence_for_each_kind_of_address() {
+    let say = |id: &'static str, count: u64| {
+        let shown = english().message(
+            MessageId::new(id),
+            &[
+                ("count", MsgArg::Count(count)),
+                ("address", MsgArg::Text("https://hub.example".to_owned())),
+                (
+                    "fingerprint",
+                    MsgArg::Text("7K3Q-M9XD-2RTV-8HFA-QW5N".to_owned()),
+                ),
+            ],
+        );
+        assert!(shown.problems().is_empty(), "{id}: {:?}", shown.problems());
+        shown.text().to_owned()
+    };
+    assert!(say("cli-pair-read-ca", 1).starts_with("Read 1 character. "));
+    assert!(say("cli-pair-read-ca", 120).starts_with("Read 120 characters. "));
+    assert!(say("cli-pair-read-ca", 120).contains("trust store"));
+    assert!(say("cli-pair-read-pinned", 1).starts_with("Read 1 character. "));
+    assert!(say("cli-pair-read-pinned", 120).contains("pinned"));
+}

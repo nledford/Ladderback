@@ -36,6 +36,8 @@ mod build_info;
 mod check_keyring;
 mod composition;
 mod dumps;
+#[cfg(feature = "hub")]
+mod hub;
 mod logging;
 mod mcp_call;
 mod output;
@@ -79,6 +81,11 @@ enum Command {
         /// the restart status, so Settings offers a restart.
         #[arg(long)]
         service_managed: bool,
+        /// Serve the hub's agent routes under `/sync/` as well, so that
+        /// other machines can pair with this one.
+        #[cfg(feature = "hub")]
+        #[arg(long)]
+        hub: bool,
     },
     /// Add the repository and the plans of a rustic profile to the
     /// configuration.
@@ -105,6 +112,39 @@ enum Command {
     /// session. It is typed twice at a terminal, without being shown, or
     /// read as one line of standard input; never given as an argument.
     SetPassword,
+    /// Make a one-time pairing token for an agent, list the unused ones, or
+    /// revoke one. Run it while the daemon is stopped.
+    #[cfg(feature = "hub")]
+    PairingToken {
+        /// The hub's address as agents reach it, such as
+        /// `https://hub.example`.
+        #[arg(long, required_unless_present_any = ["list", "revoke"])]
+        address: Option<String>,
+        /// How long the token lives, in minutes: 5 to 1440, 15 by default.
+        #[arg(long, value_name = "MINUTES")]
+        ttl: Option<i64>,
+        /// List the unused tokens by token ID, with when each lapses.
+        #[arg(long, conflicts_with_all = ["address", "ttl", "revoke"])]
+        list: bool,
+        /// Revoke the unused token with this token ID.
+        #[arg(long, value_name = "TOKEN_ID", conflicts_with_all = ["address", "ttl"])]
+        revoke: Option<String>,
+    },
+    /// Pair this machine with a hub. The token is pasted at the prompt,
+    /// without being shown, or read as standard input; never given as an
+    /// argument.
+    #[cfg(feature = "hub")]
+    Pair {
+        /// The hub's address, when this machine reaches it another way than
+        /// the token's.
+        address: Option<String>,
+        /// Pair under this hostname instead of the machine's.
+        #[arg(long)]
+        hostname: Option<String>,
+        /// Pair without asking, when standard input is the token.
+        #[arg(long)]
+        yes: bool,
+    },
     // Their descriptions are the catalog's (`cli-help-*`), set in `parse`.
     InstallService,
     RemoveService,
@@ -211,7 +251,40 @@ fn main() -> ExitCode {
             listen,
             allowed_hosts,
             service_managed,
-        } => serve(listen, allowed_hosts, service_managed, plain),
+            #[cfg(feature = "hub")]
+            hub,
+        } => serve(
+            listen,
+            allowed_hosts,
+            service_managed,
+            plain,
+            #[cfg(feature = "hub")]
+            hub,
+        ),
+        #[cfg(feature = "hub")]
+        Command::PairingToken {
+            address,
+            ttl,
+            list,
+            revoke,
+        } => hub::pairing_token(match (list, revoke, address) {
+            (true, _, _) => hub::TokenAsk::List,
+            (false, Some(id), _) => hub::TokenAsk::Revoke(id),
+            (false, None, address) => hub::TokenAsk::Make {
+                address: address.unwrap_or_default(),
+                ttl_minutes: ttl,
+            },
+        }),
+        #[cfg(feature = "hub")]
+        Command::Pair {
+            address,
+            hostname,
+            yes,
+        } => hub::pair(hub::PairAsk {
+            address,
+            hostname,
+            yes,
+        }),
         Command::ImportProfile {
             file,
             repo_name,
@@ -417,6 +490,7 @@ fn serve(
     allowed_hosts: Vec<String>,
     service_managed: bool,
     plain: bool,
+    #[cfg(feature = "hub")] hub: bool,
 ) -> ExitCode {
     // Before the log, so that it holds the start and every line after it.
     let recent_log: Arc<dyn app::ports::RecentLogStore> =
@@ -431,6 +505,8 @@ fn serve(
             allowed_hosts,
             service_managed,
             recent_log,
+            #[cfg(feature = "hub")]
+            hub,
         ),
     )
 }
@@ -447,6 +523,7 @@ fn run_daemon(
     allowed_hosts: Vec<String>,
     service_managed: bool,
     recent_log: Arc<dyn app::ports::RecentLogStore>,
+    #[cfg(feature = "hub")] hub: bool,
 ) -> io::Result<ExitCode> {
     // Checked here, not by the argument parser, so that the refusal is said
     // in the catalog's words and the person's language (§8.4). Exit status 2
@@ -539,6 +616,16 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
+    // `serve --hub` carries the pairing handshake at `/sync/v1` on this
+    // listener, whose sessions have no TLS of the hub's own (decision 120).
+    #[cfg(feature = "hub")]
+    let mut state = state;
+    #[cfg(feature = "hub")]
+    if hub && let Some(data_dir) = platform::dirs::data_dir() {
+        let pairing = hub::hub_pairing(&data_dir, Arc::clone(&operation_log.store));
+        state.sync = http_adapter::SyncHub::serving(Arc::new(pairing));
+        log::info!("serving the hub's pairing at {}", api::sync::PATH);
+    }
     // What came of serving, and the stop once it began; what is said on
     // stderr before then can fail the whole of it.
     let ran: io::Result<(io::Result<ExitCode>, Option<Stopping>)> = runtime.block_on(async {
