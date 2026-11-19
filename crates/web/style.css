@@ -525,22 +525,6 @@ main:focus {
   }
 }
 
-/* An icon (§4.5): one Lucide glyph, stroked in its tone (`--tone`;
-   Inherit, the text's color, unless its page names another), whose tokens
-   reach 4.5:1 on the page and on a surface, more than the 3:1 a part needs
-   (1.4.11). Its length is the shared scale's (`--size`, set by its size's
-   class on the drawing itself), so it grows with the reader's text (1.4.4).
-   In a line of text it is centered on the text as an inline image is; in a
-   row it keeps its length. Under forced colors it follows the tone rule
-   above: the text's own color. */
-.icon {
-  flex: none;
-  inline-size: var(--size);
-  block-size: var(--size);
-  vertical-align: middle;
-  color: var(--tone);
-}
-
 /* A link (§4.5): its words in its tone (`--tone`: Ladder Blue unless its
    page names the text around it), always underlined, so a link in a line of
    text is never told by its color alone (1.4.1), and its color needs no 3:1
