@@ -32,7 +32,7 @@ const SECTION = "## 16. Decisions";
 const TABLE_HEAD = ["| # | Question |", "|---|---|"];
 
 /** The lines of `markdown` outside fenced code, with their 1-based numbers. */
-function proseLines(markdown: string): { line: string; number: number }[] {
+export function proseLines(markdown: string): { line: string; number: number }[] {
   const out: { line: string; number: number }[] = [];
   let fence: string | null = null;
   markdown.split(/\r?\n/).forEach((line, i) => {
@@ -49,7 +49,7 @@ function proseLines(markdown: string): { line: string; number: number }[] {
 }
 
 /** The 1-based number of the first line of `markdown` that is a merge-conflict marker, if any. */
-function conflictLine(markdown: string): number | null {
+export function conflictLine(markdown: string): number | null {
   const i = markdown.split(/\r?\n/).findIndex((line) => CONFLICT.test(line));
   return i < 0 ? null : i + 1;
 }

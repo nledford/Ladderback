@@ -104,7 +104,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 
 **Settled in the component build** (`crates/web/src/components/`, one file per component, re-exported from `components.rs`, with the decisions a component makes in a child module, `<component>/rules.rs`; exercised by the gallery):
 
-- **The first six components** are:
+- **The first six components** were `ModalDialog`, `SortableTable` (since `Table`), `FormField` (since `TextField`), `StatusBadge`, `Progress` and `Toast`, each with its contract now in a file of its own (the table below).
 
   Menus and disclosures stay for later milestones. Every gallery demo shows its loading, empty, error and success states where they apply, and the demo strings come from `ui.ftl`.
 - **Form controls take the page's font.** A browser draws the text of a button, a field, a select and a text area in a font of its own, fixed in size (13.33 px in Chromium), whatever the page's text size: at 200 % text every button's label stayed at that size while the text around it doubled (1.4.4). `style.css` sets `font: inherit` on all four once, in its base rules, so a control's text has the size and face of the text around it, and what a control sizes in `em`, such as the checkbox's box, grows with it. `features/ui/components/gallery.feature` pins it at 200 % text on the gallery's buttons, and the gallery at 320 × 256 with that text: nothing scrolls sideways, nothing is clipped, no accessibility violations.
@@ -115,6 +115,31 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 - **The contrast gate** (A4) is `just test-contrast`: `scripts/check-contrast.ts` reads the token pairs named in it from `style.css` — text and muted text on surface (4.5:1), the focus ring on surface (3:1), the badge's Loading and Empty pairs and each status pair's words on its fill (4.5:1), the pairs the repositories page adds: text, links and the form error on the page background and links on the surface (4.5:1), and the table rule on the page background (3:1), each button tone, a text field's edge on the page and on a surface (3:1), and the tooltip's words on its fill (`--bg` on `--fg`, 4.5:1; 16.56:1 in light, 15.32:1 in dark), in both light and dark — and fails any pair under WCAG 2.2 AA, and the Warning and Error fills when they are less than 0.1 apart in OKLab lightness (decision 108).
 
   An underlined link needs no pair against nearby text. A progress bar's fill in each tone is held to 3:1 on its Ledger Gray track and on the page (1.4.11; the weakest is 4.56:1, Success and Warning on the track in light). The gate needs only Node; `just verify` runs it, and CI runs it in the `Check` job.
+
+**Each component's contract** is a file of its own in `components/accessibility/`, named as the component's `.rs` file. `just component-index` writes this table from the files' headings, and `just lint` fails when it doesn't match them:
+
+| Contract | Component |
+|---|---|
+| [The alert](accessibility/alert.md) | `components/alert.rs` |
+| [The badge](accessibility/badge.md) | `components/badge.rs` |
+| [The banner](accessibility/banner.md) | `components/banner.rs` |
+| [The button](accessibility/button.md) | `components/button.rs` |
+| [The checkbox](accessibility/checkbox.md) | `components/checkbox.rs` |
+| [The icon](accessibility/icon.md) | `components/icon.rs` |
+| [The link](accessibility/link.md) | `components/link.rs` |
+| [The modal dialog](accessibility/modal_dialog.md) | `components/modal_dialog.rs` |
+| [The progress bar](accessibility/progress.md) | `components/progress.rs` |
+| [The radio group](accessibility/radio_group.md) | `components/radio_group.rs` |
+| [The review dialog](accessibility/review_dialog.md) | `components/review_dialog.rs` |
+| [The skeleton](accessibility/skeleton.md) | `components/skeleton.rs` |
+| [The spinner](accessibility/spinner.md) | `components/spinner.rs` |
+| [The status badge](accessibility/status_badge.md) | `components/status_badge.rs` |
+| [The table](accessibility/table.md) | `components/table.rs` |
+| [The tabs](accessibility/tabs.md) | `components/tabs.rs` |
+| [The text field](accessibility/text_field.md) | `components/text_field.rs` |
+| [The toast](accessibility/toast.md) | `components/toast.rs` |
+| [The tooltip](accessibility/tooltip.md) | `components/tooltip.rs` |
+| [The tree](accessibility/tree.md) | `components/tree.rs` |
 
 **Settled in the pause build** (`crates/web/src/pause.rs` and `announcer.rs` for the decisions, `components.rs`, `live.rs` and `operations_page.rs` for the glue; decision 65):
 
