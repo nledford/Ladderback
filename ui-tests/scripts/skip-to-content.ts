@@ -119,7 +119,7 @@ function scenarios(feature: string): Scenario[] {
   let tags: string[] = [];
   let featureTags: string[] = [];
   let ruleTags: string[] = [];
-  let featureBackground: Scenario["steps"] = [];
+  const featureBackground: Scenario["steps"] = [];
   let ruleBackground: Scenario["steps"] = [];
   let inRule = false;
   // Where a step line goes, and an outline's examples so far.
