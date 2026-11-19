@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use api::sync::{AgentFrame, HubFrame};
 use async_trait::async_trait;
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::Timestamp;
 use domain::fleet::{HubRoute, RouteSession};
 
@@ -29,6 +31,7 @@ pub trait HubConnectorHarness: Sync {
 pub async fn run(harness: &dyn HubConnectorHarness) {
     a_connect_is_answered_with_the_hubs_challenge(harness).await;
     a_frame_out_of_turn_ends_the_link_with_its_reason(harness).await;
+    frames_the_agent_has_not_read_are_kept_in_order(harness).await;
     only_a_pinned_route_has_an_exporter(harness).await;
     a_route_nothing_answers_on_is_unreachable(harness).await;
 }
@@ -76,20 +79,50 @@ async fn a_connect_is_answered_with_the_hubs_challenge(harness: &dyn HubConnecto
     );
 }
 
+/// A `Pair` that reads as one but that no `Challenge` of the hub's was made
+/// for, so no proof in it holds.
+fn a_pair_no_challenge_was_made_for() -> AgentFrame {
+    let encoded = |bytes: &[u8]| URL_SAFE_NO_PAD.encode(bytes);
+    AgentFrame::Pair {
+        pairing_key: encoded(&[7; 32]),
+        agent_key: encoded(&[8; 32]),
+        counter: 0,
+        hostname: "laptop".to_owned(),
+        pairing_signature: encoded(&[9; 64]),
+        agent_signature: encoded(&[10; 64]),
+    }
+}
+
+/// What the hub sent before the agent read any of it is read in the order
+/// it was sent: a `Connect` and a `Pair` sent back to back are answered by
+/// the `Challenge` and then the refusal, not the refusal alone.
+async fn frames_the_agent_has_not_read_are_kept_in_order(harness: &dyn HubConnectorHarness) {
+    let Some((mut link, _)) = open(harness).await else {
+        return;
+    };
+    let frame = connect(link.as_ref());
+    assert_eq!(link.send(&frame).await, Ok(()));
+    // The hub may close before the frame is through.
+    let _ = link.send(&a_pair_no_challenge_was_made_for()).await;
+    let first = link.receive().await;
+    assert!(
+        matches!(first, Ok(HubFrame::Challenge { .. })),
+        "the first frame read is the Challenge: {first:?}"
+    );
+    let second = link.receive().await;
+    assert!(
+        matches!(second, Ok(HubFrame::Refused { .. })),
+        "the second is the refusal: {second:?}"
+    );
+}
+
 /// The hub closes the connection on a `Pair` before any `Connect`, and the
 /// agent reads the reason it gave.
 async fn a_frame_out_of_turn_ends_the_link_with_its_reason(harness: &dyn HubConnectorHarness) {
     let Some((mut link, _)) = open(harness).await else {
         return;
     };
-    let early = AgentFrame::Pair {
-        pairing_key: "A".repeat(43),
-        agent_key: "A".repeat(43),
-        counter: 0,
-        hostname: "laptop".to_owned(),
-        pairing_signature: "A".repeat(86),
-        agent_signature: "A".repeat(86),
-    };
+    let early = a_pair_no_challenge_was_made_for();
     // The hub may close before the frame is through; what is read next is
     // what tells.
     let _ = link.send(&early).await;
