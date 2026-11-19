@@ -1,0 +1,119 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reviews a pull request only when the maintainer asks
+# (`@coderabbitai review`), as a second, independent reviewer of the risky
+# ones, and its review is advisory: no check of its own is required, and
+# nothing it posts merges or blocks a pull request. Decision 125 says why, and
+# what it is asked to look for; AGENTS.md, which CodeRabbit reads as the
+# project's guidelines, holds the rules.
+language: en-US
+tone_instructions: >-
+  Be calm and exact. Report a finding only with evidence: the file and line, a
+  failing input or a counterexample. Skip style the formatters and linters
+  already settle.
+
+reviews:
+  profile: chill
+  # The changelog and the squash commit are built from the title and body the
+  # author writes, so nothing is written into the description.
+  high_level_summary: false
+  high_level_summary_in_walkthrough: true
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  poem: false
+  auto_review:
+    # Reviews on request only; a later push isn't reviewed again by itself.
+    enabled: false
+    auto_incremental_review: false
+  # Every change starts with a failing test (AGENTS.md, §13.1), so CodeRabbit
+  # writes no commits: a person fixes what it finds.
+  finishing_touches:
+    unit_tests:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+  pre_merge_checks:
+    # CI's `Pull request title` job checks titles (§13.8).
+    title:
+      mode: "off"
+    description:
+      mode: "off"
+  path_filters:
+    - "!Cargo.lock"
+    - "!**/package-lock.json"
+    - "!CHANGELOG.md"
+    - "!crates/adapters/*/tests/golden/**"
+  path_instructions:
+    - path: "crates/domain/**"
+      instructions: >-
+        The domain has no I/O, no async and no ambient time or randomness
+        (§3.2). Check that invariants live on the aggregate or domain service
+        that owns them, and that the ubiquitous language of §3.1 is used
+        exactly.
+    - path: "crates/{app,adapters}/**"
+      instructions: >-
+        Check the safety invariants I1 to I7 in docs/design/README.md §0, above
+        all: prune never uses instant-delete or early-delete-index (I2);
+        resolved secrets never appear in argv, worker or hook environments,
+        logs, hook templates, sync messages or the UI (I4); forget deletes
+        only snapshots a plan owns or the user adopted or selected (I6);
+        maintenance on one repository runs one operation at a time (I7).
+        Flag a panic path outside tests, unchecked
+        indexing or slicing of input from outside the process, and an
+        allocation sized by that input.
+    - path: "crates/adapters/{http,mcp,secrets,engine,hooks,platform,tls,signing}/**"
+      instructions: >-
+        These cross trust boundaries (decision 99 says who is trusted): check
+        request checks, token scopes, file paths, command execution and that
+        no secret leaks into an error, a log line or a response.
+    - path: "crates/web/**"
+      instructions: >-
+        Check the accessibility invariants A1 to A6 (§0, §4.5): roles and accessible names, keyboard use,
+        focus, and that a widget the shared components in
+        crates/web/src/components/ provide isn't built again in a page.
+        User-facing text comes from l10n message IDs, never a string literal
+        or concatenated fragments.
+    - path: "{features,ui-tests,tests}/**"
+      instructions: >-
+        Scenarios are written in the ubiquitous language, never endpoints,
+        tables or crates. UI steps find elements only by role and accessible
+        name. Flag a wait that can outlast its step, a sleep in place of a
+        wait for a state, and a test that asserts wiring or source text.
+  tools:
+    # CI runs these with the project's own configuration and pinned versions.
+    clippy:
+      enabled: false
+    biome:
+      enabled: false
+    shellcheck:
+      enabled: false
+    actionlint:
+      enabled: false
+    zizmor:
+      enabled: false
+    yamllint:
+      enabled: false
+    # The docs have rules of their own (scripts/check-paragraph-length.ts,
+    # American English); these two only add style comments.
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+chat:
+  # It answers when mentioned, not on every reply in a thread.
+  auto_reply: false
+  art: false
+
+knowledge_base:
+  learnings:
+    scope: local
