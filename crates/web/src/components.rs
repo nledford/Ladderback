@@ -21,6 +21,7 @@ use crate::focus::{FocusWrap, focus_wrap};
 use crate::live::reply;
 use crate::repositories::{Run, Sentence, address_parts, runs};
 use alert::rules::AlertTone;
+use skeleton::rules::Awaited;
 
 pub(crate) mod alert;
 pub(crate) mod badge;
@@ -212,6 +213,40 @@ pub(crate) fn dialog_refusal_alert(
     sentence: Sentence,
 ) -> impl IntoView + use<> {
     view! { <div role="alert">{refusal_alert(localizer, sentence)}</div> }
+}
+
+/// A region's first load (§4.5, the skeleton's caller): busy, saying the
+/// wait in `words`, visible, and showing beside them the still shape of
+/// what is coming, row by row as [`Awaited::rows`] decides. The page draws
+/// it where its content will stand and drops it whole when the content
+/// comes, so nothing busy or saying the wait stays, focus stays where it
+/// was, and nothing is announced: the announcer stays the page's.
+pub(crate) fn first_load(words: String, awaited: Awaited) -> impl IntoView + use<> {
+    view! {
+        <div aria-busy="true">
+            <p>{words}</p>
+            {awaited
+                .rows()
+                .into_iter()
+                .map(|row| {
+                    view! {
+                        <div class="my-2 flex gap-4">
+                            {row
+                                .into_iter()
+                                .map(|shape| {
+                                    view! {
+                                        <div class="min-w-0 flex-1">
+                                            <Skeleton shape=shape />
+                                        </div>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    }
+                })
+                .collect_view()}
+        </div>
+    }
 }
 
 /// Says each refusal `refused` comes to hold through the announcer's

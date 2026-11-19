@@ -52,9 +52,9 @@ const MANAGER_LIMIT: Duration = Duration::from_secs(30);
 pub const KILL_AFTER: Duration = Duration::from_secs(75);
 
 /// The status the agent exits with after an orderly stop asked for as a
-/// restart (EX_TEMPFAIL), which the service files have the manager start it
-/// again on: launchd on any exit but a successful one, systemd through
-/// `RestartForceExitStatus=` (decision 94).
+/// restart (EX_TEMPFAIL). The managers start the agent again after any exit
+/// they didn't ask for (#1035); this status is the one `SuccessExitStatus=`
+/// keeps from marking the systemd unit failed (decision 94).
 pub const RESTART_STATUS: u8 = 75;
 
 /// The argument the service files pass after `serve`: it tells the agent a
