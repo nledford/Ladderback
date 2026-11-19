@@ -310,7 +310,7 @@ impl WarningKind {
             Self::OtherHosts => "maintenance-other-hosts",
             Self::LocationSkipped => "location-skipped",
             Self::SecretFileReadable => "secret-file-readable",
-            Self::SecretFileWritable => todo!(),
+            Self::SecretFileWritable => "secret-file-writable",
             Self::FullDiskAccessMissing => "full-disk-access-missing",
             Self::Other => "unknown",
         }
@@ -678,16 +678,19 @@ impl Operation {
     }
 
     /// Counts `warning` and keeps a cut copy of it while there is room
-    /// ([`Self::record_warning`]). An operation names a readable secret file
-    /// once, however many of its reads met it (#386): such a warning for a
-    /// path already kept is neither kept nor counted again.
+    /// ([`Self::record_warning`]). An operation names a secret file others
+    /// can read or change once, however many of its reads met it (#386):
+    /// such a warning for a path already kept is neither kept nor counted
+    /// again.
     fn keep(&mut self, warning: Warning) {
         let item = warning.item.map(cut_warning_text);
-        if warning.kind == WarningKind::SecretFileReadable
-            && self
-                .warnings
-                .iter()
-                .any(|kept| kept.kind == warning.kind && kept.item == item)
+        if matches!(
+            warning.kind,
+            WarningKind::SecretFileReadable | WarningKind::SecretFileWritable
+        ) && self
+            .warnings
+            .iter()
+            .any(|kept| kept.kind == warning.kind && kept.item == item)
         {
             return;
         }

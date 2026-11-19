@@ -132,17 +132,22 @@ pub enum SecretWarning {
 
 impl SecretWarning {
     /// The warning an operation that read this secret carries, so its
-    /// history says so (#386): `item` is the path and `detail` the mode in
-    /// octal, as `chmod` takes it (`0644`).
+    /// history says so (#386, #1137): `item` is the path and `detail` the
+    /// mode in octal, as `chmod` takes it (`0644`).
     pub fn warning(&self) -> Warning {
-        match self {
-            Self::FileReadableByOthers { path, mode } => Warning {
-                kind: WarningKind::SecretFileReadable,
-                item: Some(path.clone()),
-                during: "secret".to_owned(),
-                detail: format!("{mode:04o}"),
-            },
-            Self::FileWritableByOthers { .. } => todo!(),
+        let (kind, path, mode) = match self {
+            Self::FileReadableByOthers { path, mode } => {
+                (WarningKind::SecretFileReadable, path, mode)
+            }
+            Self::FileWritableByOthers { path, mode } => {
+                (WarningKind::SecretFileWritable, path, mode)
+            }
+        };
+        Warning {
+            kind,
+            item: Some(path.clone()),
+            during: "secret".to_owned(),
+            detail: format!("{mode:04o}"),
         }
     }
 
@@ -156,7 +161,10 @@ impl SecretWarning {
                 path: redactor.redact(path),
                 mode: *mode,
             },
-            Self::FileWritableByOthers { .. } => todo!(),
+            Self::FileWritableByOthers { path, mode } => Self::FileWritableByOthers {
+                path: redactor.redact(path),
+                mode: *mode,
+            },
         }
     }
 }
@@ -272,11 +280,15 @@ const RUNTIME_SECRET_DIRECTORIES: [&str; 2] = ["/run/secrets", "/var/run/secrets
 /// The group and world read bits of a Unix file mode.
 const READABLE_BY_OTHERS: u32 = 0o044;
 
+/// The group and world write bits of a Unix file mode.
+const WRITABLE_BY_OTHERS: u32 = 0o022;
+
 /// The warning for a secret file with Unix permission bits `mode`, if it
-/// deserves one: it is group- or world-readable and isn't under one of the
-/// directories where a container runtime or systemd sets permissions.
-/// `credentials_directory` is the value of `$CREDENTIALS_DIRECTORY`, which
-/// only counts when it is a real absolute directory.
+/// deserves one: other users can change it, or else read it (group or world
+/// permission), and it isn't under one of the directories where a container
+/// runtime or systemd sets permissions. `credentials_directory` is the value
+/// of `$CREDENTIALS_DIRECTORY`, which only counts when it is a real absolute
+/// directory.
 ///
 /// Where a file is written isn't where it is: a link in `/run/secrets` may
 /// lead anywhere. `resolve` follows every link in a path (`None` when it
@@ -289,13 +301,21 @@ pub fn file_warning(
     credentials_directory: Option<&str>,
     resolve: impl Fn(&str) -> Option<String>,
 ) -> Option<SecretWarning> {
-    let exposed = mode & READABLE_BY_OTHERS != 0;
-    (exposed && !is_runtime_secret(path, credentials_directory, resolve)).then(|| {
+    let mode = mode & 0o777;
+    let warning = if mode & WRITABLE_BY_OTHERS != 0 {
+        SecretWarning::FileWritableByOthers {
+            path: path.to_owned(),
+            mode,
+        }
+    } else if mode & READABLE_BY_OTHERS != 0 {
         SecretWarning::FileReadableByOthers {
             path: path.to_owned(),
-            mode: mode & 0o777,
+            mode,
         }
-    })
+    } else {
+        return None;
+    };
+    (!is_runtime_secret(path, credentials_directory, resolve)).then_some(warning)
 }
 
 fn is_runtime_secret(

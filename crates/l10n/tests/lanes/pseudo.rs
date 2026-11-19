@@ -197,6 +197,7 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             &["http-cacert"],
         ),
         (msg::WARNING_SECRET_FILE_READABLE, &["chmod 600"]),
+        (msg::WARNING_SECRET_FILE_WRITABLE, &["chmod 600"]),
         (
             msg::CLI_PAIRING_TOKEN_BAD_ADDRESS,
             &["https://name", "https://name:port"],
