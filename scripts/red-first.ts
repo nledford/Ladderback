@@ -94,6 +94,12 @@ function testArtifact(line: string): (CargoMessage & { executable: string }) | n
   return { ...message, executable: message.executable };
 }
 
+/** What a command printed (stdout then stderr) and how it ended. */
+interface Run {
+  status: number | null;
+  output: string;
+}
+
 /**
  * Runs a command in one of the worktrees, with that worktree's target dir. A
  * timeout or a command that can't start is an error, never a red result.
@@ -103,7 +109,7 @@ function run(
   args: string[],
   cwd: string,
   { env = {}, timeout = BUILD_TIMEOUT_MS }: { env?: Env; timeout?: number } = {},
-): { status: number | null; output: string } {
+): Run {
   const tree = path.relative(treesRoot, cwd).split(path.sep)[0] ?? "";
   const result = spawnSync(command, args, {
     cwd,
@@ -392,7 +398,7 @@ function runScenario(
   engine: Engine = "chromium",
 ): { outcome: Outcome; output: string } {
   const regex = nameRegex(scenario.name);
-  let result;
+  let result: Run;
   if (scenario.runner === "acceptance") {
     result = run("cargo", ["test", "-p", "app", "--test", "acceptance", "--", "--name", regex], dir, {
       timeout: TEST_TIMEOUT_MS,
