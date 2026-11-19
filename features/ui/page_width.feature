@@ -70,14 +70,15 @@ Feature: Choosing the width of the pages
       | Narrow     |
       | Full width |
 
-  Scenario: A browser that keeps nothing says so, and the page stays narrow
+  Scenario: A browser that keeps nothing says so in an error alert, said assertively, and the page stays narrow
     Given a viewport of 1600 by 900 pixels
     And this browser keeps nothing a page stores
     When I open the address "/settings#page-width"
     And I skip to the content
     And I press Tab until focus is on the radio "Narrow"
     And I press the down arrow until focus is on the radio "Full width"
-    Then the page shows a message containing "This browser didn't keep the page width, so the page stays as it was."
+    Then the page shows an error alert containing "This browser didn't keep the page width, so the page stays as it was."
+    And the assertive region comes to contain "This browser didn't keep the page width, so the page stays as it was."
     And the radio "Narrow" of the group "Width of each page" is checked
     And the main content is no wider than 60 rem
     And the page has no accessibility violations

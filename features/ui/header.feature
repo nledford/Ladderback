@@ -28,7 +28,7 @@ Feature: The header bar
     Then focus is on a control in the main content
     And the page has no accessibility violations
 
-  Scenario Outline: A sign-out that reaches no daemon says so and leaves the header's height as it was, at <width> pixels with <size> percent text in <colors>
+  Scenario Outline: A sign-out that reaches no daemon is an error alert said assertively, and leaves the header's height as it was, at <width> pixels with <size> percent text in <colors>
     Given a viewport of <width> by <height> pixels
     And the reader sets the text size to <size> percent
     And the browser asks for "<colors>"
@@ -43,7 +43,8 @@ Feature: The header bar
     And the daemon has stopped
     And I press Shift+Tab until focus is on the button "Sign out"
     And I press Enter
-    Then the page shows an alert containing "did not answer"
+    Then the page shows an error alert containing "did not answer"
+    And the assertive region comes to contain "did not answer"
     And the header keeps the height noted
     And the page doesn't scroll sideways
     And no text is clipped
@@ -54,7 +55,7 @@ Feature: The header bar
       | 1280  | 720    | 100  | light colors |
       | 320   | 256    | 200  | dark colors  |
 
-  Scenario: A failed sign-out isn't said again once the session has ended another way and the admin signs in again
+  Scenario: A failed sign-out's error alert isn't shown again once the session has ended another way and the admin signs in again
     Given a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/settings#signing-in"
     And I skip to the content
@@ -65,7 +66,7 @@ Feature: The header bar
     When the next sign-out reaches no daemon
     And I press Shift+Tab until focus is on the button "Sign out"
     And I press Enter
-    Then the page shows an alert containing "did not answer"
+    Then the page shows an error alert containing "did not answer"
     When I press Tab until focus is on the button "Sign out everywhere"
     And I press Enter
     And I press Tab until focus is on the button "Sign out every browser"
@@ -75,7 +76,7 @@ Feature: The header bar
     And I type "demo-admin-pass"
     And I press Enter
     Then focus is on the heading "Settings"
-    And the page shows no alert containing "did not answer"
+    And the page shows no error alert containing "did not answer"
 
   # The version's width depends on the build's commit, whose digits differ in
   # width, so the scenario measures the widest and the narrowest version a

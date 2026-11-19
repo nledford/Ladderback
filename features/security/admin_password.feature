@@ -168,7 +168,7 @@ Feature: Setting and changing the admin password in Settings
       And the field "New password again" is marked invalid
       And the page has no accessibility violations
 
-    Scenario: With sign-in on, changing the admin password in Settings by keyboard alone asks to sign in with the new one
+    Scenario: With sign-in on, changing the admin password in Settings by keyboard alone asks to sign in with the new one in an information alert
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings#admin-password"
@@ -182,7 +182,7 @@ Feature: Setting and changing the admin password in Settings
       And I press Tab until focus is on the button "Change the admin password"
       And I press Enter
       Then the main heading reads "Sign in to Ladderback"
-      And the page shows a message containing "Admin password changed. Sign in with the new password."
+      And the page shows an information alert containing "Admin password changed. Sign in with the new password."
       And the page has no accessibility violations
       When I press Tab until focus is on the textbox "Admin password"
       And I type "another-admin-pass"

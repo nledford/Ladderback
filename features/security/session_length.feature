@@ -338,7 +338,7 @@ Feature: How long signing in lasts
       When the page is left unused for "01:02:00"
       Then the dialog "Sign in again" is closed
 
-    Scenario: Choosing Stay signed in for by keyboard alone keeps the choice
+    Scenario: Choosing Stay signed in for by keyboard alone keeps the choice, and a success alert says so
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings#signing-in"
@@ -349,7 +349,7 @@ Feature: How long signing in lasts
       When I press the down arrow until focus is on the radio "Until I sign out"
       And I press Tab until focus is on the button "Save the session length"
       And I press Enter
-      Then the page shows a message containing "Saved."
+      Then the page shows a success alert containing "Saved."
       When I reload the page
       Then the radio "Until I sign out" of the group "Stay signed in for" is checked
       And the page has no accessibility violations

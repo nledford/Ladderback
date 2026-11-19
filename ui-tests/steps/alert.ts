@@ -376,16 +376,16 @@ Then(
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// A page's own message (§4.5, #929): an Error alert, found by its class, as
-// it has no role. What the catalog filled in is set apart by bidi isolation
-// marks, which may stand between any two characters. The alert is no live
-// region and holds none. On the page nothing around it is one either, so
-// only the announcer says it, once; in a dialog, whose modal page silences
-// the announcer, it stands inside the dialog's own `role="alert"` (the
-// Dialog contract).
-Then("the page shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+// A page's own message (§4.5, #929): an alert of `tone`, found by its
+// class, as it has no role. What the catalog filled in is set apart by bidi
+// isolation marks, which may stand between any two characters. The alert is
+// no live region and holds none. On the page nothing around it is one
+// either, so only the announcer says it, once; in a dialog, whose modal page
+// silences the announcer, it stands inside the dialog's own `role="alert"`
+// (the Dialog contract).
+async function pageShowsAlert(world: BrowserWorld, tone: string, needle: string) {
   const heard = [...needle].map(escapeRegExp).join(ISOLATION);
-  const alert = this.page.locator(".alert.tone-error").filter({ hasText: new RegExp(heard) });
+  const alert = world.page.locator(`.alert.tone-${tone}`).filter({ hasText: new RegExp(heard) });
   await alert.first().waitFor({ state: "visible", timeout: patienceMs() });
   const found = await alert.first().evaluate((element, live) => {
     const dialog = element.closest("dialog");
@@ -400,8 +400,28 @@ Then("the page shows an error alert containing {string}", async function (this: 
   assert.equal(found.role, null, "the alert's own role");
   assert.equal(found.holds, 0, "live regions inside the alert");
   if (found.dialog) {
-    assert.deepEqual(found.around, { role: "alert", inDialog: true }, "the dialog's alert around the error alert");
+    assert.deepEqual(found.around, { role: "alert", inDialog: true }, "the dialog's alert around the alert");
   } else {
     assert.equal(found.around, null, "a live region around the alert, which would say it a second time");
   }
+}
+
+Then("the page shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await pageShowsAlert(this, "error", needle);
+});
+
+Then("the page shows a success alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await pageShowsAlert(this, "success", needle);
+});
+
+// Information is the vocabulary's Primary tone (§4.5).
+Then("the page shows an information alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await pageShowsAlert(this, "primary", needle);
+});
+
+// Nothing the page shows now: an alert drawn with the page is there at once.
+Then("the page shows no error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  const heard = [...needle].map(escapeRegExp).join(ISOLATION);
+  const alerts = this.page.locator(".alert.tone-error").filter({ hasText: new RegExp(heard) });
+  assert.equal(await alerts.count(), 0, `the page shows an error alert containing "${needle}"`);
 });
