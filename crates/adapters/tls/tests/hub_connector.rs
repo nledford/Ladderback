@@ -63,12 +63,19 @@ async fn serve(pairing: Arc<HubPairing>, key: Option<TlsKey>) -> u16 {
     port
 }
 
-/// Accepts the upgrade only at `/sync/v1`.
+/// Accepts the upgrade only at `/sync/v1`, and only without an `Origin`:
+/// the hub's sync routes refuse a handshake that carries one as a web
+/// page's (security §10.1).
 struct AtSyncPath;
 
 impl Callback for AtSyncPath {
     fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
         assert_eq!(request.uri().path(), PATH);
+        assert_eq!(
+            request.headers().get("origin"),
+            None,
+            "the agent sent an Origin"
+        );
         Ok(response)
     }
 }

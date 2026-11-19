@@ -17,7 +17,7 @@ import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "../support/gallery.ts";
 import { ISOLATION, namePattern } from "../support/keyboard.ts";
 
-// The gallery's banners as it opens (`gallery.rs`): one in each tone it
+// The gallery's banners as it opens (`gallery/banner.rs`): one in each tone it
 // takes, then the notice the reader can dismiss.
 const BANNERS = 3;
 

@@ -263,12 +263,17 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
 - **Bans.** Wildcard requirements are denied; duplicate versions only warn, because the tree has some we don't control. `chrono` is denied except as a dependency of `suppaftp`, `rmcp` or `schemars`, which can't drop it (decision 22), so a Ladderback crate that starts to use it fails.
 - **Sources.** crates.io only, and no git repository: the engine crates come from their crates.io releases too (decision 7).
 
-**In CI.** The `Dependencies (cargo-deny)` job runs `just deny` on pull requests that touch more than docs, and every night.
+**npm audit.** `just npm-audit` runs `npm audit --audit-level=high` on `crates/web/package-lock.json` (the Tailwind CLI, which builds the shipped stylesheet in the release build) and `ui-tests/package-lock.json` (the UI test harness). Every package in both is a dev dependency, so all of them are audited: `--omit=dev` would leave nothing. A high or critical advisory fails it; a low or moderate one is printed and passes.
 
-- The RustSec database changes without any code change, so a new advisory first turns the nightly run red, before a pull request does; an open pull request's next run shows it too.
+- **An advisory with no fix.** npm audit has no ignore list. A transitive advisory the direct dependency hasn't fixed yet is fixed with an `overrides` entry in that folder's `package.json`, pinning the patched version, with a comment in the pull request on why and what ends it. Where no patched version exists, the job stays red until one does or the maintainer accepts it; it isn't a required check, so it doesn't block merging.
+- **Dependabot.** `.github/dependabot.yml` covers both lockfiles for security updates only, as for Cargo, with the `build` prefix, so its pull requests pass the title check and stay out of the changelog.
+
+**In CI.** The `Dependencies (cargo-deny)` job runs `just deny`, then `just npm-audit`, on pull requests that touch more than docs, and every night.
+
+- The RustSec and npm advisory databases change without any code change, so a new advisory first turns the nightly run red, before a pull request does; an open pull request's next run shows it too.
 - A scheduled run notifies no one, so a failed nightly run opens an issue titled "Nightly dependency check failed", or comments on the open one.
 - It is not a required check yet; the maintainer may add it to the ruleset once it has proved stable.
-- `just verify` leaves it out because it needs the network.
+- `just verify` leaves both out because they need the network.
 
 ### 13.7 Changes that touch several places
 
@@ -312,7 +317,8 @@ A shared component is four pieces:
 1. The component in a file of its own, `crates/web/src/components/<component>.rs`, re-exported from `components.rs`, with any decision it makes in a child module, `components/<component>/rules.rs`, tested on the host.
    - It is built from native elements first (§4.5), takes its tone, size and placement from the shared vocabulary (`crates/web/src/variants.rs`), its sizes drawn at the shared scale's lengths (`--size`).
    - It has its row in §4.5's table naming any tone it leaves out, its default tone where it isn't `Primary`, and any size it draws at other lengths, with the reason.
-2. Its entry in the gallery (`crates/web/src/gallery.rs`), with every state it can show: a `<section>` whose `id` is its anchor, the demo's English heading in lower case with hyphens for spaces, then `-demo` (`text-field-demo`), and whose heading is a `DemoHeading`, so that the address `/_gallery#<id>` puts focus on it.
+   - Its accessibility contract is a file of its own, `docs/design/components/accessibility/<component>.md`, named as its `.rs` file and opening with its heading (`# The tooltip`); `just component-index` writes its row in §4.5's index of contracts (`just lint` fails when the index doesn't match the files).
+2. Its entry in the gallery, with every state it can show: a demo module of its own named as its `.rs` file, `crates/web/src/gallery/<component>.rs`, declared in `crates/web/src/gallery.rs`, whose page draws the module's demo component in the demo's place. The demo is a `<section>` whose `id` is its anchor, the demo's English heading in lower case with hyphens for spaces, then `-demo` (`text-field-demo`), and whose heading is a `DemoHeading`, so that the address `/_gallery#<id>` puts focus on it.
 3. A row in each Scenario Outline of `features/ui/components/gallery.feature`: "The address of the "<demo>" demo puts focus on its heading", for its anchor; no axe-core violations in its demo states; and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/gallery.ts`.
 4. Contract scenarios for its behaviour in a feature file of its own, `features/ui/components/<component>.feature`, with steps that find it by role and name and drive it by keyboard alone. Its steps go in a file of their own named as its `.rs` file, `ui-tests/steps/<component>.ts`; what several components' steps share, such as a demo's section, goes in `ui-tests/support/gallery.ts`. Each scenario starts at its own demo, `When I open the "<demo>" demo`, rather than walking from the top of the gallery, so a demo added above it never lengthens its walk. The one exception is a pointer's own behaviour, such as a tooltip's hover (1.4.13): its steps move the pointer through `ui-tests/support/pointer.ts`, which the maintainer approved and which never presses.
 

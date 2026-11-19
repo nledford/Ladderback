@@ -2,7 +2,7 @@
 //! its row header gives the operation, the label of its Cancel button, the
 //! facts of what a run that succeeded produced, and how the page announces
 //! the run's end. Which message, and with which values, is decided here, on
-//! the host; `routes.rs` renders it.
+//! the host; `operations_page.rs` renders it.
 
 use api::{MsgArg, OperationResultDto, OperationSummaryDto};
 use l10n::{Localizer, MessageId, msg};

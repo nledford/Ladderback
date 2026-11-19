@@ -266,13 +266,13 @@ jobs:
             esac
             # What the two jobs that MVP mode runs only on a change to their
             # inputs read: `workflow-lint` the workflows and actions and what
-            # configures and installs the linters, `deny` the lockfile, the
-            # manifests and deny.toml.
+            # configures and installs the linters, `deny` the lockfiles, the
+            # manifests, deny.toml and .nvmrc.
             case "$file" in
               .github/workflows/* | .github/actions/* | .github/actionlint.yaml | scripts/install-actionlint.sh | scripts/install-shellcheck.sh) workflows=true ;;
             esac
             case "$file" in
-              Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml) deps=true ;;
+              Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml | */package.json | */package-lock.json | ui-tests/.nvmrc) deps=true ;;
             esac
           done < "$RUNNER_TEMP/changed-files"
           # A change with no files isn't a docs change, and runs the jobs.
@@ -337,7 +337,8 @@ jobs:
     steps:
       # Every pull request is checked out: a docs-only one still runs the
       # agent-guidance path check, the paragraph-length check and the
-      # decision-index check below, which `just lint` runs for the rest.
+      # decision-index and component-index checks below, which `just lint`
+      # runs for the rest.
       - if: matrix.skip != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -355,9 +356,9 @@ jobs:
       # paragraph-length lints, the architecture checks and the contrast gate
       # give one answer anywhere, so they run on Linux alone; macOS needs no
       # Node then. A docs-only pull request sets Node up as well, for the
-      # paragraph-length and decision-index checks. Every setup-node reads
-      # Node's major version from ui-tests/.nvmrc, which a pull request of its
-      # own bumps (development.md §13.8).
+      # paragraph-length, decision-index and component-index checks. Every
+      # setup-node reads Node's major version from ui-tests/.nvmrc, which a
+      # pull request of its own bumps (development.md §13.8).
       - if: matrix.skip != 'true' && runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -367,6 +368,8 @@ jobs:
         run: node scripts/check-paragraph-length.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/decision-index.ts
+      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+        run: node scripts/component-index.ts
       # leptosfmt at the version the Justfile pins, for `just fmt-check`.
       # install-action lists no leptosfmt (manifests/ at that SHA), so it
       # falls back to cargo-binstall at that version, which takes the
@@ -757,20 +760,20 @@ jobs:
         run: rm -rf target
 
   # The dependency tree against deny.toml: RustSec advisories, licenses, banned
-  # crates and sources (technical design §13.6). It also runs on the nightly
-  # schedule, because an advisory can appear with no change to the code; a
-  # scheduled run notifies no one, so a failed one opens an issue (`deny-report`
-  # below), as `mutants-nightly` does. Not a required check: the maintainer may
-  # add it to the ruleset once it has proved stable. It fetches the advisory
-  # database, so a GitHub outage can fail it for a reason that isn't a
-  # dependency's.
+  # crates and sources, then `npm audit` on the two npm lockfiles (technical
+  # design §13.6). It also runs on the nightly schedule, because an advisory
+  # can appear with no change to the code; a scheduled run notifies no one, so
+  # a failed one opens an issue (`deny-report` below), as `mutants-nightly`
+  # does. Not a required check: the maintainer may add it to the ruleset once
+  # it has proved stable. It fetches the advisory databases, so a GitHub
+  # outage can fail it for a reason that isn't a dependency's.
   deny:
     name: Dependencies (cargo-deny)
     needs: changes
     # `changes` is skipped on a push, the nightly run and a manual run; with
     # `!cancelled()` this job runs then, and a pull request skips it when it is
-    # docs-only or, in MVP mode (decision 124), when no `Cargo.lock`, manifest
-    # or deny.toml changed; a failed `changes` leaves `deps` empty, which runs it.
+    # docs-only or, in MVP mode (decision 124), when no lockfile, manifest,
+    # deny.toml or .nvmrc changed; a failed `changes` leaves `deps` empty, which runs it.
     if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' && (needs.changes.outputs.mvp != 'true' || needs.changes.outputs.deps != 'false') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -785,6 +788,16 @@ jobs:
           cache: "false"
           tools: just,cargo-deny
       - run: just deny
+      # npm audit reads only the lockfiles and the registry's advisories:
+      # nothing is installed, so no cache. It runs even when `just deny`
+      # failed, so a RustSec advisory doesn't hide an npm one.
+      - if: ${{ !cancelled() }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui-tests/.nvmrc
+          package-manager-cache: false
+      - if: ${{ !cancelled() }}
+        run: just npm-audit
 
   # A failed nightly `deny` opens an issue, or comments on the open one. A job
   # of its own, as release-builds.yml's `report` is, so only it holds
@@ -809,7 +822,7 @@ jobs:
       - uses: $/.github/actions/report-nightly-failure
         with:
           title: Nightly dependency check failed
-          body: "The nightly dependency check (`just deny`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A new RustSec advisory is the usual cause; the job's log names it."
+          body: "The nightly dependency check (`just deny`, then `just npm-audit`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. A new RustSec or npm advisory is the usual cause; the job's log names it."
 
   # The pull request's mutants, split over one to four runners by how many
   # there are, which `changes` estimates from the diff alone

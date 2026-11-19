@@ -1,4 +1,4 @@
-//! Repository use cases (technical design §5, components.md): initialising a
+//! Repository use cases (technical design §5, components/daemon.md): initialising a
 //! repository where nothing is yet, testing one that is there, and connecting
 //! one by saving it into the configuration once its test passes. Each one
 //! resolves the repository's secrets first, so no resolved value is kept past

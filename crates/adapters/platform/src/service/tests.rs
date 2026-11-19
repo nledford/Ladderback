@@ -32,6 +32,15 @@ fn the_systemd_unit_is_the_golden_one() {
     );
 }
 
+/// Files the service-run agent creates are its user's alone (#1139).
+#[test]
+fn the_systemd_unit_makes_the_agents_files_owner_only() {
+    let unit = systemd_unit(&path("/home/demo/.local/bin/ladderback"));
+    let service = unit.split("[Service]\n").nth(1).unwrap();
+    let service = service.split("\n[").next().unwrap();
+    assert!(service.lines().any(|line| line == "UMask=0077"), "{unit}");
+}
+
 #[test]
 fn the_launchd_plist_is_the_golden_one() {
     assert_eq!(

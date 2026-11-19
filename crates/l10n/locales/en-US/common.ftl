@@ -444,7 +444,7 @@ error-operation-not-running = Operation { $operation } has already ended, so the
 # refused and nothing was done. For a maintenance run it is this
 # repository's; for turning maintenance off it may be another repository's.
 # $operation (text): the running operation's ID.
-error-maintenance-busy = Maintenance operation { $operation } is running on this agent, so nothing was done. Wait for it to end, then ask again.
+error-maintenance-busy = Maintenance operation { $operation } is running on this { -agent }, so nothing was done. Wait for it to end, then ask again.
 
 # The confirmation a restore asks for first was not right: the admin
 # password with sign-in on, the snapshot's short ID with sign-in off.
@@ -458,20 +458,20 @@ error-restore-target-unwritable = The restore could not write where it was to wr
 # Another restore already runs on this agent, which runs one at a time, so
 # the request was refused and nothing ran.
 # $operation (text): the running restore's operation ID.
-error-restore-running = Restore { $operation } is already running, and this agent runs one restore at a time. Wait for it to end, then restore again.
+error-restore-running = Restore { $operation } is already running, and this { -agent } runs one restore at a time. Wait for it to end, then restore again.
 
 # A restore over the original files was asked for from elsewhere than this
 # agent's own web UI, the only place it is offered, so nothing ran.
-error-restore-in-place-not-here = A restore over the original files can only be started in this agent's own web UI, so nothing was restored. Restore into a new folder instead, or open the agent's web UI.
+error-restore-in-place-not-here = A restore over the original files can only be started in this { -agent }'s own web UI, so nothing was restored. Restore into a new folder instead, or open the { -agent }'s web UI.
 
 # A restore was asked for through the hub, and this agent doesn't allow
 # restores from the hub, so nothing ran.
-error-restore-hub-not-allowed = This agent doesn't take restores from the hub, so nothing was restored. Set { "allow-hub-restore = true" } in the agent's configuration file to allow them.
+error-restore-hub-not-allowed = This { -agent } doesn't take restores from the { -hub }, so nothing was restored. Set { "allow-hub-restore = true" } in the { -agent }'s configuration file to allow them.
 
 # A restore into a new folder was asked for, and this agent has no folder
 # to make it in: it has no home folder, and its configuration file doesn't
 # set restore-folder, so nothing ran.
-error-restore-folder-unset = This agent has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the agent's configuration file to a folder for restores, then try again.
+error-restore-folder-unset = This { -agent } has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the { -agent }'s configuration file to a folder for restores, then try again.
 
 # A browser asked the agent to open System Settings at the Full Disk Access pane, and the browser isn't on the agent's own Mac, so nothing opened.
 error-full-disk-access-not-local = { -brand-name } opens System Settings only for a browser on the Mac it runs on, so nothing opened. On that Mac, open System Settings, choose Privacy & Security, then { -full-disk-access }, and turn it on for { -brand-name }.
@@ -482,7 +482,7 @@ error-full-disk-access-settings-unopened = { -brand-name } could not open System
 # Two downloads are already under way on this agent, confirmed or being
 # handed over, and an agent hands over two at a time, so nothing ran. The
 # third is refused rather than queued.
-error-downloads-busy = Two downloads are already under way on this agent, and it hands over two at a time, so nothing was downloaded. Wait for one to finish, then download again.
+error-downloads-busy = Two downloads are already under way on this { -agent }, and it hands over two at a time, so nothing was downloaded. Wait for one to finish, then download again.
 
 # The agent's system gave no random bytes for a download's ticket, so the
 # download wasn't confirmed and nothing ran. The daemon's log says why.
@@ -594,7 +594,7 @@ error-hub-connection-lost = The connection to the { -hub } ended before the pair
 # refusal can come after the repository was read, when maintenance from this
 # agent was turned off meanwhile.
 # $alias (text): the repository's alias, such as demo.
-error-maintenance-not-owner = This agent does not maintain the repository { $alias }, so nothing in it was changed. To maintain it from this agent, turn its maintenance on from the Snapshots page.
+error-maintenance-not-owner = This { -agent } does not maintain the repository { $alias }, so nothing in it was changed. To maintain it from this { -agent }, turn its maintenance on from the Snapshots page.
 
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.
@@ -603,7 +603,7 @@ error-retention-keeps-nothing = The policy of plan { $plan } would keep none of 
 
 # The group an adoption named matches no plan of this agent, so nothing
 # was written.
-error-adoption-no-match = No plan of this agent matches that history, so nothing was written. Point the adoption at the plan whose host, label and sources it carries.
+error-adoption-no-match = No plan of this { -agent } matches that history, so nothing was written. Point the adoption at the plan whose host, label and sources it carries.
 
 # More than one plan matches the group an adoption named, so nothing was
 # written.
@@ -656,6 +656,12 @@ warning-keyring-not-activatable = Your keyring service is running, but nothing c
 # $mode (text): the file's permissions in octal, such as 0644.
 # The command is typed as it is: keep it a string literal.
 warning-secret-file-readable = Other users of this machine can read the secret file { $path } (permissions { $mode }). Run { "chmod 600" } on it so that only its owner can read it.
+
+# A secret was read from a file other users of this machine can change, so they can choose the secret it holds.
+# $path (text): the file's path.
+# $mode (text): the file's permissions in octal, such as 0620.
+# The command is typed as it is: keep it a string literal.
+warning-secret-file-writable = Other users of this machine can change the secret file { $path } (permissions { $mode }), so they can choose the secret { -brand-name } reads from it. Run { "chmod 600" } on it so that only its owner can read or change it.
 
 # A hook command around the operation failed where its `on-failure` said to go on.
 # $phase (text): which hook list it ran from: before, after, failed or finally.
@@ -1080,7 +1086,7 @@ warning-profile-key-ignored = { -brand-name } left out { $key } of the profile, 
 
 # The profile prunes after its forget, and the repository now prunes from one place.
 # `maintenance` and `local` are a setting and its value in the configuration, typed as they are: keep them string literals.
-warning-profile-prune = Pruning will run from one place (the hub or this agent), not after every forget as the profile asked. The repository's { "maintenance" } setting is now { "local" }: change it if that is not what you want.
+warning-profile-prune = Pruning will run from one place (the { -hub } or this { -agent }), not after every forget as the profile asked. The repository's { "maintenance" } setting is now { "local" }: change it if that is not what you want.
 
 # The profile's environment table was left out.
 # `[global.env]`, `password-env` and `${VAR}` are typed as they are: keep them string literals.

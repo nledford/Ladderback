@@ -11,10 +11,10 @@ publish.workspace = true
 name = "http_adapter"
 
 [features]
-# The hub's way in (§16, decision 122): the agent routes under `/sync/` and
-# their exemption from the request checks. On by default for this crate's own
-# tests; the workspace dependency turns it off, `ladderback`'s `hub` on, and a
-# release build leaves it out.
+# The hub's way in (§16, decision 122): the agent routes under `/sync/`, with
+# a router and a check of their own (security §10.1). On by default for this
+# crate's own tests; the workspace dependency turns it off, `ladderback`'s
+# `hub` on, and a release build leaves it out.
 default = ["hub"]
 hub = []
 
