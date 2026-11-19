@@ -693,7 +693,10 @@ fn operations_table(
     let started_localizer = Arc::clone(localizer);
     let started = Column::new(
         text(localizer, msg::UI_COLUMN_STARTED),
-        Rem::tenths(110),
+        // Room for the sort button's label, "Sort by started", and a whole
+        // start time on one line each in the widest common sans-serif
+        // (DejaVu Sans, Linux's default); 11 rem fit only narrower fonts.
+        Rem::tenths(130),
         move |row: Signal<OperationRow>| {
             let localizer = Arc::clone(&started_localizer);
             let zone = zone.clone();
@@ -718,7 +721,7 @@ fn operations_table(
     let result_localizer = Arc::clone(localizer);
     let result = Column::new(
         text(localizer, msg::UI_COLUMN_RESULT),
-        Rem::tenths(200),
+        Rem::tenths(180),
         move |row: Signal<OperationRow>| result_view(&result_localizer, row),
     );
     let cancel_localizer = Arc::clone(localizer);
@@ -1637,13 +1640,16 @@ fn repositories_table(
 ) -> AnyView {
     let name = Column::new(
         text(localizer, msg::UI_COLUMN_NAME),
-        Rem::tenths(90),
+        Rem::tenths(70),
         |row: Signal<RepositoryDto>| row.with_untracked(|row| row.alias.clone()).into_any(),
     );
     let place_localizer = Arc::clone(localizer);
     let location = Column::new(
         text(localizer, msg::UI_COLUMN_LOCATION),
-        Rem::tenths(250),
+        // An address such as `sftp:me@nas.home.lan:/srv/data/repo/pc/main`
+        // on one line in DejaVu Sans, Linux's default sans-serif, the widest
+        // common one. The four columns add up to the page's 58 rem.
+        Rem::tenths(265),
         move |row: Signal<RepositoryDto>| {
             let localizer = Arc::clone(&place_localizer);
             (move || row.with(|row| place_view(&localizer, row, tested))).into_any()
@@ -1661,7 +1667,8 @@ fn repositories_table(
     let actions_localizer = Arc::clone(localizer);
     let actions = Column::new(
         text(localizer, msg::UI_COLUMN_ACTIONS),
-        Rem::tenths(80),
+        // A row's Create button ("Create demo") on one line in DejaVu Sans.
+        Rem::tenths(95),
         move |row: Signal<RepositoryDto>| {
             let localizer = Arc::clone(&actions_localizer);
             let base = base.clone();
