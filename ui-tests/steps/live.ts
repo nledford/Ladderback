@@ -160,6 +160,15 @@ Given(
   },
 );
 
+// The same two plans over the tiny source, for a journey that needs only
+// their snapshots: a small source's backup takes up to 30 s on CI.
+Given(
+  "two demo plans {string} and {string} with a tiny scratch repository",
+  async function (this: BrowserWorld, first: string, second: string) {
+    await serveDemoPlans(this, [first, second], "tiny");
+  },
+);
+
 /** The run the daemon's plans list says `plan` has planned, if any. */
 export async function plannedRun(world: BrowserWorld, plan: string): Promise<string | null> {
   assert.ok(world.baseUrl, "this scenario's daemon was never started");

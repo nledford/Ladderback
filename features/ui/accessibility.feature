@@ -165,7 +165,7 @@ Feature: Accessibility of the app shell
   # who tabs through the plans hears which one each button runs, and each
   # button starts that plan and no other.
   Scenario: Each plan's start button names the plan it starts
-    Given two demo plans "demo-home" and "demo-work" with a scratch repository
+    Given two demo plans "demo-home" and "demo-work" with a tiny scratch repository
     When I open the address "/operations"
     Then the page has no accessibility violations
     When I skip to the content
@@ -193,7 +193,7 @@ Feature: Accessibility of the app shell
     And the page has no accessibility violations
 
   Scenario: The operations table sorts by keyboard with the sort announced
-    Given a demo plan "demo-home" with a scratch repository
+    Given a demo plan "demo-home" with a tiny scratch repository
     When I open the address "/operations"
     And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
@@ -279,7 +279,7 @@ Feature: Accessibility of the app shell
     And the page has no accessibility violations
 
   Scenario: The snapshots page lists a plan's snapshots newest first
-    Given a demo plan "demo-home" with a scratch repository
+    Given a demo plan "demo-home" with a tiny scratch repository
     When I open the address "/operations"
     And I skip to the content
     And I press Tab until focus is on the button "Start backup of demo-home"
@@ -300,7 +300,7 @@ Feature: Accessibility of the app shell
   # A listed snapshot's time is the one its own clock read, not the viewer's
   # (features/ui/snapshot_times.feature).
   Scenario: The operations page writes each time in the zone of the browser
-    Given a demo plan "demo-home" with a scratch repository
+    Given a demo plan "demo-home" with a tiny scratch repository
     And the browser is in the time zone "Pacific/Auckland"
     When I open the address "/operations"
     And I skip to the content
