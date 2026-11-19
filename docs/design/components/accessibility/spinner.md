@@ -10,6 +10,8 @@
 
   What a screen reader meets is `spinner/rules.rs`, decided on the host, with the spinner's classes: with `LabelShown::Visible`, the default, the label is ordinary text beside the drawing and the drawing is `aria-hidden`, so the label is read once; with `LabelShown::Hidden` the drawing is `role="img"` named by the label. The track is the arc's color at a quarter of its strength. Each tone's token reaches 4.5:1 on the page and on a surface (the vocabulary's contrast pairs), more than the 3:1 the arc needs as a part (1.4.11). Under forced colors the arc follows the vocabulary's rule, the text's own color whatever the tone, and the track is `GrayText`. The reduced-motion rule stops the turning, leaving a still arc beside the label.
 
+  Its look is Tailwind utilities (decision 117), logical ones only (#931): `spinner/rules.rs` returns the spinner's classes, a row's utilities (`flex items-start`) on a line of its own, and its drawing's, its turn's and its track's, which draw in `--tone` and `--size`. `style.css` keeps three rules: the turn's `@keyframes`, an at-rule no utility writes, and on a line of its own the two margins that center the drawing and the label's first line on each other, half the difference between `1lh` and the drawing's length, never below zero, which no named utility sets and an arbitrary value would hide in a class name.
+
   The caller's duties under WCAG 2.2 AA, which the component can't meet for it:
 
   - **Announcing (4.1.3, Status Messages).** A spinner that appears because of something the reader did (a search, a save) has its wait, and the wait's end, said through the announcer, since the spinner is no live region.

@@ -53,13 +53,23 @@ pub struct Bar {
     pub block: String,
 }
 
+/// How each bar is drawn, in Tailwind utilities (decision 117), logical ones
+/// only: flat, in Pencil Gray (`--skeleton`), which shows on the page and on
+/// Ledger Gray alike, with the small corner, never wider than its room. It
+/// never moves: no animation and no transition, in any motion setting
+/// (2.2.2). Under forced colors the system drops the fill, so an edge in the
+/// color of unavailable text keeps the shape in view.
+pub const BAR: &str = "skeleton-bar block max-inline-full bg-skeleton rounded-(--radius-small) \
+    forced-colors:border forced-colors:border-solid forced-colors:border-[color:GrayText]";
+
 impl Shape {
-    /// The skeleton's classes: what it stands for, which `style.css` lays
-    /// out.
+    /// The skeleton's classes: what it stands for, which `style.css` gives a
+    /// line's margins, and its bars' column, in Tailwind utilities, at the
+    /// start of the room it is given, so they follow the page's direction.
     pub fn class(self) -> &'static str {
         match self {
-            Self::Lines { .. } => "skeleton skeleton-lines",
-            Self::Block { .. } => "skeleton skeleton-block",
+            Self::Lines { .. } => "skeleton skeleton-lines flex flex-col items-start",
+            Self::Block { .. } => "skeleton skeleton-block flex flex-col items-start",
         }
     }
 
@@ -240,15 +250,18 @@ mod tests {
 
     #[test]
     fn lines_and_a_block_are_laid_out_by_their_own_classes() {
-        assert_eq!(lines(2, 50).class(), "skeleton skeleton-lines");
-        assert_eq!(
-            Shape::Block {
-                inline: Rem::tenths(10),
-                block: Rem::tenths(10)
-            }
-            .class(),
-            "skeleton skeleton-block"
-        );
+        let block = Shape::Block {
+            inline: Rem::tenths(10),
+            block: Rem::tenths(10),
+        };
+        for (shape, own) in [(lines(2, 50), "skeleton-lines"), (block, "skeleton-block")] {
+            let classes: Vec<&str> = shape.class().split_whitespace().collect();
+            assert_eq!(
+                classes.get(..2),
+                Some(&["skeleton", own][..]),
+                "{classes:?}"
+            );
+        }
     }
 
     /// The share of its room a one-line skeleton takes, in percent.
