@@ -12,6 +12,13 @@
 //! newcomer. This listener has no TLS of the hub's own, so each session's
 //! exporter is `None`, and a `Connect` naming one closes
 //! `binding-unavailable`.
+//!
+//! In a build with the hub, every path under `/sync/` is these routes',
+//! behind a check of their own in place of the browser's request checks
+//! (technical design §10.1): agents reach the hub by whatever name it has
+//! and prove themselves with signatures, and send no `Origin`. The check
+//! takes only what an agent sends, a `GET` asking to upgrade to a WebSocket,
+//! with no `Origin` and no body, which a web page can't send.
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -29,7 +36,8 @@ pub struct SyncHub {
 }
 
 /// The routes under `/sync/`: the handshake's when `hub` serves it, 404 on
-/// every path there otherwise.
+/// every path there otherwise. In a build with the hub, each is behind the
+/// sync check, which a route added here can't leave out.
 pub(crate) fn routes<S>(hub: &SyncHub) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
@@ -41,12 +49,66 @@ where
         .route("/sync/{*rest}", not_found);
     // Every other path under `/sync/` answers 404 beside the handshake's.
     #[cfg(feature = "hub")]
-    if let Some(router) = served::routes(hub) {
-        return nothing.merge(router);
+    let nothing = match served::routes(hub) {
+        Some(router) => nothing.merge(router),
+        None => nothing,
     }
+    .layer(axum::middleware::from_fn(check::enforce));
     #[cfg(not(feature = "hub"))]
     let _ = hub;
     nothing
+}
+
+/// The daemon's router: `app`, the UI and the API under the browser's
+/// checks, behind the routes under `/sync/`. Every path there goes to
+/// [`routes`], so a route `app` has under `/sync/` is never reached: an
+/// agent route can only be added behind the sync check.
+#[cfg(feature = "hub")]
+pub(crate) fn in_front_of(app: Router, hub: &SyncHub) -> Router {
+    routes(hub).fallback_service(app)
+}
+
+/// The sync routes' own check (technical design §10.1). A web page can't
+/// pass it: its WebSocket always carries its `Origin`, and its other
+/// requests may not set `Upgrade`. So the hub needs no `Host` check here,
+/// which DNS rebinding would otherwise call for, and no `Content-Type`
+/// check, which guards bodies.
+#[cfg(feature = "hub")]
+mod check {
+    use api::ErrorCode;
+    use axum::body::HttpBody as _;
+    use axum::extract::Request;
+    use axum::http::header::{ALLOW, ORIGIN, UPGRADE};
+    use axum::http::{Method, StatusCode};
+    use axum::middleware::Next;
+    use axum::response::{IntoResponse as _, Response};
+
+    /// Refuses, in this order, a request that carries an `Origin` (`403
+    /// origin-not-allowed`, whatever the origin: the UI never opens these
+    /// routes), a method other than `GET` (`405`), one that doesn't ask to
+    /// upgrade to a WebSocket (`426`) and one with a body (`413
+    /// body-too-large`, of a limit of 0 bytes), before any route sees it.
+    pub(super) async fn enforce(request: Request, next: Next) -> Response {
+        let headers = request.headers();
+        if headers.contains_key(ORIGIN) {
+            return crate::request_checks::refusal(ErrorCode::OriginNotAllowed);
+        }
+        if request.method() != Method::GET {
+            return (StatusCode::METHOD_NOT_ALLOWED, [(ALLOW, "GET")]).into_response();
+        }
+        let websocket = headers
+            .get(UPGRADE)
+            .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"websocket"));
+        if !websocket {
+            return (StatusCode::UPGRADE_REQUIRED, [(UPGRADE, "websocket")]).into_response();
+        }
+        // A request has no body when its length is known to be 0: none
+        // declared, or `Content-Length: 0`. Chunked framing announces one.
+        if request.body().size_hint().exact() != Some(0) {
+            return crate::body_limit::too_large(0);
+        }
+        next.run(request).await
+    }
 }
 
 #[cfg(feature = "hub")]

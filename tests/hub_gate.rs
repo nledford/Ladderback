@@ -130,8 +130,8 @@ fn every_path_under_sync_answers_404() {
     assert_eq!(daemon.status_of("/api/v1/log", "127.0.0.1"), 200);
 }
 
-/// Without the hub, `/sync/v1` has no exemption from the request checks: a
-/// name the daemon wasn't told to answer to is refused there as anywhere.
+/// Without the hub, `/sync/v1` isn't behind a check of its own: a name the
+/// daemon wasn't told to answer to is refused there as anywhere.
 #[test]
 fn the_sync_routes_get_the_request_checks() {
     let daemon = Daemon::start();

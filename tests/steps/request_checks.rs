@@ -429,6 +429,15 @@ fn refused(agent: &mut Agent, status: u16, code: String) {
     assert_eq!(response.header("content-type"), Some("application/json"));
 }
 
+/// A refusal of the hub's sync routes that isn't a request check's typed
+/// refusal: HTTP's own answer, which an agent never gets.
+#[then(expr = "the request is refused with status {int}")]
+fn refused_with_status(agent: &mut Agent, status: u16) {
+    let response = agent.web.response();
+    assert_eq!(response.status, status, "body {:?}", response.body);
+    assert_eq!(refusal_code(response), None, "body {:?}", response.body);
+}
+
 #[then("the WebSocket handshake is accepted")]
 fn handshake_accepted(agent: &mut Agent) {
     let response = agent.web.response();
@@ -528,6 +537,24 @@ async fn start_with(agent: &mut Agent, arguments: &str, rust_log: Option<&'stati
 #[given("Ladderback is serving on loopback")]
 async fn serving_on_loopback(agent: &mut Agent) {
     serve_on_loopback(agent).await;
+}
+
+/// Starts `ladderback serve --hub` on a free loopback port, on folders of
+/// its own, and keeps it as the daemon requests go to.
+#[given("Ladderback is serving as a hub on loopback")]
+async fn serving_as_a_hub(agent: &mut Agent) {
+    let (child, outcome, log) = start(
+        agent.scratch(),
+        None,
+        &["--listen", "127.0.0.1:0", "--hub"],
+        None,
+    )
+    .await;
+    match outcome {
+        Outcome::Listening(addr) => agent.web.server = Some(Server { child, addr }),
+        Outcome::Exited(status, text) => panic!("the hub exited with {status}: {text}"),
+    }
+    agent.web.log = Some(log);
 }
 
 /// Starts `ladderback serve` on a free loopback port with the scenario's
