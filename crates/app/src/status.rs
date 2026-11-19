@@ -5,10 +5,12 @@
 //! be read at their last attempt. Plans and repositories are named by their
 //! IDs and aliases, never by anything a secret could be in (I4).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use domain::execution::OperationKind;
-use domain::{PlanId, RepositoryAlias, SignedDuration, TimeZone};
+use domain::execution::{OperationKind, OperationStatus, RepositoryReading};
+use domain::planning::{AgentConfig, Plan};
+use domain::{PlanId, RepositoryAlias, SignedDuration, TimeZone, Timestamp};
 
 use crate::ports::{
     Clock, ConfigError, ConfigStore, HistoryQuery, MAX_PAGE_SIZE, OperationRecord, OperationStore,
@@ -100,18 +102,115 @@ impl ReadStatus {
 
     /// The summary as it stands now.
     pub async fn read(&self) -> Result<Status, StatusError> {
-        let _ = (
-            &self.config,
-            &self.operations,
-            &self.clock,
-            &self.zone,
-            OperationKind::Backup,
-            HistoryQuery {
-                plan: None,
+        let config = self
+            .config
+            .load()
+            .await
+            .map_err(|error| StatusError::Config(Box::new(error)))?;
+        let now = self.clock.now();
+        let recent = self.recent(None).await?;
+        let queue = recent
+            .iter()
+            .filter(|record| {
+                matches!(
+                    record.status,
+                    OperationStatus::Queued | OperationStatus::Running
+                )
+            })
+            .cloned()
+            .collect();
+        let unreadable = unreadable(&config, &recent);
+        let mut plans = Vec::with_capacity(config.plans().len());
+        for plan in config.plans() {
+            plans.push(self.standing(plan, now).await?);
+        }
+        Ok(Status {
+            plans,
+            queue,
+            unreadable,
+        })
+    }
+
+    /// The newest [`RECENT_OPERATIONS`] of `plan`, or of the agent.
+    async fn recent(&self, plan: Option<&PlanId>) -> Result<Vec<OperationRecord>, StatusError> {
+        let page = self
+            .operations
+            .list(&HistoryQuery {
+                plan: plan.cloned(),
                 after: None,
                 limit: PageSize::new(RECENT_OPERATIONS),
-            },
-        );
-        todo!()
+            })
+            .await
+            .map_err(StatusError::Store)?;
+        Ok(page.operations)
     }
+
+    async fn standing(&self, plan: &Plan, now: Timestamp) -> Result<PlanStanding, StatusError> {
+        let recent = self.recent(Some(&plan.id)).await?;
+        let last_success = recent
+            .iter()
+            .find(|record| {
+                record.kind == OperationKind::Backup
+                    && matches!(
+                        record.status,
+                        OperationStatus::Succeeded | OperationStatus::SucceededWithWarnings
+                    )
+            })
+            .map(|record| LastSuccess {
+                ago: now.duration_since(record.finished_at.unwrap_or(record.queued_at)),
+                operation: record.clone(),
+            });
+        let overdue = plan.schedule.as_ref().is_some_and(|schedule| {
+            let started = last_success.as_ref().map(|success| {
+                success
+                    .operation
+                    .started_at
+                    .unwrap_or(success.operation.queued_at)
+            });
+            schedule.is_overdue(&self.zone, started, now)
+        });
+        Ok(PlanStanding {
+            plan: plan.id.clone(),
+            last: recent.into_iter().next(),
+            last_success,
+            overdue,
+        })
+    }
+}
+
+/// The configured repositories whose newest operation among `recent` that
+/// tells of reading them couldn't, in alias order. An operation's
+/// repository is the alias it recorded, or else its plan's repository as the
+/// configuration names it now.
+fn unreadable(config: &AgentConfig, recent: &[OperationRecord]) -> Vec<UnreadableRepository> {
+    let mut told: BTreeMap<&RepositoryAlias, Option<&OperationRecord>> = BTreeMap::new();
+    for record in recent {
+        let Some(reading) = record.status.repository_reading() else {
+            continue;
+        };
+        let repository = record.repository_alias.as_ref().or_else(|| {
+            let plan = record.target.plan.as_ref()?;
+            config
+                .plans()
+                .iter()
+                .find(|configured| &configured.id == plan)
+                .map(|configured| &configured.repository)
+        });
+        let Some(repository) = repository else {
+            continue;
+        };
+        if !config.repositories().contains_key(repository) {
+            continue;
+        }
+        told.entry(repository)
+            .or_insert((reading == RepositoryReading::Unreadable).then_some(record));
+    }
+    told.into_iter()
+        .filter_map(|(repository, record)| {
+            record.map(|operation| UnreadableRepository {
+                repository: repository.clone(),
+                operation: operation.clone(),
+            })
+        })
+        .collect()
 }
