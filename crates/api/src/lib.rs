@@ -4936,12 +4936,68 @@ pub struct FullDiskAccessDto {
 /// What the Full Disk Access probe found: `not-applicable` where the agent
 /// isn't on macOS, which has no such grant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum FullDiskAccessStateDto {
     Granted,
     Missing,
     Unknown,
     NotApplicable,
+}
+
+/// What `GET /api/v1/status` answers: the status summary (§3.1, §4.6). Each
+/// plan, in the order the configuration writes them; the operations queued
+/// or running among the newest 200, newest first; the repositories
+/// that couldn't be read at their last attempt, in the order of their
+/// aliases; and what the Full Disk Access probe found. Plans and
+/// repositories are named by their IDs and aliases, never by an address or
+/// anything else a secret could be in (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct StatusDto {
+    pub plans: Vec<PlanStatusDto>,
+    /// Queued or running, as each one's `status` says.
+    pub running: Vec<OperationSummaryDto>,
+    pub unreadable_repositories: Vec<UnreadableRepositoryDto>,
+    pub full_disk_access: FullDiskAccessStateDto,
+}
+
+/// One plan in the status summary: the plans list's entry, its last
+/// operation, its last successful backup among its newest 200 operations,
+/// and whether it is overdue (§3.1).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct PlanStatusDto {
+    #[serde(flatten)]
+    pub plan: PlanSummaryDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<OperationSummaryDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success: Option<LastSuccessDto>,
+    pub overdue: bool,
+}
+
+/// A plan's last successful backup: its operation's ID, when it finished,
+/// and how many whole seconds ago that was.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct LastSuccessDto {
+    pub operation: String,
+    pub finished_at: String,
+    pub ago_seconds: u64,
+}
+
+/// A repository, by its alias, that couldn't be read at its last attempt,
+/// and the operation that couldn't read it, its `failure` saying why.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct UnreadableRepositoryDto {
+    pub repository: String,
+    pub operation: OperationSummaryDto,
 }
 
 /// The build a program came from (§3.1, decision 90): its version, the

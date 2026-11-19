@@ -13,6 +13,7 @@ use axum::routing::get;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::DaemonStatus;
 
 /// Serves `routes` on a free loopback port, for as long as the test runs.
 async fn daemon(routes: Router) -> DaemonUrl {
@@ -69,9 +70,13 @@ fn session_answering(sign_in: &'static str) -> Router {
     )
 }
 
-/// The plans and history routes of [`a_daemon_with_two_plans`].
+/// The plans, history and status routes of [`a_daemon_with_two_plans`].
 fn two_plans() -> Router {
     Router::new()
+        .route(
+            "/api/v1/status",
+            get(|| async { axum::Json(status_answer()) }),
+        )
         .route(
             "/api/v1/plans",
             get(|| async {
@@ -100,12 +105,36 @@ fn two_plans() -> Router {
         )
 }
 
+/// What the status route of [`two_plans`] answers: `home` overdue after a
+/// failure that couldn't read `nas`, `photos` never run, one backup running.
+fn status_answer() -> Value {
+    json!({
+        "plans": [
+            {
+                "id": "home", "repository": "nas", "scheduled": true,
+                "next-run": "2026-11-15T02:00:00Z",
+                "last": operation(1, "home", "failed"),
+                "last-success": {
+                    "operation": "018f0000-0000-7000-8000-000000000009",
+                    "finished-at": "2026-11-14T20:00:00Z",
+                    "ago-seconds": 18_000,
+                },
+                "overdue": true,
+            },
+            {"id": "photos", "repository": "nas", "scheduled": false, "next-run": null, "overdue": false},
+        ],
+        "running": [operation(3, "photos", "running")],
+        "unreadable-repositories": [{"repository": "nas", "operation": operation(1, "home", "failed")}],
+        "full-disk-access": "granted",
+    })
+}
+
 fn summary(value: Value) -> OperationSummaryDto {
     serde_json::from_value(value).unwrap()
 }
 
 #[tokio::test]
-async fn status_reads_the_daemons_build_plans_last_operations_and_unfinished_operations() {
+async fn status_reads_the_daemons_build_and_its_status_summary() {
     let status = status_of(daemon(a_daemon_with_two_plans()).await)
         .await
         .unwrap();
@@ -121,29 +150,10 @@ async fn status_reads_the_daemons_build_plans_last_operations_and_unfinished_ope
             exposure: ExposureDto::Loopback,
         })
     );
-    let plans: Vec<(&str, Option<&OperationSummaryDto>)> = status
-        .plans
-        .iter()
-        .map(|plan| (plan.plan.id.as_str(), plan.last.as_ref()))
-        .collect();
-    assert_eq!(
-        plans,
-        [
-            ("home", Some(&summary(operation(1, "home", "succeeded")))),
-            ("photos", None),
-        ]
-    );
-    assert_eq!(
-        status.plans[0].plan.next_run.as_deref(),
-        Some("2026-11-15T02:00:00Z")
-    );
-    assert_eq!(
-        status.running,
-        [
-            summary(operation(3, "photos", "running")),
-            summary(operation(2, "home", "queued")),
-        ]
-    );
+    let summary: api::StatusDto = serde_json::from_value(status_answer()).unwrap();
+    assert_eq!(status.summary, summary);
+    assert!(status.summary.plans[0].overdue);
+    assert_eq!(status.summary.unreadable_repositories[0].repository, "nas");
 }
 
 #[tokio::test]

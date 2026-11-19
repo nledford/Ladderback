@@ -2846,6 +2846,14 @@ struct ConfigCatalog {
 
 #[async_trait]
 impl Catalog for ConfigCatalog {
+    async fn status(
+        &self,
+        full_disk_access: api::FullDiskAccessStateDto,
+    ) -> Result<api::StatusDto, CatalogError> {
+        let _ = full_disk_access;
+        todo!()
+    }
+
     async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
         let config = self.config.load().await.map_err(catalog_refusal)?;
         // A planned run that can't be read is no reason to hide the plans:

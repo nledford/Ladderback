@@ -83,6 +83,8 @@ mod scheduler_steps;
 mod sign_in_steps;
 #[path = "steps/stats.rs"]
 mod stats_steps;
+#[path = "steps/status.rs"]
+mod status_steps;
 #[path = "steps/updates.rs"]
 mod updates_steps;
 
@@ -122,6 +124,7 @@ struct Agent {
     maintainer: maintainer_steps::MaintainerWorld,
     full_disk_access: full_disk_access_steps::FullDiskAccessWorld,
     download: download_steps::DownloadWorld,
+    status: status_steps::StatusWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -178,6 +181,7 @@ impl Agent {
             recent_log: Default::default(),
             maintainer: Default::default(),
             full_disk_access: Default::default(),
+            status: Default::default(),
         }
     }
 

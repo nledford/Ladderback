@@ -62,6 +62,29 @@ impl OperationStatus {
             }
         )
     }
+
+    /// What the operation tells of reading its repository: [`Read`] when it
+    /// succeeded, [`Unreadable`] when it failed because the repository
+    /// couldn't be opened or read where it was looked for (no repository or
+    /// another one there, its credentials or password refused, no location
+    /// usable, a secret of its settings unresolved), and `None` when it
+    /// tells neither: it is queued, running or cancelled, or failed for a
+    /// reason of its own. The status summary names a repository whose last
+    /// operation that tells was [`Unreadable`] (§4.6).
+    ///
+    /// [`Read`]: RepositoryReading::Read
+    /// [`Unreadable`]: RepositoryReading::Unreadable
+    pub fn repository_reading(&self) -> Option<RepositoryReading> {
+        todo!()
+    }
+}
+
+/// Whether an operation read its repository, as
+/// [`OperationStatus::repository_reading`] tells it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RepositoryReading {
+    Read,
+    Unreadable,
 }
 
 /// Why an operation failed. Typed, never a sentence: adapters map it onto
@@ -1610,5 +1633,69 @@ mod tests {
         assert_eq!(op.trigger(), &Trigger::Schedule);
         assert_eq!(op.kind(), OperationKind::Backup);
         assert_eq!(op.target(), &target);
+    }
+
+    #[test]
+    fn a_success_tells_its_repository_was_read() {
+        for status in [
+            OperationStatus::Succeeded,
+            OperationStatus::SucceededWithWarnings,
+        ] {
+            assert_eq!(status.repository_reading(), Some(RepositoryReading::Read));
+        }
+    }
+
+    #[test]
+    fn a_failure_to_open_or_read_the_repository_tells_it_unreadable() {
+        let refusal = refusal::SettingRefusal::SecretMissing {
+            source: "file:/srv/missing".to_owned(),
+        };
+        for reason in [
+            FailureReason::RepositoryReplaced,
+            FailureReason::RepositoryNotFound,
+            FailureReason::RepositoryConfigNotFound {
+                detail: "no config file".to_owned(),
+            },
+            FailureReason::CredentialsRefused { half: None },
+            FailureReason::NoLocationUsable,
+            FailureReason::NoLocationRuleHolds,
+            FailureReason::PasswordNotAccepted,
+            FailureReason::SecretRefused {
+                field: "password".to_owned(),
+                refusal,
+            },
+        ] {
+            let status = OperationStatus::Failed {
+                reason: reason.clone(),
+            };
+            assert_eq!(
+                status.repository_reading(),
+                Some(RepositoryReading::Unreadable),
+                "{reason:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_operation_unfinished_cancelled_or_failed_for_its_own_reason_tells_nothing() {
+        let failed = |reason| OperationStatus::Failed { reason };
+        for status in [
+            OperationStatus::Queued,
+            OperationStatus::Running,
+            OperationStatus::Cancelled,
+            failed(FailureReason::EngineFailed {
+                detail: "source unreadable".to_owned(),
+            }),
+            failed(FailureReason::HookFailed { exit_code: Some(1) }),
+            failed(FailureReason::DeadlinePassed),
+            failed(FailureReason::DaemonStopped),
+            failed(FailureReason::DaemonShutDown),
+            failed(FailureReason::EngineUnavailable {
+                detail: "worker not found".to_owned(),
+            }),
+            failed(FailureReason::RepositoryExists),
+        ] {
+            assert_eq!(status.repository_reading(), None, "{status:?}");
+        }
     }
 }

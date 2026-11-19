@@ -300,6 +300,13 @@ pub trait Catalog: Send + Sync {
         folder: domain::browse::FolderPath,
         from: u64,
     ) -> Result<api::FolderDto, FolderError>;
+
+    /// The status summary (§4.6), read now, with `full_disk_access`, what
+    /// the Full Disk Access probe found, as its own.
+    async fn status(
+        &self,
+        full_disk_access: api::FullDiskAccessStateDto,
+    ) -> Result<api::StatusDto, CatalogError>;
 }
 
 /// Why a catalog request couldn't be answered.
@@ -1544,6 +1551,18 @@ mod tests {
 
     #[async_trait]
     impl Catalog for DemoCatalog {
+        async fn status(
+            &self,
+            full_disk_access: api::FullDiskAccessStateDto,
+        ) -> Result<api::StatusDto, CatalogError> {
+            Ok(api::StatusDto {
+                plans: Vec::new(),
+                running: Vec::new(),
+                unreadable_repositories: Vec::new(),
+                full_disk_access,
+            })
+        }
+
         async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
             Ok(api::PlansDto {
                 plans: vec![api::PlanSummaryDto {
@@ -2772,6 +2791,14 @@ mod tests {
 
     #[async_trait]
     impl Catalog for MistakenCatalog {
+        async fn status(
+            &self,
+            _full_disk_access: api::FullDiskAccessStateDto,
+        ) -> Result<api::StatusDto, CatalogError> {
+            let (code, args, detail) = mistake();
+            Err(CatalogError::Unavailable { code, args, detail })
+        }
+
         async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
             let (code, args, detail) = mistake();
             Err(CatalogError::Unavailable { code, args, detail })
@@ -2811,6 +2838,7 @@ mod tests {
     async fn a_configuration_that_cannot_be_used_is_refused_with_its_code_and_where_it_is() {
         for (method, path, sent) in [
             (Method::GET, "/api/v1/plans", ""),
+            (Method::GET, "/api/v1/status", ""),
             (Method::GET, "/api/v1/repositories", ""),
             (Method::GET, "/api/v1/repositories/demo/snapshots", ""),
             (

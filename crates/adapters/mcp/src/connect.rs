@@ -18,10 +18,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use crate::{
-    Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, PlanStatus, Proposals,
-    RECENT_OPERATIONS, not_cancellable, unfinished,
-};
+use crate::{Access, Backend, BackendStatus, CANCELLABLE_KIND, Proposals, not_cancellable};
 
 /// The daemon `--connect` reaches when it names none: `serve`'s default
 /// address.
@@ -402,26 +399,8 @@ impl Backend for Connect {
             // Sign-in is on and no token was sent: every other route refuses.
             (_, None) => return Err(ErrorDto::new(ErrorCode::SignInRequired, [], None)),
         };
-        let listed = self.plans().await?;
-        let mut plans = Vec::with_capacity(listed.plans.len());
-        for plan in listed.plans {
-            let page = self.history(Some(plan.id.clone()), None, 1).await?;
-            plans.push(PlanStatus {
-                last: page.operations.into_iter().next(),
-                plan,
-            });
-        }
-        let recent = self.history(None, None, RECENT_OPERATIONS).await?;
-        let running = unfinished(recent.operations);
-        Ok(BackendStatus {
-            access,
-            daemon: Some(DaemonStatus {
-                build: session.build,
-                exposure: session.exposure,
-            }),
-            plans,
-            running,
-        })
+        let _ = (access, session);
+        todo!()
     }
 
     async fn plans(&self) -> Result<PlansDto, ErrorDto> {

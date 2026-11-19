@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use api::{
-    BuildDto, ErrorCode, ErrorDto, ExposureDto, NewProposalDto, OperationWarningDto, PlansDto,
-    ProposalDto, RepositoriesDto, SnapshotsDto, WarningCode,
+    BuildDto, ErrorCode, ErrorDto, ExposureDto, NewProposalDto, OperationWarningDto,
+    PlanSummaryDto, PlansDto, ProposalDto, RepositoriesDto, SnapshotsDto, WarningCode,
 };
 use serde_json::{Value, json};
 use tokio::io::{
@@ -113,13 +113,69 @@ fn daemon() -> DaemonStatus {
     }
 }
 
+/// The summary [`told`] tells: a plan overdue whose last backup failed for
+/// its repository, which is named unreadable, and a backup waiting.
+fn status_summary() -> StatusDto {
+    let failed = json!({
+        "id": "018f0000-0000-7000-8000-000000000002",
+        "plan": "home",
+        "kind": "backup",
+        "status": "failed",
+        "queued-at": "2026-11-15T07:50:00Z",
+        "started-at": "2026-11-15T07:50:00Z",
+        "finished-at": "2026-11-15T07:51:00Z",
+        "warning-codes": [],
+        "failure-code": "repository-config-not-found",
+        "result": null,
+    });
+    let waiting = json!({
+        "id": "018f0000-0000-7000-8000-000000000003",
+        "plan": "home",
+        "kind": "backup",
+        "status": "queued",
+        "queued-at": "2026-11-15T07:55:00Z",
+        "started-at": null,
+        "finished-at": null,
+        "warning-codes": [],
+        "failure-code": null,
+        "result": null,
+    });
+    serde_json::from_value(json!({
+        "plans": [{
+            "id": "home",
+            "repository": "nas",
+            "scheduled": true,
+            "next-run": "2026-11-15T09:00:00Z",
+            "last": failed,
+            "last-success": {
+                "operation": "018f0000-0000-7000-8000-000000000001",
+                "finished-at": "2026-11-15T05:01:00Z",
+                "ago-seconds": 10_740,
+            },
+            "overdue": true,
+        }],
+        "running": [waiting],
+        "unreadable-repositories": [{"repository": "nas", "operation": failed}],
+        "full-disk-access": "missing",
+    }))
+    .expect("the summary is one the wire carries")
+}
+
 fn told() -> Told {
     Told(Ok(BackendStatus {
         access: Access::ApiToken,
         daemon: Some(daemon()),
-        plans: Vec::new(),
-        running: Vec::new(),
+        summary: status_summary(),
     }))
+}
+
+/// What `status` answers of [`status_summary`] after `build`, `access` and
+/// `daemon`: the summary's fields as `GET /api/v1/status` answers them.
+fn summary_fields() -> serde_json::Map<String, Value> {
+    match serde_json::to_value(status_summary()) {
+        Ok(Value::Object(fields)) => fields,
+        other => panic!("the summary is an object: {other:?}"),
+    }
 }
 
 /// The client's end of one session.
@@ -452,29 +508,114 @@ async fn status_names_this_programs_build_field_by_field_and_what_the_backend_to
     let answer = client.call_status(json!({})).await;
     let result = &answer["result"];
     assert_eq!(result["isError"], false, "{answer}");
+    let mut expected = json!({
+        "build": {
+            "version": "0.3.1",
+            "commit": "3f937cf0a1b2c3d4e5f60718293a4b5c6d7e8f90",
+            "dirty": true,
+            "release": false,
+        },
+        "access": "api-token",
+        "daemon": {
+            "build": {"version": "0.3.0", "commit": null, "dirty": false, "release": false},
+            "exposure": "loopback",
+        },
+    });
+    expected
+        .as_object_mut()
+        .expect("an object")
+        .extend(summary_fields());
+    assert_eq!(result["structuredContent"], expected);
+    // Each plan keeps its place: the plans list's entry and its last
+    // operation, then what the summary adds (§4.6).
+    let plan = &result["structuredContent"]["plans"][0];
+    assert_eq!(plan["id"], "home");
+    assert_eq!(plan["next-run"], "2026-11-15T09:00:00Z");
+    assert_eq!(plan["last"]["failure-code"], "repository-config-not-found");
+    assert_eq!(plan["last-success"]["ago-seconds"], 10_740);
+    assert_eq!(plan["overdue"], true);
     assert_eq!(
-        result["structuredContent"],
-        json!({
-            "build": {
-                "version": "0.3.1",
-                "commit": "3f937cf0a1b2c3d4e5f60718293a4b5c6d7e8f90",
-                "dirty": true,
-                "release": false,
-            },
-            "access": "api-token",
-            "daemon": {
-                "build": {"version": "0.3.0", "commit": null, "dirty": false, "release": false},
-                "exposure": "loopback",
-            },
-            "plans": [],
-            "running": [],
-        })
+        result["structuredContent"]["unreadable-repositories"][0]["repository"],
+        "nas"
     );
+    assert_eq!(result["structuredContent"]["full-disk-access"], "missing");
     let text = result["content"][0]["text"]
         .as_str()
         .expect("the result as text");
     let mirrored: Value = serde_json::from_str(text).unwrap();
     assert_eq!(mirrored, result["structuredContent"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_server_offers_resources_and_lists_the_status_summary_as_one() {
+    let initialized = connect(told()).initialize("2025-11-25").await;
+    assert!(
+        initialized["result"]["capabilities"]["resources"].is_object(),
+        "{initialized}"
+    );
+    let mut client = connect(told());
+    let listed = client.ask_current("resources/list", json!({})).await;
+    assert_eq!(
+        listed["result"]["resources"],
+        json!([{
+            "uri": "ladderback://status",
+            "name": "status",
+            "title": "Status summary",
+            "description": STATUS_RESOURCE_DESCRIPTION,
+            "mimeType": "application/json",
+        }]),
+        "{listed}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_status_resource_reads_what_the_status_tool_answers() {
+    let mut client = connect(told());
+    let read = client
+        .ask_current("resources/read", json!({"uri": "ladderback://status"}))
+        .await;
+    let contents = &read["result"]["contents"];
+    assert_eq!(contents.as_array().map(Vec::len), Some(1), "{read}");
+    assert_eq!(contents[0]["uri"], "ladderback://status");
+    assert_eq!(contents[0]["mimeType"], "application/json");
+    let text = contents[0]["text"].as_str().expect("the summary as text");
+    let resource: Value = serde_json::from_str(text).unwrap();
+    let tool = client.call_status(json!({})).await;
+    assert_eq!(resource, tool["result"]["structuredContent"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_resource_that_isnt_the_status_summary_is_not_found() {
+    let mut client = connect(told());
+    let read = client
+        .ask_current("resources/read", json!({"uri": "ladderback://secrets"}))
+        .await;
+    // Resource not found is invalid params from the 2026-07-28 revision on
+    // (SEP-2164), where earlier ones had -32002 of their own.
+    assert_eq!(read["error"]["code"], -32602, "{read}");
+    assert_eq!(
+        read["error"]["message"],
+        "no resource is named \"ladderback://secrets\""
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_reading_the_status_resource_is_an_error_with_its_code() {
+    let mut client = connect(Told(Err(ErrorDto::new(
+        ErrorCode::SignInRequired,
+        [],
+        None,
+    ))));
+    let read = client
+        .ask_current("resources/read", json!({"uri": "ladderback://status"}))
+        .await;
+    assert_eq!(read["error"]["code"], -32603, "{read}");
+    assert_eq!(read["error"]["data"], json!({"code": "sign-in-required"}));
+    let message = read["error"]["message"].as_str().expect("a message");
+    assert!(
+        !message.is_empty() && !message.contains("sign-in-required"),
+        "{message}"
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -412,22 +412,7 @@ impl InProcess {
 #[async_trait]
 impl ::mcp::Backend for InProcess {
     async fn status(&self) -> Result<::mcp::BackendStatus, api::ErrorDto> {
-        let listed = self.plans().await?;
-        let mut plans = Vec::with_capacity(listed.plans.len());
-        for plan in listed.plans {
-            let page = self.history(Some(plan.id.clone()), None, 1).await?;
-            plans.push(::mcp::PlanStatus {
-                last: page.operations.into_iter().next(),
-                plan,
-            });
-        }
-        let recent = self.history(None, None, ::mcp::RECENT_OPERATIONS).await?;
-        Ok(::mcp::BackendStatus {
-            access: ::mcp::Access::InProcess,
-            daemon: None,
-            plans,
-            running: ::mcp::unfinished(recent.operations),
-        })
+        todo!()
     }
 
     async fn plans(&self) -> Result<api::PlansDto, api::ErrorDto> {
