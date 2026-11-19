@@ -12,8 +12,9 @@ use leptos::prelude::*;
 
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{Button, LabelLanguage, RadioGroup};
-use crate::language_choice::{GROUP, HEADING_ID, SECTION_ID, chosen, options, to_keep};
+use crate::language_choice::{GROUP, HEADING_ID, chosen, options, to_keep};
 use crate::page;
+use crate::settings_tabs::Section;
 use crate::text;
 use crate::variants::Tone;
 
@@ -43,12 +44,12 @@ pub(super) fn LanguageSection(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = NodeRef::<leptos::html::H2>::new();
     Effect::new(move |_| {
         if let Some(heading) = heading.get() {
-            page::focus_when_named(SECTION_ID, &heading);
+            page::focus_when_named(Section::Language.fragment(), &heading);
         }
     });
     let not_kept = text(&localizer, msg::UI_LANGUAGE_NOT_KEPT);
     view! {
-        <section id=SECTION_ID aria-labelledby=HEADING_ID>
+        <section aria-labelledby=HEADING_ID>
             <h2 id=HEADING_ID node_ref=heading tabindex="-1">
                 {text(&localizer, msg::UI_LANGUAGE_HEADING)}
             </h2>
@@ -57,7 +58,7 @@ pub(super) fn LanguageSection(localizer: Arc<Localizer>) -> impl IntoView {
                 on:submit=move |event| {
                     event.prevent_default();
                     let tag = to_keep(chosen.get_untracked(), &languages);
-                    refused.set(!page::choose_language(tag, SECTION_ID));
+                    refused.set(!page::choose_language(tag, Section::Language.fragment()));
                 }
             >
                 <RadioGroup

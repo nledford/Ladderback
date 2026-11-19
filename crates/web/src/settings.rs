@@ -7,8 +7,8 @@
 //! (decision 93), listed, created and revoked in a session; the dry-run
 //! allowlist (decision 89), whose glue is `settings/dry_run_allowlist.rs`;
 //! and the restart of Ladderback (decision 94). The tabs, the address that
-//! opens each and
-//! what each panel holds are `settings_tabs.rs`'s; what the token form
+//! opens each, the tab an address changed while the page is open chooses
+//! and what each panel holds are `settings_tabs.rs`'s; what the token form
 //! lacks, the request it sends, which field a refusal is about and how a
 //! token's row reads are `api_tokens.rs`'s, and what the restart section
 //! offers and waits for is `restart.rs`'s, all host-tested; this is the DOM
@@ -32,6 +32,7 @@ use page_width::PageWidthSection;
 use password::AdminPassword;
 use sign_in::SignInSection;
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use api::{
@@ -39,6 +40,7 @@ use api::{
 };
 use l10n::{Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
+use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -66,7 +68,7 @@ use crate::restart::{
 };
 use crate::routes::{PAGE_HEADING_ID, PageHeading, instant, refused_sentence, text_with};
 use crate::session::{Standing, waiting_password, waiting_tone};
-use crate::settings_tabs::Section;
+use crate::settings_tabs::{Section, tab_named};
 use crate::variants::{Size, Tone};
 use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
@@ -162,17 +164,29 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
         msg::UI_LANGUAGE_HEADING,
         language.into_any(),
     );
-    let shown: Vec<Section> = std::iter::once(Section::Language)
+    let shown: Rc<[Section]> = std::iter::once(Section::Language)
         .chain(sections.iter().map(|(section, _, _)| *section))
         .collect();
     let rest = sections
         .into_iter()
         .map(|(section, words, panel)| tab(section, words, panel))
         .collect();
+    let selected = RwSignal::new(0_usize);
+    // The address changed while the page is open, its fragment alone, as
+    // one typed in the address bar does: the tab it names is chosen, focus
+    // left where it is, and one that names no tab shown leaves the tab as it
+    // is.
+    let tabs_shown = Rc::clone(&shown);
+    let fragment_changed = window_event_listener(ev::hashchange, move |_| {
+        if let Some(index) = tab_named(&page::address_fragment(), &tabs_shown) {
+            selected.set(index);
+        }
+    });
+    on_cleanup(move || fragment_changed.remove());
     // A tab chosen names its section in the address; the tab the page
     // starts on is named there already, or is the first, which the address
-    // needn't name.
-    let selected = RwSignal::new(0_usize);
+    // needn't name. A tab the address chose is named there already too, and
+    // naming it again changes nothing.
     Effect::new(move |seen: Option<usize>| {
         let now = selected.get();
         if seen.is_some_and(|seen| seen != now)

@@ -8,8 +8,10 @@ Feature: Settings shows its sections as tabs
   selected when the page opens. Each tab has an address, Settings' own with
   the section's name after a "#", which opens Settings at that tab. Choosing a
   tab gives the page its address, so loading the page again, as saving the
-  language does, comes back to the same tab. Only how a section is reached
-  changes: what each one does is the same.
+  language does, comes back to the same tab. While Settings is open, an
+  address that names another tab by its fragment alone, as one typed in the
+  address bar, chooses that tab, and focus stays where it was. Only how a
+  section is reached changes: what each one does is the same.
 
   Scenario: Settings shows a tab per section in a column beside it, the first selected
     Given a daemon with sign-in on and the admin password "demo-admin-pass"
@@ -84,6 +86,44 @@ Feature: Settings shows its sections as tabs
     When I open the address "/settings#backups"
     Then the tab "Language" is selected and the one Tab stop of its list
     And the tab "Language" shows its panel, and every other panel of its list is drawn but hidden
+
+  Scenario: Changing the address's fragment to another section's chooses its tab, and focus stays where it was
+    Given a viewport of 1280 by 720 pixels
+    When I open the address "/settings"
+    And I skip to the content
+    And I press Tab until focus is on the tab "Language"
+    And I change the address's fragment to "#restart"
+    Then the tab "Restart Ladderback" is selected and the one Tab stop of its list
+    And the tab "Restart Ladderback" shows its panel, and every other panel of its list is drawn but hidden
+    And focus stays on the tab "Language"
+    And the page's address ends in the fragment "#restart"
+    And the page has no accessibility violations
+    When I change the address's fragment to "#language"
+    Then the tab "Language" is selected and the one Tab stop of its list
+    And the tab "Language" shows its panel, and every other panel of its list is drawn but hidden
+    And focus stays on the tab "Language"
+
+  Scenario: Changing the address's fragment to one that names no section leaves the tab as it is
+    When I open the address "/settings"
+    And I skip to the content
+    And I press Tab until focus is on the tab "Language"
+    And I change the address's fragment to "#page-width"
+    And I change the address's fragment to "#backups"
+    Then the tab "Page width" is selected and the one Tab stop of its list
+    And the tab "Page width" shows its panel, and every other panel of its list is drawn but hidden
+    And focus stays on the tab "Language"
+
+  Scenario: Going back to Settings' own address, which names no tab, chooses the first tab
+    When I open the address "/settings"
+    And I skip to the content
+    And I press Tab until focus is on the tab "Language"
+    And I change the address's fragment to "#restart"
+    Then the tab "Restart Ladderback" is selected and the one Tab stop of its list
+    When I go back to the address before
+    Then the tab "Language" is selected and the one Tab stop of its list
+    And the tab "Language" shows its panel, and every other panel of its list is drawn but hidden
+    And the page's address is "/settings"
+    And focus stays on the tab "Language"
 
   Scenario: With sign-in off, a section that holds only words is a Tab stop of its own after its tab
     When I open the address "/settings#api-tokens"
