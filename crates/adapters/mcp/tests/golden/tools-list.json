@@ -6,7 +6,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "Ladderback's state: each plan with its next run and last operation, the operations queued or running, this program's build and, in connect mode, the daemon's build, sign-in state and exposure.",
+    "description": "Ladderback's state: each plan with its last operation, last successful backup and how long ago, whether it is overdue and its next run; the operations queued or running; the repositories that couldn't be read at their last attempt; the Full Disk Access state; this program's build and, in connect mode, the daemon's build, sign-in state and exposure.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},
@@ -113,8 +113,38 @@
             }
           ]
         },
+        "FullDiskAccessStateDto": {
+          "enum": [
+            "granted",
+            "missing",
+            "unknown",
+            "not-applicable"
+          ],
+          "type": "string"
+        },
         "IanaZone": {
           "type": "string"
+        },
+        "LastSuccessDto": {
+          "properties": {
+            "ago-seconds": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "finished-at": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "finished-at",
+            "ago-seconds"
+          ],
+          "type": "object"
         },
         "LocationTriedDto": {
           "properties": {
@@ -527,7 +557,7 @@
           ],
           "type": "object"
         },
-        "PlanStatus": {
+        "PlanStatusDto": {
           "properties": {
             "id": {
               "type": "string"
@@ -542,11 +572,24 @@
                 }
               ]
             },
+            "last-success": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LastSuccessDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "next-run": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "overdue": {
+              "type": "boolean"
             },
             "repository": {
               "type": "string"
@@ -565,7 +608,23 @@
             "id",
             "repository",
             "scheduled",
-            "next-run"
+            "next-run",
+            "overdue"
+          ],
+          "type": "object"
+        },
+        "UnreadableRepositoryDto": {
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/OperationSummaryDto"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "operation"
           ],
           "type": "object"
         },
@@ -605,9 +664,12 @@
             }
           ]
         },
+        "full-disk-access": {
+          "$ref": "#/$defs/FullDiskAccessStateDto"
+        },
         "plans": {
           "items": {
-            "$ref": "#/$defs/PlanStatus"
+            "$ref": "#/$defs/PlanStatusDto"
           },
           "type": "array"
         },
@@ -616,13 +678,21 @@
             "$ref": "#/$defs/OperationSummaryDto"
           },
           "type": "array"
+        },
+        "unreadable-repositories": {
+          "items": {
+            "$ref": "#/$defs/UnreadableRepositoryDto"
+          },
+          "type": "array"
         }
       },
       "required": [
         "build",
         "access",
         "plans",
-        "running"
+        "running",
+        "unreadable-repositories",
+        "full-disk-access"
       ],
       "type": "object"
     },

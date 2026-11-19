@@ -348,6 +348,39 @@ impl Schedule {
     pub fn on_ac_power(&self) -> bool {
         self.on_ac_power
     }
+
+    /// Whether a plan on this schedule is overdue at `now` (§3.1): its last
+    /// successful backup, which started at `last_success`, is a whole run of
+    /// the schedule behind, the schedule's first moment after it and the
+    /// moment after that both past. The first moment alone may be the run
+    /// still going; and as jitter may start that run as late as just before
+    /// the second moment, the second counts only once as much time again
+    /// has passed. A run that never succeeded (`None`) is overdue, and a
+    /// schedule with no moment left never is. A cron expression is read on
+    /// the wall clock of the schedule's zone, or else of `machine`.
+    pub fn is_overdue(
+        &self,
+        machine: &TimeZone,
+        last_success: Option<Timestamp>,
+        now: Timestamp,
+    ) -> bool {
+        let Some(success) = last_success else {
+            return true;
+        };
+        let zone = self.zone.as_ref().map_or(machine, ScheduleZone::zone);
+        let Ok(first) = self.cadence.moment_after(success, zone) else {
+            return false;
+        };
+        let Ok(second) = self.cadence.moment_after(first, zone) else {
+            return false;
+        };
+        // The delay the scheduler may draw for the first moment's run: the
+        // jitter, cut short of the second moment (`next_run`'s stretch).
+        let delay = self.jitter.map_or(SignedDuration::ZERO, |jitter| {
+            jitter.min(first.duration_until(second) - SignedDuration::from_millis(1))
+        });
+        second.checked_add(delay).is_ok_and(|due| due <= now)
+    }
 }
 
 #[cfg(test)]
@@ -832,5 +865,78 @@ mod tests {
             cron("@daily").next_after(Timestamp::MAX, &utc),
             Err(NoNextRun)
         );
+    }
+
+    fn hourly() -> Schedule {
+        Schedule::new(cron("0 * * * *"))
+    }
+
+    #[test]
+    fn a_plan_is_overdue_only_once_the_moment_after_the_first_one_since_its_success_passed() {
+        let utc = zone("UTC");
+        let success = Some(at("2027-01-15T05:10:00Z"));
+        // The first moment after the success (06:00) may be the run still
+        // going; the one after it (07:00) is a whole run missed.
+        assert!(!hourly().is_overdue(&utc, success, at("2027-01-15T06:59:59Z")));
+        assert!(hourly().is_overdue(&utc, success, at("2027-01-15T07:00:00Z")));
+    }
+
+    #[test]
+    fn a_success_that_started_on_a_moment_counts_from_the_moment_after_it() {
+        let utc = zone("UTC");
+        let success = Some(at("2027-01-15T05:00:00Z"));
+        assert!(!hourly().is_overdue(&utc, success, at("2027-01-15T06:59:59Z")));
+        assert!(hourly().is_overdue(&utc, success, at("2027-01-15T07:00:00Z")));
+    }
+
+    #[test]
+    fn a_plan_never_backed_up_successfully_is_overdue() {
+        assert!(hourly().is_overdue(&zone("UTC"), None, at("2027-01-15T05:10:00Z")));
+    }
+
+    #[test]
+    fn overdue_reads_a_cron_on_the_schedules_own_zone_before_the_machines() {
+        // Daily at 09:00 in Berlin (08:00 UTC in winter); the machine's zone
+        // is New York, whose 09:00 is 14:00 UTC.
+        let berlin = ScheduleZone::new("Europe/Berlin", zone("Europe/Berlin")).unwrap();
+        let daily = Schedule::new(cron("0 9 * * *")).with_zone(berlin);
+        let success = Some(at("2027-01-14T08:00:00Z"));
+        let new_york = zone("America/New_York");
+        assert!(!daily.is_overdue(&new_york, success, at("2027-01-16T07:59:59Z")));
+        assert!(daily.is_overdue(&new_york, success, at("2027-01-16T08:00:00Z")));
+    }
+
+    #[test]
+    fn an_interval_is_overdue_two_intervals_after_the_success_started() {
+        let every = Schedule::new(Interval::new(SignedDuration::from_hours(6)).unwrap());
+        let success = Some(at("2027-01-15T00:00:00Z"));
+        let utc = zone("UTC");
+        assert!(!every.is_overdue(&utc, success, at("2027-01-15T11:59:59Z")));
+        assert!(every.is_overdue(&utc, success, at("2027-01-15T12:00:00Z")));
+    }
+
+    #[test]
+    fn a_schedule_with_no_moment_left_is_never_overdue() {
+        let utc = zone("UTC");
+        let late = Some(Timestamp::MAX);
+        assert!(!hourly().is_overdue(&utc, late, Timestamp::MAX));
+    }
+
+    #[test]
+    fn jitter_gives_the_run_it_may_delay_as_long_again_before_a_plan_is_overdue() {
+        let jittered = hourly().with_jitter(SignedDuration::from_mins(59)).unwrap();
+        let utc = zone("UTC");
+        // The 05:00 run drawn to 05:58; the 06:00 one may start as late as
+        // 06:59 and is given its hour from there.
+        let success = Some(at("2027-01-15T05:58:00Z"));
+        assert!(!jittered.is_overdue(&utc, success, at("2027-01-15T07:58:59Z")));
+        assert!(jittered.is_overdue(&utc, success, at("2027-01-15T07:59:00Z")));
+    }
+
+    #[test]
+    fn a_schedule_whose_moment_after_the_next_is_past_the_last_time_is_never_overdue() {
+        let every = Schedule::new(Interval::new(SignedDuration::from_hours(6)).unwrap());
+        let success = Timestamp::MAX - SignedDuration::from_hours(7);
+        assert!(!every.is_overdue(&zone("UTC"), Some(success), Timestamp::MAX));
     }
 }
