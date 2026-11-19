@@ -321,3 +321,9 @@ Then("the live regions stay silent", async function (this: BrowserWorld) {
     await sleep(100);
   } while (Date.now() < until);
 });
+
+// The reader asks her system for less motion while the page is open, and the
+// page follows at once (WCAG 2.3.3).
+When("the reader asks for less motion", async function (this: BrowserWorld) {
+  await this.page.emulateMedia({ reducedMotion: "reduce" });
+});

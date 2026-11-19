@@ -11,7 +11,7 @@ import { Then } from "@cucumber/cucumber";
 import type { DataTable } from "@cucumber/cucumber";
 import type { Locator, Page } from "playwright";
 
-import { LIVE_REGION } from "./components.ts";
+import { LIVE_REGION } from "../support/gallery.ts";
 import { expect } from "../support/expect.ts";
 import { said } from "../support/said.ts";
 import type { BrowserWorld } from "../support/world.ts";

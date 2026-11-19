@@ -14,7 +14,7 @@ import type { Locator, Page } from "playwright";
 
 import { expect } from "../support/expect.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { demoSection, eachOf } from "./components.ts";
+import { demoSection, eachOf } from "../support/gallery.ts";
 import { ISOLATION, namePattern } from "../support/keyboard.ts";
 
 // The gallery's banners as it opens (`gallery.rs`): one in each tone it

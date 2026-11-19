@@ -16,7 +16,7 @@ import { ISOLATION } from "../support/keyboard.ts";
 import { patienceMs } from "../support/patience.ts";
 import { besideIconProblems, wordsBesideIcon, wordsBrokenInside } from "../support/parts.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { demoSection, eachOf, LIVE_REGION } from "./components.ts";
+import { demoSection, eachOf, LIVE_REGION } from "../support/gallery.ts";
 
 // The gallery's alerts as it opens (`gallery.rs`): one in each tone, then
 // the notice the reader can dismiss.
