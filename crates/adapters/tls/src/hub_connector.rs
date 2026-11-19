@@ -208,10 +208,15 @@ where
     }
 
     async fn send(&mut self, frame: &AgentFrame) -> Result<(), LinkError> {
-        self.socket
-            .send(Message::text(frame.to_text()))
-            .await
-            .map_err(|_| LinkError::Closed { reason: None })
+        // A hub that stops reading can block the write, as its pongs and this
+        // frame wait for room: the same deadline as an answer ends the wait.
+        tokio::time::timeout(
+            self.within,
+            self.socket.send(Message::text(frame.to_text())),
+        )
+        .await
+        .map_err(|_| no_answer())?
+        .map_err(|_| LinkError::Closed { reason: None })
     }
 
     async fn receive(&mut self) -> Result<HubFrame, LinkError> {
