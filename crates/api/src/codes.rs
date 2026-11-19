@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 #[cfg(doc)]
-use crate::{ArgumentProblem, PlanProblem, UiEvent};
+use crate::{PlanProblem, UiEvent};
 
 /// Why something failed. Closed: a code this version doesn't know, say from
 /// a newer agent, reads as [`ErrorCode::Unknown`].
@@ -885,6 +885,31 @@ pub struct ArgSpec {
     /// the text `none`, so the message can choose its wording (§8.4). An
     /// optional argument is always text.
     pub optional: bool,
+}
+
+/// What is wrong with an argument an [`ErrorCode::InvalidArguments`] names,
+/// sent as its `problem` argument by its wire name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ArgumentProblem {
+    /// An argument the tool needs isn't there.
+    Missing,
+    /// An argument the tool doesn't take.
+    UnknownKey,
+    /// A value the argument doesn't take: one of another type, or a number
+    /// out of its range.
+    Invalid,
+}
+
+impl ArgumentProblem {
+    /// The name the `problem` argument carries, which the message selects
+    /// on.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::UnknownKey => "unknown-key",
+            Self::Invalid => "invalid",
+        }
+    }
 }
 
 /// A code's schema: text, never the list of every code. Each tool's output
