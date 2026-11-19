@@ -345,6 +345,8 @@ Keep the chain short: at most three pull requests, and two where possible. Every
 
 **Break-glass.** Only the maintainer may merge a pull request whose required checks fail, through the ruleset's pull-request-only bypass, and only when a check can't pass for a reason outside the change: a GitHub Actions outage, a broken action or toolchain release, or a yanked crate. Each use gets an issue that says why, and fixing that check comes next. Agents never use the bypass.
 
+**CodeRabbit.** Until 2026-12-03, a trial: the maintainer asks CodeRabbit to review a pull request that touches an invariant, security-sensitive code or concurrency and maintenance logic (`@coderabbitai review`), as a second reviewer beside the independent review AGENTS.md asks for. Its review is advisory: its `CodeRabbit` check is not required, it writes no commits, and each finding is checked at the head like any other reviewer's. `.coderabbit.yaml` holds its settings, and [decision 125](decisions/125-coderabbit-reviews-on-request.md) says why.
+
 **Required check names.** The "Protect main" ruleset requires checks by job name:
 
 - `Check (ubuntu-latest)`
