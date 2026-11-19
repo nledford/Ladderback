@@ -75,6 +75,20 @@ fn ordered(mut ids: Vec<SnapshotId>) -> Vec<SnapshotId> {
     ids
 }
 
+/// A repository of `count` snapshots, after a failed assertion if the harness
+/// made another number: a case that selects snapshots by place would
+/// otherwise pass on fewer.
+async fn made(harness: &dyn RetentionHarness, count: usize) -> Repository {
+    let repository = harness.repository(count).await;
+    assert_eq!(
+        repository.snapshots.len(),
+        count,
+        "{:?}",
+        repository.snapshots
+    );
+    repository
+}
+
 async fn removes(
     repository: &Repository,
     policy: &RetentionPolicy,
@@ -88,22 +102,21 @@ async fn removes(
 }
 
 async fn the_newest_snapshots_stay_and_the_rest_are_named(harness: &dyn RetentionHarness) {
-    let repository = harness.repository(5).await;
+    let repository = made(harness, 5).await;
     let all = &repository.snapshots;
-    assert_eq!(all.len(), 5, "the harness made five snapshots");
     let removed = removes(&repository, &keep_last(2), all).await;
     assert_eq!(removed, Ok(ids(all, &[2, 3, 4])));
 }
 
 async fn keeping_one_names_all_but_the_newest(harness: &dyn RetentionHarness) {
-    let repository = harness.repository(3).await;
+    let repository = made(harness, 3).await;
     let all = &repository.snapshots;
     let removed = removes(&repository, &keep_last(1), all).await;
     assert_eq!(removed, Ok(ids(all, &[1, 2])));
 }
 
 async fn a_count_the_group_does_not_pass_names_nothing(harness: &dyn RetentionHarness) {
-    let repository = harness.repository(3).await;
+    let repository = made(harness, 3).await;
     let all = &repository.snapshots;
     for count in [3, 4] {
         let removed = removes(&repository, &keep_last(count), all).await;
@@ -112,7 +125,7 @@ async fn a_count_the_group_does_not_pass_names_nothing(harness: &dyn RetentionHa
 }
 
 async fn keeping_all_names_nothing(harness: &dyn RetentionHarness) {
-    let repository = harness.repository(3).await;
+    let repository = made(harness, 3).await;
     let removed = removes(&repository, &keep_last(-1), &repository.snapshots).await;
     assert_eq!(removed, Ok(Vec::new()));
 }
@@ -121,7 +134,7 @@ async fn keeping_all_names_nothing(harness: &dyn RetentionHarness) {
 /// belong to another plan, so they neither count toward `keep-last` nor are
 /// named, however old.
 async fn only_the_snapshots_it_is_given_are_counted_and_named(harness: &dyn RetentionHarness) {
-    let repository = harness.repository(5).await;
+    let repository = made(harness, 5).await;
     let all = &repository.snapshots;
     let ours = group(all, &[0, 2, 4]);
     let removed = removes(&repository, &keep_last(1), &ours).await;
@@ -131,13 +144,13 @@ async fn only_the_snapshots_it_is_given_are_counted_and_named(harness: &dyn Rete
 }
 
 async fn a_group_with_no_snapshot_names_nothing(harness: &dyn RetentionHarness) {
-    let repository = harness.repository(2).await;
+    let repository = made(harness, 2).await;
     let removed = removes(&repository, &keep_last(1), &[]).await;
     assert_eq!(removed, Ok(Vec::new()));
 }
 
 async fn a_policy_that_sets_nothing_is_refused(harness: &dyn RetentionHarness) {
-    let repository = harness.repository(2).await;
+    let repository = made(harness, 2).await;
     let removed = removes(
         &repository,
         &RetentionPolicy::default(),
