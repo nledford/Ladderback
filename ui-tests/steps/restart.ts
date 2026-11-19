@@ -13,14 +13,11 @@ import path from "node:path";
 
 import { Given, Then } from "@cucumber/cucumber";
 
+import { untilSettled } from "../support/patience.ts";
 import { type BrowserWorld, startServer } from "../support/world.ts";
 
 // The status a service manager starts the daemon again on (decision 94).
 const RESTART_STATUS = 75;
-
-// How long the daemon may take to stop in order with nothing running, with
-// room.
-const STOP_PATIENCE_MS = 20_000;
 
 // A daemon of the scenario's own, with sign-in off, as a service file starts
 // it. The After hook of live.ts stops it, if it still runs, and removes the
@@ -44,7 +41,9 @@ Then("the daemon has exited with the restart status", async function (this: Brow
   const own = this.ownServer;
   assert.ok(own, "this scenario's daemon was never started");
   if (own.child.exitCode === null) {
-    await once(own.child, "exit", { signal: AbortSignal.timeout(STOP_PATIENCE_MS) });
+    // It stops in order once the step before asked it to: until the step's
+    // limit (#1104).
+    await untilSettled(once(own.child, "exit"), "the daemon never exited");
   }
   assert.equal(own.child.exitCode, RESTART_STATUS);
 });

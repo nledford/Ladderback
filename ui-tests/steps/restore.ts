@@ -5,22 +5,20 @@
 import assert from "node:assert/strict";
 import { readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
+import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import { type BrowserWorld, engine } from "../support/world.ts";
 import { clipboardPermissions } from "./api_tokens.ts";
 import { latestSnapshotOf, sourcePath } from "./maintenance.ts";
 
-const PAGE_PATIENCE_MS = 10_000;
-
-// A dry run reads the repository and the original files: as long as the
-// other journeys give a read of the repository.
-const READ_PATIENCE_MS = 10_000;
+// A dry run reads the repository and the original files, and the page shows
+// what it found once it has: the steps wait for it until the step's limit
+// (#1104).
 
 // Bidi isolation marks, which a reader never hears (§4.5).
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
@@ -48,7 +46,7 @@ function shownSnapshot(world: BrowserWorld): string {
 // drawn, and not made unselectable.
 async function showsCopyableText(world: BrowserWorld, name: string, short: string): Promise<void> {
   const dialog = dialogOf(world, name);
-  await expect(dialog).toContainText(short, { timeout: PAGE_PATIENCE_MS });
+  await expect(dialog).toContainText(short);
   const selectable = await dialog.evaluate((el, id) => {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
@@ -77,7 +75,7 @@ Then(
 );
 
 Then("the clipboard holds {string}", async function (this: BrowserWorld, text: string) {
-  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS }).toBe(text);
+  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText())).toBe(text);
 });
 
 When("I type the newest snapshot's short ID of the plan {string}", async function (this: BrowserWorld, plan: string) {
@@ -89,11 +87,10 @@ When("I type the newest snapshot's short ID of the plan {string}", async functio
 // answered.
 Then("the dialog {string} comes to say {string}", async function (this: BrowserWorld, name: string, text: string) {
   const dialog = dialogOf(this, name);
-  await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await dialog.waitFor({ state: "visible", timeout: patienceMs() });
   await expect
     .poll(() => heard(dialog), {
       message: `the dialog "${name}" never said "${text}"`,
-      timeout: READ_PATIENCE_MS,
     })
     .toContain(text);
 });
@@ -103,11 +100,10 @@ Then("the dialog {string} comes to say {string}", async function (this: BrowserW
 Then("the dialog {string} alerts {string}", async function (this: BrowserWorld, name: string, text: string) {
   const dialog = dialogOf(this, name);
   const alert = dialog.getByRole("alert");
-  await alert.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await alert.first().waitFor({ state: "visible", timeout: patienceMs() });
   await expect
     .poll(async () => (await Promise.all((await alert.all()).map(heard))).join("\n"), {
       message: `the dialog "${name}" never alerted "${text}"`,
-      timeout: PAGE_PATIENCE_MS,
     })
     .toContain(text);
   assert.ok(await dialog.isVisible(), `the dialog "${name}" closed`);
@@ -159,14 +155,12 @@ Then(
     assert.ok(this.ownServer, "this scenario's daemon was never started");
     const restoreFolder = path.join(this.ownServer.scratch, "home", "ladderback-restore");
     const status = journey(this.page).byRole("status");
-    const deadline = Date.now() + READ_PATIENCE_MS;
-    let said = FILES_ARE_IN.exec(await heard(status));
-    while (said === null && Date.now() < deadline) {
-      await sleep(100);
-      said = FILES_ARE_IN.exec(await heard(status));
-    }
-    assert.ok(said, `the polite region never named a folder (last read ${JSON.stringify(await heard(status))})`);
-    const folder = said[1];
+    const read = await untilStepLimit(
+      "the polite region names a folder",
+      () => heard(status),
+      (text) => FILES_ARE_IN.test(text),
+    );
+    const folder = FILES_ARE_IN.exec(read)?.[1];
     assert.ok(folder, "the polite region named an empty folder");
     assert.equal(path.dirname(folder), restoreFolder, `the folder ${folder} is not in the restore folder`);
     const held = await readdir(folder, { recursive: true });
@@ -182,7 +176,7 @@ Then(
 Then(
   "the browser saves {string} holding what the plan backed up as {string}",
   async function (this: BrowserWorld, saved: string, original: string) {
-    await expect.poll(() => this.downloads.length, { timeout: READ_PATIENCE_MS }).toBeGreaterThan(0);
+    await expect.poll(() => this.downloads.length).toBeGreaterThan(0);
     const download = this.downloads[this.downloads.length - 1];
     assert.ok(download, "the browser saved a file");
     assert.equal(download.suggestedFilename(), saved);

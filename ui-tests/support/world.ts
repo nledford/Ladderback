@@ -37,7 +37,7 @@ import {
 } from "playwright";
 
 import { avoidLabelledByCrash } from "./labelledby-crash.ts";
-import { STEP_LIMIT_MS, timed } from "./patience.ts";
+import { patienceMs, STEP_LIMIT_MS, timed } from "./patience.ts";
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
 
 setDefaultTimeout(STEP_LIMIT_MS);
@@ -328,7 +328,7 @@ export class BrowserWorld extends World {
     this.#watch(this.page);
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
-    await this.page.getByRole("heading", { level: 1 }).waitFor();
+    await this.page.getByRole("heading", { level: 1 }).waitFor({ timeout: patienceMs() });
     // As a constructed sheet, not a <style> element: the page's content
     // security policy refuses an inline one, and a reader's own styles are not
     // the page's to refuse.
@@ -348,7 +348,7 @@ export class BrowserWorld extends World {
     this.page = await this.context.newPage();
     this.#watch(this.page);
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
-    await this.page.getByRole("heading", { level: 1 }).waitFor();
+    await this.page.getByRole("heading", { level: 1 }).waitFor({ timeout: patienceMs() });
   }
 
   /** The steps act in the first tab again, brought to the front. */
@@ -387,6 +387,8 @@ export class BrowserWorld extends World {
       this.attach(`no trace: ${message(error)}`);
     }
     try {
+      // Not a wait for the page but a picture of a failed one, capped so that a
+      // page that won't draw leaves the hook its time for the rest.
       await this.page.screenshot({ path: `${base}.png`, timeout: 5_000 });
       this.attach(`screenshot: ${shown}.png`);
     } catch (error) {

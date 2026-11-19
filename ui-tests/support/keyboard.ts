@@ -81,10 +81,9 @@ export const MAX_PRESSES = 30;
 // until a step moves it on"). There the page's own timers and frames run only
 // when a step moves the clock on, so the focus check can't wait on them in
 // WebKit; it waits instead for the browser to bring focus into view, through
-// Playwright's own check, which keeps real time, for at most
-// `STOPPED_CLOCK_REVEAL_MS`. An element still out of view then fails as ever.
+// Playwright's own check, which keeps real time, until the step's limit
+// (#1104). An element still out of view then fails as ever.
 const stoppedClocks = new WeakSet<Page>();
-const STOPPED_CLOCK_REVEAL_MS = 5_000;
 
 /** Records that `page`'s clock now stands still until a step moves it on. */
 export function clockStandsStill(page: Page): void {
@@ -231,8 +230,9 @@ async function lookAtFocus(page: Page, key: string) {
   const stopped = revealsFocusFromATimer && stoppedClocks.has(page);
   if (stopped) {
     // Its failure is only the end of the wait: the measure below is the check.
+    // The `expect` of the steps waits until the step's limit.
     await expect(page.locator(":focus"))
-      .toBeInViewport({ timeout: STOPPED_CLOCK_REVEAL_MS })
+      .toBeInViewport()
       .catch(() => undefined);
   }
   const focused = await page.evaluateHandle(async (fromATimer) => {

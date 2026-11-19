@@ -546,7 +546,7 @@ When("the daemon's answers to the UI are delayed by {int} seconds", function (th
 
 When("I reload the page", async function (this: BrowserWorld) {
   await this.page.reload();
-  await this.page.getByRole("heading", { level: 1 }).waitFor();
+  await this.page.getByRole("heading", { level: 1 }).waitFor({ timeout: patienceMs() });
 });
 
 // A row is named by its plan, or a maintenance run by what ran and its

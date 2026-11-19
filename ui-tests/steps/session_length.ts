@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { Given, Then } from "@cucumber/cucumber";
 
 import { namePattern } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { changeHeaders, ownBase } from "./api_tokens.ts";
 
@@ -38,7 +39,7 @@ Given("the admin has set Stay signed in for to {string}", function (this: Browse
 // Asked once the sign-in form is there: the form is drawn with what the
 // daemon said of the checkbox, so nothing comes later.
 Then("the page offers no checkbox {string}", async function (this: BrowserWorld, name: string) {
-  await this.page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
+  await this.page.getByRole("button", { name: "Sign in", exact: true }).waitFor({ timeout: patienceMs() });
   const boxes = this.page.getByRole("checkbox", { name: namePattern(name) });
   assert.equal(await boxes.count(), 0, `the page offers the checkbox "${name}"`);
 });

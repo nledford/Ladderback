@@ -9,11 +9,12 @@ import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { Given, Then, When } from "@cucumber/cucumber";
+import type { Locator } from "playwright";
 
 import { journey, pressUntilFocused } from "../support/keyboard.ts";
+import { untilStepLimit } from "../support/patience.ts";
 import { partsBrokenInside } from "../support/parts.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
@@ -21,9 +22,6 @@ import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts
 import { api, ended } from "./maintenance.ts";
 
 const PASSWORD = "demo-password";
-// A Test probes each location, and a backup opens the repository: each takes
-// the engine a moment, in a debug build more than one.
-const PATIENCE_MS = 25_000;
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** What the scenario knows of its repository's locations. */
@@ -50,13 +48,18 @@ function placeOf(world: BrowserWorld, name: string): string {
   return found[1];
 }
 
-async function until(check: () => Promise<boolean>, what: string): Promise<void> {
-  const end = Date.now() + PATIENCE_MS;
-  while (Date.now() < end) {
-    if (await check()) return;
-    await sleep(250);
-  }
-  assert.fail(`${what} within ${PATIENCE_MS / 1000} s`);
+// A Test probes each location, and a backup opens the repository: each takes
+// the engine a moment, in a debug build more than one. The steps wait for
+// what they show until the step's limit (#1104).
+
+/** What each of `items` says, in order. */
+async function eachSaid(items: Locator): Promise<string[]> {
+  return Promise.all(Array.from({ length: await items.count() }, (_, n) => said(items.nth(n))));
+}
+
+/** What the first of `rows` says, or null while there is none. */
+async function firstSaid(rows: Locator): Promise<string | null> {
+  return (await rows.count()) === 0 ? null : said(rows.first());
 }
 
 Given(
@@ -216,7 +219,11 @@ Given(
 
 Then("the repository {string} lists {int} locations", async function (this: BrowserWorld, alias: string, count: number) {
   const items = locationList(this, alias).getByRole("listitem");
-  await until(async () => (await items.count()) === count, `the repository ${alias} lists ${count} locations`);
+  await untilStepLimit(
+    `the repository ${alias} lists ${count} locations`,
+    () => items.count(),
+    (n) => n === count,
+  );
 });
 
 // Where an address may break, as a reader splits one (`partsBrokenInside`);
@@ -226,7 +233,11 @@ Then(
   /^the address "([^"]*)" of the repository "([^"]*)" (sits on one line|breaks only after a separator|breaks only after a separator, each part whole)$/,
   async function (this: BrowserWorld, address: string, alias: string, how: string) {
     const shownAddress = locationList(this, alias).getByText(address, { exact: true });
-    await until(async () => (await shownAddress.count()) === 1, `the repository ${alias} shows the address ${address} once`);
+    await untilStepLimit(
+      `the repository ${alias} shows the address ${address} once`,
+      () => shownAddress.count(),
+      (n) => n === 1,
+    );
     const whole = how.endsWith("each part whole");
     const found = await shownAddress.evaluate(partsBrokenInside, { text: address, whole });
     assert.ok(found !== null, `the repository ${alias} doesn't show the address ${address}`);
@@ -242,7 +253,11 @@ Then(
   "the repository {string} lists the location {string} first and the location {string} second",
   async function (this: BrowserWorld, alias: string, first: string, second: string) {
     const items = locationList(this, alias).getByRole("listitem");
-    await until(async () => (await items.count()) === 2, `the repository ${alias} lists two locations`);
+    await untilStepLimit(
+      `the repository ${alias} lists two locations`,
+      () => items.count(),
+      (n) => n === 2,
+    );
     const [one, two] = await Promise.all([0, 1].map((n) => said(items.nth(n))));
     assert.ok(one?.includes(placeOf(this, first)), `the first location is ${first}: ${one}`);
     assert.ok(one?.includes("tried first"), `the first location says it is tried first: ${one}`);
@@ -256,10 +271,11 @@ Then(
     const position = locations(this).places.findIndex(([known]) => known === name);
     assert.ok(position >= 0, `no location "${name}"`);
     const items = locationList(this, alias).getByRole("listitem");
-    await until(async () => {
-      if ((await items.count()) <= position) return false;
-      return (await said(items.nth(position))).includes("May be tried on a wired network");
-    }, `the location ${name} says it may be tried on a wired network`);
+    await untilStepLimit(
+      `the location ${name} says it may be tried on a wired network`,
+      () => eachSaid(items),
+      (texts) => texts[position]?.includes("May be tried on a wired network") ?? false,
+    );
   },
 );
 
@@ -273,12 +289,11 @@ When("I press {string} for the repository {string}", async function (this: Brows
 Then("each location shows whether it answers", async function (this: BrowserWorld) {
   const { alias } = locations(this);
   const items = locationList(this, alias).getByRole("listitem");
-  await until(async () => {
-    const count = await items.count();
-    if (count !== 2) return false;
-    const texts = await Promise.all([0, 1].map((n) => said(items.nth(n))));
-    return texts.every((text) => text.includes("Answers and holds the repository"));
-  }, "each location shows that it answers");
+  await untilStepLimit(
+    "each location shows that it answers",
+    () => eachSaid(items),
+    (texts) => texts.length === 2 && texts.every((text) => text.includes("Answers and holds the repository")),
+  );
 });
 
 // The daemon's answer to the repository's next Test, as the page receives
@@ -303,20 +318,20 @@ When(
 
 Then("each location of the repository {string} says {string}", async function (this: BrowserWorld, alias: string, words: string) {
   const items = locationList(this, alias).getByRole("listitem");
-  await until(async () => {
-    const count = await items.count();
-    if (count !== 2) return false;
-    const texts = await Promise.all([0, 1].map((n) => said(items.nth(n))));
-    return texts.every((text) => text.includes(words));
-  }, `each location of ${alias} says "${words}"`);
+  await untilStepLimit(
+    `each location of ${alias} says "${words}"`,
+    () => eachSaid(items),
+    (texts) => texts.length === 2 && texts.every((text) => text.includes(words)),
+  );
 });
 
 Then("the row for the plan {string} says {string}", async function (this: BrowserWorld, plan: string, words: string) {
   const rows = this.page.getByRole("row").filter({ hasText: plan });
-  await until(async () => {
-    if ((await rows.count()) === 0) return false;
-    return (await said(rows.first())).includes(words);
-  }, `the newest row for ${plan} says "${words}"`);
+  await untilStepLimit(
+    `the newest row for ${plan} says "${words}"`,
+    () => firstSaid(rows),
+    (text) => text?.includes(words) ?? false,
+  );
 });
 
 // The rule is written into the location's own table: the entry's table for
@@ -370,14 +385,14 @@ Then(
   "the repository {string} says this machine can't read the Wi-Fi network's name and the rule doesn't apply",
   async function (this: BrowserWorld, alias: string) {
     const row = this.page.getByRole("row").filter({ hasText: alias });
-    await until(async () => {
-      if ((await row.count()) === 0) return false;
-      const text = await said(row.first());
-      return (
-        text.includes("can't read the name of the Wi-Fi network this machine is on") &&
-        text.includes("doesn't apply here and the location is skipped")
-      );
-    }, `the repository ${alias} says this machine can't read the Wi-Fi network's name and the rule doesn't apply`);
+    await untilStepLimit(
+      `the repository ${alias} says this machine can't read the Wi-Fi network's name and the rule doesn't apply`,
+      () => firstSaid(row),
+      (text) =>
+        ["can't read the name of the Wi-Fi network this machine is on", "doesn't apply here and the location is skipped"].every(
+          (part) => text?.includes(part),
+        ),
+    );
   },
 );
 
@@ -405,15 +420,14 @@ Then(
   "the repository {string} says its rules hold only where they hold for both IPv4 and IPv6, and how to make one link carry both",
   async function (this: BrowserWorld, alias: string) {
     const row = this.page.getByRole("row").filter({ hasText: alias });
-    await until(async () => {
-      if ((await row.count()) === 0) return false;
-      const text = await said(row.first());
-      return (
-        text.includes("IPv4 by Wi-Fi and IPv6 by a wired network") &&
-        text.includes("holds here only if it holds for both") &&
-        text.includes("ipv6.route-metric")
-      );
-    }, `the repository ${alias} says its rules hold only where they hold for both IPv4 and IPv6, and how to make one link carry both`);
+    await untilStepLimit(
+      `the repository ${alias} says its rules hold only where they hold for both IPv4 and IPv6, and how to make one link carry both`,
+      () => firstSaid(row),
+      (text) =>
+        ["IPv4 by Wi-Fi and IPv6 by a wired network", "holds here only if it holds for both", "ipv6.route-metric"].every((part) =>
+          text?.includes(part),
+        ),
+    );
   },
 );
 
@@ -421,14 +435,15 @@ Then(
   "the repository {string} says the rule of location {int} can't tell the network it is meant for from one made to look like it, and recommends HTTPS",
   async function (this: BrowserWorld, alias: string, position: number) {
     const row = this.page.getByRole("row").filter({ hasText: alias });
-    await until(async () => {
-      if ((await row.count()) === 0) return false;
-      const text = await said(row.first());
-      return (
-        text.includes(`Location ${position} sends its credentials over plain HTTP`) &&
-        text.includes("its rule can't tell the network it is meant for from one made to look like it") &&
-        text.includes("Use HTTPS")
-      );
-    }, `the repository ${alias} says the rule of location ${position} can't tell the network it is meant for from one made to look like it, and recommends HTTPS`);
+    await untilStepLimit(
+      `the repository ${alias} says the rule of location ${position} can't tell the network it is meant for from one made to look like it, and recommends HTTPS`,
+      () => firstSaid(row),
+      (text) =>
+        [
+          `Location ${position} sends its credentials over plain HTTP`,
+          "its rule can't tell the network it is meant for from one made to look like it",
+          "Use HTTPS",
+        ].every((part) => text?.includes(part)),
+    );
   },
 );
