@@ -116,14 +116,28 @@ impl TokenId {
     /// The token ID a person typed, as `--revoke` takes it: 8 hex digits in
     /// either case, with no space; `None` for anything else.
     pub fn parse(text: &str) -> Option<Self> {
-        todo!()
+        let digits = text.as_bytes();
+        if digits.len() != 8 {
+            return None;
+        }
+        let mut bytes = [0_u8; 4];
+        let (pairs, _) = digits.as_chunks::<2>();
+        for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {
+            *byte = (hex_digit(*high)? << 4) | hex_digit(*low)?;
+        }
+        Some(Self(KeyId(bytes)))
     }
 }
 
 /// The value of one hex digit in either case.
 fn hex_digit(byte: u8) -> Option<u8> {
-        todo!()
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
+}
 
 impl fmt::Display for TokenId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -218,7 +218,27 @@ impl PairingToken {
     /// letter whose case was changed fails the checksum. Text longer than a
     /// token could be with all of that around it is malformed unread.
     pub fn parse_pasted(text: &str) -> Result<Self, TokenRefused> {
-        todo!()
+        if text.len() > MAX_PASTED_TEXT {
+            return Err(TokenRefused::Malformed);
+        }
+        let mut kept = Zeroizing::new(String::with_capacity(text.len()));
+        kept.extend(
+            text.chars()
+                .filter(|&c| !c.is_whitespace() && !ZERO_WIDTH.contains(&c)),
+        );
+        let mut inner = kept.as_str();
+        while let Some(unwrapped) = unquoted(inner) {
+            inner = unwrapped;
+        }
+        let mut token = Zeroizing::new(String::with_capacity(inner.len()));
+        match inner.get(..TOKEN_PREFIX.len()) {
+            Some(prefix) if is_prefix_as_pasted(prefix) => {
+                token.push_str(TOKEN_PREFIX);
+                token.push_str(inner.get(TOKEN_PREFIX.len()..).unwrap_or_default());
+            }
+            _ => token.push_str(inner),
+        }
+        Self::parse(&token)
     }
 
     /// The same token for an agent that reaches the hub at `address`
@@ -227,7 +247,7 @@ impl PairingToken {
     /// carries no trust.
     #[must_use]
     pub fn with_address(self, address: HubAddress) -> Self {
-        todo!()
+        Self { address, ..self }
     }
 }
 
@@ -249,13 +269,27 @@ const ZERO_WIDTH: [char; 5] = ['\u{200b}', '\u{200c}', '\u{200d}', '\u{2060}', '
 /// `text` without one pair of quotes or angle brackets around it, or `None`
 /// when it has none.
 fn unquoted(text: &str) -> Option<&str> {
-        todo!()
-    }
+    const PAIRS: [(char, char); 6] = [
+        ('"', '"'),
+        ('\'', '\''),
+        ('`', '`'),
+        ('<', '>'),
+        ('\u{201c}', '\u{201d}'),
+        ('\u{2018}', '\u{2019}'),
+    ];
+    PAIRS.iter().find_map(|&(open, close)| {
+        text.strip_prefix(open)
+            .and_then(|rest| rest.strip_suffix(close))
+    })
+}
 
 /// Whether `text` is the token's prefix in any case, with `-` for `_`.
 fn is_prefix_as_pasted(text: &str) -> bool {
-        todo!()
-    }
+    text.len() == TOKEN_PREFIX.len()
+        && text.bytes().zip(TOKEN_PREFIX.bytes()).all(|(pasted, own)| {
+            pasted.eq_ignore_ascii_case(&own) || (pasted == b'-' && own == b'_')
+        })
+}
 
 /// The token's bytes not read yet; a field past the end is a malformed token.
 struct Fields<'a>(&'a [u8]);
