@@ -15,7 +15,7 @@ The maintainer accepts the cost: a breakage that only macOS, the release build, 
 3. **What a pull request runs in MVP mode.**
    - Always: `Changed paths`, `Pull request title` and `Check (ubuntu-latest)`.
    - Only when its paths reach the UI (the `ui` output of `Changed paths`, the rule that already starts the Firefox and WebKit journeys in full mode): `UI journeys (Chromium, axe-core, keyboard)`. Otherwise it is skipped, which counts as passing; `Check (ubuntu-latest)` still runs the unit, acceptance and `@e2e` suites.
-   - Only when a workflow or action file, `.github/actionlint.yaml` or `scripts/install-actionlint.sh` changed: `Workflow lint (actionlint, zizmor)`.
+   - Only when a workflow or action file, `.github/actionlint.yaml`, `scripts/install-actionlint.sh` or `scripts/install-shellcheck.sh` changed: `Workflow lint (actionlint, zizmor)`.
    - Only when `Cargo.lock`, a `Cargo.toml` or `deny.toml` changed: `Dependencies (cargo-deny)`.
    - A docs-only pull request still skips what it skips today.
 4. **What it skips.** `Check (macos-latest)`, `Release-build tests (no default features)`, the four mutation shards and `Mutation testing (changed code)`, `Red-first check`, the Firefox and WebKit journeys, `Service managers (launchd)` and `(systemd)`, and `Wasm tests (Node)`.

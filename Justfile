@@ -44,6 +44,7 @@ setup:
     cargo binstall --no-confirm --version '{{ leptosfmt_version }}' leptosfmt
     scripts/install-rustic.sh
     scripts/install-actionlint.sh
+    scripts/install-shellcheck.sh
     scripts/install-dist.sh
     scripts/install-nfpm.sh
     cd ui-tests && npm ci
@@ -92,18 +93,19 @@ clippy:
 # dev-dependency), Biome's format and lint check of that TypeScript
 # (biome.json, also a ui-tests dev-dependency; `biome ci` writes nothing, and
 # with `--error-on-warnings` a warning fails like an error, so a rule is on or
-# off, never advisory; `just fmt` writes the format), the tooling's own tests
-# (`scripts/*.test.ts`, under Node's
-# built-in runner), the journey lint, the check that every path AGENTS.md and
-# CLAUDE.md name exists, the check that no paragraph in docs/ runs over
-# 150 words, then the
-# check that the §16 decision index matches the decision files, and rustdoc
-# on every crate, private items included, with warnings as errors, so a doc
-# comment's broken link or malformed markup fails. Rustdoc sees only the items
-# built for the host and, for `web`, not its wasm32-only ones. CI runs `lint`
-# on Linux alone, so a doc comment on macOS-only code is checked only by a
-# local run on a Mac; macOS CI runs `clippy` (see `clippy`).
-[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the Biome format and lint check, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
+# off, never advisory; `just fmt` writes the format), shellcheck on the shell
+# scripts (scripts/install-shellcheck.sh pins it; at `--severity=warning`, so
+# its warnings and errors fail and its style notes don't), the tooling's own
+# tests (`scripts/*.test.ts`, under Node's built-in runner), the journey lint,
+# the check that every path AGENTS.md and CLAUDE.md name exists, the check that
+# no paragraph in docs/ runs over 150 words, the check that the §16 decision
+# index matches the decision files, and rustdoc on every crate, private items
+# included, with warnings as errors, so a doc comment's broken link or
+# malformed markup fails. Rustdoc sees only the items built for the host and,
+# for `web`, not its wasm32-only ones. CI runs `lint` on Linux alone, so a doc
+# comment on macOS-only code is checked only by a local run on a Mac; macOS CI
+# runs `clippy` (see `clippy`).
+[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
 [group('quality')]
 lint: _ui-deps clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
@@ -111,6 +113,7 @@ lint: _ui-deps clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown {{ release_flags }} -- -D warnings
     ui-tests/node_modules/.bin/tsc --project tsconfig.json
     ui-tests/node_modules/.bin/biome ci --error-on-warnings
+    shellcheck --severity=warning scripts/*.sh
     node --test scripts/*.test.ts
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh

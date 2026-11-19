@@ -270,7 +270,7 @@ jobs:
             # configures and installs the linters, `deny` the lockfile, the
             # manifests and deny.toml.
             case "$file" in
-              .github/workflows/* | .github/actions/* | .github/actionlint.yaml | scripts/install-actionlint.sh) workflows=true ;;
+              .github/workflows/* | .github/actions/* | .github/actionlint.yaml | scripts/install-actionlint.sh | scripts/install-shellcheck.sh) workflows=true ;;
             esac
             case "$file" in
               Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml) deps=true ;;
@@ -391,6 +391,10 @@ jobs:
         uses: $/.github/actions/npm-ci
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just fmt-check
+      # shellcheck for `just lint`: the official release, checked against the
+      # SHA-256 the script pins, ahead of the runner's own copy on the PATH.
+      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+        run: scripts/install-shellcheck.sh
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just lint
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os != 'Linux'
@@ -630,7 +634,10 @@ jobs:
         with:
           tool: just,zizmor
       # Not in install-action's list: the official release, checked against
-      # the SHA-256 the script pins.
+      # the SHA-256 the script pins. actionlint also runs shellcheck on each
+      # `run:` block when it finds it on the PATH, so the pinned one goes in
+      # first.
+      - run: scripts/install-shellcheck.sh
       - run: scripts/install-actionlint.sh
       - run: just lint-workflows
         env:
