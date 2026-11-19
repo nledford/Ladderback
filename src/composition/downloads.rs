@@ -11,7 +11,7 @@ use app::ports::{Clock, ConfigStore, Random};
 use async_trait::async_trait;
 use domain::restore::download::DownloadTicket;
 use domain::{OperationId, RepositoryAlias, SignedDuration};
-use http_adapter::{DownloadRefusal, DownloadStart, Handover, MaintenanceRefusal, SignIn};
+use http_adapter::{DownloadRefusal, DownloadStart, HandOff, MaintenanceRefusal, SignIn};
 use uuid::Uuid;
 
 use super::{PlanRunner, maintenance, runs};
@@ -169,7 +169,7 @@ impl http_adapter::Downloads for DownloadService {
     /// task of its own, once its pieces end or are dropped. Downloads whose
     /// minute ran out are given up by the sweep, never by this request, so
     /// a browser that hangs up can't leave one running in the log.
-    async fn fetch(&self, ticket: DownloadTicket) -> Option<Handover> {
+    async fn fetch(&self, ticket: DownloadTicket) -> Option<HandOff> {
         let Download {
             file_name,
             shape,
@@ -177,7 +177,7 @@ impl http_adapter::Downloads for DownloadService {
             recorded,
         } = self.downloads.fetch(&ticket).ok()?;
         tokio::spawn(recorded);
-        Some(Handover {
+        Some(HandOff {
             file_name,
             shape,
             pieces,

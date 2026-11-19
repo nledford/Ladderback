@@ -95,7 +95,7 @@ impl Downloads for Scripted {
         self.start.clone()
     }
 
-    async fn fetch(&self, ticket: DownloadTicket) -> Option<Handover> {
+    async fn fetch(&self, ticket: DownloadTicket) -> Option<HandOff> {
         self.asked
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -130,7 +130,7 @@ impl Downloads for Scripted {
                 .boxed(),
             ),
         };
-        Some(Handover {
+        Some(HandOff {
             file_name: self.name.to_owned(),
             shape,
             pieces,

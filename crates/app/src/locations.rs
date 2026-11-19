@@ -782,10 +782,10 @@ enum Phase {
 
 /// Stops a located job: every probe while they run, the job once it does,
 /// and nothing is started after.
-struct Handover(Probing);
+struct HandOff(Probing);
 
 #[async_trait]
-impl JobControl for Handover {
+impl JobControl for HandOff {
     async fn stop(&mut self) {
         let going = std::mem::replace(
             &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
@@ -882,7 +882,7 @@ impl Engine for ChooseLocation {
         .boxed();
         Ok(RunningJob {
             events,
-            control: Box::new(Handover(phase)),
+            control: Box::new(HandOff(phase)),
         })
     }
 }
