@@ -639,19 +639,21 @@ async fn the_in_memory_event_bus_meets_the_event_bus_contract() {
     contract::event_bus::run(&InMemoryEventBusHarness).await;
 }
 
-struct InMemoryRecentLogHarness;
+/// The daemon's own recent log, `app::recent_log::RecentLogRing`: the real
+/// adapter of the `RecentLogStore` port, which keeps its lines in memory
+/// already, so it has no I/O to fake (`app::fakes::InMemoryRecentLog` is the
+/// same type under the fakes' name).
+struct RecentLogRingHarness;
 
-impl contract::recent_log::RecentLogHarness for InMemoryRecentLogHarness {
+impl contract::recent_log::RecentLogHarness for RecentLogRingHarness {
     fn log(&self) -> Arc<dyn app::ports::RecentLogStore> {
-        Arc::new(app::fakes::InMemoryRecentLog::new())
+        Arc::new(app::recent_log::RecentLogRing::new())
     }
 }
 
-/// The in-memory recent log is the daemon's own (`app::recent_log`), so this
-/// run covers the real adapter too.
 #[test]
-fn the_in_memory_recent_log_meets_the_recent_log_contract() {
-    contract::recent_log::run(&InMemoryRecentLogHarness);
+fn the_daemons_recent_log_ring_meets_the_recent_log_contract() {
+    contract::recent_log::run(&RecentLogRingHarness);
 }
 
 /// The fake reader gives the profile a harness method scripted, at the path
@@ -1253,4 +1255,70 @@ impl contract::walk::WalkHarness for InMemoryTrees {
 #[tokio::test]
 async fn in_memory_tree_meets_the_walk_contract() {
     contract::walk::run(&InMemoryTrees).await;
+}
+
+/// Builds each case's repository in memory: the fake reads none, so the
+/// snapshots are made up, one a day apart, and the access points nowhere.
+struct FakeRetentionHarness;
+
+#[async_trait]
+impl contract::retention::RetentionHarness for FakeRetentionHarness {
+    async fn repository(&self, count: usize) -> contract::retention::Repository {
+        let newest = Timestamp::from_second(1_800_000_000).unwrap();
+        let snapshots = (0..count)
+            .map(|number| domain::maintenance::Snapshot {
+                id: domain::SnapshotId::parse(&format!("{:064x}", number + 1)).unwrap(),
+                time: newest - SignedDuration::from_hours(24 * i64::try_from(number).unwrap()),
+                offset: domain::Offset::UTC,
+                hostname: "demo-host".to_owned(),
+                label: String::new(),
+                tags: Vec::new(),
+                paths: vec!["/srv/demo".to_owned()],
+            })
+            .collect();
+        contract::retention::Repository {
+            retention: Arc::new(app::fakes::FakeRetention),
+            access: app::ports::RepositoryAccess {
+                repository: "/srv/demo/repo".to_owned(),
+                repo_hot: None,
+                password: domain::secrets::SecretValue::new("demo-password"),
+                options: Default::default(),
+                options_hot: Default::default(),
+                options_cold: Default::default(),
+                secrets: Vec::new(),
+                id: None,
+                entry: None,
+            },
+            snapshots,
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_fake_retention_meets_the_retention_contract() {
+    contract::retention::run(&FakeRetentionHarness).await;
+}
+
+/// Builds each case's disk in memory, under `/srv/demo`: the fake reads no
+/// disk, so it has no folders to make.
+struct FakeDisks;
+
+impl contract::sources::SourcesHarness for FakeDisks {
+    fn disk(
+        &self,
+        _folders: &[&str],
+    ) -> (
+        Arc<dyn app::ports::NormalizeSources>,
+        domain::planning::Source,
+    ) {
+        (
+            Arc::new(app::fakes::FakeSources),
+            domain::planning::Source::parse("/srv/demo").unwrap(),
+        )
+    }
+}
+
+#[tokio::test]
+async fn the_fake_sources_meet_the_sources_contract() {
+    contract::sources::run(&FakeDisks).await;
 }

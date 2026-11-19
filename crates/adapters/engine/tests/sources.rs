@@ -1,12 +1,45 @@
 //! The real `NormalizeSources` adapter: a plan's sources come back the way
 //! rustic records them — absolute, dots removed, symlinks resolved, sorted
-//! and deduplicated — which is what adoption's matching compares (§7.3).
+//! and deduplicated — which is what adoption's matching compares (§7.3). It
+//! meets the port's contract suite, as the fake does (§13.3), and the rest
+//! is what only a disk has: links, and a source that isn't there.
 
 use std::assert_matches;
+use std::sync::{Arc, Mutex, PoisonError};
 
+use app::contract::sources::{SourcesHarness, run};
 use app::ports::NormalizeSources;
 use domain::planning::Source;
 use engine::RusticSources;
+use tempfile::TempDir;
+
+/// Builds each case's disk in its own scratch folder, kept until the
+/// harness is dropped.
+#[derive(Default)]
+struct ScratchDisks(Mutex<Vec<TempDir>>);
+
+impl SourcesHarness for ScratchDisks {
+    fn disk(&self, folders: &[&str]) -> (Arc<dyn NormalizeSources>, Source) {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let root = std::fs::canonicalize(scratch.path()).expect("resolved");
+        for folder in folders {
+            std::fs::create_dir_all(root.join(folder)).expect("a folder");
+        }
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(scratch);
+        (
+            Arc::new(RusticSources),
+            Source::parse(root.to_str().expect("UTF-8")).expect("a source"),
+        )
+    }
+}
+
+#[tokio::test]
+async fn rustic_sources_meet_the_sources_contract() {
+    run(&ScratchDisks::default()).await;
+}
 
 #[tokio::test]
 async fn a_symlink_is_resolved_as_rustic_records_it() {
@@ -26,39 +59,6 @@ async fn a_symlink_is_resolved_as_rustic_records_it() {
         normalized,
         vec![Source::parse(expected.to_str().expect("UTF-8")).expect("a source")],
         "the symlink is resolved, as a snapshot's paths are"
-    );
-}
-
-#[tokio::test]
-async fn the_same_source_twice_is_one_source() {
-    let scratch = tempfile::tempdir().expect("a scratch dir");
-    let real = scratch.path().join("real");
-    std::fs::create_dir(&real).expect("a folder");
-    let source = Source::parse(real.to_str().expect("UTF-8")).expect("a source");
-
-    let normalized = RusticSources
-        .normalized(&[source.clone(), source])
-        .await
-        .expect("the sources normalize");
-    assert_eq!(normalized.len(), 1, "{normalized:?}");
-}
-
-#[tokio::test]
-async fn a_dotted_path_comes_back_without_its_dots() {
-    let scratch = tempfile::tempdir().expect("a scratch dir");
-    let inner = scratch.path().join("inner");
-    std::fs::create_dir(&inner).expect("a folder");
-    let dotted = format!("{}/./inner", scratch.path().to_str().expect("UTF-8"));
-
-    let normalized = RusticSources
-        .normalized(&[Source::parse(&dotted).expect("a source")])
-        .await
-        .expect("the source normalizes");
-    let expected = std::fs::canonicalize(&inner).expect("the inner folder");
-    assert_eq!(
-        normalized,
-        vec![Source::parse(expected.to_str().expect("UTF-8")).expect("a source")],
-        "the dots are gone, as a snapshot's paths have them"
     );
 }
 
