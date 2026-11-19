@@ -4,7 +4,10 @@ use std::time::Duration;
 use api::sync::{AgentFrame, HubFrame, PATH};
 use app::fakes::{FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, SeededRandom};
 use app::pairing::{BINDING_UNAVAILABLE, HubPairing, PROTOCOL_ERROR};
+use app::ports::{Attempt, Identity, IdentityError};
+use async_trait::async_trait;
 use domain::Timestamp;
+use domain::fleet::{HubPin, PublicKey, SeedFile, SigningSeed, TlsKey};
 use futures::{SinkExt as _, StreamExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
@@ -19,9 +22,13 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 const PATIENCE: Duration = Duration::from_secs(5);
 
 fn pairing() -> Arc<HubPairing> {
+    pairing_on(Arc::new(InMemoryIdentity::default()))
+}
+
+fn pairing_on(identity: Arc<dyn Identity>) -> Arc<HubPairing> {
     Arc::new(HubPairing::new(
         Arc::new(InMemoryAgentRegistry::new()),
-        Arc::new(InMemoryIdentity::default()),
+        identity,
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(5)),
         Arc::new(FakeClock::new(
@@ -119,6 +126,84 @@ async fn a_frame_over_4_kib_ends_the_connection() {
         None | Some(Message::Close(_)) => {}
         other => panic!("the connection went on: {other:?}"),
     }
+}
+
+/// Key files that are slow to read, as a data folder on a stalled disk is.
+struct SlowIdentity {
+    files: InMemoryIdentity,
+    delay: Duration,
+}
+
+#[async_trait]
+impl Identity for SlowIdentity {
+    async fn seed(&self, file: SeedFile) -> Result<Option<SigningSeed>, IdentityError> {
+        tokio::time::sleep(self.delay).await;
+        self.files.seed(file).await
+    }
+
+    async fn keep_seed(
+        &self,
+        file: SeedFile,
+        seed: SigningSeed,
+    ) -> Result<SigningSeed, IdentityError> {
+        self.files.keep_seed(file, seed).await
+    }
+
+    async fn forget_recovery_seed(&self) -> Result<(), IdentityError> {
+        self.files.forget_recovery_seed().await
+    }
+
+    async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError> {
+        self.files.recovery_key().await
+    }
+
+    async fn keep_recovery_key(&self, key: PublicKey) -> Result<PublicKey, IdentityError> {
+        self.files.keep_recovery_key(key).await
+    }
+
+    async fn tls_key(&self) -> Result<Option<TlsKey>, IdentityError> {
+        self.files.tls_key().await
+    }
+
+    async fn keep_tls_key(&self, key: TlsKey) -> Result<TlsKey, IdentityError> {
+        self.files.keep_tls_key(key).await
+    }
+
+    async fn pin(&self) -> Result<Option<HubPin>, IdentityError> {
+        self.files.pin().await
+    }
+
+    async fn write_pin(&self, pin: &HubPin) -> Result<(), IdentityError> {
+        self.files.write_pin(pin).await
+    }
+
+    async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {
+        self.files.begin_attempt().await
+    }
+}
+
+/// The first bound counts from when the connection is admitted, so reading
+/// the hub's keys is within it: a peer that says nothing holds its place
+/// for the bound, not for the bound and the time the keys took.
+#[tokio::test]
+async fn the_first_bound_includes_the_time_the_hubs_keys_take_to_read() {
+    let bounds = Bounds {
+        connect_within: Duration::from_millis(200),
+        ..Bounds::DECIDED
+    };
+    let slow = SlowIdentity {
+        files: InMemoryIdentity::default(),
+        delay: Duration::from_millis(600),
+    };
+    let address = serve(&SyncHub::bounded(pairing_on(Arc::new(slow)), bounds)).await;
+    let started = std::time::Instant::now();
+    let mut socket = open(&address).await;
+    assert_eq!(closed_with(&mut socket).await, "");
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_millis(500),
+        "closed after {took:?}, not within the 200 ms first bound"
+    );
 }
 
 #[tokio::test]
