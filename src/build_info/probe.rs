@@ -104,14 +104,16 @@ pub enum ReleaseTag {
 
 impl ReleaseTag {
     /// Where the tag stands, from whether the build `is_release` and whether
-    /// `git` found the tag at all.
+    /// `git` found the tag before it answered. A tag it found only while
+    /// answering was made meanwhile: it counts as missing, so the folder it
+    /// was made in is watched.
     pub fn of(is_release: bool, exists: bool) -> Self {
-        if is_release {
-            Self::AtHead
-        } else if exists {
-            Self::Elsewhere
-        } else {
+        if !exists {
             Self::Missing
+        } else if is_release {
+            Self::AtHead
+        } else {
+            Self::Elsewhere
         }
     }
 }
@@ -123,9 +125,11 @@ pub fn release_ref(version: &str) -> String {
 
 /// Of each of `groups` (`watched`), the first path that `exists`; a group
 /// with none is left out.
-pub fn chosen<'a>(groups: &'a [Vec<String>], exists: impl Fn(&str) -> bool) -> Vec<&'a str> {
-    let _ = (groups, exists);
-    todo!()
+pub fn chosen(groups: &[Vec<String>], exists: impl Fn(&str) -> bool) -> Vec<&str> {
+    groups
+        .iter()
+        .filter_map(|group| group.iter().map(String::as_str).find(|path| exists(path)))
+        .collect()
 }
 
 /// The files in the git folder whose change may change `git`'s answers about
@@ -143,8 +147,11 @@ pub fn chosen<'a>(groups: &'a [Vec<String>], exists: impl Fn(&str) -> bool) -> V
 /// release tag's are watched, and only while the tag can change the answer
 /// (#1103): the tags folder while there is no tag to make the build the
 /// release, the tag where it lives (its own file, or `packed-refs` once
-/// packed) while it names HEAD, and nothing while it names another commit,
-/// since a release tag isn't moved and HEAD moving onto it is watched anyway.
+/// packed) while it names HEAD, and nothing while it names another commit.
+/// HEAD moving onto that commit is watched anyway; the tag moved onto HEAD
+/// (`git tag -f`, or deleted and made again) is seen only once HEAD, the
+/// index or a tracked file next changes. Watching the tag's own file there
+/// would rerun every build whenever packing refs packs it.
 pub fn watched(version: &str, branch: Option<&str>, tag: ReleaseTag) -> Vec<Vec<String>> {
     let mut groups = vec![
         vec!["HEAD".to_owned()],
