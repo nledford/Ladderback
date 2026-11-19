@@ -388,3 +388,86 @@ cli-mcp-call-line-no-tool = line { $line } of the script names no tool that exis
 # $line (count): the line's number in the script, counted from 1.
 # $limit (bytes): the longest line read.
 cli-mcp-call-line-too-long = line { $line } of the script is longer than { $limit }, so it was not read
+
+# `ladderback pairing-token` writes the hub's store from its own process, and the daemon holds the data folder.
+# $path (text): the data folder. It is shown as it is.
+# `ladderback serve --hub` is typed as it is: keep it a string literal.
+cli-pairing-token-daemon-running = the daemon is running on the data folder { $path }. Stop it, make the token, then start it again with { "ladderback serve --hub" }.
+
+# The address given for the hub isn't an http:// or https:// address of at most 200 bytes.
+# $address (text): the address as given. It is shown as it came.
+cli-pairing-token-bad-address = { $address } isn't a hub address: give it as https://name or https://name:port, as agents reach the hub.
+
+# The token's address is loopback, which another machine can't reach.
+# `--address` is typed as it is: keep it a string literal.
+cli-pairing-token-loopback = The address is loopback: another machine can't reach it. Use { "--address" } with the address agents will use.
+
+# The hub key's fingerprint, printed before the token so the person has something to compare with the agent's screen.
+# $fingerprint (text): the fingerprint, in groups of four characters.
+cli-pairing-token-hub-key = Hub key: { $fingerprint }
+
+# Printed after the token: it is one-time, its token ID, and when it lapses.
+# $id (text): the token ID, 8 hex digits.
+# $expires (text): when the token lapses, as an RFC 3339 instant in UTC.
+# `ladderback pairing-token --revoke` is typed as it is: keep it a string literal.
+cli-pairing-token-made = This token works once. Token ID { $id }, usable until { $expires }. Revoke it with { "ladderback pairing-token --revoke" } { $id }.
+
+# `ladderback pairing-token --list` found no unused token.
+cli-pairing-token-none = no unused pairing tokens
+
+# `ladderback pairing-token --revoke` revoked the token.
+# $id (text): the token ID.
+cli-pairing-token-revoked = token { $id } is revoked: it can't pair any machine now.
+
+# There is no unused token with this ID: it was used, lapsed, revoked or never made.
+# $id (text): the token ID as given.
+# `ladderback pairing-token --list` is typed as it is: keep it a string literal.
+cli-pairing-token-no-such = there is no unused token { $id }. See the unused ones with { "ladderback pairing-token --list" }.
+
+# The life asked for is outside 5 minutes to 24 hours.
+# `--ttl` is typed as it is: keep it a string literal.
+cli-pairing-token-bad-ttl = a token lives 5 to 1440 minutes: give { "--ttl" } in that range.
+
+# The hub keeps at most a few unused tokens at once.
+# `ladderback pairing-token --revoke` is typed as it is: keep it a string literal.
+cli-pairing-token-too-many = there are too many unused tokens. Use one, wait for one to lapse, or revoke one with { "ladderback pairing-token --revoke" }.
+
+# A hub command failed for a reason the system gave.
+# $detail (text): the system's message. It is shown as it came.
+cli-hub-command-failed = the command failed: { $detail }
+
+# `ladderback pair` asks for the token at a terminal; what is pasted is not shown. Printed without the program's name, and the paste follows on the same line.
+cli-pair-prompt = Paste the pairing token:
+
+# What was pasted isn't a pairing token, or its checksum doesn't match, as when a chat app changed the case of its letters.
+cli-pair-unreadable-token = this isn't a pairing token, or it was changed on the way (letters' case matters). Copy it again from the hub.
+
+# The hostname to pair under isn't one the hub takes.
+# $name (text): the hostname. It is shown as it came.
+# `--hostname` is typed as it is: keep it a string literal.
+cli-pair-bad-hostname = { $name } can't name this machine to the hub. Give another with { "--hostname" }.
+
+# The kind of the token's address, said in cli-pair-read.
+cli-pair-kind-ca = certificate checked by this machine's trust store
+cli-pair-kind-pinned = pinned certificate
+
+# What `pair` read from the token, before it asks; nothing is sent yet.
+# $count (count): how many characters were read.
+# $address (text): the hub's address.
+# $fingerprint (text): the hub key's fingerprint.
+# $kind (text): cli-pair-kind-ca or cli-pair-kind-pinned.
+cli-pair-read = Read { $count } characters. Hub { $address }, key { $fingerprint }, { $kind }. Compare the fingerprint with the hub's.
+
+# `pair` asks before it sends anything. Printed without the program's name, and the answer follows on the same line.
+cli-pair-confirm = Pair? [y/N]
+
+# The person didn't answer y.
+cli-pair-not-confirmed = Not paired: nothing was sent.
+
+# Standard input is the token, so nobody can answer the question.
+# `--yes` is typed as it is: keep it a string literal.
+cli-pair-no-terminal = No terminal to ask on. Compare the hub key above with the hub's own screen, then run again with { "--yes" }.
+
+# The hub took the pairing and holds the agent pending until a person approves it there.
+# $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
+cli-pair-pending = Paired. The hub holds this machine pending until someone approves it there. This machine's key: { $fingerprint }. Compare it with the hub's screen.

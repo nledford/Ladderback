@@ -209,6 +209,26 @@ impl PairingToken {
             .ok_or(TokenRefused::Malformed)?;
         Ok(Self::new(hub_key, tls, pairing_seed, address))
     }
+
+    /// Reads a token as a person pasted it (§16, decision 121, "`ladderback
+    /// pair`"): whitespace and line breaks anywhere, zero-width characters,
+    /// and quotes or angle brackets around it are dropped, and the prefix is
+    /// read in any case with `-` for `_`. The rest must be the token as
+    /// [`parse`](Self::parse) reads it: base64 is case-sensitive, so a
+    /// letter whose case was changed fails the checksum. Text longer than a
+    /// token could be with all of that around it is malformed unread.
+    pub fn parse_pasted(text: &str) -> Result<Self, TokenRefused> {
+        todo!()
+    }
+
+    /// The same token for an agent that reaches the hub at `address`
+    /// rather than the token's (decision 121, `ladderback pair <address>`).
+    /// The hub key and the certificate stay the token's: the address
+    /// carries no trust.
+    #[must_use]
+    pub fn with_address(self, address: HubAddress) -> Self {
+        todo!()
+    }
 }
 
 /// The first 4 bytes of the SHA-256 of `bytes`.
@@ -218,6 +238,24 @@ fn checksum(bytes: &[u8]) -> [u8; CHECKSUM_BYTES] {
         .first_chunk::<CHECKSUM_BYTES>()
         .unwrap_or(&[0; CHECKSUM_BYTES])
 }
+
+/// The longest pasted text read: room for a token wrapped on every
+/// character with a line break and a zero-width character.
+const MAX_PASTED_TEXT: usize = MAX_TOKEN_TEXT * 8;
+
+/// The zero-width characters a chat app or a web page may put in a paste.
+const ZERO_WIDTH: [char; 5] = ['\u{200b}', '\u{200c}', '\u{200d}', '\u{2060}', '\u{feff}'];
+
+/// `text` without one pair of quotes or angle brackets around it, or `None`
+/// when it has none.
+fn unquoted(text: &str) -> Option<&str> {
+        todo!()
+    }
+
+/// Whether `text` is the token's prefix in any case, with `-` for `_`.
+fn is_prefix_as_pasted(text: &str) -> bool {
+        todo!()
+    }
 
 /// The token's bytes not read yet; a field past the end is a malformed token.
 struct Fields<'a>(&'a [u8]);

@@ -8,18 +8,24 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+api.workspace = true
 app.workspace = true
+async-trait.workspace = true
 domain.workspace = true
+futures.workspace = true
 rcgen.workspace = true
 rustls.workspace = true
-tokio.workspace = true
+rustls-platform-verifier.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
 tokio-rustls.workspace = true
+# The agent's WebSocket to its hub's `/sync/v1`, over its own TLS.
+tokio-tungstenite.workspace = true
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
 # A TLS 1.2 peer, which only the tests build, to show it is refused.
 rustls = { workspace = true, features = ["tls12"] }
-tokio = { workspace = true, features = ["io-util", "macros", "rt"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "time"] }
 
 [lints]
 workspace = true

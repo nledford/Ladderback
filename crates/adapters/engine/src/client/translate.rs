@@ -409,6 +409,24 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::EntryUnknown
                 | ErrorCode::DownloadUnknown
                 | ErrorCode::RouteUnknown
+                | ErrorCode::TokenUsed
+                | ErrorCode::TokenExpired
+                | ErrorCode::TokenRevoked
+                | ErrorCode::TokenMalformed
+                | ErrorCode::TokenUnsupported
+                | ErrorCode::HostnameTaken
+                | ErrorCode::AgentKeyMismatch
+                | ErrorCode::HubKeyMismatch
+                | ErrorCode::HubProofInvalid
+                | ErrorCode::ProofRefused
+                | ErrorCode::PendingLimit
+                | ErrorCode::BindingUnavailable
+                | ErrorCode::HubUnreachable
+                | ErrorCode::HubPinMismatch
+                | ErrorCode::HubUntrusted
+                | ErrorCode::HubTlsRefused
+                | ErrorCode::PlainAddress
+                | ErrorCode::HubConnectionLost
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

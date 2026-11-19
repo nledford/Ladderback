@@ -523,7 +523,7 @@ pub(crate) const LOG_CLOSE_BOUND: std::time::Duration =
 /// The operation log the daemon writes, which it closes before it lets go
 /// of the data folder.
 pub(crate) struct OperationLog {
-    store: Arc<SqliteStore>,
+    pub(crate) store: Arc<SqliteStore>,
     database: std::path::PathBuf,
 }
 
@@ -1021,6 +1021,7 @@ async fn state_over(
             // An empty one: the daemon's own puts the one its log feeds here.
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
             full_disk_access: full_disk_access_route,
+            sync: http_adapter::SyncHub::default(),
         },
         background,
         stopping,
