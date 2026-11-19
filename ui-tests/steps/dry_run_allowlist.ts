@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { Given, Then } from "@cucumber/cucumber";
 
 import { namePattern } from "../support/keyboard.ts";
-import { type BrowserWorld } from "../support/world.ts";
+import type { BrowserWorld } from "../support/world.ts";
 import { api } from "./maintenance.ts";
 import { rowNamed } from "./live.ts";
 
