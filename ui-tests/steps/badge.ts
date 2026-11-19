@@ -12,6 +12,7 @@ import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
 import { composite, contrastRatio, whereFocusIs } from "../support/keyboard.ts";
+import { besideIconProblems, wordsBesideIcon } from "../support/parts.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "./components.ts";
 
@@ -176,10 +177,14 @@ Then(
       const drawn = await badge.evaluate((element) => {
         const icon = element.querySelector("svg");
         if (icon === null) return null;
+        // The words start after the icon's box: the icon itself, or the box
+        // the badge holds it in.
+        let glyph: Element = icon;
+        while (glyph.parentElement !== null && glyph.parentElement !== element) glyph = glyph.parentElement;
         const range = document.createRange();
         range.selectNodeContents(element);
-        range.setStartAfter(icon);
-        const line = range.getClientRects()[0];
+        range.setStartAfter(glyph);
+        const line = Array.from(range.getClientRects()).find((rect) => rect.width > 0);
         const box = icon.getBoundingClientRect();
         return {
           words: element.textContent?.trim() ?? "",
@@ -220,3 +225,17 @@ Then("every badge of the {string} demo keeps within the room it is given", async
     assert.ok(!drawn.overflows, `the words of the badge "${drawn.words}" run past its pill`);
   }
 });
+
+// The words wrap between words beside the icon (#1070): a badge too long for
+// its room takes more lines after its icon, which stands at the start of the
+// first, never on a line of its own above the words.
+Then(
+  "the badge {string} of the {string} demo wraps its words beside its icon, which stands at the start of its first line",
+  async function (this: BrowserWorld, words: string, component: string) {
+    const badge = badges(this.page, component).filter({ hasText: words });
+    await expect(badge).toHaveCount(1);
+    const drawn = await badge.evaluate(wordsBesideIcon, { icon: "svg", words: "" });
+    assert.ok(drawn.lines.length > 1, `the badge "${drawn.text}" takes ${drawn.lines.length} line(s), not more than one`);
+    assert.deepEqual(besideIconProblems(drawn), []);
+  },
+);

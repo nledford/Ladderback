@@ -13,39 +13,51 @@
 # its steps may fail: the build then runs uncached (slower, still correct).
 # `cache: "false"` leaves it out, for a job that compiles nothing.
 #
-# Why the key has a manifest hash. Cargo names an artifact by a hash of
-# everything that goes into it, the manifests, the lockfile and the toolchain
-# among them, and never deletes an artifact it no longer uses. mbx saves the
-# target dir each main commit leaves, and the next commit restores that one, so
-# a change to any manifest left the old copies of every artifact it touched in
-# the entry for good: adding one dependency to `domain` rehashed `domain` and
-# everything built on it, tests included, and the Linux entry grew from 2.8 to
-# 3.8 GB in one save (#727). The generation below holds the hash of those
-# files, so a main commit that changes one starts from no build at all, and
-# a build that only a source change touched still starts from the last one:
-# between two such changes an entry doesn't grow.
+# What the cache holds (#1076, pending measurement: the mode before it was
+# mbx's default, `target`, and goes back to it if the numbers on that pull
+# request say so). mbx's `objects` payload is the compiler outputs a job's
+# builds used or made, each stored under a hash of its own inputs, and not a
+# Cargo target tree. The job restores them into mbx's store before its first
+# build; the bundle also carries Cargo's scheduler state, which mbx puts back
+# into an absent `target/` of the checkout, so a build there starts warm.
+# Both the bundle and the state are independent of Cargo's layout of the
+# build dir, which is why ci.yml no longer opts out of Cargo 1.100's (#598).
 #
-# What restores what:
-# - a push to main restores only an entry of its own manifest hash, or none,
-#   and then saves its build as a new entry of that hash;
-# - everything else (pull requests, the nightly run) restores an entry of its
-#   own hash when there is one, and else the newest entry of any hash of its
-#   own generation, a build that is stale in places and still saves most of
-#   the compile. They never save: mbx saves on a push to the default branch
-#   alone. The restore prefixes end in `-m`, the start of the hash, so the
-#   default generation never restores the wasm one (`v1-wasm-m…`).
+# Why the key has no manifest hash any more (#727). Under `target`, Cargo's
+# target tree never dropped an artifact: a change to a manifest left the old
+# copy of every artifact it touched in the entry for good, so the generation
+# held a hash of the manifests, and a main commit that changed one started
+# from no build at all. An `objects` entry holds what the job's builds used, as
+# an outputs-by-inputs store, so a changed manifest changes the keys of the
+# crates it touches and no others, and the old outputs aren't in the next
+# export. Whether an entry then stays the size of its sources across a
+# manifest change is what the pull request measures.
 #
-# The restore prefixes need the key's layout, which mbx documents as
-# `<platform>-<architecture>-mbx-<generation>-<mode>-<toolchain>-<commit>`; the
-# cache's last step warns when mbx's primary key doesn't start as this action
-# expects, so a change of layout shows on the run and not as a cold build on
-# every pull request. ci.yml's `cache-prune` job prunes by the same layout.
+# Who saves. Only a push to main saves (a pull request would save an entry no
+# other pull request can read), and mbx names the entry by platform, generation,
+# toolchain and commit alone, so every job that saved would save the same key
+# and the first to finish would hold it for the newest commit. Under `target`
+# a job with no target dir at its end saved nothing, and jobs emptied theirs
+# for that. An `objects` export doesn't depend on the target dir, so a job that
+# saves says so with `save: "true"`, and every other job restores only: it
+# runs the mbx action with ACTIONS_CACHE_MODE=read, which the action reads as
+# a cache that may not be written (its post step then exports nothing), and
+# which is set on that one step, so that the job's other cache steps
+# (browsers, trunk's tools, npm's) still save.
+#
+# What restores what: a push to main and everything else (pull requests, the
+# nightly run) restore the newest entry of their platform, generation and
+# toolchain, which mbx's default restore keys name, so the key's layout is
+# mbx's and not ours. ci.yml's `cache-prune` job prunes by it
+# (`<platform>-<architecture>-mbx-<generation>[-dir]-<toolchain>-<commit>`, with
+# `-dir` the bundle form of mbx 1.12 and later) and warns of an entry on main
+# that none of its families claims, which is where a change of layout shows.
 #
 # The tools. `tools` is taiki-e/install-action's `tool` list (`just,trunk`);
 # a tool pinned from a value only `just` can read (leptosfmt, wasm-bindgen)
 # is the job's own step after this one.
 name: Rust setup
-description: Installs the pinned toolchain, restores (and on a push to main saves) the Cargo build, and installs the tools a job names.
+description: Installs the pinned toolchain, restores (and, for the jobs that say so, on a push to main saves) mbx's build cache, and installs the tools a job names.
 inputs:
   tools:
     description: "The tools to install, as install-action's comma-separated `tool` list; empty installs none."
@@ -54,60 +66,27 @@ inputs:
     description: 'Whether to use the build cache: "true" or "false" (a job that compiles nothing).'
     default: "true"
   generation:
-    description: "Names the cache of this job apart from the other jobs' (mbx's `cache-generation`). The manifest hash is added to it."
+    description: "Names the cache of this job apart from the other jobs' (mbx's `cache-generation`)."
     default: v1
+  save:
+    description: 'Whether a push to main saves the build cache after the job: "true" or "false". Only the jobs that name a cache of their own set it, one job to each.'
+    default: "false"
 runs:
   using: composite
   steps:
     - shell: bash
       run: rustup toolchain install
-    - id: keys
+    - id: mbx
       if: inputs.cache == 'true'
       continue-on-error: true
-      shell: bash
-      env:
-        GENERATION: ${{ inputs.generation }}
-        MANIFESTS: ${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'Cargo.toml', 'crates/**/Cargo.toml') }}
-        # Only a push to main saves, so only it must not start from another
-        # manifest hash's build.
-        SAVES: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-      run: |
-        case "$RUNNER_OS" in
-          Linux) platform=linux ;;
-          macOS) platform=darwin ;;
-          *) platform=$(echo "$RUNNER_OS" | tr '[:upper:]' '[:lower:]') ;;
-        esac
-        arch=$(echo "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')
-        generation="$GENERATION-m${MANIFESTS:0:12}"
-        own="$platform-$arch-mbx-$generation-"
-        {
-          echo "generation=$generation"
-          echo "own=$own"
-          echo "restore-keys<<EOF"
-          echo "$own"
-          if [ "$SAVES" != true ]; then
-            echo "$platform-$arch-mbx-$GENERATION-m"
-          fi
-          echo "EOF"
-        } >> "$GITHUB_OUTPUT"
-    - id: mbx
-      if: steps.keys.outcome == 'success'
-      continue-on-error: true
       uses: jdx/mr-boxington-action@88acf2bb50552c7c508cbac13e5f8c576b95b1de # v1.7.3
-      with:
-        cache-generation: ${{ steps.keys.outputs.generation }}
-        restore-keys: ${{ steps.keys.outputs.restore-keys }}
-    - if: steps.mbx.outcome == 'success'
-      continue-on-error: true
-      shell: bash
       env:
-        OWN: ${{ steps.keys.outputs.own }}
-        PRIMARY: ${{ steps.mbx.outputs.cache-primary-key }}
-      run: |
-        case "$PRIMARY" in
-          "$OWN"*) ;;
-          *) echo "::warning title=Rust build cache::mbx's cache key '$PRIMARY' doesn't start with '$OWN', so mbx's key layout has changed: the restore keys in .github/actions/setup-rust/action.yml and ci.yml's cache-prune families no longer match it." ;;
-        esac
+        # `write` is the default on a push, so it changes nothing for the jobs
+        # that save; `read` is how the rest only restore (see "Who saves").
+        ACTIONS_CACHE_MODE: ${{ inputs.save == 'true' && 'write' || 'read' }}
+      with:
+        cache-generation: ${{ inputs.generation }}
+        github-cache-mode: objects
     - if: inputs.tools != ''
       uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
       with:
