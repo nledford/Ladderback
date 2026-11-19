@@ -102,7 +102,7 @@ const PSEUDO_MARKER = Buffer.concat(
     return bytes;
   }),
 );
-// An element ID only the component gallery's page has (crates/web/src/gallery.rs).
+// An element ID only the component gallery's page has (crates/web/src/gallery/review_dialog.rs).
 const GALLERY_MARKER = "gallery-review-body";
 
 // The libraries every glibc system has, by soname: glibc's own and the

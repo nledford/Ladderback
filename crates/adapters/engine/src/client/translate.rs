@@ -76,6 +76,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 // The daemon's choice of location says it, never a worker.
                 WarningCode::LocationSkipped => WarningKind::LocationSkipped,
                 WarningCode::SecretFileReadable => WarningKind::SecretFileReadable,
+                WarningCode::SecretFileWritable => WarningKind::SecretFileWritable,
                 // The profile codes belong to the import and export, which
                 // run in the CLI; a worker that sent one is reported as the
                 // problem it claims, in its own words.

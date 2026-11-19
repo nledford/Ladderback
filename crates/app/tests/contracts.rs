@@ -508,7 +508,7 @@ async fn in_memory_config_store_meets_the_config_store_contract() {
 }
 
 /// The fake hook runner, set up through the contract's harness. The
-/// simulated environment follows the worker's rule (components.md §4.1):
+/// simulated environment follows the worker's rule (components/worker.md §4.1):
 /// the allow-list plus the `LADDERBACK_*` context variables, and nothing
 /// else of the daemon's.
 struct FakeHooksHarness {

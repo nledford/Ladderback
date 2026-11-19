@@ -17,7 +17,7 @@ import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "../support/gallery.ts";
 import { saidJustBeforeBusy } from "./first_load.ts";
 
-// The gallery's skeletons while its region waits (`gallery.rs`): a
+// The gallery's skeletons while its region waits (`gallery/skeleton.rs`): a
 // paragraph's lines, a field's block, lines on Ledger Gray and the region's
 // lines.
 const SKELETONS = 4;

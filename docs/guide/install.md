@@ -97,7 +97,7 @@ git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1
 
 ## After installing
 
-Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with `--allowed-host`; [Remote access](remote-access.md) has the details). Its configuration and data live in your platform's config and data folders ([technical design §4.2](../design/components.md#42-daemon-agent), "Config").
+Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with `--allowed-host`; [Remote access](remote-access.md) has the details). Its configuration and data live in your platform's config and data folders ([technical design §4.2](../design/components/daemon.md#42-daemon-agent), "Config").
 
 ## Updating
 
