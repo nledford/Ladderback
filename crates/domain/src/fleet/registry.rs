@@ -5,6 +5,7 @@
 //! the records and applies a decision in the same step that read them.
 
 use jiff::{SignedDuration, Timestamp};
+use unicode_normalization::UnicodeNormalization as _;
 
 use super::fingerprint::TokenId;
 use super::handshake::BindingKind;
@@ -36,8 +37,13 @@ pub struct TokenLifeRefused;
 
 /// The life a token is made with: `asked`, or [`TOKEN_LIFE`] when nothing
 /// was asked for.
-pub fn token_life(_asked: Option<SignedDuration>) -> Result<SignedDuration, TokenLifeRefused> {
-    todo!()
+pub fn token_life(asked: Option<SignedDuration>) -> Result<SignedDuration, TokenLifeRefused> {
+    let life = asked.unwrap_or(TOKEN_LIFE);
+    if (SHORTEST_TOKEN_LIFE..=LONGEST_TOKEN_LIFE).contains(&life) {
+        Ok(life)
+    } else {
+        Err(TokenLifeRefused)
+    }
 }
 
 /// What the hub compares hostnames by: `casefold(NFC(name))`, with the
@@ -48,8 +54,8 @@ pub fn token_life(_asked: Option<SignedDuration>) -> Result<SignedDuration, Toke
 pub struct HostnameKey(String);
 
 impl HostnameKey {
-    pub fn of(_name: &Hostname) -> Self {
-        todo!()
+    pub fn of(name: &Hostname) -> Self {
+        Self(name.as_str().nfc().collect::<String>().to_lowercase())
     }
 
     pub fn as_str(&self) -> &str {
@@ -85,11 +91,11 @@ pub struct AgentRecord {
 
 impl AgentRecord {
     pub fn hostname_key(&self) -> HostnameKey {
-        todo!()
+        HostnameKey::of(&self.hostname)
     }
 
-    pub fn is_pending(&self) -> bool {
-        todo!()
+    pub const fn is_pending(&self) -> bool {
+        matches!(self.status, AgentStatus::Pending { .. })
     }
 }
 
@@ -123,12 +129,12 @@ pub struct TokenRecord {
 impl TokenRecord {
     /// The ID the token is listed and revoked by.
     pub fn id(&self) -> TokenId {
-        todo!()
+        TokenId::of_pairing_key(&self.pairing_key)
     }
 
     /// Whether the token can still pair an agent at `now`.
-    pub fn is_unused_at(&self, _now: Timestamp) -> bool {
-        todo!()
+    pub fn is_unused_at(&self, now: Timestamp) -> bool {
+        self.state == TokenUse::Unused && now < self.expires_at
     }
 }
 
@@ -179,7 +185,16 @@ pub enum PairRefusal {
 impl PairRefusal {
     /// The code on the wire, which the hub signs.
     pub fn code(&self) -> WireName {
-        todo!()
+        WireName::known(match self {
+            Self::ProofRefused => "proof-refused",
+            Self::TokenUsed => "token-used",
+            Self::TokenExpired => "token-expired",
+            Self::TokenRevoked => "token-revoked",
+            Self::HostnameTaken { .. } => "hostname-taken",
+            Self::AgentKeyMismatch => "agent-key-mismatch",
+            Self::HubKeyMismatch => "hub-key-mismatch",
+            Self::PendingLimit => "pending-limit",
+        })
     }
 }
 
@@ -212,11 +227,61 @@ pub enum Pairing {
 
 /// The decision a `Pair` gets at `now` (decision 120, "Pairing").
 pub fn decide_pairing(
-    _view: &PairingView<'_>,
-    _request: &PairRequest,
-    _now: Timestamp,
+    view: &PairingView<'_>,
+    request: &PairRequest,
+    now: Timestamp,
 ) -> Result<Pairing, PairRefusal> {
-    todo!()
+    let token = view.token.ok_or(PairRefusal::ProofRefused)?;
+    if token.hub_key != request.hub_key {
+        return Err(PairRefusal::HubKeyMismatch);
+    }
+    if token.kind != request.kind {
+        return Err(PairRefusal::ProofRefused);
+    }
+    match token.state {
+        TokenUse::Revoked => return Err(PairRefusal::TokenRevoked),
+        TokenUse::Used {
+            agent_id,
+            agent_key,
+        } => {
+            let same = agent_id == request.agent_id && agent_key == request.agent_key;
+            let registered = view.by_id.is_some_and(|record| record.key == agent_key);
+            return if same && registered {
+                Ok(Pairing::Repeated)
+            } else {
+                Err(PairRefusal::TokenUsed)
+            };
+        }
+        TokenUse::Unused if now >= token.expires_at => return Err(PairRefusal::TokenExpired),
+        TokenUse::Unused => {}
+    }
+    if let Some(record) = view.by_id {
+        if record.key != request.agent_key {
+            return Err(PairRefusal::AgentKeyMismatch);
+        }
+        return Ok(Pairing::Again(AgentRecord {
+            counter: record.counter.max(request.counter),
+            last_seen: now,
+            ..record.clone()
+        }));
+    }
+    if let Some(holder) = view.by_hostname {
+        return Err(PairRefusal::HostnameTaken {
+            holder: holder.hostname.clone(),
+            last_seen: holder.last_seen,
+        });
+    }
+    if view.pending >= PENDING_LIMIT {
+        return Err(PairRefusal::PendingLimit);
+    }
+    Ok(Pairing::New(AgentRecord {
+        agent_id: request.agent_id,
+        key: request.agent_key,
+        hostname: request.hostname.clone(),
+        status: AgentStatus::Pending { since: now },
+        counter: request.counter,
+        last_seen: now,
+    }))
 }
 
 #[cfg(test)]

@@ -26,27 +26,41 @@ pub enum BindingKind {
 
 impl BindingKind {
     /// The kind byte `Connect` and the token carry.
-    pub fn byte(self) -> u8 {
-        todo!()
+    pub const fn byte(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::TlsExporter => 1,
+        }
     }
 
     /// The kind a byte names, or `None` for a kind this build doesn't know.
-    pub fn from_byte(_byte: u8) -> Option<Self> {
-        todo!()
+    pub const fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::None),
+            1 => Some(Self::TlsExporter),
+            _ => None,
+        }
     }
 
     /// The kind of a token's address: a pinned certificate is the hub's own
     /// TLS (kind 1), a certificate authority's is a proxy's (kind 0).
-    pub fn of_token(_tls: TokenTls) -> Self {
-        todo!()
+    pub const fn of_token(tls: TokenTls) -> Self {
+        match tls {
+            TokenTls::Ca => Self::None,
+            TokenTls::Pinned(_) => Self::TlsExporter,
+        }
     }
 
     /// The binding signatures carry under this kind on a session whose
     /// `tls-exporter` value is `exporter`: none for kind 0, whatever the
     /// session; the exporter for kind 1, and `None` when the session has
     /// none to give (`binding-unavailable`).
-    pub fn binding(self, _exporter: Option<[u8; KEY_BYTES]>) -> Option<Binding> {
-        todo!()
+    pub const fn binding(self, exporter: Option<[u8; KEY_BYTES]>) -> Option<Binding> {
+        match (self, exporter) {
+            (Self::None, _) => Some(Binding::None),
+            (Self::TlsExporter, Some(value)) => Some(Binding::TlsExporter(value)),
+            (Self::TlsExporter, None) => None,
+        }
     }
 }
 
