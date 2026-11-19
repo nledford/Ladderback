@@ -48,6 +48,7 @@ pub mod schedule;
 pub mod secrets;
 pub mod snapshots;
 pub mod stats;
+pub mod status;
 pub mod updates;
 
 #[cfg(feature = "fakes")]

@@ -288,6 +288,9 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
         (Method::GET, "/api/v1/operations/018f", Some(Read)),
         (Method::GET, "/api/v1/plans", Some(Read)),
         (Method::GET, "/api/v1/repositories", Some(Read)),
+        // The status summary, read as the plans are (§4.6).
+        (Method::GET, "/api/v1/status", Some(Read)),
+        (Method::POST, "/api/v1/status", None),
         (
             Method::GET,
             "/api/v1/repositories/home/snapshots",
@@ -411,6 +414,23 @@ async fn a_read_token_reads_without_a_session_or_a_csrf_token() {
         .send(get("/api/v1/plans", &[("authorization", &token)]))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// An AI agent in connect mode reads the status summary with the `read`
+/// scope, as it reads the plans it sums up (§4.6).
+#[tokio::test]
+async fn a_read_token_reads_the_status_summary_with_what_the_probe_found() {
+    let daemon = Daemon::new();
+    let token = daemon.token(&[Scope::Read]).await;
+    let response = daemon
+        .send(get("/api/v1/status", &[("authorization", &token)]))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status["full-disk-access"], "not-applicable", "{status}");
 }
 
 /// The snapshot tree reads a folder with the `read` scope, as it reads the

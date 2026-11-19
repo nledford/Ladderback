@@ -127,22 +127,24 @@ async fn both_backends_tell_the_status_alike() {
         .await
         .expect("a status");
 
-    assert_eq!(in_process.plans, connect.plans);
-    assert_eq!(in_process.running, connect.running);
+    assert_eq!(in_process.summary, connect.summary);
     // What the two are told is the daemon's state, not an empty one.
     let plans: Vec<&str> = in_process
+        .summary
         .plans
         .iter()
         .map(|plan| plan.plan.id.as_str())
         .collect();
     assert_eq!(plans, ["home", "work"]);
     let last: Vec<Option<&str>> = in_process
+        .summary
         .plans
         .iter()
         .map(|plan| plan.last.as_ref().map(|last| last.status.as_str()))
         .collect();
     assert_eq!(last, [Some("failed"), Some("queued")]);
     let running: Vec<&str> = in_process
+        .summary
         .running
         .iter()
         .map(|op| op.plan.as_str())
@@ -153,6 +155,40 @@ async fn both_backends_tell_the_status_alike() {
     assert_eq!(connect.access, mcp::Access::SignInOff);
     assert_eq!(in_process.daemon, None);
     assert_eq!(in_process.access, mcp::Access::InProcess);
+}
+
+#[tokio::test]
+async fn a_plans_last_success_is_told_by_its_operation_when_it_finished_and_how_long_ago() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let mut backup = queued(3, "home", 1_700_000_000);
+    backup.start(at(1_700_000_000)).expect("the backup starts");
+    backup
+        .succeed(at(1_700_000_060))
+        .expect("the backup succeeds");
+    let daemon = a_daemon_with(scratch.path(), std::slice::from_ref(&backup)).await;
+    let before = Timestamp::now();
+    let status = InProcess::over(&daemon.state)
+        .status()
+        .await
+        .expect("a status");
+    let after = Timestamp::now();
+
+    let home = &status.summary.plans[0];
+    let success = home.last_success.as_ref().expect("home's last success");
+    assert_eq!(
+        success.operation,
+        backup.id().as_uuid().hyphenated().to_string()
+    );
+    assert_eq!(success.finished_at, at(1_700_000_060).to_string());
+    let ago = |now: Timestamp| u64::try_from(now.as_second() - 1_700_000_060).expect("a past");
+    assert!(
+        (ago(before)..=ago(after)).contains(&success.ago_seconds),
+        "{} seconds ago",
+        success.ago_seconds
+    );
+    // A plan with no schedule is never overdue; the other never succeeded.
+    assert!(!home.overdue);
+    assert_eq!(status.summary.plans[1].last_success, None);
 }
 
 #[tokio::test]
@@ -329,6 +365,13 @@ struct WithSnapshots {
 
 #[async_trait]
 impl http_adapter::Catalog for WithSnapshots {
+    async fn status(
+        &self,
+        full_disk_access: api::FullDiskAccessStateDto,
+    ) -> Result<api::StatusDto, http_adapter::CatalogError> {
+        self.catalog.status(full_disk_access).await
+    }
+
     async fn plans(&self) -> Result<api::PlansDto, http_adapter::CatalogError> {
         self.catalog.plans().await
     }
