@@ -279,15 +279,7 @@ fn line(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> String
 /// `path` as a message shows it: a control character as its escape, never
 /// sent to the terminal as it is.
 fn shown(path: &Path) -> String {
-    let mut shown = String::new();
-    for c in path.to_string_lossy().chars() {
-        if c.is_control() {
-            shown.extend(c.escape_default());
-        } else {
-            shown.push(c);
-        }
-    }
-    shown
+    crate::output::escaped(&path.to_string_lossy())
 }
 
 #[cfg(test)]

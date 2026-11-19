@@ -32,7 +32,7 @@ use crate::composition::profile_refusals::{
     Notice, Refusal, config_folder_unknown, export_refusal, import_refusal, plan_unknown,
     profile_notice, repository_alias_invalid, runtime_unavailable,
 };
-use crate::output::{Report, to_stderr, to_stdout, write_json};
+use crate::output::{self, Report, to_stderr, to_stdout, write_json};
 use crate::{finish, say, text};
 
 /// Where stock rustic looks for the profiles a profile uses, when it is not
@@ -64,9 +64,16 @@ fn refuse(localizer: &Localizer, refusal: &Refusal) -> io::Result<()> {
     to_stderr(&refusal_said(localizer, refusal))
 }
 
-/// The line [`refuse`] prints.
-fn refusal_said(_localizer: &Localizer, _refusal: &Refusal) -> String {
-    todo!()
+/// The line [`refuse`] prints: its arguments and detail, which can come
+/// from the profile, the configuration or the operating system, escaped
+/// ([`output::refusal_line`]).
+fn refusal_said(localizer: &Localizer, refusal: &Refusal) -> String {
+    output::refusal_line(
+        localizer,
+        refusal.code,
+        &refusal.args,
+        refusal.detail.as_deref(),
+    )
 }
 
 /// Prints a notice on stderr, as the catalog says it.

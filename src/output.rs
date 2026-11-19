@@ -91,20 +91,82 @@ pub(crate) fn to_stderr(text: &str) -> io::Result<()> {
     write_text(&mut io::stderr().lock(), text)
 }
 
-/// The sentence the catalog says a refusal in, `code` with `args` and
-/// `detail`, as the command line shows it.
-pub(crate) fn refusal_said(
-    _localizer: &Localizer,
-    _code: ErrorCode,
-    _args: &[(&str, MsgArg)],
-    _detail: Option<&str>,
-) -> String {
-    todo!()
+/// `text` as the command line shows text from outside it (a daemon's, a
+/// profile's, the configuration's, the operating system's): each control
+/// character, C0, DEL and C1, as its escape (`\u{1b}`, `\r`, `\u{9b}`), so a
+/// terminal shows it rather than acting on it.
+pub(crate) fn escaped(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() {
+            shown.extend(c.escape_default());
+        } else {
+            shown.push(c);
+        }
+    }
+    shown
 }
 
-/// `error` as the command line may have another localizer say it.
-pub(crate) fn escaped_error(_error: &ErrorDto) -> ErrorDto {
-    todo!()
+/// `arg` with its text [`escaped`], if it has one.
+fn escaped_arg(arg: &MsgArg) -> MsgArg {
+    match arg {
+        MsgArg::Text(text) => MsgArg::Text(escaped(text)),
+        other => other.clone(),
+    }
+}
+
+/// A refusal's detail [`escaped`], without the white space at its ends: a
+/// line break at the end of a program's output is no word of it, and a
+/// detail of only white space stays no detail, as the catalog has it.
+fn escaped_detail(detail: Option<&str>) -> Option<String> {
+    detail.map(str::trim).map(escaped)
+}
+
+/// The sentence the catalog says a refusal in, `code` with `args` and
+/// `detail`, as the command line shows it: each text of its arguments and
+/// its detail [`escaped`], since they can come from outside; the catalog's
+/// own words as they are.
+pub(crate) fn refusal_said(
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(&str, MsgArg)],
+    detail: Option<&str>,
+) -> String {
+    let args: Vec<(&str, MsgArg)> = args
+        .iter()
+        .map(|(name, arg)| (*name, escaped_arg(arg)))
+        .collect();
+    let detail = escaped_detail(detail);
+    localizer.error(code, &args, detail.as_deref()).into_text()
+}
+
+/// The line a command prints a refusal in on standard error: the
+/// program's name, then the [`refusal_said`].
+pub(crate) fn refusal_line(
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(&str, MsgArg)],
+    detail: Option<&str>,
+) -> String {
+    format!(
+        "ladderback: {}\n",
+        refusal_said(localizer, code, args, detail)
+    )
+}
+
+/// `error` as the command line may have another localizer say it, as
+/// [`refusal_said`] says a refusal: each text of its arguments and its
+/// detail [`escaped`].
+pub(crate) fn escaped_error(error: &ErrorDto) -> ErrorDto {
+    ErrorDto {
+        code: error.code,
+        args: error
+            .args
+            .iter()
+            .map(|(name, arg)| (name.clone(), escaped_arg(arg)))
+            .collect(),
+        detail: escaped_detail(error.detail.as_deref()),
+    }
 }
 
 /// Whether a write failed because nobody reads what it wrote to: the reader

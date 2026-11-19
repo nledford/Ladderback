@@ -130,7 +130,8 @@ fn report(
             }
             (KeyringUser::Repository(alias), Some(refusal)) => {
                 let (error, args, detail) = app::announce::refused("password", refusal);
-                let reason = localizer.error(error, &args, detail.as_deref());
+                let reason =
+                    crate::output::refusal_said(localizer, error, &args, detail.as_deref());
                 let args = [
                     ("repository", text(alias.as_str())),
                     entry,
