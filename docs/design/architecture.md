@@ -90,7 +90,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Unmanaged group | Untagged snapshots, grouped by the repository's `group-by` |
 | Orphaned group | Tagged snapshots whose plan or agent no longer exists, or whose agent tags or plan tags disagree |
 | Adopt | Retag an unmanaged or orphaned group into a plan |
-| Maintenance owner | The single party that runs forget, prune and check for a repository (I1). Not the project's maintainer: where code or UI copy says "maintainer" for this role, it means the maintenance owner |
+| Maintenance owner | The single party that runs forget, prune and check for a repository (I1). Not the project's maintainer: where a code name says `maintainer` for this role (message IDs such as `ui-maintainer-on`, test steps), it means the maintenance owner; UI copy says "maintain" |
 | Ownership | The stateless domain service that enforces I1 on an agent with no hub: it decides from facts passed in whether this agent may run maintenance (`Ownership`, `crates/domain/src/maintenance.rs`). Not the hub's `RepositoryOwnership` |
 | Repository ownership | Planned for M9: the hub's aggregate that holds a repository's claims, grant, lease and epoch (`RepositoryOwnership`, §7.3, layer 2) |
 | Prune guard | Planned for M9: the owner's check that waits for unfinished backups before a prune (`PruneGuard`, §7.3, layer 2). The backup budget and `Deadline` are layer 1 and live in Execution |
