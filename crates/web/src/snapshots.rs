@@ -51,6 +51,14 @@ use crate::ws::{self, Got, Posted};
 /// control that held it leaves the page with the history it showed.
 const MAINTENANCE_HEADING: &str = "maintenance-heading";
 
+/// The room a snapshot's short ID needs to read whole as a table's row
+/// header: its eight hex digits in bold at their widest, DejaVu Sans Bold's
+/// "b" and "d" (0.72em each), with the letter spacing a reader may add
+/// (0.12em, 1.4.12), 6.7em in all, and the cell's padding at its widest
+/// (0.5rem a side), rounded up. Two fifths of the forget review's frame at
+/// 320 px leaves an ID 89.6 px, and the widest takes 91.6 (#1129).
+const SHORT_ID_ROOM: Rem = Rem::tenths(80);
+
 /// The heading of a repository's stats, which also names their table.
 const STATS_HEADING: &str = "stats-heading";
 
@@ -999,7 +1007,8 @@ pub(crate) fn snapshots_table(
                 None => short.into_any(),
             }
         },
-    );
+    )
+    .kept_whole(SHORT_ID_ROOM);
     // Whether the host writes this locale's instants, asked once per table.
     let writes_instants = localizer.writes_instants();
     let time_localizer = Arc::clone(localizer);

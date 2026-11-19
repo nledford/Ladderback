@@ -36,10 +36,12 @@ thread_local! {
 type Draw<R> = Arc<dyn Fn(Signal<R>) -> AnyView + Send + Sync>;
 
 /// One column of a [`Table`]: its header's words, its width, how its cells
-/// are aligned, how each is drawn and, if it can be sorted by, how.
+/// are aligned, how each is drawn and, if it can be sorted by, how. A row
+/// header's column may keep the room its words need to read whole.
 pub struct Column<R: Send + Sync + 'static> {
     header: String,
     width: Rem,
+    whole: Option<Rem>,
     align: Align,
     sort: Option<Sort<R>>,
     draw: Draw<R>,
@@ -57,9 +59,24 @@ impl<R: Send + Sync + 'static> Column<R> {
         Self {
             header: header.into(),
             width,
+            whole: None,
             align: Align::Start,
             sort: None,
             draw: Arc::new(draw),
+        }
+    }
+
+    /// The column, as a table's row header, `room` wide however narrow its
+    /// frame, so its words read whole, as a snapshot's short ID must; the
+    /// frame scrolls instead. It is still at most its width, and at most
+    /// three fifths of the frame, so the cells beside it can be read. Only
+    /// for a header beside cells that hold no control: the room it covers can
+    /// be more than the share that keeps a focused control in view (2.4.11).
+    /// A column that isn't the row header's is its width already.
+    pub fn kept_whole(self, room: Rem) -> Self {
+        Self {
+            whole: Some(room),
+            ..self
         }
     }
 
@@ -205,14 +222,15 @@ where
     let caption_id = format!("table-{id}-caption");
     let frame_name = name.frame_labelled_by(&caption_id).to_owned();
     let pinned = row_header.width;
+    let whole = row_header.whole;
     let columns: Arc<Vec<Column<R>>> =
         Arc::new(std::iter::once(row_header).chain(columns).collect());
     let width = rules::table_width(
         pinned,
-        None,
+        whole,
         columns.iter().skip(1).map(|column| column.width),
     );
-    let pinned_room = rules::pinned_room(pinned, None);
+    let pinned_room = rules::pinned_room(pinned, whole);
     let sorted = RwSignal::new(None::<Sorted>);
     let shown = Memo::new(move |_| rules::shown(state.get(), rows.with(Vec::len)));
     let order = {
@@ -307,7 +325,7 @@ where
                                             .enumerate()
                                             .map(|(at, column)| {
                                                 let width = if at == 0 {
-                                                    rules::row_header_width(column.width, None)
+                                                    rules::row_header_width(column.width, column.whole)
                                                 } else {
                                                     column.width.to_string()
                                                 };

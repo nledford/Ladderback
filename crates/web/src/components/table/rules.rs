@@ -192,17 +192,26 @@ impl Align {
 /// The share of its frame a pinned row header takes at most, in percent: a
 /// header pinned wider would leave the cells scrolling past it too little
 /// room to show a focused control (2.4.11) on a small screen with larger
-/// text, where a frame is 8rem wide. Its words break inside it there.
+/// text, where a frame is 8rem wide. Its words break inside it there, unless
+/// they must read whole (`whole` below), beside cells that hold no control.
 const PINNED_SHARE: u8 = 40;
+
+/// The share of its frame a row header kept whole takes at most, in percent:
+/// the cells beside it keep two fifths to be read in, so at 320 px with 200 %
+/// text, where the forget review's frame is 180 px, its words break inside it
+/// rather than cover every cell.
+const WHOLE_SHARE: u8 = 60;
 
 /// The row header column's width: `width`, or, in a frame too narrow for it
 /// to leave the others room, its share of the frame (`cqi`: the frame is the
-/// size container around the table), but never less than `whole`, where its
-/// header's words must read whole.
+/// size container around the table). Where its header's words must read
+/// whole, that share is `whole`, but at most three fifths of the frame.
 pub fn row_header_width(width: Rem, whole: Option<Rem>) -> String {
     match whole {
         None => format!("min({width}, {PINNED_SHARE}cqi)"),
-        Some(_) => todo!(),
+        Some(whole) => {
+            format!("min({width}, max({PINNED_SHARE}cqi, min({whole}, {WHOLE_SHARE}cqi)))")
+        }
     }
 }
 
@@ -213,7 +222,7 @@ pub fn row_header_width(width: Rem, whole: Option<Rem>) -> String {
 pub fn pinned_room(width: Rem, whole: Option<Rem>) -> String {
     match whole {
         None => format!("min({width}, {PINNED_SHARE}%)"),
-        Some(_) => todo!(),
+        Some(whole) => format!("min({width}, max({PINNED_SHARE}%, min({whole}, {WHOLE_SHARE}%)))"),
     }
 }
 

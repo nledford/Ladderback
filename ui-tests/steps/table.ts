@@ -284,9 +284,9 @@ Then(
 // A word ends where its box does: text in another block or flex item, such as
 // the next line of a cell or a header's sort button, starts a word of its own.
 // A column keeps its width in rem however narrow the frame (the frame
-// scrolls), but a pinned header is at most 40 % of the frame: a word wider
-// than its cell's room breaks rather than run over the cells beside it, and
-// only such a word.
+// scrolls), but a pinned header is at most 40 % of the frame (60 % where its
+// words must read whole): a word wider than its cell's room breaks rather
+// than run over the cells beside it, and only such a word.
 Then("no word of a table breaks inside, an address only between its parts", async function (this: BrowserWorld) {
   const broken = await this.page.evaluate(async () => {
     await document.fonts.ready;
