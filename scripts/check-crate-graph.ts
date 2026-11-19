@@ -83,6 +83,7 @@ export const GRAPH: Readonly<Record<string, Row | typeof ANY>> = {
   secrets: adapter(),
   "signing-adapter": adapter(),
   store: adapter(),
+  "tls-adapter": adapter(),
   ladderback: ANY,
 };
 
@@ -108,6 +109,9 @@ export const OWNERS: readonly Model[] = [
   { name: "axum", crates: /^axum([-_]|$)/, owners: ["http-adapter", "ladderback"] },
   // Ed25519 for the hub and its agents goes through the `Signing` port (§16, decision 120).
   { name: "aws-lc", crates: /^aws-lc([-_]|$)/, owners: ["signing-adapter"] },
+  // The hub's built-in TLS, its certificate and the agent's pinned verifier (§16, decision 120).
+  { name: "rustls", crates: /^(tokio-)?rustls([-_]|$)/, owners: ["tls-adapter"] },
+  { name: "rcgen", crates: /^rcgen$/, owners: ["tls-adapter"] },
 ];
 
 const own = <T>(record: Readonly<Record<string, T>>, key: string): T | undefined =>

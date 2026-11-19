@@ -221,10 +221,13 @@ gallery lacks "${release_flags[@]}"
 # workspace crate (a path package) whose `hub` is on is found;
 # dev-dependencies are in it on purpose, so no test support turns the hub on
 # in the build `just test-release` runs either. A release build must also lack every crate
-# only the hub uses, which a plain dependency added by mistake would bring in.
-# As for the pseudolocales, both sides are checked, so that a change that
-# blinds this check cannot pass it with nothing to find.
-hub_only_crates='^(qrcode|rqrr)$'
+# only the hub uses, which a plain dependency added by mistake would bring in:
+# the QR crates, and the built-in TLS's `tls-adapter` with its `rcgen`
+# (`rustls` and `tokio-rustls` are in every release already, for the
+# daemon's own HTTPS clients). As for the pseudolocales, both sides are
+# checked, so that a change that blinds this check cannot pass it with
+# nothing to find.
+hub_only_crates='^(qrcode|rqrr|rcgen|tls-adapter)$'
 hub() {
   local want=$1 package=$2
   shift 2

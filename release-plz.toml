@@ -59,6 +59,14 @@ git_tag_name = "unreleased-mcp-v{{ version }}"
 name = "releases-adapter"
 git_tag_name = "unreleased-releases-adapter-v{{ version }}"
 
+[[package]]
+name = "signing-adapter"
+git_tag_name = "unreleased-signing-adapter-v{{ version }}"
+
+[[package]]
+name = "tls-adapter"
+git_tag_name = "unreleased-tls-adapter-v{{ version }}"
+
 [changelog]
 header = """# Changelog
 

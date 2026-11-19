@@ -264,6 +264,11 @@ fn fake_signing_meets_the_signing_contract() {
     contract::signing::run(&app::fakes::FakeSigning);
 }
 
+#[test]
+fn fake_tls_keys_meet_the_tls_keys_contract() {
+    contract::tls_keys::run(&app::fakes::FakeTlsKeys::default());
+}
+
 #[tokio::test]
 async fn in_memory_identity_meets_the_identity_contract() {
     contract::identity::run(&app::fakes::InMemoryIdentity::default()).await;
