@@ -273,6 +273,23 @@ Feature: API tokens
       And the page shows the paragraph "No API tokens yet."
       And the page has no accessibility violations
 
+    Scenario: A revoked token is answered in a toast, said once, and focus goes to the section's heading as its row goes
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the admin is signed in with "demo-admin-pass"
+      And the admin has created the API token "nightly-mcp" with the scopes "read, run"
+      When I open the address "/settings#api-tokens"
+      And I skip to the content
+      And I press Tab until focus is on the button "Revoke token nightly-mcp"
+      And I press Enter
+      And I press Tab until focus is on the button "Revoke the token"
+      And I press Enter
+      Then the toast reads "Token nightly-mcp revoked." after its icon "Success"
+      And the toast is no live region, nor holds one
+      And focus is on the heading "API tokens"
+      And the polite region reads "Token nightly-mcp revoked."
+      And the polite region keeps reading "Token nightly-mcp revoked."
+      And the page has no accessibility violations
+
     Scenario: A form without a label or a scope moves focus to an error summary that names both
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
