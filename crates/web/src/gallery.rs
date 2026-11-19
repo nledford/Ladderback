@@ -42,6 +42,7 @@ use crate::routes::{PageHeading, text_with};
 use crate::text;
 use crate::variants::{Placement, Rem, Side, Size, StatusTone, Tone};
 
+mod alert;
 mod progress;
 mod steps;
 mod table;
@@ -212,28 +213,6 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let hidden_files = RwSignal::new(false);
     let presses_localizer = Arc::clone(&localizer);
     let form_sent = t(msg::UI_GALLERY_BUTTON_SENT);
-    // The alert demo: its words in each tone, the warning's with a link
-    // inside it in the alert's text color (Inherit), and whether its
-    // dismissible notice shows, which its Dismiss button clears and the
-    // button after it sets again.
-    let (alert_information, alert_success, alert_error) = (
-        t(msg::UI_GALLERY_ALERT_INFORMATION),
-        t(msg::UI_GALLERY_ALERT_SUCCESS),
-        t(msg::UI_GALLERY_ALERT_ERROR),
-    );
-    let alert_warning = sentence_link(
-        &localizer,
-        Destination::route("/operations", Matching::Section),
-        msg::UI_GALLERY_ALERT_WARNING,
-        t(msg::UI_GALLERY_ALERT_WARNING_LINK),
-        LinkTone::Inherit,
-    );
-    let notice_shown = RwSignal::new(true);
-    let (notice, notice_show) = (
-        t(msg::UI_GALLERY_ALERT_DISMISSIBLE),
-        t(msg::UI_GALLERY_ALERT_SHOW),
-    );
-    let alert_localizer = Arc::clone(&localizer);
     // The skeleton demo: whether its plan has come, which its toggle sets,
     // the words that say the wait, and the plan's own lines.
     let plan_shown = RwSignal::new(false);
@@ -1437,50 +1416,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 )}
             </p>
         </section>
-        <section id="alert-demo">
-            <DemoHeading text=t(msg::UI_GALLERY_ALERT_HEADING) />
-            // Each tone, information first, which is the default.
-            <Alert localizer=Arc::clone(&localizer)>{alert_information}</Alert>
-            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Success>
-                {alert_success}
-            </Alert>
-            // A link inside, in the alert's text color.
-            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Warning>
-                {alert_warning}
-            </Alert>
-            // A long path, which wraps inside the alert on a small screen.
-            <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
-                {alert_error}
-            </Alert>
-            // A notice the reader dismisses: the page takes it away, and
-            // focus goes to the button that brings it back.
-            {move || {
-                notice_shown
-                    .get()
-                    .then(|| {
-                        let notice = notice.clone();
-                        view! {
-                            <Alert
-                                localizer=Arc::clone(&alert_localizer)
-                                dismissal=Dismissal {
-                                    on_dismiss: Callback::new(move |()| notice_shown.set(false)),
-                                    then_focus: ALERT_DEMO_SHOW.to_owned(),
-                                }
-                            >
-                                {notice}
-                            </Alert>
-                        }
-                    })
-            }}
-            <p>
-                <Button
-                    id=ALERT_DEMO_SHOW
-                    content=Content::Text(notice_show.into())
-                    disabled=notice_shown
-                    on_press=Callback::new(move |()| notice_shown.set(true))
-                />
-            </p>
-        </section>
+        <alert::AlertDemo localizer=Arc::clone(&localizer) />
         <tabs::TabsDemo localizer=Arc::clone(&localizer) />
         <tabs::VerticalTabsDemo localizer=Arc::clone(&localizer) />
         <tabs::ResponsiveTabsDemo localizer=Arc::clone(&localizer) />
@@ -1533,10 +1469,6 @@ fn DemoHeading(text: String) -> impl IntoView {
 
 /// rustic's documentation, the demo's other site.
 const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
-
-/// The ID of the alert demo's button that brings its dismissed notice back,
-/// where focus goes when the notice is dismissed.
-const ALERT_DEMO_SHOW: &str = "alert-demo-show";
 
 /// The name the gallery's dismissible demo banner is remembered under in
 /// the browser's local storage.
