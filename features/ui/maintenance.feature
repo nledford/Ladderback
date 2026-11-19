@@ -493,6 +493,7 @@ Feature: Maintenance of a repository on the Snapshots page
   Scenario: The Snapshots page reflows on a small screen
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times
+    And each snapshot's ID reaches the page in the widest hex digits
     And the plan "home" is now called "away"
     And a viewport of 320 by 256 pixels
     When I open the address "/snapshots"
@@ -505,10 +506,13 @@ Feature: Maintenance of a repository on the Snapshots page
     And no text is clipped
     And the page has no accessibility violations
 
+  # rustic picks a snapshot's ID at random, so the widest IDs are given to the
+  # page rather than left to chance (#1129).
   Scenario: The history tables keep their words whole on a small screen, the review of a forget open
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
+    And each snapshot's ID reaches the page in the widest hex digits
     And a viewport of 320 by 256 pixels
     When I open the address "/snapshots"
     And I skip to the content
@@ -518,6 +522,29 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Enter
     Then the dialog "Forget snapshots of demo" opens with focus inside it
     And no word of a table is broken across lines
+    And each table's row header leaves two fifths of its frame to the cells beside it
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
+
+  # Text spacing (WCAG 1.4.12) makes an ID about a sixth wider: the widest
+  # case its room is set by.
+  Scenario: The history tables keep the widest snapshot IDs whole on a small screen with wider text spacing, the review of a forget open
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And each snapshot's ID reaches the page in the widest hex digits
+    And a viewport of 320 by 256 pixels
+    And the reader increases the text spacing
+    When I open the address "/snapshots"
+    And I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And no word of a table is broken across lines
+    And each table's row header leaves two fifths of its frame to the cells beside it
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
@@ -539,6 +566,7 @@ Feature: Maintenance of a repository on the Snapshots page
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" keeps the last 1 snapshots
     And the plan "home" has been backed up 3 times
+    And each snapshot's ID reaches the page in the widest hex digits
     And a viewport of 320 by 256 pixels
     And the reader sets the text size to 200 percent
     And the reader increases the text spacing
@@ -549,6 +577,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Tab until focus is on the button "Forget snapshots"
     And I press Enter
     Then the dialog "Forget snapshots of demo" opens with focus inside it
+    And each table's row header leaves two fifths of its frame to the cells beside it
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations

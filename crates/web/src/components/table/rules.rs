@@ -192,34 +192,54 @@ impl Align {
 /// The share of its frame a pinned row header takes at most, in percent: a
 /// header pinned wider would leave the cells scrolling past it too little
 /// room to show a focused control (2.4.11) on a small screen with larger
-/// text, where a frame is 8rem wide. Its words break inside it there.
+/// text, where a frame is 8rem wide. Its words break inside it there, unless
+/// they must read whole (`whole` below), beside cells that hold no control.
 const PINNED_SHARE: u8 = 40;
+
+/// The share of its frame a row header kept whole takes at most, in percent:
+/// the cells beside it keep two fifths to be read in, so at 320 px with 200 %
+/// text, where the forget review's frame is 180 px, its words break inside it
+/// rather than cover every cell.
+const WHOLE_SHARE: u8 = 60;
 
 /// The row header column's width: `width`, or, in a frame too narrow for it
 /// to leave the others room, its share of the frame (`cqi`: the frame is the
-/// size container around the table).
-pub fn row_header_width(width: Rem) -> String {
-    format!("min({width}, {PINNED_SHARE}cqi)")
+/// size container around the table). Where its header's words must read
+/// whole, that share is `whole`, but at most three fifths of the frame.
+pub fn row_header_width(width: Rem, whole: Option<Rem>) -> String {
+    match whole {
+        None => format!("min({width}, {PINNED_SHARE}cqi)"),
+        Some(whole) => {
+            format!("min({width}, max({PINNED_SHARE}cqi, min({whole}, {WHOLE_SHARE}cqi)))")
+        }
+    }
 }
 
 /// The frame's `scroll-padding-inline-start`: the room the pinned row header
 /// covers, so a control focused in a cell scrolled under it is scrolled out
 /// from beneath it. A percentage of the frame's own width, as a padding of a
 /// scroller's is.
-pub fn pinned_room(width: Rem) -> String {
-    format!("min({width}, {PINNED_SHARE}%)")
+pub fn pinned_room(width: Rem, whole: Option<Rem>) -> String {
+    match whole {
+        None => format!("min({width}, {PINNED_SHARE}%)"),
+        Some(whole) => format!("min({width}, max({PINNED_SHARE}%, min({whole}, {WHOLE_SHARE}%)))"),
+    }
 }
 
 /// The table's own width: the frame's (`100cqi`), or, where that is less
 /// than the row header's and the `columns`' widths added up, those widths,
 /// and the frame scrolls.
-pub fn table_width(row_header: Rem, columns: impl IntoIterator<Item = Rem>) -> String {
+pub fn table_width(
+    row_header: Rem,
+    whole: Option<Rem>,
+    columns: impl IntoIterator<Item = Rem>,
+) -> String {
     let sum = columns
         .into_iter()
         .fold(Rem::tenths(0), Rem::saturating_add);
     format!(
         "max(100cqi, calc({} + {sum}))",
-        row_header_width(row_header)
+        row_header_width(row_header, whole)
     )
 }
 
@@ -498,19 +518,43 @@ mod tests {
     #[test]
     fn the_table_is_as_wide_as_its_frame_or_its_columns_whichever_is_wider() {
         assert_eq!(
-            table_width(Rem::tenths(80), [Rem::tenths(55), Rem::tenths(110)]),
+            table_width(Rem::tenths(80), None, [Rem::tenths(55), Rem::tenths(110)]),
             "max(100cqi, calc(min(8.0rem, 40cqi) + 16.5rem))"
         );
         assert_eq!(
-            table_width(Rem::tenths(80), []),
+            table_width(Rem::tenths(80), None, []),
             "max(100cqi, calc(min(8.0rem, 40cqi) + 0.0rem))"
         );
     }
 
     #[test]
     fn a_pinned_row_header_takes_at_most_two_fifths_of_its_frame() {
-        assert_eq!(row_header_width(Rem::tenths(65)), "min(6.5rem, 40cqi)");
-        assert_eq!(pinned_room(Rem::tenths(65)), "min(6.5rem, 40%)");
+        assert_eq!(
+            row_header_width(Rem::tenths(65), None),
+            "min(6.5rem, 40cqi)"
+        );
+        assert_eq!(pinned_room(Rem::tenths(65), None), "min(6.5rem, 40%)");
+    }
+
+    /// A snapshot's short ID breaks across lines in two fifths of a frame at
+    /// 320 px (#1129), so a header whose words must read whole keeps their
+    /// room in a narrow frame, up to three fifths of it: the cells beside it
+    /// keep the rest to be read in, at 200 % text too.
+    #[test]
+    fn a_row_header_kept_whole_keeps_its_room_up_to_three_fifths_of_its_frame() {
+        let whole = Some(Rem::tenths(65));
+        assert_eq!(
+            row_header_width(Rem::tenths(100), whole),
+            "min(10.0rem, max(40cqi, min(6.5rem, 60cqi)))"
+        );
+        assert_eq!(
+            pinned_room(Rem::tenths(100), whole),
+            "min(10.0rem, max(40%, min(6.5rem, 60%)))"
+        );
+        assert_eq!(
+            table_width(Rem::tenths(100), whole, [Rem::tenths(200)]),
+            "max(100cqi, calc(min(10.0rem, max(40cqi, min(6.5rem, 60cqi))) + 20.0rem))"
+        );
     }
 
     #[test]
