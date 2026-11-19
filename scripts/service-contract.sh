@@ -14,8 +14,9 @@
 #             to linger only to a user who doesn't (#546); the service
 #             runs and answers on 127.0.0.1:9898; `install-service` again over
 #             the running one, which must have stopped by the time it returns,
-#             and a new process answers; then `remove-service`, after which
-#             nothing of it runs.
+#             and a new process answers; a SIGTERM the manager didn't send,
+#             after which the manager starts it again (#1035); then
+#             `remove-service`, after which nothing of it runs.
 #
 # Both fail, never skip, when no user service manager answers: a skip would
 # hide what they exist to catch. Both start services in your session, so they
@@ -224,9 +225,18 @@ install() {
   second=$(wait_running "$first")
   echo "the new service runs as process $second and answers on $ADDRESS"
 
+  # #1035: a SIGTERM the manager didn't send, as a stray `pkill -f` would,
+  # ends the daemon with status 0, and the manager starts it again: launchd
+  # once its 10 s throttle allows, systemd after `RestartSec=10`.
+  echo "--- SIGTERM from another program"
+  kill -TERM "$second" || fail "the daemon (process $second) couldn't be sent SIGTERM"
+  local third
+  third=$(wait_running "$second")
+  echo "the service ran again as process $third after another program's SIGTERM"
+
   echo "--- remove-service"
   "$bin" remove-service || fail "remove-service failed"
-  ! alive "$second" || fail "remove-service returned while the daemon (process $second) still ran"
+  ! alive "$third" || fail "remove-service returned while the daemon (process $third) still ran"
   ! manager_has || fail "the service manager still has the service after remove-service"
   [ ! -e "$file" ] || fail "remove-service left the service file at $file"
   if [ "$os" = Linux ] && { [ -e "$wants" ] || [ -L "$wants" ]; }; then

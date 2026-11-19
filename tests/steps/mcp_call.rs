@@ -15,9 +15,9 @@ use serde_json::{Value, json};
 use testkit::children::Owned;
 
 use api::MsgArg;
-use l10n::{Localizer, msg};
+use l10n::Localizer;
 
-use super::events_steps::Events;
+use super::events_steps::{DATA_DIR_IN_USE, Events};
 use super::interop_steps::{Ran, ran};
 use super::mcp_steps::{
     ANSWER, OPERATION_WAIT, STOP, catalog_sentence, daemon_url, headless_root, mcp_command,
@@ -423,7 +423,7 @@ fn token_never_printed(agent: &mut Agent) {
 #[then("the call is refused, naming the data folder and the process that holds it")]
 fn headless_call_refused(agent: &mut Agent) {
     let said = Localizer::new(&[]).message(
-        msg::CLI_DATA_DIR_IN_USE,
+        DATA_DIR_IN_USE,
         &[
             (
                 "path",

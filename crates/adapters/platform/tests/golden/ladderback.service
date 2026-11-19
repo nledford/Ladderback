@@ -11,9 +11,8 @@ CacheDirectoryMode=0700
 Environment=LADDERBACK_CACHE_DIR=%C/ladderback
 KillMode=mixed
 TimeoutStopSec=75
-Restart=on-failure
+Restart=always
 RestartSec=10
-RestartForceExitStatus=75
 SuccessExitStatus=75
 
 [Install]

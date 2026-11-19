@@ -11,7 +11,7 @@ use api::MsgArg;
 use cucumber::{given, then, when};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
 use domain::{OperationId, PlanId, RepositoryId, SignedDuration, Timestamp, Uuid};
-use l10n::{Localizer, msg};
+use l10n::Localizer;
 use platform::SystemClock;
 use store::SqliteStore;
 
@@ -199,7 +199,9 @@ async fn a_prune_is_accepted(agent: &mut Agent) {
     assert_eq!(status, 202, "the prune is accepted: {body}");
 }
 
-#[then("the second Ladderback is refused, naming the data folder and the process that holds it")]
+#[then(
+    "the second Ladderback is refused, naming the data folder, the process that holds it and how to stop the installed service for good"
+)]
 fn the_second_is_refused(agent: &mut Agent) {
     let holder = agent.events.pid();
     let data = Events::data_dir(agent);
@@ -208,7 +210,7 @@ fn the_second_is_refused(agent: &mut Agent) {
     // The refusal as the daemon's catalog words it for this folder and this
     // holder: bare digits could as well be a time in the log's own lines.
     let said = Localizer::new(&[]).message(
-        msg::CLI_DATA_DIR_IN_USE,
+        events_steps::DATA_DIR_IN_USE,
         &[
             ("path", MsgArg::Text(data.display().to_string())),
             ("pid", MsgArg::Text(holder.to_string())),
@@ -219,6 +221,19 @@ fn the_second_is_refused(agent: &mut Agent) {
         "the refusal says {:?}:\n{log}",
         said.text()
     );
+    // A killed service is started again by its manager (#1035): the refusal
+    // names the commands that stop it for good, as the person types them.
+    let stop = if cfg!(target_os = "macos") {
+        "launchctl bootout gui/$(id -u)/io.github.nledford.ladderback"
+    } else {
+        "systemctl --user stop ladderback"
+    };
+    for command in [stop, "ladderback remove-service"] {
+        assert!(
+            log.contains(command),
+            "the refusal names {command:?}:\n{log}"
+        );
+    }
 }
 
 /// The schedule kept `plan`'s next run, as the daemon keeps it while it is

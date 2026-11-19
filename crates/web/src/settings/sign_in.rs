@@ -15,6 +15,8 @@ use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::{Button, Confirmation, RadioGroup, ReviewDialog, Working, sentence_view};
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -178,7 +180,7 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
     let saving = text(&localizer, msg::UI_SESSION_LENGTH_SAVING);
     let saved_text = text(&localizer, msg::UI_SESSION_LENGTH_SAVED);
     let form = move || match phase.get() {
-        Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+        Phase::Loading => first_load(loading.clone(), Awaited::form(1)).into_any(),
         Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
         Phase::Ready => match refused.get() {
             Some(sentence) => view! { <p>{sentence_view(sentence)}</p> }.into_any(),

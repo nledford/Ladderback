@@ -14,10 +14,7 @@
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<dict>
-		<key>SuccessfulExit</key>
-		<false/>
-	</dict>
+	<true/>
 	<key>ExitTimeOut</key>
 	<integer>75</integer>
 	<key>StandardErrorPath</key>

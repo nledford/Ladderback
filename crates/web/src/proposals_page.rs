@@ -21,6 +21,8 @@ use leptos::task::{spawn_local, tick};
 use crate::announcer::Politeness;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Banner, Button, StepUp, StepUpField, TextField, focus_element, hand_focus_when_gone,
     refusal_alert, say_refusals, text_field,
@@ -220,7 +222,7 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
         <p>{body}</p>
         {off}
         {move || match shape.get() {
-            (Phase::Loading, _, _) => view! { <p>{loading.clone()}</p> }.into_any(),
+            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::Text).into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
                 refusal_alert(&refusal_localizer, sentence).into_any()
