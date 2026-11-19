@@ -261,7 +261,7 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
   - The one dependency that has only a copyleft license, `option-ext` (MPL-2.0, file-level copyleft, which we never modify), is allowed by name as an `exception`, so a second MPL-2.0 crate fails.
   - A license not on the list is the maintainer's decision, not an edit made to turn the check green.
 - **Bans.** Wildcard requirements are denied; duplicate versions only warn, because the tree has some we don't control. `chrono` is denied except as a dependency of `suppaftp`, `rmcp` or `schemars`, which can't drop it (decision 22), so a Ladderback crate that starts to use it fails.
-- **Sources.** crates.io only, plus the one git repository, `rustic-rs/rustic_core`, that the pinned engine crates come from (decision 7).
+- **Sources.** crates.io only, and no git repository: the engine crates come from their crates.io releases too (decision 7).
 
 **In CI.** The `Dependencies (cargo-deny)` job runs `just deny` on pull requests that touch more than docs, and every night.
 
@@ -410,7 +410,7 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 What may come into the repository, under which license, and what test data may hold:
 
 - **Dependencies:** ask the maintainer before adding an external dependency (a crates.io crate, an npm package, a GitHub Action). Its license must be compatible with MIT OR Apache-2.0. A new workspace crate is not a dependency in this sense.
-- **Versions:** a crate is added or updated at its latest stable release whenever possible: the newest version on crates.io that isn't a pre-release. Anything else (an older version, a pre-release, a git revision) needs a reason, in a comment beside it in `Cargo.toml` and in the pull request. Reasons that hold: an unreleased fix only a git revision has (`rustic_core` and `rustic_backend`, pinned to one commit); the version another dependency uses, so the build has one copy (`tokio-tungstenite` at the version `axum`'s `ws` uses); a newer release that breaks the build, a test or a supported platform, named with its issue. When the reason goes, the crate moves to the latest release in a commit of its own.
+- **Versions:** a crate is added or updated at its latest stable release whenever possible: the newest version on crates.io that isn't a pre-release. Anything else (an older version, a pre-release, a git revision) needs a reason, in a comment beside it in `Cargo.toml` and in the pull request. Reasons that hold: an unreleased fix only a git revision has (as `rustic_core` and `rustic_backend` were pinned to one commit until 0.14.0 had `Progress::error`, decision 7); the version another dependency uses, so the build has one copy (`tokio-tungstenite` at the version `axum`'s `ws` uses); a newer release that breaks the build, a test or a supported platform, named with its issue. When the reason goes, the crate moves to the latest release in a commit of its own.
 - **License:** MIT OR Apache-2.0 ([LICENSE-MIT](../../LICENSE-MIT), [LICENSE-APACHE](../../LICENSE-APACHE)). Ladderback is inspired by Backrest and never derived from it: Backrest is GPL-3.0, so never copy, port or paraphrase its code ([design](README.md)).
 - **Screenshots and fixtures:** use neutral demo data and scratch repositories, never real backups, hostnames or paths. A secret in a test is a canary value, never a real repository password or key.
 
