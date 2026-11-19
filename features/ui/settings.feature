@@ -1,9 +1,10 @@
 @ui
 Feature: Settings shows its sections as tabs
   Settings holds several sections: the language of the web UI, the width of
-  its pages, the admin password, signing in, the API tokens and the restart of
-  Ladderback. Each is a tab of its own, in a column beside its section where
-  the page is wide and in a row above it where it is narrow, and the first is
+  its pages, the admin password, signing in, the API tokens, the dry-run
+  allowlist and the restart of Ladderback. Each is a tab of its own, in a
+  column beside its section where the page is wide and in a row above it
+  where it is narrow, and the first is
   selected when the page opens. Each tab has an address, Settings' own with
   the section's name after a "#", which opens Settings at that tab. Choosing a
   tab gives the page its address, so loading the page again, as saving the
@@ -21,6 +22,7 @@ Feature: Settings shows its sections as tabs
       | Admin password     |
       | Signing in         |
       | API tokens         |
+      | Dry-run allowlist  |
       | Restart Ladderback |
     And the tab "Language" is selected and the one Tab stop of its list
     And the tab "Language" shows its panel, and every other panel of its list is drawn but hidden
@@ -69,13 +71,14 @@ Feature: Settings shows its sections as tabs
     And the tab "<tab>" shows its panel, and every other panel of its list is drawn but hidden
 
     Examples:
-      | fragment       | tab                |
-      | language       | Language           |
-      | page-width     | Page width         |
-      | admin-password | Admin password     |
-      | signing-in     | Signing in         |
-      | api-tokens     | API tokens         |
-      | restart        | Restart Ladderback |
+      | fragment          | tab                |
+      | language          | Language           |
+      | page-width        | Page width         |
+      | admin-password    | Admin password     |
+      | signing-in        | Signing in         |
+      | api-tokens        | API tokens         |
+      | dry-run-allowlist | Dry-run allowlist  |
+      | restart           | Restart Ladderback |
 
   Scenario: An address that names no section opens Settings at its first tab
     When I open the address "/settings#backups"

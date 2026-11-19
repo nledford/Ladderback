@@ -69,10 +69,11 @@ mod gallery;
 mod language_choice;
 // The live regions' glue around the announcer.
 mod live;
-// What the admin password's and the API tokens' sections of Settings
-// decide, host-tested; `settings.rs` is their glue.
+// What the admin password's, the API tokens' and the dry-run allowlist's
+// sections of Settings decide, host-tested; `settings.rs` is their glue.
 mod admin_password;
 mod api_tokens;
+mod dry_run_allowlist;
 // The live pages' decisions (host-tested) and their DOM glue; see
 // `backend.rs` for why the fetch-and-socket glue is only covered by the
 // browser journeys.
