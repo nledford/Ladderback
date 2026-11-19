@@ -36,6 +36,7 @@ import {
   webkit,
 } from "playwright";
 
+import { avoidLabelledByCrash } from "./labelledby-crash.ts";
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
 
 setDefaultTimeout(30_000);
@@ -338,6 +339,7 @@ export class BrowserWorld extends World {
     // CI can be read from its run.
     await this.context.tracing.start({ screenshots: true, snapshots: true });
     this.tracing = true;
+    await avoidLabelledByCrash(this.context, engine);
     await this.scriptedDaemon?.install(this.context);
     for (const install of this.contextRoutes) await install(this.context);
     if (this.answerDelayMs > 0) {
