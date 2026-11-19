@@ -46,6 +46,7 @@ mod alert;
 mod badge;
 mod banner;
 mod button;
+mod checkbox;
 mod icon;
 mod link;
 mod pause_updates;
@@ -319,30 +320,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 </p>
             </ModalDialog>
         </section>
-        <section id="checkbox-demo">
-            <DemoHeading text=t(msg::UI_GALLERY_CHECKBOX_HEADING) />
-            // Its two states: off with a description, and on without one.
-            <Checkbox
-                id="gallery-notification"
-                label=t(msg::UI_GALLERY_DEMO_NOTIFICATION)
-                description=t(msg::UI_GALLERY_DEMO_NOTIFICATION_HINT)
-                checked=RwSignal::new(false)
-            />
-            <Checkbox
-                id="gallery-log"
-                label=t(msg::UI_GALLERY_DEMO_LOG)
-                checked=RwSignal::new(true)
-            />
-            // Its error, as a form shows once it is checked, under its
-            // description.
-            <Checkbox
-                id="gallery-terms"
-                label=t(msg::UI_GALLERY_DEMO_TERMS)
-                description=t(msg::UI_GALLERY_DEMO_TERMS_HINT)
-                error=Some(t(msg::UI_GALLERY_DEMO_TERMS_ERROR))
-                checked=RwSignal::new(false)
-            />
-        </section>
+        <checkbox::CheckboxDemo localizer=Arc::clone(&localizer) />
         <radio_group::RadioGroupDemo localizer=Arc::clone(&localizer) />
         <status_badge::StatusBadgeDemo localizer=Arc::clone(&localizer) />
         <badge::BadgeDemo localizer=Arc::clone(&localizer) />
