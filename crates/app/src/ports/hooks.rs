@@ -136,7 +136,7 @@ impl HookOutcome {
 ///   timeout. A hook that ends on the SIGTERM is not signalled again, so a
 ///   process it started that ignored the SIGTERM can outlive it
 ///   (scheduling-and-config.md §6.1).
-/// - Its environment is the worker's allow-list (components.md §4.1) plus
+/// - Its environment is the worker's allow-list (components/worker.md §4.1) plus
 ///   the `LADDERBACK_*` variables of the context, and nothing else: no
 ///   secret of the run, no repository URL with credentials. What the
 ///   allow-list passes that is a credential, a proxy URL's userinfo, is in
