@@ -38,3 +38,21 @@ updates:
     commit-message:
       prefix: fix
       include: scope
+
+  # npm: security updates only, as for Cargo. `crates/web` holds the Tailwind
+  # CLI, which builds the shipped stylesheet in the release build;
+  # `ui-tests` the Playwright and cucumber harness. Both are build and test
+  # tooling, so the prefix is `build`: the PR title check accepts it, and
+  # release-plz leaves it out of the changelog.
+  - package-ecosystem: npm
+    directories:
+      - /crates/web
+      - /ui-tests
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: build
+      include: scope

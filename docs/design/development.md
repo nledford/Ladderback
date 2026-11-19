@@ -263,12 +263,17 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
 - **Bans.** Wildcard requirements are denied; duplicate versions only warn, because the tree has some we don't control. `chrono` is denied except as a dependency of `suppaftp`, `rmcp` or `schemars`, which can't drop it (decision 22), so a Ladderback crate that starts to use it fails.
 - **Sources.** crates.io only, plus the one git repository, `rustic-rs/rustic_core`, that the pinned engine crates come from (decision 7).
 
-**In CI.** The `Dependencies (cargo-deny)` job runs `just deny` on pull requests that touch more than docs, and every night.
+**npm audit.** `just npm-audit` runs `npm audit --audit-level=high` on `crates/web/package-lock.json` (the Tailwind CLI, which builds the shipped stylesheet in the release build) and `ui-tests/package-lock.json` (the UI test harness). Every package in both is a dev dependency, so all of them are audited: `--omit=dev` would leave nothing. A high or critical advisory fails it; a low or moderate one is printed and passes.
 
-- The RustSec database changes without any code change, so a new advisory first turns the nightly run red, before a pull request does; an open pull request's next run shows it too.
+- **An advisory with no fix.** npm audit has no ignore list. A transitive advisory the direct dependency hasn't fixed yet is fixed with an `overrides` entry in that folder's `package.json`, pinning the patched version, with a comment in the pull request on why and what ends it. Where no patched version exists, the job stays red until one does or the maintainer accepts it; it isn't a required check, so it doesn't block merging.
+- **Dependabot.** `.github/dependabot.yml` covers both lockfiles for security updates only, as for Cargo, with the `build` prefix, so its pull requests pass the title check and stay out of the changelog.
+
+**In CI.** The `Dependencies (cargo-deny)` job runs `just deny`, then `just npm-audit`, on pull requests that touch more than docs, and every night.
+
+- The RustSec and npm advisory databases change without any code change, so a new advisory first turns the nightly run red, before a pull request does; an open pull request's next run shows it too.
 - A scheduled run notifies no one, so a failed nightly run opens an issue titled "Nightly dependency check failed", or comments on the open one.
 - It is not a required check yet; the maintainer may add it to the ruleset once it has proved stable.
-- `just verify` leaves it out because it needs the network.
+- `just verify` leaves both out because they need the network.
 
 ### 13.7 Changes that touch several places
 
