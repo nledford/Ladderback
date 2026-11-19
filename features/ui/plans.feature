@@ -168,7 +168,7 @@ Feature: Plans page
 
   Scenario: A reader who leaves the form while its plan is saved keeps their place
     Given a demo plan "demo-home" with a scratch repository
-    And the daemon answers each read of the plans list after the first 10 seconds late
+    And the daemon holds back its answer to each read of the plans list after the first
     When I open the address "/plans"
     And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
@@ -179,12 +179,13 @@ Feature: Plans page
     Then the polite region comes to contain "The plan demo-home is saved."
     When I press Shift+Tab until focus is on the link "Log"
     Then the page shows the button "Save the plan"
-    And the button "Save the plan" leaves the page
+    When the daemon has answered the held reads of the plans list
+    Then the button "Save the plan" leaves the page
     And focus stays on the link "Log"
 
   Scenario: A plan's form opened while another plan is saved stays open
     Given two demo plans "demo-home" and "demo-work" with a scratch repository
-    And the daemon answers each read of the plans list after the first 10 seconds late
+    And the daemon holds back its answer to each read of the plans list after the first
     When I open the address "/plans"
     And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
@@ -201,7 +202,7 @@ Feature: Plans page
 
   Scenario: Leaving the Plans page while a saved plan is listed again breaks nothing
     Given a demo plan "demo-home" with a scratch repository
-    And the daemon answers each read of the plans list after the first 3 seconds late
+    And the daemon holds back its answer to each read of the plans list after the first
     When I open the address "/plans"
     And I skip to the content
     And I press Tab until focus is on the button "Change demo-home"
@@ -213,6 +214,8 @@ Feature: Plans page
     When I press Shift+Tab until focus is on the link "Operations"
     And I press Enter
     Then focus is on the main heading "Operations"
+    When the daemon has answered the held reads of the plans list
+    Then focus stays on the heading "Operations"
     And the page raises no script error while the daemon answers
 
   Scenario: Deleting a plan asks first and says its snapshots stay

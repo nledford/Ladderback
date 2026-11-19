@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import type { Locator, Page } from "playwright";
 import { expect } from "playwright/test";
 
-import { focusProbes } from "./focus-probes.ts";
+import { type Box, focusProbes, type Point } from "./focus-probes.ts";
 
 /** Playwright's name for the engine that drives `page`: `chromium`, `firefox`
  *  or `webkit`. It comes from the page, not from `world.ts`'s `engine`: only
@@ -207,10 +207,21 @@ async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise
   );
 }
 
+// How many times the check looks for the focused element before it gives up
+// on a page that keeps moving it. A page that draws something new above the
+// element, as when a skeleton gives way to its table, moves it once; the
+// looks after that are for a page that draws it in several steps.
+const LOOKS = 5;
+
 /** The focused element's look, focused and not, and whether any of
- *  `focusProbes`' points finds it. The page is read twice, the points worked
- *  out between the reads; both read the one element focused after `key`, and
- *  the check fails if focus has left it in between. */
+ *  `focusProbes`' points finds it. The page is read at least twice, the
+ *  points worked out between the reads; every read reads the one element
+ *  focused after `key`, and the check fails if focus has left it in between.
+ *  The points are worked out from a measure of the element, and the read that
+ *  looks at them measures it again first: if it moved in between, as when the
+ *  page draws something above it, the points would find what took its place,
+ *  so the check works them out again from the new measure and looks again,
+ *  and fails if the element has moved before each of `LOOKS` looks. */
 async function lookAtFocus(page: Page, key: string) {
   const engine = engineOf(page);
   // WebKit scrolls a newly focused element into view from a timer that the
@@ -243,71 +254,97 @@ async function lookAtFocus(page: Page, key: string) {
     return el === null || el === document.body || el === document.documentElement ? null : el;
   }, revealsFocusFromATimer && !stopped);
   try {
-    const measured = await focused.evaluate((el) => {
-      if (el === null) return null;
-      const box = ({ left, top, right, bottom }: DOMRect) => ({ left, top, right, bottom });
-      return {
-        fragments: [...el.getClientRects()].map(box),
-        whole: box(el.getBoundingClientRect()),
-        viewport: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
-      };
-    });
+    let read = await focused.evaluate(readFocus, null);
+    for (let looks = 0; read.focus === "measured"; looks += 1) {
+      assert.ok(
+        looks < LOOKS,
+        `after ${key} the focused element kept moving while the check looked at it, ${LOOKS} times: ${read.name}`,
+      );
+      const { fragments, whole, viewport } = read.measure;
+      const probes = focusProbes(fragments, whole, viewport, revealsFocusInPart);
+      read = await focused.evaluate(readFocus, { probes, measure: read.measure });
+    }
     assert.ok(
-      measured !== null,
+      read.focus !== "none",
       `after ${key} focus is on the page body or nowhere, so a keyboard user has no focus to see`,
     );
-    const probes = focusProbes(measured.fragments, measured.whole, measured.viewport, revealsFocusInPart);
-    const state = await focused.evaluate((measuredEl, probes) => {
-      if (measuredEl === null || document.activeElement !== measuredEl) return null;
-      // HTML, SVG and MathML elements, the ones that take focus, can all blur
-      // and focus again (the HTMLOrSVGElement mixin).
-      const el = measuredEl as Element & HTMLOrSVGElement;
-      const look = () => {
-        const s = getComputedStyle(el);
-        return {
-          outlineStyle: s.outlineStyle,
-          outlineWidth: s.outlineWidth,
-          outlineColor: s.outlineColor,
-          outlineOffset: s.outlineOffset,
-          boxShadow: s.boxShadow,
-        };
-      };
-      // Layers a ring can sit on, nearest first. A ring outside the element
-      // sits on the parent's background; one drawn inward sits on the element.
-      const backgrounds = (from: Element | null) => {
-        const layers: string[] = [];
-        for (let node = from; node; node = node.parentElement) {
-          layers.push(getComputedStyle(node).backgroundColor);
-        }
-        return layers;
-      };
-      const focusedLook = look();
-      const hits = probes.map(({ x, y }) => document.elementFromPoint(x, y));
-      const inward = parseFloat(focusedLook.outlineOffset) < 0;
-      const focusedBackgrounds = backgrounds(inward ? el : el.parentElement);
-      const name = el.outerHTML.slice(0, 80);
-      const unobscured = hits.some((hit) => hit !== null && (hit === el || el.contains(hit)));
-      const found = hits.map((hit) => (hit === null ? "nothing, out of view" : `<${hit.localName}>`)).join(", ");
-
-      // Compare with the same element unfocused, then put focus back.
-      el.blur();
-      const unfocusedLook = look();
-      el.focus({ focusVisible: true });
-      return {
-        name,
-        unobscured,
-        found,
-        focusedLook,
-        unfocusedLook,
-        focusedBackgrounds,
-        restored: document.activeElement === el,
-      };
-    }, probes);
-    assert.ok(state !== null, `after ${key} focus moved while the check looked at it, ${await whereFocusIs(page)}`);
-    return state;
+    assert.ok(read.focus !== "left", `after ${key} focus moved while the check looked at it, ${await whereFocusIs(page)}`);
+    return read.look;
   } finally {
     await focused.dispose();
   }
+}
+
+/** Where the focused element stands: its boxes, one for each line, and the
+ *  box around them all, in a viewport of this size. */
+interface Measure {
+  fragments: Box[];
+  whole: Box;
+  viewport: { width: number; height: number };
+}
+
+/** One read of the page by `lookAtFocus`, in the page, of the element `el` it
+ *  found focused: none, focus gone from it, its measure (when `probing` is
+ *  null, or when it no longer stands where `probing` measured it), or its
+ *  look, found or not by `probing`'s points. */
+function readFocus(el: Element | null, probing: { probes: Point[]; measure: Measure } | null) {
+  if (el === null) return { focus: "none" } as const;
+  if (document.activeElement !== el) return { focus: "left" } as const;
+  const box = ({ left, top, right, bottom }: DOMRect): Box => ({ left, top, right, bottom });
+  const measure: Measure = {
+    fragments: [...el.getClientRects()].map(box),
+    whole: box(el.getBoundingClientRect()),
+    viewport: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
+  };
+  const name = el.outerHTML.slice(0, 80);
+  if (probing === null || JSON.stringify(measure) !== JSON.stringify(probing.measure)) {
+    return { focus: "measured", measure, name } as const;
+  }
+  // HTML, SVG and MathML elements, the ones that take focus, can all blur
+  // and focus again (the HTMLOrSVGElement mixin).
+  const focusable = el as Element & HTMLOrSVGElement;
+  const look = () => {
+    const s = getComputedStyle(focusable);
+    return {
+      outlineStyle: s.outlineStyle,
+      outlineWidth: s.outlineWidth,
+      outlineColor: s.outlineColor,
+      outlineOffset: s.outlineOffset,
+      boxShadow: s.boxShadow,
+    };
+  };
+  // Layers a ring can sit on, nearest first. A ring outside the element
+  // sits on the parent's background; one drawn inward sits on the element.
+  const backgrounds = (from: Element | null) => {
+    const layers: string[] = [];
+    for (let node = from; node; node = node.parentElement) {
+      layers.push(getComputedStyle(node).backgroundColor);
+    }
+    return layers;
+  };
+  const focusedLook = look();
+  const hits = probing.probes.map(({ x, y }) => document.elementFromPoint(x, y));
+  const inward = parseFloat(focusedLook.outlineOffset) < 0;
+  const focusedBackgrounds = backgrounds(inward ? focusable : focusable.parentElement);
+  const unobscured = hits.some((hit) => hit !== null && (hit === focusable || focusable.contains(hit)));
+  const found = hits.map((hit) => (hit === null ? "nothing, out of view" : `<${hit.localName}>`)).join(", ");
+
+  // Compare with the same element unfocused, then put focus back.
+  focusable.blur();
+  const unfocusedLook = look();
+  focusable.focus({ focusVisible: true });
+  return {
+    focus: "seen",
+    look: {
+      name,
+      unobscured,
+      found,
+      focusedLook,
+      unfocusedLook,
+      focusedBackgrounds,
+      restored: document.activeElement === focusable,
+    },
+  } as const;
 }
 
 const COLOR = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)/g;
