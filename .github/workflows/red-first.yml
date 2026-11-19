@@ -3,17 +3,12 @@
 # this check alone, not every job in ci.yml.
 #
 # Each run builds the base tree and then the test: commit's tree
-# (scripts/red-first.ts), each with a target dir of its own. The base tree
-# isn't seeded from the checkout's `target/` (RED_FIRST_SEED is unset):
-# `setup-rust` restores the compiler outputs of the build of main that ci.yml's
-# `Check (ubuntu-latest)` saved into mr boxington's (mbx) store, and a
-# dependency of the base tree's build is a hit there, whatever the tree's path
-# or target dir. The test: commit's tree starts from a copy of the base tree's
-# (the script does that itself), so only what changed since that build of main
-# compiles again, the workspace crates at least: the trees are checked out
-# after the copies, so their sources are newer. Pending measurement (#1076):
-# this step's build time is read against main's, and `RED_FIRST_SEED: target`
-# goes back on the last step if copying the restored `target/` is faster.
+# (scripts/red-first.ts). The base tree starts from a copy of the build of main
+# that mr boxington (mbx) restored, which ci.yml's `Check (ubuntu-latest)`
+# saved (RED_FIRST_SEED), and the test: commit's tree from a copy of the base
+# tree's. So only what changed since that build of main compiles again, the
+# workspace crates at least: the trees are checked out after the copies, so
+# their sources are newer.
 name: Red-first
 
 on:
@@ -39,6 +34,9 @@ env:
   CARGO_TERM_COLOR: always
   # Same as ci.yml, see the comment there.
   CARGO_INCREMENTAL: 0
+  # Same as ci.yml, see the comment there: the build copied from main's cache
+  # has the layout mbx can save, and this build must use the same one.
+  __CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT: 1
   # This job builds the pull request's first commit and its merge base, whose
   # Cargo.toml can predate the dev profile's line tables (technical design
   # §13.11); without this they would build everything with full debug info.
@@ -123,3 +121,4 @@ jobs:
       - run: just red-first "origin/$BASE_REF"
         env:
           BASE_REF: ${{ github.base_ref }}
+          RED_FIRST_SEED: target
