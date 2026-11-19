@@ -1,6 +1,6 @@
 //! The hooks adapter: a [`HookRunner`] that spawns each hook's command as a
 //! process, without a shell, in a process group of its own, with the
-//! worker's scrubbed environment (components.md §4.1, security.md §10.2),
+//! worker's scrubbed environment (components/worker.md §4.1, security.md §10.2),
 //! through the spawn gate (decision 58), so a hook inherits no other child's
 //! pipes and no other child inherits its pipes.
 //!
@@ -73,7 +73,7 @@ const PIPE_GRACE: Duration = Duration::from_secs(1);
 const READ_CHUNK: usize = 8 * 1024;
 
 /// The environment variables of the daemon a hook keeps, by exact name:
-/// the worker's allow-list (components.md §4.1). A hook gets what a worker
+/// the worker's allow-list (components/worker.md §4.1). A hook gets what a worker
 /// gets, and nothing more of the daemon's own.
 const KEPT: [&str; 24] = [
     "PATH",

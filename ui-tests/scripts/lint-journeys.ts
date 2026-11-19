@@ -59,6 +59,7 @@ for (const entry of (await readdir(featuresDir, { recursive: true })).sort()) {
     console.error(`${where}: ${advice} ${step}`);
   }
 }
-if (crossings > 0) console.error(`${crossings} walk(s) to the page's content cross the header (docs/design/components.md §4.4).`);
+if (crossings > 0)
+  console.error(`${crossings} walk(s) to the page's content cross the header (docs/design/components/web-ui.md §4.4).`);
 
 if (failures + crossings > 0) process.exit(1);
