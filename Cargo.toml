@@ -238,6 +238,9 @@ toml = { version = "1.2.1", features = ["preserve_order"] }
 toml_edit = "0.25.19"
 tower = "0.5.3"
 unic-langid = { version = "0.9.6", features = ["macros"] }
+# The hub compares hostnames as casefold(NFC(name)) (§16, decision 120,
+# "Hostnames"); already in the tree through `idna`.
+unicode-normalization = "0.1.26"
 url = "2.5.8"
 uuid = { version = "1.29.1", features = ["serde"] }
 # `JsValue` for the browser host, and the `wasm-bindgen-test` lanes that run
