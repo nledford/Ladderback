@@ -73,7 +73,9 @@ Then("the list of steps {string} reads, in order:", async function (this: Browse
       }),
     ),
   );
-  unseen.forEach((why, at) => assert.equal(why, null, `the state of step ${at + 1} of ${name} isn't shown: ${why}`));
+  for (const [at, why] of unseen.entries()) {
+    assert.equal(why, null, `the state of step ${at + 1} of ${name} isn't shown: ${why}`);
+  }
 });
 
 // One step carries `aria-current="step"`, the one the process stands at.
