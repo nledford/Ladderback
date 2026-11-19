@@ -29,6 +29,7 @@ pub mod secrets;
 pub mod service;
 pub mod session_store;
 pub mod signing;
+pub mod sources;
 pub mod stats_store;
 pub mod tls_keys;
 pub mod walk;
