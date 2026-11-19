@@ -53,6 +53,19 @@ impl FullDiskAccessRoute {
             opener: Some(opener),
         }
     }
+
+    /// What the probe found last: not applicable where there is no probe,
+    /// and unknown before it has found anything.
+    pub fn state(&self) -> FullDiskAccessStateDto {
+        match &self.check {
+            None => FullDiskAccessStateDto::NotApplicable,
+            Some(check) => match check.found() {
+                Some(FullDiskAccess::Granted) => FullDiskAccessStateDto::Granted,
+                Some(FullDiskAccess::Missing) => FullDiskAccessStateDto::Missing,
+                Some(FullDiskAccess::Unknown) | None => FullDiskAccessStateDto::Unknown,
+            },
+        }
+    }
 }
 
 /// Whether `request` comes from a browser on the agent's own Mac: its
@@ -74,16 +87,8 @@ fn from_same_mac(request: &Request) -> bool {
 /// What the route answers: what the probe found last, and whether this
 /// browser may ask for the settings pane.
 fn answer(route: &FullDiskAccessRoute, request: &Request) -> Response {
-    let state = match &route.check {
-        None => FullDiskAccessStateDto::NotApplicable,
-        Some(check) => match check.found() {
-            Some(FullDiskAccess::Granted) => FullDiskAccessStateDto::Granted,
-            Some(FullDiskAccess::Missing) => FullDiskAccessStateDto::Missing,
-            Some(FullDiskAccess::Unknown) | None => FullDiskAccessStateDto::Unknown,
-        },
-    };
     let dto = FullDiskAccessDto {
-        state,
+        state: route.state(),
         opens_settings: route.opener.is_some() && from_same_mac(request),
     };
     (StatusCode::OK, Json(dto)).into_response()

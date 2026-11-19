@@ -548,6 +548,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             "/api/v1/plans",
             axum::routing::get(list_plans).post(plans::create),
         )
+        .route("/api/v1/status", axum::routing::get(read_status))
         // Outside `/api/v1/plans/{id}`, so a plan whose ID is `dry-run`
         // stays reachable there.
         .route("/api/v1/dry-runs", axum::routing::post(dry_runs::dry_run))
@@ -923,6 +924,15 @@ async fn cancel_operation(
 async fn list_plans(State(state): State<AppState>) -> Response {
     match state.catalog.plans().await {
         Ok(plans) => (StatusCode::OK, axum::Json(plans)).into_response(),
+        Err(CatalogError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
+    }
+}
+
+/// `GET /api/v1/status`: the status summary (§4.6), with what the Full
+/// Disk Access probe found last.
+async fn read_status(State(state): State<AppState>) -> Response {
+    match state.catalog.status(state.full_disk_access.state()).await {
+        Ok(status) => (StatusCode::OK, axum::Json(status)).into_response(),
         Err(CatalogError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }
