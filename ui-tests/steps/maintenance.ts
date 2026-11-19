@@ -410,6 +410,44 @@ Then("the page lists {int} snapshots", async function (this: BrowserWorld, count
   );
 });
 
+// The widest hex digits in DejaVu Sans Bold, Linux CI's font for a table's
+// bold row header: "b" and "d" are 11.45 px at 16 px, every other digit
+// 11.13 px or less. rustic picks a snapshot's ID at random, so it is this wide
+// only by chance, and a check of a table's words would pass or fail with the
+// IDs a run happens to get (#1129).
+const WIDEST_HEX = ["b", "d"] as const;
+
+// Every snapshot's ID in the daemon's answers to the page, the `id` of each
+// snapshot listed, 64 hex digits, is given to the page in the widest digits
+// alone: the first 8, its short ID, count the IDs seen so far in "b" and "d",
+// so no two IDs read alike, and the rest are all "d". Only an `id` is
+// rewritten, never another string of 64 hex digits such as a session's
+// token, and in place, so an answer keeps its length. A run that sent an ID
+// back would name no snapshot, so the journeys that take this step only look.
+Given("each snapshot's ID reaches the page in the widest hex digits", function (this: BrowserWorld) {
+  const widest = new Map<string, string>();
+  const widen = (id: string): string => {
+    const known = widest.get(id);
+    if (known !== undefined) return known;
+    const count = widest.size;
+    assert.ok(count < 2 ** 8, "more snapshot IDs than 8 widest digits can tell apart");
+    const wide = Array.from({ length: 64 }, (_, at) => WIDEST_HEX[at < 8 ? (count >> at) & 1 : 1]).join("");
+    widest.set(id, wide);
+    return wide;
+  };
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/**", async (route) => {
+      const response = await route.fetch();
+      if (!response.headers()["content-type"]?.startsWith("application/json")) {
+        await route.fulfill({ response });
+        return;
+      }
+      const body = (await response.text()).replace(/"id":"([0-9a-f]{64})"/g, (_, id: string) => `"id":"${widen(id)}"`);
+      await route.fulfill({ response, body });
+    });
+  });
+});
+
 // A header or an ID that breaks in the middle of a word, with room beside it,
 // is a layout that squeezed its column. A table's words stay whole: each is
 // laid out on one line.

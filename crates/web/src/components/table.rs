@@ -207,8 +207,12 @@ where
     let pinned = row_header.width;
     let columns: Arc<Vec<Column<R>>> =
         Arc::new(std::iter::once(row_header).chain(columns).collect());
-    let width = rules::table_width(pinned, columns.iter().skip(1).map(|column| column.width));
-    let pinned_room = rules::pinned_room(pinned);
+    let width = rules::table_width(
+        pinned,
+        None,
+        columns.iter().skip(1).map(|column| column.width),
+    );
+    let pinned_room = rules::pinned_room(pinned, None);
     let sorted = RwSignal::new(None::<Sorted>);
     let shown = Memo::new(move |_| rules::shown(state.get(), rows.with(Vec::len)));
     let order = {
@@ -303,7 +307,7 @@ where
                                             .enumerate()
                                             .map(|(at, column)| {
                                                 let width = if at == 0 {
-                                                    rules::row_header_width(column.width)
+                                                    rules::row_header_width(column.width, None)
                                                 } else {
                                                     column.width.to_string()
                                                 };
