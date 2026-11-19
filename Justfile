@@ -113,7 +113,7 @@ clippy:
 # for `web`, not its wasm32-only ones. CI runs `lint` on Linux alone, so a doc
 # comment on macOS-only code is checked only by a local run on a Mac; macOS CI
 # runs `clippy` (see `clippy`).
-[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
+[doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index and component-index checks, and rustdoc with warnings as errors.')]
 [group('quality')]
 lint: _ui-deps _shellcheck-pinned clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
@@ -127,6 +127,7 @@ lint: _ui-deps _shellcheck-pinned clippy
     scripts/check-doc-paths.sh
     node scripts/check-paragraph-length.ts
     node scripts/decision-index.ts
+    node scripts/component-index.ts
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 # Write the index of decisions in docs/design/roadmap.md §16 from the files in
@@ -137,6 +138,16 @@ lint: _ui-deps _shellcheck-pinned clippy
 [group('quality')]
 decision-index:
     node scripts/decision-index.ts --write
+
+# Write the index of the shared components' accessibility contracts in
+# docs/design/components/accessibility.md (§4.5) from the files in
+# docs/design/components/accessibility/, one row per file, its heading and its
+# component. After adding or renaming a contract, and to resolve a conflict in
+# the table: take either side, then run this.
+[doc('Write the §4.5 contract index from docs/design/components/accessibility/.')]
+[group('quality')]
+component-index:
+    node scripts/component-index.ts --write
 
 # List, for each translation (or the tags given), the messages that are
 # missing, translated but not yet reviewed, or stale: their en-US text has

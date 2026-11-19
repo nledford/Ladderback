@@ -2,7 +2,7 @@
 Feature: Repositories over HTTP
   The Repositories page tests a location, connects it by saving it into the
   configuration, and initialises a repository where nothing is yet, all through
-  the daemon's API (components.md §4.4). A request carries the password a
+  the daemon's API (components/web-ui.md §4.4). A request carries the password a
   person typed: no answer carries it back, and what the configuration keeps is
   the settings as written, a secret reference included (I4). A repository's
   location is answered with any password in it masked.
@@ -107,6 +107,14 @@ Feature: Repositories over HTTP
     When the client tests the repository
     Then the answer has status 200 and the repository's ID
     And the daemon's log warns that other users can read the password file, of mode "0644"
+    And the daemon's log never holds the password
+
+  Scenario: A password file other users can change is used, and the daemon's log says so by its path and mode
+    Given an initialised repository
+    And the client's password is in a file other users can change
+    When the client tests the repository
+    Then the answer has status 200 and the repository's ID
+    And the daemon's log warns that other users can change the password file, of mode "0620"
     And the daemon's log never holds the password
 
   Scenario: Initialising a new local repository gives it an ID and saves nothing
