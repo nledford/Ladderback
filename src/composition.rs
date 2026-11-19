@@ -1,7 +1,10 @@
 //! The daemon's wiring (technical design §3.2, §4.2): the one place beside
-//! `main` that knows every adapter. `serve` opens the store and the config,
-//! builds the engine, secrets and the event bus, and hands the result to the
-//! HTTP router. Adapters stay constructor-injected; nothing else sees them.
+//! `main` that knows every adapter. For `serve`, [`startup::daemon`] opens
+//! the store and the config, builds the engine, secrets and the event bus,
+//! and hands the result to the HTTP router. Each submodule wires one area
+//! (the catalog, the repositories, the plan runner, maintenance and the
+//! rest); this root keeps what more than one of them shares. Adapters stay
+//! constructor-injected; nothing else sees them.
 //!
 //! A startup that cannot happen is a typed exit: [`Refused`] carries the
 //! catalog message and its arguments, and `serve` prints it and fails — never
@@ -618,10 +621,12 @@ fn unavailable(
     RepositoriesError::Unavailable { code, args, detail }
 }
 
-/// A failure a job ran into, in the words every route that tells one shares:
-/// each route makes it its own refusal, and tells the three that differ by
-/// route (`OperationFailed`, `RepositoryExists`, `RepositoryNotFound`) its
-/// own way (#742).
+/// A failure a job ran into, in the words every route that tells one shares
+/// (#742). Each route makes it its own refusal: `OperationFailed`,
+/// `RepositoryNotFound` and `RepositoryConfigNotFound` become the route's
+/// own variants, and `RepositoryExists` is the one told differently by
+/// route, an existing repository to the Repositories API and a plain failed
+/// operation to a read of the repository.
 #[derive(Debug, Clone, PartialEq)]
 enum FailureRefusal {
     /// The engine's own words for a failure it reports. The engine redacts
