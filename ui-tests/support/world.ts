@@ -309,6 +309,9 @@ export class BrowserWorld extends World {
     // `browser.close()` has to close them all at once within its limit.
     await this.discardTrace();
     await (this.context as BrowserContext | undefined)?.close();
+    // Its pages and downloads went with it.
+    this.firstTab = null;
+    this.downloads = [];
     this.context = await browser.newContext(this.contextOptions);
     // Screenshots and DOM snapshots of every action, kept only when the
     // scenario fails (`keepFailureEvidence`), so a failure that shows only on

@@ -24,8 +24,9 @@ export const REPORT_MS = 1_000;
 /** How often a wait with nothing to tell it of a change reads again. */
 const POLL_MS = 100;
 
-/** When the step running now reaches its limit. */
-let stepEnds = Number.NEGATIVE_INFINITY;
+/** When the step running now reaches its limit; until a step starts (a
+ *  `node --test` of a helper), none has, and a wait has a whole step's limit. */
+let stepEnds: number | undefined;
 
 /** The options of a step with a limit of its own: cucumber's `timeout`, and
  *  the same limit for its waits, which cucumber's option doesn't reach. */
@@ -42,6 +43,7 @@ export function startStep(limitMs: number): void {
  *  less `REPORT_MS`. At least 1 ms, since Playwright reads a timeout of 0 as
  *  no limit at all. */
 export function patienceMs(): number {
+  if (stepEnds === undefined) return STEP_LIMIT_MS - REPORT_MS;
   return Math.max(1, stepEnds - REPORT_MS - Date.now());
 }
 
@@ -79,9 +81,20 @@ export async function untilStepLimit<T, U extends T>(what: string, read: () => P
 export async function untilStepLimit<T>(what: string, read: () => Promise<T>, done: (value: T) => boolean): Promise<T>;
 export async function untilStepLimit<T>(what: string, read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
   const ends = Date.now() + patienceMs();
+  let last: T | undefined;
   for (;;) {
-    const last = await read();
-    if (done(last)) return last;
+    // A read that waits of its own (Playwright's actions wait up to 30 s)
+    // ends at the step's limit too, so the step fails with what it last read.
+    const { promise: late, resolve: tooLate } = Promise.withResolvers<{ late: true }>();
+    const timer = setTimeout(() => tooLate({ late: true }), Math.max(0, ends - Date.now()));
+    try {
+      const outcome = await Promise.race([read().then((value) => ({ late: false as const, value })), late]);
+      if (!outcome.late) last = outcome.value;
+      else assert.fail(`${what} (last read ${last === null || last === undefined ? "nothing" : JSON.stringify(last)})`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (done(last as T)) return last as T;
     if (Date.now() >= ends) {
       assert.fail(`${what} (last read ${last === null || last === undefined ? "nothing" : JSON.stringify(last)})`);
     }

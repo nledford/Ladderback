@@ -32,11 +32,6 @@ const STRAY_PACK_NAMED = STRAY_PACK.slice(0, 8);
 // a debug build, and the page shows what came of it a moment later: the
 // steps wait for both until the step's limit (#1104).
 
-// How long the page may still show a line that a check says isn't there: a
-// check that something hasn't happened keeps a window of its own rather
-// than the step's limit (#1104).
-const GONE_MS = 10_000;
-
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -597,9 +592,10 @@ Then("the main content shows the line {string}", async function (this: BrowserWo
   await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
-// A line of something that hasn't happened: a window of its own (`GONE_MS`).
+// Reopening the dialog clears the line, so this waits for it to go until the
+// step's limit, as for anything the step caused.
 Then("the main content shows no line {string}", async function (this: BrowserWorld, text: string) {
-  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "hidden", timeout: GONE_MS });
+  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "hidden", timeout: patienceMs() });
 });
 
 // A warning is a line of the main content, its data set apart by bidi

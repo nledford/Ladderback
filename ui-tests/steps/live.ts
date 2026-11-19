@@ -876,7 +876,7 @@ Then("the page shows the row {string}", stepLimit(ROW_STEP_MS), async function (
  *  once the row is there: its words, as `said` reads them. */
 export async function cellText(world: BrowserWorld, name: string, row: string, column: string): Promise<string> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
-  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex, undefined, { timeout: patienceMs() });
   const found = rowNamed(world, name, row).first();
   await found.waitFor({ state: "visible", timeout: patienceMs() });
   // The row's cells in order, as `cellIndex` counts them.

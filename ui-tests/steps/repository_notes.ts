@@ -64,5 +64,5 @@ Then("the page notes nothing of the keyring", async function (this: BrowserWorld
   const answers = scripted.get(this);
   assert.ok(answers, "no Given set how the agent finds the keyring");
   await untilSettled(answers.read, "the page never asked for its notes");
-  await expect(this.page.getByText(KEYRING_NOTE)).toHaveCount(0, { timeout: GONE_MS });
+  await expect(this.page.getByText(KEYRING_NOTE)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
 });

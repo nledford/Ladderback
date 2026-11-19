@@ -98,6 +98,33 @@ test("a wait that read nothing says so", async (t) => {
   assert.equal(outcome.failed.message, "the row demo-docs (last read nothing)");
 });
 
+// A Playwright read waits up to 30 s of its own; a 130 s step whose row never
+// shows would otherwise run past its limit and fail with cucumber's timeout.
+// The read's own wait runs on the stopped clock, as the test's do.
+test("a read that waits of its own still ends at the step's limit, with what was read before", async (t) => {
+  stopClock(t);
+  startStep(130_000);
+  let reads = 0;
+  const outcome = watch(
+    untilStepLimit(
+      "the row demo-home shows Succeeded",
+      () => {
+        reads += 1;
+        if (reads === 1) return Promise.resolve("Running");
+        const { promise, resolve } = Promise.withResolvers<string>();
+        setTimeout(() => resolve("Running"), 30_000);
+        return promise;
+      },
+      (read) => read.includes("Succeeded"),
+    ),
+  );
+  await advance(t, 130_000);
+  assert.ok(outcome.at >= 130_000 - REPORT_MS, `the wait gave up at ${outcome.at} ms`);
+  assert.ok(outcome.at < 130_000, `the wait outlasted its step, to ${outcome.at} ms`);
+  assert.ok(outcome.failed instanceof Error);
+  assert.equal(outcome.failed.message, 'the row demo-home shows Succeeded (last read "Running")');
+});
+
 // Playwright reads a timeout of 0 as no limit at all, which would leave the
 // step to cucumber's bare timeout.
 test("a wait in a step with no time left still has a moment, never no limit", (t) => {

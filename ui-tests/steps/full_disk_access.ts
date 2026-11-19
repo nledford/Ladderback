@@ -132,7 +132,7 @@ Then("the Full Disk Access banner offers no button", async function (this: Brows
 });
 
 Then("the page shows no Full Disk Access banner", async function (this: BrowserWorld) {
-  await expect(banner(this)).toHaveCount(0, { timeout: GONE_MS });
+  await expect(banner(this)).toHaveCount(0);
 });
 
 // Only once the page has read what the agent found and drawn what it read: a
@@ -147,6 +147,7 @@ Then("the page doesn't warn of Full Disk Access", async function (this: BrowserW
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     return promise;
   });
-  await expect(warning(this)).toHaveCount(0, { timeout: GONE_MS });
-  await expect(banner(this)).toHaveCount(0, { timeout: GONE_MS });
+  // What `untilSettled` left of the step, at most: a window must end in it.
+  await expect(warning(this)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
+  await expect(banner(this)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
 });
