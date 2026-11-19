@@ -50,8 +50,7 @@ type InstantOptions = Pick<Intl.DateTimeFormatOptions, "dateStyle" | "timeStyle"
 
 const UNSETTLED: ((locale: string, options: InstantOptions, zone: string | undefined) => boolean)[] = [
   (locale, options) => locale === "ar" && options.timeZoneName === "short",
-  (locale, options, zone) =>
-    locale === "bn" && options.timeZoneName === "short" && READ_AS_UTC.includes(zone),
+  (locale, options, zone) => locale === "bn" && options.timeZoneName === "short" && READ_AS_UTC.includes(zone),
   (locale, options) => locale === "th" && options.dateStyle === "short",
   (locale, options) => locale === "hi" && options.dateStyle === "long",
 ];
@@ -283,8 +282,11 @@ for (const locale of LOCALES) {
 }
 
 // Spaces that look alike are written as escapes, so a reviewer can tell them apart.
-const escape = (json: string) =>
-  json.replace(/[\u00a0\u2000-\u200f\u202f\u2060\u2066-\u2069]/g, (c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`);
+const escapeSpaces = (json: string) =>
+  json.replace(
+    /[\u00a0\u2000-\u200f\u202f\u2060\u2066-\u2069]/g,
+    (c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
+  );
 
 const about =
   "What every host that formats numbers and instants writes, for tests/expectations/mod.rs to run through the " +
@@ -296,7 +298,7 @@ const about =
   "written by the locale. An instant with no zone, or a zone nobody has, is read as UTC, never as the viewer's: a caller that wants the viewer's zone passes it, and the browser lane runs with TZ set to a zone that is not UTC so a host that read the environment's zone fails. " +
   "Sizes, counts and durations travel as text, which holds a 64-bit number exactly.";
 
-const lines = cases.map((c) => `    ${escape(JSON.stringify(c))}`);
+const lines = cases.map((c) => `    ${escapeSpaces(JSON.stringify(c))}`);
 const text = `{\n  "about": ${JSON.stringify(about)},\n  "cases": [\n${lines.join(",\n")}\n  ]\n}\n`;
 writeFileSync(path.join(here, "formatting.json"), text);
 console.log(`${cases.length} cases written`);

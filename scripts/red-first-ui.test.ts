@@ -42,11 +42,7 @@ test("the last summary counts", () => {
 });
 
 test("a tree whose world.ts reads LADDERBACK_UI_BROWSER runs all three engines", () => {
-  assert.deepEqual(enginesFor('const name = process.env.LADDERBACK_UI_BROWSER || "chromium";'), [
-    "chromium",
-    "firefox",
-    "webkit",
-  ]);
+  assert.deepEqual(enginesFor('const name = process.env.LADDERBACK_UI_BROWSER || "chromium";'), ["chromium", "firefox", "webkit"]);
 });
 
 test("a tree that predates the switch, or has no world.ts, runs Chromium alone", () => {
@@ -55,44 +51,95 @@ test("a tree that predates the switch, or has no world.ts, runs Chromium alone",
 });
 
 test("red in Chromium needs no check at the head", () => {
-  assert.deepEqual(headChecks(runs([["chromium", "failed"], ["firefox", "failed"], ["webkit", "passed"]])), []);
+  assert.deepEqual(
+    headChecks(
+      runs([
+        ["chromium", "failed"],
+        ["firefox", "failed"],
+        ["webkit", "passed"],
+      ]),
+    ),
+    [],
+  );
 });
 
 test("red only outside Chromium is checked at the head in each engine it failed in", () => {
-  assert.deepEqual(headChecks(runs([["chromium", "passed"], ["firefox", "failed"], ["webkit", "passed"]])), [
-    "firefox",
-  ]);
-  assert.deepEqual(headChecks(runs([["chromium", "other"], ["firefox", "failed"], ["webkit", "failed"]])), [
-    "firefox",
-    "webkit",
-  ]);
+  assert.deepEqual(
+    headChecks(
+      runs([
+        ["chromium", "passed"],
+        ["firefox", "failed"],
+        ["webkit", "passed"],
+      ]),
+    ),
+    ["firefox"],
+  );
+  assert.deepEqual(
+    headChecks(
+      runs([
+        ["chromium", "other"],
+        ["firefox", "failed"],
+        ["webkit", "failed"],
+      ]),
+    ),
+    ["firefox", "webkit"],
+  );
 });
 
 test("green everywhere needs no check at the head", () => {
-  assert.deepEqual(headChecks(runs([["chromium", "passed"], ["firefox", "passed"], ["webkit", "other"]])), []);
+  assert.deepEqual(
+    headChecks(
+      runs([
+        ["chromium", "passed"],
+        ["firefox", "passed"],
+        ["webkit", "other"],
+      ]),
+    ),
+    [],
+  );
 });
 
 test("red in Chromium counts", () => {
-  assert.deepEqual(countedRed(runs([["chromium", "failed"], ["firefox", "passed"], ["webkit", "passed"]]), new Map()), [
-    "chromium",
-  ]);
+  assert.deepEqual(
+    countedRed(
+      runs([
+        ["chromium", "failed"],
+        ["firefox", "passed"],
+        ["webkit", "passed"],
+      ]),
+      new Map(),
+    ),
+    ["chromium"],
+  );
   assert.deepEqual(countedRed(runs([["chromium", "failed"]]), new Map()), ["chromium"]);
 });
 
 test("red only in Firefox counts when it passes in Firefox at the head", () => {
-  const atFirst = runs([["chromium", "passed"], ["firefox", "failed"], ["webkit", "passed"]]);
+  const atFirst = runs([
+    ["chromium", "passed"],
+    ["firefox", "failed"],
+    ["webkit", "passed"],
+  ]);
   assert.deepEqual(countedRed(atFirst, runs([["firefox", "passed"]])), ["firefox"]);
 });
 
 test("red only in Firefox doesn't count when it still fails there at the head", () => {
-  const atFirst = runs([["chromium", "passed"], ["firefox", "failed"], ["webkit", "passed"]]);
+  const atFirst = runs([
+    ["chromium", "passed"],
+    ["firefox", "failed"],
+    ["webkit", "passed"],
+  ]);
   assert.deepEqual(countedRed(atFirst, runs([["firefox", "failed"]])), []);
   assert.deepEqual(countedRed(atFirst, runs([["firefox", "other"]])), []);
   assert.deepEqual(countedRed(atFirst, new Map()), []);
 });
 
 test("each engine's red counts on its own head result", () => {
-  const atFirst = runs([["chromium", "passed"], ["firefox", "failed"], ["webkit", "failed"]]);
+  const atFirst = runs([
+    ["chromium", "passed"],
+    ["firefox", "failed"],
+    ["webkit", "failed"],
+  ]);
   assert.deepEqual(
     countedRed(
       atFirst,
@@ -106,6 +153,10 @@ test("each engine's red counts on its own head result", () => {
 });
 
 test("a pass at the head in an engine that didn't fail at the test: commit counts nothing", () => {
-  const atFirst = runs([["chromium", "passed"], ["firefox", "passed"], ["webkit", "passed"]]);
+  const atFirst = runs([
+    ["chromium", "passed"],
+    ["firefox", "passed"],
+    ["webkit", "passed"],
+  ]);
   assert.deepEqual(countedRed(atFirst, runs([["firefox", "passed"]])), []);
 });

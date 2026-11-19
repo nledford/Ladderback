@@ -46,16 +46,19 @@ Then(
           hidden: element.closest("[aria-hidden]")?.getAttribute("aria-hidden") ?? null,
           roles: parts.filter((part) => part.hasAttribute("role")).length,
           live: parts.filter((part) => part.hasAttribute("aria-live")).length,
-          focusable: parts.filter((part) =>
-            part.matches("[tabindex], a[href], button, input, select, textarea, [contenteditable]"),
-          ).length,
+          focusable: parts.filter((part) => part.matches("[tabindex], a[href], button, input, select, textarea, [contenteditable]"))
+            .length,
           icon: icon === null ? null : { hidden: icon.getAttribute("aria-hidden"), focusable: icon.getAttribute("focusable") },
         };
       });
       const words = found.words.replace(ISOLATION_MARKS, "");
       assert.notEqual(words, "", "a badge without words");
       assert.equal(found.hidden, null, `the badge "${words}" is hidden from a screen reader`);
-      assert.deepEqual({ roles: found.roles, live: found.live, focusable: found.focusable }, { roles: 0, live: 0, focusable: 0 }, words);
+      assert.deepEqual(
+        { roles: found.roles, live: found.live, focusable: found.focusable },
+        { roles: 0, live: 0, focusable: 0 },
+        words,
+      );
       if (found.icon !== null) {
         icons += 1;
         assert.deepEqual(found.icon, { hidden: "true", focusable: "false" }, words);
@@ -199,7 +202,10 @@ Then(
       assert.ok(line !== null, `the badge "${words}" has no words beside its icon`);
       const before: boolean = from === "left" ? icon.right <= line.left + ROUNDING_PX : icon.left >= line.right - ROUNDING_PX;
       assert.ok(before, `the badge "${words}": its icon spans ${icon.left}–${icon.right}px, its words ${line.left}–${line.right}px`);
-      assert.ok(near(icon.middle, line.middle, 1), `the badge "${words}": its icon's middle is at ${icon.middle}px, its words' at ${line.middle}px`);
+      assert.ok(
+        near(icon.middle, line.middle, 1),
+        `the badge "${words}": its icon's middle is at ${icon.middle}px, its words' at ${line.middle}px`,
+      );
       assert.ok(near(icon.height, drawn.font), `the badge "${words}": its icon is ${icon.height}px tall, its text ${drawn.font}px`);
     }
     assert.ok(icons > 0, "the demo has no badge with an icon");

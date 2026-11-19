@@ -203,7 +203,10 @@ test("a wrong number of arguments is refused", () => {
 
 test("a change to mutants.toml that only adds a comment or a list entry is sized by its lines", () => {
   const base = mutantsToml(["crates/web/src/components/*.rs", "crates/domain/src/generated/**"]);
-  const more = base.replace('    "crates/web/src/components/*.rs",', '    # why\n    "crates/web/src/components/*.rs",\n    "crates/domain/src/old.rs",');
+  const more = base.replace(
+    '    "crates/web/src/components/*.rs",',
+    '    # why\n    "crates/web/src/components/*.rs",\n    "crates/domain/src/old.rs",',
+  );
   assert.notEqual(more, base);
   const result = estimate({ ".cargo/mutants.toml": more });
   assert.equal(result.count, 1, result.why);
@@ -214,7 +217,7 @@ test("a change to mutants.toml that only adds a comment or a list entry is sized
 
 test("a change to mutants.toml that edits or removes a line gets four shards", () => {
   const base = mutantsToml(["crates/web/src/components/*.rs", "crates/domain/src/generated/**"]);
-  assert.equal(estimate({ ".cargo/mutants.toml": base.replace("exclude_re = [\"Display\"]", 'exclude_re = ["Debug"]') }).count, 4);
+  assert.equal(estimate({ ".cargo/mutants.toml": base.replace('exclude_re = ["Display"]', 'exclude_re = ["Debug"]') }).count, 4);
   assert.equal(estimate({ ".cargo/mutants.toml": base.replace("# comment\n", "") }).count, 4);
 });
 
@@ -240,10 +243,7 @@ test("an exclude glob's other regex characters are literal", () => {
 });
 
 test("a gated package that is no crate under crates/ gets four shards", () => {
-  const result = estimate(
-    { "crates/domain/src/lib.rs": lines(3) },
-    { Justfile: justfile("--package domain --package ladderback") },
-  );
+  const result = estimate({ "crates/domain/src/lib.rs": lines(3) }, { Justfile: justfile("--package domain --package ladderback") });
   assert.equal(result.count, 4);
 });
 
@@ -295,7 +295,11 @@ test("mutants.toml is compared with where the branch was cut, not with main's ti
   const r = repo();
   try {
     r.onMain({
-      ".cargo/mutants.toml": mutantsToml(["crates/web/src/components/*.rs", "crates/domain/src/generated/**", "crates/domain/src/new.rs"]),
+      ".cargo/mutants.toml": mutantsToml([
+        "crates/web/src/components/*.rs",
+        "crates/domain/src/generated/**",
+        "crates/domain/src/new.rs",
+      ]),
     });
     assert.equal(r.estimate({ "crates/domain/src/lib.rs": lines(3) }).count, 1);
   } finally {

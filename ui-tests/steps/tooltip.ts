@@ -53,7 +53,16 @@ interface Drawn {
   text: string;
   hidden: string | null;
   fits: { across: boolean; down: boolean };
-  style: { background: string; color: string; shadow: string; border: string; borderColor: string; fontSize: number; durations: string; properties: string };
+  style: {
+    background: string;
+    color: string;
+    shadow: string;
+    border: string;
+    borderColor: string;
+    fontSize: number;
+    durations: string;
+    properties: string;
+  };
   page: { canvas: string; canvasText: string; fontSize: number; fg: string; bg: string };
 }
 
@@ -176,25 +185,22 @@ When("I rest the pointer on the button {string}", async function (this: BrowserW
 
 // A pointer passing over the page doesn't flash every tooltip on its way:
 // nothing shows until the pointer has rested a moment.
-Then(
-  "the tooltip {string} shows only once the pointer has rested a moment",
-  async function (this: BrowserWorld, text: string) {
-    const since = restedAt.get(this.page);
-    assert.ok(since !== undefined, "the pointer never rested");
-    // The page reads its clock as it looks, so a look the busy machine
-    // delays past the 300 ms isn't taken for one made before them.
-    for (;;) {
-      const look = await this.page.evaluate(() => ({
-        at: Date.now(),
-        shown: [...document.querySelectorAll(".tooltip")].some((tip) => tip.matches(":popover-open")),
-      }));
-      if (look.at - since >= REST_MS) break;
-      assert.equal(look.shown, false, `a tooltip showed ${look.at - since} ms after the pointer came`);
-      await sleep(25);
-    }
-    await expect(this.page.getByRole("tooltip", { name: text, exact: true })).toBeVisible({ timeout: PATIENCE_MS });
-  },
-);
+Then("the tooltip {string} shows only once the pointer has rested a moment", async function (this: BrowserWorld, text: string) {
+  const since = restedAt.get(this.page);
+  assert.ok(since !== undefined, "the pointer never rested");
+  // The page reads its clock as it looks, so a look the busy machine
+  // delays past the 300 ms isn't taken for one made before them.
+  for (;;) {
+    const look = await this.page.evaluate(() => ({
+      at: Date.now(),
+      shown: [...document.querySelectorAll(".tooltip")].some((tip) => tip.matches(":popover-open")),
+    }));
+    if (look.at - since >= REST_MS) break;
+    assert.equal(look.shown, false, `a tooltip showed ${look.at - since} ms after the pointer came`);
+    await sleep(25);
+  }
+  await expect(this.page.getByRole("tooltip", { name: text, exact: true })).toBeVisible({ timeout: PATIENCE_MS });
+});
 
 // 1.4.13, Hoverable: the pointer can move onto the tooltip, across the gap
 // between it and its control, and the tooltip stays.
@@ -209,16 +215,13 @@ Then("the tooltip {string} still shows a moment later", async function (this: Br
   await expect(this.page.getByRole("tooltip", { name: text, exact: true })).toBeVisible({ timeout: 1 });
 });
 
-When(
-  "I move the pointer away from the button {string} and its tooltip",
-  async function (this: BrowserWorld, name: string) {
-    const now = await shown(this.page, name);
-    // The corner of the window farthest from both.
-    const x = now.button.left > now.viewport.width / 2 ? 2 : now.viewport.width - 2;
-    const y = now.button.top > now.viewport.height / 2 ? 2 : now.viewport.height - 2;
-    await pointer(this.page).moveTo(x, y);
-  },
-);
+When("I move the pointer away from the button {string} and its tooltip", async function (this: BrowserWorld, name: string) {
+  const now = await shown(this.page, name);
+  // The corner of the window farthest from both.
+  const x = now.button.left > now.viewport.width / 2 ? 2 : now.viewport.width - 2;
+  const y = now.button.top > now.viewport.height / 2 ? 2 : now.viewport.height - 2;
+  await pointer(this.page).moveTo(x, y);
+});
 
 Then(
   /^the tooltip of the button "([^"]*)" stands (above|below|to the left of|to the right of) it$/,
@@ -244,7 +247,10 @@ Then(
     const now = await shown(this.page, name);
     const lineHeight = now.style.fontSize * 1.2;
     assert.ok(now.tip.bottom - now.tip.top > 2 * lineHeight, `the note takes one line: ${JSON.stringify(now)}`);
-    assert.ok(now.tip.left >= -0.5 && now.tip.right <= now.viewport.width + 0.5, `the note is wider than the window: ${JSON.stringify(now)}`);
+    assert.ok(
+      now.tip.left >= -0.5 && now.tip.right <= now.viewport.width + 0.5,
+      `the note is wider than the window: ${JSON.stringify(now)}`,
+    );
     assert.ok(now.fits.across && now.fits.down, `the note's words are cut: ${JSON.stringify(now)}`);
     assert.ok(!overlaps(now.tip, now.button), `the note covers its button: ${JSON.stringify(now)}`);
   },
@@ -336,18 +342,15 @@ When("the page scrolls up a few lines", async function (this: BrowserWorld) {
   assert.ok(after < before, `the page didn't scroll: it was at ${before}px and is at ${after}px`);
 });
 
-Then(
-  "the tooltip of the button {string} stands beside it, without covering it",
-  async function (this: BrowserWorld, name: string) {
-    const now = await shown(this.page, name);
-    assert.ok(!overlaps(now.tip, now.button), `the tooltip covers its button: ${JSON.stringify(now)}`);
-    const distances: Record<string, number> = {
-      above: now.button.top - now.tip.bottom,
-      below: now.tip.top - now.button.bottom,
-      "to the left of": now.button.left - now.tip.right,
-      "to the right of": now.tip.left - now.button.right,
-    };
-    const away = distances[sideOf(now) ?? "above"] ?? Number.NaN;
-    assert.ok(away >= 0 && away <= now.em, `the tooltip is ${away}px from its button: ${JSON.stringify(now)}`);
-  },
-);
+Then("the tooltip of the button {string} stands beside it, without covering it", async function (this: BrowserWorld, name: string) {
+  const now = await shown(this.page, name);
+  assert.ok(!overlaps(now.tip, now.button), `the tooltip covers its button: ${JSON.stringify(now)}`);
+  const distances: Record<string, number> = {
+    above: now.button.top - now.tip.bottom,
+    below: now.tip.top - now.button.bottom,
+    "to the left of": now.button.left - now.tip.right,
+    "to the right of": now.tip.left - now.button.right,
+  };
+  const away = distances[sideOf(now) ?? "above"] ?? Number.NaN;
+  assert.ok(away >= 0 && away <= now.em, `the tooltip is ${away}px from its button: ${JSON.stringify(now)}`);
+});

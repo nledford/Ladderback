@@ -97,7 +97,9 @@ test("a workspace crate's name from outside the workspace, or a path outside it,
 });
 
 test("the composition root may depend on every workspace crate", () => {
-  const all = Object.keys(GRAPH).filter((name) => name !== "ladderback").map((name) => on(name));
+  const all = Object.keys(GRAPH)
+    .filter((name) => name !== "ladderback")
+    .map((name) => on(name));
   assert.equal(GRAPH.ladderback, ANY);
   assert.deepEqual(graphProblems(workspace({ ladderback: all })), []);
 });
@@ -178,12 +180,12 @@ test("async in comments, literals and longer names isn't code", () => {
     "/* outer /* async */ still a comment: async */",
     'const A: &str = "async fn";',
     'const B: &str = r#"say "async" here"#;',
-    "const C: &[u8] = br\"async\";",
+    'const C: &[u8] = br"async";',
     "const D: char = '\"'; // a quote, then: async",
     "#[async_trait] trait T {}",
     "fn r#async() {}",
     "let async_mode = 1;",
-    "let s = \"escaped \\\" async\";",
+    'let s = "escaped \\" async";',
   ].join("\n");
   assert.deepEqual(lines(source), []);
 });
@@ -194,7 +196,13 @@ test("code after a char literal, a lifetime or a raw string is still read", () =
 });
 
 test("#[path] and include! in domain are refused: they bring in code the scan doesn't read", () => {
-  const source = ['#[path = "../extra/x.rs"]', "mod x;", 'include!("../gen.rs");', '// include!("ignored")', 'const S: &str = include_str!("a.txt");'].join("\n");
+  const source = [
+    '#[path = "../extra/x.rs"]',
+    "mod x;",
+    'include!("../gen.rs");',
+    '// include!("ignored")',
+    'const S: &str = include_str!("a.txt");',
+  ].join("\n");
   assert.deepEqual(domainProblems("lib.rs", source), [
     "lib.rs:1: #[path] or include! in domain, which the no-async check can't follow",
     "lib.rs:3: #[path] or include! in domain, which the no-async check can't follow",

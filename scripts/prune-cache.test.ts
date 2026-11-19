@@ -64,7 +64,10 @@ const linux = "^linux-x64-mbx-v[0-9]+-target-rust-";
 test("it keeps the newest entry of a family and deletes the rest, whichever page they are on", () => {
   const result = prune(
     [
-      [entry(1, "linux-x64-mbx-v1-target-rust-aaa-1", "2026-11-15T10:00:00Z"), entry(3, "linux-x64-mbx-v1-target-rust-aaa-3", "2026-11-15T12:00:00Z")],
+      [
+        entry(1, "linux-x64-mbx-v1-target-rust-aaa-1", "2026-11-15T10:00:00Z"),
+        entry(3, "linux-x64-mbx-v1-target-rust-aaa-3", "2026-11-15T12:00:00Z"),
+      ],
       [entry(2, "linux-x64-mbx-v1-target-rust-aaa-2", "2026-11-15T11:00:00Z")],
     ],
     [linux],
@@ -135,10 +138,7 @@ test("a delete that fails is reported, fails the run, and the others still go", 
 });
 
 test("an entry no family claims is reported, and kept", () => {
-  const result = prune(
-    [[entry(1, "k-a", "2026-11-15T10:00:00Z"), entry(2, "mystery-1", "2026-11-15T10:00:00Z")]],
-    ["^k-"],
-  );
+  const result = prune([[entry(1, "k-a", "2026-11-15T10:00:00Z"), entry(2, "mystery-1", "2026-11-15T10:00:00Z")]], ["^k-"]);
   assert.equal(result.status, 0);
   assert.deepEqual(result.deleted, []);
   assert.match(result.stdout, /belong to no family.*mystery-1/);
@@ -226,7 +226,10 @@ const real: Record<string, { keep: number; keys: string[] }> = {
     ],
   },
   "^trunk-tools-Linux-": { keep: 1, keys: [`trunk-tools-Linux-${lock}`, `trunk-tools-Linux-${lock.replace("a", "b")}`] },
-  "^node-cache-Linux-x64-npm-": { keep: 1, keys: [`node-cache-Linux-x64-npm-${lock}`, `node-cache-Linux-x64-npm-${lock.replace("a", "b")}`] },
+  "^node-cache-Linux-x64-npm-": {
+    keep: 1,
+    keys: [`node-cache-Linux-x64-npm-${lock}`, `node-cache-Linux-x64-npm-${lock.replace("a", "b")}`],
+  },
   "^playwright-(chromium-)?Linux-": {
     keep: 1,
     keys: [`playwright-Linux-${lock}`, `playwright-chromium-Linux-${lock}`, `playwright-chromium-Linux-${lock.replace("a", "b")}`],
@@ -265,17 +268,25 @@ test("the families ci.yml prunes by keep the newest entries of every key layout 
   const doomed: number[] = [];
   let id = 1;
   for (const family of families) {
-    const { keep, keys } = real[family]!;
+    const layout = real[family];
+    assert.ok(layout, `ci.yml prunes the family ${family}, which this test has no keys for`);
+    const { keep, keys } = layout;
     keys.forEach((key, i) => {
       entries.push(entry(id, key, `2026-11-1${i + 1}T10:00:00Z`));
       if (i < keys.length - keep) doomed.push(id);
       id++;
     });
   }
-  const result = prune([entries], args.flatMap((a) => (a.startsWith("--keep") ? a.split(" ") : [a])));
+  const result = prune(
+    [entries],
+    args.flatMap((a) => (a.startsWith("--keep") ? a.split(" ") : [a])),
+  );
   assert.equal(result.status, 0, result.stdout);
   assert.doesNotMatch(result.stdout, /no family/);
-  assert.deepEqual(result.deleted.sort((a, b) => a - b), doomed);
+  assert.deepEqual(
+    result.deleted.sort((a, b) => a - b),
+    doomed,
+  );
 });
 
 test("it needs a family", () => {

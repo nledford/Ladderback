@@ -119,7 +119,7 @@ function scenarios(feature: string): Scenario[] {
   let tags: string[] = [];
   let featureTags: string[] = [];
   let ruleTags: string[] = [];
-  let featureBackground: Scenario["steps"] = [];
+  const featureBackground: Scenario["steps"] = [];
   let ruleBackground: Scenario["steps"] = [];
   let inRule = false;
   // Where a step line goes, and an outline's examples so far.
@@ -182,7 +182,10 @@ function scenarios(feature: string): Scenario[] {
     }
     if (text.startsWith("|")) {
       if (examples === undefined || current === undefined) return;
-      const cells = text.slice(1, -1).split("|").map((cell) => cell.trim());
+      const cells = text
+        .slice(1, -1)
+        .split("|")
+        .map((cell) => cell.trim());
       if (examples.header === undefined) {
         examples.header = cells;
         return;

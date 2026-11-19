@@ -56,15 +56,12 @@ Then(
 );
 
 // The region the skeleton stands for is busy until its content arrives.
-Then(
-  "the region of the {string} demo is busy and shows a skeleton",
-  async function (this: BrowserWorld, component: string) {
-    const busy = await region(this.page, component);
-    await expect(busy).toHaveAttribute("aria-busy", "true");
-    await expect(busy.locator(".skeleton")).toHaveCount(1);
-    await expect(busy.locator(".skeleton")).toBeVisible();
-  },
-);
+Then("the region of the {string} demo is busy and shows a skeleton", async function (this: BrowserWorld, component: string) {
+  const busy = await region(this.page, component);
+  await expect(busy).toHaveAttribute("aria-busy", "true");
+  await expect(busy.locator(".skeleton")).toHaveCount(1);
+  await expect(busy.locator(".skeleton")).toBeVisible();
+});
 
 // The page still says the wait in words, visible, just before the busy
 // region and outside it, so a screen reader that leaves a busy region unread
@@ -176,7 +173,10 @@ Then(
       for (const [index, bar] of bars.entries()) {
         assert.ok(near(bar.height, drawn.font), `line ${index + 1} is ${bar.height}px tall, its text ${drawn.font}px`);
         const atStart: boolean = from === "left" ? near(bar.left, room.left) : near(bar.right, room.right);
-        assert.ok(atStart, `line ${index + 1} starts at ${from === "left" ? bar.left : bar.right}px, its room at ${from === "left" ? room.left : room.right}px`);
+        assert.ok(
+          atStart,
+          `line ${index + 1} starts at ${from === "left" ? bar.left : bar.right}px, its room at ${from === "left" ? room.left : room.right}px`,
+        );
       }
       const last = bars.at(-1);
       assert.ok(last !== undefined);
@@ -253,7 +253,11 @@ Then(
     assert.ok(onSurface.includes(true) && onSurface.includes(false), "the demo has no skeleton on the page and on a surface both");
     for (const skeleton of drawn.skeletons) {
       assert.ok(skeleton.behind !== "", "a skeleton lies on no fill");
-      assert.deepEqual(skeleton.fills, skeleton.fills.map(() => drawn.fill), `a skeleton on ${skeleton.behind}`);
+      assert.deepEqual(
+        skeleton.fills,
+        skeleton.fills.map(() => drawn.fill),
+        `a skeleton on ${skeleton.behind}`,
+      );
       const ratio = contrastRatio(composite([drawn.fill]), composite([skeleton.behind]));
       assert.ok(ratio >= floor, `a skeleton on ${skeleton.behind} is ${ratio.toFixed(2)}:1 apart from it`);
     }

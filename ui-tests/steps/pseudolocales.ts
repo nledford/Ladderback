@@ -9,7 +9,7 @@ import { expect } from "playwright/test";
 import { journey, pressUntilFocused } from "../support/keyboard.ts";
 import { type BrowserWorld, repoRoot } from "../support/world.ts";
 
-const NON_ASCII = /[^\x00-\x7f]/;
+const NON_ASCII = /\P{ASCII}/u;
 
 // Each catalog's name of its language written in that language
 // (`ui-language-name`), by its tag: the name Settings marks with `lang` set to
@@ -69,7 +69,7 @@ async function untransformed(page: Page, data?: string): Promise<{ inspected: nu
         if (lang !== null && lang !== root.lang && ownNames[lang] === text) continue;
         if (data && parent.closest(data)) continue;
         inspected += 1;
-        if (/^[\x00-\x7f]*$/.test(text)) plain.push(text);
+        if (/^\p{ASCII}*$/u.test(text)) plain.push(text);
       }
       return { inspected, plain };
     },
