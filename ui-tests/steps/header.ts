@@ -164,7 +164,7 @@ When("the running version is the {word} one a build between releases can show", 
     async (route) => {
       const answer = await route.fetch();
       const body: unknown = await answer.json().catch(() => undefined);
-      if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>)["version"] === "string") {
+      if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>).version === "string") {
         await route.fulfill({ response: answer, json: { ...body, ...build } });
       } else {
         await route.fulfill({ response: answer });

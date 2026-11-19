@@ -73,7 +73,7 @@ export function binFolder(args: readonly string[], env: Env): string {
     if (arg === "--root" && args[i + 1] !== undefined) return path.join(path.resolve(args[i + 1] ?? ""), "bin");
     if (arg.startsWith("--root=")) return path.join(path.resolve(arg.slice("--root=".length)), "bin");
   }
-  const root = env["CARGO_INSTALL_ROOT"] || env["CARGO_HOME"] || path.join(homedir(), ".cargo");
+  const root = env.CARGO_INSTALL_ROOT || env.CARGO_HOME || path.join(homedir(), ".cargo");
   return path.join(root, "bin");
 }
 

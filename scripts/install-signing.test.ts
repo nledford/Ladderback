@@ -57,7 +57,7 @@ exit 0
     chmodSync(join(dir, "security"), 0o755);
     chmodSync(join(dir, "codesign"), 0o755);
     writeFileSync(join(dir, "listing"), stand.listing ?? LISTING);
-    const env: NodeJS.ProcessEnv = { PATH: `${dir}:${process.env["PATH"]}`, CARGO_HOME: join(dir, "cargo") };
+    const env: NodeJS.ProcessEnv = { PATH: `${dir}:${process.env.PATH}`, CARGO_HOME: join(dir, "cargo") };
     if (identity !== undefined) env[IDENTITY_VARIABLE] = identity;
     const said: string[] = [];
     const record = (...parts: unknown[]) => void said.push(parts.join(" "));

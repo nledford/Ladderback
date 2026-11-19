@@ -191,8 +191,8 @@ function logStand(file: string): Stand {
     let running = 0;
     let queued = 0;
     for (const row of rows) {
-      const status = row["status"];
-      const count = Number(row["count"]);
+      const status = row.status;
+      const count = Number(row.count);
       if (status === "running") running += count;
       else if (status === "queued") queued += count;
       else if (typeof status !== "string" || !ENDED.has(status)) {
@@ -363,7 +363,7 @@ async function main(argv: string[]): Promise<number> {
       if (given.trim() === "" || !Number.isFinite(minutes) || minutes < 0) usage(`--wait takes minutes, not ${JSON.stringify(given)}`);
     } else install.push(arg);
   }
-  const address = process.env["INSTALL_RESTART_ADDRESS"] || DEFAULT_ADDRESS;
+  const address = process.env.INSTALL_RESTART_ADDRESS || DEFAULT_ADDRESS;
   const base = `http://${address}`;
 
   // What the binary will be built from: the tree now, before the build.
@@ -371,13 +371,13 @@ async function main(argv: string[]): Promise<number> {
   const version = workspaceVersion(ROOT);
   const wanted = expected === undefined ? version : shown(expected);
 
-  const installed = run(process.env["INSTALL_RESTART_JUST"] || "just", ["install", ...install]);
+  const installed = run(process.env.INSTALL_RESTART_JUST || "just", ["install", ...install]);
   if (installed !== 0) {
     console.error("install-restart: the install failed; the running daemon is untouched.");
     return 1;
   }
 
-  const ladderback = process.env["INSTALL_RESTART_LADDERBACK"] || path.join(binFolder(install, process.env), "ladderback");
+  const ladderback = process.env.INSTALL_RESTART_LADDERBACK || path.join(binFolder(install, process.env), "ladderback");
   const checked = installedBuild(ladderback, wanted, expected, version);
   if (checked !== true) {
     console.error(`install-restart: ${checked.why}. Not restarting; the running daemon is untouched.`);

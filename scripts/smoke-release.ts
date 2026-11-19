@@ -860,7 +860,7 @@ function usage(message: string): never {
 async function main(argv: string[]): Promise<number> {
   let binary: string | undefined;
   let version: string | undefined;
-  let summary = process.env["GITHUB_STEP_SUMMARY"];
+  let summary = process.env.GITHUB_STEP_SUMMARY;
   const containers: string[] = [];
   const packages = new Map<PackageFormat, string>();
   for (let i = 0; i < argv.length; i++) {
