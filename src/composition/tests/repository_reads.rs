@@ -6,6 +6,7 @@ use app::fakes::InMemoryConfigStore;
 
 use super::service_support::*;
 use super::*;
+use crate::composition::catalog::{folder_refusal, listing_refusal};
 
 /// The lines logged so far about the snapshots of `alias`.
 fn logged_about(alias: &str) -> Vec<String> {

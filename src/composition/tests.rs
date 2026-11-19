@@ -1,6 +1,14 @@
 //! The composition root's tests, one file for each area; `support` and
 //! `service_support` hold what more than one of them shares.
 
+use app::browse::BrowseError;
+use app::ports::SnapshotSummary;
+use app::snapshots::SnapshotError;
+use domain::SnapshotId;
+use domain::browse::FolderPath;
+use domain::planning::{InterfaceKind, Link, Location, LocationRule, NameFilter};
+use http_adapter::{CatalogError, FolderError, SnapshotsError};
+
 use super::*;
 
 mod announcements;
