@@ -8,11 +8,16 @@
 //! global flags of <https://rclone.org/flags/>, the flags of
 //! <https://rclone.org/commands/rclone_serve_restic/>, and the options of
 //! each backend's page that name a file, a program or a location.
+//!
+//! The flags of an `rclone-command` that are given a credential as text
+//! are read here too, since a flag that names a file on this machine is
+//! given none, whatever its name says (#1136).
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 use super::{is_relative_program, starts_relative};
-use crate::secrets::MAX_RCLONE_DEPTH;
+use crate::secrets::{MAX_RCLONE_DEPTH, is_rclone_secret_flag};
 
 /// What the value of a flag or a setting names on this machine.
 #[derive(Clone, Copy)]
@@ -165,6 +170,43 @@ pub(super) fn flags_relative(args: &[String]) -> bool {
         }
     }
     false
+}
+
+/// The flags of `args`, the arguments of an `rclone-command`, that are given
+/// a credential as text ([`is_rclone_secret_flag`]), by name without the
+/// `--`, each once, in the order first given. A flag is read as in
+/// [`flags_relative`], and its next word is its value whatever it is, as
+/// pflag reads a flag that takes one; an empty value is no credential. A
+/// flag that names something on this machine ([`named_by_flag`]: `--key`,
+/// the TLS key of `rclone serve`, `--rc-htpasswd`) is given none, whatever
+/// its name says, and so is a word whose name has a character no flag has.
+pub(super) fn secret_flags(args: &[String]) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let Some(flag) = arg.strip_prefix("--") else {
+            continue;
+        };
+        let (name, value) = match flag.split_once('=') {
+            Some((name, value)) => (name, Some(value)),
+            None => (flag, None),
+        };
+        let flag_like = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !flag_like || named_by_flag(name).is_some() || !is_rclone_secret_flag(name) {
+            continue;
+        }
+        let Some(value) = value.or_else(|| args.next().map(String::as_str)) else {
+            break;
+        };
+        if !value.is_empty() && seen.insert(name) {
+            found.push(name.to_owned());
+        }
+    }
+    found
 }
 
 /// What the flag `--name` names, if it names something on this machine.

@@ -34,8 +34,9 @@ pub enum InlineSecret {
 impl InlineSecret {
     /// Where the secret is, as the configuration names it: `repository`,
     /// `repo-hot`, `password`, `options.NAME`, `options-hot.NAME` or
-    /// `options-cold.NAME`, with the name as one bounded line. Never the
-    /// secret itself (I4).
+    /// `options-cold.NAME`, with the name as one bounded line, where
+    /// `NAME` is `rclone-command` for a flag of one. Never the secret
+    /// itself (I4).
     pub fn field(&self) -> String {
         match self {
             Self::Location => "repository".to_owned(),
@@ -44,14 +45,27 @@ impl InlineSecret {
             Self::Option(name) => format!("options.{}", shown(name)),
             Self::OptionHot(name) => format!("options-hot.{}", shown(name)),
             Self::OptionCold(name) => format!("options-cold.{}", shown(name)),
-            Self::RcloneFlag(_) | Self::RcloneFlagHot(_) | Self::RcloneFlagCold(_) => todo!(),
+            Self::RcloneFlag(_) => "options.rclone-command".to_owned(),
+            Self::RcloneFlagHot(_) => "options-hot.rclone-command".to_owned(),
+            Self::RcloneFlagCold(_) => "options-cold.rclone-command".to_owned(),
         }
     }
 
     /// The flag of an `rclone-command` the credential is written after,
-    /// as `--NAME`; none for any other secret.
+    /// as `--NAME` with the name as one bounded line; none for any other
+    /// secret. Never the credential (I4).
     pub fn flag(&self) -> Option<String> {
-        todo!()
+        match self {
+            Self::RcloneFlag(name) | Self::RcloneFlagHot(name) | Self::RcloneFlagCold(name) => {
+                Some(format!("--{}", shown(name)))
+            }
+            Self::Location
+            | Self::LocationHot
+            | Self::Password
+            | Self::Option(_)
+            | Self::OptionHot(_)
+            | Self::OptionCold(_) => None,
+        }
     }
 }
 

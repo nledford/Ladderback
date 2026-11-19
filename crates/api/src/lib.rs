@@ -1805,7 +1805,23 @@ impl WarningCode {
                     optional: true,
                 },
             ],
-            Self::RcloneCommandSecret => todo!(),
+            Self::RcloneCommandSecret => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "flag",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
             Self::GlobNeverMatches => &[
                 ArgSpec {
                     name: "plan",

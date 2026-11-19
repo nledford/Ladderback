@@ -1126,6 +1126,15 @@ warning-location-secret = { $position ->
     }
   }
 
+# A repository's rclone-command setting, the command line that starts rclone, has a credential typed after one of rclone's flags, as in --pass=…: the configuration file keeps it as text, and rclone is started with it in its arguments.
+# $field (text): the setting, as the configuration names it, such as options.rclone-command. Keep it as it is.
+# $flag (text): the flag the credential follows, such as --pass or --s3-secret-access-key. Keep it as it is.
+# $position (text): the place, from 2, of the further location whose setting it is, in the repository's list of locations; none for the repository's own setting.
+warning-rclone-command-secret = { $position ->
+    [none] The { $field } setting of this repository gives { $flag } a credential written as text, so the configuration file keeps it as text too, and rclone is started with it in its arguments, where other users of this computer may see it. Take it out of the command and keep it in rclone's own configuration file instead.
+   *[other] The { $field } setting of location { $position } gives { $flag } a credential written as text, so the configuration file keeps it as text too, and rclone is started with it in its arguments, where other users of this computer may see it. Take it out of the command and keep it in rclone's own configuration file instead.
+  }
+
 # A glob of a plan has a slash in the middle, so rustic matches it against the whole path from the root of the file system, and written from one of the plan's sources it matches nothing. An exclude glob (it starts with !) that matches nothing leaves nothing out; an include glob (no !) that matches nothing leaves out every file that no other glob includes.
 # $glob (text): the glob as written, such as !.local/share/containers. Keep it as it is.
 # $plan (text): the plan's ID. Keep it as it is.
