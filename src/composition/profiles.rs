@@ -13,7 +13,7 @@ use domain::{AgentId, PlanId, RepositoryAlias};
 use http_adapter::{Profiles, ProfilesError};
 use interop::{FileProfileReader, KeyringCommand, RusticProfileWriter};
 
-use super::{Notice, Refusal, export_refusal, import_refusal, profile_notice};
+use super::profile_refusals::{Notice, Refusal, export_refusal, import_refusal, profile_notice};
 
 /// The name a refusal gives a profile previewed from its text, where it
 /// would name a profile's file.
@@ -57,7 +57,7 @@ impl Profiles for ProfileService {
         request: api::ProfilePreviewDto,
     ) -> Result<api::ProfileImportDto, ProfilesError> {
         let Ok(alias) = RepositoryAlias::parse(&request.repository) else {
-            return Err(refused(super::repository_alias_invalid()));
+            return Err(refused(super::profile_refusals::repository_alias_invalid()));
         };
         match self
             .import

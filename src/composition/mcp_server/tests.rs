@@ -10,7 +10,9 @@ use mcp::Backend;
 use store::SqliteStore;
 use uuid::Uuid;
 
-use super::super::{Daemon, daemon_at, wire_name};
+use super::super::Daemon;
+use super::super::plan_runner::wire_name;
+use super::super::startup::daemon_at;
 use super::*;
 
 /// The configuration both backends read: two plans on one repository.

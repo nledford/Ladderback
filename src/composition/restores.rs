@@ -18,7 +18,8 @@ use http_adapter::{MaintenanceRefusal, RestoreRefusal, RestoreStart, SignIn};
 use platform::SystemClock;
 use uuid::Uuid;
 
-use super::{CancelRegistry, PlanRunner, maintenance, runs};
+use super::plan_runner::PlanRunner;
+use super::{CancelRegistry, maintenance, runs};
 
 /// The restores of the agent: one use case, so one restore runs at a time.
 pub(super) struct RestoreService {
@@ -191,7 +192,7 @@ impl http_adapter::Restores for RestoreService {
             let _ = started.send(Ok(prepared.folder().map(str::to_owned)));
             let finished = restores.run(prepared, cancel).await;
             registry.finish(&operation);
-            super::log_ended(&finished);
+            super::plan_runner::log_ended(&finished);
         }));
         match wait_for_start.await {
             Ok(answer) => answer.map(|folder| api::RestoreStartedDto {
