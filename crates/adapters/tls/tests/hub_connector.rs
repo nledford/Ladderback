@@ -126,10 +126,7 @@ impl Served {
 impl HubConnectorHarness for Served {
     async fn hub(&self, pairing: Arc<HubPairing>) -> (Arc<dyn HubConnector>, HubRoute) {
         let port = serve(pairing, self.key.clone()).await;
-        (
-            Arc::new(WebSocketHubConnector::new().unwrap()),
-            self.route(port),
-        )
+        (Arc::new(WebSocketHubConnector::new()), self.route(port))
     }
 
     async fn unanswered(&self) -> (Arc<dyn HubConnector>, HubRoute) {
@@ -140,10 +137,7 @@ impl HubConnectorHarness for Served {
             .local_addr()
             .unwrap()
             .port();
-        (
-            Arc::new(WebSocketHubConnector::new().unwrap()),
-            self.route(port),
-        )
+        (Arc::new(WebSocketHubConnector::new()), self.route(port))
     }
 }
 
@@ -182,7 +176,7 @@ async fn a_certificate_the_trust_store_doesnt_accept_is_untrusted() {
         port,
         session: RouteSession::Ca,
     };
-    let link = WebSocketHubConnector::new().unwrap().connect(&route).await;
+    let link = WebSocketHubConnector::new().connect(&route).await;
     assert!(
         matches!(link, Err(LinkError::Untrusted { .. })),
         "{:?}",
@@ -200,7 +194,7 @@ async fn another_key_than_the_pinned_one_is_a_pin_mismatch() {
         port,
         session: RouteSession::Pinned(Fingerprint::from_digest([7; 32])),
     };
-    let link = WebSocketHubConnector::new().unwrap().connect(&route).await;
+    let link = WebSocketHubConnector::new().connect(&route).await;
     assert_eq!(link.err(), Some(LinkError::PinMismatch));
 }
 
@@ -223,7 +217,7 @@ async fn an_address_with_no_hub_at_its_path_is_unreachable() {
         port,
         session: RouteSession::Plain,
     };
-    let link = WebSocketHubConnector::new().unwrap().connect(&route).await;
+    let link = WebSocketHubConnector::new().connect(&route).await;
     assert!(
         matches!(&link, Err(LinkError::Unreachable { detail }) if detail.contains("404")),
         "{:?}",

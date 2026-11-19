@@ -400,10 +400,7 @@ async fn on_the_agent(
         Ok(id) => id,
         Err(error) => return refused(localizer, &error.to_string()),
     };
-    let connector = match WebSocketHubConnector::new() {
-        Ok(connector) => connector,
-        Err(error) => return refused(localizer, &format!("{error:?}")),
-    };
+    let connector = WebSocketHubConnector::new();
     let pairing = AgentPairing::new(
         Arc::new(FileIdentity::in_data_dir(data_dir)),
         Arc::new(AwsLcSigning),

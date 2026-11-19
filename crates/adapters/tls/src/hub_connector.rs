@@ -7,7 +7,7 @@
 //! unreachable.
 
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use api::sync::{AgentFrame, HubFrame, MAX_FRAME_BYTES, PATH};
@@ -17,6 +17,8 @@ use domain::fleet::{Binding, Fingerprint, HubRoute, KEY_BYTES, RouteSession};
 use futures::{SinkExt as _, StreamExt as _};
 use rustls::ClientConfig;
 use rustls::client::Resumption;
+use rustls::client::danger::ServerCertVerifier;
+use rustls::crypto::CryptoProvider;
 use rustls::crypto::aws_lc_rs::kx_group;
 use rustls::pki_types::ServerName;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -36,33 +38,29 @@ pub const CONNECT_WITHIN: Duration = Duration::from_secs(10);
 /// whole handshake (decision 120, "Bounds before the proofs").
 pub const ANSWER_WITHIN: Duration = Duration::from_secs(15);
 
+/// What builds the verifier of a CA-checked route's certificate.
+type Roots = Box<
+    dyn Fn(Arc<CryptoProvider>) -> Result<Arc<dyn ServerCertVerifier>, rustls::Error> + Send + Sync,
+>;
+
 /// The agent's [`HubConnector`]: its CA-checked TLS is TLS 1.3 alone, the
 /// hybrid key exchange then X25519, no early data and no resumption, and a
 /// certificate the operating system's trust store accepts for the address's
 /// name (`rustls-platform-verifier`).
 pub struct WebSocketHubConnector {
-    ca: TlsConnector,
+    roots: Roots,
+    /// Built when the first CA-checked route opens: a plain or a pinned one
+    /// has no use for the trust store.
+    ca: OnceLock<TlsConnector>,
 }
 
 impl WebSocketHubConnector {
-    /// The connector, with the operating system's trust store.
-    pub fn new() -> Result<Self, ConnectError> {
-        let provider = provider(vec![kx_group::X25519MLKEM768, kx_group::X25519]);
-        let config_error = |error: rustls::Error| ConnectError::Config {
-            detail: error.to_string(),
-        };
-        let verifier =
-            rustls_platform_verifier::Verifier::new(provider.clone()).map_err(config_error)?;
-        let mut config = ClientConfig::builder_with_provider(provider)
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .map_err(config_error)?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(verifier))
-            .with_no_client_auth();
-        config.enable_early_data = false;
-        config.resumption = Resumption::disabled();
-        Ok(Self {
-            ca: TlsConnector::from(Arc::new(config)),
+    /// The connector, with the operating system's trust store for its
+    /// CA-checked routes.
+    pub fn new() -> Self {
+        Self::with_verifier(|provider| {
+            let verifier = rustls_platform_verifier::Verifier::new(provider)?;
+            Ok(Arc::new(verifier))
         })
     }
 
@@ -71,16 +69,40 @@ impl WebSocketHubConnector {
     /// or a pinned route never asks for it, so a machine with no CA roots
     /// pairs over either.
     pub fn with_verifier(
-        roots: impl Fn(
-            Arc<rustls::crypto::CryptoProvider>,
-        )
-            -> Result<Arc<dyn rustls::client::danger::ServerCertVerifier>, rustls::Error>
+        roots: impl Fn(Arc<CryptoProvider>) -> Result<Arc<dyn ServerCertVerifier>, rustls::Error>
         + Send
         + Sync
         + 'static,
     ) -> Self {
-        let _ = roots;
-        todo!("build the CA-checked connector when a CA route opens")
+        Self {
+            roots: Box::new(roots),
+            ca: OnceLock::new(),
+        }
+    }
+
+    /// The TLS connector of a CA-checked route. Failing to build it fails
+    /// that route alone.
+    fn ca_connector(&self) -> Result<TlsConnector, LinkError> {
+        if let Some(ca) = self.ca.get() {
+            return Ok(ca.clone());
+        }
+        let refused = |error: rustls::Error| LinkError::TlsRefused {
+            detail: error.to_string(),
+        };
+        let provider = provider(vec![kx_group::X25519MLKEM768, kx_group::X25519]);
+        let verifier = (self.roots)(provider.clone()).map_err(refused)?;
+        let mut config = ClientConfig::builder_with_provider(provider)
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .map_err(refused)?
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth();
+        config.enable_early_data = false;
+        config.resumption = Resumption::disabled();
+        Ok(self
+            .ca
+            .get_or_init(|| TlsConnector::from(Arc::new(config)))
+            .clone())
     }
 
     async fn open(&self, route: &HubRoute) -> Result<Box<dyn HubLink>, LinkError> {
@@ -92,7 +114,7 @@ impl WebSocketHubConnector {
             RouteSession::Ca => {
                 let name = server_name(&route.host)?;
                 let tls = self
-                    .ca
+                    .ca_connector()?
                     .connect(name, tcp)
                     .await
                     .map_err(|error| refused(&error, false))?;
@@ -100,6 +122,12 @@ impl WebSocketHubConnector {
             }
             RouteSession::Pinned(pin) => pinned(tcp, pin, route).await,
         }
+    }
+}
+
+impl Default for WebSocketHubConnector {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
