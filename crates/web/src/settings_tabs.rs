@@ -4,7 +4,6 @@
 //! glue that draws the tabs, and `page.rs` reads and writes the address.
 
 use crate::components::tabs::Holds;
-use crate::{language_choice, page_width};
 
 /// A section of Settings, each a tab of its own, in the order the tabs
 /// stand.
@@ -40,11 +39,14 @@ impl Section {
     ];
 
     /// The section's name in its tab's address, after the `#`
-    /// (`/settings#api-tokens`).
+    /// (`/settings#api-tokens`). No element of the page has it as its `id`:
+    /// a browser that changes the address's fragment to an element's `id`
+    /// takes focus from where it was (Chromium does), and choosing a tab
+    /// leaves focus where it is.
     pub(crate) const fn fragment(self) -> &'static str {
         match self {
-            Self::Language => language_choice::SECTION_ID,
-            Self::PageWidth => page_width::SECTION_ID,
+            Self::Language => "language",
+            Self::PageWidth => "page-width",
             Self::AdminPassword => "admin-password",
             Self::SigningIn => "signing-in",
             Self::ApiTokens => "api-tokens",
@@ -82,13 +84,18 @@ impl Section {
     }
 }
 
-/// The tab, its index among the tabs `shown` in their order, of the section
-/// the fragment `hash` of the page's address names, as `Location.hash` gives
-/// it: the tab an address changed while Settings is open chooses. `None` when
-/// it names no section, or one whose tab isn't shown, which leaves the tab as
-/// it is.
+/// The tab, its index among the tabs `shown` in their order, that the
+/// fragment `hash` of the page's address names, as `Location.hash` gives it:
+/// the tab an address changed while Settings is open chooses. No fragment
+/// names the first tab, as Settings' own address opens there. `None` when it
+/// names no section, or one whose tab isn't shown, which leaves the tab as it
+/// is.
 pub(crate) fn tab_named(hash: &str, shown: &[Section]) -> Option<usize> {
-    todo!("{hash} {shown:?}")
+    if matches!(hash, "" | "#") {
+        return (!shown.is_empty()).then_some(0);
+    }
+    let named = Section::named(hash)?;
+    shown.iter().position(|section| *section == named)
 }
 
 #[cfg(test)]
@@ -96,8 +103,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_section_has_a_name_of_its_own_in_its_address_and_the_language_and_page_width_keep_their_sections_ids()
-     {
+    fn each_section_has_a_name_of_its_own_in_its_address() {
         let names: Vec<_> = Section::ALL.map(Section::fragment).into();
         assert_eq!(
             names,
@@ -111,8 +117,6 @@ mod tests {
                 "restart"
             ]
         );
-        assert_eq!(Section::Language.fragment(), language_choice::SECTION_ID);
-        assert_eq!(Section::PageWidth.fragment(), page_width::SECTION_ID);
     }
 
     #[test]
