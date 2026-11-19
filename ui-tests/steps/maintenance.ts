@@ -433,7 +433,7 @@ Then("no word of a table is broken across lines", async function (this: BrowserW
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const cell = node.parentElement?.closest("th, td");
       const text = node.textContent ?? "";
-      if (!cell || !cell.checkVisibility() || !text.trim()) continue;
+      if (!cell?.checkVisibility() || !text.trim()) continue;
       for (const word of text.matchAll(/\S+/g)) {
         const range = document.createRange();
         range.setStart(node, word.index);
