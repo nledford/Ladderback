@@ -17,6 +17,8 @@ serde.workspace = true
 # constant time (security §10.1).
 sha2.workspace = true
 subtle.workspace = true
+# Hostnames compare as casefold(NFC(name)) on the hub (§16, decision 120).
+unicode-normalization.workspace = true
 uuid.workspace = true
 # Secrets and passwords wipe their bytes when they are dropped (§10.2).
 zeroize.workspace = true

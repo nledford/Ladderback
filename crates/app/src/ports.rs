@@ -1,6 +1,7 @@
 //! Outbound ports. Object-safe, used as `Arc<dyn Port>` (technical design §3.2).
 
 mod admin_password;
+mod agent_registry;
 mod api_token_store;
 mod change_codec;
 mod clock;
@@ -32,6 +33,7 @@ mod tls_keys;
 mod walk;
 
 pub use admin_password::{AdminPassword, AdminPasswordError};
+pub use agent_registry::AgentRegistry;
 pub use api_token_store::{Added, ApiTokenStore};
 pub use change_codec::{ChangeCodec, CodecError};
 pub use clock::Clock;

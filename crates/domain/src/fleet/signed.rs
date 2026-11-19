@@ -114,6 +114,11 @@ impl WireName {
         }
     }
 
+    /// A kind or code this build names itself, which its tests parse.
+    pub(super) fn known(name: &'static str) -> Self {
+        Self(name.to_owned())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

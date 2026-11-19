@@ -7,6 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# The hub's registry of agents and pairing tokens (`AgentRegistry`; §16,
+# decisions 120 and 122). Its tables' migration ships in every build. On by
+# default for this crate's own tests; the workspace dependency turns it off,
+# `ladderback`'s `hub` on, and a release build leaves it out.
+default = ["hub"]
+hub = []
+
 [dependencies]
 api.workspace = true
 app.workspace = true

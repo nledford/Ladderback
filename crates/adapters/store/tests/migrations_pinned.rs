@@ -89,6 +89,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "operation entry",
         "342a20b97c987a48dfe03883e9356e8be99b82b3ce089dea11e75538bdd08924dfb59d357be8b70a8abfb46696f10c20",
     ),
+    (
+        16,
+        "hub registry",
+        "d358afcedf70fbedbb51e9016085519b92106907ae3bd4f5361bd1d57101037c7495f6097c867edb6edcd97674ef0cc7",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

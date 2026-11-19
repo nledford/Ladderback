@@ -367,3 +367,97 @@ pub(crate) const PROPOSAL_APPLIED: &str = concat!(
     "UPDATE proposals SET status = 'applied', applied_as = ? ",
     "WHERE id = ? AND status = 'applying'"
 );
+
+/// The hub's registry (`pairing_tokens`, `agents`), which only a build with
+/// the hub reads and writes (§16, decision 122).
+#[cfg(feature = "hub")]
+pub(crate) mod hub {
+    /// A `SELECT` of the columns `row::pairing_token` reads, followed by
+    /// `clause`s.
+    macro_rules! select_tokens {
+        ($($clause:literal),+ $(,)?) => {
+            concat!(
+                "SELECT pairing_key, hub_key, kind, made_at, expires_at, state, ",
+                "used_agent_id, used_agent_key FROM pairing_tokens",
+                $($clause),+
+            )
+        };
+    }
+
+    /// A `SELECT` of the columns `row::agent` reads, followed by `clause`s.
+    macro_rules! select_agents {
+        ($($clause:literal),+ $(,)?) => {
+            concat!(
+                "SELECT id, pubkey, hostname, status, status_at, counter, last_seen ",
+                "FROM agents",
+                $($clause),+
+            )
+        };
+    }
+
+    /// How many tokens are unused at a moment. Parameter: the moment.
+    pub(crate) const COUNT_UNUSED_TOKENS: &str =
+        "SELECT COUNT(*) FROM pairing_tokens WHERE state = 'unused' AND expires_at > ?";
+
+    /// Keeps a token. Parameters, in order: every column of
+    /// `select_tokens!`.
+    pub(crate) const INSERT_TOKEN: &str = concat!(
+        "INSERT INTO pairing_tokens (pairing_key, hub_key, kind, made_at, expires_at, state, ",
+        "used_agent_id, used_agent_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+
+    /// The tokens unused at a moment, oldest first. Parameter: the moment.
+    pub(crate) const UNUSED_TOKENS: &str = select_tokens!(
+        " WHERE state = 'unused' AND expires_at > ?",
+        " ORDER BY made_at, rowid"
+    );
+
+    /// The token with a pairing key. Parameter: the key.
+    pub(crate) const TOKEN: &str = select_tokens!(" WHERE pairing_key = ?");
+
+    /// Revokes a token still unused. Parameter: its pairing key.
+    pub(crate) const REVOKE_TOKEN: &str =
+        "UPDATE pairing_tokens SET state = 'revoked' WHERE pairing_key = ? AND state = 'unused'";
+
+    /// Revokes every token still unused, as a new hub key does.
+    pub(crate) const REVOKE_UNUSED_TOKENS: &str =
+        "UPDATE pairing_tokens SET state = 'revoked' WHERE state = 'unused'";
+
+    /// Spends a token on a pairing. Parameters: the agent ID, the agent
+    /// key, the token's pairing key.
+    pub(crate) const SPEND_TOKEN: &str = concat!(
+        "UPDATE pairing_tokens SET state = 'used', used_agent_id = ?, used_agent_key = ? ",
+        "WHERE pairing_key = ?"
+    );
+
+    /// The agent with an ID. Parameter: the ID.
+    pub(crate) const AGENT: &str = select_agents!(" WHERE id = ?");
+
+    /// The agent whose hostname has a key. Parameter: the key.
+    pub(crate) const AGENT_BY_HOSTNAME: &str = select_agents!(" WHERE hostname_key = ?");
+
+    /// How many agents wait for approval.
+    pub(crate) const COUNT_PENDING_AGENTS: &str =
+        "SELECT COUNT(*) FROM agents WHERE status = 'pending'";
+
+    /// How many agents are registered, pending or approved.
+    pub(crate) const COUNT_AGENTS: &str = "SELECT COUNT(*) FROM agents";
+
+    /// Every agent, oldest first.
+    pub(crate) const ALL_AGENTS: &str = select_agents!(" ORDER BY rowid");
+
+    /// Keeps a new agent. Parameters, in order: `id`, `pubkey`, `hostname`,
+    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`.
+    pub(crate) const INSERT_AGENT: &str = concat!(
+        "INSERT INTO agents (id, pubkey, hostname, hostname_key, status, status_at, counter, ",
+        "last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+
+    /// Writes an agent's record over the one kept under its ID, every
+    /// column but the ID. Parameters, in order: `pubkey`, `hostname`,
+    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`, `id`.
+    pub(crate) const UPDATE_AGENT: &str = concat!(
+        "UPDATE agents SET pubkey = ?, hostname = ?, hostname_key = ?, status = ?, ",
+        "status_at = ?, counter = ?, last_seen = ? WHERE id = ?"
+    );
+}
