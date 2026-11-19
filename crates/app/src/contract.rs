@@ -25,5 +25,6 @@ pub mod schedule_store;
 pub mod secrets;
 pub mod service;
 pub mod session_store;
+pub mod signing;
 pub mod stats_store;
 pub mod walk;

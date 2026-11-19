@@ -240,6 +240,11 @@ exclude_re = [
     # left four bits and a low one below it, so `|` and `^` give the same
     # byte. A ticket that parses to other bytes (`&`) is caught.
     'crates/domain/src/restore/download\.rs.*: replace \| with \^ in DownloadTicket::parse$',
+    # The hub's fixed keys are read the same way when the build evaluates
+    # them (`hex32`): a high hex digit shifted left four bits and a low one
+    # below it never share a bit, so `|` and `^` give the same byte. Other
+    # bytes (`&`) are caught.
+    'crates/domain/src/fleet/keys\.rs.*: replace \| with \^ in hex32$',
     # An API token's ID gathers its first eight bytes by shifting what it has
     # eight bits left and joining the next byte below; its secret is read
     # back six bits a character the same way, and the last three characters

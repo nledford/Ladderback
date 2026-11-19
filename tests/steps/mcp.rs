@@ -17,7 +17,7 @@ use api::MsgArg;
 use app::ports::{OperationRecord, OperationStore as _};
 use domain::execution::{FailureReason, OperationStatus, Trigger};
 use domain::{OperationId, Uuid};
-use l10n::{Localizer, msg};
+use l10n::Localizer;
 use store::SqliteStore;
 
 use super::build_steps::expected;
@@ -491,7 +491,7 @@ fn headless_refused(agent: &mut Agent) {
         "a refusal is a failure: {status}; log: {log}"
     );
     let said = Localizer::new(&[]).message(
-        msg::CLI_DATA_DIR_IN_USE,
+        events_steps::DATA_DIR_IN_USE,
         &[
             ("path", MsgArg::Text(data.display().to_string())),
             ("pid", MsgArg::Text(holder.to_string())),

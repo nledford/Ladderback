@@ -11,8 +11,10 @@
 //!    without an `Origin`: a browser or extension that strips it must not let
 //!    a cross-site form post through.
 //!
-//! Each refusal is a typed [`ErrorCode`]; `/sync/v1` is exempt from all
-//! three, since agents authenticate there with a signed nonce (§7.1).
+//! Each refusal is a typed [`ErrorCode`]. In a build with the `hub` feature,
+//! `/sync/v1` is exempt from all three, since agents authenticate there with
+//! a signed nonce (§7.1); a build without it has no agent routes to exempt
+//! (§16, decision 122).
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -42,6 +44,7 @@ impl RequestChecks {
     }
 
     fn check(&self, method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<(), ErrorCode> {
+        #[cfg(feature = "hub")]
         if is_agent_route(uri.path()) {
             return Ok(());
         }
@@ -86,6 +89,7 @@ impl RequestChecks {
 
 /// The agent routes authenticate with a signed nonce (§7.1), are reached by
 /// whatever name the hub has, and aren't browsers.
+#[cfg(feature = "hub")]
 fn is_agent_route(path: &str) -> bool {
     path.strip_prefix("/sync/v1")
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
