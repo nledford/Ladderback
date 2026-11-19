@@ -268,7 +268,9 @@ test("the families ci.yml prunes by keep the newest entries of every key layout 
   const doomed: number[] = [];
   let id = 1;
   for (const family of families) {
-    const { keep, keys } = real[family]!;
+    const layout = real[family];
+    assert.ok(layout, `ci.yml prunes the family ${family}, which this test has no keys for`);
+    const { keep, keys } = layout;
     keys.forEach((key, i) => {
       entries.push(entry(id, key, `2026-11-1${i + 1}T10:00:00Z`));
       if (i < keys.length - keep) doomed.push(id);

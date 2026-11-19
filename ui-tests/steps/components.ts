@@ -1693,9 +1693,13 @@ Then(
       ].map((rect) => rect && { top: rect.top, bottom: rect.bottom });
     });
     const parts = ["label", "description", "error", "field"];
-    for (const [at, rect] of tops.entries()) assert.ok(rect, `"${name}" shows no ${parts[at]}`);
-    for (let at = 1; at < tops.length; at++) {
-      const [above, below] = [tops[at - 1]!, tops[at]!];
+    const shown = tops.map((rect, at) => {
+      assert.ok(rect, `"${name}" shows no ${parts[at]}`);
+      return rect;
+    });
+    for (const [at, below] of shown.entries()) {
+      const above = shown[at - 1];
+      if (above === undefined) continue;
       assert.ok(above.bottom <= below.top + 0.5, `the ${parts[at - 1]} of "${name}" isn't above its ${parts[at]}`);
     }
   },
@@ -1762,20 +1766,18 @@ Then(
   async function (this: BrowserWorld, name: string, button: string) {
     const field = textField(this, name);
     const pressed = this.page.getByRole("button", { name: button, exact: true });
-    const [a, b] = await Promise.all(
-      [field, pressed].map((locator) =>
-        locator.evaluate((element) => {
-          const rect = element.getBoundingClientRect();
-          return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
-        }),
-      ),
-    );
+    const boxOf = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+      });
+    const [a, b] = await Promise.all([boxOf(field), boxOf(pressed)]);
     assert.ok(
-      Math.abs(a!.bottom - a!.top - (b!.bottom - b!.top)) < 0.5,
+      Math.abs(a.bottom - a.top - (b.bottom - b.top)) < 0.5,
       `"${name}" ${JSON.stringify(a)}, "${button}" ${JSON.stringify(b)}`,
     );
-    assert.ok(Math.abs(a!.bottom - b!.bottom) < 0.5, `"${name}" and "${button}" don't stand level`);
-    assert.ok(a!.right <= b!.left || b!.right <= a!.left, `"${button}" isn't beside "${name}"`);
+    assert.ok(Math.abs(a.bottom - b.bottom) < 0.5, `"${name}" and "${button}" don't stand level`);
+    assert.ok(a.right <= b.left || b.right <= a.left, `"${button}" isn't beside "${name}"`);
   },
 );
 

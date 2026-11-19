@@ -192,9 +192,14 @@ Then(
       ];
     });
     const parts = ["legend", "error", "first choice"];
-    for (const [at, rect] of tops.entries()) assert.ok(rect, `the group "${name}" shows no ${parts[at]}`);
-    for (let at = 1; at < tops.length; at++) {
-      assert.ok(tops[at - 1]!.bottom <= tops[at]!.top + ROUNDING_PX, `the ${parts[at - 1]} of "${name}" isn't above its ${parts[at]}`);
+    const shown = tops.map((rect, at) => {
+      assert.ok(rect, `the group "${name}" shows no ${parts[at]}`);
+      return rect;
+    });
+    for (const [at, below] of shown.entries()) {
+      const above = shown[at - 1];
+      if (above === undefined) continue;
+      assert.ok(above.bottom <= below.top + ROUNDING_PX, `the ${parts[at - 1]} of "${name}" isn't above its ${parts[at]}`);
     }
   },
 );
