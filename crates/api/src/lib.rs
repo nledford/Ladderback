@@ -4964,7 +4964,7 @@ pub struct StatusDto {
 }
 
 /// One plan in the status summary: the plans list's entry, its last
-/// operation, its last successful backup among its newest 200 operations,
+/// operation, its last successful backup, however long ago,
 /// and whether it is overdue (§3.1).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
