@@ -230,3 +230,54 @@ async fn an_address_with_no_hub_at_its_path_is_unreachable() {
         link.err()
     );
 }
+
+/// A machine whose trust store holds no CA roots, as a Linux container with
+/// no certificates installed.
+fn without_ca_roots() -> WebSocketHubConnector {
+    WebSocketHubConnector::with_verifier(|_| Err(rustls::Error::General("no CA roots".to_owned())))
+}
+
+/// A plain address needs no CA roots, so none missing doesn't stop it.
+#[tokio::test]
+async fn a_plain_address_connects_on_a_machine_with_no_ca_roots() {
+    let port = serve(hub(), None).await;
+    let route = HubRoute {
+        host: "127.0.0.1".to_owned(),
+        port,
+        session: RouteSession::Plain,
+    };
+    let link = without_ca_roots().connect(&route).await;
+    assert!(link.is_ok(), "{:?}", link.err());
+}
+
+/// A pinned address checks the one key its token names, so no CA roots are
+/// needed to refuse another.
+#[tokio::test]
+async fn a_pinned_address_is_checked_on_a_machine_with_no_ca_roots() {
+    let port = serve(hub(), Some(key())).await;
+    let route = HubRoute {
+        host: "127.0.0.1".to_owned(),
+        port,
+        session: RouteSession::Pinned(Fingerprint::from_digest([7; 32])),
+    };
+    let link = without_ca_roots().connect(&route).await;
+    assert_eq!(link.err(), Some(LinkError::PinMismatch));
+}
+
+/// A CA-checked address has nothing to check the certificate against with
+/// no roots, so it is refused, not trusted.
+#[tokio::test]
+async fn a_ca_checked_address_is_refused_on_a_machine_with_no_ca_roots() {
+    let port = serve(hub(), Some(key())).await;
+    let route = HubRoute {
+        host: "localhost".to_owned(),
+        port,
+        session: RouteSession::Ca,
+    };
+    let link = without_ca_roots().connect(&route).await;
+    assert!(
+        matches!(&link, Err(LinkError::TlsRefused { detail }) if detail.contains("no CA roots")),
+        "{:?}",
+        link.err()
+    );
+}

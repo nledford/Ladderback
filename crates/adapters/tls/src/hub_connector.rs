@@ -66,6 +66,23 @@ impl WebSocketHubConnector {
         })
     }
 
+    /// A connector whose CA-checked routes trust the verifier `roots`
+    /// builds, when the first such route is opened and not before. A plain
+    /// or a pinned route never asks for it, so a machine with no CA roots
+    /// pairs over either.
+    pub fn with_verifier(
+        roots: impl Fn(
+            Arc<rustls::crypto::CryptoProvider>,
+        )
+            -> Result<Arc<dyn rustls::client::danger::ServerCertVerifier>, rustls::Error>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        let _ = roots;
+        todo!("build the CA-checked connector when a CA route opens")
+    }
+
     async fn open(&self, route: &HubRoute) -> Result<Box<dyn HubLink>, LinkError> {
         let tcp = TcpStream::connect((route.host.as_str(), route.port))
             .await
