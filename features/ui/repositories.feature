@@ -9,7 +9,7 @@ Feature: Repositories page
   the sentence that says it was created. A failed attempt moves focus to an
   error summary
   that names each problem and links to its field, and what the daemon said is
-  shown as the catalog writes it (A4, components.md §4.5). A password is never
+  shown as the catalog writes it (A4, components/accessibility.md §4.5). A password is never
   shown again once typed (I4). A connected repository is maintained from this
   machine only when the person turns that on, for only one place may maintain
   a repository (I1). In these scenarios {repo} is a scratch copy of

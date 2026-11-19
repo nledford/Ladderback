@@ -10,7 +10,7 @@ Feature: Plans page
   has moved it out of the form while the plan was saved, and leaves open a
   form they opened meanwhile for another plan (A1). A refusal moves
   focus to an error summary that names each problem and links to its field
-  (A4, components.md §4.5). Deleting a plan asks first, and says what
+  (A4, components/accessibility.md §4.5). Deleting a plan asks first, and says what
   becomes of its snapshots: they stay in the repository, and since forget
   removes only snapshots a plan owns (I6), nothing forgets them on its own
   any more; they can still be forgotten by selecting them. A new plan given

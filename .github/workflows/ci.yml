@@ -337,7 +337,8 @@ jobs:
     steps:
       # Every pull request is checked out: a docs-only one still runs the
       # agent-guidance path check, the paragraph-length check and the
-      # decision-index check below, which `just lint` runs for the rest.
+      # decision-index and component-index checks below, which `just lint`
+      # runs for the rest.
       - if: matrix.skip != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -355,9 +356,9 @@ jobs:
       # paragraph-length lints, the architecture checks and the contrast gate
       # give one answer anywhere, so they run on Linux alone; macOS needs no
       # Node then. A docs-only pull request sets Node up as well, for the
-      # paragraph-length and decision-index checks. Every setup-node reads
-      # Node's major version from ui-tests/.nvmrc, which a pull request of its
-      # own bumps (development.md §13.8).
+      # paragraph-length, decision-index and component-index checks. Every
+      # setup-node reads Node's major version from ui-tests/.nvmrc, which a
+      # pull request of its own bumps (development.md §13.8).
       - if: matrix.skip != 'true' && runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -367,6 +368,8 @@ jobs:
         run: node scripts/check-paragraph-length.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/decision-index.ts
+      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+        run: node scripts/component-index.ts
       # leptosfmt at the version the Justfile pins, for `just fmt-check`.
       # install-action lists no leptosfmt (manifests/ at that SHA), so it
       # falls back to cargo-binstall at that version, which takes the

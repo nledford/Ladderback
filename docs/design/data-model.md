@@ -220,7 +220,7 @@ Later tables, columns and indexes arrive as migrations of the features that need
 
 Its `offset` is the offset of the clock that took it, as RFC 3339 writes one (`-06:00`, seconds only when it has some), read from the snapshot file; a daemon older than the field leaves it out, and the daemon refuses a worker's listing with an offset no clock has (beyond ±25:59:59) (§16, decision 56). A snapshot that had more, or text cut short, says so in `paths_truncated` and `tags_truncated`; a listing of any length reaches the daemon as a series of worker events (§4.1, decision 32).
 
-Reading a page of a snapshot's folder (`Job::Browse`, decision 102) is a read in the same way: no I7 slot, no row, and it waits for one of the daemon's few turns to read a folder ([§4.1](components.md#41-worker-process-the-engine-boundary)).
+Reading a page of a snapshot's folder (`Job::Browse`, decision 102) is a read in the same way: no I7 slot, no row, and it waits for one of the daemon's few turns to read a folder ([§4.1](components/worker.md#41-worker-process-the-engine-boundary)).
 
 A download (`Job::Dump`, §10.4, decision 114) reads the repository too and takes no I7 slot, but it is a row, as a restore is, because it hands a snapshot's contents out of the agent: kind `download`, trigger `manual`, written once the worker has found the entry (running), and again when it ends. It succeeds with the bytes it handed over (`Summary::Dump`), fails when a piece couldn't be read, and is cancelled when the browser went away or never fetched it within its minute. Like a restore's, its row names the entry it read (`entry`, above).
 

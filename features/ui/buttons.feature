@@ -1,6 +1,6 @@
 @ui
 Feature: Buttons on every page
-  Every action a page offers is the shared button (components.md §4.5,
+  Every action a page offers is the shared button (components/accessibility/button.md §4.5,
   decision 113), drawn from the tokens rather than in the browser's own
   look, so it looks the same in every browser and what axe-core reads is
   what is painted. An action row's main action is the one filled button in

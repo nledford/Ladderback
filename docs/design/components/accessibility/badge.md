@@ -1,0 +1,19 @@
+# The badge
+
+- **The badge** is `Badge` (`components/badge.rs`), for a count or a tag ("Pending changes 3"): its `label`, the words that say what it counts or names, on a pill of its `tone`'s pair of tokens, after an optional `icon`. The status badge is one use of it, each state a tone and a glyph; its classes are now the badge's utilities, and its accessible output (its ARIA snapshot) is as it was. The label, the tone and the icon may be signals, so a live row's badge follows its run in place.
+
+  What it draws is `badge/rules.rs`, decided on the host: `BadgeTone`, the shared vocabulary's names for the pairs it draws in, `Primary` (the badge's own `--badge-loading-*`), `Secondary` (its own `--badge-empty-*`), and `Success`, `Warning` and `Error`, each its status tone's pair (`StatusTone::pair`, decision 108), the one every component tinted in a status shares, and its classes, Tailwind utilities only (decision 117), which replaced the `.badge-*` rules of `style.css`. `Secondary`, the gray pair, is the default: Ladder Blue is the accent for action, and a badge is none. It leaves out `Inherit`, which would leave a pill with no fill of its own. It has no size and no placement: its words are the text around it, and it stands in their line, so it grows with the reader's text (1.4.4). Its class keeps `badge`, its own name, which the operations table's narrower padding and the live row's steps find it by.
+
+  It is plain text: a `<span>` with no role, not a live region and nothing in it to focus, so a screen reader reads its words where they stand and Tab never stops on it. The icon is an `Icon` in its defaults: decoration (`aria-hidden="true"`), in the Inherit tone, the words' color, so the tone's pair covers it too, and as tall as the text, centered on the words' first line in a box one line tall.
+
+  The icon and the words are two flex items, 0.25em apart where they share a line. The words wrap between words beside the icon, starting as wide as their longest word (`flex-basis: min-content`), so they go under it, on a line of the pill's own, only where that word doesn't fit beside it (#1070). There a word longer than the line breaks inside (`overflow-wrap: break-word`: the page's `anywhere` kept them beside the icon a letter or two a line). The pill is never wider than its room (`max-inline-size: 100%`), and its corners are half a line: a pill on one line, a rounded box on two.
+
+  Under forced colors the system drops the fill, so the words take the color of the text around them (the system's text color), as the vocabulary's tones do, set by the badge itself so an engine that doesn't force colors (WebKit) draws it alike, and a 1px outline in that color, drawn inside the box, keeps each badge apart from the text and the badge beside it without moving anything; the status badge gains the same edge.
+
+  The caller's duties, which the badge can't meet for it:
+
+  - **Words that say it all (1.4.1).** The label says what the badge counts or names, the count included ("Pending changes 3", never "3" alone): the tone and the icon only repeat it.
+  - **Telling a change.** A count that changes while the reader is on the page is said through the announcer where the reader needs to hear it (4.1.3, A3), never by the badge.
+
+  The gallery's "Badge" demo (`section#badge-demo`, an id that finds it under a pseudolocale too), after the Status badge demo, shows a count, a tag and a long tag, then every tone named in words. `features/ui/components/badge.feature` checks axe and the ARIA snapshot, no role and no stop for Tab, each tone's words and icon on its own pair at 4.5:1 in light and dark colors, the words, icon and edge under forced colors, the icon before the words, centered on their line and as tall as the text, left to right and right to left, and every badge within its room at 320 px with 200 % text.
+

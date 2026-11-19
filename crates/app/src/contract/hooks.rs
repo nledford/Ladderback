@@ -189,7 +189,7 @@ async fn a_hook_is_told_the_context_and_nothing_else(harness: &dyn HooksHarness,
             .any(|l| l.starts_with("env: LADDERBACK_OPERATION_ID=")),
         "the hook is told its operation: {written:?}"
     );
-    // Every name the hook saw is the worker's allow-list (components.md
+    // Every name the hook saw is the worker's allow-list (components/worker.md
     // §4.1) or a context variable: nothing else of the daemon's gets
     // through. `PWD`, `SHLVL` and `_` are set by the POSIX shell the demo
     // script runs under, not given by the runner.
@@ -214,7 +214,7 @@ async fn a_hook_is_told_the_context_and_nothing_else(harness: &dyn HooksHarness,
 }
 
 /// The only variables of the daemon's environment a worker, and so a hook,
-/// is passed (components.md §4.1). The proxy variables also count in
+/// is passed (components/worker.md §4.1). The proxy variables also count in
 /// lowercase.
 const WORKER_ALLOW_LIST: &[&str] = &[
     "PATH",
