@@ -43,6 +43,15 @@ pub fn selection_on_press(selected: usize, pressed: usize) -> Option<usize> {
     (pressed != selected).then_some(pressed)
 }
 
+/// The tab newly selected when the tabs' caller chooses the tab `chosen`
+/// (writing `Tabs`'s `selected`) while the tab `selected` is, in a set whose
+/// last tab is `last`: the tab chosen, as a press on it would select, or
+/// `None` for the tab already selected and for one the set doesn't hold,
+/// which changes nothing.
+pub fn selection_on_choice(selected: usize, chosen: usize, last: usize) -> Option<usize> {
+    todo!("{selected} {chosen} {last}")
+}
+
 /// The tab selected when the tabs are drawn, of tabs whose callers marked
 /// each as the one to start on or not (`marked`, in the order of the list):
 /// the first one marked, or the first tab when none is, so a caller can't
@@ -410,6 +419,22 @@ mod tests {
         assert_eq!(selection_on_press(2, 0), Some(0));
         assert_eq!(selection_on_press(1, 1), None);
         assert_eq!(Activation::Automatic.selection_on_arrival(1, 1), None);
+    }
+
+    // A caller choosing a tab, as Settings does for an address whose
+    // fragment changed, selects it as a press would, and can't select a tab
+    // the set doesn't hold.
+    #[test]
+    fn a_tab_a_caller_chooses_is_newly_selected_only_if_the_set_holds_it_and_it_isnt_selected_yet()
+    {
+        assert_eq!(selection_on_choice(0, 2, 2), Some(2));
+        assert_eq!(selection_on_choice(2, 0, 2), Some(0));
+        assert_eq!(selection_on_choice(0, 1, 2), Some(1));
+        assert_eq!(selection_on_choice(1, 1, 2), None);
+        assert_eq!(selection_on_choice(0, 3, 2), None);
+        assert_eq!(selection_on_choice(0, usize::MAX, 2), None);
+        assert_eq!(selection_on_choice(0, 0, 0), None);
+        assert_eq!(selection_on_choice(0, 1, 0), None);
     }
 
     #[test]

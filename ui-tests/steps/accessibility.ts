@@ -124,6 +124,32 @@ Then("the page's address ends in the fragment {string}", async function (this: B
   await expect.poll(() => new URL(this.page.url()).hash, { message: "the page's address's fragment" }).toBe(fragment);
 });
 
+// The reader changes the address's fragment alone, typing another in the
+// address bar or going Back to an address that differs from this one only by
+// it: the browser doesn't load the page again, and tells it with a
+// `hashchange`. These steps wait for that event and two frames after it, so
+// whatever the page does about it has been drawn, and a step after them that
+// says nothing changed isn't early.
+When("I change the address's fragment to {string}", async function (this: BrowserWorld, fragment: string) {
+  const now = new URL(this.page.url()).hash;
+  assert.notEqual(now, fragment, `the address's fragment is "${now}" already, and the browser tells of no change to it`);
+  await this.page.evaluate(async (hash) => {
+    const changed = new Promise((done) => window.addEventListener("hashchange", done, { once: true }));
+    window.location.hash = hash;
+    await changed;
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  }, fragment);
+});
+
+When("I go back to the address before", async function (this: BrowserWorld) {
+  await this.page.evaluate(async () => {
+    const changed = new Promise((done) => window.addEventListener("hashchange", done, { once: true }));
+    history.back();
+    await changed;
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  });
+});
+
 When("I press Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   await pressUntilFocusIsOn(this, "Tab", role, name);
 });

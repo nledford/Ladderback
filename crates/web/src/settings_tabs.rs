@@ -82,6 +82,15 @@ impl Section {
     }
 }
 
+/// The tab, its index among the tabs `shown` in their order, of the section
+/// the fragment `hash` of the page's address names, as `Location.hash` gives
+/// it: the tab an address changed while Settings is open chooses. `None` when
+/// it names no section, or one whose tab isn't shown, which leaves the tab as
+/// it is.
+pub(crate) fn tab_named(hash: &str, shown: &[Section]) -> Option<usize> {
+    todo!("{hash} {shown:?}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +138,44 @@ mod tests {
         ] {
             assert_eq!(Section::named(hash), None, "{hash:?}");
         }
+    }
+
+    #[test]
+    fn an_address_changed_while_settings_is_open_chooses_the_tab_of_the_section_it_names() {
+        for (index, section) in Section::ALL.into_iter().enumerate() {
+            let hash = format!("#{}", section.fragment());
+            assert_eq!(tab_named(&hash, &Section::ALL), Some(index), "{hash}");
+        }
+        // Without the admin password's and signing in's tabs, the API
+        // tokens' is the third.
+        let shown = [
+            Section::Language,
+            Section::PageWidth,
+            Section::ApiTokens,
+            Section::DryRunAllowlist,
+            Section::Restart,
+        ];
+        assert_eq!(tab_named("#api-tokens", &shown), Some(2));
+        assert_eq!(tab_named("#restart", &shown), Some(4));
+    }
+
+    // Settings' own address, `/settings` with no fragment, is its first
+    // tab's, as the page opens there: going Back to it shows that tab.
+    #[test]
+    fn an_address_changed_to_settings_own_with_no_fragment_chooses_the_first_tab() {
+        assert_eq!(tab_named("", &Section::ALL), Some(0));
+        assert_eq!(tab_named("#", &Section::ALL), Some(0));
+        assert_eq!(tab_named("", &[]), None);
+    }
+
+    #[test]
+    fn an_address_changed_to_name_no_section_or_one_not_shown_leaves_the_tab_as_it_is() {
+        for hash in ["#backups", "#API-tokens", "##", "restart"] {
+            assert_eq!(tab_named(hash, &Section::ALL), None, "{hash:?}");
+        }
+        let shown = [Section::Language, Section::PageWidth, Section::Restart];
+        assert_eq!(tab_named("#admin-password", &shown), None);
+        assert_eq!(tab_named("#signing-in", &shown), None);
     }
 
     #[test]
