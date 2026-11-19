@@ -686,6 +686,14 @@ fn warns_once(agent: &mut Agent, path: String) {
     assert_eq!(warnings.len(), 1, "{warnings:?}");
 }
 
+#[then(expr = "the resolution warns once that others can change the file {string}")]
+fn warns_once_changeable(agent: &mut Agent, path: String) {
+    let warnings = &agent.secrets.resolved().warnings;
+    let named = |w: &&SecretWarning| matches!(w, SecretWarning::FileWritableByOthers { path: at, .. } if *at == path);
+    assert_eq!(warnings.iter().filter(named).count(), 1);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+}
+
 #[then("the resolution warns about nothing")]
 fn warns_about_nothing(agent: &mut Agent) {
     assert_eq!(agent.secrets.resolved().warnings, []);

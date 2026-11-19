@@ -655,6 +655,7 @@ mod tests {
             WarningKind::OtherHosts => "maintenance-other-hosts",
             WarningKind::LocationSkipped => "location-skipped",
             WarningKind::SecretFileReadable => "secret-file-readable",
+            WarningKind::SecretFileWritable => "secret-file-writable",
             WarningKind::FullDiskAccessMissing => "full-disk-access-missing",
             WarningKind::Other => "unknown",
         }

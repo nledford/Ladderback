@@ -123,6 +123,11 @@ pub enum SecretWarning {
     /// permission). `mode` is the file's permission bits (`0o644`), without
     /// its type.
     FileReadableByOthers { path: String, mode: u32 },
+    /// Other users of the machine can change the file (group or world write
+    /// permission), so they can choose the secret: for a new repository,
+    /// the key it is made with (#1137). It takes the place of
+    /// [`Self::FileReadableByOthers`] when both hold. `mode` as there.
+    FileWritableByOthers { path: String, mode: u32 },
 }
 
 impl SecretWarning {
@@ -137,6 +142,7 @@ impl SecretWarning {
                 during: "secret".to_owned(),
                 detail: format!("{mode:04o}"),
             },
+            Self::FileWritableByOthers { .. } => todo!(),
         }
     }
 
@@ -150,6 +156,7 @@ impl SecretWarning {
                 path: redactor.redact(path),
                 mode: *mode,
             },
+            Self::FileWritableByOthers { .. } => todo!(),
         }
     }
 }
@@ -424,19 +431,78 @@ mod tests {
         assert_eq!(warning.masked(&Redactor::new([])), warning);
     }
 
+    /// Whoever can change a secret file chooses the secret, so a file other
+    /// users can write to is warned about as such, whether they can read it
+    /// or not, by the permission bits a `chmod` sets (#1137).
     #[test]
-    fn a_file_only_its_owner_can_read_is_not() {
+    fn a_file_others_can_change_is_warned_about() {
         let path = "/home/demo/secrets/nas";
-        for mode in [0o600, 0o400, 0o700, 0o000, 0o100_600] {
-            assert!(!warns(path, mode, None), "{mode:o}");
+        for (st_mode, mode) in [
+            (0o602, 0o602),
+            (0o620, 0o620),
+            (0o622, 0o622),
+            (0o666, 0o666),
+            (0o646, 0o646),
+            (0o002, 0o002),
+            (0o100_620, 0o620),
+        ] {
+            assert_eq!(
+                file_warning(path, st_mode, None, same),
+                Some(SecretWarning::FileWritableByOthers {
+                    path: path.to_owned(),
+                    mode,
+                }),
+                "{st_mode:o}"
+            );
         }
     }
 
-    /// Writable or executable by others is another matter than readable.
+    /// An operation that read a file others can change carries it by its
+    /// path and mode, as `chmod` writes it, and nothing else (#1137, I4).
     #[test]
-    fn only_the_read_permission_of_group_and_world_counts() {
-        for mode in [0o620, 0o602, 0o610, 0o601, 0o622, 0o022, 0o011] {
-            assert!(!warns("/home/demo/nas", mode, None), "{mode:o}");
+    fn an_operation_carries_a_changeable_file_by_its_path_and_mode() {
+        let changeable = |mode| SecretWarning::FileWritableByOthers {
+            path: "/home/demo/secrets/nas".to_owned(),
+            mode,
+        };
+        assert_eq!(
+            changeable(0o620).warning(),
+            Warning {
+                kind: WarningKind::SecretFileWritable,
+                item: Some("/home/demo/secrets/nas".to_owned()),
+                during: "secret".to_owned(),
+                detail: "0620".to_owned(),
+            }
+        );
+        assert_eq!(changeable(0o002).warning().detail, "0002");
+    }
+
+    /// A changeable file's path is masked of the secrets it was read with,
+    /// and its mode kept (I4).
+    #[test]
+    fn a_changeable_files_path_is_masked_of_the_secrets_read_with_it() {
+        let secret = SecretValue::new("alice");
+        let warning = SecretWarning::FileWritableByOthers {
+            path: "/home/alice/nas-password".to_owned(),
+            mode: 0o602,
+        };
+        assert_eq!(
+            warning.masked(&Redactor::new([&secret])),
+            SecretWarning::FileWritableByOthers {
+                path: "/home/***/nas-password".to_owned(),
+                mode: 0o602,
+            }
+        );
+    }
+
+    #[test]
+    fn a_file_only_its_owner_can_read_is_not() {
+        let path = "/home/demo/secrets/nas";
+        // Executable by others is another matter than reading or changing.
+        for mode in [
+            0o600, 0o400, 0o700, 0o000, 0o100_600, 0o610, 0o601, 0o711, 0o011,
+        ] {
+            assert!(!warns(path, mode, None), "{mode:o}");
         }
     }
 

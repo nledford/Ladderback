@@ -2497,6 +2497,7 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
         WarningKind::LocationSkipped => WarningCode::LocationSkipped,
         WarningKind::SecretFileReadable => WarningCode::SecretFileReadable,
+        WarningKind::SecretFileWritable => todo!(),
         WarningKind::FullDiskAccessMissing => WarningCode::FullDiskAccessMissing,
         WarningKind::Other => WarningCode::Unknown,
     }
@@ -3750,6 +3751,7 @@ fn log_secret_warning(warning: &SecretWarning) {
              owner can read it",
             WarningCode::SecretFileReadable
         ),
+        SecretWarning::FileWritableByOthers { .. } => todo!(),
     }
 }
 
