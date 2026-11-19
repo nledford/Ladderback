@@ -1693,7 +1693,7 @@ Then(
       ].map((rect) => rect && { top: rect.top, bottom: rect.bottom });
     });
     const parts = ["label", "description", "error", "field"];
-    tops.forEach((rect, at) => assert.ok(rect, `"${name}" shows no ${parts[at]}`));
+    for (const [at, rect] of tops.entries()) assert.ok(rect, `"${name}" shows no ${parts[at]}`);
     for (let at = 1; at < tops.length; at++) {
       const [above, below] = [tops[at - 1]!, tops[at]!];
       assert.ok(above.bottom <= below.top + 0.5, `the ${parts[at - 1]} of "${name}" isn't above its ${parts[at]}`);

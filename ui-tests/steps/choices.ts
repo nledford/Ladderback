@@ -192,7 +192,7 @@ Then(
       ];
     });
     const parts = ["legend", "error", "first choice"];
-    tops.forEach((rect, at) => assert.ok(rect, `the group "${name}" shows no ${parts[at]}`));
+    for (const [at, rect] of tops.entries()) assert.ok(rect, `the group "${name}" shows no ${parts[at]}`);
     for (let at = 1; at < tops.length; at++) {
       assert.ok(tops[at - 1]!.bottom <= tops[at]!.top + ROUNDING_PX, `the ${parts[at - 1]} of "${name}" isn't above its ${parts[at]}`);
     }
