@@ -11,6 +11,8 @@
     clippy::unreachable
 )]
 
+#[cfg(feature = "hub")]
+mod agent_registry;
 mod api_tokens;
 mod codec;
 mod error_args;

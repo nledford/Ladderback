@@ -61,6 +61,8 @@ mod hub_tls_key_steps;
 mod interop_steps;
 #[path = "steps/notifications.rs"]
 mod notifications_steps;
+#[path = "steps/pairing.rs"]
+mod pairing_steps;
 #[path = "steps/plans.rs"]
 mod plans_steps;
 #[path = "steps/proposals.rs"]
@@ -94,6 +96,7 @@ struct Agent {
     finished: Option<Finished>,
     hooks: hooks_steps::HooksWorld,
     hub_tls_key: hub_tls_key_steps::HubTlsKeyWorld,
+    pairing: pairing_steps::PairingWorld,
     secrets: secrets_steps::SecretsWorld,
     config: config_steps::ConfigWorld,
     conditions: conditions_steps::ConditionsWorld,
@@ -157,6 +160,7 @@ impl Agent {
             maintenance: Default::default(),
             hooks: hooks_steps::HooksWorld::new(),
             hub_tls_key: Default::default(),
+            pairing: Default::default(),
             repositories: Default::default(),
             forget: Default::default(),
             interop: Default::default(),

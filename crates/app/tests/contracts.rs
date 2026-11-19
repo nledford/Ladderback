@@ -180,6 +180,33 @@ async fn in_memory_api_token_store_meets_the_api_token_store_contract() {
     contract::api_token_store::run(&InMemoryApiTokens::default()).await;
 }
 
+/// The in-memory registry: a new one for each `empty`, and the same one
+/// again for `reopened`, as the real store's file outlives its handle.
+#[derive(Default)]
+struct InMemoryRegistries(Mutex<Option<Arc<app::fakes::InMemoryAgentRegistry>>>);
+
+#[async_trait]
+impl contract::agent_registry::AgentRegistryHarness for InMemoryRegistries {
+    async fn empty(&self) -> Arc<dyn app::ports::AgentRegistry> {
+        let registry = Arc::new(app::fakes::InMemoryAgentRegistry::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&registry));
+        registry
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::AgentRegistry> {
+        self.0
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("a registry was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_agent_registry_meets_the_agent_registry_contract() {
+    contract::agent_registry::run(&InMemoryRegistries::default()).await;
+}
+
 /// The in-memory proposal store: a new one for each `empty`, and the same
 /// one again for `reopened`, as the real store's file outlives its handle.
 #[derive(Default)]

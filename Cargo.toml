@@ -74,8 +74,8 @@ mcp = { path = "crates/adapters/mcp" }
 # for its default build, and a release build leaves it out (§16, decision 122).
 http-adapter = { path = "crates/adapters/http", default-features = false }
 platform = { path = "crates/adapters/platform", default-features = false }
+store = { path = "crates/adapters/store", default-features = false }
 secrets = { path = "crates/adapters/secrets" }
-store = { path = "crates/adapters/store" }
 spawn-gate = { path = "crates/spawn-gate" }
 testkit = { path = "crates/testkit" }
 
@@ -368,7 +368,7 @@ pseudo = ["l10n/pseudo"]
 # the key files and every other way in to the hub's code. On in every
 # development and test build; a release build's `--no-default-features` leaves
 # it out until M8, and `just architecture` checks that it does.
-hub = ["http-adapter/hub", "platform/hub"]
+hub = ["http-adapter/hub", "platform/hub", "store/hub"]
 
 [dependencies]
 api.workspace = true

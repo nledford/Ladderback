@@ -189,3 +189,26 @@ async fn sqlite_store_meets_the_proposal_store_contract() {
     )
     .await;
 }
+
+#[cfg(feature = "hub")]
+#[async_trait]
+impl contract::agent_registry::AgentRegistryHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn app::ports::AgentRegistry> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::AgentRegistry> {
+        Arc::new(self.last_store().await)
+    }
+}
+
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn sqlite_store_meets_the_agent_registry_contract() {
+    within(
+        120,
+        "the agent registry contract suite",
+        contract::agent_registry::run(&SqliteFiles::default()),
+    )
+    .await;
+}

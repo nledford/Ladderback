@@ -6,14 +6,19 @@
 //! seed and nonce comes from the `Random` port.
 
 mod fingerprint;
+mod handshake;
 mod hostname;
 mod key_files;
 mod keys;
 mod pin;
+mod registry;
 mod signed;
 mod token;
 
 pub use fingerprint::{Fingerprint, KeyId, TokenId};
+pub use handshake::{
+    BindingKind, Challenge, Connect, HANDSHAKES, Holder, Pair, PairAnswer, Paired, Refused,
+};
 pub use hostname::{Hostname, InvalidHostname, MAX_HOSTNAME_BYTES};
 pub use key_files::{
     COUNTER_LOCK_FILE, ConnectionCounter, CounterRefused, KeyFile, LEFT_OUT_OF_BACKUPS,
@@ -24,6 +29,11 @@ pub use keys::{
     SignatureRefused, SigningSeed,
 };
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
+pub use registry::{
+    AgentRecord, AgentStatus, HostnameKey, LONGEST_TOKEN_LIFE, PENDING_LIMIT, PairRefusal,
+    PairRequest, Pairing, PairingView, SHORTEST_TOKEN_LIFE, TOKEN_LIFE, TokenLifeRefused,
+    TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, decide_pairing, token_life,
+};
 pub use signed::{
     Binding, EpochSeconds, Handshakes, InvalidWireName, LABEL_PREFIX, MAX_WIRE_NAME_BYTES, Nonce,
     PayloadDigest, SignedBytes, SignedMessage, WireName,

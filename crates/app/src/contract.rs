@@ -2,6 +2,7 @@
 //! each suite in `app`'s tests, and each real adapter runs the same suite, so
 //! a fake can't drift from reality. A suite panics on the first violation.
 pub mod admin_password;
+pub mod agent_registry;
 pub mod api_token_store;
 pub mod change_codec;
 pub mod clock;
