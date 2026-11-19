@@ -59,7 +59,7 @@ Then(/^the (checkbox|radio) "([^"]*)" shows no mark$/, async function (this: Bro
 // The fill of a chosen box, and its mark over it: a check's strokes, drawn
 // in the text's color of its icon, or a dot's fill.
 Then(
-  new RegExp(String.raw`^the (checkbox|radio) "([^"]*)" is filled in ${COLOR}, its mark in ${COLOR}$`),
+  new RegExp(`^the (checkbox|radio) "([^"]*)" is filled in ${COLOR}, its mark in ${COLOR}$`),
   async function (this: BrowserWorld, role: string, name: string, fill: string, mark: string) {
     const box = choice(this, role, name);
     await expect(box).toBeChecked();
