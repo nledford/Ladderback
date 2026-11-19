@@ -2,6 +2,7 @@ use std::assert_matches;
 
 use super::support::*;
 use super::*;
+use crate::composition::repositories::new_operation;
 use app::ports::ProgressEvent;
 
 /// An operation log that takes every write at once but the one it holds,
