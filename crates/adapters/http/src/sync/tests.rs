@@ -283,8 +283,7 @@ async fn without_the_hub_every_path_under_sync_answers_404() {
 }
 
 /// The daemon's whole router, with `serve --hub`'s sync routes.
-async fn send(request: axum::http::Request<axum::body::Body>) -> axum::response::Response {
-    use tower::ServiceExt as _;
+fn daemon() -> Router {
     let state = crate::AppState {
         sync: SyncHub::serving(pairing()),
         ..crate::request_checks::tests::test_state()
@@ -294,9 +293,87 @@ async fn send(request: axum::http::Request<axum::body::Body>) -> axum::response:
         crate::RequestChecks::new([]),
         state,
     )
-    .oneshot(request)
-    .await
-    .unwrap()
+}
+
+async fn send(request: axum::http::Request<axum::body::Body>) -> axum::response::Response {
+    use tower::ServiceExt as _;
+    daemon().oneshot(request).await.unwrap()
+}
+
+/// An agent reaches the hub by whatever name it knows it by, which the
+/// daemon wasn't told to answer to, and its client sends no `Origin`: its
+/// handshake gets through the whole router, whatever the case of its
+/// `Upgrade`, as a proxy may write it.
+#[tokio::test]
+async fn an_agents_handshake_reaches_the_hub_by_any_name() {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, daemon()).await });
+    for upgrade in ["websocket", "WebSocket"] {
+        let mut request = format!("ws://{address}{PATH}")
+            .into_client_request()
+            .unwrap();
+        assert_eq!(request.headers().get("origin"), None);
+        let headers = request.headers_mut();
+        headers.insert(
+            "host",
+            axum::http::HeaderValue::from_static("hub.other.example:8443"),
+        );
+        headers.insert("upgrade", axum::http::HeaderValue::from_static(upgrade));
+        let mut socket = connect_async(request).await.unwrap().0;
+        socket.send(connect(0)).await.unwrap();
+        let Some(Message::Text(text)) = next(&mut socket).await else {
+            panic!("no answer upgrading to {upgrade}");
+        };
+        assert!(matches!(
+            HubFrame::from_text(text.as_str()),
+            Ok(HubFrame::Challenge { .. })
+        ));
+    }
+}
+
+/// An agent's handshake has no body; one that does is refused before the
+/// handshake, whatever its length, and when it has none it declares.
+#[tokio::test]
+async fn a_handshake_with_a_body_is_refused_before_it_starts() {
+    let streamed = || {
+        let chunks = [Ok::<_, std::io::Error>("{}".as_bytes())];
+        axum::body::Body::from_stream(futures::stream::iter(chunks))
+    };
+    for (what, body) in [
+        ("one byte", axum::body::Body::from("x")),
+        ("JSON", axum::body::Body::from("{}")),
+        ("of no known length", streamed()),
+    ] {
+        let mut request = handshake("GET", PATH, &[]);
+        *request.body_mut() = body;
+        let response = send(request).await;
+        assert_eq!(
+            crate::request_checks::tests::code(response).await,
+            Some((StatusCode::PAYLOAD_TOO_LARGE, "body-too-large".to_owned())),
+            "a body {what}"
+        );
+    }
+}
+
+/// A web page's request is refused as one whatever else is wrong with it:
+/// the `Origin` is checked first.
+#[tokio::test]
+async fn the_origin_is_checked_before_the_method_and_the_upgrade() {
+    let origin = ("origin", "http://evil.example");
+    let without_upgrade =
+        crate::request_checks::tests::request("GET", PATH, &[("host", "localhost:9898"), origin]);
+    for (what, request) in [
+        ("a POST", handshake("POST", PATH, &[origin])),
+        ("a GET asking for no upgrade", without_upgrade),
+    ] {
+        assert_eq!(
+            crate::request_checks::tests::code(send(request).await).await,
+            Some((StatusCode::FORBIDDEN, "origin-not-allowed".to_owned())),
+            "{what}"
+        );
+    }
 }
 
 /// What an agent's WebSocket handshake carries, besides its `Host`.

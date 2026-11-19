@@ -12,6 +12,20 @@ Feature: The hub's sync routes
   Background:
     Given Ladderback is serving as a hub on loopback
 
+  Scenario: An agent's handshake reaches the hub by whatever name it knows it by
+    Given a "GET" request for "/sync/v1"
+    And the request has the header "Host: hub.other.example:8443"
+    And the request asks to upgrade to a WebSocket
+    When the request is sent
+    Then the WebSocket handshake is accepted
+
+  Scenario: A handshake with a body is refused before it starts
+    Given a "GET" request for "/sync/v1"
+    And the request asks to upgrade to a WebSocket
+    And the request has a body of 1 byte
+    When the request is sent
+    Then the request is refused with status 413 and the error code "body-too-large", naming the limit of 0 bytes
+
   Scenario Outline: A web page's handshake to <path> is refused before it starts
     Given a "GET" request for "<path>"
     And the request asks to upgrade to a WebSocket

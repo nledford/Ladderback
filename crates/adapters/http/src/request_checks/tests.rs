@@ -936,8 +936,10 @@ async fn the_checks_run_host_then_origin_then_content_type() {
     .await;
 }
 
+/// Only the sync routes, every path under `/sync/`, have a check of their
+/// own; a path that only mentions them gets the browser's.
 #[tokio::test]
-async fn only_the_sync_route_itself_is_exempt() {
+async fn paths_beside_the_sync_routes_get_the_browser_checks() {
     for path in [
         "/api/v1/sync/v1",
         "/x/sync/v1",

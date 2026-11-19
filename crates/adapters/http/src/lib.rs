@@ -491,7 +491,9 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// connection's address is refused.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     let sign_in = state.sign_in.clone();
-    Router::new()
+    #[cfg(feature = "hub")]
+    let hub = state.sync.clone();
+    let routes = Router::new()
         .route(
             sign_in::SESSION_PATH,
             axum::routing::get(sign_in::current)
@@ -677,8 +679,12 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             axum::routing::get(restart::read)
                 .post(restart::ask)
                 .delete(restart::cancel),
-        )
-        .merge(sync::routes(&state.sync))
+        );
+    // Without the hub, the paths under `/sync/` answer 404 behind the
+    // browser's checks, as every other path does (§16, decision 122).
+    #[cfg(not(feature = "hub"))]
+    let routes = routes.merge(sync::routes(&state.sync));
+    let app = routes
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
             let assets = Arc::clone(&assets);
@@ -686,8 +692,11 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         })
         .layer(from_fn(body_limit::enforce))
         .layer(from_fn_with_state(sign_in, sign_in::enforce))
-        .layer(from_fn_with_state(checks, request_checks::enforce))
-        .layer(from_fn(response_headers::add))
+        .layer(from_fn_with_state(checks, request_checks::enforce));
+    // With it, they are the agents', behind a check of their own.
+    #[cfg(feature = "hub")]
+    let app = sync::in_front_of(app, &hub);
+    app.layer(from_fn(response_headers::add))
 }
 
 /// The most one message from an events client may hold. The UI sends pings,

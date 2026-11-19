@@ -281,7 +281,7 @@ Feature: Request checks
 
   Rule: Only the hub's sync routes skip these checks, for a check of their own (fleet/sync_routes.feature)
 
-    Scenario Outline: Only /sync/v1 itself is exempt: <path> is refused
+    Scenario Outline: A path beside the sync routes gets these checks: <path> is refused
       Given a "GET" request for "<path>"
       And the request has the header "Host: hub.other.example:8443"
       When the request is sent
