@@ -33,8 +33,18 @@ pub(crate) fn routes<S>(hub: &SyncHub) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-        todo!()
+    #[cfg(feature = "hub")]
+    if let Some(router) = served::routes(hub) {
+        return router;
     }
+    #[cfg(not(feature = "hub"))]
+    let _ = hub;
+    let not_found = any(|| async { StatusCode::NOT_FOUND });
+    Router::new()
+        .route("/sync", not_found.clone())
+        .route("/sync/", not_found.clone())
+        .route("/sync/{*rest}", not_found)
+}
 
 #[cfg(feature = "hub")]
 mod served {
@@ -78,19 +88,34 @@ mod served {
     impl SyncHub {
         /// `/sync/v1` carrying `pairing`'s handshake.
         pub fn serving(pairing: Arc<HubPairing>) -> Self {
-        todo!()
-    }
+            Self::bounded(pairing, Bounds::DECIDED)
+        }
 
         pub(crate) fn bounded(pairing: Arc<HubPairing>, bounds: Bounds) -> Self {
-        todo!()
-    }
+            Self {
+                served: Some(Arc::new(Served {
+                    pairing,
+                    bounds,
+                    waiting: Mutex::default(),
+                })),
+            }
+        }
     }
 
     pub(super) fn routes<S>(hub: &SyncHub) -> Option<Router<S>>
     where
         S: Clone + Send + Sync + 'static,
     {
-        todo!()
+        let served = hub.served.clone()?;
+        Some(Router::new().route(
+            PATH,
+            get(move |upgrade: WebSocketUpgrade| async move {
+                upgrade
+                    .max_message_size(MAX_FRAME_BYTES)
+                    .max_frame_size(MAX_FRAME_BYTES)
+                    .on_upgrade(move |socket| served.run(socket))
+            }),
+        ))
     }
 
     struct Served {
@@ -101,8 +126,10 @@ mod served {
 
     impl std::fmt::Debug for Served {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
+            f.debug_struct("Served")
+                .field("bounds", &self.bounds)
+                .finish_non_exhaustive()
+        }
     }
 
     /// The unauthenticated connections, oldest first, each with what tells
@@ -133,26 +160,101 @@ mod served {
 
     impl Served {
         async fn run(self: Arc<Self>, mut socket: WebSocket) {
-        todo!()
-    }
+            let (id, evicted) = self.admit();
+            let end = tokio::select! {
+                end = tokio::time::timeout(
+                    self.bounds.handshake_within,
+                    self.converse(&mut socket),
+                ) => end.unwrap_or(End::Dropped),
+                () = evicted.notified() => End::Dropped,
+            };
+            self.leave(id);
+            let (code, reason) = match end {
+                End::Answered => (close_code::NORMAL, ""),
+                End::Refused(reason) => (close_code::POLICY, reason),
+                End::Dropped => (close_code::POLICY, ""),
+            };
+            let close = CloseFrame {
+                code,
+                reason: reason.into(),
+            };
+            let _ = socket.send(Message::Close(Some(close))).await;
+        }
 
         /// A place among the unauthenticated, evicting the oldest when the
         /// table is full.
         fn admit(&self) -> (u64, Arc<Notify>) {
-        todo!()
-    }
+            let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+            while waiting.open.len() >= self.bounds.unauthenticated {
+                let Some((_, oldest)) = waiting.open.pop_front() else {
+                    break;
+                };
+                oldest.notify_one();
+            }
+            let id = waiting.next;
+            waiting.next = waiting.next.wrapping_add(1);
+            let evicted = Arc::new(Notify::new());
+            waiting.open.push_back((id, Arc::clone(&evicted)));
+            (id, evicted)
+        }
 
         fn leave(&self, id: u64) {
-        todo!()
-    }
+            self.waiting
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .open
+                .retain(|(open, _)| *open != id);
+        }
 
         async fn converse(&self, socket: &mut WebSocket) -> End {
-        todo!()
-    }
+            let mut session = match self.pairing.session(None).await {
+                Ok(session) => session,
+                Err(error) => {
+                    log::warn!("/sync/v1: the hub's keys couldn't be read: {error:?}");
+                    return End::Dropped;
+                }
+            };
+            let first = tokio::time::timeout(self.bounds.connect_within, next(socket)).await;
+            let mut read = first.unwrap_or(Next::Gone);
+            loop {
+                let frame = match read {
+                    Next::Frame(frame) => frame,
+                    Next::Unreadable => return End::Refused(PROTOCOL_ERROR),
+                    Next::Gone => return End::Dropped,
+                };
+                match self.pairing.step(&mut session, &frame).await {
+                    HubStep::Reply(answer) => {
+                        if socket.send(Message::text(answer.to_text())).await.is_err() {
+                            return End::Dropped;
+                        }
+                    }
+                    HubStep::Last(answer) => {
+                        let _ = socket.send(Message::text(answer.to_text())).await;
+                        return End::Answered;
+                    }
+                    HubStep::Close(reason) => return End::Refused(reason),
+                    HubStep::Fail(error) => {
+                        log::warn!("/sync/v1: the hub couldn't take a pairing step: {error:?}");
+                        return End::Dropped;
+                    }
+                }
+                read = next(socket).await;
+            }
+        }
     }
 
     async fn next(socket: &mut WebSocket) -> Next {
-        todo!()
+        loop {
+            return match socket.recv().await {
+                Some(Ok(Message::Text(text))) => match AgentFrame::from_text(text.as_str()) {
+                    Ok(frame) => Next::Frame(frame),
+                    Err(_) => Next::Unreadable,
+                },
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                Some(Ok(Message::Binary(_))) => Next::Unreadable,
+                Some(Ok(Message::Close(_)) | Err(_)) | None => Next::Gone,
+            };
+        }
     }
 }
 

@@ -47,24 +47,58 @@ pub struct WebSocketHubConnector {
 impl WebSocketHubConnector {
     /// The connector, with the operating system's trust store.
     pub fn new() -> Result<Self, ConnectError> {
-        todo!()
+        let provider = provider(vec![kx_group::X25519MLKEM768, kx_group::X25519]);
+        let config_error = |error: rustls::Error| ConnectError::Config {
+            detail: error.to_string(),
+        };
+        let verifier =
+            rustls_platform_verifier::Verifier::new(provider.clone()).map_err(config_error)?;
+        let mut config = ClientConfig::builder_with_provider(provider)
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .map_err(config_error)?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth();
+        config.enable_early_data = false;
+        config.resumption = Resumption::disabled();
+        Ok(Self {
+            ca: TlsConnector::from(Arc::new(config)),
+        })
     }
 
     async fn open(&self, route: &HubRoute) -> Result<Box<dyn HubLink>, LinkError> {
-        todo!()
+        let tcp = TcpStream::connect((route.host.as_str(), route.port))
+            .await
+            .map_err(unreachable)?;
+        match route.session {
+            RouteSession::Plain => upgrade(tcp, "ws", route, None).await,
+            RouteSession::Ca => {
+                let name = server_name(&route.host)?;
+                let tls = self
+                    .ca
+                    .connect(name, tcp)
+                    .await
+                    .map_err(|error| refused(&error, false))?;
+                upgrade(tls, "wss", route, None).await
+            }
+            RouteSession::Pinned(pin) => pinned(tcp, pin, route).await,
+        }
     }
 }
 
 impl std::fmt::Debug for WebSocketHubConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        f.debug_struct("WebSocketHubConnector")
+            .finish_non_exhaustive()
     }
 }
 
 #[async_trait]
 impl HubConnector for WebSocketHubConnector {
     async fn connect(&self, route: &HubRoute) -> Result<Box<dyn HubLink>, LinkError> {
-        todo!()
+        tokio::time::timeout(CONNECT_WITHIN, self.open(route))
+            .await
+            .map_err(|_| no_answer())?
     }
 }
 
@@ -73,12 +107,46 @@ async fn pinned(
     pin: Fingerprint,
     route: &HubRoute,
 ) -> Result<Box<dyn HubLink>, LinkError> {
-        todo!()
-    }
+    let connector = PinnedConnector::new(pin).map_err(|error| match error {
+        ConnectError::Config { detail } => LinkError::TlsRefused { detail },
+        other => LinkError::TlsRefused {
+            detail: format!("{other:?}"),
+        },
+    })?;
+    let tls = connector
+        .connect(&route.host, tcp)
+        .await
+        .map_err(|error| match error {
+            ConnectError::Handshake(error) => refused(&error, true),
+            ConnectError::Host => LinkError::Unreachable {
+                detail: "the address's host is no name".to_owned(),
+            },
+            ConnectError::Config { detail } => LinkError::TlsRefused { detail },
+            ConnectError::NotPostQuantum => LinkError::TlsRefused {
+                detail: "the key exchange wasn't X25519MLKEM768".to_owned(),
+            },
+        })?;
+    let exporter = match tls.binding() {
+        Ok(Binding::TlsExporter(value)) => value,
+        Ok(Binding::None) => {
+            return Err(LinkError::TlsRefused {
+                detail: "the session has no exporter".to_owned(),
+            });
+        }
+        Err(error) => {
+            return Err(LinkError::TlsRefused {
+                detail: error.detail,
+            });
+        }
+    };
+    upgrade(tls, "wss", route, Some(exporter)).await
+}
 
 fn server_name(host: &str) -> Result<ServerName<'static>, LinkError> {
-        todo!()
-    }
+    ServerName::try_from(host.to_owned()).map_err(|_| LinkError::Unreachable {
+        detail: "the address's host is no name".to_owned(),
+    })
+}
 
 /// The WebSocket upgrade to `/sync/v1` over `stream`.
 async fn upgrade<S>(
@@ -90,8 +158,27 @@ async fn upgrade<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-        todo!()
-    }
+    let host = if route.host.contains(':') {
+        format!("[{}]", route.host)
+    } else {
+        route.host.clone()
+    };
+    let url = format!("{scheme}://{host}:{}{PATH}", route.port);
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_FRAME_BYTES))
+        .max_frame_size(Some(MAX_FRAME_BYTES));
+    let (socket, _) = client_async_with_config(url, stream, Some(config))
+        .await
+        .map_err(|error| match error {
+            WsError::Http(response) => LinkError::Unreachable {
+                detail: format!("no hub at this address: HTTP {}", response.status()),
+            },
+            other => LinkError::Unreachable {
+                detail: other.to_string(),
+            },
+        })?;
+    Ok(Box::new(WebSocketLink { socket, exporter }))
+}
 
 struct WebSocketLink<S> {
     socket: WebSocketStream<S>,
@@ -104,29 +191,64 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
     fn exporter(&self) -> Option<[u8; KEY_BYTES]> {
-        todo!()
+        self.exporter
     }
 
     async fn send(&mut self, frame: &AgentFrame) -> Result<(), LinkError> {
-        todo!()
+        self.socket
+            .send(Message::text(frame.to_text()))
+            .await
+            .map_err(|_| LinkError::Closed { reason: None })
     }
 
     async fn receive(&mut self) -> Result<HubFrame, LinkError> {
-        todo!()
+        loop {
+            let next = tokio::time::timeout(ANSWER_WITHIN, self.socket.next())
+                .await
+                .map_err(|_| no_answer())?;
+            return match next {
+                Some(Ok(Message::Text(text))) => {
+                    HubFrame::from_text(text.as_str()).map_err(|_| LinkError::Unreadable)
+                }
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
+                Some(Ok(Message::Binary(_)) | Err(WsError::Capacity(_))) => {
+                    Err(LinkError::Unreadable)
+                }
+                Some(Ok(Message::Close(frame))) => Err(LinkError::Closed {
+                    reason: frame
+                        .map(|frame| frame.reason.as_str().to_owned())
+                        .filter(|reason| !reason.is_empty()),
+                }),
+                Some(Err(_)) | None => Err(LinkError::Closed { reason: None }),
+            };
+        }
     }
 }
 
 fn no_answer() -> LinkError {
-        todo!()
+    LinkError::Unreachable {
+        detail: "no answer in time".to_owned(),
     }
+}
 
 fn unreachable(error: io::Error) -> LinkError {
-        todo!()
+    LinkError::Unreachable {
+        detail: error.to_string(),
     }
+}
 
 /// What a failed TLS handshake means: the certificate refused, as not the
 /// pinned one or not one the trust store accepts; TLS itself refused, on its
 /// version or its key exchange; or, with no TLS error in it, the connection.
 fn refused(error: &io::Error, pinned: bool) -> LinkError {
-        todo!()
+    let detail = error.to_string();
+    match error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+    {
+        Some(rustls::Error::InvalidCertificate(_)) if pinned => LinkError::PinMismatch,
+        Some(rustls::Error::InvalidCertificate(_)) => LinkError::Untrusted { detail },
+        Some(_) => LinkError::TlsRefused { detail },
+        None => LinkError::Unreachable { detail },
     }
+}
