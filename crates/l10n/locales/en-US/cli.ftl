@@ -189,7 +189,7 @@ cli-profile-no-repository-name = cannot make a repository name of the file name 
 # An export needs the agent's ID, which is kept in the data folder, and could not read it.
 # $path (text): the data folder.
 # $detail (text): the operating system's own message. It is shown as it came.
-cli-profile-no-agent-id = cannot read the agent's ID in { $path }: { $detail }
+cli-profile-no-agent-id = cannot read the { -agent }'s ID in { $path }: { $detail }
 
 # A command could not write what it had to say, and ended with status 1: the disk is full, say. A reader that has gone is not this case: the command ends quietly with 141.
 # $detail (text): the operating system's message. It is shown as it came.
@@ -199,7 +199,7 @@ cli-cannot-write-output = cannot write the result: { $detail }
 
 # What `install-service` does, in its `--help`.
 # `install-service` is the command, typed as it is: keep it a string literal.
-cli-help-install-service = Install this agent as a service of your user: the service manager runs it in the background, now and from each login on. On Linux that is a systemd user unit, on macOS a launchd agent.
+cli-help-install-service = Install this { -agent } as a service of your user: the service manager runs it in the background, now and from each login on. On Linux that is a systemd user unit, on macOS a launchd agent.
 
 # What `remove-service` does, in its `--help`.
 # `install-service` is the command, typed as it is: keep it a string literal.
@@ -445,7 +445,7 @@ cli-hub-command-failed = the command failed: { $detail }
 cli-pair-prompt = Paste the pairing token:
 
 # What was pasted isn't a pairing token, or its checksum doesn't match, as when a chat app changed the case of its letters.
-cli-pair-unreadable-token = this isn't a pairing token, or it was changed on the way (letters' case matters). Copy it again from the hub.
+cli-pair-unreadable-token = this isn't a pairing token, or it was changed on the way (letters' case matters). Copy it again from the { -hub }.
 
 # The hostname to pair under isn't one the hub takes.
 # $name (text): the hostname. It is shown as it came.
