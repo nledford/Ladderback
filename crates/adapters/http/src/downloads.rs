@@ -36,7 +36,7 @@ pub trait Downloads: Send + Sync {
 
     /// The download waiting under `ticket`, which no one can fetch again;
     /// `None` when none waits under it.
-    async fn fetch(&self, ticket: DownloadTicket) -> Option<Handover>;
+    async fn fetch(&self, ticket: DownloadTicket) -> Option<HandOff>;
 }
 
 /// A download a request asks for, read from its path and body.
@@ -55,7 +55,7 @@ pub struct DownloadStart {
 
 /// A download handed over: the name to save it under, what it is, and its
 /// pieces. An error ends a download the engine couldn't finish.
-pub struct Handover {
+pub struct HandOff {
     pub file_name: String,
     pub shape: DownloadShape,
     pub pieces: BoxStream<'static, Result<Vec<u8>, FailureReason>>,
@@ -165,7 +165,7 @@ pub(crate) async fn fetch(State(state): State<AppState>, Path(ticket): Path<Stri
     let Some(ticket) = DownloadTicket::parse(&ticket) else {
         return unknown();
     };
-    let Some(Handover {
+    let Some(HandOff {
         file_name,
         shape,
         pieces,

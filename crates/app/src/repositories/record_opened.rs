@@ -268,7 +268,7 @@ impl RecordOpened {
         .boxed();
         Ok(RunningJob {
             events,
-            control: Box::new(Handover(phase)),
+            control: Box::new(HandOff(phase)),
         })
     }
 }
@@ -285,10 +285,10 @@ enum Phase {
 
 /// Stops an identified-first run: the identify while it runs, the job once
 /// it does, and nothing is started after.
-struct Handover(Arc<Mutex<Phase>>);
+struct HandOff(Arc<Mutex<Phase>>);
 
 #[async_trait]
-impl JobControl for Handover {
+impl JobControl for HandOff {
     async fn stop(&mut self) {
         let going = std::mem::replace(
             &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),

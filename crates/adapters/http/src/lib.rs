@@ -52,7 +52,7 @@ use rust_embed::RustEmbed;
 use rust_embed as _;
 use serde::{Deserialize, Serialize};
 
-pub use downloads::{DownloadRefusal, DownloadStart, Downloads, Handover};
+pub use downloads::{DownloadRefusal, DownloadStart, Downloads, HandOff};
 pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
 pub use listener::{GatedListener, PeerAddr};

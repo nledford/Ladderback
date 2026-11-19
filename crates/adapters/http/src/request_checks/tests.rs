@@ -296,7 +296,7 @@ impl crate::Downloads for NoDownloads {
     async fn fetch(
         &self,
         _ticket: domain::restore::download::DownloadTicket,
-    ) -> Option<crate::Handover> {
+    ) -> Option<crate::HandOff> {
         None
     }
 }
