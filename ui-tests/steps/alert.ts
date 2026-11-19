@@ -18,7 +18,7 @@ import { besideIconProblems, wordsBesideIcon, wordsBrokenInside } from "../suppo
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf, LIVE_REGION } from "../support/gallery.ts";
 
-// The gallery's alerts as it opens (`gallery.rs`): one in each tone, then
+// The gallery's alerts as it opens (`gallery/alert.rs`): one in each tone, then
 // the notice the reader can dismiss.
 const ALERTS = 5;
 
