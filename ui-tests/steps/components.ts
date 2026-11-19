@@ -604,13 +604,20 @@ function wholly(text: string): RegExp {
 // line's start in the page's direction, the left in English and the right in
 // Arabic. Each row of the demo's last list is a part placed in its line (the
 // list's content box), its swatch and its name; Inline keeps the part in the
-// line of text, as wide as what it holds. The vocabulary demo holds the
-// gallery's only lists, the placements last; it is found by order, since a
-// pseudolocale changes the names. A pixel of rounding is allowed.
+// line of text, as wide as what it holds. The vocabulary demo is the first
+// demo that holds lists, and the placements are its last; both are found by
+// order, since a pseudolocale changes the names, and the demo first so that a
+// later demo's list (the Steps demo's) isn't taken for the placements. A pixel
+// of rounding is allowed.
 Then(
   /^the placements of the vocabulary demo put each part where they say, in a page that runs (left to right|right to left)$/,
   async function (this: BrowserWorld, direction: string) {
-    const placements = this.page.getByRole("main").getByRole("list").last();
+    const vocabulary = this.page
+      .getByRole("main")
+      .locator("section")
+      .filter({ has: this.page.getByRole("list") })
+      .first();
+    const placements = vocabulary.getByRole("list").last();
     const items = placements.getByRole("listitem");
     await expect(items).toHaveCount(4);
     const rows = await placements.evaluate((list) => {
