@@ -769,6 +769,30 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # it.
 ui-gallery-spinner-save = Save the demo notes
 
+# The heading of the gallery's steps demo (§4.5): a process's steps in
+# order, each with its state, and where the process has reached.
+ui-gallery-steps-heading = Steps
+
+# The name of the demo's first list of steps: a demo of moving the hub, with
+# its five steps, one of them a long name that wraps.
+ui-gallery-steps-move = Demo hub move
+ui-gallery-steps-check = Check
+ui-gallery-steps-copy = Copy
+ui-gallery-steps-commit = Commit the demo move once every demo snapshot has reached the new hub
+ui-gallery-steps-switch = Switch the agents
+ui-gallery-steps-clean-up = Clean up
+
+# The button that moves the demo hub move on to its next step, and from its
+# end back to its first.
+ui-gallery-steps-advance = Advance the demo hub move
+
+# The name of the demo's second list of steps: a demo of pairing an agent,
+# which failed at its second step.
+ui-gallery-steps-pairing = Demo pairing
+ui-gallery-steps-token = Token
+ui-gallery-steps-connect = Connect
+ui-gallery-steps-approval = Approval
+
 # The heading of the gallery's skeleton demo (§4.5): the still shape of
 # content on its way, which a screen reader skips.
 ui-gallery-skeleton-heading = Skeleton
@@ -2033,6 +2057,39 @@ ui-banner-warning = Warning
 # The name of the icon-only button that takes a banner away, which its
 # tooltip shows. The browser remembers the choice.
 ui-banner-dismiss = Dismiss
+
+## The steps (§4.5): what a list of a process's steps says of each step, and
+## what is said when the process reaches another, the same on every page.
+
+# A step's state, in words under its name, which its icon's shape shows too:
+# the process has gone past it, is at it now, hasn't reached it yet, or
+# stopped at it, failed.
+ui-steps-done = Done
+ui-steps-current = Current
+ui-steps-to-do = To do
+ui-steps-failed = Failed
+
+# Said politely when a process reaches another of its steps, such as the
+# copy of a hub move.
+# $number (count): the step's place in the process, from 1.
+# $total (count): how many steps the process has, at least 1.
+# $name (text): the step's name, as its page shows it.
+ui-steps-reached = Step { $number } of { $total }: { $name }
+
+# Said politely when a step of a process fails, which stops the process
+# there.
+# $number (count): the failed step's place in the process, from 1.
+# $total (count): how many steps the process has, at least 1.
+# $name (text): the failed step's name, as its page shows it.
+ui-steps-failed-at = Step { $number } of { $total } failed: { $name }
+
+# Said politely when a process has done every one of its steps.
+# $total (count): how many steps the process has, at least 1.
+ui-steps-finished =
+    { $total ->
+        [one] The step is done.
+       *[other] All { $total } steps are done.
+    }
 
 ## The step-up field (§4.5, §10.4): what a restore is confirmed with, the
 ## admin password with sign-in on, the short ID of what it confirms with

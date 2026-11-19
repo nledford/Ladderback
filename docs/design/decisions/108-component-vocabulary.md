@@ -6,7 +6,7 @@
 
 **Amended 2026-11-16 (the maintainer, #785):** the vocabulary gains `Side`, where a part that floats beside a control stands (the tooltip first, later the popover, #784): Above (the default), Below, Start and End, the last two in the page's direction. A part with no room on its side flips to the opposite one, then to the other axis, and stays inside the viewport. It is not a Placement, which aligns a part in its own line, and it has no class: the page measures the control and places the part with one host-tested rule (`components/tooltip/rules.rs`). The tooltip takes a side and no tone or size: a note, not a status, its text following its control's.
 
-**Amended 2026-11-16 (#792):** not every shared component takes the whole vocabulary. A component takes a tone and a size only where they mean something, and its §4.5 row says why it takes neither: the step-up field, the tooltip, the table and the tabs take none (§4.5, "The shared vocabulary").
+**Amended 2026-11-16 (#792):** not every shared component takes the whole vocabulary. A component takes a tone and a size only where they mean something, and its §4.5 row says why it takes neither; §4.5's "The shared vocabulary" lists the components that take none.
 
 **Amended 2026-11-17 (the maintainer, decision 117):** a tone, a size and a placement become sets of Tailwind utilities that `variants.rs` returns, as each component moves onto utilities (#931); until then each stays a class of `style.css`. Where "Why" below says each value is a class of `style.css`, this replaces it. The values, their meanings and the shared size scale don't change.
 

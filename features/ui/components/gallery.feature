@@ -42,6 +42,7 @@ Feature: The component gallery
       | Text field        |
       | Progress          |
       | Tabs starting on a marked tab |
+      | Steps             |
       | Table             |
       | Tooltip           |
 
@@ -85,6 +86,7 @@ Feature: The component gallery
       | Link        |
       | Alert       |
       | Step-up field |
+      | Steps       |
 
   Scenario Outline: Each component's structure is pinned by an ARIA snapshot
     When I open the component gallery
@@ -118,6 +120,7 @@ Feature: The component gallery
       | Link        |
       | Alert       |
       | Step-up field |
+      | Steps       |
 
   Scenario Outline: A button's label grows with the reader's text size
     Given the reader sets the text size to 200 percent
