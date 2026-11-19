@@ -304,8 +304,11 @@ export class BrowserWorld extends World {
   async open(pathname = "/"): Promise<void> {
     if (browser === undefined) throw new Error("the browser is not running: BeforeAll failed");
     // A second page of the scenario gets a context of its own; the first
-    // one's trace ends here rather than record for the rest of the run.
+    // one's trace ends here rather than record for the rest of the run, and
+    // the first context closes, so contexts don't pile up until AfterAll's
+    // `browser.close()` has to close them all at once within its limit.
     await this.discardTrace();
+    await (this.context as BrowserContext | undefined)?.close();
     this.context = await browser.newContext(this.contextOptions);
     // Screenshots and DOM snapshots of every action, kept only when the
     // scenario fails (`keepFailureEvidence`), so a failure that shows only on
