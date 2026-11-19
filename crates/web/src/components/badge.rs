@@ -49,6 +49,15 @@ pub fn Badge(
     view! {
         <span class=move || rules::badge_class(
             tone.get(),
-        )>{icon.map(|glyph| view! { <Icon glyph=glyph /> })} {move || label.get()}</span>
+        )>
+            {icon
+                .map(|glyph| {
+                    view! {
+                        <span class=rules::ICON>
+                            <Icon glyph=glyph />
+                        </span>
+                    }
+                })} <span class=rules::WORDS>{move || label.get()}</span>
+        </span>
     }
 }

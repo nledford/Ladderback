@@ -284,8 +284,8 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 ### Badges
 
 - **Use:** a count or a tag beside what it describes ("Pending changes 3"), its words saying what it counts or names, the count included. Never a number or a color alone.
-- **Style:** a pill in its tone's pair (see Colors), 0.125rem by 0.5rem padding: Secondary (the badge's own gray pair, the default), Primary (its own blue pair), or Success, Warning or Error (their status pairs). Under forced colors, a 1px edge in the text's color, inside the pill.
-- **Content:** an optional icon as tall as the text, stroked in the text's color, then the words. Where the two don't fit side by side, the words wrap whole below the icon.
+- **Style:** a pill in its tone's pair (see Colors), 0.125rem by 0.5rem padding, its corners half a line, so words on two lines sit in a rounded box: Secondary (the badge's own gray pair, the default), Primary (its own blue pair), or Success, Warning or Error (their status pairs). Under forced colors, a 1px edge in the text's color, inside the pill.
+- **Content:** an optional icon as tall as the text, stroked in the text's color, then the words. The words wrap between words beside the icon, and go under it only where their longest word doesn't fit beside it.
 - **Plain text:** no role, nothing to focus; it takes the text's size and stands in its line.
 
 ### Status Badges

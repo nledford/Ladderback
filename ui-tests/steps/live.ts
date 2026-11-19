@@ -15,7 +15,7 @@ import type { Locator } from "playwright";
 import { expect } from "playwright/test";
 
 import { clockStandsStill, ISOLATION, namePattern } from "../support/keyboard.ts";
-import { partsBrokenInside } from "../support/parts.ts";
+import { besideIconProblems, partsBrokenInside, wordsBesideIcon } from "../support/parts.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, evaluateAll, fixtureRepo, startServer } from "../support/world.ts";
@@ -574,6 +574,28 @@ Then("the columns of the table {string} keep the widths noted", async function (
   assert.deepEqual(moved, [], `the columns of the table ${name} changed width`);
 });
 
+// A column that narrows as the window widens (#1070): the window widens 8
+// pixels at a time, and at each width the column is, within half a pixel of
+// rounding, no narrower than at the width before.
+Then(
+  "the {string} column of the table {string} never narrows as the window widens to {int} pixels",
+  async function (this: BrowserWorld, column: string, name: string, widest: number) {
+    const header = table(this, name).getByRole("columnheader", { name: column });
+    await expect(header).toHaveCount(1);
+    const start = this.page.viewportSize();
+    assert.ok(start, "the page has no viewport");
+    const narrowed: string[] = [];
+    let before = await header.evaluate((cell) => cell.getBoundingClientRect().width);
+    for (let width = start.width + 8; width <= widest; width += 8) {
+      await this.page.setViewportSize({ width, height: start.height });
+      const now = await header.evaluate((cell) => cell.getBoundingClientRect().width);
+      if (now < before - 0.5) narrowed.push(`at ${width}px: ${before}px, now ${now}px`);
+      before = now;
+    }
+    assert.deepEqual(narrowed, [], `the column "${column}" of the table ${name} narrowed`);
+  },
+);
+
 // The shapes a row's status badge draws (technical design §4.5), noted by one
 // step for a later one to compare with. Its icon is decoration a screen
 // reader skips, so the badge is found by its class inside the row's cell.
@@ -629,12 +651,40 @@ Then(
   "the status badge of the row {string} of the table {string} is drawn in the Warning tone, with the warning icon",
   async function (this: BrowserWorld, row: string, name: string) {
     const cell = await cellOf(this, name, row, "Status");
-    const badge = cell.getByText("Succeeded with warnings", { exact: true });
+    const badge = cell.locator(".badge").filter({ hasText: /^Succeeded with warnings$/ });
     await drawnOnItsFill(badge, `the status badge of the row ${row}`, "--warning-fg", "--warning-bg");
     const icon = await badge.evaluate((element) =>
       Array.from(element.querySelectorAll("svg path"), (path) => path.getAttribute("d")),
     );
     assert.deepEqual(icon, WARNING_ICON, `the status badge of the row ${row} doesn't draw the warning icon`);
+  },
+);
+
+// A status badge's words wrap between words beside its icon (#1070): on a
+// wide screen the Status column holds the icon and a short status on one
+// line, and a longer one takes more lines after the icon, never going under
+// it. The badge is found by its class inside the row's cell.
+async function statusBadgeWords(world: BrowserWorld, name: string, row: string) {
+  const badge = (await cellOf(world, name, row, "Status")).locator(".badge");
+  await expect(badge).toHaveCount(1);
+  return badge.evaluate(wordsBesideIcon, { icon: "svg", words: "" });
+}
+
+Then(
+  "the status badge of the row {string} of the table {string} shows its icon and its words on one line",
+  async function (this: BrowserWorld, row: string, name: string) {
+    const drawn = await statusBadgeWords(this, name, row);
+    assert.equal(drawn.lines.length, 1, `the status badge "${drawn.text}" takes ${drawn.lines.length} lines`);
+    assert.deepEqual(besideIconProblems(drawn), []);
+  },
+);
+
+Then(
+  "the status badge of the row {string} of the table {string} wraps its words beside its icon, which stands at the start of its first line",
+  async function (this: BrowserWorld, row: string, name: string) {
+    const drawn = await statusBadgeWords(this, name, row);
+    assert.ok(drawn.lines.length > 1, `the status badge "${drawn.text}" takes ${drawn.lines.length} line(s), not more than one`);
+    assert.deepEqual(besideIconProblems(drawn), []);
   },
 );
 

@@ -1116,7 +1116,8 @@ table.snapshots th:first-child {
    did, and the progress bar's 16rem made the page scroll sideways at 320 px.
    The shares add up to the table's width, so the table never overflows it;
    a word breaks inside only when it is wider than its column. Started has
-   room for its sort button beside its text on a wide screen, and Actions
+   room for its sort button under its text on a wide screen (measured: the
+   button's label is wider than the column beside the text), and Actions
    for its button's label, the longest word in a row. */
 table.operations {
   table-layout: fixed;
@@ -1147,8 +1148,10 @@ table.operations thead th:nth-child(5) {
    finished backup's facts broke inside ("Snapshot" / "ba5cc73e") and a
    reason read as a column of words (#430). There each other column is as
    wide as what it holds needs, in rem, so it grows with the text: Status a
-   badge and a progress bar's step, Started an instant on two lines with the
-   sort button under its header's text, Actions a Cancel button. Result takes
+   badge's icon and "Succeeded" on one line (#1070), no narrower than its
+   19 % share just below 48rem, so it never narrows as the frame widens, and
+   a progress bar's step; Started an instant on two lines with the sort
+   button under its header's text; Actions a Cancel button. Result takes
    the rest. A query on the frame around the table, not on the page: the
    columns share the table's width, and a query on the table itself left its
    columns as they were (Chromium). The rem in the query is the reader's text
@@ -1159,9 +1162,12 @@ table.operations thead th:nth-child(5) {
 
 @container (min-width: 48rem) {
   table.operations thead th:nth-child(1),
-  table.operations thead th:nth-child(2),
   table.operations thead th:nth-child(5) {
     inline-size: 8rem;
+  }
+
+  table.operations thead th:nth-child(2) {
+    inline-size: 9.5rem;
   }
 
   table.operations thead th:nth-child(3) {

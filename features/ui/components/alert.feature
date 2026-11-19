@@ -78,6 +78,19 @@ Feature: The alert
     And the page doesn't scroll sideways
     And no text is clipped
 
+  # A long path breaks beside the icon (#1071), rather than moving the words
+  # under it, as the path's whole width once did.
+  Scenario Outline: On a small screen with larger text, an alert's words stay beside its icon, a long path's too, in a page that runs <direction>
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery asking for the locale "<locale>"
+    Then every alert of the alert demo keeps its icon at the start of its words' first line, each line of its words after it
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |
+
   # A word that fits on a line of its own wraps whole, never "Ladderbac" over
   # "k"; only a word longer than the line, as the error's long path is, may
   # break inside. Dismiss keeps to the end of its line, a line of its own if
