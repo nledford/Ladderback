@@ -53,6 +53,7 @@ mod progress;
 mod review_dialog;
 mod skeleton;
 mod spinner;
+mod status_badge;
 mod step_up_field;
 mod steps;
 mod table;
@@ -403,22 +404,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 chosen=RwSignal::new("")
             />
         </section>
-        <section id="status-badge-demo">
-            <DemoHeading text=t(msg::UI_GALLERY_BADGE_HEADING) />
-            <p class="flex flex-wrap gap-2">
-                // Every state a badge can show, each with its own icon.
-                <StatusBadge state=BadgeState::Queued label=t(msg::UI_STATUS_QUEUED) />
-                <StatusBadge state=BadgeState::Running label=t(msg::UI_STATUS_RUNNING) />
-                <StatusBadge state=BadgeState::Succeeded label=t(msg::UI_STATUS_SUCCEEDED) />
-                <StatusBadge
-                    state=BadgeState::SucceededWithWarnings
-                    label=t(msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS)
-                />
-                <StatusBadge state=BadgeState::Failed label=t(msg::UI_STATUS_FAILED) />
-                <StatusBadge state=BadgeState::Cancelled label=t(msg::UI_STATUS_CANCELLED) />
-                <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
-            </p>
-        </section>
+        <status_badge::StatusBadgeDemo localizer=Arc::clone(&localizer) />
         <badge::BadgeDemo localizer=Arc::clone(&localizer) />
         <vocabulary::VocabularyDemo localizer=Arc::clone(&localizer) />
         <toast::ToastDemo localizer=Arc::clone(&localizer) />
