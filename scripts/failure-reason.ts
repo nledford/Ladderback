@@ -97,7 +97,10 @@ function fromCucumberRs(lines: string[]): string | null {
  * `e2e` or `acceptance`.
  */
 export function failureReason(runner: string, output: string): string | null {
-  const lines = output.replace(ANSI, "").split("\n").map((line) => line.replace(/\r$/, ""));
+  const lines = output
+    .replace(ANSI, "")
+    .split("\n")
+    .map((line) => line.replace(/\r$/, ""));
   const reason = runner === "ui" ? fromCucumberJs(lines) : fromCucumberRs(lines);
   return reason === "" ? null : reason;
 }

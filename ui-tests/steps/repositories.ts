@@ -199,10 +199,7 @@ Then("the page shows a repository ID", async function (this: BrowserWorld) {
 // announcements included.
 Then("the page doesn't show {string}", async function (this: BrowserWorld, text: string) {
   const shown = await this.page.evaluate(() => document.body.innerText);
-  assert.ok(
-    !shown.replace(ISOLATION_MARKS, "").includes(text),
-    `the page shows ${JSON.stringify(text)}`,
-  );
+  assert.ok(!shown.replace(ISOLATION_MARKS, "").includes(text), `the page shows ${JSON.stringify(text)}`);
 });
 
 // The form's fields, whatever language the page is in.

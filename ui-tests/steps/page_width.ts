@@ -51,28 +51,37 @@ async function mainWidths(world: BrowserWorld) {
 // A choice applies once the page has drawn it, so each step waits for it.
 Then("the main content is no wider than {int} rem", async function (this: BrowserWorld, limit: number) {
   await expect
-    .poll(async () => {
-      const { main, rem } = await mainWidths(this);
-      return main <= limit * rem + 0.5;
-    }, { message: `the main content is wider than ${limit} rem` })
+    .poll(
+      async () => {
+        const { main, rem } = await mainWidths(this);
+        return main <= limit * rem + 0.5;
+      },
+      { message: `the main content is wider than ${limit} rem` },
+    )
     .toBe(true);
 });
 
 Then("the main content is as wide as the window", async function (this: BrowserWorld) {
   await expect
-    .poll(async () => {
-      const { main, window } = await mainWidths(this);
-      return Math.abs(main - window) <= 0.5;
-    }, { message: "the main content is not as wide as the window" })
+    .poll(
+      async () => {
+        const { main, window } = await mainWidths(this);
+        return Math.abs(main - window) <= 0.5;
+      },
+      { message: "the main content is not as wide as the window" },
+    )
     .toBe(true);
 });
 
 Then("the main content is centered in the window", async function (this: BrowserWorld) {
   await expect
-    .poll(async () => {
-      const { before, after } = await mainWidths(this);
-      return before > 0 && Math.abs(before - after) <= 0.5;
-    }, { message: "the main content is not centered in the window" })
+    .poll(
+      async () => {
+        const { before, after } = await mainWidths(this);
+        return before > 0 && Math.abs(before - after) <= 0.5;
+      },
+      { message: "the main content is not centered in the window" },
+    )
     .toBe(true);
 });
 
@@ -90,29 +99,28 @@ Then("the table {string} is at least {int} pixels wide", async function (this: B
 // it. One probe of the whole measure, not `limit` times a 1ch probe: layout
 // snaps a box's width to a fraction of a pixel, and multiplying a snapped 1ch
 // by 70 can miss `max-inline-size: 70ch` by more than a pixel.
-Then(
-  "no paragraph or form of the main content is wider than {int} characters",
-  async function (this: BrowserWorld, limit: number) {
-    const tooWide = await this.page.locator("main").evaluate((main, limit) => {
-      const wide: string[] = [];
-      for (const element of main.querySelectorAll<HTMLElement>("p, form")) {
-        if (element.getClientRects().length === 0) continue;
-        const probe = document.createElement("span");
-        probe.style.cssText = `position: absolute; inline-size: ${limit}ch; block-size: 0; visibility: hidden`;
-        element.append(probe);
-        const measure = probe.getBoundingClientRect().width;
-        probe.remove();
-        const style = getComputedStyle(element);
-        const edges = ["padding-inline-start", "padding-inline-end", "border-inline-start-width", "border-inline-end-width"]
-          .map((property) => Number.parseFloat(style.getPropertyValue(property)) || 0)
-          .reduce((sum, width) => sum + width, 0);
-        const inner = element.getBoundingClientRect().width - edges;
-        if (inner > measure + 0.5) {
-          wide.push(`<${element.localName}> "${(element.textContent ?? "").trim().slice(0, 40)}…" is ${(inner / (measure / limit)).toFixed(2)} characters wide`);
-        }
+Then("no paragraph or form of the main content is wider than {int} characters", async function (this: BrowserWorld, limit: number) {
+  const tooWide = await this.page.locator("main").evaluate((main, limit) => {
+    const wide: string[] = [];
+    for (const element of main.querySelectorAll<HTMLElement>("p, form")) {
+      if (element.getClientRects().length === 0) continue;
+      const probe = document.createElement("span");
+      probe.style.cssText = `position: absolute; inline-size: ${limit}ch; block-size: 0; visibility: hidden`;
+      element.append(probe);
+      const measure = probe.getBoundingClientRect().width;
+      probe.remove();
+      const style = getComputedStyle(element);
+      const edges = ["padding-inline-start", "padding-inline-end", "border-inline-start-width", "border-inline-end-width"]
+        .map((property) => Number.parseFloat(style.getPropertyValue(property)) || 0)
+        .reduce((sum, width) => sum + width, 0);
+      const inner = element.getBoundingClientRect().width - edges;
+      if (inner > measure + 0.5) {
+        wide.push(
+          `<${element.localName}> "${(element.textContent ?? "").trim().slice(0, 40)}…" is ${(inner / (measure / limit)).toFixed(2)} characters wide`,
+        );
       }
-      return wide;
-    }, limit);
-    assert.deepEqual(tooWide, [], `paragraphs or forms wider than ${limit} characters`);
-  },
-);
+    }
+    return wide;
+  }, limit);
+  assert.deepEqual(tooWide, [], `paragraphs or forms wider than ${limit} characters`);
+});

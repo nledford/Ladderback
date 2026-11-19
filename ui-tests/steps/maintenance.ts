@@ -187,18 +187,21 @@ Given(
 
 // The configuration now names a folder that isn't there for the repository,
 // so the engine fails before it asks for any key, in its own words.
-Given("the configuration has the repository {string} at a folder that isn't there", async function (this: BrowserWorld, alias: string) {
-  const file = configPath(this);
-  const config = await readFile(file, "utf8");
-  const heading = `[repositories.${alias}]\n`;
-  const key = 'repository = "';
-  const at = config.indexOf(heading);
-  assert.ok(at >= 0, `the config has no repository ${alias}`);
-  const from = config.indexOf(key, at);
-  assert.ok(from >= 0, `the repository ${alias} has no location`);
-  const end = config.indexOf('"', from + key.length);
-  await writeFile(file, config.slice(0, end) + "-not-there" + config.slice(end));
-});
+Given(
+  "the configuration has the repository {string} at a folder that isn't there",
+  async function (this: BrowserWorld, alias: string) {
+    const file = configPath(this);
+    const config = await readFile(file, "utf8");
+    const heading = `[repositories.${alias}]\n`;
+    const key = 'repository = "';
+    const at = config.indexOf(heading);
+    assert.ok(at >= 0, `the config has no repository ${alias}`);
+    const from = config.indexOf(key, at);
+    assert.ok(from >= 0, `the repository ${alias} has no location`);
+    const end = config.indexOf('"', from + key.length);
+    await writeFile(file, config.slice(0, end) + "-not-there" + config.slice(end));
+  },
+);
 
 Given("a backup of the plan {string} has failed", async function (this: BrowserWorld, plan: string) {
   const { status } = await ended(this, await api(this, "POST", "/api/v1/operations", { plan }), `the backup of ${plan}`);
@@ -215,9 +218,16 @@ Then(
     const found = rowNamed(this, name, row).first();
     await found.waitFor({ state: "visible", timeout: ROWS_PATIENCE_MS });
     // A cell's role leaves the row header out, so the cells count from after it.
-    const words = found.getByRole("cell").nth(index - 1).locator('[lang="en"]');
+    const words = found
+      .getByRole("cell")
+      .nth(index - 1)
+      .locator('[lang="en"]');
     await words.first().waitFor({ state: "visible", timeout: ROWS_PATIENCE_MS });
-    assert.notEqual((await words.first().innerText()).replace(ISOLATION_MARKS, "").trim(), "", `the engine's words in the ${column} of the row ${row}`);
+    assert.notEqual(
+      (await words.first().innerText()).replace(ISOLATION_MARKS, "").trim(),
+      "",
+      `the engine's words in the ${column} of the row ${row}`,
+    );
   },
 );
 
@@ -275,22 +285,14 @@ Given("the repository holds data no snapshot uses", async function (this: Browse
   await rm(path.join(sourcePath(this), "demo-1.txt"));
   await backUp(this, plan);
   await keepLast(this, plan, 1);
-  await succeeds(
-    this,
-    await api(this, "POST", `/api/v1/repositories/${ALIAS}/maintenance`, { kind: "forget" }),
-    "the forget",
-  );
+  await succeeds(this, await api(this, "POST", `/api/v1/repositories/${ALIAS}/maintenance`, { kind: "forget" }), "the forget");
 });
 
 // A check the API starts, as the Snapshots page's review would: it runs to
 // its end before the scenario goes on.
 Given("the repository {string} has been checked", async function (this: BrowserWorld, alias: string) {
   assert.equal(alias, ALIAS, `only the repository ${ALIAS} is served`);
-  await succeeds(
-    this,
-    await api(this, "POST", `/api/v1/repositories/${ALIAS}/maintenance`, { kind: "check" }),
-    "the check",
-  );
+  await succeeds(this, await api(this, "POST", `/api/v1/repositories/${ALIAS}/maintenance`, { kind: "check" }), "the check");
 });
 
 /** The ID of the newest snapshot of `plan` in the scenario's repository, as
@@ -436,9 +438,7 @@ Then("no word of a table is broken across lines", async function (this: BrowserW
         const range = document.createRange();
         range.setStart(node, word.index);
         range.setEnd(node, word.index + word[0].length);
-        const lines = new Set(
-          [...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)),
-        );
+        const lines = new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)));
         if (lines.size > 1) found.push(`"${word[0]}" in <${cell.localName}> is broken across ${lines.size} lines`);
       }
     }
@@ -469,10 +469,7 @@ Then("the dialog {string} stays open with focus inside it", async function (this
   const end = Date.now() + 1_000;
   while (Date.now() < end) {
     assert.ok(await dialog.isVisible(), `the dialog "${name}" closed`);
-    assert.ok(
-      await dialog.evaluate((el) => el.contains(document.activeElement)),
-      `focus left the dialog "${name}"`,
-    );
+    assert.ok(await dialog.evaluate((el) => el.contains(document.activeElement)), `focus left the dialog "${name}"`);
     await sleep(100);
   }
 });
@@ -512,11 +509,7 @@ Then("the dialog {string} offers the button {string}", async function (this: Bro
 Then("the dialog {string} offers only the button {string}", async function (this: BrowserWorld, name: string, button: string) {
   const dialog = dialogOf(this, name);
   await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
-  const texts = await evaluateAll(
-    dialog.getByRole("button"),
-    (buttons) => buttons.map((b) => b.textContent ?? ""),
-    undefined,
-  );
+  const texts = await evaluateAll(dialog.getByRole("button"), (buttons) => buttons.map((b) => b.textContent ?? ""), undefined);
   const names = texts.map((text) => text.replace(ISOLATION_MARKS, "").trim());
   assert.deepEqual(names, [button], `the buttons of the dialog "${name}"`);
 });
@@ -543,11 +536,7 @@ Then("the dialog {string} stays closed", async function (this: BrowserWorld, nam
 Then("the dialog {string} has its button {string} unavailable", async function (this: BrowserWorld, name: string, button: string) {
   const found = dialogOf(this, name).getByRole("button", { name: namePattern(button) });
   await found.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
-  assert.equal(
-    await found.getAttribute("aria-disabled"),
-    "true",
-    `the button "${button}" of the dialog "${name}" can be used`,
-  );
+  assert.equal(await found.getAttribute("aria-disabled"), "true", `the button "${button}" of the dialog "${name}" can be used`);
 });
 
 // Silence is shown by waiting: a dialog that was going to close has done so
@@ -562,10 +551,7 @@ Then("the dialog {string} stays open", async function (this: BrowserWorld, name:
 Then("the dialog {string} is no wider than {int} pixels", async function (this: BrowserWorld, name: string, limit: number) {
   const box = await dialogOf(this, name).boundingBox();
   assert.ok(box, `the dialog "${name}" is not on the page`);
-  assert.ok(
-    box.width <= limit,
-    `the dialog "${name}" is ${Math.round(box.width)} pixels wide, wider than ${limit}`,
-  );
+  assert.ok(box.width <= limit, `the dialog "${name}" is ${Math.round(box.width)} pixels wide, wider than ${limit}`);
 });
 
 Then("the page shows the button {string}", async function (this: BrowserWorld, name: string) {
@@ -593,9 +579,7 @@ Then("the page shows no section heading {string}", async function (this: Browser
 // The plan's table is named after the plan; what the page fills in carries
 // bidi isolation marks, which the name pattern allows for.
 async function waitForRows(world: BrowserWorld, plan: string, count: number): Promise<void> {
-  const rows = world.page
-    .getByRole("table", { name: namePattern(`Snapshots of plan ${plan}`) })
-    .locator("tbody tr");
+  const rows = world.page.getByRole("table", { name: namePattern(`Snapshots of plan ${plan}`) }).locator("tbody tr");
   const end = Date.now() + ROWS_PATIENCE_MS;
   let found = -1;
   while (Date.now() < end) {
@@ -617,29 +601,17 @@ Then("the plan {string} shows {int} snapshot rows", async function (this: Browse
 // The live regions repeat what the page says, so a line of the page is looked
 // for in its main content.
 Then("the main content shows the line {string}", async function (this: BrowserWorld, text: string) {
-  await this.page
-    .getByRole("main")
-    .getByText(text, { exact: true })
-    .first()
-    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
 });
 
 Then("the main content shows no line {string}", async function (this: BrowserWorld, text: string) {
-  await this.page
-    .getByRole("main")
-    .getByText(text, { exact: true })
-    .first()
-    .waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
 });
 
 // A warning is a line of the main content, its data set apart by bidi
 // isolation marks.
 Then("the main content warns {string}", async function (this: BrowserWorld, text: string) {
-  await this.page
-    .getByRole("main")
-    .getByText(namePattern(text))
-    .first()
-    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
 });
 
 // Asked once the page has drawn what it waits for, such as a plan's rows: a
@@ -665,26 +637,19 @@ Then("the page offers the button {string}", async function (this: BrowserWorld, 
 
 // A line of the page that says more than the words a scenario names.
 Then("the main content shows a line containing {string}", async function (this: BrowserWorld, text: string) {
-  await this.page
-    .getByRole("main")
-    .getByText(text)
-    .first()
-    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(text).first().waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
 });
 
 // What the check found is in rustic's words, which name the pack; they are
 // English whatever the language of the page, and the page marks them so (§4.5).
-Then(
-  "the main content names the pack no index lists in the engine's words, marked as English",
-  async function (this: BrowserWorld) {
-    await this.page
-      .getByRole("main")
-      .locator('[lang="en"]')
-      .filter({ hasText: STRAY_PACK_NAMED })
-      .first()
-      .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
-  },
-);
+Then("the main content names the pack no index lists in the engine's words, marked as English", async function (this: BrowserWorld) {
+  await this.page
+    .getByRole("main")
+    .locator('[lang="en"]')
+    .filter({ hasText: STRAY_PACK_NAMED })
+    .first()
+    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+});
 
 // What the sender of a refusal says in its own words, the engine's or the
 // daemon's, is English whatever the language of the page, and the page marks

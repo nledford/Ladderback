@@ -66,9 +66,12 @@ const FAR_LINK = `<!doctype html>
 
 let browser: Browser | undefined;
 
-before(async () => {
-  browser = await browserType.launch();
-}, { timeout: LIMIT_MS });
+before(
+  async () => {
+    browser = await browserType.launch();
+  },
+  { timeout: LIMIT_MS },
+);
 
 after(async () => {
   await browser?.close();
@@ -88,27 +91,30 @@ async function tabOntoTheLink(
   try {
     const page = await context.newPage();
     await page.setContent(WRAPPED_LINK);
-    const lines = await page.evaluate(({ covered, leaves }) => {
-      const link = document.querySelector("a");
-      if (link === null) return 0;
-      const fragments = [...link.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
-      for (const r of fragments.slice(0, covered)) {
-        // A pixel past the line on every side, so no edge of it shows.
-        const cover = document.createElement("div");
-        cover.className = "cover";
-        Object.assign(cover.style, {
-          left: `${r.left - 1}px`,
-          top: `${r.top - 1}px`,
-          width: `${r.width + 2}px`,
-          height: `${r.height + 2}px`,
-        });
-        document.body.append(cover);
-      }
-      if (leaves) {
-        link.addEventListener("focus", () => Object.assign(link.style, { position: "fixed", top: "-1000px" }));
-      }
-      return fragments.length;
-    }, { covered: { "every line": Infinity, "its first line": 1, "no line": 0 }[over], leaves });
+    const lines = await page.evaluate(
+      ({ covered, leaves }) => {
+        const link = document.querySelector("a");
+        if (link === null) return 0;
+        const fragments = [...link.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+        for (const r of fragments.slice(0, covered)) {
+          // A pixel past the line on every side, so no edge of it shows.
+          const cover = document.createElement("div");
+          cover.className = "cover";
+          Object.assign(cover.style, {
+            left: `${r.left - 1}px`,
+            top: `${r.top - 1}px`,
+            width: `${r.width + 2}px`,
+            height: `${r.height + 2}px`,
+          });
+          document.body.append(cover);
+        }
+        if (leaves) {
+          link.addEventListener("focus", () => Object.assign(link.style, { position: "fixed", top: "-1000px" }));
+        }
+        return fragments.length;
+      },
+      { covered: { "every line": Infinity, "its first line": 1, "no line": 0 }[over], leaves },
+    );
     assert.equal(lines, 2, "the link stands on two lines");
     try {
       await journey(page).press("Tab");
@@ -146,7 +152,9 @@ test(`${engine}: a link that leaves the viewport as it takes focus is reported o
   );
 });
 
-test(`${engine}: a link focused while the page's timers are busy is in sight once the browser scrolls to it`, { timeout: LIMIT_MS }, async () => {
+test(`${engine}: a link focused while the page's timers are busy is in sight once the browser scrolls to it`, {
+  timeout: LIMIT_MS,
+}, async () => {
   assert.ok(browser !== undefined, "the browser is not running: `before` failed");
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   try {

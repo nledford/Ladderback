@@ -27,12 +27,7 @@ export interface Point {
  *  fragment in the viewport, and a fragment wholly out of it is left out.
  *  The element is in sight where any point finds it; no point at all means
  *  it is out of sight. */
-export function focusProbes(
-  fragments: Box[],
-  whole: Box,
-  viewport: { width: number; height: number },
-  inPart: boolean,
-): Point[] {
+export function focusProbes(fragments: Box[], whole: Box, viewport: { width: number; height: number }, inPart: boolean): Point[] {
   const hasArea = (b: Box): boolean => b.left < b.right && b.top < b.bottom;
   const own = fragments.filter(hasArea);
   return (own.length > 0 ? own : [whole])

@@ -32,12 +32,7 @@ export const scrollKey = (page: Page, key: string): string =>
 // stand, and the anchors keep the match whole.
 export const ISOLATION = "[\\u2066-\\u2069]*";
 export const namePattern = (name: string): RegExp =>
-  new RegExp(
-    `^${[...name]
-      .map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join(ISOLATION)}${ISOLATION}$`,
-  );
-
+  new RegExp(`^${[...name].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION)}${ISOLATION}$`);
 
 export function journey(page: Page) {
   // WebKit on macOS moves Tab only between text fields and lists, as Safari
@@ -121,8 +116,7 @@ export async function pressUntilFocused(
 ): Promise<void> {
   const keys = journey(page);
   const focused =
-    reached ??
-    (async () => (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement)));
+    reached ?? (async () => (await target.count()) === 1 && (await target.evaluate((el) => el === document.activeElement)));
   for (let presses = 0; presses < MAX_PRESSES && !(await focused()); presses += 1) {
     await keys.press(key);
     await afterEach?.();
@@ -188,11 +182,7 @@ async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise
     indicators.length > 0,
     `no visible focus indicator on ${state.name}: outline is ${now.outlineStyle} ${now.outlineWidth} ${now.outlineColor}, box-shadow is ${now.boxShadow} (needs an outline of 2px or more, or a shadow, in a visible color)`,
   );
-  assert.notDeepEqual(
-    now,
-    before,
-    `the focus indicator on ${state.name} looks the same as when it isn't focused`,
-  );
+  assert.notDeepEqual(now, before, `the focus indicator on ${state.name} looks the same as when it isn't focused`);
 
   const background = composite(state.focusedBackgrounds);
   const ratios = indicators.map((i) => ({
@@ -252,10 +242,7 @@ async function lookAtFocus(page: Page, key: string) {
         viewport: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
       };
     });
-    assert.ok(
-      measured !== null,
-      `after ${key} focus is on the page body or nowhere, so a keyboard user has no focus to see`,
-    );
+    assert.ok(measured !== null, `after ${key} focus is on the page body or nowhere, so a keyboard user has no focus to see`);
     const probes = focusProbes(measured.fragments, measured.whole, measured.viewport, revealsFocusInPart);
     const state = await focused.evaluate((measuredEl, probes) => {
       if (measuredEl === null || document.activeElement !== measuredEl) return null;

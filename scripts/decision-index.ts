@@ -90,7 +90,9 @@ export function renderIndex(decisions: readonly Decision[]): { lines: string[]; 
   for (let i = 1; i < sorted.length; i++) {
     const [before, here] = [sorted[i - 1], sorted[i]];
     if (before && here && before.number === here.number) {
-      problems.push(`decision ${here.number} is both ${before.file} and ${here.file}: the branch that merged second renumbers (§13.5)`);
+      problems.push(
+        `decision ${here.number} is both ${before.file} and ${here.file}: the branch that merged second renumbers (§13.5)`,
+      );
     }
   }
   const rows = sorted.map((d) => `| [${d.number}](decisions/${d.file}) | ${d.question} |`);
@@ -129,7 +131,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   const roadmapPath = path.join(root, "docs/design/roadmap.md");
   const problems: string[] = [];
   const decisions: Decision[] = [];
-  for (const file of readdirSync(folder).filter((f) => f.endsWith(".md") && f !== "README.md").sort()) {
+  for (const file of readdirSync(folder)
+    .filter((f) => f.endsWith(".md") && f !== "README.md")
+    .sort()) {
     const parsed = parseDecision(file, readFileSync(path.join(folder, file), "utf8"));
     if (typeof parsed === "string") {
       problems.push(parsed);
@@ -145,7 +149,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     problems.push(replaced);
   }
   if (problems.length > 0 || typeof replaced === "string") {
-    process.stderr.write(`${problems.join("\n")}\nerror: the §16 decision index can't be checked or written until the problems above are fixed\n`);
+    process.stderr.write(
+      `${problems.join("\n")}\nerror: the §16 decision index can't be checked or written until the problems above are fixed\n`,
+    );
     process.exit(1);
   }
   const written = replaced.text;

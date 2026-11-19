@@ -105,7 +105,7 @@ test("a load at the Language section leaves focus on its heading, and no other f
       '    When I open the address "/plans#demo"',
       '    And I press Tab until focus is on the button "Run now"',
       "  Scenario: Saving the language",
-      "    When I open the address \"/settings\"",
+      '    When I open the address "/settings"',
       "    And I skip to the content",
       '    And I press Tab until focus is on the button "Save the language"',
       "    When I press Enter, and the page loads again",
@@ -351,7 +351,20 @@ test("only a scenario the browser runs is checked, whichever level tags it", () 
   assert.deepEqual(found(["  @e2e # not @ui", "  Scenario: Use case", ...walk], ""), [], "a tag's comment");
   assert.deepEqual(found(["  @ui", "  Rule: In the browser", "    Scenario: One", ...walk], ""), ["8 top"]);
   assert.deepEqual(
-    found(["  Scenario Outline: <n>", ...walk, "    @ui", "    Examples:", "      | n |", "      | 1 |", "    Examples:", "      | n |", "      | 2 |"], ""),
+    found(
+      [
+        "  Scenario Outline: <n>",
+        ...walk,
+        "    @ui",
+        "    Examples:",
+        "      | n |",
+        "      | 1 |",
+        "    Examples:",
+        "      | n |",
+        "      | 2 |",
+      ],
+      "",
+    ),
     ["6 top"],
   );
   assert.deepEqual(

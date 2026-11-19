@@ -114,10 +114,7 @@ interface Unknown {
 }
 
 /** Where the daemon stands: idle, busy with operations, or unknown and why. */
-type Stand =
-  | { kind: "idle" }
-  | { kind: "busy"; running: number; queued: number }
-  | { kind: "unknown"; why: string };
+type Stand = { kind: "idle" } | { kind: "busy"; running: number; queued: number } | { kind: "unknown"; why: string };
 
 /** The first line of `text`, trimmed. */
 function firstLine(text: string): string {
@@ -146,7 +143,9 @@ function serviceProcess(): number | Unknown {
   const result = spawnSync(program, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: REQUEST_MS });
   if (result.error) return { why: `\`${call}\` couldn't run (${result.error.message})` };
   if (result.status !== 0) {
-    return { why: `the service isn't running (\`${call}\` ended with ${result.status ?? result.signal}: ${firstLine(result.stderr)})` };
+    return {
+      why: `the service isn't running (\`${call}\` ended with ${result.status ?? result.signal}: ${firstLine(result.stderr)})`,
+    };
   }
   const pid = read(result.stdout) ?? "";
   if (!/^[1-9][0-9]{0,9}$/.test(pid)) return { why: `the service isn't running (\`${call}\` names no process)` };
@@ -197,7 +196,10 @@ function logStand(file: string): Stand {
       if (status === "running") running += count;
       else if (status === "queued") queued += count;
       else if (typeof status !== "string" || !ENDED.has(status)) {
-        return { kind: "unknown", why: `the operation log at ${file} holds an operation whose status is ${String(status)}, which install-restart doesn't know` };
+        return {
+          kind: "unknown",
+          why: `the operation log at ${file} holds an operation whose status is ${String(status)}, which install-restart doesn't know`,
+        };
       }
     }
     return running + queued === 0 ? { kind: "idle" } : { kind: "busy", running, queued };
@@ -220,7 +222,10 @@ function stand(): Stand {
   const holder = folderHolder(folder);
   if (typeof holder !== "number") return { kind: "unknown", why: `${holder.why}${elsewhere}` };
   if (holder !== service) {
-    return { kind: "unknown", why: `the data folder ${folder} is held by process ${holder}, not the service's process ${service}${elsewhere}` };
+    return {
+      kind: "unknown",
+      why: `the data folder ${folder} is held by process ${holder}, not the service's process ${service}${elsewhere}`,
+    };
   }
   return logStand(path.join(folder, "ladderback.db"));
 }
@@ -233,11 +238,15 @@ async function waitUntilIdle(minutes: number): Promise<boolean> {
     const now = stand();
     if (now.kind === "idle") return true;
     if (now.kind === "unknown") {
-      console.error(`install-restart: can't tell whether the daemon is busy: ${now.why}. Not restarting; --now restarts without asking.`);
+      console.error(
+        `install-restart: can't tell whether the daemon is busy: ${now.why}. Not restarting; --now restarts without asking.`,
+      );
       return false;
     }
     if (Date.now() >= deadline) {
-      console.error(`install-restart: still busy after ${minutes} min (${now.running} running, ${now.queued} queued). Not restarting; the new binary is installed, and --now restarts at once.`);
+      console.error(
+        `install-restart: still busy after ${minutes} min (${now.running} running, ${now.queued} queued). Not restarting; the new binary is installed, and --now restarts at once.`,
+      );
       return false;
     }
     const saying = `install-restart: waiting for ${now.running} running and ${now.queued} queued operation(s) to finish (up to ${minutes} min in all)`;
@@ -252,7 +261,8 @@ function installedBuild(program: string, wanted: string, expected: Build | undef
   const result = spawnSync(program, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: REQUEST_MS });
   if (result.error) return { why: `${program} --version couldn't run (${result.error.message})` };
   const said = firstLine(result.stdout);
-  if (result.status !== 0) return { why: `${program} --version ended with ${result.status ?? result.signal}: ${firstLine(result.stderr)}` };
+  if (result.status !== 0)
+    return { why: `${program} --version ended with ${result.status ?? result.signal}: ${firstLine(result.stderr)}` };
   const named = /^ladderback (\S+)$/.exec(said)?.[1];
   // When git couldn't say, the version alone, with or without a commit.
   const ok = expected === undefined ? named === version || named?.startsWith(`${version}+`) === true : named === wanted;
@@ -267,7 +277,12 @@ type Confirmed = { process: number; build: Build | null };
  * the daemon at `base` names once it answers: the one expected, or none with
  * sign-in on; otherwise why the restart can't be confirmed.
  */
-async function restarted(before: number | Unknown, base: string, expected: Build | undefined, version: string): Promise<Confirmed | Unknown> {
+async function restarted(
+  before: number | Unknown,
+  base: string,
+  expected: Build | undefined,
+  version: string,
+): Promise<Confirmed | Unknown> {
   const deadline = Date.now() + RESTART_MS;
   let last = "no answer";
   let started: number | undefined;
@@ -373,9 +388,13 @@ async function main(argv: string[]): Promise<number> {
   // a `password-keyring` entry (#892): asked here, in the terminal, the
   // question comes while someone is there, not at the next scheduled run.
   if (run(ladderback, ["check-keyring"]) !== 0) {
-    console.error("install-restart: the new program couldn't read every keyring entry, or the configuration that names them (above), so a backup or a notification that needs one may fail too.");
+    console.error(
+      "install-restart: the new program couldn't read every keyring entry, or the configuration that names them (above), so a backup or a notification that needs one may fail too.",
+    );
     if (!ignoreKeyring) {
-      console.error("install-restart: Not restarting; the running daemon is untouched. --ignore-keyring-failure restarts all the same.");
+      console.error(
+        "install-restart: Not restarting; the running daemon is untouched. --ignore-keyring-failure restarts all the same.",
+      );
       return 1;
     }
     console.log("install-restart: --ignore-keyring-failure: restarting all the same.");
@@ -406,11 +425,18 @@ async function main(argv: string[]): Promise<number> {
     console.error(`install-restart: the service was restarted, but can't confirm it runs ${wanted}: ${confirmed.why}.`);
     return 1;
   }
-  const processes = typeof before === "number" ? `process ${confirmed.process}, not ${before} as before the restart` : `process ${confirmed.process}, where it named none before the restart`;
+  const processes =
+    typeof before === "number"
+      ? `process ${confirmed.process}, not ${before} as before the restart`
+      : `process ${confirmed.process}, where it named none before the restart`;
   if (confirmed.build === null) {
-    console.log(`install-restart: the service runs ${processes}, and the installed program says it is ladderback ${wanted}; the daemon at ${address} answers, but with sign-in on, it names its build only to a session.`);
+    console.log(
+      `install-restart: the service runs ${processes}, and the installed program says it is ladderback ${wanted}; the daemon at ${address} answers, but with sign-in on, it names its build only to a session.`,
+    );
   } else {
-    console.log(`install-restart: the service runs ${processes}, and the daemon at ${address} says it runs ladderback ${shown(confirmed.build)}.`);
+    console.log(
+      `install-restart: the service runs ${processes}, and the daemon at ${address} says it runs ladderback ${shown(confirmed.build)}.`,
+    );
   }
   return 0;
 }

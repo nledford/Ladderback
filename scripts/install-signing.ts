@@ -51,8 +51,7 @@ export const IDENTIFIER = "io.github.nledford.ladderback";
 // How long `security` may take to list the identities.
 const LIST_MS = 30_000;
 // How to sign an installed program again, once the signing failed.
-const RETRY =
-  `To sign it without building again, run \`node scripts/install-signing.ts sign\` in the checkout with ${IDENTITY_VARIABLE} and the arguments given to \`just install\`.`;
+const RETRY = `To sign it without building again, run \`node scripts/install-signing.ts sign\` in the checkout with ${IDENTITY_VARIABLE} and the arguments given to \`just install\`.`;
 
 type Env = NodeJS.ProcessEnv;
 
@@ -112,7 +111,9 @@ export function identityHash(identity: string, env: Env): string | Refusal {
   if (first === undefined) {
     const longer = identities.filter((i) => i.name.includes(identity)).map((i) => `"${i.name}"`);
     if (longer.length > 0) {
-      return { why: `${IDENTITY_VARIABLE} names "${identity}", which is no valid code-signing identity's whole name; \`security find-identity -v -p codesigning\` lists ${longer.join(", ")}: name one in full, or by its SHA-1 hash` };
+      return {
+        why: `${IDENTITY_VARIABLE} names "${identity}", which is no valid code-signing identity's whole name; \`security find-identity -v -p codesigning\` lists ${longer.join(", ")}: name one in full, or by its SHA-1 hash`,
+      };
     }
     return {
       why:
@@ -124,9 +125,13 @@ export function identityHash(identity: string, env: Env): string | Refusal {
   if (named.length > 1) {
     const hashes = new Set(named.map((i) => i.hash.toUpperCase()));
     if (hashes.size === 1) {
-      return { why: `${IDENTITY_VARIABLE} names "${identity}", a certificate that \`security find-identity -v -p codesigning\` lists ${named.length} times, once for each keychain that holds a copy: delete all but one copy in Keychain Access` };
+      return {
+        why: `${IDENTITY_VARIABLE} names "${identity}", a certificate that \`security find-identity -v -p codesigning\` lists ${named.length} times, once for each keychain that holds a copy: delete all but one copy in Keychain Access`,
+      };
     }
-    return { why: `${IDENTITY_VARIABLE} names "${identity}", which names ${hashes.size} valid code-signing identities; name one by the SHA-1 hash \`security find-identity -v -p codesigning\` lists before it` };
+    return {
+      why: `${IDENTITY_VARIABLE} names "${identity}", which names ${hashes.size} valid code-signing identities; name one by the SHA-1 hash \`security find-identity -v -p codesigning\` lists before it`,
+    };
   }
   return first.hash;
 }
@@ -136,12 +141,16 @@ export function signProgram(program: string, hash: string, env: Env): Refusal | 
   const signed = spawnSync("codesign", ["--force", "--sign", hash, "--identifier", IDENTIFIER, program], { encoding: "utf8", env });
   if (signed.error || signed.status !== 0) {
     const said = signed.error?.message ?? (firstLine(signed.stderr) || `exit status ${signed.status}`);
-    return { why: `couldn't sign ${program}: ${said}. A locked keychain, or a prompt to use the key that nobody can answer (over SSH), stops \`codesign\`. The program is installed with the linker's ad-hoc signature` };
+    return {
+      why: `couldn't sign ${program}: ${said}. A locked keychain, or a prompt to use the key that nobody can answer (over SSH), stops \`codesign\`. The program is installed with the linker's ad-hoc signature`,
+    };
   }
   const verified = spawnSync("codesign", ["--verify", program], { encoding: "utf8", env });
   if (verified.error || verified.status !== 0) {
     const said = verified.error?.message ?? (firstLine(verified.stderr) || `exit status ${verified.status}`);
-    return { why: `signed ${program}, but \`codesign --verify\` refuses it: ${said}. The program is installed with that signature, which macOS may refuse to run` };
+    return {
+      why: `signed ${program}, but \`codesign --verify\` refuses it: ${said}. The program is installed with that signature, which macOS may refuse to run`,
+    };
   }
   return undefined;
 }
@@ -161,9 +170,7 @@ export function reinstallWarning(env: Env, os: NodeJS.Platform): string | undefi
       `a local build is signed ad hoc, so macOS sees a new program (#281). ${IDENTITY_VARIABLE} names a code-signing identity to sign it with instead (docs/guide/install.md).`
     );
   }
-  return (
-    `the program is signed with "${identity}", so macOS keeps the Full Disk Access and Photos grants it gave the last build signed with it (#281); the keychain still asks once for this build before it lets it read a keyring item (#892).`
-  );
+  return `the program is signed with "${identity}", so macOS keeps the Full Disk Access and Photos grants it gave the last build signed with it (#281); the keychain still asks once for this build before it lets it read a keyring item (#892).`;
 }
 
 /** Runs `check` or `sign [args for cargo install]` for `os`; its exit status. */
@@ -177,7 +184,9 @@ export function main(argv: readonly string[], env: Env, os: NodeJS.Platform): nu
   if (identity === undefined) return 0;
   const hash = identityHash(identity, env);
   if (typeof hash !== "string") {
-    console.error(`install: ${hash.why}. ${command === "check" ? "Nothing was built or installed." : `The program is installed with the linker's ad-hoc signature. ${RETRY}`}`);
+    console.error(
+      `install: ${hash.why}. ${command === "check" ? "Nothing was built or installed." : `The program is installed with the linker's ad-hoc signature. ${RETRY}`}`,
+    );
     return 1;
   }
   if (command === "check") return 0;

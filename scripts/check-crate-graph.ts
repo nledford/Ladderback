@@ -191,7 +191,9 @@ export function ownerProblems(metadata: Metadata, owners = OWNERS): string[] {
       if (dependency.kind === "dev") continue;
       const model = owners.find((candidate) => candidate.crates.test(dependency.name));
       if (model !== undefined && !model.owners.includes(pkg.name)) {
-        problems.push(`${pkg.name} depends on ${dependency.name}${declared(dependency)}, which only ${model.owners.join(" and ")} may`);
+        problems.push(
+          `${pkg.name} depends on ${dependency.name}${declared(dependency)}, which only ${model.owners.join(" and ")} may`,
+        );
       }
     }
   }
@@ -276,7 +278,9 @@ export function domainProblems(file: string, source: string): string[] {
     .split("\n")
     .flatMap((line, i) => [
       ...(/(?<!r#)\basync\b/.test(line) ? [`${file}:${i + 1}: async in domain, which has no async (§3.2)`] : []),
-      ...(/#\s*\[\s*path\b|\binclude\s*!/.test(line) ? [`${file}:${i + 1}: #[path] or include! in domain, which the no-async check can't follow`] : []),
+      ...(/#\s*\[\s*path\b|\binclude\s*!/.test(line)
+        ? [`${file}:${i + 1}: #[path] or include! in domain, which the no-async check can't follow`]
+        : []),
     ]);
 }
 
@@ -285,8 +289,14 @@ function rustFiles(dir: string): { files: string[]; links: string[] } {
   const entries = readdirSync(dir, { withFileTypes: true, recursive: true });
   const full = (entry: Dirent) => path.join(entry.parentPath, entry.name);
   return {
-    files: entries.filter((entry) => entry.isFile() && entry.name.endsWith(".rs")).map(full).sort(),
-    links: entries.filter((entry) => entry.isSymbolicLink()).map(full).sort(),
+    files: entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".rs"))
+      .map(full)
+      .sort(),
+    links: entries
+      .filter((entry) => entry.isSymbolicLink())
+      .map(full)
+      .sort(),
   };
 }
 
@@ -303,7 +313,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       failed = true;
     }
   };
-  report([...tableProblems(metadata), ...graphProblems(metadata)], "every edge between workspace crates is one the crate graph allows");
+  report(
+    [...tableProblems(metadata), ...graphProblems(metadata)],
+    "every edge between workspace crates is one the crate graph allows",
+  );
   report(ownerProblems(metadata), `only their owners depend on the crates of ${OWNERS.map((model) => model.name).join(", ")}`);
   const domain = members(metadata).find((pkg) => pkg.name === "domain");
   if (domain === undefined) {

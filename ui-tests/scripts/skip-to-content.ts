@@ -182,7 +182,10 @@ function scenarios(feature: string): Scenario[] {
     }
     if (text.startsWith("|")) {
       if (examples === undefined || current === undefined) return;
-      const cells = text.slice(1, -1).split("|").map((cell) => cell.trim());
+      const cells = text
+        .slice(1, -1)
+        .split("|")
+        .map((cell) => cell.trim());
       if (examples.header === undefined) {
         examples.header = cells;
         return;

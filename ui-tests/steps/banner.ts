@@ -50,8 +50,7 @@ Then("no banner of the {string} demo is a live region, nor holds one", async fun
         tabindex: element.getAttribute("tabindex"),
         live: parts.filter(
           (part) =>
-            part.hasAttribute("aria-live") ||
-            ["alert", "status", "log", "marquee", "timer"].includes(part.getAttribute("role") ?? ""),
+            part.hasAttribute("aria-live") || ["alert", "status", "log", "marquee", "timer"].includes(part.getAttribute("role") ?? ""),
         ).length,
       };
     });
@@ -149,9 +148,12 @@ Then(
             return {
               tone: [...banner.classList].find((name) => name.startsWith("tone-"))?.slice("tone-".length) ?? "",
               background: style.backgroundColor,
-              corners: [style.borderStartStartRadius, style.borderStartEndRadius, style.borderEndStartRadius, style.borderEndEndRadius].map(
-                Number.parseFloat,
-              ),
+              corners: [
+                style.borderStartStartRadius,
+                style.borderStartEndRadius,
+                style.borderEndStartRadius,
+                style.borderEndEndRadius,
+              ].map(Number.parseFloat),
               edgeWidth: Number.parseFloat(style.borderInlineStartWidth),
               edgeStyle: style.borderInlineStartStyle,
               edgeColor: style.borderInlineStartColor,
@@ -248,7 +250,10 @@ Then(
         };
       }),
     );
-    assert.ok(drawn.some((banner) => banner.dismiss !== null), "no banner of the demo can be dismissed");
+    assert.ok(
+      drawn.some((banner) => banner.dismiss !== null),
+      "no banner of the demo can be dismissed",
+    );
     for (const [at, banner] of drawn.entries()) {
       const which = `banner ${at + 1}`;
       assert.equal(banner.direction, direction, which);
@@ -256,11 +261,13 @@ Then(
       if (direction === "ltr") {
         assert.ok(banner.left > banner.right, `${which}'s thick edge is on its right`);
         assert.ok(banner.icon.right <= banner.words.left + ROUNDING_PX, `${which}'s icon is after its words`);
-        if (banner.dismiss !== null) assert.ok(banner.dismiss.left >= banner.words.right - ROUNDING_PX, `${which}'s Dismiss is before its words`);
+        if (banner.dismiss !== null)
+          assert.ok(banner.dismiss.left >= banner.words.right - ROUNDING_PX, `${which}'s Dismiss is before its words`);
       } else {
         assert.ok(banner.right > banner.left, `${which}'s thick edge is on its left`);
         assert.ok(banner.icon.left >= banner.words.right - ROUNDING_PX, `${which}'s icon is after its words`);
-        if (banner.dismiss !== null) assert.ok(banner.dismiss.right <= banner.words.left + ROUNDING_PX, `${which}'s Dismiss is before its words`);
+        if (banner.dismiss !== null)
+          assert.ok(banner.dismiss.right <= banner.words.left + ROUNDING_PX, `${which}'s Dismiss is before its words`);
       }
     }
   },
@@ -327,17 +334,14 @@ const saying = (words: string): RegExp =>
 // A page's notice is the shared banner (#930): found by its words, as a
 // banner has no role, it is one banner in the tone named, its icon an image
 // named for that tone, and its words after it, never a live region itself.
-Then(
-  "the page shows a(n) {word} banner that says {string}",
-  async function (this: BrowserWorld, tone: string, words: string) {
-    const expected = PAGE_TONES[tone];
-    assert.ok(expected, `no banner tone "${tone}"`);
-    const banner = this.page.locator(".banner").filter({ hasText: saying(words) });
-    await expect(banner).toHaveCount(1, { timeout: PAGE_PATIENCE_MS });
-    await expect(banner).toHaveClass(new RegExp(`(^|\\s)tone-${expected.tone}(\\s|$)`));
-    await expect(banner.locator(".banner-icon").getByRole("img", { name: namePattern(expected.icon) })).toHaveCount(1);
-    await expect(banner.locator(".banner-words")).toContainText(saying(words));
-    await expect(banner).not.toHaveAttribute("role", /.+/);
-    await expect(banner).not.toHaveAttribute("aria-live", /.+/);
-  },
-);
+Then("the page shows a(n) {word} banner that says {string}", async function (this: BrowserWorld, tone: string, words: string) {
+  const expected = PAGE_TONES[tone];
+  assert.ok(expected, `no banner tone "${tone}"`);
+  const banner = this.page.locator(".banner").filter({ hasText: saying(words) });
+  await expect(banner).toHaveCount(1, { timeout: PAGE_PATIENCE_MS });
+  await expect(banner).toHaveClass(new RegExp(`(^|\\s)tone-${expected.tone}(\\s|$)`));
+  await expect(banner.locator(".banner-icon").getByRole("img", { name: namePattern(expected.icon) })).toHaveCount(1);
+  await expect(banner.locator(".banner-words")).toContainText(saying(words));
+  await expect(banner).not.toHaveAttribute("role", /.+/);
+  await expect(banner).not.toHaveAttribute("aria-live", /.+/);
+});

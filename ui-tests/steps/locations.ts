@@ -387,22 +387,19 @@ Then(
 // host tests' (src/composition.rs), and that each platform's reader reads
 // each family's default route apart is the contract suite's
 // (crates/adapters/platform/tests/conditions.rs).
-Given(
-  "the machine's IPv4 traffic leaves by Wi-Fi and its IPv6 traffic by a wired network",
-  function (this: BrowserWorld) {
-    const { alias } = locations(this);
-    const daemon = this.scriptedDaemon ?? new ScriptedDaemon();
-    daemon.warnOfRepository(alias, {
-      code: "location-rule-mixed-link",
-      args: {
-        ipv4: { type: "text", value: "wifi" },
-        ipv6: { type: "text", value: "wired" },
-        locations: { type: "text", value: "several" },
-      },
-    });
-    this.scriptedDaemon = daemon;
-  },
-);
+Given("the machine's IPv4 traffic leaves by Wi-Fi and its IPv6 traffic by a wired network", function (this: BrowserWorld) {
+  const { alias } = locations(this);
+  const daemon = this.scriptedDaemon ?? new ScriptedDaemon();
+  daemon.warnOfRepository(alias, {
+    code: "location-rule-mixed-link",
+    args: {
+      ipv4: { type: "text", value: "wifi" },
+      ipv6: { type: "text", value: "wired" },
+      locations: { type: "text", value: "several" },
+    },
+  });
+  this.scriptedDaemon = daemon;
+});
 
 Then(
   "the repository {string} says its rules hold only where they hold for both IPv4 and IPv6, and how to make one link carry both",

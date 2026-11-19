@@ -52,24 +52,21 @@ Then("the button {string} has the look {string}", async function (this: BrowserW
 // Every button, those in closed dialogs too, has the shared button's one
 // small corner (`--radius-small`), which no browser draws its own button
 // with: a button in the browser's look is named in the failure.
-Then(
-  "every button on the page is drawn from the tokens, none in the browser's own look",
-  async function (this: BrowserWorld) {
-    const native = await this.page.evaluate(() => {
-      const probe = document.createElement("div");
-      probe.style.borderRadius = "var(--radius-small)";
-      document.body.append(probe);
-      const corner = getComputedStyle(probe).borderTopLeftRadius;
-      probe.remove();
-      // A tab is a button too, drawn flat on its list's rule by the tabs'
-      // own rules (§4.5, "Tabs"), whose look the tabs' scenarios check.
-      return Array.from(document.querySelectorAll("button:not([role='tab'])"))
-        .filter((button) => getComputedStyle(button).borderTopLeftRadius !== corner)
-        .map((button) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim());
-    });
-    assert.deepEqual(native, [], "buttons drawn in the browser's own look");
-  },
-);
+Then("every button on the page is drawn from the tokens, none in the browser's own look", async function (this: BrowserWorld) {
+  const native = await this.page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.borderRadius = "var(--radius-small)";
+    document.body.append(probe);
+    const corner = getComputedStyle(probe).borderTopLeftRadius;
+    probe.remove();
+    // A tab is a button too, drawn flat on its list's rule by the tabs'
+    // own rules (§4.5, "Tabs"), whose look the tabs' scenarios check.
+    return Array.from(document.querySelectorAll("button:not([role='tab'])"))
+      .filter((button) => getComputedStyle(button).borderTopLeftRadius !== corner)
+      .map((button) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim());
+  });
+  assert.deepEqual(native, [], "buttons drawn in the browser's own look");
+});
 
 // The daemon holds the page's next save of a plan for a while before it
 // answers, and the page's saves are counted.

@@ -112,19 +112,13 @@ When("I type the proposal's short ID", async function (this: BrowserWorld) {
 });
 
 Then("the proposal says {string}", async function (this: BrowserWorld, text: string) {
-  await openProposal(this)
-    .getByText(namePattern(text))
-    .first()
-    .waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
+  await openProposal(this).getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
 });
 
 // A sentence of the page, wherever it stands, the values in it read whether
 // or not bidi isolation marks surround them.
 Then("the page says {string}", async function (this: BrowserWorld, text: string) {
-  await this.page
-    .getByText(namePattern(text))
-    .first()
-    .waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
+  await this.page.getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
 });
 
 // The context of the diff holds the repository's inline password (I4).

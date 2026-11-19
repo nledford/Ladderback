@@ -89,24 +89,21 @@ Given("the admin has created {int} API tokens", function (this: BrowserWorld, co
 
 // The daemon holds the page's next creation of a token for a while before it
 // answers, so the reader can leave its tab while it waits.
-Given(
-  "the daemon answers the next creation of an API token {int} seconds late",
-  function (this: BrowserWorld, seconds: number) {
-    let held = false;
-    this.contextRoutes.push(async (context) => {
-      await context.route(
-        (url) => url.pathname === "/api/v1/tokens",
-        async (route) => {
-          if (route.request().method() === "POST" && !held) {
-            held = true;
-            await new Promise((done) => setTimeout(done, seconds * 1_000));
-          }
-          await route.continue();
-        },
-      );
-    });
-  },
-);
+Given("the daemon answers the next creation of an API token {int} seconds late", function (this: BrowserWorld, seconds: number) {
+  let held = false;
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname === "/api/v1/tokens",
+      async (route) => {
+        if (route.request().method() === "POST" && !held) {
+          held = true;
+          await new Promise((done) => setTimeout(done, seconds * 1_000));
+        }
+        await route.continue();
+      },
+    );
+  });
+});
 
 // A program presents the token as a program does, with no cookie, so the
 // daemon records its use.
@@ -154,27 +151,21 @@ Given("the page may use the clipboard", function (this: BrowserWorld) {
 Given("the browser refuses the page the clipboard", function (this: BrowserWorld) {
   this.contextRoutes.push(async (context) => {
     await context.addInitScript(() => {
-      Clipboard.prototype.writeText = () =>
-        Promise.reject(new DOMException("Write permission denied.", "NotAllowedError"));
+      Clipboard.prototype.writeText = () => Promise.reject(new DOMException("Write permission denied.", "NotAllowedError"));
     });
   });
 });
 
-Then(
-  "the dialog {string} shows a token that starts with {string}",
-  async function (this: BrowserWorld, name: string, prefix: string) {
-    const field = this.page.getByRole("dialog", { name: namePattern(name) }).getByRole("textbox");
-    await expect(field).toHaveValue(new RegExp(`^${prefix}`), { timeout: PAGE_PATIENCE_MS });
-    shown.set(this, await field.inputValue());
-  },
-);
+Then("the dialog {string} shows a token that starts with {string}", async function (this: BrowserWorld, name: string, prefix: string) {
+  const field = this.page.getByRole("dialog", { name: namePattern(name) }).getByRole("textbox");
+  await expect(field).toHaveValue(new RegExp(`^${prefix}`), { timeout: PAGE_PATIENCE_MS });
+  shown.set(this, await field.inputValue());
+});
 
 Then("the clipboard holds the token the dialog showed", async function (this: BrowserWorld) {
   const token = shown.get(this);
   assert.ok(token, "no step read the token the dialog showed");
-  await expect
-    .poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS })
-    .toBe(token);
+  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS }).toBe(token);
 });
 
 // I4, and the secret is shown once: once the dialog is left, no text, no

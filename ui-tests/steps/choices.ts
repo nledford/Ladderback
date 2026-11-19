@@ -28,23 +28,20 @@ Then(
   async function (this: BrowserWorld, role: string, name: string, width: string, color: string | undefined) {
     const box = choice(this, role, name);
     await expect(box).toHaveCount(1);
-    const drawn = await box.evaluate(
-      (element, color) => {
-        const style = getComputedStyle(element);
-        // The color named, computed where the box stands, so a token gives
-        // its light or dark value and a system color the reader's.
-        let wanted: string | null = null;
-        if (color) {
-          const probe = document.createElement("span");
-          probe.style.color = color.startsWith("--") ? `var(${color})` : color;
-          element.parentElement?.append(probe);
-          wanted = getComputedStyle(probe).color;
-          probe.remove();
-        }
-        return { width: style.borderTopWidth, style: style.borderTopStyle, color: style.borderTopColor, wanted };
-      },
-      color,
-    );
+    const drawn = await box.evaluate((element, color) => {
+      const style = getComputedStyle(element);
+      // The color named, computed where the box stands, so a token gives
+      // its light or dark value and a system color the reader's.
+      let wanted: string | null = null;
+      if (color) {
+        const probe = document.createElement("span");
+        probe.style.color = color.startsWith("--") ? `var(${color})` : color;
+        element.parentElement?.append(probe);
+        wanted = getComputedStyle(probe).color;
+        probe.remove();
+      }
+      return { width: style.borderTopWidth, style: style.borderTopStyle, color: style.borderTopColor, wanted };
+    }, color);
     assert.equal(drawn.style, "solid", `the edge of the ${role} "${name}"`);
     assert.equal(drawn.width, `${width}px`, `the edge of the ${role} "${name}"`);
     if (color) assert.equal(drawn.color, drawn.wanted, `the edge of the ${role} "${name}" in ${color}`);
@@ -113,7 +110,10 @@ Then(
     });
     const label = `the ${role} "${name}"`;
     assert.ok(Math.abs(drawn.width - drawn.height) <= ROUNDING_PX, `${label} is ${drawn.width} by ${drawn.height}`);
-    assert.ok(Math.abs(drawn.width - Math.max(24, 1.5 * drawn.text)) <= ROUNDING_PX, `${label} is ${drawn.width} pixels a side, its text ${drawn.text}`);
+    assert.ok(
+      Math.abs(drawn.width - Math.max(24, 1.5 * drawn.text)) <= ROUNDING_PX,
+      `${label} is ${drawn.width} pixels a side, its text ${drawn.text}`,
+    );
     if (shape === "circle") assert.ok(drawn.corner >= drawn.width / 2, `${label} has a corner of ${drawn.corner}, not round`);
     else assert.ok(drawn.corner < drawn.width / 4, `${label} has a corner of ${drawn.corner}, not square`);
     assert.ok(drawn.mark, `${label} shows no mark`);

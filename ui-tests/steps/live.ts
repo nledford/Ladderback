@@ -322,9 +322,12 @@ When("the backup of {string} starts before the page's events stream is open", as
   await scripted(this).startsUnheard(plan, "2026-11-09T10:00:05Z");
 });
 
-When("a before-hook of the backup of {string} warns before the page's events stream is open", async function (this: BrowserWorld, plan: string) {
-  await scripted(this).warnsUnheard(plan);
-});
+When(
+  "a before-hook of the backup of {string} warns before the page's events stream is open",
+  async function (this: BrowserWorld, plan: string) {
+    await scripted(this).warnsUnheard(plan);
+  },
+);
 
 When("the daemon opens the events stream it held back", async function (this: BrowserWorld) {
   await scripted(this).openTheHeldStream();
@@ -334,9 +337,12 @@ When("the page has read the history again since its events stream opened", async
   await scripted(this).untilReadSinceTheOpening();
 });
 
-When("the daemon reports {int} steps of progress of the backup of {string}", async function (this: BrowserWorld, steps: number, plan: string) {
-  await scripted(this).progresses(plan, steps);
-});
+When(
+  "the daemon reports {int} steps of progress of the backup of {string}",
+  async function (this: BrowserWorld, steps: number, plan: string) {
+    await scripted(this).progresses(plan, steps);
+  },
+);
 
 // A step as a person says it, and its code on the wire (decision 82).
 const STEP_CODES: Record<string, string> = {
@@ -541,17 +547,23 @@ When("I reload the page", async function (this: BrowserWorld) {
 // repository, whose alias the page isolates (§4.5); what it shows is its
 // life so far, which a run changes as it goes, so the step waits for the
 // row to say it.
-Then("the table {string} has a row {string} that shows {string}", async function (this: BrowserWorld, name: string, row: string, status: string) {
-  const rows = table(this, name).getByRole("row", { name: new RegExp([...row].map(escape).join(ISOLATION)) });
-  await until(
-    async () => {
-      const found = await rows.first().textContent().catch(() => null);
-      return found?.includes(status) ? found : null;
-    },
-    ROW_PATIENCE_MS,
-    `the row ${row} of the table ${name} never showed ${status}`,
-  );
-});
+Then(
+  "the table {string} has a row {string} that shows {string}",
+  async function (this: BrowserWorld, name: string, row: string, status: string) {
+    const rows = table(this, name).getByRole("row", { name: new RegExp([...row].map(escape).join(ISOLATION)) });
+    await until(
+      async () => {
+        const found = await rows
+          .first()
+          .textContent()
+          .catch(() => null);
+        return found?.includes(status) ? found : null;
+      },
+      ROW_PATIENCE_MS,
+      `the row ${row} of the table ${name} never showed ${status}`,
+    );
+  },
+);
 
 Then("the table {string} has {int} rows", async function (this: BrowserWorld, name: string, count: number) {
   await hasRows(table(this, name), count, `the table ${name}`);
@@ -655,10 +667,13 @@ Then(
     const noted = notedIcons.get(this);
     assert.ok(noted, `the icon of the status badge of the row ${row} was never noted`);
     await expect
-      .poll(async () => {
-        const icon = await badgeIcon(this, name, row);
-        return icon !== "" && icon !== noted;
-      }, { message: `the status badge of the row ${row} of the table ${name} kept its icon`, timeout: UPDATE_PATIENCE_MS })
+      .poll(
+        async () => {
+          const icon = await badgeIcon(this, name, row);
+          return icon !== "" && icon !== noted;
+        },
+        { message: `the status badge of the row ${row} of the table ${name} kept its icon`, timeout: UPDATE_PATIENCE_MS },
+      )
       .toBe(true);
   },
 );
@@ -666,11 +681,7 @@ Then(
 // Lucide's `triangle-alert`, the warning icon (the shape `lepticons-data`
 // draws for it): the icon of a status badge whose run succeeded with
 // warnings, as it is of the Warning tone's alert and banner (§4.5).
-const WARNING_ICON = [
-  "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
-  "M12 9v4",
-  "M12 17h.01",
-];
+const WARNING_ICON = ["m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3", "M12 9v4", "M12 17h.01"];
 
 // A run that ended with something to read is drawn as one that needs a look
 // (#942): the row's status badge, found by its words, the whole of them,
@@ -684,9 +695,7 @@ Then(
     const cell = await cellOf(this, name, row, "Status");
     const badge = cell.locator(".badge").filter({ hasText: /^Succeeded with warnings$/ });
     await drawnOnItsFill(badge, `the status badge of the row ${row}`, "--warning-fg", "--warning-bg");
-    const icon = await badge.evaluate((element) =>
-      Array.from(element.querySelectorAll("svg path"), (path) => path.getAttribute("d")),
-    );
+    const icon = await badge.evaluate((element) => Array.from(element.querySelectorAll("svg path"), (path) => path.getAttribute("d")));
     assert.deepEqual(icon, WARNING_ICON, `the status badge of the row ${row} doesn't draw the warning icon`);
   },
 );
@@ -745,7 +754,9 @@ Then(
         const at = target.getBoundingClientRect();
         const box = th.getBoundingClientRect();
         if (at.left < box.left - 0.5 || at.right > box.right + 0.5 || at.top < box.top - 0.5 || at.bottom > box.bottom + 0.5) {
-          found.push(`the button reaches ${Math.round(at.left)}..${Math.round(at.right)}px of a header at ${Math.round(box.left)}..${Math.round(box.right)}px`);
+          found.push(
+            `the button reaches ${Math.round(at.left)}..${Math.round(at.right)}px of a header at ${Math.round(box.left)}..${Math.round(box.right)}px`,
+          );
         }
         const apart = apartRem * parseFloat(getComputedStyle(document.documentElement).fontSize);
         const walker = document.createTreeWalker(th, NodeFilter.SHOW_TEXT);
@@ -784,12 +795,7 @@ Then("the buttons {string} and {string} stand apart", async function (this: Brow
   };
   const a = await box(first);
   const b = await box(second);
-  const gap = Math.max(
-    b.x - (a.x + a.width),
-    a.x - (b.x + b.width),
-    b.y - (a.y + a.height),
-    a.y - (b.y + b.height),
-  );
+  const gap = Math.max(b.x - (a.x + a.width), a.x - (b.x + b.width), b.y - (a.y + a.height), a.y - (b.y + b.height));
   const root = await this.page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
   const apart = APART_REM * root;
   assert.ok(gap >= apart - 0.5, `the buttons "${first}" and "${second}" are ${gap.toFixed(1)}px apart, less than ${apart}px`);
@@ -903,7 +909,10 @@ Then(
     const end = Date.now() + STILL_MS;
     do {
       const seen = await cellText(this, name, row, column);
-      assert.ok(seen.includes(expected), `the row ${row} of the table ${name} showed "${seen}" in its ${column} column, not "${expected}"`);
+      assert.ok(
+        seen.includes(expected),
+        `the row ${row} of the table ${name} showed "${seen}" in its ${column} column, not "${expected}"`,
+      );
       await sleep(100);
     } while (Date.now() < end);
   },
@@ -932,7 +941,10 @@ Then(
       await sleep(250);
       seen = await cellText(this, name, row, column);
     }
-    assert.ok(!seen.includes(unexpected), `the row ${row} of the table ${name} kept showing "${unexpected}" in its ${column} column: "${seen}"`);
+    assert.ok(
+      !seen.includes(unexpected),
+      `the row ${row} of the table ${name} kept showing "${unexpected}" in its ${column} column: "${seen}"`,
+    );
   },
 );
 
@@ -986,21 +998,23 @@ Then(
     const cell = await cellOf(this, name, row, column);
     const items = cell.getByRole("list").getByRole("listitem");
     await expect(items.first(), `the ${column} of the row ${row} lists nothing`).toBeVisible({ timeout: ROW_PATIENCE_MS });
-    const split = await evaluateAll(items, (elements) =>
-      elements.flatMap((item) => {
-        const tops = new Set<number>();
-        const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
-        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          for (let at = 0; at < (node.textContent ?? "").length; at += 1) {
-            const range = document.createRange();
-            range.setStart(node, at);
-            range.setEnd(node, at + 1);
-            const box = [...range.getClientRects()].find((rect) => rect.width > 0);
-            if (box !== undefined) tops.add(Math.round(box.top));
+    const split = await evaluateAll(
+      items,
+      (elements) =>
+        elements.flatMap((item) => {
+          const tops = new Set<number>();
+          const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            for (let at = 0; at < (node.textContent ?? "").length; at += 1) {
+              const range = document.createRange();
+              range.setStart(node, at);
+              range.setEnd(node, at + 1);
+              const box = [...range.getClientRects()].find((rect) => rect.width > 0);
+              if (box !== undefined) tops.add(Math.round(box.top));
+            }
           }
-        }
-        return tops.size > 1 ? [`"${item.textContent}" takes ${tops.size} lines`] : [];
-      }),
+          return tops.size > 1 ? [`"${item.textContent}" takes ${tops.size} lines`] : [];
+        }),
       undefined,
     );
     assert.deepEqual(split, [], `the ${column} of the row ${row} breaks inside an item`);
@@ -1162,14 +1176,17 @@ const writtenIn = (zone: string) => {
 // is that instant read in the browser's own zone, as the browser's `Intl`
 // writes it: the default of the formatter is UTC, so a page that didn't pass
 // the zone would show the title's own hours.
-Then("the table {string} shows its {string} column in the time zone {string}", async function (this: BrowserWorld, name: string, column: string, zone: string) {
-  const cells = await timeCells(this, name, column);
-  assert.ok(cells.length > 0, `the table ${name} has no rows to read in ${zone}`);
-  const written = writtenIn(zone);
-  for (const [raw, shown] of cells) {
-    assert.equal(shown, written(raw), `the ${column} cell of ${raw} is not in ${zone}`);
-  }
-});
+Then(
+  "the table {string} shows its {string} column in the time zone {string}",
+  async function (this: BrowserWorld, name: string, column: string, zone: string) {
+    const cells = await timeCells(this, name, column);
+    assert.ok(cells.length > 0, `the table ${name} has no rows to read in ${zone}`);
+    const written = writtenIn(zone);
+    for (const [raw, shown] of cells) {
+      assert.equal(shown, written(raw), `the ${column} cell of ${raw} is not in ${zone}`);
+    }
+  },
+);
 
 // A snapshot time is what the clock that took it read (§16, decision 56): the
 // cell's instant read in the zone that clock ran in, then that clock's offset,
@@ -1186,10 +1203,17 @@ Then(
   },
 );
 
-Then("the table {string} shows these times in its {string} column:", async function (this: BrowserWorld, name: string, column: string, expected: DataTable) {
-  const shown = (await timeCells(this, name, column)).map(([, text]) => text);
-  assert.deepEqual(shown, expected.raw().map(([text]) => text), `the ${column} column of ${name}`);
-});
+Then(
+  "the table {string} shows these times in its {string} column:",
+  async function (this: BrowserWorld, name: string, column: string, expected: DataTable) {
+    const shown = (await timeCells(this, name, column)).map(([, text]) => text);
+    assert.deepEqual(
+      shown,
+      expected.raw().map(([text]) => text),
+      `the ${column} column of ${name}`,
+    );
+  },
+);
 
 // The snapshots a plan's group lists, in place of the real daemon's: each is
 // a time and the offset of the clock that took it, as a snapshot file records
@@ -1270,9 +1294,7 @@ Then("the page shows the paragraph {string}", async function (this: BrowserWorld
 });
 
 Then("the page shows the heading {string}", async function (this: BrowserWorld, name: string) {
-  await this.page
-    .getByRole("heading", { level: 1, name, exact: true })
-    .waitFor({ state: "visible", timeout: 25_000 });
+  await this.page.getByRole("heading", { level: 1, name, exact: true }).waitFor({ state: "visible", timeout: 25_000 });
 });
 
 // The page's heading names what the page shows, and a table takes its name

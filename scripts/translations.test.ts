@@ -95,11 +95,22 @@ test("a sources file that names a message twice is refused", () => {
 });
 
 test("a sources file is written sorted by ID, after a header that says not to edit it", () => {
-  const written = renderSources(new Map([["zebra", HELLO], ["apple", HELLO]]));
+  const written = renderSources(
+    new Map([
+      ["zebra", HELLO],
+      ["apple", HELLO],
+    ]),
+  );
   const lines = written.split("\n");
   assert.ok(lines[0]?.startsWith("# "));
   assert.ok(written.endsWith(`apple ${HELLO}\nzebra ${HELLO}\n`));
-  assert.deepEqual(parseSources(written, "x"), new Map([["apple", HELLO], ["zebra", HELLO]]));
+  assert.deepEqual(
+    parseSources(written, "x"),
+    new Map([
+      ["apple", HELLO],
+      ["zebra", HELLO],
+    ]),
+  );
 });
 
 test("each English message is current, missing, not reviewed or stale", () => {
@@ -241,10 +252,7 @@ test("accepting a stale message by its ID takes it, and leaves nothing out", () 
 
 test("accepting every message says which stale ones it left out, and how many", () => {
   assert.equal(leftOut("de", []), null);
-  assert.equal(
-    leftOut("de", ["greeting"]),
-    "de: left out 1 stale message (greeting): name its ID to accept it after review",
-  );
+  assert.equal(leftOut("de", ["greeting"]), "de: left out 1 stale message (greeting): name its ID to accept it after review");
   assert.equal(
     leftOut("de", ["farewell", "greeting"]),
     "de: left out 2 stale messages (farewell, greeting): name their IDs to accept them after review",

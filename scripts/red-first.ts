@@ -280,8 +280,12 @@ function wasmTests(dir: string): Tests {
   }
   const build = run(
     "cargo",
-    ["test", ...packages, "--lib", "--bins", "--tests", "--all-features"]
-      .concat(["--target", WASM_TARGET, "--no-run", "--message-format=json"]),
+    ["test", ...packages, "--lib", "--bins", "--tests", "--all-features"].concat([
+      "--target",
+      WASM_TARGET,
+      "--no-run",
+      "--message-format=json",
+    ]),
     dir,
     { env: WASM_ENV },
   );
@@ -470,9 +474,7 @@ try {
   }
   const afterWasm: Tests = wasm ? wasmTests(trees.first) : { ok: true, tests: new Map() };
   if (!afterWasm.ok) {
-    throw new Error(
-      `the test: commit doesn't compile for ${WASM_TARGET}; a compile error doesn't count as red:\n${afterWasm.output}`,
-    );
+    throw new Error(`the test: commit doesn't compile for ${WASM_TARGET}; a compile error doesn't count as red:\n${afterWasm.output}`);
   }
   const newTests = [...after.tests].filter(([key]) => !before.tests.has(key));
   const newWasmTests = [...afterWasm.tests].filter(([key]) => !beforeWasm.tests.has(key));
@@ -505,12 +507,9 @@ try {
     // A tree that defines a `web-test` recipe builds its UI for the scenarios
     // with it, as `just test-ui` does (it may need features a release build
     // leaves out). A tree without one gets the plain release build.
-    const webTest =
-      existsSync(path.join(trees.first, "Justfile")) && run("just", ["--show", "web-test"], trees.first).status === 0;
+    const webTest = existsSync(path.join(trees.first, "Justfile")) && run("just", ["--show", "web-test"], trees.first).status === 0;
     const steps: [string, string[], string][] = [
-      webTest
-        ? ["just", ["web-test"], trees.first]
-        : ["trunk", ["build", "--release"], path.join(trees.first, "crates/web")],
+      webTest ? ["just", ["web-test"], trees.first] : ["trunk", ["build", "--release"], path.join(trees.first, "crates/web")],
       ["cargo", ["build"], trees.first],
       ["npm", ["ci"], path.join(trees.first, "ui-tests")],
     ];
@@ -530,9 +529,7 @@ try {
   const uiScenarios: { key: string; scenario: Scenario; atFirst: Runs; atHead: Runs }[] = [];
   for (const [key, scenario] of newScenarios) {
     if (scenario.runner === "ui") {
-      const atFirst: Runs = new Map(
-        engines.map((engine) => [engine, runScenario(trees.first, scenario, uiReady, engine)]),
-      );
+      const atFirst: Runs = new Map(engines.map((engine) => [engine, runScenario(trees.first, scenario, uiReady, engine)]));
       uiScenarios.push({ key, scenario, atFirst, atHead: new Map() });
       continue;
     }

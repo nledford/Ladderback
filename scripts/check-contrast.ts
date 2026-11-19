@@ -238,9 +238,7 @@ for (const scheme of SCHEMES) {
     const ratio = contrastRatio(fg, bg);
     const ok = ratio >= pair.min;
     if (!ok) failed += 1;
-    console.log(
-      `${ok ? "pass" : "FAIL"} ${where}: ${ratio.toFixed(2)}:1 (needs ${pair.min}:1) — ${fg} on ${bg}`,
-    );
+    console.log(`${ok ? "pass" : "FAIL"} ${where}: ${ratio.toFixed(2)}:1 (needs ${pair.min}:1) — ${fg} on ${bg}`);
   }
   for (const fills of FILLS_APART) {
     const where = `${scheme.name}: ${fills.name}`;
@@ -255,9 +253,7 @@ for (const scheme of SCHEMES) {
     const apart = Math.abs(lightness(parseHex(a)) - lightness(parseHex(b)));
     const ok = apart >= fills.min;
     if (!ok) failed += 1;
-    console.log(
-      `${ok ? "pass" : "FAIL"} ${where}: ${apart.toFixed(3)} apart in lightness (needs ${fills.min}) — ${a} and ${b}`,
-    );
+    console.log(`${ok ? "pass" : "FAIL"} ${where}: ${apart.toFixed(3)} apart in lightness (needs ${fills.min}) — ${a} and ${b}`);
   }
   for (const fills of FILLS_STRONGER) {
     for (const around of AROUND_FILLS) {
@@ -272,8 +268,7 @@ for (const scheme of SCHEMES) {
         continue;
       }
       const ground = lightness(parseHex(bg));
-      const further =
-        Math.abs(lightness(parseHex(strong)) - ground) - Math.abs(lightness(parseHex(weak)) - ground);
+      const further = Math.abs(lightness(parseHex(strong)) - ground) - Math.abs(lightness(parseHex(weak)) - ground);
       const strongRatio = contrastRatio(strong, bg);
       const weakRatio = contrastRatio(weak, bg);
       const ok = further >= fills.min && strongRatio >= weakRatio;

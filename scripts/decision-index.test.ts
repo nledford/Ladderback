@@ -60,7 +60,9 @@ test("two files with one number are a problem naming both", () => {
 });
 
 const roadmap = (table: string): string =>
-  ["# Roadmap", "", "## 16. Decisions", "", "Intro.", "", table, "", "Closing words.", "", "## 17. Next", "| keep | me |", ""].join("\n");
+  ["# Roadmap", "", "## 16. Decisions", "", "Intro.", "", table, "", "Closing words.", "", "## 17. Next", "| keep | me |", ""].join(
+    "\n",
+  );
 const TABLE = ["| # | Question |", "|---|---|", "| [9](decisions/09-a.md) | A |"];
 
 test("only §16's table is replaced; the text around it and other tables stay", () => {

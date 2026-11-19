@@ -77,9 +77,7 @@ Then(
 );
 
 Then("the clipboard holds {string}", async function (this: BrowserWorld, text: string) {
-  await expect
-    .poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS })
-    .toBe(text);
+  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS }).toBe(text);
 });
 
 When("I type the newest snapshot's short ID of the plan {string}", async function (this: BrowserWorld, plan: string) {

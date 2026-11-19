@@ -24,7 +24,9 @@ function tab(world: BrowserWorld, name: string): Locator {
 
 /** The tab list that holds the tab `name`. */
 function listOf(world: BrowserWorld, name: string): Locator {
-  return journey(world.page).byRole("tablist").filter({ has: tab(world, name) });
+  return journey(world.page)
+    .byRole("tablist")
+    .filter({ has: tab(world, name) });
 }
 
 /** The element the tab's `aria-controls` names: its panel. */
@@ -40,26 +42,23 @@ Then("focus is on the tab {string}", async function (this: BrowserWorld, name: s
 
 // The roving Tab stop (§4.5): the selected tab alone is in the Tab order,
 // and every tab says whether it is the selected one.
-Then(
-  "the tab {string} is selected and the one Tab stop of its list",
-  async function (this: BrowserWorld, name: string) {
-    await expect(tab(this, name)).toHaveAttribute("aria-selected", "true");
-    const tabs = await listOf(this, name).getByRole("tab").all();
-    assert.ok(tabs.length > 1, `the list of the tab "${name}" holds ${tabs.length} tabs`);
-    const drawn = await Promise.all(
-      tabs.map(async (each) => ({
-        name: ((await each.textContent()) ?? "").trim(),
-        stop: await each.getAttribute("tabindex"),
-        selected: await each.getAttribute("aria-selected"),
-      })),
-    );
-    for (const each of drawn) {
-      const own = namePattern(name).test(each.name);
-      assert.equal(each.stop, own ? "0" : "-1", `the tabindex of the tab "${each.name}"`);
-      assert.equal(each.selected, own ? "true" : "false", `the aria-selected of the tab "${each.name}"`);
-    }
-  },
-);
+Then("the tab {string} is selected and the one Tab stop of its list", async function (this: BrowserWorld, name: string) {
+  await expect(tab(this, name)).toHaveAttribute("aria-selected", "true");
+  const tabs = await listOf(this, name).getByRole("tab").all();
+  assert.ok(tabs.length > 1, `the list of the tab "${name}" holds ${tabs.length} tabs`);
+  const drawn = await Promise.all(
+    tabs.map(async (each) => ({
+      name: ((await each.textContent()) ?? "").trim(),
+      stop: await each.getAttribute("tabindex"),
+      selected: await each.getAttribute("aria-selected"),
+    })),
+  );
+  for (const each of drawn) {
+    const own = namePattern(name).test(each.name);
+    assert.equal(each.stop, own ? "0" : "-1", `the tabindex of the tab "${each.name}"`);
+    assert.equal(each.selected, own ? "true" : "false", `the aria-selected of the tab "${each.name}"`);
+  }
+});
 
 // Every panel is drawn once and stays (§4.5): what a reader typed or
 // scrolled to in one is there when it shows again. The others are hidden.
@@ -83,17 +82,14 @@ Then(
 
 // A panel nothing in which takes focus is the stop after its tab, a
 // `tabpanel` named by that tab.
-Then(
-  "focus is on the panel of the tab {string}, which the tab names",
-  async function (this: BrowserWorld, name: string) {
-    const panel = await panelOf(this, name);
-    await expect(panel).toBeFocused();
-    await expect(panel).toHaveAttribute("role", "tabpanel");
-    const id = await tab(this, name).getAttribute("id");
-    assert.ok(id, `the tab "${name}" has no id for its panel to name`);
-    await expect(panel).toHaveAttribute("aria-labelledby", id);
-  },
-);
+Then("focus is on the panel of the tab {string}, which the tab names", async function (this: BrowserWorld, name: string) {
+  const panel = await panelOf(this, name);
+  await expect(panel).toBeFocused();
+  await expect(panel).toHaveAttribute("role", "tabpanel");
+  const id = await tab(this, name).getAttribute("id");
+  assert.ok(id, `the tab "${name}" has no id for its panel to name`);
+  await expect(panel).toHaveAttribute("aria-labelledby", id);
+});
 
 Then("the panel of the tab {string} is no Tab stop of its own", async function (this: BrowserWorld, name: string) {
   const panel = await panelOf(this, name);
@@ -101,14 +97,11 @@ Then("the panel of the tab {string} is no Tab stop of its own", async function (
   await expect(panel).not.toHaveAttribute("tabindex");
 });
 
-Then(
-  "the tab {string} stands to the left of the tab {string}",
-  async function (this: BrowserWorld, left: string, right: string) {
-    const [a, b] = [await tab(this, left).boundingBox(), await tab(this, right).boundingBox()];
-    assert.ok(a && b, "a tab is not drawn");
-    assert.ok(a.x + a.width <= b.x + 0.5, `the tab "${left}" ends at ${a.x + a.width}, past the start of "${right}" at ${b.x}`);
-  },
-);
+Then("the tab {string} stands to the left of the tab {string}", async function (this: BrowserWorld, left: string, right: string) {
+  const [a, b] = [await tab(this, left).boundingBox(), await tab(this, right).boundingBox()];
+  assert.ok(a && b, "a tab is not drawn");
+  assert.ok(a.x + a.width <= b.x + 0.5, `the tab "${left}" ends at ${a.x + a.width}, past the start of "${right}" at ${b.x}`);
+});
 
 /** A tab's weight, its words' color and its bar, beside the colors they are
  *  measured against: the page's text, a token or the system's text color
@@ -205,14 +198,11 @@ for (const [what, token, forced] of [
 // The words that say how a set of tabs is used are tied to its list
 // (`aria-describedby`), so a screen reader says them on entering it. Read
 // through the relation, as panelOf does (#774).
-Then(
-  "the tab list of the tab {string} is described by {string}",
-  async function (this: BrowserWorld, name: string, words: string) {
-    const id = await listOf(this, name).getAttribute("aria-describedby");
-    assert.ok(id, `the tab list of the tab "${name}" names nothing that describes it`);
-    await expect(this.page.locator(`[id="${id}"]`)).toHaveText(words);
-  },
-);
+Then("the tab list of the tab {string} is described by {string}", async function (this: BrowserWorld, name: string, words: string) {
+  const id = await listOf(this, name).getAttribute("aria-describedby");
+  assert.ok(id, `the tab list of the tab "${name}" names nothing that describes it`);
+  await expect(this.page.locator(`[id="${id}"]`)).toHaveText(words);
+});
 
 // A page's tabs are named by an element that already shows the name, such as
 // its heading (`aria-labelledby`), read through the relation as above
@@ -239,22 +229,19 @@ Then("the demo says {string}", async function (this: BrowserWorld, words: string
   await expect(this.page.getByText(namePattern(words))).toBeVisible();
 });
 
-Then(
-  "the tab {string} stands on a line above the last of its list",
-  async function (this: BrowserWorld, name: string) {
-    const found = await listOf(this, name).evaluate(
-      (element, name) =>
-        Array.from(element.querySelectorAll('[role="tab"]'), (each) => ({
-          name: (each.textContent ?? "").trim(),
-          bottom: each.getBoundingClientRect().bottom,
-        })).filter((each, _, all) => each.name === name || each === all.at(-1)),
-      name,
-    );
-    const [own, last] = [found.find((each) => each.name === name), found.at(-1)];
-    assert.ok(own && last, `the list holds no tab "${name}"`);
-    assert.ok(own.bottom < last.bottom - 1, `the tab "${name}" ends at ${own.bottom}, on the last line (${last.bottom})`);
-  },
-);
+Then("the tab {string} stands on a line above the last of its list", async function (this: BrowserWorld, name: string) {
+  const found = await listOf(this, name).evaluate(
+    (element, name) =>
+      Array.from(element.querySelectorAll('[role="tab"]'), (each) => ({
+        name: (each.textContent ?? "").trim(),
+        bottom: each.getBoundingClientRect().bottom,
+      })).filter((each, _, all) => each.name === name || each === all.at(-1)),
+    name,
+  );
+  const [own, last] = [found.find((each) => each.name === name), found.at(-1)];
+  assert.ok(own && last, `the list holds no tab "${name}"`);
+  assert.ok(own.bottom < last.bottom - 1, `the tab "${name}" ends at ${own.bottom}, on the last line (${last.bottom})`);
+});
 
 // The rules under tabs side by side join into one unbroken line: no gap
 // between neighbours on a line, in either reading direction.
@@ -344,7 +331,10 @@ Then(
     });
     assert.ok(found.tabs.length > 1, `the list of the tab "${name}" holds ${found.tabs.length} tabs`);
     for (const each of found.tabs) {
-      assert.ok(each.left >= -0.5 && each.right <= found.width + 0.5, `the tab "${each.name}" runs past the window: ${each.left} to ${each.right} of ${found.width}`);
+      assert.ok(
+        each.left >= -0.5 && each.right <= found.width + 0.5,
+        `the tab "${each.name}" runs past the window: ${each.left} to ${each.right} of ${found.width}`,
+      );
       assert.ok(!each.clipped, `the tab "${each.name}" is cut`);
       assert.ok(each.bottom <= found.listBottom + 0.5, `the tab "${each.name}" lies under the list's rule`);
     }
@@ -387,7 +377,10 @@ Then(
       assert.ok(Math.abs(below.left - above.left) <= 0.5, `the tabs "${above.name}" and "${below.name}" don't share a column`);
     }
     if (direction === "rtl") {
-      assert.ok(panel.x + panel.width <= list.left + 0.5, `the panel ends at ${panel.x + panel.width}, past the list's start at ${list.left}`);
+      assert.ok(
+        panel.x + panel.width <= list.left + 0.5,
+        `the panel ends at ${panel.x + panel.width}, past the list's start at ${list.left}`,
+      );
     } else {
       assert.ok(panel.x >= list.right - 0.5, `the panel starts at ${panel.x}, before the list's end at ${list.right}`);
     }
@@ -397,14 +390,11 @@ Then(
 
 // A horizontal list says so too, which a list that can change layout must
 // (a responsive one), and its panel stands under it.
-Then(
-  "the tab list of the tab {string} is horizontal, a row above its panel",
-  async function (this: BrowserWorld, name: string) {
-    await expect(listOf(this, name)).toHaveAttribute("aria-orientation", "horizontal");
-    const { list, panel } = await layoutOf(this, name);
-    assert.ok(panel.y >= list.bottom - 0.5, `the panel starts at ${panel.y}, above the list's end at ${list.bottom}`);
-  },
-);
+Then("the tab list of the tab {string} is horizontal, a row above its panel", async function (this: BrowserWorld, name: string) {
+  await expect(listOf(this, name)).toHaveAttribute("aria-orientation", "horizontal");
+  const { list, panel } = await layoutOf(this, name);
+  assert.ok(panel.y >= list.bottom - 0.5, `the panel starts at ${panel.y}, above the list's end at ${list.bottom}`);
+});
 
 /** Each tab of a list in a column: its box against the list's, and where
  *  each line of its words starts and ends, in the list's direction. */
@@ -455,7 +445,10 @@ Then(
       assert.ok(each.lines.length > 0, `the tab "${each.name}" draws no words`);
       for (const line of each.lines) {
         const at = rtl ? line.right : line.left;
-        assert.ok(Math.abs(at - each.start) <= 1, `a line of the tab "${each.name}" starts at ${at}, not at the tab's start ${each.start}`);
+        assert.ok(
+          Math.abs(at - each.start) <= 1,
+          `a line of the tab "${each.name}" starts at ${at}, not at the tab's start ${each.start}`,
+        );
       }
     }
   },
@@ -528,7 +521,10 @@ for (const [what, token, forced] of [
       assert.equal(drawn.weight, "700", `the weight of the tab "${name}"`);
       assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the bar beside the tab "${name}"`);
       assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
-      assert.ok(Math.abs(drawn.end - drawn.listEnd) <= 0.5, `the bar beside the tab "${name}" stands at ${drawn.end}, the list's rule at ${drawn.listEnd}`);
+      assert.ok(
+        Math.abs(drawn.end - drawn.listEnd) <= 0.5,
+        `the bar beside the tab "${name}" stands at ${drawn.end}, the list's rule at ${drawn.listEnd}`,
+      );
     },
   );
 
@@ -540,7 +536,10 @@ for (const [what, token, forced] of [
       assert.equal(drawn.color, forced ? drawn.wanted : drawn.text, `the words of the tab "${name}" are not in the text's color`);
       assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the rule beside the tab "${name}"`);
       assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
-      assert.ok(Math.abs(drawn.end - drawn.listEnd) <= 0.5, `the rule beside the tab "${name}" stands at ${drawn.end}, the list's at ${drawn.listEnd}`);
+      assert.ok(
+        Math.abs(drawn.end - drawn.listEnd) <= 0.5,
+        `the rule beside the tab "${name}" stands at ${drawn.end}, the list's at ${drawn.listEnd}`,
+      );
     },
   );
 

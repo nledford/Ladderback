@@ -50,8 +50,7 @@ type InstantOptions = Pick<Intl.DateTimeFormatOptions, "dateStyle" | "timeStyle"
 
 const UNSETTLED: ((locale: string, options: InstantOptions, zone: string | undefined) => boolean)[] = [
   (locale, options) => locale === "ar" && options.timeZoneName === "short",
-  (locale, options, zone) =>
-    locale === "bn" && options.timeZoneName === "short" && READ_AS_UTC.includes(zone),
+  (locale, options, zone) => locale === "bn" && options.timeZoneName === "short" && READ_AS_UTC.includes(zone),
   (locale, options) => locale === "th" && options.dateStyle === "short",
   (locale, options) => locale === "hi" && options.dateStyle === "long",
 ];
@@ -284,7 +283,10 @@ for (const locale of LOCALES) {
 
 // Spaces that look alike are written as escapes, so a reviewer can tell them apart.
 const escape = (json: string) =>
-  json.replace(/[\u00a0\u2000-\u200f\u202f\u2060\u2066-\u2069]/g, (c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`);
+  json.replace(
+    /[\u00a0\u2000-\u200f\u202f\u2060\u2066-\u2069]/g,
+    (c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
+  );
 
 const about =
   "What every host that formats numbers and instants writes, for tests/expectations/mod.rs to run through the " +

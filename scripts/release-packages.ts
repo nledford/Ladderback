@@ -38,12 +38,16 @@ export function installCommand(format: PackageFormat, file: string): string[] {
 
 /** The command that removes the package. */
 export function removeCommand(format: PackageFormat): string[] {
-  return format === "deb" ? ["apt-get", "remove", "--yes", "ladderback"] : ["dnf", "remove", "--assumeyes", "--disablerepo=*", "ladderback"];
+  return format === "deb"
+    ? ["apt-get", "remove", "--yes", "ladderback"]
+    : ["dnf", "remove", "--assumeyes", "--disablerepo=*", "ladderback"];
 }
 
 /** A shell command that prints the installed package's version, and fails when it isn't installed. */
 export function installedVersionScript(format: PackageFormat): string {
-  return format === "deb" ? "dpkg-query --show --showformat='${Version}' ladderback" : "rpm --query --queryformat='%{VERSION}-%{RELEASE}' ladderback";
+  return format === "deb"
+    ? "dpkg-query --show --showformat='${Version}' ladderback"
+    : "rpm --query --queryformat='%{VERSION}-%{RELEASE}' ladderback";
 }
 
 /** A shell command that prints the installed package's files, one a line, no folders. */
@@ -60,7 +64,9 @@ export function describeScript(format: PackageFormat, file: string): string {
 
 /** A shell command that prints the package's maintainer scripts, nothing when it has none. */
 export function scriptsScript(format: PackageFormat): string {
-  return format === "deb" ? "ls /var/lib/dpkg/info | grep -E '^ladderback\\.(preinst|postinst|prerm|postrm|config)$' || true" : "rpm --query --scripts ladderback";
+  return format === "deb"
+    ? "ls /var/lib/dpkg/info | grep -E '^ladderback\\.(preinst|postinst|prerm|postrm|config)$' || true"
+    : "rpm --query --scripts ladderback";
 }
 
 /**
@@ -75,10 +81,15 @@ export const FOLDER_STATE_SCRIPT =
 
 /** A shell command that seeds those folders with what a person who used Ladderback has there. */
 export const SEED_FOLDERS_SCRIPT =
-  'cd "$HOME" && mkdir -p .config/ladderback .local/share/ladderback/repository .cache/ladderback && printf \'schema = 1\\n\' > .config/ladderback/config.toml && printf \'a backup\\n\' > .local/share/ladderback/repository/data && printf \'a cache\\n\' > .cache/ladderback/cache';
+  "cd \"$HOME\" && mkdir -p .config/ladderback .local/share/ladderback/repository .cache/ladderback && printf 'schema = 1\\n' > .config/ladderback/config.toml && printf 'a backup\\n' > .local/share/ladderback/repository/data && printf 'a cache\\n' > .cache/ladderback/cache";
 
 // Every path a package may hold: the program and its licence texts, and the .rpm's own licence folder.
-const ALLOWED = [/^\/usr\/bin\/ladderback$/, /^\/usr\/share\/licenses\/ladderback$/, /^\/usr\/share\/doc\/ladderback\/LICENSE-(?:MIT|APACHE)$/, /^\/usr\/share\/licenses\/ladderback\/LICENSE-(?:MIT|APACHE)$/];
+const ALLOWED = [
+  /^\/usr\/bin\/ladderback$/,
+  /^\/usr\/share\/licenses\/ladderback$/,
+  /^\/usr\/share\/doc\/ladderback\/LICENSE-(?:MIT|APACHE)$/,
+  /^\/usr\/share\/licenses\/ladderback\/LICENSE-(?:MIT|APACHE)$/,
+];
 
 /** The paths in `files` a package must not hold: anything but the program and its licences (so no service unit, no `/etc`). */
 export function unexpectedFiles(files: string[]): string[] {
