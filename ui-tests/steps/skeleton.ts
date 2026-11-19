@@ -56,15 +56,12 @@ Then(
 );
 
 // The region the skeleton stands for is busy until its content arrives.
-Then(
-  "the region of the {string} demo is busy and shows a skeleton",
-  async function (this: BrowserWorld, component: string) {
-    const busy = await region(this.page, component);
-    await expect(busy).toHaveAttribute("aria-busy", "true");
-    await expect(busy.locator(".skeleton")).toHaveCount(1);
-    await expect(busy.locator(".skeleton")).toBeVisible();
-  },
-);
+Then("the region of the {string} demo is busy and shows a skeleton", async function (this: BrowserWorld, component: string) {
+  const busy = await region(this.page, component);
+  await expect(busy).toHaveAttribute("aria-busy", "true");
+  await expect(busy.locator(".skeleton")).toHaveCount(1);
+  await expect(busy.locator(".skeleton")).toBeVisible();
+});
 
 // The page still says the wait in words, visible, just before the busy
 // region and outside it, so a screen reader that leaves a busy region unread

@@ -118,12 +118,9 @@ Then(
   },
 );
 
-Then(
-  "the page says {string} just before its busy region, outside it",
-  async function (this: BrowserWorld, words: string) {
-    await saidJustBeforeBusy(this.page.getByRole("main"), words);
-  },
-);
+Then("the page says {string} just before its busy region, outside it", async function (this: BrowserWorld, words: string) {
+  await saidJustBeforeBusy(this.page.getByRole("main"), words);
+});
 
 Then("no region of the page is busy", async function (this: BrowserWorld) {
   await expect(this.page.getByRole("main").locator('[aria-busy="true"]')).toHaveCount(0);
