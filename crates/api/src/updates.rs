@@ -1,5 +1,5 @@
-//! A newer release and restarting the daemon on the wire: the Updates context
-//! (technical design §3.1).
+//! A newer release on the wire (the Updates context, technical design §3.1),
+//! and restarting the daemon (§16, decision 94).
 
 use serde::{Deserialize, Serialize};
 
