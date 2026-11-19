@@ -150,9 +150,7 @@ class Report {
     const rows = this.results.map(
       (result) => `| ${result.ok ? "pass" : "**FAIL**"} | ${cell(result.check)} | ${cell(result.detail)} |`,
     );
-    return [`### ${title}`, "", "| Result | Check | Detail |", "|---|---|---|", ...rows, "", ...this.notes, ""].join(
-      "\n",
-    );
+    return [`### ${title}`, "", "| Result | Check | Detail |", "|---|---|---|", ...rows, "", ...this.notes, ""].join("\n");
   }
 }
 
@@ -165,7 +163,11 @@ const details = (summary: string, body: string) =>
 type Output = { status: number | null; stdout: Buffer; stderr: string };
 
 /** Runs `command` to the end, or kills it after `limitMs`; never throws. */
-function run(command: string, args: string[], options: { input?: Buffer | string; env?: NodeJS.ProcessEnv; limitMs?: number } = {}): Promise<Output> {
+function run(
+  command: string,
+  args: string[],
+  options: { input?: Buffer | string; env?: NodeJS.ProcessEnv; limitMs?: number } = {},
+): Promise<Output> {
   const { promise, resolve } = Promise.withResolvers<Output>();
   const child = spawn(command, args, { env: options.env ?? process.env, stdio: ["pipe", "pipe", "pipe"] });
   const stdout: Buffer[] = [];
@@ -334,7 +336,15 @@ async function containerPlace(name: string, image: string, binary: string): Prom
     // stdin unless told otherwise, and the request would never be sent.
     exchange: async (port, request) => {
       const sent = await docker(
-        ["exec", "--interactive", container, "bash", "-c", 'exec 3<>"/dev/tcp/127.0.0.1/$0" || exit 1; cat <&0 >&3 & cat <&3', String(port)],
+        [
+          "exec",
+          "--interactive",
+          container,
+          "bash",
+          "-c",
+          'exec 3<>"/dev/tcp/127.0.0.1/$0" || exit 1; cat <&0 >&3 & cat <&3',
+          String(port),
+        ],
         request,
       );
       if (sent.status !== 0 && sent.stdout.length === 0) throw new Error(`no connection: ${sent.stderr.trim()}`);
@@ -549,7 +559,11 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
 
   const shown = await place.run(["--version"], {});
   const said = shown.stdout.toString().trim();
-  report.add("--version", shown.status === 0 && said === `ladderback ${version}`, `said ${JSON.stringify(said)}${shown.status === 0 ? "" : `, exit ${shown.status}: ${shown.stderr.trim()}`}`);
+  report.add(
+    "--version",
+    shown.status === 0 && said === `ladderback ${version}`,
+    `said ${JSON.stringify(said)}${shown.status === 0 ? "" : `, exit ${shown.status}: ${shown.stderr.trim()}`}`,
+  );
 
   const scratch = place.scratch;
   // Each daemon's own folders, and a release feed nothing answers at, so
@@ -566,7 +580,11 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
   // free port, so a release that has the hub by mistake touches nothing real.
   for (const args of [["serve", "--hub", "--listen", "127.0.0.1:0"], ["pairing-token"]]) {
     const refused = await place.run(args, folders("hub"));
-    report.add(`no hub: ${args.slice(0, 2).join(" ")} is refused`, refused.status === 2, `exit ${refused.status}: ${refused.stderr.trim().slice(0, 300)}`);
+    report.add(
+      `no hub: ${args.slice(0, 2).join(" ")} is refused`,
+      refused.status === 2,
+      `exit ${refused.status}: ${refused.stderr.trim().slice(0, 300)}`,
+    );
   }
   const source = `${scratch}/source`;
   const repository = `${scratch}/repository`;
@@ -606,7 +624,14 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
       if (address) break;
       await sleep(100);
     }
-    if (!report.add("serve starts", address !== undefined, address ? `listening on ${address}` : `no address: ${daemon.stderr().trim().slice(-1000)}`)) return;
+    if (
+      !report.add(
+        "serve starts",
+        address !== undefined,
+        address ? `listening on ${address}` : `no address: ${daemon.stderr().trim().slice(-1000)}`,
+      )
+    )
+      return;
     const at = address as string;
 
     // A second daemon on the address the first holds: it can't listen, and
@@ -626,7 +651,9 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
     const html = page.body.toString();
     report.add(
       "GET / serves the web UI",
-      page.status === 200 && (page.headers.get("content-type") ?? "").startsWith("text/html") && html.includes("<title>Ladderback</title>"),
+      page.status === 200 &&
+        (page.headers.get("content-type") ?? "").startsWith("text/html") &&
+        html.includes("<title>Ladderback</title>"),
       `${page.status} ${page.headers.get("content-type") ?? "no content type"}, ${page.body.length} bytes`,
     );
     const wasmPath = /href="(\/[^"]+\.wasm)"/.exec(html)?.[1];
@@ -635,8 +662,16 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
       const isWasm = wasm.status === 200 && wasm.body.subarray(0, 4).equals(Buffer.from([0, 0x61, 0x73, 0x6d]));
       report.add("the wasm is served", isWasm, `${wasm.status}, ${(wasm.body.length / 1024 / 1024).toFixed(1)} MiB`);
       if (isWasm) {
-        report.add("no pseudolocales in the web UI", !wasm.body.includes(PSEUDO_MARKER), wasm.body.includes(PSEUDO_MARKER) ? "fluent-pseudo's letter table is in the wasm" : "fluent-pseudo's letter table is absent");
-        report.add("no gallery in the web UI", !wasm.body.includes(GALLERY_MARKER), wasm.body.includes(GALLERY_MARKER) ? `${GALLERY_MARKER} is in the wasm` : `${GALLERY_MARKER} is absent`);
+        report.add(
+          "no pseudolocales in the web UI",
+          !wasm.body.includes(PSEUDO_MARKER),
+          wasm.body.includes(PSEUDO_MARKER) ? "fluent-pseudo's letter table is in the wasm" : "fluent-pseudo's letter table is absent",
+        );
+        report.add(
+          "no gallery in the web UI",
+          !wasm.body.includes(GALLERY_MARKER),
+          wasm.body.includes(GALLERY_MARKER) ? `${GALLERY_MARKER} is in the wasm` : `${GALLERY_MARKER} is absent`,
+        );
       }
     }
 
@@ -647,11 +682,15 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
       "/api/v1/repositories/_init",
       JSON.stringify({ settings: { repository, password: { source: "file", path: passwordFile } } }),
     );
-    if (!report.add("a scratch repository is initialised", init.status === 201, `${init.status} ${init.body.toString().slice(0, 300)}`)) return;
+    if (
+      !report.add("a scratch repository is initialised", init.status === 201, `${init.status} ${init.body.toString().slice(0, 300)}`)
+    )
+      return;
 
     const run = await call(place, at, "POST", "/api/v1/operations", JSON.stringify({ plan: PLAN }));
     const operation = run.status === 202 ? field(json(run), "operation") : undefined;
-    if (!report.add("a backup is accepted", typeof operation === "string", `${run.status} ${run.body.toString().slice(0, 300)}`)) return;
+    if (!report.add("a backup is accepted", typeof operation === "string", `${run.status} ${run.body.toString().slice(0, 300)}`))
+      return;
 
     let status: unknown;
     let detail = "";
@@ -663,7 +702,11 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
       if (typeof status === "string" && ["succeeded", "succeeded-with-warnings", "failed", "cancelled"].includes(status)) break;
       await sleep(250);
     }
-    report.add("the backup succeeds", status === "succeeded", `${String(status)} after ${((Date.now() - begun) / 1000).toFixed(1)} s${status === "succeeded" ? "" : `: ${detail.slice(0, 500)}`}`);
+    report.add(
+      "the backup succeeds",
+      status === "succeeded",
+      `${String(status)} after ${((Date.now() - begun) / 1000).toFixed(1)} s${status === "succeeded" ? "" : `: ${detail.slice(0, 500)}`}`,
+    );
 
     const listed = await call(place, at, "GET", `/api/v1/repositories/${PLAN}/snapshots`);
     const snapshots = listed.status === 200 ? field(json(listed), "snapshots") : undefined;
@@ -688,7 +731,14 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
  * removes it, and checks that the person's configuration and data folders
  * were never touched. `binary` is the file the package must hold.
  */
-async function checkPackage(name: string, image: string, file: string, binary: string, version: string, report: Report): Promise<void> {
+async function checkPackage(
+  name: string,
+  image: string,
+  file: string,
+  binary: string,
+  version: string,
+  report: Report,
+): Promise<void> {
   const format: PackageFormat = packageFormat(file) as PackageFormat;
   const container = `ladderback-smoke-package-${name.replace(/[^a-z0-9]+/g, "-")}-${process.pid}`;
   const started = await docker(["run", "--detach", "--rm", "--network", "none", "--name", container, image, "sleep", "infinity"]);
@@ -708,33 +758,69 @@ async function checkPackage(name: string, image: string, file: string, binary: s
     // What a person who used Ladderback has: a configuration, a repository, a cache.
     const seeded = await shell(SEED_FOLDERS_SCRIPT);
     const before = said(await shell(FOLDER_STATE_SCRIPT));
-    if (!report.add("the person's folders are seeded", seeded.status === 0 && before !== "", before === "" ? `nothing there${exit(seeded)}` : `${before.split("\n").length} lines of state`)) return;
+    if (
+      !report.add(
+        "the person's folders are seeded",
+        seeded.status === 0 && before !== "",
+        before === "" ? `nothing there${exit(seeded)}` : `${before.split("\n").length} lines of state`,
+      )
+    )
+      return;
 
     const install = await docker(["exec", "--env", "DEBIAN_FRONTEND=noninteractive", container, ...installCommand(format, inside)]);
     report.note(details(`${name}: the install`, `${install.stdout.toString()}${install.stderr}`));
-    if (!report.add(`${format} installs`, install.status === 0, `${installCommand(format, inside)[0]} exit ${install.status}${exit(install)}`)) return;
+    if (
+      !report.add(
+        `${format} installs`,
+        install.status === 0,
+        `${installCommand(format, inside)[0]} exit ${install.status}${exit(install)}`,
+      )
+    )
+      return;
 
     // Resolved: Fedora's /usr/sbin is a link to /usr/bin, and its PATH names it first.
     const found = said(await shell('readlink -f "$(command -v ladderback)"'));
     report.add("the program is at /usr/bin/ladderback", found === "/usr/bin/ladderback", `the shell finds ${JSON.stringify(found)}`);
     const shown = await shell("ladderback --version");
-    report.add("--version", shown.status === 0 && said(shown) === `ladderback ${version}`, `said ${JSON.stringify(said(shown))}${exit(shown)}`);
+    report.add(
+      "--version",
+      shown.status === 0 && said(shown) === `ladderback ${version}`,
+      `said ${JSON.stringify(said(shown))}${exit(shown)}`,
+    );
     const installed = said(await shell("sha256sum /usr/bin/ladderback")).split(/\s+/)[0] ?? "";
     const expected = createHash("sha256").update(readFileSync(binary)).digest("hex");
-    report.add("the program is the archive's binary", installed === expected, installed === expected ? `SHA-256 ${installed}` : `SHA-256 ${installed}, the archive's binary has ${expected}`);
+    report.add(
+      "the program is the archive's binary",
+      installed === expected,
+      installed === expected ? `SHA-256 ${installed}` : `SHA-256 ${installed}, the archive's binary has ${expected}`,
+    );
     const mode = said(await shell("stat -c '%a %U' /usr/bin/ladderback"));
     report.add("the program is root's and executable by all", mode === "755 root", `mode and owner ${JSON.stringify(mode)}`);
 
     const recorded = await shell(installedVersionScript(format));
     const wanted = packageVersion(version, format);
-    report.add("the package's version", recorded.status === 0 && said(recorded) === wanted, `${JSON.stringify(said(recorded))}, expected ${JSON.stringify(wanted)}`);
-    const files = said(await shell(installedFilesScript(format))).split("\n").filter((line) => line !== "");
+    report.add(
+      "the package's version",
+      recorded.status === 0 && said(recorded) === wanted,
+      `${JSON.stringify(said(recorded))}, expected ${JSON.stringify(wanted)}`,
+    );
+    const files = said(await shell(installedFilesScript(format)))
+      .split("\n")
+      .filter((line) => line !== "");
     const extra = unexpectedFiles(files);
-    report.add("the package holds the program and its licences only", files.length > 0 && extra.length === 0, extra.length > 0 ? `also: ${extra.join(", ")}` : `${files.length} files`);
+    report.add(
+      "the package holds the program and its licences only",
+      files.length > 0 && extra.length === 0,
+      extra.length > 0 ? `also: ${extra.join(", ")}` : `${files.length} files`,
+    );
     const scripts = said(await shell(scriptsScript(format)));
     report.add("the package has no maintainer scripts", scripts === "", scripts === "" ? "none" : scripts.slice(0, 300));
     const afterInstall = said(await shell(FOLDER_STATE_SCRIPT));
-    report.add("the install leaves the person's folders as they were", afterInstall === before, afterInstall === before ? "unchanged" : `before:\n${before}\nafter:\n${afterInstall}`);
+    report.add(
+      "the install leaves the person's folders as they were",
+      afterInstall === before,
+      afterInstall === before ? "unchanged" : `before:\n${before}\nafter:\n${afterInstall}`,
+    );
 
     const removal = await docker(["exec", "--env", "DEBIAN_FRONTEND=noninteractive", container, ...removeCommand(format)]);
     report.note(details(`${name}: the removal`, `${removal.stdout.toString()}${removal.stderr}`));
@@ -745,9 +831,17 @@ async function checkPackage(name: string, image: string, file: string, binary: s
     const leftovers = said(await shell("ls -d /usr/share/doc/ladderback /usr/share/licenses/ladderback 2>/dev/null || true"));
     report.add("none of the package's folders is left", leftovers === "", leftovers === "" ? "none" : leftovers);
     const still = await shell(installedVersionScript(format));
-    report.add("the package is no longer installed", still.status !== 0, still.status === 0 ? `still ${said(still)}` : "not installed");
+    report.add(
+      "the package is no longer installed",
+      still.status !== 0,
+      still.status === 0 ? `still ${said(still)}` : "not installed",
+    );
     const afterRemoval = said(await shell(FOLDER_STATE_SCRIPT));
-    report.add("the removal leaves the person's folders as they were", afterRemoval === before, afterRemoval === before ? "unchanged" : `before:\n${before}\nafter:\n${afterRemoval}`);
+    report.add(
+      "the removal leaves the person's folders as they were",
+      afterRemoval === before,
+      afterRemoval === before ? "unchanged" : `before:\n${before}\nafter:\n${afterRemoval}`,
+    );
   } finally {
     await docker(["rm", "--force", container]);
   }
@@ -766,7 +860,7 @@ function usage(message: string): never {
 async function main(argv: string[]): Promise<number> {
   let binary: string | undefined;
   let version: string | undefined;
-  let summary = process.env["GITHUB_STEP_SUMMARY"];
+  let summary = process.env.GITHUB_STEP_SUMMARY;
   const containers: string[] = [];
   const packages = new Map<PackageFormat, string>();
   for (let i = 0; i < argv.length; i++) {
@@ -828,7 +922,8 @@ async function main(argv: string[]): Promise<number> {
       const file = packages.get(format);
       const packageReport = new Report();
       try {
-        if (file === undefined) packageReport.add(`a .${format} was given`, false, `${name} installs the .${format}, and --package named none`);
+        if (file === undefined)
+          packageReport.add(`a .${format} was given`, false, `${name} installs the .${format}, and --package named none`);
         else await checkPackage(name, IMAGES[name] as string, file, binary, expected, packageReport);
       } catch (error) {
         packageReport.add("the run finishes", false, (error as Error).message);

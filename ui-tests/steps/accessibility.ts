@@ -37,7 +37,8 @@ When("I open the component gallery", async function (this: BrowserWorld) {
  *  anchor fails the step here, not as a selector that finds nothing. */
 function demoAnchor(demo: string): string {
   const anchor = `${demo.toLowerCase().replaceAll(" ", "-")}-demo`;
-  if (!/^[a-z0-9-]+$/.test(anchor)) assert.fail(`the demo "${demo}" has no anchor: its name makes "${anchor}", not letters, digits and hyphens`);
+  if (!/^[a-z0-9-]+$/.test(anchor))
+    assert.fail(`the demo "${demo}" has no anchor: its name makes "${anchor}", not letters, digits and hyphens`);
   return anchor;
 }
 
@@ -56,7 +57,9 @@ When("I open the {string} demo", async function (this: BrowserWorld, demo: strin
   try {
     await expect(heading).toBeFocused({ timeout: TARGET_PATIENCE_MS });
   } catch {
-    assert.fail(`the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`);
+    assert.fail(
+      `the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`,
+    );
   }
   await expect(heading).toHaveAccessibleName(demo);
 });
@@ -64,21 +67,20 @@ When("I open the {string} demo", async function (this: BrowserWorld, demo: strin
 // The same in a locale of choice. A pseudolocale renames the demo's heading,
 // so the anchor is the English heading's, and only in en-US is the heading's
 // name the demo's.
-When(
-  "I open the {string} demo asking for the locale {string}",
-  async function (this: BrowserWorld, demo: string, locale: string) {
-    const anchor = demoAnchor(demo);
-    const address = `/_gallery?locale=${encodeURIComponent(locale)}#${anchor}`;
-    await this.open(address);
-    const heading = this.page.locator(`#${anchor}`).getByRole("heading", { level: 2 }).first();
-    try {
-      await expect(heading).toBeFocused({ timeout: TARGET_PATIENCE_MS });
-    } catch {
-      assert.fail(`the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`);
-    }
-    if (locale === "en-US") await expect(heading).toHaveAccessibleName(demo);
-  },
-);
+When("I open the {string} demo asking for the locale {string}", async function (this: BrowserWorld, demo: string, locale: string) {
+  const anchor = demoAnchor(demo);
+  const address = `/_gallery?locale=${encodeURIComponent(locale)}#${anchor}`;
+  await this.open(address);
+  const heading = this.page.locator(`#${anchor}`).getByRole("heading", { level: 2 }).first();
+  try {
+    await expect(heading).toBeFocused({ timeout: TARGET_PATIENCE_MS });
+  } catch {
+    assert.fail(
+      `the address ${address} did not put focus on the heading of the "${demo}" demo: it is ${await whereFocusIs(this.page)}`,
+    );
+  }
+  if (locale === "en-US") await expect(heading).toHaveAccessibleName(demo);
+});
 
 When("I open the address {string}", async function (this: BrowserWorld, address: string) {
   await this.open(address);
@@ -186,10 +188,7 @@ Then("focus has left the group {string}", async function (this: BrowserWorld, na
 
 Then("focus is on the main heading {string}", async function (this: BrowserWorld, name: string) {
   const keys = journey(this.page);
-  await keys.assertFocused(
-    keys.byRole("heading", { level: 1, name }),
-    `the main heading "${name}"`,
-  );
+  await keys.assertFocused(keys.byRole("heading", { level: 1, name }), `the main heading "${name}"`);
 });
 
 Then("focus is on the main heading", async function (this: BrowserWorld) {
@@ -229,11 +228,7 @@ async function region(world: BrowserWorld, politeness: string): Promise<Locator>
   const role = REGIONS[politeness];
   assert.ok(role !== undefined, `no live region is polite "${politeness}": say polite or assertive`);
   const found = journey(world.page).byRole(role);
-  assert.equal(
-    await found.count(),
-    1,
-    `the page needs exactly one ${politeness} region (role="${role}")`,
-  );
+  assert.equal(await found.count(), 1, `the page needs exactly one ${politeness} region (role="${role}")`);
   return found;
 }
 
@@ -268,10 +263,7 @@ Then("the {word} region comes to contain {string}", async function (this: Browse
     await sleep(100);
     actual = await heard();
   }
-  assert.ok(
-    actual.includes(expected),
-    `the ${politeness} region (last read ${JSON.stringify(actual)})`,
-  );
+  assert.ok(actual.includes(expected), `the ${politeness} region (last read ${JSON.stringify(actual)})`);
 });
 
 Then("the {word} region is empty", async function (this: BrowserWorld, politeness: string) {

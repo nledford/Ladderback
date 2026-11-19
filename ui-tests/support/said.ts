@@ -13,5 +13,8 @@ export const said = (element: Locator): Promise<string> =>
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (node.parentElement?.checkVisibility({ visibilityProperty: true })) text += node.textContent;
     }
-    return text.replace(/[\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
+    return text
+      .replace(/[\u2066-\u2069]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
   });

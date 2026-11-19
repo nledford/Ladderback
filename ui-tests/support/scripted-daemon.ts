@@ -157,9 +157,7 @@ export class ScriptedDaemon {
 
   /** The newest check of `repository` in the history. */
   #checkOf(repository: string): Operation {
-    const found = this.#operations.find(
-      (operation) => operation.kind === "check" && operation.repository === repository,
-    );
+    const found = this.#operations.find((operation) => operation.kind === "check" && operation.repository === repository);
     if (found === undefined) throw new Error(`the scripted daemon has no check of ${repository}`);
     return found;
   }
@@ -212,9 +210,7 @@ export class ScriptedDaemon {
       route.fulfill({
         json: {
           plans: [
-            ...new Set(
-              this.#operations.filter((operation) => operation.kind === "backup").map((operation) => operation.plan),
-            ),
+            ...new Set(this.#operations.filter((operation) => operation.kind === "backup").map((operation) => operation.plan)),
           ].map((id) => ({
             id,
             repository: "demo",
@@ -484,13 +480,7 @@ export class ScriptedDaemon {
    *  yet) in the step whose code is `step`, as the daemon does for the bar
    *  the engine began last; `unit` is what the bar counts, left out as a
    *  daemon older than it leaves it out. */
-  async progressesInStep(
-    plan: string,
-    step: string,
-    current: number,
-    total: number | null,
-    unit?: ProgressUnit,
-  ): Promise<void> {
+  async progressesInStep(plan: string, step: string, current: number, total: number | null, unit?: ProgressUnit): Promise<void> {
     await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, step, unit, current, total });
   }
 

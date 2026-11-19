@@ -52,7 +52,12 @@ test("a package may hold the program and its licences only", () => {
     "/usr/share/licenses/ladderback/LICENSE-APACHE",
   ];
   assert.deepEqual(unexpectedFiles(files), []);
-  const extra = ["/usr/lib/systemd/user/ladderback.service", "/etc/ladderback/config.toml", "/usr/bin/ladderback-helper", "/usr/share/doc/ladderback/LICENSE-MIT.bak"];
+  const extra = [
+    "/usr/lib/systemd/user/ladderback.service",
+    "/etc/ladderback/config.toml",
+    "/usr/bin/ladderback-helper",
+    "/usr/share/doc/ladderback/LICENSE-MIT.bak",
+  ];
   assert.deepEqual(unexpectedFiles([...files, ...extra]), extra);
 });
 

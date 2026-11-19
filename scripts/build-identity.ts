@@ -34,7 +34,7 @@ export function workspaceVersion(root: string): string {
  * tree of its own).
  */
 export function checkoutBuild(root: string): Build | undefined {
-  const named = process.env["LADDERBACK_BUILD_COMMIT"] ?? "";
+  const named = process.env.LADDERBACK_BUILD_COMMIT ?? "";
   if (/^[0-9a-fA-F]{7,64}$/.test(named)) {
     return { version: workspaceVersion(root), commit: named.toLowerCase(), dirty: false, release: false };
   }

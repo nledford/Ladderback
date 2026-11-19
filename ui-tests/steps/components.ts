@@ -14,7 +14,7 @@ import type { Locator, Page } from "playwright";
 
 import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { pointer } from "../support/pointer.ts";
-import { type BrowserWorld, evaluateAll } from "../support/world.ts";
+import type { BrowserWorld } from "../support/world.ts";
 
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -40,15 +40,12 @@ Then("focus is on the button {string}", async function (this: BrowserWorld, name
 
 // One of several buttons of one name, told apart by the whole of what it is
 // described by: each field's Show password button by its field's label.
-Then(
-  "focus is on the button {string} described by {string}",
-  async function (this: BrowserWorld, name: string, description: string) {
-    await journey(this.page).assertFocused(
-      journey(this.page).byRole("button", { name: namePattern(name), description: namePattern(description) }),
-      `the button ${JSON.stringify(name)} described by ${JSON.stringify(description)}`,
-    );
-  },
-);
+Then("focus is on the button {string} described by {string}", async function (this: BrowserWorld, name: string, description: string) {
+  await journey(this.page).assertFocused(
+    journey(this.page).byRole("button", { name: namePattern(name), description: namePattern(description) }),
+    `the button ${JSON.stringify(name)} described by ${JSON.stringify(description)}`,
+  );
+});
 
 // A button of one name in more than one demo, told apart by its demo: the
 // alert's Dismiss and the banner's.
@@ -64,31 +61,25 @@ When(
   },
 );
 
-Then(
-  "focus is on the button {string} of the {string} demo",
-  async function (this: BrowserWorld, name: string, component: string) {
-    await journey(this.page).assertFocused(
-      demoButton(this.page, name, component),
-      `the button ${JSON.stringify(name)} of the ${JSON.stringify(component)} demo`,
-    );
-  },
-);
+Then("focus is on the button {string} of the {string} demo", async function (this: BrowserWorld, name: string, component: string) {
+  await journey(this.page).assertFocused(
+    demoButton(this.page, name, component),
+    `the button ${JSON.stringify(name)} of the ${JSON.stringify(component)} demo`,
+  );
+});
 
 // A dialog is named by its title, a heading at the level its place in the
 // page calls for (§4.5): the one its `aria-labelledby` points at.
-Then(
-  "the dialog {string} is titled by a heading at level {int}",
-  async function (this: BrowserWorld, name: string, level: number) {
-    const dialog = journey(this.page).byRole("dialog", { name: namePattern(name) });
-    const title = dialog.getByRole("heading", { level, name: namePattern(name) });
-    assert.equal(await title.count(), 1, `the dialog "${name}" has no heading "${name}" at level ${level}`);
-    assert.equal(
-      await dialog.getAttribute("aria-labelledby"),
-      await title.getAttribute("id"),
-      `the dialog "${name}" is not named by its heading at level ${level}`,
-    );
-  },
-);
+Then("the dialog {string} is titled by a heading at level {int}", async function (this: BrowserWorld, name: string, level: number) {
+  const dialog = journey(this.page).byRole("dialog", { name: namePattern(name) });
+  const title = dialog.getByRole("heading", { level, name: namePattern(name) });
+  assert.equal(await title.count(), 1, `the dialog "${name}" has no heading "${name}" at level ${level}`);
+  assert.equal(
+    await dialog.getAttribute("aria-labelledby"),
+    await title.getAttribute("id"),
+    `the dialog "${name}" is not named by its heading at level ${level}`,
+  );
+});
 
 // A review says in its own polite region what the page's announcer can't
 // while the modal is open (§4.5). The region has no role of its own (a second
@@ -179,36 +170,26 @@ Then("the button {string} has no description", async function (this: BrowserWorl
 
 // The wrap the dialog's own trap does: Tab on its last control puts focus on
 // its first, not just anywhere inside.
-Then(
-  "focus is on the first control of the dialog {string}",
-  async function (this: BrowserWorld, name: string) {
-    const first = this.page
-      .getByRole("dialog", { name })
-      .locator(
-        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      )
-      .first();
-    await journey(this.page).assertFocused(
-      first,
-      `the first control of the dialog ${JSON.stringify(name)}`,
-    );
-  },
-);
+Then("focus is on the first control of the dialog {string}", async function (this: BrowserWorld, name: string) {
+  const first = this.page
+    .getByRole("dialog", { name })
+    .locator(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )
+    .first();
+  await journey(this.page).assertFocused(first, `the first control of the dialog ${JSON.stringify(name)}`);
+});
 // The field's own error is on screen and in its description; a form's error
 // summary may repeat the words as a link, so they are looked for among what
 // the field points at, not anywhere on the page.
 Then("the field {string} shows the error {string}", async function (this: BrowserWorld, name: string, error: string) {
   const input = this.page.getByRole("textbox", { name });
   const ids = ((await input.getAttribute("aria-describedby")) ?? "").split(/\s+/).filter(Boolean);
-  await expect(
-    this.page.locator(ids.map((id) => `#${id}`).join(", ") || ":not(*)").filter({ hasText: error }),
-  ).toBeVisible();
+  await expect(this.page.locator(ids.map((id) => `#${id}`).join(", ") || ":not(*)").filter({ hasText: error })).toBeVisible();
 });
 
 Then("the field {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
-  const describedBy = await this.page
-    .getByRole("textbox", { name })
-    .getAttribute("aria-describedby");
+  const describedBy = await this.page.getByRole("textbox", { name }).getAttribute("aria-describedby");
   const text = (
     await Promise.all(
       (describedBy ?? "")
@@ -224,39 +205,26 @@ Then("the field {string} is described by {string}", async function (this: Browse
 });
 
 Then("the field {string} is marked invalid", async function (this: BrowserWorld, name: string) {
-  await expect(this.page.getByRole("textbox", { name })).toHaveAttribute(
-    "aria-invalid",
-    "true",
-  );
+  await expect(this.page.getByRole("textbox", { name })).toHaveAttribute("aria-invalid", "true");
 });
 
 Then("the field {string} is not marked invalid", async function (this: BrowserWorld, name: string) {
-  await expect(this.page.getByRole("textbox", { name })).not.toHaveAttribute(
-    "aria-invalid",
-    "true",
-  );
+  await expect(this.page.getByRole("textbox", { name })).not.toHaveAttribute("aria-invalid", "true");
 });
 
 Then("the field {string} shows no error", async function (this: BrowserWorld, name: string) {
-  const describedBy = await this.page
-    .getByRole("textbox", { name })
-    .getAttribute("aria-describedby");
+  const describedBy = await this.page.getByRole("textbox", { name }).getAttribute("aria-describedby");
   const shown = await Promise.all(
     (describedBy ?? "")
       .split(/\s+/)
       .filter(Boolean)
       .map((id) => this.page.locator(`#${id}`).textContent()),
   );
-  assert.ok(
-    !shown.includes("A repository name is required."),
-    `the field ${JSON.stringify(name)} still shows the error`,
-  );
+  assert.ok(!shown.includes("A repository name is required."), `the field ${JSON.stringify(name)} still shows the error`);
 });
 
 Then("the field {string} is described only by {string}", async function (this: BrowserWorld, name: string, description: string) {
-  const describedBy = await this.page
-    .getByRole("textbox", { name })
-    .getAttribute("aria-describedby");
+  const describedBy = await this.page.getByRole("textbox", { name }).getAttribute("aria-describedby");
   const text = (
     await Promise.all(
       (describedBy ?? "")
@@ -327,19 +295,19 @@ Then("the label of the button {string} is as large as the page's text", async fu
 // A short visible label with a longer name that starts with it, so a reader
 // who speaks the label they see reaches the button (WCAG 2.5.3, Label in
 // Name), and a screen reader still hears what the button acts on.
-Then("the button {string} shows {string}, which its name begins with", async function (this: BrowserWorld, name: string, label: string) {
-  const button = this.page.getByRole("button", { name: namePattern(name) });
-  await expect(button, `the button "${name}" shows "${label}"`).toHaveText(label);
-  assert.ok(name.startsWith(label), `the name "${name}" doesn't begin with "${label}"`);
-});
+Then(
+  "the button {string} shows {string}, which its name begins with",
+  async function (this: BrowserWorld, name: string, label: string) {
+    const button = this.page.getByRole("button", { name: namePattern(name) });
+    await expect(button, `the button "${name}" shows "${label}"`).toHaveText(label);
+    assert.ok(name.startsWith(label), `the name "${name}" doesn't begin with "${label}"`);
+  },
+);
 
 // What a screen reader is told of the bar's value: `aria-valuenow`, which
 // changes at most every 30 s while the step stays the same (§4.5).
 Then("the progress bar {string} shows {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
-  await expect(this.page.getByRole("progressbar", { name: namePattern(name) })).toHaveAttribute(
-    "aria-valuenow",
-    String(percent),
-  );
+  await expect(this.page.getByRole("progressbar", { name: namePattern(name) })).toHaveAttribute("aria-valuenow", String(percent));
 });
 
 // What a screen reader reads as the bar's value, `aria-valuetext`, without
@@ -645,7 +613,10 @@ Then(
     assert.ok(Math.abs(inline.box.right - inline.box.left - (inline.right - inline.left)) < 1, "Inline is as wide as its part");
     assert.ok(gaps(inline.box).after > 1, "Inline leaves the rest of its line");
     assert.ok(gaps(start).before < 1 && gaps(start).after > 1, `Start: ${JSON.stringify(gaps(start))}`);
-    assert.ok(Math.abs(gaps(center).before - gaps(center).after) < 1 && gaps(center).before > 1, `Center: ${JSON.stringify(gaps(center))}`);
+    assert.ok(
+      Math.abs(gaps(center).before - gaps(center).after) < 1 && gaps(center).before > 1,
+      `Center: ${JSON.stringify(gaps(center))}`,
+    );
     assert.ok(gaps(end).after < 1 && gaps(end).before > 1, `End: ${JSON.stringify(gaps(end))}`);
   },
 );
@@ -657,52 +628,45 @@ Then(
 // inside it (CSS animations and transitions, the Web Animations API) and
 // every SVG animation element it holds. A badge without an icon fails first,
 // so the check can't pass on a badge with nothing in it to move.
-Then(
-  "none of the {int} badges of the {string} demo moves",
-  async function (this: BrowserWorld, count: number, component: string) {
-    const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
-    const badges = await section.evaluate((element) =>
-      Array.from(element.querySelectorAll(".badge"), (badge) => ({
-        text: badge.textContent?.trim() ?? "",
-        icon: badge.querySelector("svg") !== null,
-        motions:
-          badge.getAnimations({ subtree: true }).length +
-          badge.querySelectorAll("animate, animateMotion, animateTransform, set").length,
-      })),
-    );
-    assert.equal(badges.length, count);
-    for (const badge of badges) {
-      assert.ok(badge.icon, `the badge "${badge.text}" has no icon`);
-      assert.equal(badge.motions, 0, badge.text);
-    }
-  },
-);
+Then("none of the {int} badges of the {string} demo moves", async function (this: BrowserWorld, count: number, component: string) {
+  const section = demoSection(this.page, component);
+  await section.waitFor({ timeout: 5_000 });
+  const badges = await section.evaluate((element) =>
+    Array.from(element.querySelectorAll(".badge"), (badge) => ({
+      text: badge.textContent?.trim() ?? "",
+      icon: badge.querySelector("svg") !== null,
+      motions:
+        badge.getAnimations({ subtree: true }).length + badge.querySelectorAll("animate, animateMotion, animateTransform, set").length,
+    })),
+  );
+  assert.equal(badges.length, count);
+  for (const badge of badges) {
+    assert.ok(badge.icon, `the badge "${badge.text}" has no icon`);
+    assert.equal(badge.motions, 0, badge.text);
+  }
+});
 
 // A badge's icon is as tall as its text, `1em` (technical design §4.5), so it
 // grows with the reader's text size (WCAG 1.4.4) rather than staying a small
 // mark beside large words. Half a pixel of rounding is allowed.
-Then(
-  "the icon of each badge of the {string} demo is as tall as its text",
-  async function (this: BrowserWorld, component: string) {
-    const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
-    const badges = await section.evaluate((element) =>
-      Array.from(element.querySelectorAll(".badge"), (badge) => ({
-        text: badge.textContent?.trim() ?? "",
-        font: Number.parseFloat(getComputedStyle(badge).fontSize),
-        icon: badge.querySelector("svg")?.getBoundingClientRect().height ?? 0,
-      })),
+Then("the icon of each badge of the {string} demo is as tall as its text", async function (this: BrowserWorld, component: string) {
+  const section = demoSection(this.page, component);
+  await section.waitFor({ timeout: 5_000 });
+  const badges = await section.evaluate((element) =>
+    Array.from(element.querySelectorAll(".badge"), (badge) => ({
+      text: badge.textContent?.trim() ?? "",
+      font: Number.parseFloat(getComputedStyle(badge).fontSize),
+      icon: badge.querySelector("svg")?.getBoundingClientRect().height ?? 0,
+    })),
+  );
+  assert.ok(badges.length > 0, `the ${component} demo has no badge`);
+  for (const badge of badges) {
+    assert.ok(
+      Math.abs(badge.icon - badge.font) < 0.5,
+      `the badge "${badge.text}": its icon is ${badge.icon}px tall, its text ${badge.font}px`,
     );
-    assert.ok(badges.length > 0, `the ${component} demo has no badge`);
-    for (const badge of badges) {
-      assert.ok(
-        Math.abs(badge.icon - badge.font) < 0.5,
-        `the badge "${badge.text}": its icon is ${badge.icon}px tall, its text ${badge.font}px`,
-      );
-    }
-  },
-);
+  }
+});
 
 // A bar whose size isn't known is indeterminate (WAI-ARIA `progressbar`): it
 // has no value to give, so it gives no `aria-valuenow`, rather than a value
@@ -741,11 +705,7 @@ Then("the {string} demo matches its ARIA snapshot", async function (this: Browse
   const pinned = SNAPSHOTS[component];
   assert.ok(pinned !== undefined, `no ARIA snapshot is pinned for the ${component} demo`);
   const snapshot = await demoSection(this.page, component).ariaSnapshot();
-  assert.equal(
-    snapshot.trim(),
-    pinned.trim(),
-    `the ${component} demo's ARIA snapshot`,
-  );
+  assert.equal(snapshot.trim(), pinned.trim(), `the ${component} demo's ARIA snapshot`);
 });
 
 // A spinner beside a visible label (technical design §4.5): the label is
@@ -804,10 +764,7 @@ Then(
       return { runs, middle, drawing: drawing ? (drawing.top + drawing.bottom) / 2 : Number.NaN };
     });
     const first = placed.runs[0];
-    assert.ok(
-      first && placed.runs.length >= 2,
-      `the spinner "${label}" stands in no line of text: ${JSON.stringify(placed.runs)}`,
-    );
+    assert.ok(first && placed.runs.length >= 2, `the spinner "${label}" stands in no line of text: ${JSON.stringify(placed.runs)}`);
     for (const run of placed.runs) {
       assert.ok(
         Math.abs(run.top - first.top) < 0.5 && Math.abs(run.bottom - first.bottom) < 0.5,
@@ -941,9 +898,7 @@ const linesOfTheirOwn = async (page: Page) => {
         const line = spinner.parentElement;
         const row = line?.parentElement;
         return (
-          line !== null &&
-          getComputedStyle(line).display === "flex" &&
-          !/flex|grid/.test(row ? getComputedStyle(row).display : "")
+          line !== null && getComputedStyle(line).display === "flex" && !/flex|grid/.test(row ? getComputedStyle(row).display : "")
         );
       })
       .map((spinner) => {
@@ -1207,11 +1162,7 @@ Then(
     assert.ok(drawn.spinners.length > 0, `the ${component} demo has no spinner`);
     for (const spinner of drawn.spinners) {
       assert.notEqual(spinner.text, drawn.gray, `the text around "${spinner.name}" is GrayText`);
-      assert.deepEqual(
-        { arc: spinner.arc, track: spinner.track },
-        { arc: spinner.text, track: drawn.gray },
-        spinner.name,
-      );
+      assert.deepEqual({ arc: spinner.arc, track: spinner.track }, { arc: spinner.text, track: drawn.gray }, spinner.name);
     }
   },
 );
@@ -1255,10 +1206,7 @@ Then(
       { role: null, hidden: "true", focusable: "false", stroke: icon.color },
     );
     assert.ok(Math.abs(icon.tall - icon.font) < 0.5, `the icon is ${icon.tall}px tall, its text ${icon.font}px`);
-    assert.ok(
-      Math.abs(icon.center - icon.middle) < 0.5,
-      `the icon's middle is at ${icon.center}px, the text's at ${icon.middle}px`,
-    );
+    assert.ok(Math.abs(icon.center - icon.middle) < 0.5, `the icon's middle is at ${icon.center}px, the text's at ${icon.middle}px`);
     assert.equal((await line.ariaSnapshot()).trim(), `- paragraph: ${text}`);
   },
 );
@@ -1266,20 +1214,17 @@ Then(
 // An icon-only control is named by a label of its own (`aria-label`), and
 // the icon inside it stays decoration, so a screen reader reads the name
 // once and never an image inside a button.
-Then(
-  "the button {string} shows only an icon, which a screen reader skips",
-  async function (this: BrowserWorld, name: string) {
-    const button = this.page.getByRole("button", { name, exact: true });
-    await expect(button).toHaveCount(1);
-    await expect(button).toHaveAttribute("aria-label", name);
-    await expect(button).toHaveText("");
-    const icon = button.locator("svg");
-    await expect(icon).toHaveCount(1);
-    await expect(icon).toHaveAttribute("aria-hidden", "true");
-    await expect(icon).toHaveAttribute("focusable", "false");
-    await expect(button.getByRole("img")).toHaveCount(0);
-  },
-);
+Then("the button {string} shows only an icon, which a screen reader skips", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("button", { name, exact: true });
+  await expect(button).toHaveCount(1);
+  await expect(button).toHaveAttribute("aria-label", name);
+  await expect(button).toHaveText("");
+  const icon = button.locator("svg");
+  await expect(icon).toHaveCount(1);
+  await expect(icon).toHaveAttribute("aria-hidden", "true");
+  await expect(icon).toHaveAttribute("focusable", "false");
+  await expect(button.getByRole("img")).toHaveCount(0);
+});
 
 // A toggle button that shows only an icon shows its state in the icon's
 // shape, besides `aria-pressed`, so a sighted reader sees what a screen
@@ -1304,18 +1249,15 @@ Then("the button {string} shows a bell, not crossed out", async function (this: 
 // shared vocabulary's scale), so an icon and a spinner of the same size line
 // up. Each image is read alone, as `expect` finds it (issue #774). Half a
 // pixel of rounding is allowed.
-Then(
-  "the image {string} is as tall as the image {string}",
-  async function (this: BrowserWorld, name: string, other: string) {
-    const tall = async (image: string) => {
-      const found = this.page.getByRole("img", { name: image, exact: true });
-      await expect(found).toHaveCount(1);
-      return found.evaluate((element) => element.getBoundingClientRect().height);
-    };
-    const [one, two] = [await tall(name), await tall(other)];
-    assert.ok(one > 0 && Math.abs(one - two) < 0.5, `"${name}" is ${one}px tall, "${other}" ${two}px`);
-  },
-);
+Then("the image {string} is as tall as the image {string}", async function (this: BrowserWorld, name: string, other: string) {
+  const tall = async (image: string) => {
+    const found = this.page.getByRole("img", { name: image, exact: true });
+    await expect(found).toHaveCount(1);
+    return found.evaluate((element) => element.getBoundingClientRect().height);
+  };
+  const [one, two] = [await tall(name), await tall(other)];
+  assert.ok(one > 0 && Math.abs(one - two) < 0.5, `"${name}" is ${one}px tall, "${other}" ${two}px`);
+});
 
 // A tone (technical design §4.5) colors the icon's glyph, and the words
 // beside it name the tone, so the color never says it alone (1.4.1). A
@@ -1372,7 +1314,11 @@ Then(
     await section.waitFor({ timeout: 5_000 });
     const icons = await section.evaluate((element) =>
       Array.from(element.querySelectorAll("svg"), (svg) => ({
-        name: svg.getAttribute("aria-label") || svg.parentElement?.textContent?.trim() || svg.parentElement?.getAttribute("aria-label") || "",
+        name:
+          svg.getAttribute("aria-label") ||
+          svg.parentElement?.textContent?.trim() ||
+          svg.parentElement?.getAttribute("aria-label") ||
+          "",
         stroke: getComputedStyle(svg).stroke,
         text: svg.parentElement ? getComputedStyle(svg.parentElement).color : "",
       })),
@@ -1522,15 +1468,12 @@ Then(
 
 // An unavailable button says so (`aria-disabled`) and keeps focus: never
 // the `disabled` attribute, which would take it out of the Tab order (A1).
-Then(
-  "the button {string} says it is unavailable, and is not disabled",
-  async function (this: BrowserWorld, name: string) {
-    const button = this.page.getByRole("button", { name, exact: true });
-    await expect(button).toHaveAttribute("aria-disabled", "true");
-    await expect(button).not.toHaveAttribute("disabled");
-    await expect(button).toBeFocused();
-  },
-);
+Then("the button {string} says it is unavailable, and is not disabled", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("button", { name, exact: true });
+  await expect(button).toHaveAttribute("aria-disabled", "true");
+  await expect(button).not.toHaveAttribute("disabled");
+  await expect(button).toBeFocused();
+});
 
 // A busy button with an icon keeps its width as its spinner takes the
 // icon's place, so nothing beside it moves: its width is noted before, and
@@ -1544,10 +1487,13 @@ async function buttonWidth(world: BrowserWorld, name: string): Promise<number> {
 }
 
 When("the widths of the buttons {string} and {string} are noted", async function (this: BrowserWorld, first: string, second: string) {
-  notedButtonWidths.set(this, new Map([
-    [first, await buttonWidth(this, first)],
-    [second, await buttonWidth(this, second)],
-  ]));
+  notedButtonWidths.set(
+    this,
+    new Map([
+      [first, await buttonWidth(this, first)],
+      [second, await buttonWidth(this, second)],
+    ]),
+  );
 });
 
 Then("the buttons {string} and {string} keep the widths noted", async function (this: BrowserWorld, first: string, second: string) {
@@ -1697,8 +1643,7 @@ Then(
 // whole of it ("New password" is never "New password again"): its input,
 // and the parts the input's id names, the label above it, its description
 // and its error.
-const textField = (world: BrowserWorld, name: string): Locator =>
-  world.page.getByRole("textbox", { name: namePattern(name) });
+const textField = (world: BrowserWorld, name: string): Locator => world.page.getByRole("textbox", { name: namePattern(name) });
 
 // The field's edge, as wide as it is drawn, and in a token's color where
 // the scenario names one, resolved on the field's own place in the page so
@@ -1748,9 +1693,13 @@ Then(
       ].map((rect) => rect && { top: rect.top, bottom: rect.bottom });
     });
     const parts = ["label", "description", "error", "field"];
-    tops.forEach((rect, at) => assert.ok(rect, `"${name}" shows no ${parts[at]}`));
-    for (let at = 1; at < tops.length; at++) {
-      const [above, below] = [tops[at - 1]!, tops[at]!];
+    const shown = tops.map((rect, at) => {
+      assert.ok(rect, `"${name}" shows no ${parts[at]}`);
+      return rect;
+    });
+    for (const [at, below] of shown.entries()) {
+      const above = shown[at - 1];
+      if (above === undefined) continue;
       assert.ok(above.bottom <= below.top + 0.5, `the ${parts[at - 1]} of "${name}" isn't above its ${parts[at]}`);
     }
   },
@@ -1774,14 +1723,11 @@ Then(
 
 // A number is text that asks a phone for its keyboard of digits: never
 // `type="number"`, whose value a scroll of the wheel changes.
-Then(
-  "the textbox {string} asks for the keyboard of digits, and is a text input",
-  async function (this: BrowserWorld, name: string) {
-    const field = textField(this, name);
-    await expect(field).toHaveAttribute("inputmode", "numeric");
-    await expect(field).toHaveAttribute("type", "text");
-  },
-);
+Then("the textbox {string} asks for the keyboard of digits, and is a text input", async function (this: BrowserWorld, name: string) {
+  const field = textField(this, name);
+  await expect(field).toHaveAttribute("inputmode", "numeric");
+  await expect(field).toHaveAttribute("type", "text");
+});
 
 // The marker is shown after the label and hidden from a screen reader,
 // which hears "required" once, from `aria-required`.
@@ -1820,17 +1766,18 @@ Then(
   async function (this: BrowserWorld, name: string, button: string) {
     const field = textField(this, name);
     const pressed = this.page.getByRole("button", { name: button, exact: true });
-    const [a, b] = await Promise.all(
-      [field, pressed].map((locator) =>
-        locator.evaluate((element) => {
-          const rect = element.getBoundingClientRect();
-          return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
-        }),
-      ),
+    const boxOf = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+      });
+    const [a, b] = await Promise.all([boxOf(field), boxOf(pressed)]);
+    assert.ok(
+      Math.abs(a.bottom - a.top - (b.bottom - b.top)) < 0.5,
+      `"${name}" ${JSON.stringify(a)}, "${button}" ${JSON.stringify(b)}`,
     );
-    assert.ok(Math.abs(a!.bottom - a!.top - (b!.bottom - b!.top)) < 0.5, `"${name}" ${JSON.stringify(a)}, "${button}" ${JSON.stringify(b)}`);
-    assert.ok(Math.abs(a!.bottom - b!.bottom) < 0.5, `"${name}" and "${button}" don't stand level`);
-    assert.ok(a!.right <= b!.left || b!.right <= a!.left, `"${button}" isn't beside "${name}"`);
+    assert.ok(Math.abs(a.bottom - b.bottom) < 0.5, `"${name}" and "${button}" don't stand level`);
+    assert.ok(a.right <= b.left || b.right <= a.left, `"${button}" isn't beside "${name}"`);
   },
 );
 
@@ -1906,7 +1853,10 @@ Then(
         }),
       };
     });
-    assert.ok(found.inputs.some((input) => input.disabled), `the ${component} demo has no disabled field`);
+    assert.ok(
+      found.inputs.some((input) => input.disabled),
+      `the ${component} demo has no disabled field`,
+    );
     for (const input of found.inputs) {
       const ink = input.disabled ? found.gray : found.text;
       assert.deepEqual(input.drawn, { text: ink, fill: found.field, edge: ink }, input.id);
@@ -2141,12 +2091,9 @@ Then("every link of the {string} demo is underlined below its letters", async fu
   await assertUnderlinedBelowLetters(demoSection(this.page, component).getByRole("link"), LINK_DEMO_LINKS);
 });
 
-Then(
-  "each link of the {string} demo is drawn in its tone:",
-  async function (this: BrowserWorld, component: string, table: DataTable) {
-    await assertTones(demoSection(this.page, component), table);
-  },
-);
+Then("each link of the {string} demo is drawn in its tone:", async function (this: BrowserWorld, component: string, table: DataTable) {
+  await assertTones(demoSection(this.page, component), table);
+});
 
 Then("every link of the {string} demo is drawn in the system's link color", async function (this: BrowserWorld, component: string) {
   await assertSystemLinkColor(demoSection(this.page, component).getByRole("link"), LINK_DEMO_LINKS);

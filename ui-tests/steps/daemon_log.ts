@@ -68,22 +68,14 @@ async function messages(world: BrowserWorld, name: string): Promise<string[] | s
   return shown;
 }
 
-Then(
-  "the table {string} lists, from the top, the messages:",
-  async function (this: BrowserWorld, name: string, expected: DataTable) {
-    const listed = expected.raw().map(([message]) => message);
-    await expect.poll(() => messages(this, name), { timeout: PAGE_PATIENCE_MS }).toEqual(listed);
-  },
-);
+Then("the table {string} lists, from the top, the messages:", async function (this: BrowserWorld, name: string, expected: DataTable) {
+  const listed = expected.raw().map(([message]) => message);
+  await expect.poll(() => messages(this, name), { timeout: PAGE_PATIENCE_MS }).toEqual(listed);
+});
 
 // The program and its build as `--version` prints them, then each line as the
 // log writes it, one to a line.
-Then(
-  "the clipboard holds the running version, then the lines:",
-  async function (this: BrowserWorld, lines: string) {
-    const expected = `ladderback ${await runningBuild()}\n${lines}\n`;
-    await expect
-      .poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS })
-      .toBe(expected);
-  },
-);
+Then("the clipboard holds the running version, then the lines:", async function (this: BrowserWorld, lines: string) {
+  const expected = `ladderback ${await runningBuild()}\n${lines}\n`;
+  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS }).toBe(expected);
+});

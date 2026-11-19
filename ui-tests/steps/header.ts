@@ -64,16 +64,16 @@ Then(
     const [linksTop, linksBottom] = [Math.min(...linkBoxes.map(({ top }) => top)), Math.max(...linkBoxes.map(({ box }) => box))];
     const taller = measured.filter(({ top, box }) => top < linksTop - ROUNDING_PX || box > linksBottom + ROUNDING_PX);
     assert.deepEqual(
-      taller.map(({ part, top, box }) => `${part}: ${Math.round(linksTop - top)}px above, ${Math.round(box - linksBottom)}px below the links`),
+      taller.map(
+        ({ part, top, box }) => `${part}: ${Math.round(linksTop - top)}px above, ${Math.round(box - linksBottom)}px below the links`,
+      ),
       [],
       "the header's last line is as tall as its links",
     );
     const inner = await banner.evaluate((header) => {
       const style = getComputedStyle(header);
       return (
-        header.getBoundingClientRect().bottom -
-        Number.parseFloat(style.paddingBlockEnd) -
-        Number.parseFloat(style.borderBlockEndWidth)
+        header.getBoundingClientRect().bottom - Number.parseFloat(style.paddingBlockEnd) - Number.parseFloat(style.borderBlockEndWidth)
       );
     });
     const lowest = Math.max(...measured.map(({ box }) => box));
@@ -83,17 +83,14 @@ Then(
 
 // Sign out isn't a page, so it stands outside the navigation landmark, and
 // so outside its list of pages too.
-Then(
-  "the button {string} is in the banner, outside the navigation",
-  async function (this: BrowserWorld, name: string) {
-    const banner = this.page.getByRole("banner");
-    const button = banner.getByRole("button", { name: namePattern(name) });
-    assert.equal(await button.count(), 1, `the banner has no button "${name}"`);
-    const pages = banner.getByRole("navigation");
-    const inside = await pages.evaluate((nav, held) => held !== null && nav.contains(held), await button.elementHandle());
-    assert.equal(inside, false, `the button "${name}" is in the navigation`);
-  },
-);
+Then("the button {string} is in the banner, outside the navigation", async function (this: BrowserWorld, name: string) {
+  const banner = this.page.getByRole("banner");
+  const button = banner.getByRole("button", { name: namePattern(name) });
+  assert.equal(await button.count(), 1, `the banner has no button "${name}"`);
+  const pages = banner.getByRole("navigation");
+  const inside = await pages.evaluate((nav, held) => held !== null && nav.contains(held), await button.elementHandle());
+  assert.equal(inside, false, `the button "${name}" is in the navigation`);
+});
 
 // Focus on a control of the page, not on the main landmark itself (which
 // start_page.ts's "focus is in the main content" asks for).
@@ -167,7 +164,7 @@ When("the running version is the {word} one a build between releases can show", 
     async (route) => {
       const answer = await route.fetch();
       const body: unknown = await answer.json().catch(() => undefined);
-      if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>)["version"] === "string") {
+      if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>).version === "string") {
         await route.fulfill({ response: answer, json: { ...body, ...build } });
       } else {
         await route.fulfill({ response: answer });
@@ -233,7 +230,10 @@ Then(
       },
       [version, button] as const,
     );
-    assert.ok(Math.abs(layout.buttonEnd) <= ROUNDING_PX, `the button "${name}" ends ${Math.round(-layout.buttonEnd)}px before the header's inline end`);
+    assert.ok(
+      Math.abs(layout.buttonEnd) <= ROUNDING_PX,
+      `the button "${name}" ends ${Math.round(-layout.buttonEnd)}px before the header's inline end`,
+    );
     if (layout.fits) {
       assert.ok(layout.shared, `the running version and the button "${name}" fit on one line, but stand on two`);
     } else {
@@ -249,14 +249,11 @@ Then(
 
 // A button that people press with a finger or a pointer: 2rem at least, so it
 // grows with the reader's text size (2.5.8, DESIGN.md's Buttons).
-Then(
-  "the button {string} is at least 2rem tall, the size of the reader's text",
-  async function (this: BrowserWorld, name: string) {
-    const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
-    const { height, rem } = await button.evaluate((control) => ({
-      height: control.getBoundingClientRect().height,
-      rem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
-    }));
-    assert.ok(height >= 2 * rem - 0.5, `the button "${name}" is ${height.toFixed(1)}px tall, under 2rem (${2 * rem}px)`);
-  },
-);
+Then("the button {string} is at least 2rem tall, the size of the reader's text", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  const { height, rem } = await button.evaluate((control) => ({
+    height: control.getBoundingClientRect().height,
+    rem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+  }));
+  assert.ok(height >= 2 * rem - 0.5, `the button "${name}" is ${height.toFixed(1)}px tall, under 2rem (${2 * rem}px)`);
+});

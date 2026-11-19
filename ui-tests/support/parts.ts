@@ -27,7 +27,10 @@ export function partsBrokenInside(
       chars.push({ char, box: [...range.getClientRects()].find((rect) => rect.width > 0) });
     }
   }
-  const start = chars.map(({ char }) => char).join("").indexOf(text);
+  const start = chars
+    .map(({ char }) => char)
+    .join("")
+    .indexOf(text);
   if (start < 0) return null;
   const around = element.closest("li, td, th") ?? element;
   const style = getComputedStyle(around);
@@ -187,7 +190,8 @@ export function besideIconProblems({ text, rtl, icon, lines }: WordsBesideIcon):
       : [`the icon of "${text}" is centered at ${middle}px, off its first line at ${first.top}–${first.bottom}px`];
   for (const [at, line] of lines.entries()) {
     const after = rtl ? line.right <= icon.left + ROUNDING_PX : line.left >= icon.right - ROUNDING_PX;
-    if (!after) problems.push(`line ${at + 1} of "${text}" spans ${line.left}–${line.right}px, under its icon at ${icon.left}–${icon.right}px`);
+    if (!after)
+      problems.push(`line ${at + 1} of "${text}" spans ${line.left}–${line.right}px, under its icon at ${icon.left}–${icon.right}px`);
   }
   return problems;
 }

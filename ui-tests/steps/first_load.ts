@@ -91,9 +91,9 @@ Then(
   async function (this: BrowserWorld, rows: number, columns: number) {
     const lines = await linesOf(await busyRegion(this));
     assert.equal(lines.length, rows + 1, `the skeleton has ${lines.length} lines, not a header and ${rows} rows`);
-    lines.forEach((line, index) =>
-      assert.equal(line.length, columns, `line ${index + 1} of the skeleton has ${line.length} columns, not ${columns}`),
-    );
+    for (const [index, line] of lines.entries()) {
+      assert.equal(line.length, columns, `line ${index + 1} of the skeleton has ${line.length} columns, not ${columns}`);
+    }
   },
 );
 
@@ -118,12 +118,9 @@ Then(
   },
 );
 
-Then(
-  "the page says {string} just before its busy region, outside it",
-  async function (this: BrowserWorld, words: string) {
-    await saidJustBeforeBusy(this.page.getByRole("main"), words);
-  },
-);
+Then("the page says {string} just before its busy region, outside it", async function (this: BrowserWorld, words: string) {
+  await saidJustBeforeBusy(this.page.getByRole("main"), words);
+});
 
 Then("no region of the page is busy", async function (this: BrowserWorld) {
   await expect(this.page.getByRole("main").locator('[aria-busy="true"]')).toHaveCount(0);

@@ -49,17 +49,14 @@ async function setPassword(scratch: string, password: string): Promise<void> {
 // A daemon of the scenario's own with sign-in on, and a scratch copy of the
 // `demo-repo` fixture beside it for the journeys that test a repository. The
 // After hook of live.ts stops the daemon and removes the folder.
-Given(
-  "a daemon with sign-in on and the admin password {string}",
-  async function (this: BrowserWorld, password: string) {
-    const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-sign-in-"));
-    await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
-    await setPassword(scratch, password);
-    const { child, url } = await startServer(scratch, folders(scratch));
-    this.ownServer = { child, scratch };
-    this.baseUrl = url;
-  },
-);
+Given("a daemon with sign-in on and the admin password {string}", async function (this: BrowserWorld, password: string) {
+  const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-sign-in-"));
+  await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
+  await setPassword(scratch, password);
+  const { child, url } = await startServer(scratch, folders(scratch));
+  this.ownServer = { child, scratch };
+  this.baseUrl = url;
+});
 
 // A daemon of the scenario's own with sign-in off, listening on every address
 // with one host name configured: on the network, as a home server is. The
@@ -69,12 +66,7 @@ Given(
   "a daemon with sign-in off listening on every address for the host name {string}",
   async function (this: BrowserWorld, name: string) {
     const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-network-"));
-    const { child, url } = await startServer(scratch, folders(scratch), [
-      "--listen",
-      "0.0.0.0:0",
-      "--allowed-host",
-      name,
-    ]);
+    const { child, url } = await startServer(scratch, folders(scratch), ["--listen", "0.0.0.0:0", "--allowed-host", name]);
     this.ownServer = { child, scratch };
     const address = new URL(url);
     address.hostname = "127.0.0.1";
@@ -100,14 +92,11 @@ When("the admin password {string} is set", async function (this: BrowserWorld, p
 
 // Written while the daemon runs, as a damaged disk or an editor would leave
 // it: the next answer the daemon gives says the file is unreadable.
-When(
-  "the data folder holds an admin password file that is not a password hash",
-  async function (this: BrowserWorld) {
-    const own = this.ownServer;
-    assert.ok(own, "this scenario's daemon was never started");
-    await writeFile(path.join(own.scratch, "data", "admin-password"), "not a password hash\n", { mode: 0o600 });
-  },
-);
+When("the data folder holds an admin password file that is not a password hash", async function (this: BrowserWorld) {
+  const own = this.ownServer;
+  assert.ok(own, "this scenario's daemon was never started");
+  await writeFile(path.join(own.scratch, "data", "admin-password"), "not a password hash\n", { mode: 0o600 });
+});
 
 // What a screen reader reads after the page's heading, which takes focus when
 // a reader navigates to the page: a notice above it would be passed over.
@@ -205,13 +194,10 @@ When("I go back to the first tab", async function (this: BrowserWorld) {
 });
 
 // The token a password manager reads to know what the field is for.
-Then(
-  "the textbox {string} has the autocomplete token {string}",
-  async function (this: BrowserWorld, name: string, token: string) {
-    const field = this.page.getByRole("textbox", { name: namePattern(name) });
-    await expect(field).toHaveAttribute("autocomplete", token);
-  },
-);
+Then("the textbox {string} has the autocomplete token {string}", async function (this: BrowserWorld, name: string, token: string) {
+  const field = this.page.getByRole("textbox", { name: namePattern(name) });
+  await expect(field).toHaveAttribute("autocomplete", token);
+});
 
 Then("the textbox {string} still holds {string}", async function (this: BrowserWorld, name: string, text: string) {
   const field = this.page.getByRole("textbox", { name: namePattern(name) });
@@ -250,9 +236,5 @@ Then("the page marked each later reading of the history as its own", function (t
   assert.ok(daemon, "this scenario's daemon is not scripted");
   const marks = daemon.backgroundMarks;
   assert.ok(marks.length >= 2, `the page read the history ${marks.length} times, never again after it opened`);
-  assert.deepEqual(
-    marks,
-    [false, ...marks.slice(1).map(() => true)],
-    "which readings of the history the page marked as its own",
-  );
+  assert.deepEqual(marks, [false, ...marks.slice(1).map(() => true)], "which readings of the history the page marked as its own");
 });
