@@ -61,12 +61,13 @@ Feature: The table
       | Demo empty       | No demo folders yet.                                  |
       | Demo unreachable | Ladderback can't be reached, so no demo folders show. |
 
-  Scenario: A table whose rows are on their way says so beside a spinner
+  Scenario: A table whose rows are on their way says so beside a spinner, just before the busy region where the table will stand
     When I open the component gallery
     And I press Shift+Tab until focus is on the radio "Demo rows"
     And I press the down arrow until focus is on the radio "Demo loading"
     Then the "Table" demo says "Loading the demo folders…" in the place of the table "Demo folders"
     And the "Table" demo shows the text "Loading the demo folders…" beside a spinner a screen reader skips
+    And the "Table" demo says "Loading the demo folders…" just before its busy region, outside it
 
   Scenario Outline: On a small screen with larger text, a table's frame scrolls by keyboard and each row's header stays in view, <direction>
     Given a viewport of 320 by 640 pixels

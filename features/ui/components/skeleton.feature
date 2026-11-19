@@ -1,8 +1,9 @@
 @ui
 Feature: The skeleton
   A skeleton, the still shape of content on its way, which a screen reader and
-  Tab both skip, beside the words that say the wait in a region that is busy
-  until the content takes its place, as tall as it was.
+  Tab both skip, in a region that is busy until the content takes its place,
+  as tall as it was. The words that say the wait stand just before the region,
+  outside it, since a screen reader may leave a busy region unread.
 
   Scenario: A skeleton is hidden from a screen reader, has no role and is never a stop for Tab
     When I open the component gallery
@@ -15,9 +16,10 @@ Feature: The skeleton
     And I press Tab
     Then focus is on the button "Show the demo plan"
 
-  Scenario: A region says its wait in words beside its skeleton while it is busy, and once the content comes it is no longer busy, keeps its height and leaves focus where it was
+  Scenario: A region shows its skeleton while it is busy, with the words that say its wait just before it, and once the content comes it is no longer busy, keeps its height and leaves focus where it was
     When I open the component gallery
-    Then the region of the "Skeleton" demo is busy and shows the words "Loading the demo plan…" beside a skeleton
+    Then the region of the "Skeleton" demo is busy and shows a skeleton
+    And the "Skeleton" demo says "Loading the demo plan…" just before its busy region, outside it
     When I skip to the content
     And I press Tab until focus is on the button "Open a demo review"
     And I press Tab until focus is on the button "Filled Primary"
@@ -26,6 +28,7 @@ Feature: The skeleton
     And the height of the region of the "Skeleton" demo is noted
     And I press Enter
     Then the region of the "Skeleton" demo is no longer busy and shows "Backs up the demo folder." in place of its skeleton
+    And the page doesn't show "Loading the demo plan…"
     And the region of the "Skeleton" demo is as tall as it was, within 2 pixels
     And focus stays on the button "Show the demo plan"
     And the polite region stays empty
