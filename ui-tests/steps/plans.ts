@@ -18,29 +18,55 @@ import { expand } from "./repositories.ts";
 // scheduler plans its run a moment later; ten seconds is generous for both.
 const SAVE_PATIENCE_MS = 10_000;
 
-// The reads of the plans list each world's daemon holds, as the page's
-// requests, so a step can wait until the page has the answers.
-const heldReads = new WeakMap<BrowserWorld, Request[]>();
+// The reads of the plans list each world's daemon holds back, as the page's
+// requests, and what lets them go, so a step can release them and wait until
+// the page has the answers.
+interface HeldReads {
+  requests: Request[];
+  release: () => void;
+}
+const heldReads = new WeakMap<BrowserWorld, HeldReads>();
 
 // The page reads the plans list when it opens, and again once a plan is
-// saved; the step holds every read after the first, so the reader can leave
-// the page before a saved plan's list comes back.
+// saved; the step holds back every read after the first until "the daemon has
+// answered the held reads of the plans list" lets them go, so the reader can
+// leave the form or the page before a saved plan's list comes back, however
+// long the walk there takes. A read the page makes after that goes through.
+Given("the daemon holds back its answer to each read of the plans list after the first", function (this: BrowserWorld) {
+  let reads = 0;
+  const { promise: released, resolve: release } = Promise.withResolvers<void>();
+  const held: HeldReads = { requests: [], release };
+  heldReads.set(this, held);
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname === "/api/v1/plans",
+      async (route) => {
+        if (route.request().method() === "GET") {
+          reads += 1;
+          if (reads > 1) {
+            held.requests.push(route.request());
+            await released;
+          }
+        }
+        await route.continue();
+      },
+    );
+  });
+});
+
+// As above, but the daemon lets each held read go `seconds` after it came,
+// for a scenario that waits for the answer by what the page then does.
 Given(
   "the daemon answers each read of the plans list after the first {int} seconds late",
-  async function (this: BrowserWorld, seconds: number) {
+  function (this: BrowserWorld, seconds: number) {
     let reads = 0;
-    const held: Request[] = [];
-    heldReads.set(this, held);
     this.contextRoutes.push(async (context) => {
       await context.route(
         (url) => url.pathname === "/api/v1/plans",
         async (route) => {
           if (route.request().method() === "GET") {
             reads += 1;
-            if (reads > 1) {
-              held.push(route.request());
-              await new Promise((done) => setTimeout(done, seconds * 1_000));
-            }
+            if (reads > 1) await new Promise((done) => setTimeout(done, seconds * 1_000));
           }
           await route.continue();
         },
@@ -108,13 +134,17 @@ Given("each read of the plans list after the first reaches no daemon", function 
   answerReadsAfterFirst(this, (route) => route.abort("connectionrefused"));
 });
 
-// Once the page has each held read's whole answer, and has done what it does
-// with it: a saved plan's page closes the form on the answer, then moves focus
-// a timer later, so the step lets the page's queued timers and a frame run.
+// Lets the held reads go, then waits until the page has each one's whole
+// answer and has done what it does with it: a saved plan's page closes the
+// form on the answer, then moves focus a timer later, so the step lets the
+// page's queued timers and a frame run. The reads it lets go are the ones
+// that have reached the daemon by then: a scenario walks the page between
+// the save and this step, so the save's read is among them.
 When("the daemon has answered the held reads of the plans list", async function (this: BrowserWorld) {
-  const held = heldReads.get(this) ?? [];
-  assert.ok(held.length > 0, "the daemon held no read of the plans list");
-  for (const request of held) {
+  const held = heldReads.get(this);
+  assert.ok(held !== undefined && held.requests.length > 0, "the daemon held back no read of the plans list");
+  held.release();
+  for (const request of held.requests) {
     const response = await request.response();
     assert.ok(response, `the read of the plans list at ${request.url()} got no answer`);
     await response.finished();
