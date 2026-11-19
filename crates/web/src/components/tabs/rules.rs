@@ -49,7 +49,9 @@ pub fn selection_on_press(selected: usize, pressed: usize) -> Option<usize> {
 /// `None` for the tab already selected and for one the set doesn't hold,
 /// which changes nothing.
 pub fn selection_on_choice(selected: usize, chosen: usize, last: usize) -> Option<usize> {
-    todo!("{selected} {chosen} {last}")
+    (chosen <= last)
+        .then_some(chosen)
+        .and_then(|chosen| selection_on_press(selected, chosen))
 }
 
 /// The tab selected when the tabs are drawn, of tabs whose callers marked
