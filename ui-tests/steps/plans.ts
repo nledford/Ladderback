@@ -10,7 +10,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { Request, Route } from "playwright";
 
 import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
-import { type BrowserWorld, evaluateAll } from "../support/world.ts";
+import type { BrowserWorld } from "../support/world.ts";
 import { plannedRun, rowNamed, until } from "./live.ts";
 import { expand } from "./repositories.ts";
 
@@ -155,11 +155,10 @@ Then("the row {string} of the table {string} shows a next run", async function (
     async () => {
       const planned = await plannedRun(this, row);
       if (planned === null) return null;
-      const titles = await evaluateAll(
-        found.getByRole("cell"),
-        (cells) => cells.map((cell) => cell.getAttribute("title")),
-        undefined,
-      ).catch((): (string | null)[] => []);
+      const titles = await found
+        .getByRole("cell")
+        .evaluateAll((cells) => cells.map((cell) => cell.getAttribute("title")))
+        .catch((): (string | null)[] => []);
       return titles.includes(planned) ? planned : null;
     },
     SAVE_PATIENCE_MS,

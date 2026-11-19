@@ -3,11 +3,9 @@
 // steps/.
 //
 // A tab is found by its role and its name, its own words. A tab list or a
-// panel is found through its tab, never by its own name: a panel is named by
-// its tab (`aria-labelledby`), and Firefox's page crashes on a role-and-name
-// lookup while `aria-labelledby` is read in the page (#774). A panel is the
-// element its tab's `aria-controls` names, the relation a screen reader
-// follows from the tab to it.
+// panel is found through its tab: a panel is the element its tab's
+// `aria-controls` names, the relation a screen reader follows from the tab
+// to it.
 
 import assert from "node:assert/strict";
 
@@ -197,7 +195,7 @@ for (const [what, token, forced] of [
 
 // The words that say how a set of tabs is used are tied to its list
 // (`aria-describedby`), so a screen reader says them on entering it. Read
-// through the relation, as panelOf does (#774).
+// through the relation, as panelOf does.
 Then("the tab list of the tab {string} is described by {string}", async function (this: BrowserWorld, name: string, words: string) {
   const id = await listOf(this, name).getAttribute("aria-describedby");
   assert.ok(id, `the tab list of the tab "${name}" names nothing that describes it`);
@@ -205,8 +203,8 @@ Then("the tab list of the tab {string} is described by {string}", async function
 });
 
 // A page's tabs are named by an element that already shows the name, such as
-// its heading (`aria-labelledby`), read through the relation as above
-// (#774); the tabs are in the list in the order they stand.
+// its heading (`aria-labelledby`), read through the relation as above; the
+// tabs are in the list in the order they stand.
 Then(
   "the tab list of the tab {string} is named {string} and holds the tabs, in order:",
   async function (this: BrowserWorld, name: string, named: string, tabs: DataTable) {

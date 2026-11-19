@@ -394,13 +394,8 @@ Then(
 );
 
 /**
- * The items of one of the vocabulary demo's lists, found by the list's name.
- * Each list is named by its heading through aria-labelledby, so its items are
- * read one at a time with `evaluate`, which finds them in Playwright's
- * utility world as `expect` does, and never with `evaluateAll`, which finds
- * them in the page's main world: Firefox crashes the page when a name read
- * through aria-labelledby is computed in both worlds (microsoft/playwright
- * #43967, issue #774).
+ * The items of one of the vocabulary demo's lists, found by the list's name,
+ * which its heading gives it through aria-labelledby.
  */
 function vocabularyItems(page: Page, component: string, list: string): Locator {
   return demoSection(page, component).getByRole("list", { name: list, exact: true }).getByRole("listitem");
@@ -511,7 +506,7 @@ Then(
 // Each token is read through a probe, as the page resolves it, with a
 // fallback no token has, so a token style.css lacks fails here rather than
 // matching whatever color the probe inherits. The part is read alone with
-// `evaluate`, as `expect` finds it (issue #774).
+// `evaluate`, as `expect` finds it.
 export async function drawnOnItsFill(part: Locator, name: string, words: string, fill: string) {
   await expect(part).toHaveCount(1);
   const missing = "rgb(1, 2, 3)";
@@ -1063,7 +1058,7 @@ Then(
 // follow the text around the spinner, not a tone an outer part sets, so the
 // step gives the spinner's line a color and a tone of its own and reads the
 // arc against each. Each image is read alone with `evaluate`, as `expect`
-// finds it (issue #774).
+// finds it.
 Then(
   "each spinner of the {string} demo draws its arc in its tone and its track in a faint version of it:",
   async function (this: BrowserWorld, component: string, tones: DataTable) {
@@ -1254,8 +1249,8 @@ Then("the button {string} shows a bell, not crossed out", async function (this: 
 
 // Two components of one size share one length (technical design §4.5, the
 // shared vocabulary's scale), so an icon and a spinner of the same size line
-// up. Each image is read alone, as `expect` finds it (issue #774). Half a
-// pixel of rounding is allowed.
+// up. Each image is read alone, as `expect` finds it. Half a pixel of
+// rounding is allowed.
 Then("the image {string} is as tall as the image {string}", async function (this: BrowserWorld, name: string, other: string) {
   const tall = async (image: string) => {
     const found = this.page.getByRole("img", { name: image, exact: true });
@@ -1272,7 +1267,7 @@ Then("the image {string} is as tall as the image {string}", async function (this
 // follow the text around the icon, not a tone an outer part sets, so the
 // step gives the line around it a color and a tone of its own and reads the
 // glyph against each. Each tone is found by its words, the one element that
-// holds them and its icon, and read alone with `evaluate` (issue #774).
+// holds them and its icon, and read alone with `evaluate`.
 Then(
   "each tone of the {string} demo, named in words, draws its icon in it:",
   async function (this: BrowserWorld, component: string, tones: DataTable) {
@@ -1364,7 +1359,7 @@ Then("the {string} demo shows the sentence {string}", async function (this: Brow
 // color at all. Inherit must follow the text around the button, not a tone
 // an outer part sets, so the step gives the line around it a color and a
 // tone of its own and reads the button against each. Each button is found
-// by its name and read alone with `evaluate` (issue #774).
+// by its name and read alone with `evaluate`.
 Then(
   "each button of the {string} demo draws its appearance in its tone:",
   async function (this: BrowserWorld, component: string, rows: DataTable) {
@@ -1907,7 +1902,7 @@ Then(
 // in its name and with an icon a screen reader skips, and every link is
 // underlined, in Ladder Blue or the color of the text around it, and in the
 // system's link color under forced colors. Each link is read alone with
-// `evaluate`, never with `evaluateAll` (issue #774).
+// `evaluate`.
 
 // The links of the gallery's "Link" demo.
 const LINK_DEMO_LINKS = 6;
