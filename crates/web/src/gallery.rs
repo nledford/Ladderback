@@ -42,6 +42,7 @@ use crate::routes::{PageHeading, text_with};
 use crate::text;
 use crate::variants::{Placement, Rem, Side, Size, StatusTone, Tone};
 
+mod progress;
 mod steps;
 mod table;
 mod tooltip;
@@ -102,18 +103,6 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let lines_error = RwSignal::<Option<String>>::new(None);
     let lines_value = RwSignal::new(String::new());
     let folders_error = t(msg::UI_GALLERY_FOLDERS_REQUIRED);
-    const GIB: u64 = 1 << 30;
-    let progress = RwSignal::new(Reading {
-        step: Some(api::OperationStep::BackingUp),
-        unit: api::ProgressUnit::Bytes,
-        current: 4 * GIB,
-        total: Some(10 * GIB),
-    });
-    // The reading of the progress demo's bars at each size and tone.
-    let sixty = Reading {
-        current: 6 * GIB,
-        ..progress.get_untracked()
-    };
     // The toast demo's toasts, and whether its restore's failure stands on
     // the page, as a failure must beside its toast.
     let toasts = Toasts::new();
@@ -1906,85 +1895,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         </section>
         // After the text field's, so the walks from the page's start to
         // the Toast demo and the sections after it pass none of its bars.
-        <section id="progress-demo">
-            <DemoHeading text=t(msg::UI_GALLERY_PROGRESS_HEADING) />
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_BACKUP_PROGRESS)
-                reading=progress
-            />
-            <p>
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_ADVANCE_PROGRESS).into())
-                    on_press=Callback::new(move |()| {
-                        progress
-                            .update(|demo| demo.current = (demo.current + 4 * GIB).min(10 * GIB));
-                    })
-                />
-            </p>
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
-                reading=Signal::stored(Reading::default())
-            />
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_DEMO_STEP_PROGRESS)
-                reading=Signal::stored(Reading {
-                    step: Some(api::OperationStep::ReadingIndex),
-                    ..Reading::default()
-                })
-            />
-            // Every size, then every tone, each 60% done. The Small one and
-            // the Primary one name no size or tone, so they show the
-            // defaults.
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_PROGRESS_SMALL)
-                reading=Signal::stored(sixty)
-            />
-            {[
-                (Size::Medium, msg::UI_GALLERY_PROGRESS_MEDIUM),
-                (Size::Large, msg::UI_GALLERY_PROGRESS_LARGE),
-                (Size::XLarge, msg::UI_GALLERY_PROGRESS_XLARGE),
-            ]
-                .into_iter()
-                .map(|(size, name)| {
-                    view! {
-                        <Progress
-                            localizer=Arc::clone(&localizer)
-                            label=t(name)
-                            reading=Signal::stored(sixty)
-                            size=size
-                        />
-                    }
-                })
-                .collect_view()}
-            <Progress
-                localizer=Arc::clone(&localizer)
-                label=t(msg::UI_GALLERY_PROGRESS_PRIMARY)
-                reading=Signal::stored(sixty)
-            />
-            {[
-                (Tone::Secondary, msg::UI_GALLERY_PROGRESS_SECONDARY),
-                (Tone::Success, msg::UI_GALLERY_PROGRESS_SUCCESS),
-                (Tone::Warning, msg::UI_GALLERY_PROGRESS_WARNING),
-                (Tone::Error, msg::UI_GALLERY_PROGRESS_ERROR),
-                (Tone::Inherit, msg::UI_GALLERY_PROGRESS_INHERIT),
-            ]
-                .into_iter()
-                .map(|(tone, name)| {
-                    view! {
-                        <Progress
-                            localizer=Arc::clone(&localizer)
-                            label=t(name)
-                            reading=Signal::stored(sixty)
-                            tone=tone
-                        />
-                    }
-                })
-                .collect_view()}
-        </section>
+        <progress::ProgressDemo localizer=Arc::clone(&localizer) />
         // After the progress demo, past every demo a journey walks to from
         // the page's top, so its two stops lengthen none of those walks; its
         // scenarios start at its anchor.
