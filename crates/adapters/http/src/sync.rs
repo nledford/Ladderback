@@ -49,6 +49,14 @@ where
     nothing
 }
 
+/// The daemon's router: `app`, the UI and the API under the browser's
+/// checks, behind the routes under `/sync/`.
+#[cfg(feature = "hub")]
+pub(crate) fn in_front_of(app: Router, hub: &SyncHub) -> Router {
+    let _ = (app, hub);
+    todo!()
+}
+
 #[cfg(feature = "hub")]
 mod served {
     use std::collections::VecDeque;

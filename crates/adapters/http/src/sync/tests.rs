@@ -281,3 +281,121 @@ async fn without_the_hub_every_path_under_sync_answers_404() {
     };
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// The daemon's whole router, with `serve --hub`'s sync routes.
+async fn send(request: axum::http::Request<axum::body::Body>) -> axum::response::Response {
+    use tower::ServiceExt as _;
+    let state = crate::AppState {
+        sync: SyncHub::serving(pairing()),
+        ..crate::request_checks::tests::test_state()
+    };
+    crate::router(
+        Arc::new(crate::request_checks::tests::NoUi),
+        crate::RequestChecks::new([]),
+        state,
+    )
+    .oneshot(request)
+    .await
+    .unwrap()
+}
+
+/// What an agent's WebSocket handshake carries, besides its `Host`.
+const HANDSHAKE: [(&str, &str); 4] = [
+    ("connection", "upgrade"),
+    ("upgrade", "websocket"),
+    ("sec-websocket-version", "13"),
+    ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+];
+
+fn handshake(
+    method: &str,
+    path: &str,
+    more: &[(&str, &str)],
+) -> axum::http::Request<axum::body::Body> {
+    let mut headers = vec![("host", "localhost:9898")];
+    headers.extend(HANDSHAKE);
+    headers.extend(more);
+    crate::request_checks::tests::request(method, path, &headers)
+}
+
+/// Every path the sync routes answer, served or not.
+const SYNC_PATHS: [&str; 6] = [
+    "/sync/v1",
+    "/sync/v1?x=1",
+    "/sync/v1/connect",
+    "/sync/v2",
+    "/sync/",
+    "/sync",
+];
+
+/// A web page's WebSocket always carries its origin, its own page's too, so
+/// a handshake with one is a browser's: refused before the handshake, on
+/// every path under `/sync/`.
+#[tokio::test]
+async fn a_handshake_carrying_an_origin_is_refused_before_it_starts() {
+    for path in SYNC_PATHS {
+        for origin in ["http://evil.example", "http://localhost:9898", "null"] {
+            let response = send(handshake("GET", path, &[("origin", origin)])).await;
+            assert_eq!(
+                crate::request_checks::tests::code(response).await,
+                Some((StatusCode::FORBIDDEN, "origin-not-allowed".to_owned())),
+                "{path} from {origin}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn only_a_get_reaches_the_sync_routes() {
+    for path in SYNC_PATHS {
+        for method in [
+            "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT",
+        ] {
+            let response = send(handshake(method, path, &[])).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{method} {path}"
+            );
+            assert_eq!(response.headers()["allow"], "GET", "{method} {path}");
+        }
+    }
+}
+
+/// A page's `fetch` can't ask to upgrade (`Upgrade` is a header it may not
+/// set), so a request that doesn't, by whatever name it reaches the hub,
+/// is refused before any route sees it.
+#[tokio::test]
+async fn a_request_that_isnt_a_websocket_handshake_is_refused() {
+    for path in SYNC_PATHS {
+        for upgrade in [None, Some("h2c"), Some("websocket2")] {
+            let mut headers = vec![("host", "hub.other.example:8443")];
+            headers.extend(upgrade.map(|value| ("upgrade", value)));
+            let request = crate::request_checks::tests::request("GET", path, &headers);
+            let response = send(request).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::UPGRADE_REQUIRED,
+                "{path} upgrading to {upgrade:?}"
+            );
+            assert_eq!(response.headers()["upgrade"], "websocket", "{path}");
+        }
+    }
+}
+
+/// Every path under `/sync/` is the sync routes': a route the UI's and the
+/// API's router has there is never reached, so an agent route can only be
+/// added behind the sync check.
+#[tokio::test]
+async fn a_route_beside_the_sync_routes_under_sync_is_never_reached() {
+    use tower::ServiceExt as _;
+    let app = Router::new().route(
+        "/sync/v1/x",
+        axum::routing::get(|| async { "the browser's" }),
+    );
+    let response = in_front_of(app, &SyncHub::serving(pairing()))
+        .oneshot(handshake("GET", "/sync/v1/x", &[]))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
