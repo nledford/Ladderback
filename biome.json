@@ -7,7 +7,9 @@
       "ui-tests/**/*.ts",
       "crates/l10n/tests/expectations/*.ts",
       "!ui-tests/node_modules",
-      "!ui-tests/reports"
+      "!ui-tests/reports",
+      "!.worktrees",
+      "!target"
     ]
   },
   "formatter": {

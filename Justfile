@@ -55,6 +55,7 @@ setup:
 # around a view it has laid out, never the other way round. The comment check
 # runs before either writes: leptosfmt drops a comment inside a view's Rust
 # code (§13.13).
+[doc('Format the Rust and TypeScript code: leptosfmt, rustfmt, then Biome.')]
 [group('quality')]
 fmt: _leptosfmt-pinned _ui-deps
     node scripts/leptosfmt-comments.ts leptosfmt.toml crates/web
@@ -62,8 +63,10 @@ fmt: _leptosfmt-pinned _ui-deps
     cargo fmt --all
     ui-tests/node_modules/.bin/biome format --write
 
-# Check formatting without changing files: rustfmt, leptosfmt, and no comment
-# that a leptosfmt run would drop.
+# Check Rust formatting without changing files: rustfmt, leptosfmt, and no
+# comment that a leptosfmt run would drop. The TypeScript format is checked by
+# `lint`.
+[doc('Check the Rust formatting without changing files.')]
 [group('quality')]
 fmt-check: _leptosfmt-pinned
     cargo fmt --all --check
