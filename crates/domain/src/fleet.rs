@@ -12,6 +12,7 @@ mod key_files;
 mod keys;
 mod pin;
 mod registry;
+mod route;
 mod signed;
 mod token;
 
@@ -34,6 +35,7 @@ pub use registry::{
     PairRequest, Pairing, PairingView, SHORTEST_TOKEN_LIFE, TOKEN_LIFE, TokenLifeRefused,
     TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, decide_pairing, token_life,
 };
+pub use route::{HubRoute, RouteRefused, RouteSession, is_loopback};
 pub use signed::{
     Binding, EpochSeconds, Handshakes, InvalidWireName, LABEL_PREFIX, MAX_WIRE_NAME_BYTES, Nonce,
     PayloadDigest, SignedBytes, SignedMessage, WireName,

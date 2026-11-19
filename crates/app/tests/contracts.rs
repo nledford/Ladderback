@@ -296,6 +296,48 @@ fn fake_tls_keys_meet_the_tls_keys_contract() {
     contract::tls_keys::run(&app::fakes::FakeTlsKeys::default());
 }
 
+/// The loopback connector, on a route of `0`'s kind.
+struct Loopback(domain::fleet::RouteSession);
+
+#[async_trait]
+impl contract::hub_connector::HubConnectorHarness for Loopback {
+    async fn hub(
+        &self,
+        pairing: Arc<app::pairing::HubPairing>,
+    ) -> (Arc<dyn app::ports::HubConnector>, domain::fleet::HubRoute) {
+        let connector = Arc::new(app::fakes::LoopbackHubConnector::to(pairing));
+        (connector, self.route())
+    }
+
+    async fn unanswered(&self) -> (Arc<dyn app::ports::HubConnector>, domain::fleet::HubRoute) {
+        let connector = Arc::new(app::fakes::LoopbackHubConnector::unanswered());
+        (connector, self.route())
+    }
+}
+
+impl Loopback {
+    fn route(&self) -> domain::fleet::HubRoute {
+        domain::fleet::HubRoute {
+            host: "hub.example".to_owned(),
+            port: 9443,
+            session: self.0,
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_loopback_connector_meets_the_hub_connector_contract() {
+    use domain::fleet::{Fingerprint, RouteSession};
+
+    for session in [
+        RouteSession::Plain,
+        RouteSession::Ca,
+        RouteSession::Pinned(Fingerprint::from_digest([7; 32])),
+    ] {
+        contract::hub_connector::run(&Loopback(session)).await;
+    }
+}
+
 #[tokio::test]
 async fn in_memory_identity_meets_the_identity_contract() {
     contract::identity::run(&app::fakes::InMemoryIdentity::default()).await;
