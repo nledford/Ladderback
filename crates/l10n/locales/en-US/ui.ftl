@@ -1042,6 +1042,21 @@ ui-gallery-tabs-column-second-text = The second column panel.
 ui-gallery-tabs-column-third = Third column tab
 ui-gallery-tabs-column-third-text = The third column panel.
 
+# The heading of the gallery's demo of tabs that start on a tab their caller
+# marks (§4.5), as Settings marks the tab its address names.
+ui-gallery-tabs-marked-heading = Tabs starting on a marked tab
+
+# A set of demo tabs, named by its own label, that starts on its middle tab.
+# The ar-XB rows of features/ui/components/tabs.feature name these tabs as
+# that pseudolocale writes them: a change to a tab's words changes those rows.
+ui-gallery-tabs-marked = Demo snapshot
+ui-gallery-tabs-marked-summary = Demo summary
+ui-gallery-tabs-marked-summary-text = A demo plan took the demo snapshot.
+ui-gallery-tabs-marked-files = Demo files
+ui-gallery-tabs-marked-files-text = These demo tabs start on this one, which the gallery marks.
+ui-gallery-tabs-marked-tags = Demo tags
+ui-gallery-tabs-marked-tags-text = The demo snapshot has no tags.
+
 # The heading of the gallery's tooltip demo (§4.5): a short note beside a
 # control, shown on keyboard focus or a resting pointer.
 ui-gallery-tooltip-heading = Tooltip
