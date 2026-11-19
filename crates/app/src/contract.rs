@@ -23,6 +23,7 @@ pub mod proposal_store;
 pub mod random;
 pub mod recent_log;
 pub mod release_feed;
+pub mod retention;
 pub mod schedule_store;
 pub mod secrets;
 pub mod service;

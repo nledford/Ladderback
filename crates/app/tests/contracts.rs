@@ -1256,3 +1256,45 @@ impl contract::walk::WalkHarness for InMemoryTrees {
 async fn in_memory_tree_meets_the_walk_contract() {
     contract::walk::run(&InMemoryTrees).await;
 }
+
+/// Builds each case's repository in memory: the fake reads none, so the
+/// snapshots are made up, one a day apart, and the access points nowhere.
+struct FakeRetentionHarness;
+
+#[async_trait]
+impl contract::retention::RetentionHarness for FakeRetentionHarness {
+    async fn repository(&self, count: usize) -> contract::retention::Repository {
+        let newest = Timestamp::from_second(1_800_000_000).unwrap();
+        let snapshots = (0..count)
+            .map(|number| domain::maintenance::Snapshot {
+                id: domain::SnapshotId::parse(&format!("{:064x}", number + 1)).unwrap(),
+                time: newest - SignedDuration::from_hours(24 * i64::try_from(number).unwrap()),
+                offset: domain::Offset::UTC,
+                hostname: "demo-host".to_owned(),
+                label: String::new(),
+                tags: Vec::new(),
+                paths: vec!["/srv/demo".to_owned()],
+            })
+            .collect();
+        contract::retention::Repository {
+            retention: Arc::new(app::fakes::FakeRetention),
+            access: app::ports::RepositoryAccess {
+                repository: "/srv/demo/repo".to_owned(),
+                repo_hot: None,
+                password: domain::secrets::SecretValue::new("demo-password"),
+                options: Default::default(),
+                options_hot: Default::default(),
+                options_cold: Default::default(),
+                secrets: Vec::new(),
+                id: None,
+                entry: None,
+            },
+            snapshots,
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_fake_retention_meets_the_retention_contract() {
+    contract::retention::run(&FakeRetentionHarness).await;
+}

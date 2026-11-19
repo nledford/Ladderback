@@ -1,11 +1,12 @@
-//! The real `Retention` adapter against a scratch repository: it removes
-//! exactly the snapshots rustic's own retention lets go, and it agrees with
-//! the port's fake on the same group (§13.3: fakes don't drift).
+//! The real `Retention` adapter against a scratch repository: it meets the
+//! port's contract suite, as the fake does (§13.3: fakes don't drift), and
+//! it keeps credentials out of its errors.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use app::fakes::FakeRetention;
+use app::contract::retention::{Repository, RetentionHarness, run};
 use app::ports::{EngineEvent, EngineResult, Job, RepositoryAccess, Retention, RetentionError};
+use async_trait::async_trait;
 use domain::SnapshotId;
 use domain::Timestamp;
 use domain::maintenance::Snapshot;
@@ -44,84 +45,56 @@ async fn listed(engine: &WorkerEngine, access: &RepositoryAccess) -> Vec<Snapsho
     group
 }
 
-/// Four backups of changing contents: four distinct snapshots, each made
-/// at least a second of wall-clock time after the last, so no two share a
-/// timestamp and the oldest are unambiguous.
-async fn four_snapshots(_scratch: &Scratch, access: &RepositoryAccess) -> Vec<Snapshot> {
-    let group = listed(&engine(), access).await;
-    assert_eq!(group.len(), 4, "{group:?}");
-    group
-}
+/// Makes each case's repository in its own scratch folder, kept until the
+/// harness is dropped: a snapshot a day after the one before, of changing
+/// contents.
+#[derive(Default)]
+struct ScratchRepositories(Mutex<Vec<Scratch>>);
 
-#[tokio::test]
-async fn keep_last_removes_the_oldest_as_the_fake_does() {
-    let scratch = Scratch::new();
-    let location = scratch.local();
-    location.init();
-    write_file(scratch.source().join("a.txt"), b"hello");
-    let repo = location.open().to_indexed_ids().unwrap();
-    let paths = PathList::from_iter([scratch.source()]).sanitize().unwrap();
-    for number in 1..=4 {
-        write_file(
-            scratch.source().join("a.txt"),
-            format!("content {number}").as_bytes(),
-        );
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        repo.backup(
-            &BackupOptions::default(),
-            &paths,
-            SnapshotOptions::default().to_snapshot().unwrap(),
-        )
-        .unwrap();
+#[async_trait]
+impl RetentionHarness for ScratchRepositories {
+    async fn repository(&self, count: usize) -> Repository {
+        let scratch = Scratch::new();
+        let location = scratch.local();
+        location.init();
+        let repo = location.open().to_indexed_ids().unwrap();
+        let paths = PathList::from_iter([scratch.source()]).sanitize().unwrap();
+        // From 2026-01-01, a day apart: each snapshot's time is set rather
+        // than waited for, so no two share one.
+        let first = jiff::Timestamp::from_second(1_767_225_600).unwrap();
+        for number in 0..count {
+            write_file(
+                scratch.source().join("a.txt"),
+                format!("content {number}").as_bytes(),
+            );
+            let days = i64::try_from(number).unwrap();
+            let time = (first + jiff::SignedDuration::from_hours(24 * days))
+                .to_zoned(jiff::tz::TimeZone::UTC);
+            repo.backup(
+                &BackupOptions::default(),
+                &paths,
+                SnapshotOptions::default().time(time).to_snapshot().unwrap(),
+            )
+            .unwrap();
+        }
+        let access = location.access(PASSWORD);
+        let snapshots = listed(&engine(), &access).await;
+        assert_eq!(snapshots.len(), count, "{snapshots:?}");
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(scratch);
+        Repository {
+            retention: Arc::new(RusticRetention),
+            access,
+            snapshots,
+        }
     }
-    let access = location.access(PASSWORD);
-    let group = four_snapshots(&scratch, &access).await;
-
-    let policy = RetentionPolicy {
-        keep_last: Some(KeepCount::new(2).unwrap()),
-        ..RetentionPolicy::default()
-    };
-    let real = RusticRetention
-        .removes(&access, &policy, &group)
-        .await
-        .expect("the real adapter answers");
-    let expected = Arc::new(FakeRetention)
-        .removes(&access, &policy, &group)
-        .await
-        .expect("the fake answers");
-
-    assert_eq!(real, expected, "the fake and the real adapter agree");
-    let oldest: Vec<_> = group[2..].iter().map(|s| s.id.clone()).collect();
-    assert_eq!(real, oldest, "the oldest two go: the group is newest first");
 }
 
 #[tokio::test]
-async fn an_empty_policy_is_refused_as_the_fake_refuses_it() {
-    // Rustic's retention refuses a policy that sets no `keep-*` option, so
-    // the use case never asks with one (an empty policy keeps everything);
-    // the fake refuses it too, so an acceptance scenario that asks fails.
-    let scratch = Scratch::new();
-    let location = scratch.local();
-    location.init();
-    write_file(scratch.source().join("a.txt"), b"hello");
-    let repo = location.open().to_indexed_ids().unwrap();
-    let paths = PathList::from_iter([scratch.source()]).sanitize().unwrap();
-    repo.backup(
-        &BackupOptions::default(),
-        &paths,
-        SnapshotOptions::default().to_snapshot().unwrap(),
-    )
-    .unwrap();
-    let access = location.access(PASSWORD);
-    let group = listed(&engine(), &access).await;
-    assert_eq!(group.len(), 1, "{group:?}");
-
-    let policy = RetentionPolicy::default();
-    let real = RusticRetention.removes(&access, &policy, &group).await;
-    let fake = FakeRetention.removes(&access, &policy, &group).await;
-
-    assert_eq!(real, Err(RetentionError::InvalidPolicy));
-    assert_eq!(fake, real, "the fake and the real adapter agree");
+async fn rustic_retention_meets_the_retention_contract() {
+    run(&ScratchRepositories::default()).await;
 }
 
 #[tokio::test]
