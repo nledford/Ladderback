@@ -21,13 +21,20 @@ test("a file not named as a component's .rs file is refused", () => {
 });
 
 test("a file without a heading is refused", () => {
-  assert.match(String(parseContract("tooltip.md", "- **The tooltip** is `Tooltip`.\n")), /needs a heading/);
-  assert.match(String(parseContract("tooltip.md", "## The tooltip\n")), /needs a heading/);
+  assert.match(String(parseContract("tooltip.md", "- **The tooltip** is `Tooltip`.\n")), /opens with its heading/);
+  assert.match(String(parseContract("tooltip.md", "## The tooltip\n")), /opens with its heading/);
 });
 
-test("a heading inside fenced code doesn't count", () => {
-  const markdown = "```\n# Not this\n```\n\n# The tooltip\n";
-  assert.deepEqual(parseContract("tooltip.md", markdown), contract("tooltip", "The tooltip"));
+test("a contract file opens with its heading; a heading later in the file doesn't count", () => {
+  assert.deepEqual(parseContract("tooltip.md", "\n# The tooltip\n\ntext\n"), contract("tooltip", "The tooltip"));
+  assert.match(String(parseContract("tooltip.md", "intro\n\n# The tooltip\n")), /opens with its heading/);
+  assert.match(String(parseContract("tooltip.md", "```\n# Not this\n```\n\n# The tooltip\n")), /opens with its heading/);
+});
+
+test("a heading that would break its link in the index is refused", () => {
+  assert.match(String(parseContract("tooltip.md", "# The [tooltip\n")), /a "\[" or "\]"/);
+  assert.match(String(parseContract("tooltip.md", "# The tooltip]\n")), /a "\[" or "\]"/);
+  assert.match(String(parseContract("tooltip.md", "# The tooltip #\n")), /ends with "#"/);
 });
 
 test("a heading with a pipe, which would split its row, is refused", () => {

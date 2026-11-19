@@ -19,7 +19,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { conflictLine, proseLines } from "./decision-index.ts";
+import { conflictLine } from "./decision-index.ts";
 
 export interface Contract {
   component: string;
@@ -41,15 +41,23 @@ export function parseContract(file: string, markdown: string): Contract | string
   if (conflict !== null) {
     return `${file}:${conflict}: a merge-conflict marker: resolve the conflict first`;
   }
-  const title = proseLines(markdown)
-    .find(({ line }) => line.startsWith("# "))
-    ?.line.slice(2)
-    .trim();
+  // The file opens with its heading (§13.7.5): its first line that isn't blank.
+  const first = markdown.split("\n").find((line) => line.trim() !== "");
+  if (first === undefined || !first.startsWith("# ")) {
+    return `${file}: it opens with its heading, "# <title>", such as "# The tooltip"`;
+  }
+  const title = first.slice(2).trim();
   if (!title) {
-    return `${file}: it needs a heading, "# <title>", such as "# The tooltip"`;
+    return `${file}: it opens with its heading, "# <title>", such as "# The tooltip"`;
   }
   if (title.includes("|")) {
     return `${file}: its heading has a "|", which would split its row in the index`;
+  }
+  if (title.includes("[") || title.includes("]")) {
+    return `${file}: its heading has a "[" or "]", which would break its link in the index`;
+  }
+  if (title.endsWith("#")) {
+    return `${file}: its heading ends with "#", which Markdown drops as a closing mark`;
   }
   return { component, file, title };
 }
