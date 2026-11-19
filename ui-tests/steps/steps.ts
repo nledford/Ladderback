@@ -50,45 +50,39 @@ const laidOut = (list: Locator) =>
 
 // Each step's name and its state in words, read as a screen reader reads
 // the item (the icon is hidden from it), in order.
-Then(
-  "the list of steps {string} reads, in order:",
-  async function (this: BrowserWorld, name: string, table: DataTable) {
-    const expected = table.hashes().map((row) => `${row.step} ${row.state}`);
-    const items = stepsList(this.page, name).getByRole("listitem");
-    await expect(items).toHaveCount(expected.length);
-    const all = await items.all();
-    const read = await Promise.all(all.map((item) => said(item)));
-    assert.deepEqual(read, expected, `the steps of ${name}`);
-    // The state is in words a reader sees too (§4.5), not only in words a
-    // screen reader says: no box too small to see, none clipped away as
-    // visually hidden text is.
-    const unseen = await Promise.all(
-      all.map((item) =>
-        item.evaluate((element) => {
-          const state = element.querySelector(".steps-state");
-          if (state === null) return "no state in words";
-          const rect = state.getBoundingClientRect();
-          const style = getComputedStyle(state);
-          if (rect.width <= 1 || rect.height <= 1) return `a box of ${rect.width} by ${rect.height} px`;
-          if (style.clipPath !== "none" || style.clip !== "auto") return `clipped (${style.clipPath}, ${style.clip})`;
-          return null;
-        }),
-      ),
-    );
-    unseen.forEach((why, at) => assert.equal(why, null, `the state of step ${at + 1} of ${name} isn't shown: ${why}`));
-  },
-);
+Then("the list of steps {string} reads, in order:", async function (this: BrowserWorld, name: string, table: DataTable) {
+  const expected = table.hashes().map((row) => `${row.step} ${row.state}`);
+  const items = stepsList(this.page, name).getByRole("listitem");
+  await expect(items).toHaveCount(expected.length);
+  const all = await items.all();
+  const read = await Promise.all(all.map((item) => said(item)));
+  assert.deepEqual(read, expected, `the steps of ${name}`);
+  // The state is in words a reader sees too (§4.5), not only in words a
+  // screen reader says: no box too small to see, none clipped away as
+  // visually hidden text is.
+  const unseen = await Promise.all(
+    all.map((item) =>
+      item.evaluate((element) => {
+        const state = element.querySelector(".steps-state");
+        if (state === null) return "no state in words";
+        const rect = state.getBoundingClientRect();
+        const style = getComputedStyle(state);
+        if (rect.width <= 1 || rect.height <= 1) return `a box of ${rect.width} by ${rect.height} px`;
+        if (style.clipPath !== "none" || style.clip !== "auto") return `clipped (${style.clipPath}, ${style.clip})`;
+        return null;
+      }),
+    ),
+  );
+  unseen.forEach((why, at) => assert.equal(why, null, `the state of step ${at + 1} of ${name} isn't shown: ${why}`));
+});
 
 // One step carries `aria-current="step"`, the one the process stands at.
-Then(
-  "the current step of the list of steps {string} is {string}",
-  async function (this: BrowserWorld, name: string, step: string) {
-    const current = stepsList(this.page, name).locator('[aria-current="step"]');
-    await expect(current).toHaveCount(1);
-    await expect(current).toHaveRole("listitem");
-    await expect(current.locator(".steps-name")).toHaveText(step);
-  },
-);
+Then("the current step of the list of steps {string} is {string}", async function (this: BrowserWorld, name: string, step: string) {
+  const current = stepsList(this.page, name).locator('[aria-current="step"]');
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveRole("listitem");
+  await expect(current.locator(".steps-name")).toHaveText(step);
+});
 
 // Never color alone (A2): each state's icon has a shape of its own, the same
 // for every step in that state, before the step's name, and is decoration a
@@ -109,10 +103,7 @@ Then(
           hidden: icon?.getAttribute("aria-hidden") ?? null,
           focusable: icon?.getAttribute("focusable") ?? null,
           shape: icon?.innerHTML ?? "",
-          before:
-            icon !== undefined &&
-            name !== null &&
-            (icon.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+          before: icon !== undefined && name !== null && (icon.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
           state: element.querySelector(".steps-state")?.textContent?.trim() ?? "",
         };
       });
@@ -132,18 +123,15 @@ Then(
 );
 
 // It is no live region (§4.5): the announcer says a change of step.
-Then(
-  "the list of steps {string} is no live region, nor inside one",
-  async function (this: BrowserWorld, name: string) {
-    const live = await stepsList(this.page, name).evaluate((list, selector) => {
-      const around = list.closest(selector);
-      if (around !== null) return around.outerHTML.slice(0, 120);
-      const inside = list.querySelector(selector);
-      return inside === null ? null : inside.outerHTML.slice(0, 120);
-    }, LIVE_REGION);
-    assert.equal(live, null, `the list of steps ${name} is in a live region`);
-  },
-);
+Then("the list of steps {string} is no live region, nor inside one", async function (this: BrowserWorld, name: string) {
+  const live = await stepsList(this.page, name).evaluate((list, selector) => {
+    const around = list.closest(selector);
+    if (around !== null) return around.outerHTML.slice(0, 120);
+    const inside = list.querySelector(selector);
+    return inside === null ? null : inside.outerHTML.slice(0, 120);
+  }, LIVE_REGION);
+  assert.equal(live, null, `the list of steps ${name} is in a live region`);
+});
 
 // Tab from the demo's one control leaves the demo: no list of steps after
 // it, nor any step, is a stop for Tab (§4.5).
@@ -220,15 +208,13 @@ Then(
 
 // A long name wraps, never cut: its text takes more than one line.
 Then("a step of the steps demo wraps its name onto more than one line", async function (this: BrowserWorld) {
-  const lines = await this.page
-    .locator("#steps-demo .steps-name")
-    .evaluateAll((names) =>
-      names.map((name) => {
-        const range = document.createRange();
-        range.selectNodeContents(name);
-        return new Set(Array.from(range.getClientRects(), (line) => Math.round(line.top))).size;
-      }),
-    );
+  const lines = await this.page.locator("#steps-demo .steps-name").evaluateAll((names) =>
+    names.map((name) => {
+      const range = document.createRange();
+      range.selectNodeContents(name);
+      return new Set(Array.from(range.getClientRects(), (line) => Math.round(line.top))).size;
+    }),
+  );
   assert.equal(lines.length, STEPS);
   assert.ok(
     lines.some((count) => count > 1),
