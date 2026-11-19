@@ -16,7 +16,8 @@ Decided:
 5. **The type check.** `just lint` runs `tsc --project tsconfig.json`, after `_ui-deps` installs `ui-tests`' packages when they are missing or older than the lockfile, so the first `just lint` in a fresh worktree needs the network.
 6. **The binary.** The UI tests' world finds the binary itself, `LADDERBACK_BIN` or else `debug/ladderback` under the target directory `cargo metadata` names, which replaces `test-ui`'s inline lookup and makes a bare `npm test` follow `CARGO_TARGET_DIR` (it needs `cargo` on the `PATH` when `LADDERBACK_BIN` is unset).
 7. **The format and the lint.** `biome.json` at the root has Biome (`@biomejs/biome`, an exact `ui-tests` dev-dependency, as the compiler is) format and lint the same three trees, and `just lint` runs `biome ci --error-on-warnings`, which writes nothing and fails on a warning as on an error; `just fmt` writes the format.
-   - The formatter's settings match the code that was there: two spaces, double quotes, semicolons, and a line width of 135, the one that changed the fewest lines of those tried. The lint set is Biome's recommended rules; a rule is turned off only in `biome.json`, and a single line is excused only by a `biome-ignore` comment that says why.
+   - The formatter's settings match the code that was there: two spaces, double quotes, semicolons, and a line width of 135, the one that changed the fewest lines of those tried. The lint set is Biome's recommended rules; a rule is turned off only in `biome.json` (JSON has no comments, so the reason goes here), and a single line is excused only by a `biome-ignore` comment that says why.
+   - One rule is off: `performance/useDomNodeTextContent`. The UI steps read `innerText`, and Playwright's `innerText()`, on purpose: the text a person sees, with what is hidden left out, which `textContent` doesn't give.
 
 Not chosen:
 

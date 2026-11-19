@@ -25,7 +25,8 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "performance": { "useDomNodeTextContent": "off" }
     }
   },
   "assist": {
