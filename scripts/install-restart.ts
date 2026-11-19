@@ -1,32 +1,56 @@
 #!/usr/bin/env node
-// `just install-restart` (#519): installs Ladderback from this checkout
-// (`just install`), waits until the installed daemon has nothing running or
-// queued, restarts its service with the new binary (`ladderback
-// install-service`, decision 64), then checks that the service runs this
-// checkout's build (scripts/build-identity.ts, decision 90).
+// `just install-restart` (#519): builds Ladderback from this checkout into a
+// staging folder (`just install --root <staging>`), checks the new program
+// there, waits until the installed daemon has nothing running or queued,
+// then puts the new program in place and restarts its service with it
+// (`ladderback install-service`, decision 64) at once, and checks that the
+// service runs this checkout's build (scripts/build-identity.ts, decision
+// 90).
 //
-//   1. `just install [args]`: a failed build, or a failed signing with
-//      LADDERBACK_SIGN_IDENTITY (scripts/install-signing.ts), stops here,
-//      before the running daemon is touched. A failed signing comes after
-//      the new program is installed, which the daemon runs at its next start.
-//   2. The installed program's `--version` must name the build of this
-//      checkout as it was when the install began, or nothing is restarted.
-//      It is asked again after the wait, just before step 4.
-//   2a. `<bin>/ladderback check-keyring`: the new program reads each
+//   1. `just install [args] --root <staging>`, any `--root` in the args
+//      replaced: the new program goes to `<staging>/bin/ladderback` and,
+//      with LADDERBACK_SIGN_IDENTITY, is signed there
+//      (scripts/install-signing.ts). A failed build or signing stops here;
+//      the installed program and the running daemon are untouched.
+//   2. The new program's `--version` must name the build of this checkout
+//      as it was when the install began, or nothing is installed.
+//   2a. `<staging>/bin/ladderback check-keyring`: the new program reads each
 //      `password-keyring` entry once, in this terminal, so that the
 //      keychain, which asks once for each new build (#892), asks while
 //      someone is there. An entry it can't read stops the script here,
 //      unless `--ignore-keyring-failure`.
 //   3. The wait: every 5 s, until the daemon's operation log holds no
 //      operation `running` or `queued`, for up to `--wait` minutes, after
-//      which it gives up without restarting. `--now` skips the wait.
-//   4. `<bin>/ladderback install-service`, from Cargo's bin folder (`--root`
-//      when given), which rewrites the service file and restarts the service.
+//      which it gives up without installing. `--now` skips the wait.
+//   4. One rename moves the new program over `ladderback` in Cargo's bin
+//      folder (`--root` when given), and at once `<bin>/ladderback
+//      install-service` rewrites the service file and restarts the service.
 //   5. The check: the service manager names a new process for the service,
 //      and the daemon answers `GET /api/v1/session` within a minute. With
 //      sign-in off it names its build there, which must be this checkout's;
 //      with sign-in on it names it only to a session, and the new process
 //      started from the program step 2 checked is what confirms the build.
+//
+// Until step 4 the program on disk is the one the running daemon runs. A
+// process whose program on disk has changed under it can't read the macOS
+// keychain, so when the install came first, a scheduled backup that started
+// during the wait failed to read its keyring password (#1107); anything the
+// daemon starts from its own path, such as a worker, would start the new
+// build too. The staging folder, `.ladderback-install-XXXXXX`, is made in
+// the installed program's own folder, so on the same file system: there a
+// rename replaces the program in one step, never half written, which it
+// can't across file systems. It is removed when the script ends, whether it
+// succeeds or fails, and on SIGINT, SIGTERM or SIGHUP; only a SIGKILL or a
+// crash leaves it behind, a hidden folder that is safe to delete. A stop
+// signal that comes while a step before the rename runs (the build, a check,
+// the keyring read) stops the script before the rename, not after it: Node
+// runs its handler only between steps, so the script gives it a turn just
+// before the rename, and a step the signal ended stops the script too.
+// Cargo's note to add `<staging>/bin` to the PATH is about the staging
+// folder and doesn't apply.
+// As the build goes to its own root, Cargo's record of what it installed
+// (`.crates.toml` beside the bin folder) keeps the version the last plain
+// `just install` wrote, and `cargo install --list` names that.
 //
 // The wait reads the operation log (`ladderback.db` in the daemon's data
 // folder) itself, read-only, with Node's `node:sqlite`, rather than asking
@@ -48,35 +72,39 @@
 // `$XDG_DATA_HOME/ladderback`, or `~/.local/share/ladderback`, on Linux.
 //
 // The wait is a race in principle: a backup can start between the last
-// check and the restart. The window is seconds. A run the restart catches
-// ends failed (`daemon-stopped`), as any restart ends it, and a backup still
-// queued runs again once the daemon is back (§5,
-// features/execution/recovery.feature).
+// check and the restart, the seconds the rename and `install-service` take,
+// and in them the running daemon's program on disk is already the new one.
+// A run the restart catches ends failed (`daemon-stopped`), as any restart
+// ends it, and a backup still queued runs again once the daemon is back
+// (§5, features/execution/recovery.feature).
 //
 // Usage: node scripts/install-restart.ts [--now] [--wait <minutes>]
 //          [--ignore-keyring-failure] [args for `just install`]...
 // Exit status: 0 once the daemon runs the new build; 1 when it isn't
-// restarted, or is but can't be confirmed to run the new build; 2 on bad
-// usage.
+// installed and restarted, or is but can't be confirmed to run the new
+// build; 2 on bad usage. A run that SIGINT, SIGTERM or SIGHUP stops exits
+// with 128 and the signal's number.
 //
 // INSTALL_RESTART_ADDRESS names the address the service listens on
 // (`host:port`, default 127.0.0.1:9898, where `install-service` has it
 // listen): set it for a service file edited to `serve --listen` elsewhere,
 // or the check after the restart can't reach the daemon. INSTALL_RESTART_JUST
-// and INSTALL_RESTART_LADDERBACK name the programs run for `just` and for the
-// installed `ladderback`, and the service manager is the `launchctl` or
+// names the program run for `just`, and INSTALL_RESTART_LADDERBACK the
+// installed program, in place of `ladderback` in Cargo's bin folder: the
+// staging folder is made beside it, the new program is moved over it, and
+// it runs `install-service`. The service manager is the `launchctl` or
 // `systemctl` on the PATH. With these, a stand-in for the service manager
 // first on the PATH and LADDERBACK_DATA_DIR naming the daemon's data folder,
-// the script can be tried against a `just try` daemon without installing
-// anything or touching the real service, as
+// the script can be tried against a `just try` daemon without touching
+// Cargo's bin folder or the real service, as
 // features/cli/install_restart.feature runs it.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { platform } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { constants, platform } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { setTimeout as sleep } from "node:timers/promises";
+import { setImmediate as nextTurn, setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import type { Build } from "./build-identity.ts";
@@ -240,13 +268,13 @@ async function waitUntilIdle(minutes: number): Promise<boolean> {
     if (now.kind === "idle") return true;
     if (now.kind === "unknown") {
       console.error(
-        `install-restart: can't tell whether the daemon is busy: ${now.why}. Not restarting; --now restarts without asking.`,
+        `install-restart: can't tell whether the daemon is busy: ${now.why}. Not installing or restarting; --now installs and restarts without asking.`,
       );
       return false;
     }
     if (Date.now() >= deadline) {
       console.error(
-        `install-restart: still busy after ${minutes} min (${now.running} running, ${now.queued} queued). Not restarting; the new binary is installed, and --now restarts at once.`,
+        `install-restart: still busy after ${minutes} min (${now.running} running, ${now.queued} queued). Not installing or restarting; the installed program is untouched, and --now installs and restarts at once.`,
       );
       return false;
     }
@@ -257,8 +285,8 @@ async function waitUntilIdle(minutes: number): Promise<boolean> {
   }
 }
 
-/** Whether the `ladderback --version` of `program` names the build expected; otherwise what it says instead. */
-function installedBuild(program: string, wanted: string, expected: Build | undefined, version: string): true | Unknown {
+/** Whether the `ladderback --version` of the new program `program` names the build expected; otherwise what it says instead. */
+function newBuild(program: string, wanted: string, expected: Build | undefined, version: string): true | Unknown {
   const result = spawnSync(program, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: REQUEST_MS });
   if (result.error) return { why: `${program} --version couldn't run (${result.error.message})` };
   const said = firstLine(result.stdout);
@@ -267,7 +295,7 @@ function installedBuild(program: string, wanted: string, expected: Build | undef
   const named = /^ladderback (\S+)$/.exec(said)?.[1];
   // When git couldn't say, the version alone, with or without a commit.
   const ok = expected === undefined ? named === version || named?.startsWith(`${version}+`) === true : named === wanted;
-  return ok ? true : { why: `the installed program says ${said}, not ladderback ${wanted}` };
+  return ok ? true : { why: `the new program says ${said}, not ladderback ${wanted}` };
 }
 
 /** What confirmed the restart: the build the daemon names, or none with sign-in on. */
@@ -337,24 +365,61 @@ function same(build: Build, expected: Build | undefined, version: string): boole
   return build.version === expected.version && build.commit === expected.commit && build.dirty === expected.dirty;
 }
 
-/** Runs `program` with `args` here, its output passed through; its exit status. */
+/** A child that SIGINT, SIGTERM or SIGHUP ended, as Ctrl-C ends the step it runs: the script stops too. */
+class Stopped extends Error {
+  readonly signal: NodeJS.Signals;
+  constructor(signal: NodeJS.Signals) {
+    super(`stopped by ${signal}`);
+    this.signal = signal;
+  }
+}
+
+/** Runs `program` with `args` here, its output passed through; its exit status. Throws `Stopped` when a stop signal ended it. */
 function run(program: string, args: string[]): number {
   const result = spawnSync(program, args, { cwd: ROOT, stdio: "inherit" });
   if (result.error) {
     console.error(`install-restart: couldn't run ${program}: ${result.error.message}`);
     return 1;
   }
+  if (result.signal === "SIGINT" || result.signal === "SIGTERM" || result.signal === "SIGHUP") throw new Stopped(result.signal);
   return result.status ?? 1;
-}
-
-/** The arguments for `just install` that build into `staging`: `args` with any `--root` replaced by it. */
-export function stagingArgs(args: readonly string[], staging: string): string[] {
-  throw new Error(`todo: stagingArgs(${args.join(" ")}, ${staging})`);
 }
 
 /** What is wrong with a `--root` in the arguments for `just install`, which cargo would refuse: one with no folder. */
 export function rootProblem(args: readonly string[]): string | undefined {
-  throw new Error(`todo: rootProblem(${args.join(" ")})`);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    const folder = arg === "--root" ? args[i + 1] : arg.startsWith("--root=") ? arg.slice("--root=".length) : null;
+    if (folder === null) continue;
+    if (folder === undefined || folder === "" || (arg === "--root" && folder.startsWith("-"))) return "--root needs a folder";
+  }
+  return undefined;
+}
+
+/** The arguments for `just install` that build into `staging`: `args` with any `--root` replaced by it, first. */
+export function stagingArgs(args: readonly string[], staging: string): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--root") i++;
+    else if (!arg.startsWith("--root=")) kept.push(arg);
+  }
+  return ["--root", staging, ...kept];
+}
+
+/** What one run does, read from its arguments and environment. */
+interface Options {
+  now: boolean;
+  ignoreKeyring: boolean;
+  minutes: number;
+  /** The arguments for `just install`. */
+  install: string[];
+  /** The address the service listens on. */
+  address: string;
+  /** The installed program, which the new one replaces. */
+  program: string;
+  /** The staging folder, beside `program`. */
+  staging: string;
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -374,7 +439,50 @@ async function main(argv: string[]): Promise<number> {
       if (given.trim() === "" || !Number.isFinite(minutes) || minutes < 0) usage(`--wait takes minutes, not ${JSON.stringify(given)}`);
     } else install.push(arg);
   }
+  const bad = rootProblem(install);
+  if (bad !== undefined) usage(bad);
   const address = process.env.INSTALL_RESTART_ADDRESS || DEFAULT_ADDRESS;
+  const program = process.env.INSTALL_RESTART_LADDERBACK || path.join(binFolder(install, process.env), "ladderback");
+
+  // Beside the installed program, so on its file system: the move into
+  // place is then one rename.
+  let staging: string;
+  try {
+    mkdirSync(path.dirname(program), { recursive: true });
+    staging = mkdtempSync(path.join(path.dirname(program), ".ladderback-install-"));
+  } catch (error) {
+    console.error(
+      `install-restart: can't make a staging folder beside ${program} (${(error as Error).message}). Nothing was built; the running daemon is untouched.`,
+    );
+    return 1;
+  }
+  const removeStaging = () => rmSync(staging, { recursive: true, force: true });
+  // Ended by a signal, as by Ctrl-C during the wait, the staging folder goes
+  // too, and the exit status is the one the signal would have given.
+  const handlers = (["SIGINT", "SIGTERM", "SIGHUP"] as const).map((signal) => {
+    const stopped = () => {
+      removeStaging();
+      console.error(`install-restart: stopped by ${signal}.`);
+      process.exit(128 + constants.signals[signal]);
+    };
+    process.once(signal, stopped);
+    return [signal, stopped] as const;
+  });
+  try {
+    return await update({ now, ignoreKeyring, minutes, install, address, program, staging });
+  } catch (error) {
+    if (!(error instanceof Stopped)) throw error;
+    console.error(`install-restart: ${error.message}.`);
+    return 128 + constants.signals[error.signal];
+  } finally {
+    for (const [signal, stopped] of handlers) process.removeListener(signal, stopped);
+    removeStaging();
+  }
+}
+
+/** Steps 1 to 5 (above), the new program built into the staging folder; the exit status. */
+async function update(options: Options): Promise<number> {
+  const { address, program, staging } = options;
   const base = `http://${address}`;
 
   // What the binary will be built from: the tree now, before the build.
@@ -382,49 +490,66 @@ async function main(argv: string[]): Promise<number> {
   const version = workspaceVersion(ROOT);
   const wanted = expected === undefined ? version : shown(expected);
 
-  const installed = run(process.env.INSTALL_RESTART_JUST || "just", ["install", ...install]);
-  if (installed !== 0) {
-    console.error("install-restart: the install failed; the running daemon is untouched.");
+  const built = run(process.env.INSTALL_RESTART_JUST || "just", ["install", ...stagingArgs(options.install, staging)]);
+  if (built !== 0) {
+    console.error(
+      `install-restart: the install into a staging folder failed, so nothing was installed: ${program} and the running daemon are untouched. The staging folder is removed; to retry a failed signing, run install-restart again.`,
+    );
     return 1;
   }
 
-  const ladderback = process.env.INSTALL_RESTART_LADDERBACK || path.join(binFolder(install, process.env), "ladderback");
-  const checked = installedBuild(ladderback, wanted, expected, version);
+  const staged = path.join(staging, "bin", "ladderback");
+  const checked = newBuild(staged, wanted, expected, version);
   if (checked !== true) {
-    console.error(`install-restart: ${checked.why}. Not restarting; the running daemon is untouched.`);
+    console.error(`install-restart: ${checked.why}. Not installing or restarting; ${program} and the running daemon are untouched.`);
     return 1;
   }
 
   // The keychain asks once for each new build before it lets the build read
   // a `password-keyring` entry (#892): asked here, in the terminal, the
   // question comes while someone is there, not at the next scheduled run.
-  if (run(ladderback, ["check-keyring"]) !== 0) {
+  if (run(staged, ["check-keyring"]) !== 0) {
     console.error(
       "install-restart: the new program couldn't read every keyring entry, or the configuration that names them (above), so a backup or a notification that needs one may fail too.",
     );
-    if (!ignoreKeyring) {
+    if (!options.ignoreKeyring) {
       console.error(
-        "install-restart: Not restarting; the running daemon is untouched. --ignore-keyring-failure restarts all the same.",
+        `install-restart: Not installing or restarting; ${program} and the running daemon are untouched. --ignore-keyring-failure restarts all the same.`,
       );
       return 1;
     }
     console.log("install-restart: --ignore-keyring-failure: restarting all the same.");
   }
 
-  if (now) console.log("install-restart: --now: restarting without waiting.");
-  else if (!(await waitUntilIdle(minutes))) return 1;
+  if (options.now) console.log("install-restart: --now: restarting without waiting.");
+  else if (!(await waitUntilIdle(options.minutes))) return 1;
 
-  // Again, as the wait can last hours: another checkout's `just install`
-  // meanwhile writes over the program, and `install-service` would start that.
-  const still = installedBuild(ladderback, wanted, expected, version);
-  if (still !== true) {
-    console.error(`install-restart: ${still.why}. Not restarting; the running daemon is untouched.`);
+  // A signal that came while a step above ran synchronously, as one to
+  // `timeout just install-restart` during the build, waits for the event
+  // loop: its handler runs here, before anything is replaced.
+  await nextTurn();
+
+  // From the rename on, the running daemon's program on disk is the new one,
+  // so the restart follows at once.
+  const before = serviceProcess();
+  try {
+    renameSync(staged, program);
+  } catch (error) {
+    console.error(
+      `install-restart: can't move the new program over ${program} (${(error as Error).message}). Not restarting; ${program} and the running daemon are untouched.`,
+    );
     return 1;
   }
-
-  const before = serviceProcess();
-  if (run(ladderback, ["install-service"]) !== 0) {
-    console.error(`install-restart: ${ladderback} install-service failed.`);
+  const notRestarted = `install-restart: ${program} install-service didn't finish. The new program is installed, but the daemon still runs the earlier one, which on macOS can't read the keychain until it restarts: run ${program} install-service now.`;
+  let status: number;
+  try {
+    status = run(program, ["install-service"]);
+  } catch (error) {
+    console.error(notRestarted);
+    throw error;
+  }
+  if (status !== 0) {
+    console.error(notRestarted);
     return 1;
   }
 
