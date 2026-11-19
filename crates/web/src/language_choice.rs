@@ -5,10 +5,6 @@
 
 use l10n::Language;
 
-/// The `id` of the section, which the page's address names by its fragment
-/// when the page is shown again after a save, so focus comes back to it.
-pub(crate) const SECTION_ID: &str = "language";
-
 /// The `id` of the section's heading.
 pub(crate) const HEADING_ID: &str = "language-heading";
 
