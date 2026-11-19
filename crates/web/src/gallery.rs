@@ -1,46 +1,20 @@
 //! The component gallery (technical design §4.5, "Tests"): the dev-only route
 //! `/_gallery`, where Playwright drives the shared components with real input.
-//! Built only with the `gallery` feature. Today it shows the announcer: buttons
-//! that queue a polite or an assertive message, and a dialog standing in for a
-//! modal.
+//! Built only with the `gallery` feature. Each demo is a module of its own,
+//! named after the component it shows (`tooltip` for the tooltip's demo).
 
-use std::num::NonZeroU8;
-use std::rc::Rc;
 use std::sync::Arc;
 
-use api::{EntryDto, EntryKindDto, FolderDto, MsgArg};
-use l10n::{Direction, Localizer, MessageId, msg};
-use lepticons_data::LucideGlyph;
-use leptos::either::Either;
+use api::MsgArg;
+use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
-use leptos::task::{spawn_local, tick};
 
-use crate::announcer::Politeness;
-use crate::backend::Progress as Reading;
-use crate::components::alert::rules::AlertTone;
-use crate::components::badge::rules::BadgeTone;
-use crate::components::banner::rules::BannerTone;
-use crate::components::button::{Appearance, Content, Kind};
-use crate::components::icon::Meaning;
+use crate::components::Link;
 use crate::components::link::rules::{Destination, LinkTone, Matching};
-use crate::components::skeleton::rules::{Shape, Share};
-use crate::components::spinner::rules::LabelShown;
-use crate::components::status_badge::rules::BadgeState;
-use crate::components::tabs::{Activation, Holds, Orientation, TabSet, TabsName};
-use crate::components::{
-    Alert, Align, Badge, Banner, BannerDismissal, Button, Checkbox, Column, Confirmation,
-    Dismissal, FolderLoader, FolderPage, Footer, Icon, LabelLanguage, Link, ModalDialog, Name,
-    PauseUpdates, Progress, RadioGroup, Reached, ReviewDialog, Sentences, Skeleton, Sort, SortKey,
-    Spinner, State, StatusBadge, StepUp, StepUpField, Steps, StepsName, Tab, Table, Tabs,
-    TextField, Tip, TitleLevel, Toast, ToastTone, Toasts, Tooltip, Tree,
-};
-use crate::live::{close_modal_when_gone, modal_gone, open_modal, reply, say};
 use crate::page;
-use crate::pause::{self, Ends};
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
 use crate::text;
-use crate::variants::{Placement, Rem, Side, Size, StatusTone, Tone};
 
 mod alert;
 mod announcer;
