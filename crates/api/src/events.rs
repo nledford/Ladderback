@@ -4,9 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ErrorCode, MsgArg, OperationStep, ProgressUnit, ProposalStatusDto, WarningCode};
 
-#[cfg(doc)]
-use crate::ErrorDto;
-
 /// One live update the daemon pushes to a connected page over the events
 /// WebSocket (technical design §4.4): what an operation reported, or that an
 /// agent came or went. Identifiers are text, counts are numbers, and times
@@ -60,7 +57,7 @@ pub enum UiEvent {
     /// The operation ended badly: announced like [`Self::OperationSucceeded`],
     /// for a failure the run found out itself as well as the engine's own.
     /// `args` are the failure's arguments by position, then the engine's own
-    /// words ([`ErrorDto::positional`]).
+    /// words ([`ErrorDto::positional`](crate::ErrorDto::positional)).
     OperationFailed {
         operation: String,
         code: ErrorCode,

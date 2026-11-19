@@ -5,9 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ErrorDto, ForgetPlanDto, WarningDto};
 
-#[cfg(doc)]
-use crate::ErrorCode;
-
 /// One plan of the plans list, as the daemon tells the web UI: the ID a
 /// start request names, the repository its backups go to, and when it runs
 /// on its own (§5).
@@ -47,8 +44,9 @@ pub struct PlansDto {
 #[serde(transparent)]
 pub struct PlanDto(pub serde_json::Map<String, serde_json::Value>);
 
-/// What is wrong with a plan's setting a [`ErrorCode::PlanInvalid`] names,
-/// sent as its `problem` argument by its wire name.
+/// What is wrong with a plan's setting a
+/// [`ErrorCode::PlanInvalid`](crate::ErrorCode::PlanInvalid) names, sent as
+/// its `problem` argument by its wire name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlanProblem {
     /// A setting the plan needs isn't there.
@@ -85,8 +83,9 @@ impl PlanProblem {
     }
 }
 
-/// What is wrong with a proposal's change a [`ErrorCode::ProposalInvalid`]
-/// names, sent as its `problem` argument by its wire name.
+/// What is wrong with a proposal's change a
+/// [`ErrorCode::ProposalInvalid`](crate::ErrorCode::ProposalInvalid) names,
+/// sent as its `problem` argument by its wire name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChangeProblem {
     /// The change's plan isn't one the configuration file would load.

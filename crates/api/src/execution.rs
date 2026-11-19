@@ -4,9 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ErrorCode, ErrorDto, LocationTriedDto, WarningCode};
 
-#[cfg(doc)]
-use crate::SnapshotDto;
-
 /// The step a running operation is in (technical design §3.1, §4.4; §16,
 /// decision 82), on the wire as its kebab-case name: `reading-index`. Closed
 /// like [`WarningCode`]: a page that reads a code it doesn't know has
@@ -149,8 +146,9 @@ impl std::error::Error for InvalidOperation {}
 
 impl OperationSummaryDto {
     /// Builds the summary, refusing an ID that isn't a hyphenated UUID and
-    /// a time that isn't RFC 3339, like [`SnapshotDto::new`]. The arity is
-    /// the wire's: one argument per field of the published shape, except
+    /// a time that isn't RFC 3339, like
+    /// [`SnapshotDto::new`](crate::SnapshotDto::new). The arity is the wire's:
+    /// one argument per field of the published shape, except
     /// `failure-code`, which is the code of `failure`.
     #[expect(
         clippy::too_many_arguments,

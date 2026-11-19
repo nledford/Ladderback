@@ -5,9 +5,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(doc)]
-use crate::{PlanProblem, UiEvent};
-
 /// Why something failed. Closed: a code this version doesn't know, say from
 /// a newer agent, reads as [`ErrorCode::Unknown`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -219,7 +216,7 @@ pub enum ErrorCode {
     /// file would load, so nothing was saved (decision 96). The argument
     /// `field` is the plan's setting at fault, as its key in the plan's
     /// table (`schedule.cron`), and `problem` what is wrong with it, a
-    /// [`PlanProblem`]'s wire name. Neither holds a value of the plan.
+    /// [`PlanProblem`](crate::PlanProblem)'s wire name. Neither holds a value of the plan.
     PlanInvalid,
     /// A plan was not deleted because a notification rule names it: the
     /// configuration file would no longer load. The argument `plan` names
@@ -1853,9 +1850,10 @@ impl ErrorDto {
     }
 
     /// The error as an `operation-failed` event tells it
-    /// ([`UiEvent::OperationFailed`]): its arguments by position, in the
-    /// order [`ErrorCode::args`] declares them, up to the first it lacks,
-    /// then its detail as one more text, when it has one.
+    /// ([`UiEvent::OperationFailed`](crate::UiEvent::OperationFailed)): its
+    /// arguments by position, in the order [`ErrorCode::args`] declares them,
+    /// up to the first it lacks, then its detail as one more text, when it
+    /// has one.
     pub fn positional(&self) -> Vec<MsgArg> {
         self.code
             .args()
