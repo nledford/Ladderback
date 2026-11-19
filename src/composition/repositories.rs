@@ -27,8 +27,8 @@ use uuid::Uuid;
 
 use super::startup::log_location;
 use super::{
-    config_unusable, failure_redactor, locations_tried, redacted_location, secret_refusal, text,
-    too_much_to_mask, unavailable,
+    FailureRefusal, config_unusable, failure_redactor, failure_refusal, locations_tried,
+    redacted_location, secret_refusal, too_much_to_mask, unavailable,
 };
 
 /// Tests, connects and initialises repositories for the API (§4.2): each
@@ -481,62 +481,18 @@ fn exists(settings: &RepositorySettings) -> RepositoriesError {
     }
 }
 
-/// A job that ran and failed: the engine's own words for a failure it
-/// reports, a typed code for the rest. The engine redacts what it says.
+/// A job that ran and failed, as the repository routes tell it: one that
+/// found a repository where it was to create one names the location.
 fn failed_refusal(reason: FailureReason, settings: &RepositorySettings) -> RepositoriesError {
-    use FailureReason as F;
-    match reason {
-        F::EngineFailed { detail } => RepositoriesError::OperationFailed { detail },
-        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
-            unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
+    match failure_refusal(reason) {
+        FailureRefusal::OperationFailed { detail } => RepositoriesError::OperationFailed { detail },
+        FailureRefusal::RepositoryExists => exists(settings),
+        FailureRefusal::RepositoryNotFound => RepositoriesError::NotFound,
+        FailureRefusal::RepositoryConfigNotFound { detail } => {
+            RepositoriesError::ConfigNotFound { detail }
         }
-        F::EngineExited { exit_code } => unavailable(
-            ErrorCode::EngineExited,
-            exit_code
-                .map(|code| ("exit_code", text(code)))
-                .into_iter()
-                .collect(),
-            None,
-        ),
-        F::ProtocolViolated { transition } => unavailable(
-            ErrorCode::ProtocolViolated,
-            vec![("transition", text(format!("{transition:?}")))],
-            None,
-        ),
-        F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
-        F::RestoreTargetUnwritable => {
-            unavailable(ErrorCode::RestoreTargetUnwritable, Vec::new(), None)
-        }
-        F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
-        F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
-        // Only a backup's before-hook stops a job this way: a repository job
-        // runs no hooks. It is still a failure, in the catalog's plainest words.
-        F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
-        F::RepositoryExists => exists(settings),
-        F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
-        F::RepositoryNotFound => RepositoriesError::NotFound,
-        F::RepositoryConfigNotFound { detail } => RepositoriesError::ConfigNotFound { detail },
-        F::CredentialsRefused { half } => unavailable(
-            ErrorCode::CredentialsRefused,
-            half.map(|half| ("half", text(half.code())))
-                .into_iter()
-                .collect(),
-            None,
-        ),
-        F::SecretsTooLargeToMask { field, limit } => {
-            RepositoriesError::SecretRefused(too_much_to_mask(field, limit))
-        }
-        F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
-        F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
-        F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
-        F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
-        F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
-        // Only a run the schedule started records a refusal (§5): a
-        // repository job is refused before it runs, as `secret_refusal` says.
-        F::SecretRefused { field, refusal } => {
-            let (code, args, detail) = app::announce::refused(&field, &refusal);
-            RepositoriesError::SecretRefused(SecretRefusal { code, args, detail })
-        }
+        FailureRefusal::SecretRefused(refusal) => RepositoriesError::SecretRefused(refusal),
+        FailureRefusal::Unavailable { code, args, detail } => unavailable(code, args, detail),
     }
 }
 

@@ -618,6 +618,98 @@ fn unavailable(
     RepositoriesError::Unavailable { code, args, detail }
 }
 
+/// A failure a job ran into, in the words every route that tells one shares:
+/// each route makes it its own refusal, and tells the three that differ by
+/// route (`OperationFailed`, `RepositoryExists`, `RepositoryNotFound`) its
+/// own way (#742).
+#[derive(Debug, Clone, PartialEq)]
+enum FailureRefusal {
+    /// The engine's own words for a failure it reports. The engine redacts
+    /// what it says.
+    OperationFailed { detail: String },
+    /// A repository where a job was to create one.
+    RepositoryExists,
+    /// No repository at the location.
+    RepositoryNotFound,
+    /// The engine's words for a location with no repository's config in it.
+    RepositoryConfigNotFound { detail: String },
+    /// Secrets the job couldn't use or mask.
+    SecretRefused(SecretRefusal),
+    /// A typed code, its arguments, and the engine's words when it said any.
+    Unavailable {
+        code: ErrorCode,
+        args: Vec<(&'static str, MsgArg)>,
+        detail: Option<String>,
+    },
+}
+
+/// What `reason` is told as, by every route that tells a failed job: a new
+/// `FailureReason` fails to build here until it is given its words.
+fn failure_refusal(reason: FailureReason) -> FailureRefusal {
+    use FailureReason as F;
+    let unavailable = |code, args, detail| FailureRefusal::Unavailable { code, args, detail };
+    match reason {
+        F::EngineFailed { detail } => FailureRefusal::OperationFailed { detail },
+        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
+            unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
+        }
+        F::EngineExited { exit_code } => unavailable(
+            ErrorCode::EngineExited,
+            exit_code
+                .map(|code| ("exit_code", text(code)))
+                .into_iter()
+                .collect(),
+            None,
+        ),
+        F::ProtocolViolated { transition } => unavailable(
+            ErrorCode::ProtocolViolated,
+            vec![("transition", text(format!("{transition:?}")))],
+            None,
+        ),
+        F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
+        F::RestoreTargetUnwritable => {
+            unavailable(ErrorCode::RestoreTargetUnwritable, Vec::new(), None)
+        }
+        F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
+        F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
+        // Only a backup's before-hook stops a job this way: a repository job
+        // and a read of the repository run no hooks. It is still a failure,
+        // in the catalog's plainest words.
+        F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
+        F::RepositoryExists => FailureRefusal::RepositoryExists,
+        F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
+        F::RepositoryNotFound => FailureRefusal::RepositoryNotFound,
+        F::RepositoryConfigNotFound { detail } => {
+            FailureRefusal::RepositoryConfigNotFound { detail }
+        }
+        F::CredentialsRefused { half } => unavailable(
+            ErrorCode::CredentialsRefused,
+            half.map(|half| ("half", text(half.code())))
+                .into_iter()
+                .collect(),
+            None,
+        ),
+        F::SecretsTooLargeToMask { field, limit } => {
+            FailureRefusal::SecretRefused(too_much_to_mask(field, limit))
+        }
+        // Only an operation of the log can be ended by a stopped daemon, and
+        // neither a repository job nor a read of the repository is one; the
+        // failure has its code all the same, as it has everywhere it is told.
+        F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
+        F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
+        F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
+        F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
+        F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
+        // Only a run the schedule started records a refusal (§5): a
+        // repository job or a read is refused before it runs, as
+        // `secret_refusal` says.
+        F::SecretRefused { field, refusal } => {
+            let (code, args, detail) = app::announce::refused(&field, &refusal);
+            FailureRefusal::SecretRefused(SecretRefusal { code, args, detail })
+        }
+    }
+}
+
 /// Says in the daemon's log what reading a set of secrets warned of: a file
 /// other users can read, by its path, masked of the secrets read with it,
 /// and its mode, never the secret (#386, I4). Each job, snapshot listing
