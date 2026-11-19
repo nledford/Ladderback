@@ -91,6 +91,43 @@ pub fn instructions(found: &Found) -> [String; 3] {
     ]
 }
 
+/// Where the tag `v<version>`, which makes a build the release, stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseTag {
+    /// There is no such tag.
+    Missing,
+    /// It names the commit being built.
+    AtHead,
+    /// It names another commit.
+    Elsewhere,
+}
+
+impl ReleaseTag {
+    /// Where the tag stands, from whether the build `is_release` and whether
+    /// `git` found the tag at all.
+    pub fn of(is_release: bool, exists: bool) -> Self {
+        let _ = (is_release, exists);
+        todo!()
+    }
+}
+
+/// The full name of the tag that makes a build of `version` the release.
+pub fn release_ref(version: &str) -> String {
+    let _ = version;
+    todo!()
+}
+
+/// The files in the git folder whose change may change `git`'s answers about
+/// a build of `version`, as `git rev-parse --git-path` takes them, for a work
+/// tree on `branch` (`git symbolic-ref -q HEAD`, none when HEAD is detached)
+/// whose release tag stands at `tag`. Of each group, the build script watches
+/// the first path that exists: Cargo reruns a script on every build while a
+/// path it watches is missing.
+pub fn watched(version: &str, branch: Option<&str>, tag: ReleaseTag) -> Vec<Vec<String>> {
+    let _ = (version, branch, tag);
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,5 +316,61 @@ mod tests {
                 "cargo:rustc-env=LADDERBACK_BUILT_RELEASE=true".to_owned(),
             ]
         );
+    }
+
+    /// The groups every work tree watches: its HEAD, HEAD's log and its index.
+    fn own() -> Vec<Vec<String>> {
+        vec![
+            vec!["HEAD".to_owned()],
+            vec!["logs/HEAD".to_owned()],
+            vec!["index".to_owned()],
+        ]
+    }
+
+    #[test]
+    fn the_release_tag_is_named_after_the_version() {
+        assert_eq!(release_ref("0.3.0"), "refs/tags/v0.3.0");
+    }
+
+    #[test]
+    fn the_release_tag_stands_at_head_when_the_build_is_the_release() {
+        assert_eq!(ReleaseTag::of(true, true), ReleaseTag::AtHead);
+        assert_eq!(ReleaseTag::of(false, true), ReleaseTag::Elsewhere);
+        assert_eq!(ReleaseTag::of(false, false), ReleaseTag::Missing);
+    }
+
+    #[test]
+    fn a_branch_is_watched_by_its_log_before_its_own_file() {
+        let mut expected = own();
+        expected.push(vec![
+            "logs/refs/heads/work".to_owned(),
+            "refs/heads/work".to_owned(),
+        ]);
+        assert_eq!(
+            watched("0.3.0", Some("refs/heads/work"), ReleaseTag::Elsewhere),
+            expected
+        );
+    }
+
+    #[test]
+    fn a_detached_head_watches_no_branch() {
+        assert_eq!(watched("0.3.0", None, ReleaseTag::Elsewhere), own());
+    }
+
+    #[test]
+    fn while_no_release_tag_exists_a_new_tag_is_watched_for() {
+        let mut expected = own();
+        expected.push(vec!["refs/tags".to_owned()]);
+        assert_eq!(watched("0.3.0", None, ReleaseTag::Missing), expected);
+    }
+
+    #[test]
+    fn a_release_tag_at_head_is_watched_where_it_lives() {
+        let mut expected = own();
+        expected.push(vec![
+            "refs/tags/v0.3.0".to_owned(),
+            "packed-refs".to_owned(),
+        ]);
+        assert_eq!(watched("0.3.0", None, ReleaseTag::AtHead), expected);
     }
 }
