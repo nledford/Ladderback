@@ -603,7 +603,7 @@ fn run_daemon(
         lock,
         background,
         workers,
-    } = match runtime.block_on(composition::daemon(
+    } = match runtime.block_on(composition::startup::daemon(
         sign_in,
         Arc::clone(&random),
         exposure,

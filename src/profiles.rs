@@ -28,7 +28,7 @@ use interop::{FileProfileReader, KeyringCommand, RusticProfileWriter};
 use l10n::{Localizer, PosixEnv, msg};
 use platform::{SystemClock, agent_id, dirs};
 
-use crate::composition::{
+use crate::composition::profile_refusals::{
     Notice, Refusal, config_folder_unknown, export_refusal, import_refusal, plan_unknown,
     profile_notice, repository_alias_invalid, runtime_unavailable,
 };

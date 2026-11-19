@@ -16,6 +16,7 @@ domain.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 futures.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }

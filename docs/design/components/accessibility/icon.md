@@ -6,6 +6,8 @@
 
   It takes its `tone` and `size` from the shared vocabulary and leaves none out. Its default tone is `Inherit`, not `Primary`: an icon beside words or inside a control takes their color, so their contrast pairs cover it, and it never draws the eye away from them. Its default size is `Small` (`rules::default_size`), as tall as the text, and every size draws at the shared scale's length, so an icon and a spinner of one size line up; the root's own `width` and `height` of 1em keep it the text's height without the stylesheet. In a line of text it is centered on the text as an inline image is. It has no placement: it is inline by nature, and no use yet needs a line of its own (a placement waits for one). Under forced colors it follows the vocabulary's rule, the text's own color whatever the tone.
 
+  Its look is Tailwind utilities (decision 117), logical ones only, and no rule of its own in `style.css` (#931): `rules::icon_class` returns the icon's own class, its tone's and its size's, which set `--tone` and `--size`, and the utilities that draw with them (`text-(--tone)`, `inline-(--size)`, `block-(--size)`), with `align-middle` and `flex-none`. The `icon` class stays as its name, which an outside link's rule uses to space its icon from its words.
+
   The caller's duties under WCAG 2.2 AA, which the component can't meet for it:
 
   - **A label on every meaningful icon,** saying what it shows (1.1.1).

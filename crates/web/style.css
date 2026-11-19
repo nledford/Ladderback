@@ -445,35 +445,17 @@ main:focus {
   block-size: var(--size, 1em);
 }
 
-/* A spinner (§4.5): a faint track and an arc of one circle, beside its label
-   or alone, inside its line, the element around it its placement goes on
-   (the shared vocabulary above: Inline keeps it in the line of text; Start,
-   Center and End give it a line of its own). Inline, its label is text on
-   the line's baseline, and the drawing is centered on the text as an inline
-   image is, so its label stands on the baseline of the words around it. */
-.spinner-graphic:not(:last-child) {
-  margin-inline-end: 0.5em;
-}
-
-/* Its size: the drawing's length on the shared scale (`--size`, set by its
-   size's class on the spinner), so it grows with the reader's text
-   (1.4.4). */
-.spinner > .spinner-graphic {
-  inline-size: var(--size);
-  block-size: var(--size);
-}
-
-/* On a line of its own, a long label wraps beside the drawing, not under
-   it: the spinner is a row, the drawing at its start, the label's lines all
-   starting after it. The drawing stands centered on the label's first line,
-   or that line on the drawing when the drawing is the taller. */
-:is(.placement-start, .placement-center, .placement-end) > .spinner {
-  display: flex;
-  align-items: flex-start;
-}
-
+/* A spinner (§4.5), drawn with Tailwind utilities (`spinner.rs` and
+   `spinner/rules.rs`), but for these two rules and the turn's keyframes.
+   On a line of its own (Start, Center, End) the spinner is a row, the
+   drawing at its start, so a long label wraps beside the drawing, not under
+   it. The drawing stands centered on the label's first line, or that line
+   on the drawing when the drawing is the taller: a margin of half the
+   difference between a line's height (`1lh`) and the drawing's length,
+   never below zero. They stay here because no named utility sets that
+   length: only an arbitrary value could, which would hide the arithmetic
+   in a class name. */
 :is(.placement-start, .placement-center, .placement-end) > .spinner > .spinner-graphic {
-  flex: none;
   margin-block-start: max(0px, (1lh - var(--size)) / 2);
 }
 
@@ -481,64 +463,14 @@ main:focus {
   margin-block-start: max(0px, (var(--size) - 1lh) / 2);
 }
 
-/* The arc turns once in 0.9 s, steadily. The reduced-motion rule above takes
-   the animation away, and the arc then stands still, the label carrying the
-   meaning. The drawing is stroked in its tone (`--tone`), whose tokens reach
-   4.5:1 on the page and on a surface (the contrast gate's tone pairs), more
-   than the 3:1 a part needs (1.4.11); the track is the same color, faint.
-   The label keeps the text's color: a tone colors the drawing only. */
-.spinner-graphic {
-  vertical-align: middle;
-  color: var(--tone);
-}
-
-/* What turns is the circle inside the drawing, about the drawing's middle,
-   not the drawing: its box keeps its length at every angle, so a spinner at
-   the edge of a part that scrolls never changes how far it scrolls. */
-.spinner-turn {
-  transform-box: view-box;
-  transform-origin: center;
-  animation: spinner-turn 0.9s linear infinite;
-}
-
+/* The arc's turn, once in 0.9 s, which `spinner.rs` runs with its
+   animation utility: a keyframes at-rule, which no utility writes. The
+   reduced-motion rule above takes the animation away, and the arc then
+   stands still, the label carrying the meaning. */
 @keyframes spinner-turn {
   to {
     transform: rotate(1turn);
   }
-}
-
-.spinner-track {
-  stroke-opacity: 0.25;
-}
-
-/* Forced colors: the arc follows the tone rule above, the text's own color
-   whatever the tone, which the mode gives the drawing as it gives the text;
-   the track takes the color of unavailable text, the reader's own two. Only
-   the track opts out of the mode's colors, to keep `GrayText`: when the
-   whole drawing opted out, Chromium drew its arc in the author's text color,
-   not the reader's. */
-@media (forced-colors: active) {
-  .spinner-track {
-    forced-color-adjust: none;
-    stroke: GrayText;
-    stroke-opacity: 1;
-  }
-}
-
-/* An icon (§4.5): one Lucide glyph, stroked in its tone (`--tone`;
-   Inherit, the text's color, unless its page names another), whose tokens
-   reach 4.5:1 on the page and on a surface, more than the 3:1 a part needs
-   (1.4.11). Its length is the shared scale's (`--size`, set by its size's
-   class on the drawing itself), so it grows with the reader's text (1.4.4).
-   In a line of text it is centered on the text as an inline image is; in a
-   row it keeps its length. Under forced colors it follows the tone rule
-   above: the text's own color. */
-.icon {
-  flex: none;
-  inline-size: var(--size);
-  block-size: var(--size);
-  vertical-align: middle;
-  color: var(--tone);
 }
 
 /* A link (§4.5): its words in its tone (`--tone`: Ladder Blue unless its
@@ -763,39 +695,15 @@ main:focus {
   }
 }
 
-/* A skeleton (§4.5): the still shape of content on its way, hidden from a
-   screen reader. Its bars stand in a column at the start of the room it is
-   given, so they follow the page's direction. It never moves: no
-   animation and no transition, in any motion setting (2.2.2). Flat, in
-   `--skeleton`, which shows on the page and on Ledger Gray alike, with the
-   small corner. */
-.skeleton {
-  display: flex;
-  flex-direction: column;
-  align-items: start;
-}
-
-.skeleton-bar {
-  display: block;
-  max-inline-size: 100%;
-  background-color: var(--skeleton);
-  border-radius: var(--radius-small);
-}
-
-/* A line of text: as tall as the text (1em, which the page sets on each
-   bar), centered on a line of the text's height, so a skeleton of lines is
-   as tall as the lines it stands for. Its bars are flex items, so their
-   margins never collapse. */
+/* A skeleton (§4.5), drawn with Tailwind utilities (`skeleton/rules.rs`)
+   but for this rule. A line of text: as tall as the text (1em, which the
+   page sets on each bar), centered on a line of the text's height, so a
+   skeleton of lines is as tall as the lines it stands for. Its bars are
+   flex items, so their margins never collapse. It stays here because no
+   named utility sets half the difference between `1lh` and `1em`: only an
+   arbitrary value could, which would hide the arithmetic in a class name. */
 .skeleton-lines > .skeleton-bar {
   margin-block: calc((1lh - 1em) / 2);
-}
-
-/* Forced colors: the system drops the fill, so an edge in the color of
-   unavailable text keeps the shape in view. */
-@media (forced-colors: active) {
-  .skeleton-bar {
-    border: 1px solid GrayText;
-  }
 }
 
 /* A tooltip (§4.5): a short note in the top layer (`popover="manual"`),

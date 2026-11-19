@@ -60,7 +60,7 @@ pub fn Steps(
     steps: Vec<String>,
     #[prop(into)] reached: Signal<Reached>,
 ) -> impl IntoView {
-    let (label, labelled_by) = name.attributes();
+    let label = name.0;
     let count = steps.len();
     {
         let localizer = Arc::clone(&localizer);
@@ -152,12 +152,7 @@ pub fn Steps(
         <div class="@container">
             // `role="list"`: Safari drops a list's role once its markers
             // are gone.
-            <ol
-                role="list"
-                class="m-0 flex list-none flex-col p-0 @2xl:flex-row"
-                aria-label=label
-                aria-labelledby=labelled_by
-            >
+            <ol role="list" class="m-0 flex list-none flex-col p-0 @2xl:flex-row" aria-label=label>
                 {items}
             </ol>
         </div>

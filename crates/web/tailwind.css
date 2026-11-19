@@ -32,4 +32,5 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-error: var(--error);
+  --color-skeleton: var(--skeleton);
 }

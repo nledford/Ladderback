@@ -59,15 +59,15 @@ pub fn Spinner(
 ) -> impl IntoView {
     view! {
         <span class=placement.class()>
-            <span class=rules::spinner_class(tone, size)>
+            <span class=rules::spinner_class(tone, size, placement)>
                 // A track and a quarter arc of one circle (r 9: 56.55
                 // around), the arc starting at the top, stroked in the
-                // drawing's color, its tone. The arc turns inside its group,
-                // so the drawing's box never does. The attributes give it
-                // the text's height without the stylesheet, which sets each
-                // size's length.
+                // drawing's color, its tone, the track at a quarter of its
+                // strength. The arc turns inside its group, so the drawing's
+                // box never does. The attributes give it the text's height
+                // without the stylesheet, which sets each size's length.
                 <svg
-                    class="spinner-graphic"
+                    class=rules::GRAPHIC
                     xmlns="http://www.w3.org/2000/svg"
                     width="1em"
                     height="1em"
@@ -81,8 +81,8 @@ pub fn Spinner(
                     aria-hidden=shown.graphic_hidden()
                     aria-label=move || shown.graphic_name(&label.get())
                 >
-                    <circle class="spinner-track" cx="12" cy="12" r="9" />
-                    <g class="spinner-turn">
+                    <circle class=rules::TRACK cx="12" cy="12" r="9" stroke-opacity="0.25" />
+                    <g class=rules::TURN>
                         <circle
                             class="spinner-arc"
                             cx="12"
