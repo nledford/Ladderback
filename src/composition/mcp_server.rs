@@ -395,6 +395,7 @@ pub(crate) struct InProcess {
     operations: Arc<dyn http_adapter::Operations>,
     repositories: Arc<dyn http_adapter::Repositories>,
     profiles: Arc<dyn http_adapter::Profiles>,
+    full_disk_access: http_adapter::FullDiskAccessRoute,
 }
 
 impl InProcess {
@@ -405,6 +406,7 @@ impl InProcess {
             operations: Arc::clone(&state.operations),
             repositories: Arc::clone(&state.repositories),
             profiles: Arc::clone(&state.profiles),
+            full_disk_access: state.full_disk_access.clone(),
         }
     }
 }
@@ -412,21 +414,15 @@ impl InProcess {
 #[async_trait]
 impl ::mcp::Backend for InProcess {
     async fn status(&self) -> Result<::mcp::BackendStatus, api::ErrorDto> {
-        let listed = self.plans().await?;
-        let mut plans = Vec::with_capacity(listed.plans.len());
-        for plan in listed.plans {
-            let page = self.history(Some(plan.id.clone()), None, 1).await?;
-            plans.push(::mcp::PlanStatus {
-                last: page.operations.into_iter().next(),
-                plan,
-            });
-        }
-        let recent = self.history(None, None, ::mcp::RECENT_OPERATIONS).await?;
+        let summary = self
+            .catalog
+            .status(self.full_disk_access.state())
+            .await
+            .map_err(catalog_refusal)?;
         Ok(::mcp::BackendStatus {
             access: ::mcp::Access::InProcess,
             daemon: None,
-            plans,
-            running: ::mcp::unfinished(recent.operations),
+            summary,
         })
     }
 

@@ -86,7 +86,7 @@ pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
     }
     let reads = method == Method::GET || method == Method::HEAD;
     match segments.as_slice() {
-        ["events" | "log" | "operations" | "plans" | "repositories" | "session"]
+        ["events" | "log" | "operations" | "plans" | "repositories" | "session" | "status"]
         | ["operations", _]
         | ["repositories", _, "snapshots" | "groups" | "stats"]
         | ["plans", _, "profile"]

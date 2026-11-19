@@ -45,6 +45,7 @@ use app::repositories::{
 use app::schedule::{PlanRuns, ScheduleReport, Scheduler};
 use app::secrets::{Cause, Field, ResolveError, ResolveRepository};
 use app::snapshots::{ListSnapshots, SnapshotError};
+use app::status::{ReadStatus, StatusError};
 use app::updates::{CheckForUpdates, ReleaseCheckReport, UpdateNotice};
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
@@ -2847,6 +2848,75 @@ struct ConfigCatalog {
 
 #[async_trait]
 impl Catalog for ConfigCatalog {
+    async fn status(
+        &self,
+        full_disk_access: api::FullDiskAccessStateDto,
+    ) -> Result<api::StatusDto, CatalogError> {
+        let listed = self.plans().await?;
+        let read = ReadStatus::new(
+            Arc::clone(&self.config),
+            Arc::clone(&self.operations),
+            Arc::new(SystemClock),
+            domain::TimeZone::system(),
+        );
+        let status = read.read().await.map_err(|error| match error {
+            StatusError::Config(error) => catalog_refusal(*error),
+            // The log's own words say what it couldn't do, as the history
+            // tells it.
+            StatusError::Store(
+                app::ports::StoreError::Unavailable { detail }
+                | app::ports::StoreError::Corrupt { detail },
+            ) => CatalogError::Unavailable {
+                code: ErrorCode::OperationFailed,
+                args: Vec::new(),
+                detail: Some(detail),
+            },
+        })?;
+        let mut standings: HashMap<String, app::status::PlanStanding> = status
+            .plans
+            .into_iter()
+            .map(|standing| (standing.plan.as_str().to_owned(), standing))
+            .collect();
+        // A plan the configuration gained or lost between the two readings
+        // is left out until the next one.
+        let plans = listed
+            .plans
+            .into_iter()
+            .filter_map(|plan| {
+                let standing = standings.remove(&plan.id)?;
+                Some(api::PlanStatusDto {
+                    plan,
+                    last: standing.last.as_ref().and_then(summary),
+                    last_success: standing.last_success.map(|success| api::LastSuccessDto {
+                        operation: success.operation.id.as_uuid().hyphenated().to_string(),
+                        finished_at: success
+                            .operation
+                            .finished_at
+                            .unwrap_or(success.operation.queued_at)
+                            .to_string(),
+                        ago_seconds: u64::try_from(success.ago.as_secs()).unwrap_or(0),
+                    }),
+                    overdue: standing.overdue,
+                })
+            })
+            .collect();
+        Ok(api::StatusDto {
+            plans,
+            running: status.queue.iter().filter_map(summary).collect(),
+            unreadable_repositories: status
+                .unreadable
+                .iter()
+                .filter_map(|unreadable| {
+                    Some(api::UnreadableRepositoryDto {
+                        repository: unreadable.repository.as_str().to_owned(),
+                        operation: summary(&unreadable.operation)?,
+                    })
+                })
+                .collect(),
+            full_disk_access,
+        })
+    }
+
     async fn plans(&self) -> Result<api::PlansDto, CatalogError> {
         let config = self.config.load().await.map_err(catalog_refusal)?;
         // A planned run that can't be read is no reason to hide the plans:

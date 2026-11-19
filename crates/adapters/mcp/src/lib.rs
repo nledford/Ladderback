@@ -26,17 +26,18 @@ use std::sync::Arc;
 
 use api::{
     BuildDto, ErrorCode, ErrorDto, ExposureDto, LocationsTestDto, MaintenancePreviewDto,
-    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto, PlanSummaryDto,
-    PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto,
+    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto, PlansDto,
+    ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto, StatusDto,
 };
 use async_trait::async_trait;
 use l10n::Localizer;
 use rmcp::handler::server::tool::{schema_for_input, schema_for_output};
 use rmcp::model::{
     CallToolRequestMethod, CallToolRequestParams, CallToolResponse, CallToolResult, ConstString,
-    ContentBlock, CustomRequest, CustomResult, Implementation, JsonObject, ListToolsResult,
-    PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, ServerCapabilities,
-    ServerConfig, Tool, ToolAnnotations,
+    ContentBlock, CustomRequest, CustomResult, Implementation, JsonObject, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
 };
 use rmcp::schemars::transform::transform_subschemas;
 use rmcp::schemars::{JsonSchema, Schema};
@@ -202,15 +203,15 @@ pub enum Offer {
     InProcess,
 }
 
-/// How many of the newest operations `status` looks through for those
-/// queued or running: the history's largest page.
-pub const RECENT_OPERATIONS: u64 = 200;
+/// The URI of the status summary as an MCP resource (§4.6): what the
+/// `status` tool answers, for an agent that reads context before it acts.
+pub const STATUS_RESOURCE: &str = "ladderback://status";
 
-/// Those of `operations` that are queued or running, in their order: what
-/// `status` lists of the newest [`RECENT_OPERATIONS`], in either mode.
-pub fn unfinished(operations: Vec<OperationSummaryDto>) -> Vec<OperationSummaryDto> {
-    operations.into_iter().filter(is_unfinished).collect()
-}
+/// What `resources/list` says the status summary is.
+pub const STATUS_RESOURCE_DESCRIPTION: &str = "What the status tool answers: each plan's last \
+    operation, last successful backup and how long ago, whether it is overdue and its next run; \
+    the operations queued or running; the repositories that couldn't be read at their last \
+    attempt; and the Full Disk Access state.";
 
 /// Whether `operation` is queued or running: not finished yet.
 fn is_unfinished(operation: &OperationSummaryDto) -> bool {
@@ -303,9 +304,8 @@ pub struct BackendStatus {
     pub access: Access,
     /// The daemon the tools drive, in connect mode.
     pub daemon: Option<DaemonStatus>,
-    pub plans: Vec<PlanStatus>,
-    /// The operations queued or running, newest first.
-    pub running: Vec<OperationSummaryDto>,
+    /// The status summary, as `GET /api/v1/status` answers it (§4.6).
+    pub summary: StatusDto,
 }
 
 /// How the tools reach Ladderback, as `status` tells it: decided by how
@@ -336,18 +336,6 @@ pub struct DaemonStatus {
     pub exposure: ExposureDto,
 }
 
-/// One plan as `status` shows it: the plans list's entry, with its next run,
-/// and its last operation, left out when it has none.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
-#[serde(rename_all = "kebab-case")]
-pub struct PlanStatus {
-    #[serde(flatten)]
-    pub plan: PlanSummaryDto,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last: Option<OperationSummaryDto>,
-}
-
 /// The `status` tool's result: this program's build (`version`, `commit`,
 /// `dirty`, `release` as fields of their own, decision 90), then what the
 /// backend told.
@@ -363,9 +351,12 @@ struct Status {
     /// The daemon the tools drive, in connect mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     daemon: Option<DaemonStatus>,
-    plans: Vec<PlanStatus>,
-    /// The operations queued or running, newest first.
-    running: Vec<OperationSummaryDto>,
+    /// The status summary: each plan with its last operation, last
+    /// successful backup and whether it is overdue; the operations queued
+    /// or running, newest first; the repositories that couldn't be read at
+    /// their last attempt; and the Full Disk Access state.
+    #[serde(flatten)]
+    summary: StatusDto,
 }
 
 /// The MCP server: the tools over a [`Backend`], for one session on one pair
@@ -538,14 +529,12 @@ impl Server {
             Ok(BackendStatus {
                 access,
                 daemon,
-                plans,
-                running,
+                summary,
             }) => structured(&Status {
                 build: self.build.clone(),
                 access,
                 daemon,
-                plans,
-                running,
+                summary,
             }),
             Err(error) => Answer::Refused(error),
         }
@@ -888,9 +877,11 @@ fn tools() -> Vec<Tool> {
     vec![
         Tool::new(
             STATUS,
-            "Ladderback's state: each plan with its next run and last operation, the \
-             operations queued or running, this program's build and, in connect mode, \
-             the daemon's build, sign-in state and exposure.",
+            "Ladderback's state: each plan with its last operation, last successful backup \
+             and how long ago, whether it is overdue and its next run; the operations queued \
+             or running; the repositories that couldn't be read at their last attempt; the \
+             Full Disk Access state; this program's build and, in connect mode, the daemon's \
+             build, sign-in state and exposure.",
             no_arguments(),
         )
         .with_title("Status")
@@ -1062,7 +1053,12 @@ fn tools() -> Vec<Tool> {
 
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
-        let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
+        let mut info = ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_resources()
+                .enable_tools()
+                .build(),
+        );
         info.server_info = Implementation::new("ladderback", self.build.display());
         info
     }
@@ -1082,6 +1078,49 @@ impl ServerHandler for Server {
             .filter(|tool| ToolName::named(&tool.name).is_some_and(|named| named.offered_in(offer)))
             .collect();
         Ok(ListToolsResult::with_all_items(offered))
+    }
+
+    /// The one resource: the status summary (§4.6).
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(ListResourcesResult::with_all_items(vec![
+            Resource::new(STATUS_RESOURCE, "status")
+                .with_title("Status summary")
+                .with_description(STATUS_RESOURCE_DESCRIPTION)
+                .with_mime_type("application/json"),
+        ]))
+    }
+
+    /// Reads the status summary as the `status` tool answers it, as JSON
+    /// text. A refusal is an internal error whose data is its `{code, args}`
+    /// and whose message is its [`Server::sentence`]; any other URI names no
+    /// resource.
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        if request.uri != STATUS_RESOURCE {
+            return Err(McpError::resource_not_found(
+                format!("no resource is named {:?}", request.uri),
+                None,
+            ));
+        }
+        match self.status().await {
+            Answer::Done(value) => Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(value.to_string(), request.uri)
+                    .with_mime_type("application/json"),
+            ])
+            .into()),
+            Answer::Refused(error) => Err(McpError::internal_error(
+                self.sentence(&error),
+                serde_json::to_value(&error).ok(),
+            )),
+            Answer::Unwritten(why) => Err(McpError::internal_error(why, None)),
+        }
     }
 
     /// Calls the tool `request` names. An argument it can't take is its

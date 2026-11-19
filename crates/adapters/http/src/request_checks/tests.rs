@@ -307,6 +307,18 @@ struct EmptyCatalog;
 
 #[async_trait]
 impl crate::Catalog for EmptyCatalog {
+    async fn status(
+        &self,
+        full_disk_access: api::FullDiskAccessStateDto,
+    ) -> Result<api::StatusDto, crate::CatalogError> {
+        Ok(api::StatusDto {
+            plans: Vec::new(),
+            running: Vec::new(),
+            unreadable_repositories: Vec::new(),
+            full_disk_access,
+        })
+    }
+
     async fn plans(&self) -> Result<api::PlansDto, crate::CatalogError> {
         Ok(api::PlansDto::default())
     }
