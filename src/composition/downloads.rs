@@ -14,7 +14,8 @@ use domain::{OperationId, RepositoryAlias, SignedDuration};
 use http_adapter::{DownloadRefusal, DownloadStart, HandOff, MaintenanceRefusal, SignIn};
 use uuid::Uuid;
 
-use super::{PlanRunner, maintenance, runs};
+use super::plan_runner::PlanRunner;
+use super::{maintenance, runs};
 
 /// How often the downloads whose minute ran out are given up, when no
 /// other download asks first: their engine jobs stop and their turns are

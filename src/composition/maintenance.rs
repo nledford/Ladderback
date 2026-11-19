@@ -25,7 +25,8 @@ use platform::SystemClock;
 use secrets::SystemSecrets;
 use uuid::Uuid;
 
-use super::{PlanRunner, secret_refusal};
+use super::plan_runner::PlanRunner;
+use super::{FailureRefusal, failure_refusal, secret_refusal};
 
 impl PlanRunner {
     /// The maintenance use case over this runner's parts.
@@ -161,7 +162,7 @@ pub(super) async fn start(
         let _ = started.send(Ok(()));
         let finished = use_case.execute(prepared, cancel).await;
         registry.finish(&operation);
-        super::log_ended(&finished);
+        super::plan_runner::log_ended(&finished);
     }));
     // A task that ended without answering has not started anything the route
     // could name.
@@ -495,10 +496,6 @@ fn unavailable(
     MaintenanceRefusal::Unavailable { code, args, detail }
 }
 
-fn text(value: impl std::fmt::Display) -> MsgArg {
-    MsgArg::Text(value.to_string())
-}
-
 /// What `result` came to: an error is told as the typed refusal the route
 /// answers with.
 async fn told<T>(
@@ -579,69 +576,24 @@ async fn secret_refused(
     }
 }
 
-/// A read of the repository that ran and failed: the engine's own words for a
-/// failure it reports, a typed code for the rest. The engine redacts what it
-/// says. A listing and a folder read tell their failures by it too (#637).
+/// A read of the repository that ran and failed, as the maintenance routes
+/// tell it. A listing and a folder read tell their failures by it too (#637).
 pub(super) fn failed(reason: FailureReason) -> MaintenanceRefusal {
-    use FailureReason as F;
-    match reason {
-        F::EngineFailed { detail } => MaintenanceRefusal::OperationFailed { detail },
-        F::EngineUnavailable { detail } | F::JobRejected { detail } => {
-            unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
+    match failure_refusal(reason) {
+        FailureRefusal::OperationFailed { detail } => {
+            MaintenanceRefusal::OperationFailed { detail }
         }
-        F::EngineExited { exit_code } => unavailable(
-            ErrorCode::EngineExited,
-            exit_code
-                .map(|code| ("exit_code", text(code)))
-                .into_iter()
-                .collect(),
-            None,
-        ),
-        F::ProtocolViolated { transition } => unavailable(
-            ErrorCode::ProtocolViolated,
-            vec![("transition", text(format!("{transition:?}")))],
-            None,
-        ),
-        F::DeadlinePassed => unavailable(ErrorCode::DeadlinePassed, Vec::new(), None),
-        F::RestoreTargetUnwritable => {
-            unavailable(ErrorCode::RestoreTargetUnwritable, Vec::new(), None)
-        }
-        F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
-        F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
-        // A read of the repository runs no hooks and creates nothing: these
-        // are still failures, in the catalog's plainest words.
-        F::HookFailed { .. } | F::RepositoryExists => {
+        // A read of the repository creates nothing: this is still a
+        // failure, in the catalog's plainest words.
+        FailureRefusal::RepositoryExists => {
             unavailable(ErrorCode::OperationFailed, Vec::new(), None)
         }
-        F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
-        F::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
-        F::RepositoryConfigNotFound { detail } => {
+        FailureRefusal::RepositoryNotFound => MaintenanceRefusal::RepositoryNotFound,
+        FailureRefusal::RepositoryConfigNotFound { detail } => {
             MaintenanceRefusal::RepositoryConfigNotFound { detail }
         }
-        F::CredentialsRefused { half } => unavailable(
-            ErrorCode::CredentialsRefused,
-            half.map(|half| ("half", text(half.code())))
-                .into_iter()
-                .collect(),
-            None,
-        ),
-        F::SecretsTooLargeToMask { field, limit } => {
-            MaintenanceRefusal::SecretRefused(super::too_much_to_mask(field, limit))
-        }
-        // Only an operation of the log can be ended by a stopped daemon, and a
-        // read of the repository is not one; the failure has its code all the
-        // same, as it has everywhere it is told.
-        F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
-        F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
-        F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
-        F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
-        F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
-        // Only a backup the schedule started records a refusal (§5); a read
-        // is refused before it runs, as `secret_refused` says.
-        F::SecretRefused { field, refusal } => {
-            let (code, args, detail) = app::announce::refused(&field, &refusal);
-            MaintenanceRefusal::SecretRefused(http_adapter::SecretRefusal { code, args, detail })
-        }
+        FailureRefusal::SecretRefused(refusal) => MaintenanceRefusal::SecretRefused(refusal),
+        FailureRefusal::Unavailable { code, args, detail } => unavailable(code, args, detail),
     }
 }
 
@@ -663,6 +615,7 @@ mod tests {
     use domain::{SignedDuration, SnapshotId};
     use http_adapter::SecretRefusal;
 
+    use super::super::text;
     use super::*;
 
     fn alias() -> RepositoryAlias {
@@ -1309,6 +1262,38 @@ mod tests {
             (
                 FailureReason::DaemonShutDown,
                 unavailable_with(ErrorCode::DaemonShutDown, Vec::new(), None),
+            ),
+            (
+                FailureReason::RestoreTargetUnwritable,
+                unavailable_with(ErrorCode::RestoreTargetUnwritable, Vec::new(), None),
+            ),
+            (
+                FailureReason::NoLocationUsable,
+                unavailable_with(ErrorCode::NoLocationUsable, Vec::new(), None),
+            ),
+            (
+                FailureReason::NoLocationRuleHolds,
+                unavailable_with(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
+            ),
+            (
+                FailureReason::PasswordNotAccepted,
+                unavailable_with(ErrorCode::PasswordNotAccepted, Vec::new(), None),
+            ),
+            (
+                FailureReason::SecretRefused {
+                    field: "password".to_owned(),
+                    refusal: domain::execution::refusal::SettingRefusal::SecretMissing {
+                        source: "DEMO_PASSWORD".to_owned(),
+                    },
+                },
+                MaintenanceRefusal::SecretRefused(SecretRefusal {
+                    code: ErrorCode::SecretMissing,
+                    args: vec![
+                        ("field", text("password")),
+                        ("source", text("DEMO_PASSWORD")),
+                    ],
+                    detail: None,
+                }),
             ),
         ];
         let config = InMemoryConfigStore::new();

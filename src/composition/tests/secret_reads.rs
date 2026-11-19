@@ -3,6 +3,7 @@ use app::fakes::{FakeSecrets, InMemoryConfigStore};
 
 use super::service_support::*;
 use super::*;
+use crate::composition::repositories::settings_of;
 
 #[tokio::test]
 async fn a_secret_that_cannot_be_read_names_where_it_is() {

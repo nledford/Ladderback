@@ -25,7 +25,8 @@ use platform::data_dir_lock::DataDirLock;
 use platform::scratch::{self, Scratch};
 
 use super::runs::Runs;
-use super::{Daemon, LOG_CLOSE_BOUND, OperationLog, Refused, close_within, daemon_at, text};
+use super::startup::daemon_at;
+use super::{Daemon, LOG_CLOSE_BOUND, OperationLog, Refused, close_within, text};
 use crate::shutdown::WORKERS_BOUND;
 
 /// What a headless or scratch session holds until it ends: its workers and

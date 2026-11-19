@@ -1,5 +1,12 @@
+use app::interop::{ExportError, ImportError};
+use app::ports::{ExportRefusal, ProfileError, ProfileNotice};
+
 use super::support::*;
 use super::*;
+use crate::composition::profile_refusals::{
+    Refusal, config_folder_unknown, export_refusal, import_refusal, profile_notice,
+    repository_alias_invalid, runtime_unavailable,
+};
 
 fn said(refusal: &Refusal) -> String {
     let shown = english().error(refusal.code, &refusal.args, refusal.detail.as_deref());
