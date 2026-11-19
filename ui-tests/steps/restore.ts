@@ -9,8 +9,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
 import { type BrowserWorld, engine } from "../support/world.ts";
 import { clipboardPermissions } from "./api_tokens.ts";

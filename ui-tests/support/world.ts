@@ -19,6 +19,7 @@ import {
   BeforeAll,
   type ITestCaseHookParameter,
   setDefaultTimeout,
+  setDefinitionFunctionWrapper,
   setWorldConstructor,
   Status,
   World,
@@ -36,9 +37,12 @@ import {
 } from "playwright";
 
 import { avoidLabelledByCrash } from "./labelledby-crash.ts";
+import { STEP_LIMIT_MS, timed } from "./patience.ts";
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
 
-setDefaultTimeout(30_000);
+setDefaultTimeout(STEP_LIMIT_MS);
+// Each step and hook starts its clock, which its waits run until (#1104).
+setDefinitionFunctionWrapper(timed);
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 

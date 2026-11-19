@@ -5,8 +5,8 @@
 import assert from "node:assert/strict";
 
 import type { Locator, Page } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "./expect.ts";
 import { type Box, focusProbes, type Point } from "./focus-probes.ts";
 
 /** Playwright's name for the engine that drives `page`: `chromium`, `firefox`

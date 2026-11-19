@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 
 import { type DataTable, Given, Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { journey } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 

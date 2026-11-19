@@ -9,9 +9,9 @@ import assert from "node:assert/strict";
 
 import type { DataTable } from "@cucumber/cucumber";
 import { Then } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { eachOf } from "./components.ts";

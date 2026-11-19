@@ -10,9 +10,9 @@
 import assert from "node:assert/strict";
 
 import { type DataTable, Then } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 

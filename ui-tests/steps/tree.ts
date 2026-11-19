@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { ISOLATION, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { latestSnapshotOf } from "./maintenance.ts";

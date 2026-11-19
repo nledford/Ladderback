@@ -15,10 +15,7 @@
 
 import type { BrowserContext, Route, WebSocketRoute } from "playwright";
 
-// How long a step waits for the page to open, or ask for, its events stream.
-const STREAM_PATIENCE_MS = 10_000;
-
-const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+import { Signal } from "./patience.ts";
 
 /** An operation as the daemon's wire has it, in the history the page reads. */
 interface Operation {
@@ -90,6 +87,8 @@ export class ScriptedDaemon {
    *  the page signs in again; and how many readings it refused so. */
   #sessionsEnded = false;
   #readsRefused = 0;
+  /** Tells the steps waiting on what the page did of each thing it does. */
+  #changed = new Signal();
 
   /** Adds a backup of `plan` to the history, newer than every one before it.
    *  Its instants are RFC 3339, UTC; the one that has not happened yet is
@@ -176,27 +175,32 @@ export class ScriptedDaemon {
       if (route.request().method() !== "POST" || !this.#acceptsCancels) return route.fallback();
       const operation = new URL(route.request().url()).pathname.split("/").at(-2) ?? "";
       this.#cancelsAccepted.add(operation);
+      this.#changed.notify();
       await route.fulfill({ json: {} });
     });
     await context.route("**/api/v1/operations", async (route) => {
       if (route.request().method() === "POST" && this.#answersStarts) return this.#start(route);
       if (route.request().method() !== "GET") return route.fallback();
       this.#historyReads += 1;
+      this.#changed.notify();
       this.#backgroundMarks.push(route.request().headers()["x-ladderback-background"] !== undefined);
       if (this.#sessionsEnded) {
         this.#readsRefused += 1;
+        this.#changed.notify();
         return route.fallback();
       }
       const json = { operations: structuredClone(this.#operations), next: null };
       if (this.#holdNext) {
         this.#holdNext = false;
         this.#held = () => route.fulfill({ json });
+        this.#changed.notify();
         return;
       }
       const open = this.#stream;
       if (this.#held !== null && open !== null) this.#readsBesideTheHeld += 1;
       await route.fulfill({ json });
       if (open !== null && open === this.#stream) this.#readsSinceTheOpening += 1;
+      this.#changed.notify();
     });
     // A sign-in that the real daemon accepts gives the history back to
     // this script.
@@ -241,17 +245,20 @@ export class ScriptedDaemon {
         this.#holdTheOpening = false;
         const { promise, resolve } = Promise.withResolvers<void>();
         this.#openTheHeld = resolve;
+        this.#changed.notify();
         await promise;
       }
       this.#stream = stream;
       this.#readsSinceTheOpening = 0;
       this.#open.add(stream);
       this.#streamsOpened += 1;
+      this.#changed.notify();
       // The page closing its stream; the daemon's own drop is `dropTheStream`.
       // A step after it waits for the page's next stream, never this one.
       stream.onClose(() => {
         this.#open.delete(stream);
         if (this.#stream === stream) this.#stream = null;
+        this.#changed.notify();
       });
     });
   }
@@ -280,11 +287,10 @@ export class ScriptedDaemon {
    *  `plan`. */
   async untilCancelAccepted(plan: string): Promise<void> {
     const operation = this.#backupOf(plan).id;
-    const end = Date.now() + STREAM_PATIENCE_MS;
-    while (!this.#cancelsAccepted.has(operation)) {
-      if (Date.now() > end) throw new Error(`the page never asked to cancel the backup of ${plan}`);
-      await sleep(50);
-    }
+    await this.#changed.until(
+      () => this.#cancelsAccepted.has(operation),
+      () => `the page never asked to cancel the backup of ${plan}`,
+    );
   }
 
   /** How many events streams the page has open. */
@@ -307,11 +313,10 @@ export class ScriptedDaemon {
   /** Waits until the real daemon has refused a reading of the history
    *  since the sessions ended, or says it never was asked. */
   async untilAReadIsRefused(): Promise<void> {
-    const end = Date.now() + STREAM_PATIENCE_MS;
-    while (this.#readsRefused === 0) {
-      if (Date.now() > end) throw new Error("the page never read the history after its session ended");
-      await sleep(50);
-    }
+    await this.#changed.until(
+      () => this.#readsRefused > 0,
+      () => "the page never read the history after its session ended",
+    );
   }
 
   /** How many times the page has read the history so far. */
@@ -319,16 +324,20 @@ export class ScriptedDaemon {
     return this.#historyReads;
   }
 
+  /** Waits until the page has read the history more than `reads` times, or
+   *  `ms` has gone by: whichever comes first, and neither a failure. */
+  async untilReadPast(reads: number, ms: number): Promise<void> {
+    const ends = Date.now() + ms;
+    while (this.#historyReads <= reads && Date.now() < ends) await this.#changed.next(ends - Date.now());
+  }
+
   /** Waits until the page has `count` events streams open, or says how many
    *  it kept instead. */
   async untilStreamsOpen(count: number): Promise<void> {
-    const end = Date.now() + STREAM_PATIENCE_MS;
-    while (this.#open.size !== count) {
-      if (Date.now() > end) {
-        throw new Error(`the page has ${this.#open.size} events streams open, not ${count}`);
-      }
-      await sleep(50);
-    }
+    await this.#changed.until(
+      () => this.#open.size === count,
+      () => `the page has ${this.#open.size} events streams open, not ${count}`,
+    );
   }
 
   /** Holds back the opening of the next events stream the page asks for,
@@ -339,11 +348,10 @@ export class ScriptedDaemon {
 
   /** Waits until the page has asked for the stream held back. */
   async #untilAStreamIsHeld(): Promise<void> {
-    const end = Date.now() + STREAM_PATIENCE_MS;
-    while (this.#openTheHeld === null) {
-      if (Date.now() > end) throw new Error("the page never asked for an events stream");
-      await sleep(50);
-    }
+    await this.#changed.until(
+      () => this.#openTheHeld !== null,
+      () => "the page never asked for an events stream",
+    );
   }
 
   /** Opens the events stream held back. */
@@ -358,11 +366,10 @@ export class ScriptedDaemon {
    *  its events stream last opened: the history it read is the one it had
    *  then, whatever the steps after this change. */
   async untilReadSinceTheOpening(): Promise<void> {
-    const end = Date.now() + STREAM_PATIENCE_MS;
-    while (this.#readsSinceTheOpening === 0) {
-      if (Date.now() > end) throw new Error("the page never read the history after its events stream opened");
-      await sleep(50);
-    }
+    await this.#changed.until(
+      () => this.#readsSinceTheOpening > 0,
+      () => "the page never read the history after its events stream opened",
+    );
   }
 
   /** The backup of `plan` starts while the page has asked for its events
@@ -396,11 +403,10 @@ export class ScriptedDaemon {
 
   /** Waits until the page has asked for the reading held back. */
   async untilAReadIsHeld(): Promise<void> {
-    const end = Date.now() + STREAM_PATIENCE_MS;
-    while (this.#held === null) {
-      if (Date.now() > end) throw new Error("the page never read the history again");
-      await sleep(50);
-    }
+    await this.#changed.until(
+      () => this.#held !== null,
+      () => "the page never read the history again",
+    );
   }
 
   /** How many readings of the history the page asked for, its events stream
@@ -435,11 +441,11 @@ export class ScriptedDaemon {
 
   /** The events stream the page has open, once it has one. */
   async #openStream(): Promise<WebSocketRoute> {
-    const end = Date.now() + STREAM_PATIENCE_MS;
-    while (this.#stream === null) {
-      if (Date.now() > end) throw new Error("the page never opened its events stream");
-      await sleep(50);
-    }
+    await this.#changed.until(
+      () => this.#stream !== null,
+      () => "the page never opened its events stream",
+    );
+    if (this.#stream === null) throw new Error("the page's events stream closed as it opened");
     return this.#stream;
   }
 

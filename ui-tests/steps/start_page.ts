@@ -5,9 +5,9 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { BrowserContextOptions } from "playwright";
-import { expect } from "playwright/test";
 
 import { checkoutBuild, shown } from "../../scripts/build-identity.ts";
+import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
 import { DOUBLE_FONT_CSS, TEXT_SPACING_CSS } from "../support/reader-styles.ts";
 import { type BrowserWorld, repoRoot } from "../support/world.ts";

@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 
 import { Given, Then } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // Where the page keeps the width chosen, in the browser's local storage, and
