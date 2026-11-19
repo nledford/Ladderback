@@ -18,6 +18,16 @@ pub enum Direction {
     Descending,
 }
 
+impl Direction {
+    /// The other way.
+    fn flipped(self) -> Self {
+        match self {
+            Self::Ascending => Self::Descending,
+            Self::Descending => Self::Ascending,
+        }
+    }
+}
+
 /// The column a table is sorted by, counted from the row header's (0), and
 /// which way. A table that isn't sorted shows its rows in the order its
 /// caller gave them.
@@ -27,17 +37,17 @@ pub struct Sorted {
     pub direction: Direction,
 }
 
-/// The sort after a press on the sort button of `column`: ascending, unless
-/// the table is already sorted ascending by that column, when it turns
-/// descending. A press on a column sorted descending sorts it ascending
-/// again.
-pub fn press(sorted: Option<Sorted>, column: usize) -> Sorted {
+/// The sort after a press on the sort button of `column`, whose first press
+/// sorts it `first` (ascending, or descending for a column read newest
+/// first): the other way if the table is already sorted by that column, and
+/// `first` if it is sorted by another or not at all.
+pub fn press(sorted: Option<Sorted>, column: usize, first: Direction) -> Sorted {
     let direction = match sorted {
         Some(Sorted {
             column: last,
-            direction: Direction::Ascending,
-        }) if last == column => Direction::Descending,
-        _ => Direction::Ascending,
+            direction,
+        }) if last == column => direction.flipped(),
+        _ => first,
     };
     Sorted { column, direction }
 }
@@ -266,21 +276,29 @@ mod tests {
     #[test]
     fn a_first_press_sorts_ascending_a_second_descending_and_a_third_ascending_again() {
         assert_eq!(
-            press(None, SIZE),
+            press(None, SIZE, Direction::Ascending),
             Sorted {
                 column: SIZE,
                 direction: Direction::Ascending
             }
         );
         assert_eq!(
-            press(sorted(SIZE, Direction::Ascending), SIZE),
+            press(
+                sorted(SIZE, Direction::Ascending),
+                SIZE,
+                Direction::Ascending
+            ),
             Sorted {
                 column: SIZE,
                 direction: Direction::Descending
             }
         );
         assert_eq!(
-            press(sorted(SIZE, Direction::Descending), SIZE),
+            press(
+                sorted(SIZE, Direction::Descending),
+                SIZE,
+                Direction::Ascending
+            ),
             Sorted {
                 column: SIZE,
                 direction: Direction::Ascending
@@ -289,15 +307,51 @@ mod tests {
     }
 
     #[test]
-    fn a_press_on_another_column_sorts_it_ascending_whichever_way_the_last_ran() {
-        for direction in [Direction::Ascending, Direction::Descending] {
-            assert_eq!(
-                press(sorted(SIZE, direction), FILES),
-                Sorted {
-                    column: FILES,
-                    direction: Direction::Ascending
-                }
-            );
+    fn a_column_read_newest_first_sorts_descending_on_its_first_press_and_ascending_on_its_second()
+    {
+        assert_eq!(
+            press(None, SIZE, Direction::Descending),
+            Sorted {
+                column: SIZE,
+                direction: Direction::Descending
+            }
+        );
+        assert_eq!(
+            press(
+                sorted(SIZE, Direction::Descending),
+                SIZE,
+                Direction::Descending
+            ),
+            Sorted {
+                column: SIZE,
+                direction: Direction::Ascending
+            }
+        );
+        assert_eq!(
+            press(
+                sorted(SIZE, Direction::Ascending),
+                SIZE,
+                Direction::Descending
+            ),
+            Sorted {
+                column: SIZE,
+                direction: Direction::Descending
+            }
+        );
+    }
+
+    #[test]
+    fn a_press_on_another_column_sorts_it_its_first_way_whichever_way_the_last_ran() {
+        for first in [Direction::Ascending, Direction::Descending] {
+            for direction in [Direction::Ascending, Direction::Descending] {
+                assert_eq!(
+                    press(sorted(SIZE, direction), FILES, first),
+                    Sorted {
+                        column: FILES,
+                        direction: first
+                    }
+                );
+            }
         }
     }
 
