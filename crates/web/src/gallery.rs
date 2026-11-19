@@ -47,6 +47,7 @@ mod banner;
 mod button;
 mod icon;
 mod link;
+mod pause_updates;
 mod progress;
 mod skeleton;
 mod spinner;
@@ -173,14 +174,6 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         t(msg::UI_GALLERY_KEEP_DEMO_SETTING),
         t(msg::UI_GALLERY_CHANGE_DEMO_SETTING),
     );
-    // The pause control's demo: whether it is paused, and the demo runs that
-    // finished meanwhile, each a change the banner counts.
-    let demo_paused = RwSignal::new(false);
-    let demo_waiting = RwSignal::new(0usize);
-    let demo_ends = StoredValue::new(Ends::default());
-    let demo_finished = backup_finished.clone();
-    let banner_localizer = Arc::clone(&localizer);
-    let resumed_localizer = Arc::clone(&localizer);
     // The step-up demos, one per thing the field can ask for: whether each
     // dialog is open, what is typed and the error its confirm button shows,
     // whatever was typed.
@@ -835,46 +828,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 />
             </ReviewDialog>
         </section>
-        <section id="pause-control-demo">
-            <DemoHeading text=t(msg::UI_GALLERY_PAUSE_HEADING) />
-            <PauseUpdates
-                label=t(msg::UI_GALLERY_PAUSE_DEMO)
-                paused_said=t(msg::UI_LIVE_PAUSED)
-                paused=demo_paused
-                banner=Signal::derive(move || {
-                    let words = pause::banner(demo_waiting.get());
-                    text_with(&banner_localizer, words.id, &words.args)
-                })
-                banner_id="gallery-paused"
-                on_pause=Callback::new(move |()| {
-                    demo_ends.set_value(Ends::default());
-                    demo_waiting.set(0);
-                    demo_paused.set(true);
-                })
-                on_resume=Callback::new(move |()| {
-                    demo_paused.set(false);
-                    demo_waiting.set(0);
-                    let words = pause::resumed(demo_ends.get_value());
-                    demo_ends.set_value(Ends::default());
-                    text_with(&resumed_localizer, words.id, &words.args)
-                })
-            />
-            <p>
-                // A run that finishes by itself: said at once, or
-                // counted while the demo is paused.
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_FINISH_DEMO_RUN).into())
-                    on_press=Callback::new(move |()| {
-                        if demo_paused.get_untracked() {
-                            demo_ends.update_value(|ends| ends.count("succeeded"));
-                            demo_waiting.update(|waiting| *waiting = waiting.saturating_add(1));
-                        } else {
-                            say(Politeness::Polite, &demo_finished);
-                        }
-                    })
-                />
-            </p>
-        </section>
+        <pause_updates::PauseUpdatesDemo localizer=Arc::clone(&localizer) />
         <spinner::SpinnerDemo localizer=Arc::clone(&localizer) />
         <icon::IconDemo localizer=Arc::clone(&localizer) />
         <button::ButtonDemo localizer=Arc::clone(&localizer) />
