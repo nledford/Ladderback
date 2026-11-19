@@ -82,11 +82,18 @@ mod backend;
 mod maintenance;
 // What a row of the Operations page says, decided on the host.
 mod operations;
+// The Operations page: its DOM glue, and the decisions not yet moved out of
+// it (#739), host-tested there; `operations.rs`, `backend.rs` and `pause.rs`
+// decide the rest.
+mod operations_page;
 mod page;
 // What Settings' Page width section offers, keeps and lays the page out
 // with, decided on the host; `settings/page_width.rs` is its glue.
 mod page_width;
 mod repositories;
+// The Repositories page: its DOM glue, and its form's state, host-tested
+// there; `repositories.rs` decides the rest.
+mod repositories_page;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
 // What the Plans page shows, sends and says, decided on the host;
@@ -131,6 +138,8 @@ mod time_zones;
 // A snapshot's page's DOM glue; `components/tree/rules.rs` decides for its
 // tree.
 mod snapshot_page;
+// The start page's DOM glue; `routes::next_run_cell` words a plan's next run.
+mod start_page;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
 mod ws;
@@ -156,15 +165,18 @@ use components::banner::rules::BannerTone;
 use components::link::rules::{Destination, LinkTone, Matching};
 use daemon_log_page::DaemonLog;
 use full_disk_access_warning::{FullDiskAccessBanner, FullDiskAccessFound};
+use operations_page::Operations;
 use page_width::PageWidth;
 use plans_page::Plans;
 use proposals_page::Proposals;
-use routes::{NotFound, Operations, Repositories, Start};
+use repositories_page::Repositories;
+use routes::NotFound;
 use session::{SignInOffNotice, Standing, Title};
 use settings::Settings;
 use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut, SignOutFailure};
 use snapshot_page::Snapshot;
 use snapshots::Snapshots;
+use start_page::Start;
 
 /// The text of message `id` in the page's language.
 fn text(localizer: &Localizer, id: MessageId) -> String {
