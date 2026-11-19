@@ -191,9 +191,9 @@ test("--keep with no family after it fails", () => {
 // The families ci.yml's `cache-prune` job passes, read from the workflow, each
 // with the keys the repository has saved or will save under it, oldest first:
 // the layouts of today and of before (the engine sets, the manifest hash in
-// mbx's generation, the `target` payload before #1076's `objects` one). Run
-// through the script, every family must keep its newest
-// `keep` entries and delete the others, no key may match two families, and no
+// mbx's generation, and the `objects` payload that #1078 saved before the
+// `target` one came back). Run through the script, every family must keep its
+// newest `keep` entries and delete the others, no key may match two families, and no
 // key may be left unclaimed. A family added to ci.yml without its keys here
 // fails, and so does a key that stops matching.
 const sha = "ec58f954cd12bc72680a8052d009fc144a0201d3";
