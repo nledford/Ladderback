@@ -80,11 +80,21 @@ after(async () => {
 /** Opens `WRAPPED_LINK` in a context of its own at the scenarios' viewport,
  *  puts a fixed box over `over` of the link's lines, and presses Tab onto the
  *  link through the walks' check. Given `leaves`, the link moves above the
- *  viewport as it takes focus, where no scroll brings it back. What the check
- *  said: `null` when it passed. */
+ *  viewport as it takes focus, where no scroll brings it back. Given `moves`,
+ *  a block above the link's paragraph grows to 200 px or back each time the
+ *  check has measured the link, the first time only or every time, as when a
+ *  page draws something above an element between the check's reads: the
+ *  link's own `getBoundingClientRect` makes the move after it has answered,
+ *  so the move lands between the reads in every engine. Given `blurs`, the
+ *  link loses focus the same way once the check has first measured it. What
+ *  the check said: `null` when it passed. */
 async function tabOntoTheLink(
   over: "every line" | "its first line" | "no line",
-  { leaves = false }: { leaves?: boolean } = {},
+  {
+    leaves = false,
+    moves = "never",
+    blurs = false,
+  }: { leaves?: boolean; moves?: "never" | "once" | "every time"; blurs?: boolean } = {},
 ): Promise<string | null> {
   assert.ok(browser !== undefined, "the browser is not running: `before` failed");
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -92,7 +102,7 @@ async function tabOntoTheLink(
     const page = await context.newPage();
     await page.setContent(WRAPPED_LINK);
     const lines = await page.evaluate(
-      ({ covered, leaves }) => {
+      ({ covered, leaves, moves, blurs }) => {
         const link = document.querySelector("a");
         if (link === null) return 0;
         const fragments = [...link.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
@@ -111,9 +121,24 @@ async function tabOntoTheLink(
         if (leaves) {
           link.addEventListener("focus", () => Object.assign(link.style, { position: "fixed", top: "-1000px" }));
         }
+        if (moves !== "never" || blurs) {
+          const above = document.createElement("div");
+          link.parentElement?.before(above);
+          const measure = link.getBoundingClientRect.bind(link);
+          let measures = 0;
+          link.getBoundingClientRect = () => {
+            const box = measure();
+            measures += 1;
+            if (moves === "every time" || (moves === "once" && measures === 1)) {
+              above.style.blockSize = above.style.blockSize === "200px" ? "0px" : "200px";
+            }
+            if (blurs) link.blur();
+            return box;
+          };
+        }
         return fragments.length;
       },
-      { covered: { "every line": Infinity, "its first line": 1, "no line": 0 }[over], leaves },
+      { covered: { "every line": Infinity, "its first line": 1, "no line": 0 }[over], leaves, moves, blurs },
     );
     assert.equal(lines, 2, "the link stands on two lines");
     try {
@@ -150,6 +175,29 @@ test(`${engine}: a link that leaves the viewport as it takes focus is reported o
     verdict ?? "the check passed",
     /^focused element is covered: <a href="#nowhere".*\(its lines' centers find nothing, out of view\)$/,
   );
+});
+
+test(`${engine}: a link the page moves once between the check's reads is in sight where it lands`, { timeout: LIMIT_MS }, async () => {
+  // Looked for where it was measured, the link's lines' centers would find
+  // the block drawn there; the check measures it again and looks where it
+  // now stands.
+  const verdict = await tabOntoTheLink("no line", { moves: "once" });
+  assert.equal(verdict, null, `the check reported: ${verdict}`);
+});
+
+test(`${engine}: a link the page moves between every pair of the check's reads is reported moving`, {
+  timeout: LIMIT_MS,
+}, async () => {
+  const verdict = await tabOntoTheLink("no line", { moves: "every time" });
+  assert.match(
+    verdict ?? "the check passed",
+    /^after Tab the focused element kept moving while the check looked at it, 5 times: <a href="#nowhere"/,
+  );
+});
+
+test(`${engine}: a link that loses focus between the check's reads is reported`, { timeout: LIMIT_MS }, async () => {
+  const verdict = await tabOntoTheLink("no line", { blurs: true });
+  assert.match(verdict ?? "the check passed", /^after Tab focus moved while the check looked at it, on the page body$/);
 });
 
 test(`${engine}: a link focused while the page's timers are busy is in sight once the browser scrolls to it`, {

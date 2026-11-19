@@ -26,8 +26,12 @@ import { drawnOnItsFill } from "./components.ts";
 export const PASSWORD = "demo-password";
 
 // A real backup takes real time, and the steps that wait for one are patient:
-// enough for a big scratch source to finish, in a debug build.
+// enough for a big scratch source to finish, in a debug build. A step that
+// waits this long takes ROW_STEP_MS as its own limit: cucumber's default
+// (`world.ts`) would end it at 30 s, long before this wait does, and a
+// 10,000-file backup takes 10 to 33 s on CI.
 const ROW_PATIENCE_MS = 120_000;
+const ROW_STEP_MS = ROW_PATIENCE_MS + 10_000;
 
 // A page's answer to a key press, or to an event a step sent it, takes a
 // moment at most: this long, not as long as a real backup.
@@ -157,6 +161,15 @@ Given(
   "two demo plans {string} and {string} with a scratch repository",
   async function (this: BrowserWorld, first: string, second: string) {
     await serveDemoPlans(this, [first, second], "small");
+  },
+);
+
+// The same two plans over the tiny source, for a journey that needs only
+// their snapshots: a small source's backup takes up to 30 s on CI.
+Given(
+  "two demo plans {string} and {string} with a tiny scratch repository",
+  async function (this: BrowserWorld, first: string, second: string) {
+    await serveDemoPlans(this, [first, second], "tiny");
   },
 );
 
@@ -549,6 +562,7 @@ When("I reload the page", async function (this: BrowserWorld) {
 // row to say it.
 Then(
   "the table {string} has a row {string} that shows {string}",
+  { timeout: ROW_STEP_MS },
   async function (this: BrowserWorld, name: string, row: string, status: string) {
     const rows = table(this, name).getByRole("row", { name: new RegExp([...row].map(escapeRegExp).join(ISOLATION)) });
     await until(
@@ -565,12 +579,12 @@ Then(
   },
 );
 
-Then("the table {string} has {int} rows", async function (this: BrowserWorld, name: string, count: number) {
+Then("the table {string} has {int} rows", { timeout: ROW_STEP_MS }, async function (this: BrowserWorld, name: string, count: number) {
   await hasRows(table(this, name), count, `the table ${name}`);
 });
 
 // The same, on a page with one table, whose name a pseudolocale transformed.
-Then("the page's one table has {int} row(s)", async function (this: BrowserWorld, count: number) {
+Then("the page's one table has {int} row(s)", { timeout: ROW_STEP_MS }, async function (this: BrowserWorld, count: number) {
   await hasRows(this.page.getByRole("table"), count, "the table");
 });
 
@@ -854,13 +868,17 @@ export function rowNamed(world: BrowserWorld, name: string, row: string): Locato
     .filter({ has: world.page.getByRole("rowheader", { name: namePattern(row) }) });
 }
 
-Then("the table {string} has the row {string}", async function (this: BrowserWorld, name: string, row: string) {
-  await rowNamed(this, name, row).first().waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
-});
+Then(
+  "the table {string} has the row {string}",
+  { timeout: ROW_STEP_MS },
+  async function (this: BrowserWorld, name: string, row: string) {
+    await rowNamed(this, name, row).first().waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+  },
+);
 
 // For a page in a pseudolocale, whose tables' names the catalog transformed:
 // the row is found by its header alone, which is data and stays as it is.
-Then("the page shows the row {string}", async function (this: BrowserWorld, row: string) {
+Then("the page shows the row {string}", { timeout: ROW_STEP_MS }, async function (this: BrowserWorld, row: string) {
   await this.page
     .getByRole("row")
     .filter({ has: this.page.getByRole("rowheader", { name: namePattern(row) }) })
@@ -896,6 +914,7 @@ export async function untilCellShows(world: BrowserWorld, name: string, row: str
 
 Then(
   "the row {string} of the table {string} shows {string} in its {string} column",
+  { timeout: ROW_STEP_MS },
   async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
     await untilCellShows(this, name, row, column, expected);
   },
@@ -934,6 +953,7 @@ Then(
 
 Then(
   "the row {string} of the table {string} doesn't show {string} in its {string} column",
+  { timeout: ROW_STEP_MS },
   async function (this: BrowserWorld, row: string, name: string, unexpected: string, column: string) {
     const end = Date.now() + ROW_PATIENCE_MS;
     let seen = await cellText(this, name, row, column);
@@ -973,6 +993,7 @@ export async function untilCellLists(world: BrowserWorld, name: string, row: str
 
 Then(
   "the row {string} of the table {string} lists {string} in its {string} column",
+  { timeout: ROW_STEP_MS },
   async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
     await untilCellLists(this, name, row, column, expected);
   },
@@ -982,6 +1003,7 @@ Then(
 // draws a marker that sets nothing apart (#430).
 Then(
   "the row {string} of the table {string} says {string} in its {string} column, not as a list",
+  { timeout: ROW_STEP_MS },
   async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
     await untilCellShows(this, name, row, column, expected);
     const cell = await cellOf(this, name, row, column);
@@ -994,6 +1016,7 @@ Then(
 // character's box says which line it is on; a mark of no width is on none.
 Then(
   "the row {string} of the table {string} lists each item on one line in its {string} column",
+  { timeout: ROW_STEP_MS },
   async function (this: BrowserWorld, row: string, name: string, column: string) {
     const cell = await cellOf(this, name, row, column);
     const items = cell.getByRole("list").getByRole("listitem");
