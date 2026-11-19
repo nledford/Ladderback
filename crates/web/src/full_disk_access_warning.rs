@@ -22,7 +22,7 @@ use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Button, Content};
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::{
-    Banner, Link, Toast, ToastTone, Toasts, hand_focus_when_gone, sentence_view,
+    Banner, Link, Toast, ToastTone, Toasts, hand_focus_when_gone, refusal_alert, say_refusals,
 };
 use crate::full_disk_access::{BANNER_ID, STEPS, opens_settings, said_after_check, warns};
 use crate::live::reply;
@@ -139,6 +139,7 @@ pub(crate) fn FullDiskAccessSteps(localizer: Arc<Localizer>) -> impl IntoView {
     let pending = RwSignal::<Option<Request>>::new(None);
     // A button's answer that isn't a new reading: a refusal, or none at all.
     let problem = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(problem);
     // The answer to a check that leaves the warning as it was.
     let toasts = Toasts::new();
     // The read is the banner's, on every page. Apart, so a check that finds
@@ -235,6 +236,7 @@ pub(crate) fn FullDiskAccessSteps(localizer: Arc<Localizer>) -> impl IntoView {
             let (open_label, check_label) = (open_label.clone(), check_label.clone());
             let (heading, body, steps) = (heading.clone(), body.clone(), steps.clone());
             let toast_localizer = Arc::clone(&localizer);
+            let alert_localizer = Arc::clone(&localizer);
             view! {
                 // The steps' region, named by its heading, under the banner
                 // that warns of the same grant.
@@ -279,7 +281,9 @@ pub(crate) fn FullDiskAccessSteps(localizer: Arc<Localizer>) -> impl IntoView {
                         />
                     </div>
                     <Toast localizer=toast_localizer toasts=toasts then_focus=CHECK_ID />
-                    <p role="alert">{move || problem.get().map(sentence_view)}</p>
+                    {move || {
+                        problem.get().map(|sentence| refusal_alert(&alert_localizer, sentence))
+                    }}
                 </section>
             }
         })

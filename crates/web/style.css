@@ -266,18 +266,6 @@ a {
   padding-block: 0.25rem;
 }
 
-/* A failed sign-out, said at the top of the main content
-   (`sign_in::SignOutFailure`): in the error's color and in words. Empty, it
-   takes no room. */
-.sign-out-failure {
-  margin-block: 0 1rem;
-  color: var(--error-fg);
-}
-
-.sign-out-failure:empty {
-  margin-block: 0;
-}
-
 /* The frame's width is `<main>`'s own Tailwind utilities, which Settings'
    Page width chooses (`page_width.rs`): a width here, unlayered, would beat
    them. */

@@ -20,7 +20,7 @@ use crate::announcer::Politeness;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
     Button, Column, Confirmation, Name, ReviewDialog, Sentences, State, Table, TextField, Working,
-    dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals, sentence_view,
+    dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals,
 };
 use crate::dry_run_allowlist::{
     Allowlist, HEADING_ID, Listed, added, alert_words, empty_if_still, field_refusal, home_body,
@@ -257,6 +257,7 @@ pub(super) fn DryRunAllowlistSection(localizer: Arc<Localizer>) -> impl IntoView
     let heading = text(&localizer, msg::UI_DRY_RUN_ALLOWLIST_HEADING);
     let body = text(&localizer, msg::UI_DRY_RUN_ALLOWLIST_BODY);
     let table_localizer = Arc::clone(&localizer);
+    let read_alert_localizer = Arc::clone(&localizer);
     let home_button = text(&localizer, msg::UI_DRY_RUN_HOME_ADD);
     let form_localizer = Arc::clone(&localizer);
     let remove_dialog_localizer = Arc::clone(&localizer);
@@ -268,7 +269,7 @@ pub(super) fn DryRunAllowlistSection(localizer: Arc<Localizer>) -> impl IntoView
             </h2>
             <p>{body}</p>
             {move || match read_refused.get() {
-                Some(sentence) => view! { <p>{sentence_view(sentence)}</p> }.into_any(),
+                Some(sentence) => refusal_alert(&read_alert_localizer, sentence).into_any(),
                 None => {
                     folders_table(&table_localizer, shown, state.into(), list.saving, ask_remove)
                         .into_any()
