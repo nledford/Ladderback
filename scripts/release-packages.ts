@@ -46,7 +46,8 @@ export function removeCommand(format: PackageFormat): string[] {
 /** A shell command that prints the installed package's version, and fails when it isn't installed. */
 export function installedVersionScript(format: PackageFormat): string {
   return format === "deb"
-    ? "dpkg-query --show --showformat='${Version}' ladderback"
+    ? // biome-ignore lint/suspicious/noTemplateCurlyInString: `${Version}` is dpkg-query's own format syntax, for the shell to pass on.
+      "dpkg-query --show --showformat='${Version}' ladderback"
     : "rpm --query --queryformat='%{VERSION}-%{RELEASE}' ladderback";
 }
 
