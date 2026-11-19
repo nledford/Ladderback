@@ -28,8 +28,7 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 /** `text` as a reader hears it: bidi isolation marks, which a reader never
  *  hears (§4.5), may stand between any two characters. */
-const heard = (text: string): string =>
-  [...text].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION);
+const heard = (text: string): string => [...text].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION);
 
 function treeItem(world: BrowserWorld, name: string): Locator {
   return journey(world.page).byRole("treeitem", { name: namePattern(name) });
@@ -108,9 +107,7 @@ Then(
 Then("the tree {string} has one tab stop", async function (this: BrowserWorld, name: string) {
   const tree = journey(this.page).byRole("tree", { name: namePattern(name) });
   await expect(tree).toHaveCount(1);
-  const stops = await tree.evaluate(
-    (el) => [...el.querySelectorAll<HTMLElement>("*")].filter((node) => node.tabIndex >= 0).length,
-  );
+  const stops = await tree.evaluate((el) => [...el.querySelectorAll<HTMLElement>("*")].filter((node) => node.tabIndex >= 0).length);
   assert.equal(stops, 1, `the tree "${name}" has ${stops} tab stops`);
 });
 
@@ -140,18 +137,20 @@ Then(
   },
 );
 
-Then("the tree item {string} is item {int} of {int}", async function (this: BrowserWorld, name: string, position: number, size: number) {
-  const item = treeItem(this, name);
-  await expect(item).toHaveAttribute("aria-posinset", String(position), { timeout: READ_PATIENCE_MS });
-  await expect(item).toHaveAttribute("aria-setsize", String(size));
-});
+Then(
+  "the tree item {string} is item {int} of {int}",
+  async function (this: BrowserWorld, name: string, position: number, size: number) {
+    const item = treeItem(this, name);
+    await expect(item).toHaveAttribute("aria-posinset", String(position), { timeout: READ_PATIENCE_MS });
+    await expect(item).toHaveAttribute("aria-setsize", String(size));
+  },
+);
 
 // What a screen reader reads after the row's name: what the entry is.
 Then("the tree item {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
-  await expect(treeItem(this, name)).toHaveAccessibleDescription(
-    new RegExp(`^${ISOLATION}${heard(description)}${ISOLATION}$`),
-    { timeout: READ_PATIENCE_MS },
-  );
+  await expect(treeItem(this, name)).toHaveAccessibleDescription(new RegExp(`^${ISOLATION}${heard(description)}${ISOLATION}$`), {
+    timeout: READ_PATIENCE_MS,
+  });
 });
 
 // A file of a real snapshot: its size and when it was modified are the
@@ -176,7 +175,10 @@ Then("the tree item {string} is busy", async function (this: BrowserWorld, name:
 });
 
 // The row focus is on, whichever it is: several rows may be open or closed.
-for (const [state, expanded] of [["expanded", "true"], ["collapsed", "false"]] as const) {
+for (const [state, expanded] of [
+  ["expanded", "true"],
+  ["collapsed", "false"],
+] as const) {
   Then(`the focused tree item is ${state}`, async function (this: BrowserWorld) {
     await expect
       .poll(
@@ -206,9 +208,7 @@ Then("the tree item {string} shows its name right to left", async function (this
   const item = treeItem(this, name);
   await expect(item).toHaveCount(1, { timeout: READ_PATIENCE_MS });
   const direction = await item.evaluate((row, shown) => {
-    const holder = [...row.querySelectorAll("*")].find(
-      (el) => (el.textContent ?? "").replace(/[\u2066-\u2069]/g, "") === shown,
-    );
+    const holder = [...row.querySelectorAll("*")].find((el) => (el.textContent ?? "").replace(/[\u2066-\u2069]/g, "") === shown);
     if (holder === undefined) return "in no element of its own";
     return holder.matches(":dir(rtl)") ? "right to left" : "left to right";
   }, name);

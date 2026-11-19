@@ -82,13 +82,10 @@ Then("focus is on the link {string}", async function (this: BrowserWorld, name: 
 
 // The product name in the header is the start page's link, marked as the
 // current page there like the navigation's links on theirs (#594).
-Then(
-  "the link {string} in the banner is marked as the current page",
-  async function (this: BrowserWorld, name: string) {
-    const link = this.page.getByRole("banner").getByRole("link", { name, exact: true });
-    await expect(link).toHaveAttribute("aria-current", "page");
-  },
-);
+Then("the link {string} in the banner is marked as the current page", async function (this: BrowserWorld, name: string) {
+  const link = this.page.getByRole("banner").getByRole("link", { name, exact: true });
+  await expect(link).toHaveAttribute("aria-current", "page");
+});
 
 // The project's own documentation at the tag of the release this build is,
 // where a reader of that release finds what the page says is there. The
@@ -101,13 +98,16 @@ Then(
     const version = await workspaceVersion();
     const document = await readFile(path.join(repoRoot, file), "utf8");
     const headings = document.split("\n").filter((line) => /^#+ /.test(line));
-    assert.ok(headings.some((line) => line.replace(/^#+ /, "") === heading), `${file} has no heading "${heading}"`);
-    const anchor = heading.toLowerCase().replace(/[^a-z0-9 -]/g, "").replaceAll(" ", "-");
-    const link = this.page.getByRole("link", { name: namePattern(name) });
-    await expect(link).toHaveAttribute(
-      "href",
-      `https://github.com/nledford/Ladderback/blob/v${version}/${file}#${anchor}`,
+    assert.ok(
+      headings.some((line) => line.replace(/^#+ /, "") === heading),
+      `${file} has no heading "${heading}"`,
     );
+    const anchor = heading
+      .toLowerCase()
+      .replace(/[^a-z0-9 -]/g, "")
+      .replaceAll(" ", "-");
+    const link = this.page.getByRole("link", { name: namePattern(name) });
+    await expect(link).toHaveAttribute("href", `https://github.com/nledford/Ladderback/blob/v${version}/${file}#${anchor}`);
   },
 );
 
@@ -212,9 +212,7 @@ Then("focus is in the main content", async function (this: BrowserWorld) {
 });
 
 Then("the page doesn't scroll sideways", async function (this: BrowserWorld) {
-  const overflow = await this.page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
+  const overflow = await this.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert.equal(overflow, 0, `the page is ${overflow}px wider than the viewport`);
 });
 
@@ -247,9 +245,7 @@ Then("no text is clipped", async function (this: BrowserWorld) {
     const describe = (el: Element) => `<${el.localName}> "${(el.textContent ?? "").trim().slice(0, 40)}"`;
     const viewportWidth = document.documentElement.clientWidth;
     const hides = (value: string) => value === "hidden" || value === "clip";
-    const unseenBoxes = [...document.body.querySelectorAll("*")].filter(
-      (el) => getComputedStyle(el).clipPath === "inset(50%)",
-    );
+    const unseenBoxes = [...document.body.querySelectorAll("*")].filter((el) => getComputedStyle(el).clipPath === "inset(50%)");
     const seen = (el: Element) => !unseenBoxes.some((box) => box.contains(el));
     const scrollFrames = [...document.body.querySelectorAll('[role="region"][tabindex="0"]')].filter(
       (el) =>
@@ -319,28 +315,25 @@ Then("the page has a content security policy", async function (this: BrowserWorl
 // The tab shows the icon outside the page, where Playwright can't look, so
 // the step asks the daemon for each icon the page links, then has the page
 // load it as an image, under its content security policy.
-Then(
-  "the page names an icon for the browser tab, served as an image the browser keeps",
-  async function (this: BrowserWorld) {
-    const icons = await this.page
-      .locator('link[rel~="icon"]')
-      .evaluateAll((links) => links.map((link) => (link as HTMLLinkElement).href));
-    assert.notEqual(icons.length, 0, "the page links no icon");
-    for (const icon of icons) {
-      const response = await this.page.request.get(icon);
-      assert.equal(response.status(), 200, icon);
-      assert.match(response.headers()["content-type"] ?? "", /^image\//, icon);
-      // Trunk names the file by its content, so the daemon lets the browser
-      // keep it until a release changes it.
-      assert.match(response.headers()["cache-control"] ?? "", /immutable/, icon);
-      await this.page.evaluate(async (href) => {
-        const image = new Image();
-        image.src = href;
-        await image.decode();
-      }, icon);
-    }
-  },
-);
+Then("the page names an icon for the browser tab, served as an image the browser keeps", async function (this: BrowserWorld) {
+  const icons = await this.page
+    .locator('link[rel~="icon"]')
+    .evaluateAll((links) => links.map((link) => (link as HTMLLinkElement).href));
+  assert.notEqual(icons.length, 0, "the page links no icon");
+  for (const icon of icons) {
+    const response = await this.page.request.get(icon);
+    assert.equal(response.status(), 200, icon);
+    assert.match(response.headers()["content-type"] ?? "", /^image\//, icon);
+    // Trunk names the file by its content, so the daemon lets the browser
+    // keep it until a release changes it.
+    assert.match(response.headers()["cache-control"] ?? "", /immutable/, icon);
+    await this.page.evaluate(async (href) => {
+      const image = new Image();
+      image.src = href;
+      await image.decode();
+    }, icon);
+  }
+});
 
 Then("the browser blocked nothing the page asked for", async function (this: BrowserWorld) {
   assert.deepEqual(this.policyBlocks, []);

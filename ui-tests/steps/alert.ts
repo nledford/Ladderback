@@ -147,7 +147,10 @@ Then(
       { surface, words, tones: TONE_TOKENS },
     );
     assert.match(drawn.surface, /^rgb\(/, `${surface} is ${drawn.surface}, not an opaque color`);
-    assert.ok(drawn.alerts.some((alert) => alert.links.length > 0), "no alert of the demo holds a link");
+    assert.ok(
+      drawn.alerts.some((alert) => alert.links.length > 0),
+      "no alert of the demo holds a link",
+    );
     for (const alert of drawn.alerts) {
       const tone = drawn.tones[alert.tone];
       assert.ok(tone !== undefined, `an alert in the tone "${alert.tone}"`);
@@ -232,7 +235,10 @@ Then(
         };
       }),
     );
-    assert.ok(drawn.some((alert) => alert.dismiss !== null), "no alert of the demo can be dismissed");
+    assert.ok(
+      drawn.some((alert) => alert.dismiss !== null),
+      "no alert of the demo can be dismissed",
+    );
     for (const [at, alert] of drawn.entries()) {
       const which = `alert ${at + 1}`;
       assert.equal(alert.direction, direction, which);
@@ -240,11 +246,13 @@ Then(
       if (direction === "ltr") {
         assert.ok(alert.left > alert.right, `${which}'s thick edge is on its right`);
         assert.ok(alert.icon.right <= alert.words.left + ROUNDING_PX, `${which}'s icon is after its words`);
-        if (alert.dismiss !== null) assert.ok(alert.dismiss.left >= alert.words.right - ROUNDING_PX, `${which}'s Dismiss is before its words`);
+        if (alert.dismiss !== null)
+          assert.ok(alert.dismiss.left >= alert.words.right - ROUNDING_PX, `${which}'s Dismiss is before its words`);
       } else {
         assert.ok(alert.right > alert.left, `${which}'s thick edge is on its left`);
         assert.ok(alert.icon.left >= alert.words.right - ROUNDING_PX, `${which}'s icon is after its words`);
-        if (alert.dismiss !== null) assert.ok(alert.dismiss.right <= alert.words.left + ROUNDING_PX, `${which}'s Dismiss is before its words`);
+        if (alert.dismiss !== null)
+          assert.ok(alert.dismiss.right <= alert.words.left + ROUNDING_PX, `${which}'s Dismiss is before its words`);
       }
     }
   },
@@ -352,9 +360,15 @@ Then(
     assert.equal(drawn.direction, rtl ? "rtl" : "ltr");
     assert.ok(drawn.dismiss !== null, "the dismissible alert has no Dismiss button");
     if (rtl) {
-      assert.ok(near(drawn.dismiss.left, drawn.left), `Dismiss's left edge at ${drawn.dismiss.left}px, not at the line's end, ${drawn.left}px`);
+      assert.ok(
+        near(drawn.dismiss.left, drawn.left),
+        `Dismiss's left edge at ${drawn.dismiss.left}px, not at the line's end, ${drawn.left}px`,
+      );
     } else {
-      assert.ok(near(drawn.dismiss.right, drawn.right), `Dismiss's right edge at ${drawn.dismiss.right}px, not at the line's end, ${drawn.right}px`);
+      assert.ok(
+        near(drawn.dismiss.right, drawn.right),
+        `Dismiss's right edge at ${drawn.dismiss.right}px, not at the line's end, ${drawn.right}px`,
+      );
     }
   },
 );
@@ -363,7 +377,7 @@ Then(
 // seconds is generous.
 const PAGE_PATIENCE_MS = 10_000;
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // A page's own message (§4.5, #929): an Error alert, found by its class, as
 // it has no role. What the catalog filled in is set apart by bidi isolation
@@ -373,7 +387,7 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // the announcer, it stands inside the dialog's own `role="alert"` (the
 // Dialog contract).
 Then("the page shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
-  const heard = [...needle].map(escape).join(ISOLATION);
+  const heard = [...needle].map(escapeRegExp).join(ISOLATION);
   const alert = this.page.locator(".alert.tone-error").filter({ hasText: new RegExp(heard) });
   await alert.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
   const found = await alert.first().evaluate((element, live) => {

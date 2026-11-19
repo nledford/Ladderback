@@ -11,19 +11,7 @@
 // The types release-plz.toml's `commit_parsers` know: feat, fix, perf and
 // revert reach the changelog; the others are skipped by name. A type outside
 // this list would be neither.
-const TYPES = [
-  "feat",
-  "fix",
-  "perf",
-  "revert",
-  "docs",
-  "test",
-  "chore",
-  "ci",
-  "build",
-  "refactor",
-  "style",
-] as const;
+const TYPES = ["feat", "fix", "perf", "revert", "docs", "test", "chore", "ci", "build", "refactor", "style"] as const;
 
 const HEADER = /^(?<type>[a-z]+)(?:\((?<scope>[^()\s]+)\))?(?<breaking>!)?: (?<subject>.*)$/;
 

@@ -52,7 +52,10 @@ Then(
       });
       assert.notEqual(drawn.ring.style, "none", `"${name}" draws no focus ring`);
       assert.ok(drawn.ring.width > 0, `"${name}"'s focus ring is ${drawn.ring.width}px wide`);
-      assert.ok(drawn.parts.some((part) => part.part.includes("progress-track")), `"${name}" draws no track`);
+      assert.ok(
+        drawn.parts.some((part) => part.part.includes("progress-track")),
+        `"${name}" draws no track`,
+      );
       for (const part of drawn.parts) {
         assert.ok(
           part.left >= drawn.box.left - ROUNDING_PX &&
@@ -82,10 +85,7 @@ Then(
         text: Number.parseFloat(getComputedStyle(document.body).fontSize),
       };
     });
-    assert.ok(
-      Math.abs(thick - times * text) < ROUNDING_PX,
-      `the track of "${name}" is ${thick}px thick, the page's text ${text}px`,
-    );
+    assert.ok(Math.abs(thick - times * text) < ROUNDING_PX, `the track of "${name}" is ${thick}px thick, the page's text ${text}px`);
   },
 );
 
@@ -115,8 +115,9 @@ Then(
           const track = element.querySelector(".progress-track");
           const line = element.parentElement as HTMLElement | null;
           const filled = () => (fill === null ? "" : getComputedStyle(fill).backgroundColor);
-          const words = Array.from(element.querySelectorAll(".progress-step, .progress-words"), (part) =>
-            getComputedStyle(part).color,
+          const words = Array.from(
+            element.querySelectorAll(".progress-step, .progress-words"),
+            (part) => getComputedStyle(part).color,
           );
           let expected: string[];
           let fills: string[];

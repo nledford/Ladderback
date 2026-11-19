@@ -247,7 +247,7 @@ async function assertServesThisCheckoutsUi(url: string): Promise<void> {
   }
 }
 
-BeforeAll(async function () {
+BeforeAll(async () => {
   serverScratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-shared-"));
   const started = await startServer(serverScratch, {
     LADDERBACK_CONFIG_DIR: path.join(serverScratch, "config"),
@@ -265,7 +265,7 @@ BeforeAll(async function () {
   browser = await browserType.launch();
 });
 
-AfterAll(async function () {
+AfterAll(async () => {
   await browser?.close();
   if (server && server.exitCode === null) {
     server.kill("SIGTERM");

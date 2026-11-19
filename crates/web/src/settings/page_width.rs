@@ -12,7 +12,7 @@ use leptos::prelude::*;
 
 use crate::components::RadioGroup;
 use crate::page;
-use crate::page_width::{GROUP, HEADING_ID, PageWidth, SECTION_ID, options};
+use crate::page_width::{GROUP, HEADING_ID, PageWidth, options};
 use crate::text;
 
 /// The section: a radio group of Narrow and Full width, the one in effect
@@ -49,7 +49,7 @@ pub(super) fn PageWidthSection(
     );
     let not_kept = text(&localizer, msg::UI_PAGE_WIDTH_NOT_KEPT);
     view! {
-        <section id=SECTION_ID aria-labelledby=HEADING_ID>
+        <section aria-labelledby=HEADING_ID>
             <h2 id=HEADING_ID>{text(&localizer, msg::UI_PAGE_WIDTH_HEADING)}</h2>
             <RadioGroup
                 name=GROUP

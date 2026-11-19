@@ -3,7 +3,8 @@
 // screen reader and has no role, so it has no name to find it by: it is
 // found by its class inside its demo, which is found by its heading, as a
 // spinner's drawing is. Its busy region is found by the attribute that makes
-// it busy, and its control by role and name, by keyboard alone.
+// it busy, the words that say its wait by their text, and its control by
+// role and name, by keyboard alone.
 
 import assert from "node:assert/strict";
 
@@ -14,6 +15,7 @@ import type { Locator, Page } from "playwright";
 import { composite, contrastRatio } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf } from "./components.ts";
+import { saidJustBeforeBusy } from "./first_load.ts";
 
 // The gallery's skeletons while its region waits (`gallery.rs`): a
 // paragraph's lines, a field's block, lines on Ledger Gray and the region's
@@ -53,16 +55,21 @@ Then(
   },
 );
 
-// The page still says the wait in words, visible, and marks the region the
-// skeleton stands for busy until its content arrives.
+// The region the skeleton stands for is busy until its content arrives.
+Then("the region of the {string} demo is busy and shows a skeleton", async function (this: BrowserWorld, component: string) {
+  const busy = await region(this.page, component);
+  await expect(busy).toHaveAttribute("aria-busy", "true");
+  await expect(busy.locator(".skeleton")).toHaveCount(1);
+  await expect(busy.locator(".skeleton")).toBeVisible();
+});
+
+// The page still says the wait in words, visible, just before the busy
+// region and outside it, so a screen reader that leaves a busy region unread
+// reads them: the skeleton's and the table's.
 Then(
-  "the region of the {string} demo is busy and shows the words {string} beside a skeleton",
+  "the {string} demo says {string} just before its busy region, outside it",
   async function (this: BrowserWorld, component: string, words: string) {
-    const busy = await region(this.page, component);
-    await expect(busy).toHaveAttribute("aria-busy", "true");
-    await expect(busy.getByText(words, { exact: true })).toBeVisible();
-    await expect(busy.locator(".skeleton")).toHaveCount(1);
-    await expect(busy.locator(".skeleton")).toBeVisible();
+    await saidJustBeforeBusy(demoSection(this.page, component), words);
   },
 );
 
@@ -166,7 +173,10 @@ Then(
       for (const [index, bar] of bars.entries()) {
         assert.ok(near(bar.height, drawn.font), `line ${index + 1} is ${bar.height}px tall, its text ${drawn.font}px`);
         const atStart: boolean = from === "left" ? near(bar.left, room.left) : near(bar.right, room.right);
-        assert.ok(atStart, `line ${index + 1} starts at ${from === "left" ? bar.left : bar.right}px, its room at ${from === "left" ? room.left : room.right}px`);
+        assert.ok(
+          atStart,
+          `line ${index + 1} starts at ${from === "left" ? bar.left : bar.right}px, its room at ${from === "left" ? room.left : room.right}px`,
+        );
       }
       const last = bars.at(-1);
       assert.ok(last !== undefined);
@@ -243,7 +253,11 @@ Then(
     assert.ok(onSurface.includes(true) && onSurface.includes(false), "the demo has no skeleton on the page and on a surface both");
     for (const skeleton of drawn.skeletons) {
       assert.ok(skeleton.behind !== "", "a skeleton lies on no fill");
-      assert.deepEqual(skeleton.fills, skeleton.fills.map(() => drawn.fill), `a skeleton on ${skeleton.behind}`);
+      assert.deepEqual(
+        skeleton.fills,
+        skeleton.fills.map(() => drawn.fill),
+        `a skeleton on ${skeleton.behind}`,
+      );
       const ratio = contrastRatio(composite([drawn.fill]), composite([skeleton.behind]));
       assert.ok(ratio >= floor, `a skeleton on ${skeleton.behind} is ${ratio.toFixed(2)}:1 apart from it`);
     }

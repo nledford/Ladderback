@@ -51,10 +51,7 @@ export function headChecks(atFirst: ReadonlyMap<Engine, Outcome>): Engine[] {
 /** The engines whose red counts, and so whether the scenario is red: Chromium
  *  when it failed there at the test: commit, else each engine it failed in
  *  there and passes in at the head. Empty: the scenario is GREEN. */
-export function countedRed(
-  atFirst: ReadonlyMap<Engine, Outcome>,
-  atHead: ReadonlyMap<Engine, Outcome>,
-): Engine[] {
+export function countedRed(atFirst: ReadonlyMap<Engine, Outcome>, atHead: ReadonlyMap<Engine, Outcome>): Engine[] {
   if (atFirst.get("chromium") === "failed") return ["chromium"];
   return headChecks(atFirst).filter((engine) => atHead.get(engine) === "passed");
 }

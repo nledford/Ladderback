@@ -1,0 +1,37 @@
+{
+  "$schema": "./ui-tests/node_modules/@biomejs/biome/configuration_schema.json",
+  "root": true,
+  "files": {
+    "includes": [
+      "scripts/**/*.ts",
+      "ui-tests/**/*.ts",
+      "crates/l10n/tests/expectations/*.ts",
+      "!ui-tests/node_modules",
+      "!ui-tests/reports",
+      "!.worktrees",
+      "!target"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 135
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "performance": { "useDomNodeTextContent": "off" }
+    }
+  },
+  "assist": {
+    "enabled": false
+  }
+}

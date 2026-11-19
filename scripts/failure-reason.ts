@@ -10,6 +10,7 @@
 const MAX_LENGTH = 200;
 
 // Colour and cursor sequences: cucumber-rs colours its report on a terminal.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ESC (U+001B) opens every ANSI sequence; matching it is the point.
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 const indentOf = (line: string): number => line.length - line.trimStart().length;
@@ -97,7 +98,10 @@ function fromCucumberRs(lines: string[]): string | null {
  * `e2e` or `acceptance`.
  */
 export function failureReason(runner: string, output: string): string | null {
-  const lines = output.replace(ANSI, "").split("\n").map((line) => line.replace(/\r$/, ""));
+  const lines = output
+    .replace(ANSI, "")
+    .split("\n")
+    .map((line) => line.replace(/\r$/, ""));
   const reason = runner === "ui" ? fromCucumberJs(lines) : fromCucumberRs(lines);
   return reason === "" ? null : reason;
 }

@@ -145,9 +145,7 @@ export function listing(
     else found.current += 1;
   }
   const known = new Set(english.map((entry) => entry.id));
-  found.unknown = [...new Set([...translated, ...sources.keys()])]
-    .filter((id) => !known.has(id) && !ownTerm(id, translated))
-    .sort();
+  found.unknown = [...new Set([...translated, ...sources.keys()])].filter((id) => !known.has(id) && !ownTerm(id, translated)).sort();
   return found;
 }
 
@@ -160,10 +158,7 @@ const indented = (text: string, by: string): string[] => text.split("\n").map((l
 
 /** The listing as `just translations` prints it. `translatedFrom` finds the
  * English a stale message was translated from, by its ID and hash. */
-export function renderListing(
-  listings: readonly Listing[],
-  translatedFrom: (id: string, hash: string) => string | null,
-): string {
+export function renderListing(listings: readonly Listing[], translatedFrom: (id: string, hash: string) => string | null): string {
   if (listings.length === 0) return `No language besides ${SOURCE_TAG} has a catalog.\n`;
   const lines: string[] = [];
   for (const found of listings) {
@@ -207,8 +202,7 @@ export function accepting(
   const hashes = new Map(english.map((entry) => [entry.id, sourceHash(entry.text)]));
   const translatedIds = english.map((entry) => entry.id).filter((id) => translated.has(id));
   const chosen = ids === "all" ? translatedIds.filter((id) => !sources.has(id)) : ids;
-  const staleLeftOut =
-    ids === "all" ? translatedIds.filter((id) => sources.has(id) && sources.get(id) !== hashes.get(id)) : [];
+  const staleLeftOut = ids === "all" ? translatedIds.filter((id) => sources.has(id) && sources.get(id) !== hashes.get(id)) : [];
   const next = new Map(sources);
   const accepted: string[] = [];
   for (const id of chosen) {

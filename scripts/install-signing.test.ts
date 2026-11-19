@@ -57,7 +57,7 @@ exit 0
     chmodSync(join(dir, "security"), 0o755);
     chmodSync(join(dir, "codesign"), 0o755);
     writeFileSync(join(dir, "listing"), stand.listing ?? LISTING);
-    const env: NodeJS.ProcessEnv = { PATH: `${dir}:${process.env["PATH"]}`, CARGO_HOME: join(dir, "cargo") };
+    const env: NodeJS.ProcessEnv = { PATH: `${dir}:${process.env.PATH}`, CARGO_HOME: join(dir, "cargo") };
     if (identity !== undefined) env[IDENTITY_VARIABLE] = identity;
     const said: string[] = [];
     const record = (...parts: unknown[]) => void said.push(parts.join(" "));
@@ -66,12 +66,21 @@ exit 0
     console.error = record;
     let status: number;
     try {
-      status = main(argv.map((arg) => arg.replaceAll("<dir>", dir)), env, os);
+      status = main(
+        argv.map((arg) => arg.replaceAll("<dir>", dir)),
+        env,
+        os,
+      );
     } finally {
       console.log = original.log;
       console.error = original.error;
     }
-    const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((c) => c.replaceAll(dir, "<dir>")) : [];
+    const calls = existsSync(log)
+      ? readFileSync(log, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((c) => c.replaceAll(dir, "<dir>"))
+      : [];
     return { status, said: said.join("\n").replaceAll(dir, "<dir>"), calls };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -141,7 +150,12 @@ test("an identity named by its hash, in either case, signs with that identity", 
 test("a name security doesn't list as valid stops the check, saying how to make one", () => {
   const { status, said, calls } = run(["check"], "darwin", "Someone Else");
   assert.equal(status, 1);
-  assert.match(said, new RegExp(`^install: ${IDENTITY_VARIABLE} names "Someone Else", which \`security find-identity -v -p codesigning\` doesn't list as a valid code-signing identity`));
+  assert.match(
+    said,
+    new RegExp(
+      `^install: ${IDENTITY_VARIABLE} names "Someone Else", which \`security find-identity -v -p codesigning\` doesn't list as a valid code-signing identity`,
+    ),
+  );
   assert.match(said, /Certificate Assistant → Create a Certificate/);
   assert.match(said, /Trust → Code Signing to Always Trust/);
   assert.match(said, /Nothing was built or installed\.$/);
@@ -152,7 +166,12 @@ test("part of a listed name is refused, naming the names that hold it", () => {
   // `codesign` would take it as a name; the check takes only a whole one.
   const { status, said, calls } = run(["check"], "darwin", "Ladderback");
   assert.equal(status, 1);
-  assert.match(said, new RegExp(`names "Ladderback", which is no valid code-signing identity's whole name; .* lists "${NAME}", "${NAME} 2": name one in full, or by its SHA-1 hash`));
+  assert.match(
+    said,
+    new RegExp(
+      `names "Ladderback", which is no valid code-signing identity's whole name; .* lists "${NAME}", "${NAME} 2": name one in full, or by its SHA-1 hash`,
+    ),
+  );
   assert.match(said, /Nothing was built or installed\.$/);
   assert.deepEqual(calls, [LIST]);
 });
@@ -161,7 +180,10 @@ test("a name security doesn't list after the install leaves the program signed a
   const { status, said, calls } = run(["sign"], "darwin", "Someone Else");
   assert.equal(status, 1);
   assert.match(said, /doesn't list as a valid code-signing identity/);
-  assert.match(said, /The program is installed with the linker's ad-hoc signature\. To sign it without building again, run `node scripts\/install-signing\.ts sign`/);
+  assert.match(
+    said,
+    /The program is installed with the linker's ad-hoc signature\. To sign it without building again, run `node scripts\/install-signing\.ts sign`/,
+  );
   assert.deepEqual(calls, [LIST]);
 });
 
@@ -185,14 +207,20 @@ test("a certificate listed once for each of two keychains is refused, by name or
 test("a listing security can't give stops the check", () => {
   const { status, said } = run(["check"], "darwin", NAME, { failing: "security" });
   assert.equal(status, 1);
-  assert.match(said, /couldn't list the code-signing identities with `security find-identity -v -p codesigning`: security: SecKeychainSearchCopyNext/);
+  assert.match(
+    said,
+    /couldn't list the code-signing identities with `security find-identity -v -p codesigning`: security: SecKeychainSearchCopyNext/,
+  );
   assert.match(said, /Nothing was built or installed\.$/);
 });
 
 test("a signing codesign refuses fails the install, unverified, with the ad-hoc signature left", () => {
   const { status, said, calls } = run(["sign"], "darwin", NAME, { failing: "sign" });
   assert.equal(status, 1);
-  assert.match(said, /^install: couldn't sign <dir>\/cargo\/bin\/ladderback: <dir>\/cargo\/bin\/ladderback: errSecInternalComponent\./);
+  assert.match(
+    said,
+    /^install: couldn't sign <dir>\/cargo\/bin\/ladderback: <dir>\/cargo\/bin\/ladderback: errSecInternalComponent\./,
+  );
   assert.match(said, /The program is installed with the linker's ad-hoc signature\. To sign it without building again/);
   assert.equal(calls.length, 2);
 });
@@ -200,7 +228,10 @@ test("a signing codesign refuses fails the install, unverified, with the ad-hoc 
 test("a signature codesign --verify refuses fails the install, saying the program carries it", () => {
   const { status, said, calls } = run(["sign"], "darwin", NAME, { failing: "verify" });
   assert.equal(status, 1);
-  assert.match(said, /signed <dir>\/cargo\/bin\/ladderback, but `codesign --verify` refuses it: .*invalid signature.*\. The program is installed with that signature, which macOS may refuse to run\. To sign it without building again/);
+  assert.match(
+    said,
+    /signed <dir>\/cargo\/bin\/ladderback, but `codesign --verify` refuses it: .*invalid signature.*\. The program is installed with that signature, which macOS may refuse to run\. To sign it without building again/,
+  );
   assert.doesNotMatch(said, /ad-hoc/);
   assert.equal(calls.length, 3);
 });

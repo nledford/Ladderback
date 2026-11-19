@@ -94,6 +94,12 @@ function testArtifact(line: string): (CargoMessage & { executable: string }) | n
   return { ...message, executable: message.executable };
 }
 
+/** What a command printed (stdout then stderr) and how it ended. */
+interface Run {
+  status: number | null;
+  output: string;
+}
+
 /**
  * Runs a command in one of the worktrees, with that worktree's target dir. A
  * timeout or a command that can't start is an error, never a red result.
@@ -103,7 +109,7 @@ function run(
   args: string[],
   cwd: string,
   { env = {}, timeout = BUILD_TIMEOUT_MS }: { env?: Env; timeout?: number } = {},
-): { status: number | null; output: string } {
+): Run {
   const tree = path.relative(treesRoot, cwd).split(path.sep)[0] ?? "";
   const result = spawnSync(command, args, {
     cwd,
@@ -280,8 +286,12 @@ function wasmTests(dir: string): Tests {
   }
   const build = run(
     "cargo",
-    ["test", ...packages, "--lib", "--bins", "--tests", "--all-features"]
-      .concat(["--target", WASM_TARGET, "--no-run", "--message-format=json"]),
+    ["test", ...packages, "--lib", "--bins", "--tests", "--all-features"].concat([
+      "--target",
+      WASM_TARGET,
+      "--no-run",
+      "--message-format=json",
+    ]),
     dir,
     { env: WASM_ENV },
   );
@@ -388,7 +398,7 @@ function runScenario(
   engine: Engine = "chromium",
 ): { outcome: Outcome; output: string } {
   const regex = nameRegex(scenario.name);
-  let result;
+  let result: Run;
   if (scenario.runner === "acceptance") {
     result = run("cargo", ["test", "-p", "app", "--test", "acceptance", "--", "--name", regex], dir, {
       timeout: TEST_TIMEOUT_MS,
@@ -470,9 +480,7 @@ try {
   }
   const afterWasm: Tests = wasm ? wasmTests(trees.first) : { ok: true, tests: new Map() };
   if (!afterWasm.ok) {
-    throw new Error(
-      `the test: commit doesn't compile for ${WASM_TARGET}; a compile error doesn't count as red:\n${afterWasm.output}`,
-    );
+    throw new Error(`the test: commit doesn't compile for ${WASM_TARGET}; a compile error doesn't count as red:\n${afterWasm.output}`);
   }
   const newTests = [...after.tests].filter(([key]) => !before.tests.has(key));
   const newWasmTests = [...afterWasm.tests].filter(([key]) => !beforeWasm.tests.has(key));
@@ -505,12 +513,9 @@ try {
     // A tree that defines a `web-test` recipe builds its UI for the scenarios
     // with it, as `just test-ui` does (it may need features a release build
     // leaves out). A tree without one gets the plain release build.
-    const webTest =
-      existsSync(path.join(trees.first, "Justfile")) && run("just", ["--show", "web-test"], trees.first).status === 0;
+    const webTest = existsSync(path.join(trees.first, "Justfile")) && run("just", ["--show", "web-test"], trees.first).status === 0;
     const steps: [string, string[], string][] = [
-      webTest
-        ? ["just", ["web-test"], trees.first]
-        : ["trunk", ["build", "--release"], path.join(trees.first, "crates/web")],
+      webTest ? ["just", ["web-test"], trees.first] : ["trunk", ["build", "--release"], path.join(trees.first, "crates/web")],
       ["cargo", ["build"], trees.first],
       ["npm", ["ci"], path.join(trees.first, "ui-tests")],
     ];
@@ -530,9 +535,7 @@ try {
   const uiScenarios: { key: string; scenario: Scenario; atFirst: Runs; atHead: Runs }[] = [];
   for (const [key, scenario] of newScenarios) {
     if (scenario.runner === "ui") {
-      const atFirst: Runs = new Map(
-        engines.map((engine) => [engine, runScenario(trees.first, scenario, uiReady, engine)]),
-      );
+      const atFirst: Runs = new Map(engines.map((engine) => [engine, runScenario(trees.first, scenario, uiReady, engine)]));
       uiScenarios.push({ key, scenario, atFirst, atHead: new Map() });
       continue;
     }

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { Given, Then } from "@cucumber/cucumber";
 
 import { namePattern } from "../support/keyboard.ts";
-import { type BrowserWorld } from "../support/world.ts";
+import type { BrowserWorld } from "../support/world.ts";
 import { api } from "./maintenance.ts";
 import { rowNamed } from "./live.ts";
 
@@ -91,8 +91,11 @@ Then("the table {string} has the row of the daemon's home folder", async functio
 });
 
 // A folder's row, found by its header, holds the button named for it.
-Then("the row {string} of the table {string} holds the button {string}", async function (this: BrowserWorld, row: string, name: string, button: string) {
-  await rowNamed(this, name, row)
-    .getByRole("button", { name: namePattern(button) })
-    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
-});
+Then(
+  "the row {string} of the table {string} holds the button {string}",
+  async function (this: BrowserWorld, row: string, name: string, button: string) {
+    await rowNamed(this, name, row)
+      .getByRole("button", { name: namePattern(button) })
+      .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  },
+);
