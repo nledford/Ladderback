@@ -1,9 +1,11 @@
 // Journey steps for a page's first load (technical design §4.5, the
-// skeleton's caller): while the daemon's first answer is on its way, the
-// region it fills is busy, says the wait in words and shows the still shape
-// of what is coming. A skeleton is hidden from a screen reader and has no
-// role, so it is found by its class inside the busy region, which is found by
-// the attribute that makes it busy, as the gallery's skeleton steps do.
+// skeleton's caller): while the daemon's first answer is on its way, the page
+// says the wait in words just before the region it fills, outside it, and
+// the region is busy and shows the still shape of what is coming. A skeleton
+// is hidden from a screen reader and has no role, so it is found by its class
+// inside the busy region, which has no role or name either: it is found by
+// the attribute that makes it busy, as the gallery's skeleton steps do. The
+// words are found by their text.
 
 import assert from "node:assert/strict";
 
@@ -21,18 +23,44 @@ interface Box {
   height: number;
 }
 
-/** The main content's one busy region in view, once it says the wait in
- *  `words` beside skeletons that a screen reader skips. */
-async function busyRegion(world: BrowserWorld, words: string): Promise<Locator> {
+/** The main content's one busy region in view, once it shows skeletons that
+ *  a screen reader skips. */
+async function busyRegion(world: BrowserWorld): Promise<Locator> {
   const busy = world.page.getByRole("main").locator('[aria-busy="true"]:visible');
   await expect(busy).toHaveCount(1);
-  await expect(busy.getByText(words, { exact: true })).toBeVisible();
   const skeletons = busy.locator(".skeleton");
   assert.ok((await skeletons.count()) > 0, "the busy region shows no skeleton");
   for (const skeleton of await skeletons.all()) {
     await expect(skeleton).toHaveAttribute("aria-hidden", "true");
   }
   return busy;
+}
+
+/** Asserts `words`, the one visible run of them in `scope`, stand just
+ *  before a busy region and outside it, where a screen reader reads them:
+ *  ARIA lets assistive technology leave a busy region's content unread until
+ *  it stops being busy (§4.5, the skeleton's caller). "Just before" is the
+ *  next element after the words' line, the innermost element around them
+ *  with anything after it. */
+export async function saidJustBeforeBusy(scope: Locator, words: string): Promise<void> {
+  const said = scope.getByText(words, { exact: true });
+  await expect(said).toBeVisible();
+  const placed = await said.evaluate((element) => {
+    let line: Element | null = element;
+    while (line && !line.nextElementSibling) {
+      line = line.parentElement;
+    }
+    return {
+      insideBusy: element.closest('[aria-busy="true"]') !== null,
+      hidden: element.closest('[aria-hidden="true"]') !== null,
+      beforeBusy: line?.nextElementSibling?.getAttribute("aria-busy") === "true",
+    };
+  });
+  assert.deepEqual(
+    placed,
+    { insideBusy: false, hidden: false, beforeBusy: true },
+    `"${words}" isn't just before a busy region, outside it, where a screen reader reads it`,
+  );
 }
 
 /** The region's skeletons line by line, top to bottom: those that stand
@@ -59,9 +87,9 @@ async function linesOf(busy: Locator): Promise<Box[][]> {
 
 // A table's shape: its header, then its rows, each a skeleton per column.
 Then(
-  "a region of the page is busy and shows the words {string} beside the still shape of a table, its header and {int} rows of {int} columns",
-  async function (this: BrowserWorld, words: string, rows: number, columns: number) {
-    const lines = await linesOf(await busyRegion(this, words));
+  "a region of the page is busy and shows the still shape of a table, its header and {int} rows of {int} columns",
+  async function (this: BrowserWorld, rows: number, columns: number) {
+    const lines = await linesOf(await busyRegion(this));
     assert.equal(lines.length, rows + 1, `the skeleton has ${lines.length} lines, not a header and ${rows} rows`);
     lines.forEach((line, index) =>
       assert.equal(line.length, columns, `line ${index + 1} of the skeleton has ${line.length} columns, not ${columns}`),
@@ -72,9 +100,9 @@ Then(
 // A form's shape: each field a label above its box, which is taller than the
 // label's line, then the button below them.
 Then(
-  "a region of the page is busy and shows the words {string} beside the still shape of a form, {int} field(s) and its button",
-  async function (this: BrowserWorld, words: string, fields: number) {
-    const lines = await linesOf(await busyRegion(this, words));
+  "a region of the page is busy and shows the still shape of a form, {int} field(s) and its button",
+  async function (this: BrowserWorld, fields: number) {
+    const lines = await linesOf(await busyRegion(this));
     assert.equal(lines.length, fields * 2 + 1, `the skeleton has ${lines.length} lines, not ${fields} fields and a button`);
     assert.ok(
       lines.every((line) => line.length === 1),
@@ -87,6 +115,13 @@ Then(
     }
     const [label, button] = [parts.at(0), parts.at(-1)];
     assert.ok(label && button && button.height > label.height, "the button is no taller than a label");
+  },
+);
+
+Then(
+  "the page says {string} just before its busy region, outside it",
+  async function (this: BrowserWorld, words: string) {
+    await saidJustBeforeBusy(this.page.getByRole("main"), words);
   },
 );
 

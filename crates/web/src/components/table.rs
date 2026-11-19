@@ -108,7 +108,9 @@ impl<R> Sort<R> {
 /// The sentences that take the table's place while it can't show its rows,
 /// the caller's, since only it knows what the rows are.
 pub struct Sentences {
-    /// Said beside a spinner while the rows are on their way.
+    /// Said beside a spinner while the rows are on their way, just before
+    /// the busy region where the table will stand and outside it, since a
+    /// screen reader may leave a busy region unread (§4.5).
     pub loading: String,
     /// Said when there are none.
     pub empty: String,
@@ -238,70 +240,75 @@ where
     let labelled_by = name.table_labelled_by().map(str::to_owned);
     let row_columns = Arc::clone(&columns);
     view! {
-        <div aria-busy=move || {
-            (shown.get() == Shown::Loading).then_some("true")
-        }>
-            {move || match shown.get() {
-                Shown::Loading => view! { <Spinner label=loading.clone() /> }.into_any(),
-                Shown::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
-                Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
-                Shown::Table => {
-                    let columns = Arc::clone(&row_columns);
-                    let header_row = header_row(&columns, sorted);
-                    let footer_row = footer.clone().map(|footer| footer_row(&columns, footer));
-                    view! {
-                        // The frame is the size container the table's width
-                        // is measured against, and what scrolls.
-                        <div
-                            class="table-frame data-table-frame"
-                            role="region"
-                            aria-labelledby=frame_name.clone()
-                            tabindex="0"
-                            style:scroll-padding-inline-start=pinned_room.clone()
-                        >
-                            <table
-                                class="data-table"
-                                aria-labelledby=labelled_by.clone()
-                                style:inline-size=width.clone()
-                            >
-                                {caption
-                                    .clone()
-                                    .map(|caption| {
-                                        view! {
-                                            <caption id=caption_id.clone() class="text-muted">
-                                                {caption}
-                                            </caption>
-                                        }
-                                    })}
-                                <colgroup>
-                                    {columns
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(at, column)| {
-                                            let width = if at == 0 {
-                                                rules::row_header_width(column.width)
-                                            } else {
-                                                column.width.to_string()
-                                            };
-                                            view! { <col style:inline-size=width /> }
-                                        })
-                                        .collect_view()}
-                                </colgroup>
-                                {header_row}
-                                <tbody node_ref=body>
-                                    <For
-                                        each=move || placed.get()
-                                        key=|key| key.clone()
-                                        children=move |key| { row_view(&columns, rows, index, key) }
-                                    />
-                                </tbody>
-                                {footer_row}
-                            </table>
-                        </div>
-                    }
-                        .into_any()
-                }
+        <div>
+            {move || {
+                (shown.get() == Shown::Loading).then(|| view! { <Spinner label=loading.clone() /> })
             }}
+            <div aria-busy=move || {
+                (shown.get() == Shown::Loading).then_some("true")
+            }>
+                {move || match shown.get() {
+                    Shown::Loading => ().into_any(),
+                    Shown::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
+                    Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
+                    Shown::Table => {
+                        let columns = Arc::clone(&row_columns);
+                        let header_row = header_row(&columns, sorted);
+                        let footer_row = footer.clone().map(|footer| footer_row(&columns, footer));
+                        view! {
+                            // The frame is the size container the table's width
+                            // is measured against, and what scrolls.
+                            <div
+                                class="table-frame data-table-frame"
+                                role="region"
+                                aria-labelledby=frame_name.clone()
+                                tabindex="0"
+                                style:scroll-padding-inline-start=pinned_room.clone()
+                            >
+                                <table
+                                    class="data-table"
+                                    aria-labelledby=labelled_by.clone()
+                                    style:inline-size=width.clone()
+                                >
+                                    {caption
+                                        .clone()
+                                        .map(|caption| {
+                                            view! {
+                                                <caption id=caption_id.clone() class="text-muted">
+                                                    {caption}
+                                                </caption>
+                                            }
+                                        })}
+                                    <colgroup>
+                                        {columns
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(at, column)| {
+                                                let width = if at == 0 {
+                                                    rules::row_header_width(column.width)
+                                                } else {
+                                                    column.width.to_string()
+                                                };
+                                                view! { <col style:inline-size=width /> }
+                                            })
+                                            .collect_view()}
+                                    </colgroup>
+                                    {header_row}
+                                    <tbody node_ref=body>
+                                        <For
+                                            each=move || placed.get()
+                                            key=|key| key.clone()
+                                            children=move |key| { row_view(&columns, rows, index, key) }
+                                        />
+                                    </tbody>
+                                    {footer_row}
+                                </table>
+                            </div>
+                        }
+                            .into_any()
+                    }
+                }}
+            </div>
         </div>
     }
     .into_any()
