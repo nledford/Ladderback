@@ -8,6 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The pairing token's text is unpadded base64url (§16, decision 120).
+base64.workspace = true
 croner.workspace = true
 jiff.workspace = true
 serde.workspace = true

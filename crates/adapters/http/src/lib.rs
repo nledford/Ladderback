@@ -27,6 +27,7 @@ mod response_headers;
 mod restart;
 mod restores;
 mod sign_in;
+mod sync;
 
 use std::borrow::Cow;
 #[cfg(debug_assertions)]
@@ -668,6 +669,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
                 .post(restart::ask)
                 .delete(restart::cancel),
         )
+        .merge(sync::routes())
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
             let assets = Arc::clone(&assets);

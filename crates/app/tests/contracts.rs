@@ -259,6 +259,11 @@ fn seeded_randomness_meets_the_random_contract() {
     contract::random::run(&SeededRandom::new(0x5eed));
 }
 
+#[test]
+fn fake_signing_meets_the_signing_contract() {
+    contract::signing::run(&app::fakes::FakeSigning);
+}
+
 #[tokio::test]
 async fn simulated_engine_steps_take_time_on_its_clock() {
     let clock = Arc::new(FakeClock::auto_advancing(epoch()));

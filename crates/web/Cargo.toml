@@ -14,8 +14,11 @@ publish.workspace = true
 # engine along, so a release build passes `--no-default-features` (`trunk build
 # --release --no-default-features`), and `just architecture` checks that this
 # leaves them out.
-default = ["pseudo"]
+default = ["pseudo", "hub"]
 pseudo = ["l10n/pseudo"]
+# The hub's pages and the agent's pairing pages (§16, decision 122), none yet.
+# On by default; a release build leaves it out, as `just architecture` checks.
+hub = []
 # The component gallery, the dev-only route `/_gallery` where Playwright drives
 # the shared components (technical design §4.5). Off by default and off in a
 # release build; `just test-ui` builds the UI with it on.
