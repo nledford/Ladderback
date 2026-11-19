@@ -69,6 +69,8 @@ mod install_restart_steps;
 mod install_script_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
+#[path = "steps/key_files.rs"]
+mod key_files_steps;
 #[path = "steps/locations.rs"]
 mod locations_steps;
 #[path = "steps/maintenance.rs"]

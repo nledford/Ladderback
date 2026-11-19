@@ -183,3 +183,58 @@ fn keys_and_signatures_show_their_hex() {
         format!("Signature({RFC_SIGNATURE})")
     );
 }
+
+#[test]
+fn a_key_reads_back_from_its_hex() {
+    let key = PublicKey::from_bytes(bytes32(RFC_KEY)).unwrap();
+    assert_eq!(key.to_hex(), RFC_KEY);
+    assert_eq!(PublicKey::from_hex(RFC_KEY), Ok(key));
+}
+
+#[test]
+fn a_key_from_hex_is_checked_as_bytes_are() {
+    let small = lower_hex(&SMALL_ORDER_KEYS[2]);
+    assert_eq!(PublicKey::from_hex(&small), Err(KeyRefused::SmallOrder));
+    let prime = lower_hex(&FIELD_PRIME);
+    assert_eq!(PublicKey::from_hex(&prime), Err(KeyRefused::NotCanonical));
+}
+
+/// Exactly 64 lower-case hex digits, nothing around them: a file's line
+/// break is the caller's to take off.
+#[test]
+fn other_text_is_no_key() {
+    let upper = RFC_KEY.to_uppercase();
+    let short = RFC_KEY.get(..62).unwrap();
+    let long = format!("{RFC_KEY}00");
+    let spaced = format!(" {RFC_KEY}");
+    let broken = format!("{RFC_KEY}\n");
+    let not_hex = format!("{}g", RFC_KEY.get(..63).unwrap());
+    let wide = format!("{}é", RFC_KEY.get(..62).unwrap());
+    for text in ["", &upper, short, &long, &spaced, &broken, &not_hex, &wide] {
+        assert_eq!(
+            PublicKey::from_hex(text),
+            Err(KeyRefused::NotHex),
+            "{text:?}"
+        );
+        assert!(SigningSeed::from_hex(text).is_none(), "{text:?}");
+    }
+}
+
+/// Every digit, both nibbles: `0f`, `f0` and each of `0`–`9`, `a`–`f`.
+#[test]
+fn a_seed_reads_back_from_its_hex() {
+    let mut bytes = [0; KEY_BYTES];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::try_from(index).unwrap().wrapping_mul(0x4f) ^ 0x0f;
+    }
+    let text = lower_hex(&bytes);
+    let seed = SigningSeed::from_hex(&text).unwrap();
+    assert_eq!(seed.expose(), &bytes);
+    assert_eq!(seed.to_hex().as_str(), text);
+    assert_eq!(
+        SigningSeed::from_hex("0123456789abcdef".repeat(4).as_str())
+            .unwrap()
+            .expose()[..8],
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]
+    );
+}

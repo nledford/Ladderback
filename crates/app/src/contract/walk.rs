@@ -44,7 +44,7 @@ async fn walk(
     give_way: GiveWay,
 ) -> Walked {
     let (walker, root) = harness.tree(TREE);
-    let walked = walker.walk(&[root], filter, limits, give_way).await;
+    let walked = walker.walk(&[root], filter, &[], limits, give_way).await;
     assert!(walked.is_ok(), "the walk failed with {walked:?}");
     walked.unwrap_or_default()
 }

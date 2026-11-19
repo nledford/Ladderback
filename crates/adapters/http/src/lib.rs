@@ -269,6 +269,11 @@ pub enum StartError {
         args: Vec<(&'static str, api::MsgArg)>,
         detail: Option<String>,
     },
+    /// The plan's sources hold the data folder while it holds a secret key
+    /// file that no glob can leave out, its path not being UTF-8 (§16,
+    /// decision 120, "A copied data folder"): refused rather than back the
+    /// keys up.
+    KeyFilesNotLeftOut,
 }
 
 /// The catalog the API asks of the daemon (§4.2): the plans the operations
@@ -813,6 +818,11 @@ async fn run_plan(
         ),
         Err(StartError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
         Err(StartError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
+        Err(StartError::KeyFilesNotLeftOut) => refused_with(
+            StatusCode::CONFLICT,
+            api::ErrorCode::KeyFilesNotLeftOut,
+            Vec::new(),
+        ),
     }
 }
 
@@ -1347,6 +1357,7 @@ mod tests {
                     ],
                     detail: Some("no such entry".to_owned()),
                 })),
+                "keys" => Err(StartError::KeyFilesNotLeftOut),
                 "mistaken" => {
                     let (code, args, detail) = mistake();
                     Err(StartError::Unavailable { code, args, detail })
@@ -1806,6 +1817,22 @@ mod tests {
             body(response).await,
             r#"{"code":"plan-unknown","args":{"plan":{"type":"text","value":"missing"}}}"#
         );
+    }
+
+    /// A backup that would take key files no glob can leave out is refused
+    /// with its own code, and nothing else: the data folder's path, not
+    /// being UTF-8, can't be shown as written.
+    #[tokio::test]
+    async fn a_plan_that_would_back_up_the_key_files_is_refused() {
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/operations",
+            r#"{"plan":"keys"}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(body(response).await, r#"{"code":"key-files-not-left-out"}"#);
     }
 
     /// A secret of the plan's repository that can't be resolved is refused

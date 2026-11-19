@@ -135,11 +135,18 @@ pub(crate) fn snapshot_tags(plan: &PlanTags, extra: &[String]) -> Result<StringL
 
 /// rustic's backup options with the plan's source filter: its globs and glob
 /// files as `Excludes`, the rest as `LocalSourceFilterOptions`, each field
-/// under its own name. What the filter doesn't set is rustic's default, and
-/// `exclude-larger-than`, which a plan never sets (§6.1), stays off. The
-/// filter is taken apart whole, so a field added to it fails to compile here
-/// until it is mapped.
-pub(crate) fn backup_options(filter: &SourceFilterSpec) -> BackupOptions {
+/// under its own name, and `left_out` last. What the filter doesn't set is
+/// rustic's default, and `exclude-larger-than`, which a plan never sets
+/// (§6.1), stays off. The filter is taken apart whole, so a field added to
+/// it fails to compile here until it is mapped.
+///
+/// rustic adds the iglob files' lines after `iglobs`, and in gitignore's
+/// rules the last glob that matches a path decides it, so a line such as
+/// `*` would bring back what `left_out` leaves out (§16, decisions 120 and
+/// 122). The iglob files are read here instead, line by line as rustic
+/// reads them and in the same place, and `left_out` follows them. A file
+/// that can't be read fails the backup, as it fails rustic's.
+pub(crate) fn backup_options(filter: &SourceFilterSpec) -> Result<BackupOptions, JobError> {
     let SourceFilterSpec {
         globs,
         iglobs,
@@ -151,12 +158,20 @@ pub(crate) fn backup_options(filter: &SourceFilterSpec) -> BackupOptions {
         exclude_if_present,
         exclude_if_xattr,
         one_file_system,
+        left_out,
     } = filter;
+    let mut every_iglob = iglobs.clone();
+    for file in iglob_files {
+        let text = std::fs::read_to_string(file).map_err(|error| {
+            JobError::failed(format!("Failed to read the iglob file `{file}`: {error}"))
+        })?;
+        every_iglob.extend(text.lines().map(str::to_owned));
+    }
+    every_iglob.extend(left_out.iter().cloned());
     let excludes = Excludes::default()
         .globs(globs.clone())
-        .iglobs(iglobs.clone())
-        .glob_files(glob_files.clone())
-        .iglob_files(iglob_files.clone());
+        .iglobs(every_iglob)
+        .glob_files(glob_files.clone());
     let filter_options = LocalSourceFilterOptions::default()
         .git_ignore(*git_ignore)
         .no_require_git(*no_require_git)
@@ -164,9 +179,9 @@ pub(crate) fn backup_options(filter: &SourceFilterSpec) -> BackupOptions {
         .exclude_if_present(exclude_if_present.clone())
         .exclude_if_xattr(exclude_if_xattr.clone())
         .one_file_system(*one_file_system);
-    BackupOptions::default()
+    Ok(BackupOptions::default()
         .excludes(excludes)
-        .ignore_filter_opts(filter_options)
+        .ignore_filter_opts(filter_options))
 }
 
 /// The host a snapshot records, checked as the daemon's [`Hostname`] checks
@@ -508,18 +523,19 @@ mod tests {
         );
     }
 
-    fn every_filter_field() -> SourceFilterSpec {
+    fn every_filter_field(iglob_file: &str) -> SourceFilterSpec {
         SourceFilterSpec {
             globs: vec!["!*.tmp".to_owned()],
             iglobs: vec!["!node_modules".to_owned()],
             glob_files: vec!["/home/demo/.globs".to_owned()],
-            iglob_files: vec!["/home/demo/.iglobs".to_owned()],
+            iglob_files: vec![iglob_file.to_owned()],
             git_ignore: true,
             no_require_git: true,
             custom_ignorefiles: vec![".rusticignore".to_owned()],
             exclude_if_present: vec![".nobackup".to_owned()],
             exclude_if_xattr: vec!["user.nobackup".to_owned()],
             one_file_system: true,
+            left_out: vec!["!/home/demo/.ladderback/hub-key*".to_owned()],
         }
     }
 
@@ -530,14 +546,18 @@ mod tests {
         serde_json::to_value(filter).unwrap()
     }
 
+    /// The iglob file's lines follow the plan's iglobs, as rustic reads
+    /// them, and the globs that leave the key files out come last.
     #[test]
     fn every_field_of_a_source_filter_reaches_rustic_under_its_own_name() {
-        let options = backup_options(&every_filter_field());
+        let scratch = tempfile::tempdir().unwrap();
+        let iglob_file = scratch.path().join(".iglobs");
+        std::fs::write(&iglob_file, "!*.iso\r\n*\n").unwrap();
+        let options = backup_options(&every_filter_field(iglob_file.to_str().unwrap())).unwrap();
         let excludes: rustic_core::Excludes = serde_json::from_value(serde_json::json!({
             "globs": ["!*.tmp"],
-            "iglobs": ["!node_modules"],
+            "iglobs": ["!node_modules", "!*.iso", "*", "!/home/demo/.ladderback/hub-key*"],
             "glob-files": ["/home/demo/.globs"],
-            "iglob-files": ["/home/demo/.iglobs"],
         }))
         .unwrap();
         assert_eq!(options.excludes, excludes);
@@ -555,8 +575,24 @@ mod tests {
     }
 
     #[test]
+    fn an_iglob_file_that_cant_be_read_fails_the_backup_and_names_the_file() {
+        let scratch = tempfile::tempdir().unwrap();
+        let missing = scratch.path().join("no-such-iglobs");
+        let missing = missing.to_str().unwrap();
+        let Err(JobError::Failed { code, detail }) = backup_options(&every_filter_field(missing))
+        else {
+            panic!("an unread iglob file is a failure");
+        };
+        assert_eq!(code, ErrorCode::OperationFailed);
+        assert!(
+            detail.starts_with(&format!("Failed to read the iglob file `{missing}`: ")),
+            "{detail}"
+        );
+    }
+
+    #[test]
     fn an_empty_source_filter_leaves_nothing_out() {
-        let options = backup_options(&SourceFilterSpec::default());
+        let options = backup_options(&SourceFilterSpec::default()).unwrap();
         assert!(options.excludes.is_empty());
         assert_eq!(
             serde_json::to_value(&options.ignore_filter_opts).unwrap(),

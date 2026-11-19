@@ -223,7 +223,8 @@ pub struct BackupJobSpec {
 }
 
 /// A plan's source filter as the worker takes it: the fields of rustic's
-/// `Excludes` and `LocalSourceFilterOptions` that a plan sets (§6.1). Its
+/// `Excludes` and `LocalSourceFilterOptions` that a plan sets (§6.1), and
+/// the globs no plan sets that leave out the key files (`left_out`). Its
 /// lists are as long as the plan's; the message cap bounds them, as it does
 /// every list in a spec (§4.1).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,6 +239,9 @@ pub struct SourceFilterSpec {
     pub exclude_if_present: Vec<String>,
     pub exclude_if_xattr: Vec<String>,
     pub one_file_system: bool,
+    /// Iglobs matched after every glob above, the iglob files' lines
+    /// included (`app::ports::BackupJob::left_out`).
+    pub left_out: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -777,6 +781,7 @@ mod tests {
                 exclude_if_present: vec![".nobackup".to_owned()],
                 exclude_if_xattr: vec!["user.nobackup".to_owned()],
                 one_file_system: true,
+                left_out: vec!["!/home/demo/.ladderback/hub-key*".to_owned()],
             },
             deadline_budget: SignedDuration::from_hours(6),
         };

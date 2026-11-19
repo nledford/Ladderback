@@ -390,6 +390,11 @@ async fn each_refusal_is_answered_with_the_status_and_code_of_its_kind() {
             serde_json::json!({ "code": "dry-run-filter" }),
         ),
         (
+            DryRunsError::KeyFilesNotLeftOut,
+            StatusCode::CONFLICT,
+            serde_json::json!({ "code": "key-files-not-left-out" }),
+        ),
+        (
             DryRunsError::Failed,
             StatusCode::SERVICE_UNAVAILABLE,
             serde_json::json!({ "code": "dry-run-failed" }),

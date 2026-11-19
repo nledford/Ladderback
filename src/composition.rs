@@ -86,6 +86,7 @@ use uuid::Uuid;
 
 mod downloads;
 mod dry_runs;
+mod key_files;
 mod maintenance;
 pub(crate) mod mcp_server;
 mod plans;
@@ -93,6 +94,8 @@ mod profiles;
 mod proposals;
 mod restores;
 mod runs;
+
+use key_files::KeyFilesLeftOut;
 
 /// Why the daemon cannot serve, as a message for the person who started it.
 pub(crate) struct Refused {
@@ -851,6 +854,7 @@ async fn state_over(
         writes: Arc::clone(&writes),
         resolve: Arc::clone(&resolve),
         agent_id,
+        left_out: KeyFilesLeftOut::of(data_dir),
         engine: Arc::clone(&engine),
         locations: Some(locations),
         store: Arc::clone(&store),
@@ -936,7 +940,8 @@ async fn state_over(
     }
     // The plan dry run reads outside the backup concurrency limit, one at a
     // time, and gives way to every backup the queue holds (decision 89,
-    // point 13).
+    // point 13). It leaves out the key files each backup does, and is
+    // refused where the backup is (decision 120), so it predicts the backup.
     let queue = Arc::clone(&runner.queue);
     let dry_runs: Arc<dyn http_adapter::DryRuns> = Arc::new(dry_runs::DryRunService::new(
         app::dry_run::PlanDryRuns::new(
@@ -946,6 +951,7 @@ async fn state_over(
             Arc::new(SystemClock),
             Arc::new(move || queue.is_busy()),
             app::dry_run::DryRunLimits::DAEMON,
+            runner.left_out.for_dry_runs(),
         ),
         app::dry_run::DryRunAllowlists::new(
             Arc::clone(&config),
@@ -1605,6 +1611,9 @@ struct PlanRunner {
     /// The agent's Full Disk Access check, run before each backup on macOS
     /// (§16, decision 115); none elsewhere.
     full_disk_access: Option<Arc<FullDiskAccessCheck>>,
+    /// What keeps the secret key files in the data folder out of every
+    /// backup (§16, decisions 120 and 122).
+    left_out: KeyFilesLeftOut,
 }
 
 impl PlanRunner {
@@ -1625,6 +1634,13 @@ impl PlanRunner {
         let repository = config
             .repository(&plan.repository)
             .ok_or(Unbuilt::Refused(StartError::UnknownPlan))?;
+        // The secret key files stay out of every backup that walks the data
+        // folder, in every build, or the backup is refused when no glob can
+        // name them (§16, decisions 120 and 122).
+        let left_out = self
+            .left_out
+            .for_backup(&plan.sources)
+            .map_err(Unbuilt::Refused)?;
         // The engine opens only the repository the configuration recorded,
         // when it recorded one (§7.3), and the job carries the entry it was
         // made from, so the ID it opens is recorded in an entry that records
@@ -1673,6 +1689,7 @@ impl PlanRunner {
             label: plan.label.clone(),
             host: plan.snapshot_host(config.agent()).cloned(),
             filter: plan.filter.clone(),
+            left_out: left_out.to_vec(),
             deadline_budget: backup_budget(None, None),
         });
         // The agent, repository and plan hooks of §6.1 wrap the run.
@@ -1883,6 +1900,11 @@ fn start_refused(error: &StartError) -> String {
                 wire_name(refusal.code)
             )
         }
+        StartError::KeyFilesNotLeftOut => format!(
+            "its sources hold the data folder, whose secret key files no glob can leave out, \
+             as its path isn't UTF-8 ({})",
+            wire_name(ErrorCode::KeyFilesNotLeftOut)
+        ),
     }
 }
 
