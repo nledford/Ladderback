@@ -13,7 +13,7 @@ import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
 import { ISOLATION } from "../support/keyboard.ts";
-import { wordsBrokenInside } from "../support/parts.ts";
+import { besideIconProblems, wordsBesideIcon, wordsBrokenInside } from "../support/parts.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf, LIVE_REGION } from "./components.ts";
 
@@ -288,25 +288,43 @@ Then(
 );
 
 // Words wrap whole (#972): on a small screen with larger text an alert's
-// words break between words, never inside one that fits on a line of the
-// alert's own (its content box: the widest line its words can be given,
-// under its icon if not beside it); only a word longer than that, as the
-// error's long path is, may break inside. The demo is found by its id, since
-// a pseudolocale renames its heading.
+// words break between words, never inside one that fits on a line of their
+// own (the content box of the box that holds them: the widest line they can
+// be given, beside the icon); only a word longer than that, as the error's
+// long path is, may break inside. The demo is found by its id, since a
+// pseudolocale renames its heading.
 Then(
   "every alert of the alert demo breaks its words only between them, unless a word is longer than its line",
   async function (this: BrowserWorld) {
     for (const alert of await eachOf(this.page.locator("#alert-demo .alert"), ALERTS)) {
-      const room = await alert.evaluate((element) => {
-        const style = getComputedStyle(element);
+      const room = await alert.locator(".alert-words").evaluate((words) => {
+        const holder = words.parentElement;
+        const style = holder === null ? null : getComputedStyle(holder);
         return {
-          text: element.querySelector(".alert-words")?.textContent?.trim() ?? "",
-          line: element.clientWidth - parseFloat(style.paddingInlineStart) - parseFloat(style.paddingInlineEnd),
+          text: words.textContent?.trim() ?? "",
+          line:
+            holder === null || style === null
+              ? 0
+              : holder.clientWidth - parseFloat(style.paddingInlineStart) - parseFloat(style.paddingInlineEnd),
         };
       });
       const found = await alert.locator(".alert-words").evaluate(wordsBrokenInside, { line: room.line });
       assert.ok(found.words > 1, `"${room.text}" shows no sentence`);
       assert.deepEqual(found.inside, [], `the words of "${room.text}" break inside a word`);
+    }
+  },
+);
+
+// A long path breaks beside the icon (#1071): every alert keeps its icon at
+// the start of its words' first line and each line of its words after it,
+// rather than its words going under the icon because a path is wider than
+// the room beside it.
+Then(
+  "every alert of the alert demo keeps its icon at the start of its words' first line, each line of its words after it",
+  async function (this: BrowserWorld) {
+    for (const alert of await eachOf(this.page.locator("#alert-demo .alert"), ALERTS)) {
+      const drawn = await alert.evaluate(wordsBesideIcon, { icon: ".alert-icon", words: ".alert-words" });
+      assert.deepEqual(besideIconProblems(drawn), []);
     }
   },
 );

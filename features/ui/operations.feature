@@ -134,6 +134,33 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the row "demo-home" of the table "Operations" lists each item on one line in its "Result" column
     And the page has no accessibility violations
 
+  # A status badge's words wrap between words beside its icon (#1070): on a
+  # wide screen the Status column holds the icon and "Succeeded" on one line,
+  # and "Succeeded with warnings" wraps after the icon, never under it.
+  Scenario: A finished backup's status shows its icon and its words on one line on a wide screen
+    Given the daemon reports a finished backup of "demo-home" that went through 152.1 GiB
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/operations"
+    Then the row "demo-home" of the table "Operations" shows "Succeeded" in its "Status" column
+    And the status badge of the row "demo-home" of the table "Operations" shows its icon and its words on one line
+
+  Scenario: A status that succeeded with warnings wraps its words beside its icon on a wide screen
+    Given the daemon reports a backup of "demo-home" that succeeded with warnings
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/operations"
+    Then the row "demo-home" of the table "Operations" shows "Succeeded with warnings" in its "Status" column
+    And the status badge of the row "demo-home" of the table "Operations" wraps its words beside its icon, which stands at the start of its first line
+
+  # The Status column's width above 48rem of room (#1070) is never less than
+  # its share just below: a column that narrowed as the window widened would
+  # wrap the words its badge held on one line a moment before.
+  Scenario: The Status column never narrows as the window widens
+    Given the daemon reports a finished backup of "demo-home" that went through 152.1 GiB
+    And a viewport of 640 by 800 pixels
+    When I open the address "/operations"
+    Then the row "demo-home" of the table "Operations" shows "Succeeded" in its "Status" column
+    And the "Status" column of the table "Operations" never narrows as the window widens to 1440 pixels
+
   Scenario: A failed backup's reason fits its cell on a small screen with larger text
     Given the daemon reports a backup of "demo-home" that failed because it could not read "/srv/backups/home-laptop.password"
     And a viewport of 320 by 256 pixels

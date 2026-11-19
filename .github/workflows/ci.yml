@@ -8,17 +8,27 @@
 # below keep exactly the entries every pull request reads, one per family, and
 # a footprint that fits with room for a save in flight.
 #
+# PENDING MEASUREMENT (#1076). The Rust builds' entries below are mbx's
+# `objects` payload (compiler outputs, each keyed by its own inputs), where
+# they were its `target` payload (the warm Cargo target tree). Whether
+# `objects` is the faster and the smaller of the two is what that pull
+# request's runs measure. Until they are in, the sizes in the footprint table
+# are `target`'s; if `objects` loses, `setup-rust` goes back to `target`,
+# with the manifest hash in its key (rule 3), by reverting #1076.
+#
 # 1. Only a push to main saves a cache. Pull requests restore and never save:
-#    mbx saves on a push to the default branch alone, and every other cache
+#    mbx saves on a push to the default branch alone, and only for the jobs
+#    that pass `save: "true"` to `setup-rust` (rule 3); every other cache
 #    (browsers, trunk's tools, npm's) is restored by one step and saved by a
 #    second one that runs on a push to main, when the restore missed. Each
 #    pull request used to save its own copy of what it restored (a copy of
 #    the browsers is 0.3 to 0.5 GB), which no other pull request could read.
 # 2. Main saves every set a pull request restores. red-first.yml runs on pull
 #    requests alone, so `browser-cache` below installs its engines on main.
-# 3. The Rust build doesn't grow. Cargo names each artifact by a hash of what
-#    went into it and never deletes one it stops using, and mbx saves what a
-#    build leaves and restores it for the next, so a change to a manifest,
+# 3. The Rust build doesn't grow. Until #1076 mbx saved its `target` payload,
+#    the Cargo target tree. Cargo names each artifact by a hash of what
+#    went into it and never deletes one it stops using, and mbx saved what a
+#    build left and restored it for the next, so a change to a manifest,
 #    the lockfile or the toolchain left the old copy of every artifact it
 #    touched in the entry for good. Measured on main (2026-11-15): the Linux
 #    entry held 2.0 GB for twelve commits, then took 2.8 GB with the commit
@@ -28,15 +38,28 @@
 #    binary is rebuilt under a new hash then: 263 test executables sat in the
 #    entry, 86 in a build from nothing, 11.9 of the 15.9 GB it unpacks to. The
 #    macOS entry jumped at the same commits, 1.6 to 2.2 to 2.9 GB, and the
-#    wasm one held 90 MB over a build from nothing. So `setup-rust`
-#    (.github/actions/setup-rust) puts a hash of the manifests, the lockfile
-#    and the toolchain file into the cache's key. A push to main restores only
-#    an entry with its own hash and otherwise builds from nothing, once per
-#    change to those files; a Check run from nothing took about 3 minutes
-#    longer than a warm one on Linux (10 to 12 minutes against 7 to 10, on
-#    2026-11-14 and 15) and about 4 on macOS. Pull requests prefer their own
-#    hash, fall back to the newest entry of any, and never save. Between such
-#    changes an entry stays the size of its sources.
+#    wasm one held 90 MB over a build from nothing. So `setup-rust` put a hash
+#    of the manifests, the lockfile and the toolchain file into the cache's
+#    key: a push to main restored only an entry with its own hash and
+#    otherwise built from nothing, once per change to those files (a Check
+#    run from nothing took about 3 minutes longer than a warm one on Linux,
+#    10 to 12 minutes against 7 to 10, on 2026-11-14 and 15, and about 4 on
+#    macOS), and pull requests preferred their own hash, fell back to the
+#    newest entry of any, and never saved. Between such changes an entry
+#    stayed the size of its sources.
+#
+#    The `objects` payload keeps what a job's builds used: each compiler
+#    output under a hash of its own inputs, with Cargo's scheduler state,
+#    which mbx puts back into an absent `target/`. A change to a manifest
+#    rekeys the outputs it touches and leaves the rest, and an output no
+#    build uses any more isn't in the next export, so the key has no manifest
+#    hash, and a push to main restores the newest entry of its platform and
+#    toolchain, whatever changed since. Whether an entry stays the size of
+#    its sources across such a change is what the draft pull request's runs
+#    after a manifest change measure. `objects` exports what a job built, not
+#    what its target dir holds, so a job saves only when it passes
+#    `save: "true"` to `setup-rust`; the others restore, and no longer empty
+#    their target dir to keep from saving.
 # 4. One entry per family, and it goes after its successor is saved. mbx saves
 #    in its post step, after a job's last step, so no step of that job can
 #    delete what the save replaced. The `cache-prune` job at the end of a
@@ -49,13 +72,16 @@
 # 5. A closed pull request's caches are deleted (cache-cleanup.yml), with
 #    `pull_request`, not `pull_request_target`, and not for forks.
 #
-# Footprint on main, in GB. "Entry" is what one push saves, measured on
-# 2026-11-15 (the Rust builds are a build from nothing at this commit, 1.5 GB
-# for Linux, rounded up for what a few commits add; the macOS figure is an
-# estimate, to be replaced by the first entry saved); "kept" is how many entries
-# `cache-prune` leaves; "peak" is one entry more of each, the worst moment:
-# every family has saved its successor and `cache-prune` hasn't run. A usual
-# push rotates the three Rust builds, and only a change to a lockfile the rest.
+# Footprint on main, in GB, of the `target` payload that #1076 measures
+# `objects` against; the Rust rows are replaced with `objects`' entries when
+# that pull request has them, and kept if `target` stays. "Entry" is what one
+# push saves, measured on 2026-11-15 (the Rust builds are a build from
+# nothing at this commit, 1.5 GB for Linux, rounded up for what a few commits
+# add; the macOS figure is an estimate, to be replaced by the first entry
+# saved); "kept" is how many entries `cache-prune` leaves; "peak" is one
+# entry more of each, the worst moment: every family has saved its successor
+# and `cache-prune` hasn't run. A usual push rotates the three Rust builds,
+# and only a change to a lockfile the rest.
 #
 #   family                           saved by         entry  kept  steady  peak
 #   Rust build, Linux                Check (ubuntu)    1.60     1    1.60  3.20
@@ -78,16 +104,25 @@
 # under the limit and adds its row; `cache-prune` warns of an entry on main
 # that no family claims.
 #
+# On 2026-11-18 the three `target` entries were 2.00 (Linux), 0.44 (wasm) and
+# 1.51 GB (macOS), which makes the peak about 10.1 GB, over the limit: the
+# `target` payload has no room to grow, and the size of `objects`' entries
+# says whether there is any.
+#
 # Which jobs build what, and who saves: on Linux only `Check (ubuntu-latest)`
 # saves the Rust build: it builds the most, and `Release-build tests`, the
 # host part of `UI journeys` and red-first.yml start from its build. (The
 # first job to finish used to save it, `Wasm tests`, a few hundred
 # megabytes, and every other Linux job restored that and rebuilt nearly every
-# crate.) `UI journeys`, `Release-build tests` and both `Service managers`
-# jobs empty their target dir after their last step on a push (on macOS too,
-# leaving that OS's save to `Check (macos-latest)`), and mbx skips the save of
-# a job with no build to keep. `Wasm tests` builds wasm32 tests, which Check
-# doesn't, so it keeps a family of its own (the `generation` input of
+# crate.) `UI journeys`, its Firefox and WebKit twins, `Release-build tests`
+# and both `Service managers` jobs restore it and save nothing (on macOS too,
+# leaving that OS's save to `Check (macos-latest)`): they don't pass
+# `save: "true"` to `setup-rust`. Under `target` they emptied their target
+# dir after their last step on a push to the same end, as mbx skipped the
+# save of a job with no build to keep; an `objects` export doesn't depend on
+# the target dir, so each would otherwise save its platform's one key, and
+# the first to finish would hold it. `Wasm tests` builds wasm32 tests, which
+# Check doesn't, so it saves a family of its own (the `generation` input of
 # `setup-rust`). A cache per job doesn't fit the limit. If Check fails on a
 # push, that commit saves no Linux build, and pull requests restore the one
 # before.
@@ -132,28 +167,17 @@ env:
   # The mbx action doesn't set it. Debug info is Cargo.toml's dev profile, the
   # same as a local build's.
   CARGO_INCREMENTAL: 0
-  # Keeps Cargo 1.100's build dir in the layout mbx's cache can use. Since 1.100
-  # (rust-toolchain.toml, #411) Cargo puts intermediate files under
-  # target/<profile>/build/<package>/<hash>/ and no longer writes
-  # target/<profile>/.fingerprint/ or deps/. The mbx action (v1.7.3) decides
-  # whether a build is worth saving by looking for a non-empty `.fingerprint`
-  # directory, and it prunes the saved tree by the old directory names, so on
-  # the new layout every job logged "No reusable Cargo target state was
-  # produced" and saved nothing (#598). Cargo 1.100 still honours this
-  # variable, which it calls temporary, and means to delete the legacy layout
-  # once a few weeks have passed (rust-lang/cargo#17182). When it does, the
-  # "Build cache" step below warns on every push to main, and the fix is an
-  # mbx action that knows the new layout. red-first.yml sets it too: it copies
-  # a restored target dir.
-  __CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT: 1
 
 jobs:
-  # Tells a docs-only pull request from one that touches code, and one that
-  # can change what the `service` jobs check from one that can't, with plain
-  # git, so the jobs below can skip work. Anything that isn't clearly docs
-  # counts as code, anything that isn't clearly outside the service jobs'
-  # reach counts as inside it, and so does a failure here: the jobs below run
-  # unless this job says "true" (`docs-only`) or "false" (`service`). Pushes
+  # Tells a docs-only pull request from one that touches code, one that can
+  # change what the `service` jobs check from one that can't, and one that
+  # can change what the Firefox and WebKit journeys check from one that can't,
+  # with plain git, so the jobs below can skip work. Anything that isn't
+  # clearly docs counts as code, anything that isn't clearly outside the
+  # service jobs' reach counts as inside it, and so does a failure here: the
+  # jobs below run unless this job says "true" (`docs-only`) or "false"
+  # (`service`, `ui`). The `ui` output is the other way round: false unless a
+  # path names the UI, because Chromium's required job covers the rest. Pushes
   # to main and the nightly run skip this job and run everything.
   changes:
     name: Changed paths
@@ -163,6 +187,7 @@ jobs:
     outputs:
       docs-only: ${{ steps.diff.outputs.docs-only }}
       service: ${{ steps.diff.outputs.service }}
+      ui: ${{ steps.diff.outputs.ui }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -177,6 +202,7 @@ jobs:
           git diff -z --name-only --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
           docs_only=true
           service=false
+          ui=false
           count=0
           while IFS= read -r -d '' file; do
             count=$((count + 1))
@@ -201,11 +227,31 @@ jobs:
               crates/web/* | ui-tests/* | features/ui/* | scripts/*.ts | docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
               *) service=true ;;
             esac
+            # What the Firefox and WebKit journeys (`ui-engines`) can see that
+            # Chromium's can't: what the page is made of, how it is served and
+            # styled, and what the browser formats (the l10n crate's `Intl`
+            # calls differ by engine), signs in with and downloads. Only a
+            # path named here turns them on; every other
+            # path leaves them off. A `.feature` outside features/ui/ counts
+            # only when it holds an `@ui` scenario, in the merged tree this
+            # job checked out (a deleted file has none).
+            case "$file" in
+              crates/web/* | ui-tests/* | features/ui/*) ui=true ;;
+              crates/l10n/*) ui=true ;;
+              crates/adapters/http/src/lib.rs | crates/adapters/http/src/response_headers.rs) ui=true ;;
+              crates/adapters/http/src/sign_in.rs | crates/adapters/http/src/downloads.rs | crates/adapters/http/src/request_checks.rs) ui=true ;;
+              rust-toolchain.toml | scripts/web-packages.sh | scripts/install-browser.sh) ui=true ;;
+              .github/workflows/ci.yml | .github/actions/browser/* | .github/actions/npm-ci/*) ui=true ;;
+              features/*.feature) if grep -Eq '@ui([[:space:]]|$)' "$file" 2> /dev/null; then ui=true; fi ;;
+            esac
           done < "$RUNNER_TEMP/changed-files"
           # A change with no files isn't a docs change, and runs the jobs.
-          if [ "$count" -eq 0 ]; then docs_only=false; service=true; fi
-          echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "service=$service" >> "$GITHUB_OUTPUT"
+          if [ "$count" -eq 0 ]; then docs_only=false; service=true; ui=true; fi
+          {
+            echo "docs-only=$docs_only"
+            echo "service=$service"
+            echo "ui=$ui"
+          } >> "$GITHUB_OUTPUT"
 
   check:
     name: Check (${{ matrix.name }})
@@ -240,10 +286,12 @@ jobs:
         run: scripts/check-doc-paths.sh
       # The toolchain, the build cache (allowed to fail: an outage runs the
       # build uncached, and so for every job's setup-rust below) and the tools.
+      # Check saves the Rust build (`save`); the other jobs only restore it.
       - if: needs.changes.outputs.docs-only != 'true'
         uses: $/.github/actions/setup-rust
         with:
           tools: just,cargo-nextest
+          save: "true"
       # Only the host clippy and the tests can differ by OS (`cfg(target_os)`
       # code). Formatting, the wasm32 clippy, the journey, doc-path and
       # paragraph-length lints, the architecture checks and the contrast gate
@@ -300,16 +348,6 @@ jobs:
         timeout-minutes: 30
         env:
           NEXTEST_PROFILE: ci
-      # Nothing fails when the build cache saves nothing: every later run just
-      # starts cold (#598 went unseen for that reason). mbx saves only a target
-      # dir with a non-empty `target/<profile>/.fingerprint`, so a main push
-      # that built none warns here, where the maintainers read the run.
-      - name: Build cache
-        if: github.event_name == 'push' && needs.changes.outputs.docs-only != 'true'
-        run: |
-          if [ -z "$(ls -A target/debug/.fingerprint 2>/dev/null)" ]; then
-            echo "::warning title=Build cache::target/debug/.fingerprint is empty, so mbx will not save this build and pull requests start cold. See the __CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT comment in ci.yml (#598)."
-          fi
       # Kept 14 days, not the repository's default of 90: a report is read
       # while its failure is fresh, and two weeks still covers a run looked at
       # after a week away. The same holds for both `mutants.out` uploads below.
@@ -381,19 +419,25 @@ jobs:
         with:
           path: ~/.cache/trunk
           key: trunk-tools-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
-      - if: github.event_name == 'push'
-        run: rm -rf target
 
   # The `ui` job's journeys in Gecko (Firefox, Zen, LibreWolf) and WebKit
   # (Safari's engine, the closest stand-in for Safari that runs on Linux).
   # Not required checks: the maintainer adds them to the ruleset once they have
   # a clean record. Its steps are the `ui` job's, through the same actions, but
   # restore-only: the `ui` job saves trunk's cache; change both together.
+  #
+  # A pull request runs them only when `changes` doesn't say its paths are out
+  # of the UI's reach (the `ui` output), as the `service` jobs do: each job
+  # waited a median of 22 (Firefox) and 39 (WebKit) minutes for a runner in
+  # November 2026, and ran about 30. The jobs also run when `changes` failed or was skipped (a
+  # push to main), so main keeps all three engines. A job its `if` skips
+  # can't expand its matrix, so a pull request that skips them shows one
+  # skipped check named `UI journeys (${{ matrix.name }}, axe-core, keyboard)`,
+  # not one per engine; neither is a required check.
   ui-engines:
     name: UI journeys (${{ matrix.name }}, axe-core, keyboard)
     needs: changes
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.ui != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -439,10 +483,6 @@ jobs:
           name: ui-reports-${{ matrix.engine }}-attempt-${{ github.run_attempt }}
           path: ui-tests/reports/
           retention-days: 14
-      # Also after a failed run: these jobs are expected to fail more often, and
-      # a target left behind could be saved under the shared Linux build key.
-      - if: ${{ !cancelled() && github.event_name == 'push' }}
-        run: rm -rf target
 
   # The red-first check (red-first.yml) installs all three engines in one job,
   # under caches keyed on that set, and runs only on pull requests, whose
@@ -491,6 +531,7 @@ jobs:
       - uses: $/.github/actions/setup-rust
         with:
           generation: v1-wasm
+          save: "true"
           tools: just
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -592,9 +633,6 @@ jobs:
         run: scripts/service-contract.sh install
         env:
           LADDERBACK_TEST_INSTALL_SERVICE: "1"
-      # Leaves the build cache to the `Check` jobs (top of this file).
-      - if: github.event_name == 'push'
-        run: rm -rf target
 
   # The tests of the build a release is: `--no-default-features`, which leaves
   # out the development pseudolocales (technical design §8.4). `just test`
@@ -622,9 +660,6 @@ jobs:
       - run: just test-release
         env:
           NEXTEST_PROFILE: ci
-      # Leaves the build cache to `Check (ubuntu-latest)` (top of this file).
-      - if: github.event_name == 'push'
-        run: rm -rf target
 
   # The dependency tree against deny.toml: RustSec advisories, licenses, banned
   # crates and sources (technical design §13.6). It also runs on the nightly
@@ -795,11 +830,13 @@ jobs:
           persist-credentials: false
           sparse-checkout: scripts/prune-cache.sh
           sparse-checkout-cone-mode: false
-      # An entry saved before the manifest hash joined the key
-      # (`...-v1-target-rust-...`) is in its family too, until the first
-      # entry of the new layout supersedes it. The browsers' and package sets'
-      # keys before the engine sets (`playwright-Linux-`, `playwright-debs-ubuntu`)
-      # are the chromium set's. The package sets keep two entries: GitHub rolls
+      # An entry of the `target` payload that preceded #1076
+      # (`...-v1-target-rust-...`, with the manifest hash before `target`) is
+      # in its family too, until the first `objects` entry (`...-v1-dir-rust-...`;
+      # `...-v1-rust-...` from an mbx older than 1.12) supersedes it. The
+      # browsers' and package sets' keys before the engine sets
+      # (`playwright-Linux-`, `playwright-debs-ubuntu`) are the chromium
+      # set's. The package sets keep two entries: GitHub rolls
       # a runner image out beside the one before it, each run restores the set
       # of its own image, and the older of two is the one a run on the other
       # image is about to need.
@@ -813,9 +850,9 @@ jobs:
             exit 0
           fi
           scripts/prune-cache.sh \
-            '^linux-x64-mbx-v1-(m[0-9a-f]+-)?target-rust-' \
-            '^linux-x64-mbx-v1-wasm-(m[0-9a-f]+-)?target-rust-' \
-            '^darwin-arm64-mbx-v1-(m[0-9a-f]+-)?target-rust-' \
+            '^linux-x64-mbx-v1-((m[0-9a-f]+-)?target-|dir-)?rust-' \
+            '^linux-x64-mbx-v1-wasm-((m[0-9a-f]+-)?target-|dir-)?rust-' \
+            '^darwin-arm64-mbx-v1-((m[0-9a-f]+-)?target-|dir-)?rust-' \
             '^trunk-tools-Linux-' \
             '^node-cache-Linux-x64-npm-' \
             '^playwright-(chromium-)?Linux-' \
