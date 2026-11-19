@@ -206,28 +206,47 @@ async fn the_first_bound_includes_the_time_the_hubs_keys_take_to_read() {
     );
 }
 
+/// The scheduling margin a bound may overrun by on a busy machine.
+const MARGIN: Duration = Duration::from_millis(700);
+
+/// Closed with no reason, no sooner than `bound` after `started` (the hub
+/// counts from after that) and no later than `bound` and [`MARGIN`]: a
+/// bound of seconds wouldn't pass for one of a few hundred milliseconds.
+async fn closed_at_its_bound(socket: &mut Socket, started: std::time::Instant, bound: Duration) {
+    assert_eq!(closed_with(socket).await, "");
+    let took = started.elapsed();
+    assert!(
+        took >= bound && took <= bound + MARGIN,
+        "closed after {took:?}, not at its {bound:?} bound"
+    );
+}
+
 #[tokio::test]
 async fn a_connection_silent_past_its_first_bound_is_closed() {
+    let bound = Duration::from_millis(100);
     let bounds = Bounds {
-        connect_within: Duration::from_millis(100),
+        connect_within: bound,
         ..Bounds::DECIDED
     };
     let address = serve(&SyncHub::bounded(pairing(), bounds)).await;
+    let started = std::time::Instant::now();
     let mut socket = open(&address).await;
-    assert_eq!(closed_with(&mut socket).await, "");
+    closed_at_its_bound(&mut socket, started, bound).await;
 }
 
 #[tokio::test]
 async fn a_handshake_not_over_within_its_bound_is_closed() {
+    let bound = Duration::from_millis(300);
     let bounds = Bounds {
-        handshake_within: Duration::from_millis(300),
+        handshake_within: bound,
         ..Bounds::DECIDED
     };
     let address = serve(&SyncHub::bounded(pairing(), bounds)).await;
+    let started = std::time::Instant::now();
     let mut socket = open(&address).await;
     socket.send(connect(0)).await.unwrap();
     assert!(matches!(next(&mut socket).await, Some(Message::Text(_))));
-    assert_eq!(closed_with(&mut socket).await, "");
+    closed_at_its_bound(&mut socket, started, bound).await;
 }
 
 /// When the table of unauthenticated connections is full, the oldest is
