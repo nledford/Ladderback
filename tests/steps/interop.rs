@@ -122,12 +122,27 @@ pub(super) fn pipe_without_reader() -> std::io::PipeWriter {
     writer
 }
 
-/// Runs `ladderback` with `args` in the working folder, with an environment
-/// of its own: the scratch folders, English, and the variables the scenario
-/// set. Nothing of the developer's environment reaches it.
-pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
+/// Gives `command` the environment `run` runs a program with: the working
+/// folder, the scratch folders, English, and the variables the scenario set.
+/// Nothing of the developer's environment reaches it.
+pub(super) fn environment(agent: &Agent, command: &mut Command) {
     fs::create_dir_all(work_dir(agent)).expect("the working folder");
     fs::create_dir_all(home_dir(agent)).expect("the home folder");
+    command
+        .current_dir(work_dir(agent))
+        .env_clear()
+        .env("HOME", home_dir(agent))
+        .env("LADDERBACK_CONFIG_DIR", agent.scratch().join("config"))
+        .env("LADDERBACK_DATA_DIR", agent.scratch().join("data"))
+        .env("LANGUAGE", "en-US");
+    for (name, value) in &agent.interop.env {
+        command.env(name, value);
+    }
+}
+
+/// Runs `ladderback` with `args` in the working folder, with an environment
+/// of its own (`environment`).
+pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     let program = agent
         .interop
         .program
@@ -141,17 +156,8 @@ pub(super) async fn run(agent: &mut Agent, args: &[&str]) {
     } else {
         Command::new(program)
     };
-    command
-        .args(args)
-        .current_dir(work_dir(agent))
-        .env_clear()
-        .env("HOME", home_dir(agent))
-        .env("LADDERBACK_CONFIG_DIR", agent.scratch().join("config"))
-        .env("LADDERBACK_DATA_DIR", agent.scratch().join("data"))
-        .env("LANGUAGE", "en-US");
-    for (name, value) in &agent.interop.env {
-        command.env(name, value);
-    }
+    command.args(args);
+    environment(agent, &mut command);
     // What `output` would do, but started through the spawn gate.
     command
         .stdin(Stdio::null())

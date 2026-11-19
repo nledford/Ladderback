@@ -72,11 +72,12 @@
 // features/cli/install_restart.feature runs it.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { platform } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
 import type { Build } from "./build-identity.ts";
 import { checkoutBuild, shown, workspaceVersion } from "./build-identity.ts";
@@ -346,6 +347,16 @@ function run(program: string, args: string[]): number {
   return result.status ?? 1;
 }
 
+/** The arguments for `just install` that build into `staging`: `args` with any `--root` replaced by it. */
+export function stagingArgs(args: readonly string[], staging: string): string[] {
+  throw new Error(`todo: stagingArgs(${args.join(" ")}, ${staging})`);
+}
+
+/** What is wrong with a `--root` in the arguments for `just install`, which cargo would refuse: one with no folder. */
+export function rootProblem(args: readonly string[]): string | undefined {
+  throw new Error(`todo: rootProblem(${args.join(" ")})`);
+}
+
 async function main(argv: string[]): Promise<number> {
   let now = false;
   let ignoreKeyring = false;
@@ -441,4 +452,7 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-process.exitCode = await main(process.argv.slice(2));
+// Run as a script, not imported (the real path: `import.meta.url` is one).
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  process.exitCode = await main(process.argv.slice(2));
+}

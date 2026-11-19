@@ -1,19 +1,22 @@
 @e2e @needs-node
 Feature: Update the service from a checkout without interrupting an operation
-  `just install-restart` (scripts/install-restart.ts) installs Ladderback
-  from a checkout, waits until the daemon has no operation running or
-  queued, and restarts the service on the new binary. It reads what is
-  running and queued from the daemon's operation log, read-only, so it works
-  whether sign-in is on or off, and it doesn't restart a daemon when it can't
-  tell whether that daemon is busy. It confirms the restart by the service
-  running a new process, the installed program naming the checkout's build
-  and the daemon answering; with sign-in off the daemon names that build too.
+  `just install-restart` (scripts/install-restart.ts) builds Ladderback from
+  a checkout into a staging folder beside the installed program, checks the
+  new program there, waits until the daemon has no operation running or
+  queued, then moves the new program over the installed one and restarts
+  the service on it at once. It reads what is running and queued from the
+  daemon's operation log, read-only, so it works whether sign-in is on or
+  off, and it doesn't restart a daemon when it can't tell whether that
+  daemon is busy. It confirms the restart by the service running a new
+  process, the new program naming the checkout's build and the daemon
+  answering; with sign-in off the daemon names that build too.
 
-  In the examples the install builds nothing, the service manager is a
-  stand-in, the installed program is the real one except that it names the
-  build the scenario chose, and the daemon's address is a stand-in that says
-  only whether sign-in is on and which build it runs. The operation log is a
-  real one, in the data folder the service's process holds.
+  In the examples the build only copies a stand-in for the new program
+  where it is told to install it, the service manager is a stand-in, the new
+  program is the real one except that it names the build the scenario chose,
+  and the daemon's address is a stand-in that says only whether sign-in is
+  on and which build it runs. The operation log is a real one, in the data
+  folder the service's process holds.
 
   Background:
     Given the service manager is a stand-in
@@ -42,19 +45,78 @@ Feature: Update the service from a checkout without interrupting an operation
       Then the command exits with status 1
       And standard error says "the service manager still names process"
 
-    Scenario: An installed program that isn't the checkout's build isn't started
-      Given the installed program says it is "ladderback 0.0.1"
+    Scenario: A new program that isn't the checkout's build is neither installed nor started
+      Given the new program says it is "ladderback 0.0.1"
       When the owner runs install-restart
       Then the command exits with status 1
       And the service runs the same process
-      And standard error says "the installed program says ladderback 0.0.1, not ladderback"
+      And the installed program is still the one from before
+      And no staging folder is left
+      And standard error says "the new program says ladderback 0.0.1, not ladderback"
 
-    Scenario: A program installed over the checkout's build before the restart isn't started
-      Given another program, saying it is "ladderback 0.0.1", is installed once install-restart has checked the installed one
+  Rule: It replaces the installed program only once the daemon is idle
+
+    Until the restart, the program on disk stays the one the running daemon
+    runs: macOS's keychain refuses a read from a process whose program on
+    disk has changed under it, so a scheduled backup that starts during the
+    wait would fail (#1107). The new program is built into a staging folder
+    in the installed program's folder, so on the same file system, and is
+    checked there. Once the daemon is idle, one rename puts it in place, and
+    the service restarts at once.
+
+    Scenario: The new program is checked in a staging folder, then put in place for the restart
+      When the owner runs install-restart
+      Then the command exits with status 0
+      And the new program named its build and read the keyring entries before it was put in place
+      And the installed program is the new one
+      And the service was restarted by the new program in place
+      And no staging folder is left
+
+    Scenario: A busy daemon's program stays in place while install-restart waits
+      Given the operation log shows a backup running
+      When the owner runs install-restart with "--wait 0"
+      Then the command exits with status 1
+      And the installed program is still the one from before
+      And no staging folder is left
+      And standard error says "the installed program is untouched"
+
+    Scenario: A failed build leaves the installed program in place
+      Given the new program's build fails
       When the owner runs install-restart
       Then the command exits with status 1
       And the service runs the same process
-      And standard error says "the installed program says ladderback 0.0.1, not ladderback"
+      And the installed program is still the one from before
+      And no staging folder is left
+      And standard error says "nothing was installed"
+
+    Scenario: Stopping install-restart while it waits leaves the installed program in place
+      Given the operation log shows a backup running
+      When the owner stops install-restart while it waits
+      Then the command exits with status 130
+      And the service runs the same process
+      And the installed program is still the one from before
+      And no staging folder is left
+
+    Scenario: Stopping install-restart while it builds leaves the installed program in place
+      Given install-restart is told to stop while it builds
+      When the owner runs install-restart with "--now"
+      Then the command exits with status 143
+      And the service runs the same process
+      And the installed program is still the one from before
+      And no staging folder is left
+
+    Scenario Outline: An install root with no folder is refused before anything is built
+      When the owner runs install-restart with "<args>"
+      Then the command exits with status 2
+      And the installed program is still the one from before
+      And no staging folder is left
+      And standard error says "--root needs a folder"
+
+      Examples:
+        | args           |
+        | --root         |
+        | --root=        |
+        | --root --force |
 
   Rule: It waits while an operation runs or is queued
 
@@ -85,7 +147,7 @@ Feature: Update the service from a checkout without interrupting an operation
       And the service runs the same process
       And standard error says "can't tell whether the daemon is busy"
       And standard error says "<why>"
-      And standard error says "Not restarting; --now restarts without asking."
+      And standard error says "Not installing or restarting; --now installs and restarts without asking."
 
       Examples:
         | surprise                                                                      | why                           |
@@ -114,28 +176,29 @@ Feature: Update the service from a checkout without interrupting an operation
     Scenario: The new program reads the keyring entries before the service restarts
       When the owner runs install-restart
       Then the command exits with status 0
-      And the installed program read the keyring entries before the service was restarted
+      And the new program read the keyring entries before the service was restarted
       And standard output says "no repository or notification channel takes a secret from the keyring"
 
     Scenario: The keyring entries are read before the wait for a busy daemon
       Given the operation log shows a backup running
       When the owner runs install-restart with "--wait 0"
       Then the command exits with status 1
-      And the installed program read the keyring entries
-      And the installed program never restarted the service
+      And the new program read the keyring entries
+      And the new program never restarted the service
 
     Scenario: A keyring entry the new program can't read stops it before the restart
-      Given the installed program can't read a keyring entry
+      Given the new program can't read a keyring entry
       When the owner runs install-restart
       Then the command exits with status 1
       And the service runs the same process
-      And the installed program never restarted the service
+      And the new program never restarted the service
+      And the installed program is still the one from before
       And standard error says "could not read the keyring entry ladderback/nas"
       And standard error says "the new program couldn't read every keyring entry"
       And standard error says "--ignore-keyring-failure restarts all the same"
 
     Scenario: --ignore-keyring-failure restarts despite a keyring entry the new program can't read
-      Given the installed program can't read a keyring entry
+      Given the new program can't read a keyring entry
       When the owner runs install-restart with "--ignore-keyring-failure"
       Then the command exits with status 0
       And the service runs a new process

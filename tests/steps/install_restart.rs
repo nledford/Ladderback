@@ -4,10 +4,15 @@
 //! the developer's environment), with the service manager's stand-ins alone
 //! on the `PATH` (`service_steps`).
 //!
-//! `just install` is a stand-in that builds nothing. The installed program
-//! is the real `ladderback` behind a stand-in that answers `--version` with
-//! what the scenario chose: by default the checkout's build, which
-//! `LADDERBACK_BUILD_COMMIT` fixes for the script (scripts/build-identity.ts).
+//! `just install` is a stand-in that builds nothing: it copies the new
+//! program's stand-in into `bin` under the `--root` it is given, or, given
+//! none, over the installed program, as `cargo install` installs into
+//! Cargo's bin folder. The installed program, which
+//! `INSTALL_RESTART_LADDERBACK` names, starts as a stand-in for the build
+//! from before. The new program is the real `ladderback` behind a stand-in
+//! that answers `--version` with what the scenario chose: by default the
+//! checkout's build, which `LADDERBACK_BUILD_COMMIT` fixes for the script
+//! (scripts/build-identity.ts).
 //! The daemon's address is a stand-in that answers `GET /api/v1/session`
 //! alone, as the daemon answers a caller without a session. The operation
 //! log is the real store's, migrated as the daemon migrates it and kept open
@@ -18,8 +23,10 @@
 //! `translations_steps::node_runs_typescript` fails.
 
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use app::ports::OperationStore;
@@ -32,9 +39,9 @@ use store::SqliteStore;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use super::interop_steps::run;
+use super::interop_steps::{Ran, environment, run};
 use super::service_steps::{NAME, managers};
-use super::{Agent, LADDERBACK};
+use super::{Agent, LADDERBACK, blocking};
 
 /// The script under test, as the repository holds it.
 const SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/install-restart.ts");
@@ -79,8 +86,40 @@ fn database(agent: &Agent) -> PathBuf {
     data_dir(agent).join("ladderback.db")
 }
 
+/// The folder of the stand-ins, and of the installed program.
 fn installed(agent: &Agent) -> PathBuf {
     agent.scratch().join("installed")
+}
+
+/// The installed program, which `INSTALL_RESTART_LADDERBACK` names.
+fn installed_program(agent: &Agent) -> PathBuf {
+    installed(agent).join("ladderback")
+}
+
+/// A stand-in for the `build` of the program in `folder`. `--version` names
+/// `version`; each call's first argument and the path it was called by go
+/// to `calls`; `check-keyring` fails as the real program fails for an entry
+/// it can't read when a scenario has written `keyring-fails`. Everything else
+/// goes to the real program.
+fn stand_in(folder: &Path, build: &str) -> String {
+    format!(
+        "#!/bin/sh\n\
+         # The {build} build.\n\
+         d='{}'\n\
+         printf '%s\\t%s\\n' \"$1\" \"$0\" >> \"$d/calls\"\n\
+         if [ \"$1\" = --version ]; then exec /bin/cat \"$d/version\"; fi\n\
+         if [ \"$1\" = check-keyring ] && [ -e \"$d/keyring-fails\" ]; then\n\
+         echo 'ladderback: nas: could not read the keyring entry ladderback/nas (secret-keyring-unavailable)' >&2\n\
+         exit 1\n\
+         fi\n\
+         exec '{LADDERBACK}' \"$@\"\n",
+        folder.display()
+    )
+}
+
+/// What the installed program holds: the build from before, or the new one.
+fn installed_text(agent: &Agent) -> String {
+    fs::read_to_string(installed_program(agent)).expect("an installed program")
 }
 
 /// Writes a runnable file. Written while no child starts: a child forked
@@ -129,29 +168,26 @@ async fn daemon_keeps_its_log(agent: &mut Agent) {
     let folder = installed(agent);
     fs::create_dir_all(&folder).expect("the installed program's folder");
     fs::write(folder.join("version"), format!("ladderback {}\n", build()))
-        .expect("the installed program's version");
-    write_program(&folder.join("just"), "#!/bin/sh\nexit 0\n");
-    // `--version` names `version`, and from its second call on
-    // `version-later` when a scenario has written one. Each call's first
-    // argument goes to `calls`. `check-keyring` fails as the real program
-    // fails for an entry it can't read when a scenario has written
-    // `keyring-fails`.
+        .expect("the new program's version");
+    write_program(&folder.join("new"), &stand_in(&folder, "new"));
+    write_program(&installed_program(agent), &stand_in(&folder, "earlier"));
+    // `just install [args]`: the new program goes to `bin` under `--root`,
+    // or over the installed program, unless a scenario has written
+    // `build-fails`. With `stop-while-building`, the build first sends the
+    // script SIGTERM, as `timeout` or a `kill` does, and goes on.
     write_program(
-        &folder.join("ladderback"),
+        &folder.join("just"),
         &format!(
             "#!/bin/sh\n\
              d='{}'\n\
-             echo \"$1\" >> \"$d/calls\"\n\
-             if [ \"$1\" = --version ]; then\n\
-             if [ -e \"$d/asked\" ] && [ -e \"$d/version-later\" ]; then exec /bin/cat \"$d/version-later\"; fi\n\
-             : > \"$d/asked\"\n\
-             exec /bin/cat \"$d/version\"\n\
-             fi\n\
-             if [ \"$1\" = check-keyring ] && [ -e \"$d/keyring-fails\" ]; then\n\
-             echo 'ladderback: nas: could not read the keyring entry ladderback/nas (secret-keyring-unavailable)' >&2\n\
-             exit 1\n\
-             fi\n\
-             exec '{LADDERBACK}' \"$@\"\n",
+             if [ -e \"$d/build-fails\" ]; then echo 'error: could not compile `ladderback`' >&2; exit 101; fi\n\
+             if [ -e \"$d/stop-while-building\" ]; then kill -TERM \"$PPID\"; fi\n\
+             to=\"$d\"\n\
+             while [ $# -gt 0 ]; do\n\
+             case \"$1\" in --root) to=\"$2/bin\"; shift ;; --root=*) to=\"${{1#--root=}}/bin\" ;; esac\n\
+             shift\n\
+             done\n\
+             /bin/mkdir -p \"$to\" && /bin/cp \"$d/new\" \"$to/ladderback.new\" && /bin/mv \"$to/ladderback.new\" \"$to/ladderback\"\n",
             folder.display()
         ),
     );
@@ -162,7 +198,7 @@ async fn daemon_keeps_its_log(agent: &mut Agent) {
         ),
         (
             "INSTALL_RESTART_LADDERBACK",
-            folder.join("ladderback").display().to_string(),
+            installed_program(agent).display().to_string(),
         ),
         ("INSTALL_RESTART_ADDRESS", address),
         ("LADDERBACK_BUILD_COMMIT", COMMIT.to_owned()),
@@ -232,66 +268,132 @@ fn keeps_process(agent: &mut Agent) {
     managers(agent).keep_process_on_restart();
 }
 
-#[given(expr = "the installed program says it is {string}")]
-fn installed_says(agent: &mut Agent, said: String) {
+#[given(expr = "the new program says it is {string}")]
+fn new_program_says(agent: &mut Agent, said: String) {
     fs::write(installed(agent).join("version"), format!("{said}\n"))
-        .expect("the installed program's version");
+        .expect("the new program's version");
 }
 
-/// The installed program's stand-in names `said` from its second
-/// `--version` on, as when another checkout's `just install` writes over it
-/// while install-restart waits.
-#[given(
-    expr = "another program, saying it is {string}, is installed once install-restart has checked the installed one"
-)]
-fn installed_over(agent: &mut Agent, said: String) {
-    fs::write(installed(agent).join("version-later"), format!("{said}\n"))
-        .expect("the later program's version");
-}
-
-#[given("the installed program can't read a keyring entry")]
+#[given("the new program can't read a keyring entry")]
 fn keyring_fails(agent: &mut Agent) {
     fs::write(installed(agent).join("keyring-fails"), "")
         .expect("the stand-in is told to fail its keyring check");
 }
 
-/// The installed program's commands, by their first argument, in the order
-/// they ran.
-fn calls(agent: &Agent) -> Vec<String> {
+#[given("the new program's build fails")]
+fn build_fails(agent: &mut Agent) {
+    fs::write(installed(agent).join("build-fails"), "")
+        .expect("the build's stand-in is told to fail");
+}
+
+#[given("install-restart is told to stop while it builds")]
+fn stop_while_building(agent: &mut Agent) {
+    fs::write(installed(agent).join("stop-while-building"), "")
+        .expect("the build's stand-in is told to stop the script");
+}
+
+/// The commands the programs ran, each by its first argument and the path
+/// it was called by, in the order they ran.
+fn calls(agent: &Agent) -> Vec<(String, PathBuf)> {
     fs::read_to_string(installed(agent).join("calls"))
         .unwrap_or_default()
         .lines()
-        .map(str::to_owned)
+        .map(|line| {
+            let (call, by) = line.split_once('\t').unwrap_or((line, ""));
+            (call.to_owned(), PathBuf::from(by))
+        })
         .collect()
 }
 
-#[then("the installed program read the keyring entries")]
+/// Where `calls` has the first `call`.
+fn first(calls: &[(String, PathBuf)], call: &str) -> Option<usize> {
+    calls.iter().position(|(ran, _)| ran == call)
+}
+
+#[then("the new program read the keyring entries")]
 fn keyring_read(agent: &mut Agent) {
     let calls = calls(agent);
     assert!(
-        calls.iter().any(|call| call == "check-keyring"),
-        "the installed program ran {calls:?}"
+        first(&calls, "check-keyring").is_some(),
+        "the programs ran {calls:?}"
     );
 }
 
-#[then("the installed program read the keyring entries before the service was restarted")]
+#[then("the new program read the keyring entries before the service was restarted")]
 fn keyring_read_before_restart(agent: &mut Agent) {
     let calls = calls(agent);
-    let checked = calls.iter().position(|call| call == "check-keyring");
-    let restarted = calls.iter().position(|call| call == "install-service");
+    let checked = first(&calls, "check-keyring");
     assert!(
-        checked.is_some() && checked < restarted,
-        "the installed program ran {calls:?}"
+        checked.is_some() && checked < first(&calls, "install-service"),
+        "the programs ran {calls:?}"
     );
 }
 
-#[then("the installed program never restarted the service")]
+#[then("the new program never restarted the service")]
 fn never_restarted(agent: &mut Agent) {
     let calls = calls(agent);
     assert!(
-        !calls.iter().any(|call| call == "install-service"),
-        "the installed program ran {calls:?}"
+        first(&calls, "install-service").is_none(),
+        "the programs ran {calls:?}"
     );
+}
+
+/// The new program named its build and read the keyring entries where it
+/// was built: in a folder of its own in the installed program's folder,
+/// not as the installed program.
+#[then("the new program named its build and read the keyring entries before it was put in place")]
+fn checked_where_staged(agent: &mut Agent) {
+    let calls = calls(agent);
+    let folder = installed(agent);
+    let program = installed_program(agent);
+    for check in ["--version", "check-keyring"] {
+        let by = calls
+            .iter()
+            .find(|(call, _)| call == check)
+            .map(|(_, by)| by);
+        assert!(
+            by.is_some_and(|by| by != &program && by.starts_with(&folder)),
+            "{check} should run from a staging folder in {}: the programs ran {calls:?}",
+            folder.display()
+        );
+    }
+}
+
+#[then("the service was restarted by the new program in place")]
+fn restarted_in_place(agent: &mut Agent) {
+    let calls = calls(agent);
+    let program = installed_program(agent);
+    assert!(
+        calls
+            .iter()
+            .any(|(call, by)| call == "install-service" && by == &program),
+        "the programs ran {calls:?}"
+    );
+}
+
+#[then("the installed program is the new one")]
+fn installed_is_new(agent: &mut Agent) {
+    assert_eq!(installed_text(agent), stand_in(&installed(agent), "new"));
+}
+
+#[then("the installed program is still the one from before")]
+fn installed_is_earlier(agent: &mut Agent) {
+    assert_eq!(
+        installed_text(agent),
+        stand_in(&installed(agent), "earlier")
+    );
+}
+
+/// The installed program's folder holds the stand-ins' files and nothing
+/// else: no folder a build went into.
+#[then("no staging folder is left")]
+fn no_staging_folder(agent: &mut Agent) {
+    let folders: Vec<PathBuf> = fs::read_dir(installed(agent))
+        .expect("the installed program's folder")
+        .map(|entry| entry.expect("an entry").path())
+        .filter(|path| path.is_dir())
+        .collect();
+    assert!(folders.is_empty(), "left behind: {folders:?}");
 }
 
 #[given(expr = "the operation log shows a backup {word}")]
@@ -450,6 +552,58 @@ async fn run_script(agent: &mut Agent, args: &[&str]) {
     agent.interop.program = Some(node);
     run(agent, &all).await;
     agent.interop.program = None;
+}
+
+/// Runs the script as `run_script` does, with a minute's wait, and sends it
+/// SIGINT, as Ctrl-C in its terminal does, once it says it is waiting.
+#[when("the owner stops install-restart while it waits")]
+async fn stops_while_waiting(agent: &mut Agent) {
+    agent.install_restart.process_before = managers(agent).process(NAME);
+    let mut command = Command::new(node());
+    command.args([SCRIPT, "--wait", "1"]);
+    environment(agent, &mut command);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let ran = blocking(move || {
+        let mut child = spawn_gate::hold(|| command.spawn()).expect("the script runs");
+        let mut said = String::new();
+        let mut lines = BufReader::new(child.stdout.take().expect("its output")).lines();
+        for line in lines.by_ref() {
+            let line = line.expect("a line of its output");
+            said.push_str(&line);
+            said.push('\n');
+            if line.contains("waiting for") {
+                let pid = i32::try_from(child.id()).expect("a process ID fits a pid_t");
+                nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid),
+                    nix::sys::signal::Signal::SIGINT,
+                )
+                .expect("the script is sent SIGINT");
+                break;
+            }
+        }
+        for line in lines {
+            said.push_str(&line.expect("a line of its output"));
+            said.push('\n');
+        }
+        let output = child.wait_with_output().expect("the script ended");
+        Ran {
+            success: output.status.success(),
+            code: output.status.code(),
+            stdout: said,
+            stderr: String::from_utf8_lossy_owned(output.stderr),
+        }
+    })
+    .await;
+    assert!(
+        ran.stdout.contains("waiting for"),
+        "the script never waited: {}{}",
+        ran.stdout,
+        ran.stderr
+    );
+    agent.interop.ran = Some(ran);
 }
 
 /// The `node` on the test's own `PATH`: the one the build's web UI needs.
