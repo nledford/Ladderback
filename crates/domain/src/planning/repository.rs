@@ -168,7 +168,10 @@ impl RepositorySettings {
             InlineSecret::Password
             | InlineSecret::Option(_)
             | InlineSecret::OptionHot(_)
-            | InlineSecret::OptionCold(_) => None,
+            | InlineSecret::OptionCold(_)
+            | InlineSecret::RcloneFlag(_)
+            | InlineSecret::RcloneFlagHot(_)
+            | InlineSecret::RcloneFlagCold(_) => None,
         }
     }
 

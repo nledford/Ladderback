@@ -392,6 +392,41 @@ fn a_written_secret_is_named_by_its_setting_and_its_further_location() {
     }
 }
 
+/// A credential typed after a flag of an `rclone-command` is pointed out by
+/// the setting and the flag, and by the further location that holds it
+/// (#1136).
+#[test]
+fn a_credential_after_an_rclone_flag_is_named_by_its_setting_and_its_flag() {
+    use api::WarningCode;
+    let localizer = english();
+    let text = |value: &str| MsgArg::Text(value.to_owned());
+    for (args, start) in [
+        (
+            vec![
+                ("field", text("options.rclone-command")),
+                ("flag", text("--pass")),
+            ],
+            "The options.rclone-command setting of this repository gives --pass a credential written as text",
+        ),
+        (
+            vec![
+                ("field", text("options-hot.rclone-command")),
+                ("flag", text("--s3-secret-access-key")),
+                ("position", text("2")),
+            ],
+            "The options-hot.rclone-command setting of location 2 gives --s3-secret-access-key a credential written as text",
+        ),
+    ] {
+        let shown = localizer.warning(WarningCode::RcloneCommandSecret, &args, None);
+        assert!(shown.problems().is_empty(), "{shown}");
+        assert!(shown.text().starts_with(start), "{shown}");
+        assert!(
+            shown.text().contains("other users of this computer"),
+            "{shown}"
+        );
+    }
+}
+
 #[test]
 fn the_plain_http_warning_has_its_own_words_for_every_cause_and_rule() {
     let localizer = english();

@@ -546,3 +546,239 @@ fn the_configuration_holds_the_written_secrets_of_every_repository_at_every_loca
         "*** *** *** *** ***"
     );
 }
+
+// --- A credential after a flag of an rclone-command (#1136) -----------------
+
+/// The secrets settings hold as text whose `options` start rclone with
+/// `command`.
+fn rclone_command(command: &str) -> Vec<InlineSecret> {
+    let mut demo = located("rclone:demo:backups");
+    demo.options = options(&[("rclone-command", command)]);
+    demo.inline_secrets()
+}
+
+#[test]
+fn a_credential_after_a_flag_of_the_rclone_command_is_named_by_the_flag() {
+    for (command, flag) in [
+        ("rclone serve restic --pass=canary-pass", "pass"),
+        ("rclone serve restic --pass canary-pass", "pass"),
+        ("rclone --password canary-pass serve restic", "password"),
+        (
+            "rclone --s3-secret-access-key='canary pass' serve restic",
+            "s3-secret-access-key",
+        ),
+        (
+            "rclone \"--s3-session-token=canary pass\" serve restic",
+            "s3-session-token",
+        ),
+        ("rclone --b2-key \"canary-pass\" serve restic", "b2-key"),
+        (
+            "rclone --azureblob-key=canary-pass serve restic",
+            "azureblob-key",
+        ),
+        ("rclone --sftp-pass canary-pass serve restic", "sftp-pass"),
+        (
+            "rclone --sftp-key-file-pass=canary-pass serve restic",
+            "sftp-key-file-pass",
+        ),
+        (
+            "rclone --sftp-key-pem=canary-pass serve restic",
+            "sftp-key-pem",
+        ),
+        (
+            "rclone --drive-token canary-pass serve restic",
+            "drive-token",
+        ),
+        (
+            "rclone --drive-client-secret canary-pass serve restic",
+            "drive-client-secret",
+        ),
+        ("rclone --rc-pass canary-pass serve restic", "rc-pass"),
+        (
+            "rclone --webdav-bearer-token=canary-pass serve restic",
+            "webdav-bearer-token",
+        ),
+        (
+            "rclone --azureblob-sas-url=canary-pass serve restic",
+            "azureblob-sas-url",
+        ),
+        (
+            "rclone --crypt-password2 canary-pass serve restic",
+            "crypt-password2",
+        ),
+        (
+            "rclone --s3-sse-customer-key canary-pass serve restic",
+            "s3-sse-customer-key",
+        ),
+        // A word that starts `--` after the flag is still its value.
+        ("rclone serve restic --pass --canary-pass", "pass"),
+    ] {
+        assert_eq!(
+            rclone_command(command),
+            [InlineSecret::RcloneFlag(flag.to_owned())],
+            "{command}"
+        );
+    }
+}
+
+/// Each of these words names a command, a file, an address or a switch,
+/// never a credential, so only the `--rc-pass` after it is one.
+#[test]
+fn a_flag_that_names_a_command_a_file_or_a_switch_holds_no_credential() {
+    for words in [
+        "--password-command 'pass show canary-pass'",
+        "--password-command=canary-pass",
+        "--webdav-bearer-token-command='cat canary-pass'",
+        "--sftp-key-file /home/demo/.ssh/canary-pass",
+        "--sftp-pubkey-file=/home/demo/.ssh/canary-pass.pub",
+        "--oos-sse-customer-key-file=/home/demo/canary-pass",
+        "--gcs-service-account-file /home/demo/canary-pass.json",
+        "--key /home/demo/tls/canary-pass.pem",
+        "--client-key=/home/demo/tls/canary-pass.pem",
+        "--rc-key /home/demo/tls/canary-pass.pem",
+        "--rc-htpasswd /home/demo/canary-pass",
+        "--htpasswd=/home/demo/canary-pass",
+        "--ask-password=false",
+        "--sftp-ask-password",
+        "--drive-client-credentials",
+        "--drive-token-url https://oauth.example.net/canary-pass",
+        "--s3-access-key-id canary-pass",
+        "--sftp-key-use-agent",
+        "--dump-headers",
+        "--sftp-pin-host-key",
+        "--seafile-2fa",
+        "--user canary-pass",
+        "-pass canary-pass",
+        "'--pass canary-pass'",
+    ] {
+        let command = format!("rclone {words} --rc-pass=canary-pass serve restic");
+        assert_eq!(
+            rclone_command(&command),
+            [InlineSecret::RcloneFlag("rc-pass".to_owned())],
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn a_flag_with_no_credential_after_it_holds_none() {
+    for command in [
+        // Nothing after it, or nothing in it.
+        "rclone --rc-pass=canary-pass serve restic --pass",
+        "rclone --rc-pass=canary-pass serve restic --pass=",
+        "rclone --rc-pass=canary-pass serve restic --pass ''",
+        // A comment is no word of the command.
+        "rclone --rc-pass=canary-pass serve restic # --pass canary-pass",
+    ] {
+        assert_eq!(
+            rclone_command(command),
+            [InlineSecret::RcloneFlag("rc-pass".to_owned())],
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn a_flag_given_twice_is_named_once() {
+    assert_eq!(
+        rclone_command("rclone --pass=canary-one serve restic --pass canary-two --rc-pass=canary"),
+        [
+            InlineSecret::RcloneFlag("pass".to_owned()),
+            InlineSecret::RcloneFlag("rc-pass".to_owned())
+        ]
+    );
+}
+
+/// A command with a reference in it is refused when a job starts, as
+/// every option rustic runs as a command is (§10.2), and its words are
+/// known only then; one that can't be split into words is rustic's to
+/// refuse. Neither is read for a flag.
+#[test]
+fn a_command_with_a_reference_or_that_cannot_be_split_is_not_read_for_flags() {
+    let mut demo = located("rclone:demo:backups");
+    demo.options = options(&[(
+        "rclone-command",
+        "rclone serve restic --pass=${RCLONE_PASS}",
+    )]);
+    demo.options_hot = options(&[("rclone-command", "rclone --pass='canary-pass serve")]);
+    demo.options_cold = options(&[("rclone-command", "rclone --pass=canary-pass serve")]);
+    assert_eq!(
+        demo.inline_secrets(),
+        [InlineSecret::RcloneFlagCold("pass".to_owned())]
+    );
+}
+
+#[test]
+fn only_the_rclone_command_is_read_for_flags() {
+    let mut demo = located("/srv/demo-repo");
+    demo.options = options(&[
+        ("post-create-command", "notify --pass canary-pass"),
+        (
+            "rclone-command",
+            "rclone --rc-pass canary-pass serve restic",
+        ),
+    ]);
+    assert_eq!(
+        demo.inline_secrets(),
+        [InlineSecret::RcloneFlag("rc-pass".to_owned())]
+    );
+}
+
+#[test]
+fn a_credential_in_the_rclone_command_of_each_half_is_named_by_its_set_and_flag() {
+    let mut demo = located("rclone:demo:backups");
+    demo.repo_hot = Some("rclone:hot:backups".to_owned());
+    demo.options_hot = options(&[("rclone-command", "rclone --pass canary-pass serve restic")]);
+    demo.options_cold = options(&[(
+        "rclone-command",
+        "rclone --s3-session-token=canary-pass serve restic",
+    )]);
+    let found = demo.inline_secrets();
+    assert_eq!(
+        found,
+        [
+            InlineSecret::RcloneFlagHot("pass".to_owned()),
+            InlineSecret::RcloneFlagCold("s3-session-token".to_owned())
+        ]
+    );
+    let named: Vec<(String, Option<String>)> = found
+        .iter()
+        .map(|secret| (secret.field(), secret.flag()))
+        .collect();
+    assert_eq!(
+        named,
+        [
+            (
+                "options-hot.rclone-command".to_owned(),
+                Some("--pass".to_owned())
+            ),
+            (
+                "options-cold.rclone-command".to_owned(),
+                Some("--s3-session-token".to_owned())
+            ),
+        ]
+    );
+    assert!(!format!("{found:?}").contains("canary-pass"), "{found:?}");
+}
+
+#[test]
+fn a_flag_is_named_as_one_bounded_line_and_other_secrets_have_none() {
+    let found = rclone_command(&format!(
+        "rclone --s3-secret{}=canary-pass serve restic",
+        "x".repeat(500)
+    ));
+    let flag = found.first().and_then(InlineSecret::flag).expect("a flag");
+    assert!(flag.starts_with("--s3-secretxxx"), "{flag}");
+    assert_eq!(flag.chars().count(), "--".len() + 80);
+    assert_eq!(
+        found.first().map(InlineSecret::field).as_deref(),
+        Some("options.rclone-command")
+    );
+    for other in [
+        InlineSecret::Password,
+        InlineSecret::Location,
+        InlineSecret::Option("pass".to_owned()),
+    ] {
+        assert_eq!(other.flag(), None, "{other:?}");
+    }
+}

@@ -22,6 +22,13 @@ pub enum InlineSecret {
     OptionHot(String),
     /// An option of the cold half only.
     OptionCold(String),
+    /// A credential written after a flag of `options.rclone-command`, by the
+    /// flag's name without its `--`. Never the credential.
+    RcloneFlag(String),
+    /// A credential after a flag of `options-hot.rclone-command`.
+    RcloneFlagHot(String),
+    /// A credential after a flag of `options-cold.rclone-command`.
+    RcloneFlagCold(String),
 }
 
 impl InlineSecret {
@@ -37,7 +44,14 @@ impl InlineSecret {
             Self::Option(name) => format!("options.{}", shown(name)),
             Self::OptionHot(name) => format!("options-hot.{}", shown(name)),
             Self::OptionCold(name) => format!("options-cold.{}", shown(name)),
+            Self::RcloneFlag(_) | Self::RcloneFlagHot(_) | Self::RcloneFlagCold(_) => todo!(),
         }
+    }
+
+    /// The flag of an `rclone-command` the credential is written after,
+    /// as `--NAME`; none for any other secret.
+    pub fn flag(&self) -> Option<String> {
+        todo!()
     }
 }
 

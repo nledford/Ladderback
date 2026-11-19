@@ -33,7 +33,7 @@ use domain::planning::{
     Plan, RepositoryConfig, RepositorySettings, RetryPolicy, RouteState, RuleNote, Schedule,
     Source, SourceFilter,
 };
-use domain::secrets::SecretRef;
+use domain::secrets::{InlineSecret, SecretRef};
 use domain::{AgentId, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, Uuid};
 use futures::StreamExt;
 
@@ -86,6 +86,9 @@ pub struct LocationsWorld {
     /// By repository: the warnings the Repositories page lists for its
     /// locations.
     listed: BTreeMap<String, Vec<LocationWarning>>,
+    /// By repository: each secret its settings hold as text, with the
+    /// position of the location that holds it.
+    written: BTreeMap<String, Vec<(u8, InlineSecret)>>,
     /// The warning a step found, and the repository it is about, which the
     /// next steps look at.
     warned: Option<LocationWarning>,
@@ -1014,6 +1017,39 @@ fn repositories_listed(agent: &mut Agent) {
         .iter()
         .map(|(name, entry)| (name.clone(), entry.location_warnings()))
         .collect();
+}
+
+#[when("the secrets written in the configuration are listed")]
+fn written_secrets_listed(agent: &mut Agent) {
+    let world = &mut agent.locations;
+    world.written = world
+        .entries
+        .iter()
+        .map(|(name, entry)| (name.clone(), entry.inline_secrets()))
+        .collect();
+}
+
+#[then(
+    expr = "the repository {string} is warned only that the setting {string} of the location {int} gives {string} a credential written as text"
+)]
+fn warned_only_of_flag(agent: &mut Agent, name: String, field: String, position: u8, flag: String) {
+    let written = named(&agent.locations.written, &name);
+    let warned: Vec<(u8, String, Option<String>)> = written
+        .iter()
+        .map(|(at, secret)| (*at, secret.field(), secret.flag()))
+        .collect();
+    assert_eq!(warned, [(position, field, Some(flag))], "{written:?}");
+}
+
+#[then(expr = "no secret written in the configuration shows {string}")]
+fn no_written_secret_shows(agent: &mut Agent, secret: String) {
+    for (name, written) in &agent.locations.written {
+        let shown = written
+            .iter()
+            .map(|(_, secret)| format!("{secret:?} {} {:?}", secret.field(), secret.flag()))
+            .collect::<String>();
+        assert!(!shown.contains(&secret), "{name}: {shown}");
+    }
 }
 
 #[then(expr = "the operation used the location {string}")]

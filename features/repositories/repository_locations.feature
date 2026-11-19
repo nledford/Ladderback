@@ -554,6 +554,39 @@ Feature: A repository reached at several locations
       When a backup of "solo" runs
       Then the daemon's log warns that the repository "solo" sends its credentials over plain HTTP, naming no location
 
+  Rule: A credential typed after a flag of an rclone-command is warned about by the flag, never by its value
+
+    # rclone is started with the words of a location's rclone-command in its
+    # arguments, where other users of this computer can read them, and the
+    # configuration file keeps them as text (§10.2, decision 37, #1136).
+    Scenario Outline: A credential after a flag of an rclone-command is named by its setting and its flag
+      Given the location "<location>" sets "rclone-command" to "<command>" in its "<set>"
+      When the secrets written in the configuration are listed
+      Then the repository "nas" is warned only that the setting "<field>" of the location <position> gives "<flag>" a credential written as text
+      And no secret written in the configuration shows "canary-pass"
+
+      Examples:
+        | location | set          | command                                                  | field                       | position | flag                   |
+        | lan      | options      | rclone serve restic --pass=canary-pass                   | options.rclone-command      | 1        | --pass                 |
+        | lan      | options      | rclone serve restic --pass canary-pass                   | options.rclone-command      | 1        | --pass                 |
+        | lan      | options-hot  | rclone --s3-secret-access-key 'canary-pass' serve restic | options-hot.rclone-command  | 1        | --s3-secret-access-key |
+        | public   | options-cold | rclone --b2-key=canary-pass serve restic                 | options-cold.rclone-command | 2        | --b2-key               |
+
+    # A flag ending in -command names a program that prints the credential,
+    # and one ending in -file a file that holds it: neither is the
+    # credential, so only the flag after it is warned about.
+    Scenario Outline: A flag that names a command or a file is not taken for a credential
+      Given the location "lan" sets "rclone-command" to "<command> --rc-pass=canary-pass serve restic" in its "options"
+      When the secrets written in the configuration are listed
+      Then the repository "nas" is warned only that the setting "options.rclone-command" of the location 1 gives "--rc-pass" a credential written as text
+
+      Examples:
+        | command                                                    |
+        | rclone --password-command 'pass show canary-pass'          |
+        | rclone --webdav-bearer-token-command 'cat canary-pass'     |
+        | rclone --sftp-key-file /home/demo/.ssh/canary-pass         |
+        | rclone --sftp-pubkey-file /home/demo/.ssh/canary-pass.pub  |
+
   Rule: The Repositories page notes what the locations' rules mean for a plan's runs
 
     Scenario: A repository whose every location has a rule is noted
