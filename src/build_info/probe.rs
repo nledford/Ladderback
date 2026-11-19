@@ -121,6 +121,13 @@ pub fn release_ref(version: &str) -> String {
     format!("refs/tags/v{version}")
 }
 
+/// Of each of `groups` (`watched`), the first path that `exists`; a group
+/// with none is left out.
+pub fn chosen<'a>(groups: &'a [Vec<String>], exists: impl Fn(&str) -> bool) -> Vec<&'a str> {
+    let _ = (groups, exists);
+    todo!()
+}
+
 /// The files in the git folder whose change may change `git`'s answers about
 /// a build of `version`, as `git rev-parse --git-path` takes them, for a work
 /// tree on `branch` (`git symbolic-ref -q HEAD`, none when HEAD is detached)
@@ -364,6 +371,29 @@ mod tests {
         assert_eq!(ReleaseTag::of(true, true), ReleaseTag::AtHead);
         assert_eq!(ReleaseTag::of(false, true), ReleaseTag::Elsewhere);
         assert_eq!(ReleaseTag::of(false, false), ReleaseTag::Missing);
+    }
+
+    #[test]
+    fn a_release_tag_made_after_the_files_were_chosen_counts_as_missing() {
+        assert_eq!(ReleaseTag::of(true, false), ReleaseTag::Missing);
+    }
+
+    #[test]
+    fn of_each_group_the_first_path_that_exists_is_watched() {
+        let groups = vec![
+            vec!["HEAD".to_owned()],
+            vec!["index".to_owned()],
+            vec![
+                "logs/refs/heads/work".to_owned(),
+                "refs/heads/work".to_owned(),
+            ],
+            vec!["refs/tags/v0.3.0".to_owned(), "packed-refs".to_owned()],
+        ];
+        let existing = ["HEAD", "refs/heads/work", "refs/tags/v0.3.0", "packed-refs"];
+        assert_eq!(
+            chosen(&groups, |path| existing.contains(&path)),
+            ["HEAD", "refs/heads/work", "refs/tags/v0.3.0"]
+        );
     }
 
     #[test]
