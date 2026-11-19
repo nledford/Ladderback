@@ -1135,8 +1135,9 @@ Then(
   },
 );
 
-// The cells of the named column each carry the instant they show, so the
-// order is read from those, not from localized text.
+// The cells of the named column each give the instant they show in a
+// `<time datetime>`, so the order is read from those, not from localized text.
+// A cell that gives none fails the step: an order of nothing proves nothing.
 async function instants(world: BrowserWorld, name: string, column: string): Promise<string[]> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(escapeRegExp(column)) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
@@ -1147,7 +1148,9 @@ async function instants(world: BrowserWorld, name: string, column: string): Prom
         rows.map((row) => {
           const cell = row.cells[at];
           if (cell === undefined) throw new Error(`a row has no cell ${at}`);
-          return cell.title;
+          const given = cell.querySelector("time")?.getAttribute("datetime");
+          if (!given) throw new Error(`the cell "${cell.textContent ?? ""}" gives no instant in a time element`);
+          return given;
         }),
       index,
     );
@@ -1164,7 +1167,7 @@ Given("the browser is in the time zone {string}", function (this: BrowserWorld, 
   this.contextOptions.timezoneId = zone;
 });
 
-/** The cells of the named column, each as the instant its `title` carries (in
+/** The cells of the named column, each as the instant its `<time datetime>` gives (in
  *  UTC) and what a reader hears of it: its text, without bidi isolation marks
  *  and with the narrow and no-break spaces V8 and CLDR differ on folded. */
 async function timeCells(world: BrowserWorld, name: string, column: string): Promise<Array<readonly [string, string]>> {
@@ -1177,7 +1180,7 @@ async function timeCells(world: BrowserWorld, name: string, column: string): Pro
         rows.map((row) => {
           const cell = row.cells[at];
           if (cell === undefined) throw new Error(`a row has no cell ${at}`);
-          return [cell.title, cell.textContent ?? ""] as const;
+          return [cell.querySelector("time")?.getAttribute("datetime") ?? "", cell.textContent ?? ""] as const;
         }),
       index,
     );
@@ -1192,10 +1195,10 @@ const writtenIn = (zone: string) => {
   return (raw: string) => fold(written.format(new Date(raw)));
 };
 
-// Each cell carries the instant it shows in its `title`, in UTC. What it shows
+// Each cell gives the instant it shows in its `<time datetime>`, in UTC. What it shows
 // is that instant read in the browser's own zone, as the browser's `Intl`
 // writes it: the default of the formatter is UTC, so a page that didn't pass
-// the zone would show the title's own hours.
+// the zone would show the instant's own hours.
 Then(
   "the table {string} shows its {string} column in the time zone {string}",
   async function (this: BrowserWorld, name: string, column: string, zone: string) {
@@ -1265,7 +1268,7 @@ Given("the plan {string} holds snapshots taken at:", function (this: BrowserWorl
   });
 });
 
-// The cell of a plan's next run carries in its `title` the run the daemon
+// The cell of a plan's next run gives in its `<time datetime>` the run the daemon
 // planned, in UTC as the plans list sends it, and shows that instant read in
 // the browser's own zone.
 Then(
@@ -1277,12 +1280,12 @@ Then(
     const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
     const found = rowNamed(this, name, row).first();
     await found.waitFor({ state: "visible", timeout: UPDATE_PATIENCE_MS });
-    const [title, shown] = await found.evaluate((tr: HTMLTableRowElement, at) => {
+    const [given, shown] = await found.evaluate((tr: HTMLTableRowElement, at) => {
       const cell = tr.cells[at];
       if (cell === undefined) throw new Error(`the row has no cell ${at}`);
-      return [cell.title, cell.textContent ?? ""] as const;
+      return [cell.querySelector("time")?.getAttribute("datetime") ?? "", cell.textContent ?? ""] as const;
     }, index);
-    assert.equal(title, planned, `the ${column} cell of ${row} doesn't carry the run the daemon planned`);
+    assert.equal(given, planned, `the ${column} cell of ${row} doesn't give the run the daemon planned`);
     assert.equal(fold(shown), writtenIn(zone)(planned), `the ${column} cell of ${row} is not in ${zone}`);
   },
 );
