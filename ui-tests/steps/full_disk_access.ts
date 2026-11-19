@@ -7,13 +7,16 @@
 import assert from "node:assert/strict";
 
 import { Given, Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { namePattern } from "../support/keyboard.ts";
+import { patienceMs, untilSettled } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
-// How long the page takes to show what the daemon answered, with room.
-const PAGE_PATIENCE_MS = 10_000;
+// How long a check that the page shows no warning gives one on its way out:
+// a check that something isn't there keeps a window of its own rather than
+// the step's limit (#1104).
+const GONE_MS = 10_000;
 
 // The warning's heading, which names its region.
 const WARNING = "Full Disk Access is missing";
@@ -102,19 +105,19 @@ When("the agent then finds Full Disk Access {word}", function (this: BrowserWorl
 });
 
 Then("the page warns that Full Disk Access is missing", async function (this: BrowserWorld) {
-  await warning(this).waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await warning(this).waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 Then("the page lists the steps to grant Full Disk Access", async function (this: BrowserWorld) {
   const steps = warning(this).getByRole("list").getByRole("listitem");
-  await steps.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await steps.first().waitFor({ state: "visible", timeout: patienceMs() });
   assert.ok((await steps.count()) >= 3, `the warning lists ${await steps.count()} steps`);
 });
 
 Then(
   "the page shows the Full Disk Access banner, its link {string} leading to the start page",
   async function (this: BrowserWorld, name: string) {
-    await expect(banner(this)).toHaveCount(1, { timeout: PAGE_PATIENCE_MS });
+    await expect(banner(this)).toHaveCount(1);
     const link = banner(this).getByRole("link", { name: namePattern(name) });
     await expect(link).toHaveCount(1);
     await expect(link).toHaveAttribute("href", "/");
@@ -124,24 +127,19 @@ Then(
 // Not dismissible while the grant is missing (#948): no Dismiss button, nor
 // any other.
 Then("the Full Disk Access banner offers no button", async function (this: BrowserWorld) {
-  await expect(banner(this)).toHaveCount(1, { timeout: PAGE_PATIENCE_MS });
+  await expect(banner(this)).toHaveCount(1);
   await expect(banner(this).getByRole("button")).toHaveCount(0);
 });
 
 Then("the page shows no Full Disk Access banner", async function (this: BrowserWorld) {
-  await expect(banner(this)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
+  await expect(banner(this)).toHaveCount(0);
 });
 
 // Only once the page has read what the agent found and drawn what it read: a
 // page that never asked, or has yet to handle the answer, would show no
 // warning either.
 Then("the page doesn't warn of Full Disk Access", async function (this: BrowserWorld) {
-  const { read } = answers(this);
-  const { promise: late, resolve: tooLate } = Promise.withResolvers<"late">();
-  const timer = setTimeout(() => tooLate("late"), PAGE_PATIENCE_MS);
-  const outcome = await Promise.race([read.then(() => "read" as const), late]);
-  clearTimeout(timer);
-  assert.equal(outcome, "read", "the page never read what the agent found of Full Disk Access");
+  await untilSettled(answers(this).read, "the page never read what the agent found of Full Disk Access");
   // The answer reaches the page's code after the route answers it: two frames
   // later, the page has drawn whatever it drew for it.
   await this.page.evaluate(() => {
@@ -149,6 +147,7 @@ Then("the page doesn't warn of Full Disk Access", async function (this: BrowserW
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     return promise;
   });
-  await expect(warning(this)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
-  await expect(banner(this)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
+  // What `untilSettled` left of the step, at most: a window must end in it.
+  await expect(warning(this)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
+  await expect(banner(this)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
 });

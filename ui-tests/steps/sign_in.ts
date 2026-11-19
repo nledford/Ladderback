@@ -11,14 +11,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { namePattern } from "../support/keyboard.ts";
+import { patienceMs, untilSettled } from "../support/patience.ts";
 import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "../support/world.ts";
 import { expand } from "./repositories.ts";
-
-// How long a dialog or a focus move the page makes takes to show, with room.
-const PAGE_PATIENCE_MS = 10_000;
 
 /** The folders a scenario's daemon keeps its data, config and cache in. */
 function folders(scratch: string): Record<string, string> {
@@ -161,11 +159,7 @@ for (const [reading, address] of Object.entries(HELD_READINGS)) {
   When(`the daemon gives the answer it held back to ${reading}`, async function (this: BrowserWorld) {
     const held = heldReadings.get(this);
     assert.ok(held, `no Given held back ${reading}`);
-    const { promise: late, resolve: tooLate } = Promise.withResolvers<"late">();
-    const timer = setTimeout(() => tooLate("late"), PAGE_PATIENCE_MS);
-    const outcome = await Promise.race([held.arrived.then(() => "arrived" as const), late]);
-    clearTimeout(timer);
-    assert.equal(outcome, "arrived", `the page never made ${reading}`);
+    await untilSettled(held.arrived, `the page never made ${reading}`);
     held.letThrough();
   });
 }
@@ -179,7 +173,7 @@ When("the daemon refuses the page's own next reading of the history", async func
       new URL(response.url()).pathname === "/api/v1/operations" &&
       response.request().headers()["x-ladderback-background"] === "1" &&
       response.status() === 401,
-    { timeout: PAGE_PATIENCE_MS },
+    { timeout: patienceMs() },
   );
 });
 
@@ -221,10 +215,8 @@ Then(
   "the dialog {string} opens with focus on the button {string}",
   async function (this: BrowserWorld, dialog: string, button: string) {
     const opened = this.page.getByRole("dialog", { name: namePattern(dialog) });
-    await opened.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
-    await expect(opened.getByRole("button", { name: namePattern(button) })).toBeFocused({
-      timeout: PAGE_PATIENCE_MS,
-    });
+    await opened.waitFor({ state: "visible", timeout: patienceMs() });
+    await expect(opened.getByRole("button", { name: namePattern(button) })).toBeFocused();
   },
 );
 

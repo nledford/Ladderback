@@ -5,9 +5,10 @@
 import assert from "node:assert/strict";
 
 import type { Locator, Page } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "./expect.ts";
 import { type Box, focusProbes, type Point } from "./focus-probes.ts";
+import { patienceMs } from "./patience.ts";
 
 /** Playwright's name for the engine that drives `page`: `chromium`, `firefox`
  *  or `webkit`. It comes from the page, not from `world.ts`'s `engine`: only
@@ -231,8 +232,10 @@ async function lookAtFocus(page: Page, key: string) {
   const stopped = revealsFocusFromATimer && stoppedClocks.has(page);
   if (stopped) {
     // Its failure is only the end of the wait: the measure below is the check.
+    // A window of its own, not the step's limit: a press whose focus never
+    // comes into view would otherwise leave the measure no time to say so.
     await expect(page.locator(":focus"))
-      .toBeInViewport({ timeout: STOPPED_CLOCK_REVEAL_MS })
+      .toBeInViewport({ timeout: Math.min(STOPPED_CLOCK_REVEAL_MS, patienceMs()) })
       .catch(() => undefined);
   }
   const focused = await page.evaluateHandle(async (fromATimer) => {

@@ -15,14 +15,17 @@ import { promisify } from "node:util";
 import { Given, Then, When } from "@cucumber/cucumber";
 
 import { journey, namePattern } from "../support/keyboard.ts";
+import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "../support/world.ts";
 import { api, ended } from "./maintenance.ts";
 
 // A test, a connection or a creation takes the engine a moment, in a debug
-// build more than one.
-const ANSWER_PATIENCE_MS = 25_000;
+// build more than one: the steps wait for what the page shows of it until the
+// step's limit (#1104).
 
-// How long a test of the scratch repository needs to be answered, with room.
+// How long the page has to throw once it is left with a test of the scratch
+// repository on its way: a check that something doesn't happen, so a window
+// of its own rather than the step's limit (#1104).
 const ANSWER_SETTLES_MS = 6_000;
 
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
@@ -174,25 +177,20 @@ When("I type {string}", async function (this: BrowserWorld, text: string) {
 });
 
 // Waits until the main content's text, as a reader gets it, matches `pattern`.
-function mainTextMatches(world: BrowserWorld, pattern: string) {
-  return world.page.waitForFunction(
-    (source) => {
-      const main = document.querySelector("main");
-      if (main === null) throw new Error("the page has no main content");
-      const text = main.innerText.replace(/[\u2066-\u2069]/g, "");
-      return new RegExp(source).test(text);
-    },
-    pattern,
-    { timeout: ANSWER_PATIENCE_MS },
+async function mainTextMatches(world: BrowserWorld, pattern: RegExp): Promise<void> {
+  await untilStepLimit(
+    `the main content comes to match ${pattern}`,
+    () => world.page.evaluate(() => document.querySelector("main")?.innerText.replace(/[\u2066-\u2069]/g, "") ?? null),
+    (text) => text !== null && pattern.test(text),
   );
 }
 
 Then("the page shows a message containing {string}", async function (this: BrowserWorld, needle: string) {
-  await mainTextMatches(this, escapeRegExp(needle));
+  await mainTextMatches(this, new RegExp(escapeRegExp(needle)));
 });
 
 Then("the page shows a repository ID", async function (this: BrowserWorld) {
-  await mainTextMatches(this, "Its ID is [0-9a-f]{64}\\b");
+  await mainTextMatches(this, /Its ID is [0-9a-f]{64}\b/);
 });
 
 // I4: nothing a person typed into the password field comes back on the page,
@@ -202,21 +200,22 @@ Then("the page doesn't show {string}", async function (this: BrowserWorld, text:
   assert.ok(!shown.replace(ISOLATION_MARKS, "").includes(text), `the page shows ${JSON.stringify(text)}`);
 });
 
-// The form's fields, whatever language the page is in.
+// The form's fields, whatever language the page is in, once the page has
+// drawn them.
 Then("the page has {int} text boxes", async function (this: BrowserWorld, count: number) {
   const boxes = journey(this.page).byRole("textbox");
-  await boxes
-    .first()
-    .waitFor({ timeout: 5_000 })
-    .catch(() => {});
-  assert.equal(await boxes.count(), count);
+  await untilStepLimit(
+    `the page has ${count} text boxes`,
+    () => boxes.count(),
+    (found) => found === count,
+  );
 });
 
 // Focus moves once the answer is in, a moment after the element exists.
 export async function focusComesTo(world: BrowserWorld, role: string, name: string, description: string): Promise<void> {
   const keys = journey(world.page);
   const target = keys.byRole(role, { name: namePattern(name) });
-  const deadline = Date.now() + ANSWER_PATIENCE_MS;
+  const deadline = Date.now() + patienceMs();
   for (;;) {
     try {
       return await keys.assertFocused(target, description);
@@ -230,7 +229,7 @@ export async function focusComesTo(world: BrowserWorld, role: string, name: stri
 }
 
 // A page that is left while a request is on its way gets the answer after it
-// is gone. The engine takes a moment, so the step waits long enough for it.
+// is gone. The engine takes a moment, so the step watches long enough for it.
 Then("the page raises no script error while the daemon answers", async function (this: BrowserWorld) {
   await new Promise((done) => setTimeout(done, ANSWER_SETTLES_MS));
   assert.deepEqual(this.scriptErrors, [], "the page's scripts threw");
@@ -257,7 +256,7 @@ Then("focus is on the message {string}", async function (this: BrowserWorld, mes
         return focused.innerText.replace(new RegExp(marks, "g"), "").trim() === message;
       },
       { message, marks: ISOLATION_MARKS.source },
-      { timeout: ANSWER_PATIENCE_MS },
+      { timeout: patienceMs() },
     )
     .catch(async () => {
       const focused = await this.page.evaluate(() => document.activeElement?.outerHTML ?? "nothing");
@@ -269,7 +268,7 @@ Then("focus is on the message {string}", async function (this: BrowserWorld, mes
 Then("the button {string} leaves the page", async function (this: BrowserWorld, name: string) {
   await journey(this.page)
     .byRole("button", { name: namePattern(name) })
-    .waitFor({ state: "detached", timeout: ANSWER_PATIENCE_MS });
+    .waitFor({ state: "detached", timeout: patienceMs() });
 });
 
 // How long the list of repositories takes to answer once it is slow: long

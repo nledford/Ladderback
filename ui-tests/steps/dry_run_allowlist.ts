@@ -9,15 +9,13 @@ import assert from "node:assert/strict";
 import { Given, Then } from "@cucumber/cucumber";
 
 import { namePattern } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { api } from "./maintenance.ts";
 import { rowNamed } from "./live.ts";
 
 /** The route that reads and sets the dry-run allowlist. */
 const ALLOWLIST = "/api/v1/settings/dry-run-allowlist";
-
-// How long the row the page adds takes to show, with room.
-const PAGE_PATIENCE_MS = 10_000;
 
 /** The allowlist as the daemon answers it: its folders and its home folder. */
 interface Allowlist {
@@ -87,7 +85,7 @@ Then("the daemon's dry-run allowlist holds its home folder alone", async functio
 Then("the table {string} has the row of the daemon's home folder", async function (this: BrowserWorld, name: string) {
   const { home } = await allowlist(this);
   assert.ok(home, "the daemon names no home folder");
-  await rowNamed(this, name, home).first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await rowNamed(this, name, home).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // A folder's row, found by its header, holds the button named for it.
@@ -96,6 +94,6 @@ Then(
   async function (this: BrowserWorld, row: string, name: string, button: string) {
     await rowNamed(this, name, row)
       .getByRole("button", { name: namePattern(button) })
-      .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+      .waitFor({ state: "visible", timeout: patienceMs() });
   },
 );

@@ -14,6 +14,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
 import { ISOLATION, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
+import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import { type BrowserWorld, startServer } from "../support/world.ts";
 import { rowNamed, serveDemoPlans, table, untilCellLists } from "./live.ts";
 
@@ -28,17 +29,8 @@ const STRAY_PACK = "5ca1ab1e".repeat(8);
 const STRAY_PACK_NAMED = STRAY_PACK.slice(0, 8);
 
 // A backup, a forget or a prune of the tiny source ends in a moment, even in
-// a debug build; this is the room a slow machine gets.
-const RUN_PATIENCE_MS = 120_000;
-
-// What the page owes a keyboard once an answer is in: a dialog, a heading, a
-// row. Short, so a page that never shows them fails a journey quickly.
-const PAGE_PATIENCE_MS = 10_000;
-const ROWS_PATIENCE_MS = 30_000;
-// A line of the page that a run's wait brings: a run behind answers that come
-// seconds late is on the page seconds after it was started. Under the
-// timeout of a step, so that a line that never comes fails by saying so.
-const LINE_PATIENCE_MS = 20_000;
+// a debug build, and the page shows what came of it a moment later: the
+// steps wait for both until the step's limit (#1104).
 
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
@@ -79,16 +71,17 @@ export async function ended(world: Pick<BrowserWorld, "baseUrl">, started: Answe
   assert.equal(started.status, 202, `${what} was refused: ${JSON.stringify(started.json)}`);
   const id = started.json?.operation;
   assert.ok(typeof id === "string", `${what} was started with no operation id: ${JSON.stringify(started.json)}`);
-  const end = Date.now() + RUN_PATIENCE_MS;
-  let status = "queued";
-  let failureCode: string | undefined;
-  while (Date.now() < end) {
-    const operation = (await api(world, "GET", `/api/v1/operations/${id}`)).json?.operation;
-    status = (typeof operation === "object" ? operation.status : undefined) ?? status;
-    failureCode = typeof operation === "object" ? operation["failure-code"] : undefined;
-    if (!["queued", "running"].includes(status)) break;
-    await sleep(250);
-  }
+  const { status, failureCode } = await untilStepLimit(
+    `${what} ends`,
+    async () => {
+      const operation = (await api(world, "GET", `/api/v1/operations/${id}`)).json?.operation;
+      return {
+        status: (typeof operation === "object" ? operation.status : undefined) ?? "queued",
+        failureCode: typeof operation === "object" ? operation["failure-code"] : undefined,
+      };
+    },
+    ({ status }) => !["queued", "running"].includes(status),
+  );
   return { status, failureCode };
 }
 
@@ -140,7 +133,7 @@ function dialogOf(world: BrowserWorld, name: string): Locator {
 /** What a reader gets from a dialog: its text without bidi isolation marks. */
 async function textOfDialog(world: BrowserWorld, name: string): Promise<string> {
   const dialog = dialogOf(world, name);
-  await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await dialog.waitFor({ state: "visible", timeout: patienceMs() });
   return (await dialog.innerText()).replace(ISOLATION_MARKS, "");
 }
 
@@ -216,13 +209,13 @@ Then(
     const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
     const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
     const found = rowNamed(this, name, row).first();
-    await found.waitFor({ state: "visible", timeout: ROWS_PATIENCE_MS });
+    await found.waitFor({ state: "visible", timeout: patienceMs() });
     // A cell's role leaves the row header out, so the cells count from after it.
     const words = found
       .getByRole("cell")
       .nth(index - 1)
       .locator('[lang="en"]');
-    await words.first().waitFor({ state: "visible", timeout: ROWS_PATIENCE_MS });
+    await words.first().waitFor({ state: "visible", timeout: patienceMs() });
     assert.notEqual(
       (await words.first().innerText()).replace(ISOLATION_MARKS, "").trim(),
       "",
@@ -374,7 +367,7 @@ Given("the repository {string} has no maintenance setting", async function (this
  *  page reads the history it lists from the daemon, so a button made from it
  *  is not there when the presses would begin: they begin when it is. */
 async function tabUntilFocused(world: BrowserWorld, target: Locator, description: string): Promise<void> {
-  await target.waitFor({ state: "attached", timeout: PAGE_PATIENCE_MS });
+  await target.waitFor({ state: "attached", timeout: patienceMs() });
   await pressUntilFocused(world.page, "Tab", target, description);
 }
 
@@ -410,14 +403,11 @@ When("I press Tab until focus is on the button of the repository {string}", asyn
 // headings that name the sections are the catalog's words then.
 Then("the page lists {int} snapshots", async function (this: BrowserWorld, count: number) {
   const rows = this.page.getByRole("main").locator("tbody tr");
-  const end = Date.now() + LINE_PATIENCE_MS;
-  let found = -1;
-  while (Date.now() < end) {
-    found = await rows.count();
-    if (found === count) return;
-    await sleep(100);
-  }
-  assert.equal(found, count, "the snapshot rows of the page");
+  await untilStepLimit(
+    `the page lists ${count} snapshot rows`,
+    () => rows.count(),
+    (found) => found === count,
+  );
 });
 
 // A header or an ID that breaks in the middle of a word, with room beside it,
@@ -451,14 +441,12 @@ Then("no word of a table is broken across lines", async function (this: BrowserW
 // moment later.
 Then("the dialog {string} opens with focus inside it", async function (this: BrowserWorld, name: string) {
   const dialog = dialogOf(this, name);
-  await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
-  const end = Date.now() + PAGE_PATIENCE_MS;
-  let inside = false;
-  while (!inside && Date.now() < end) {
-    inside = await dialog.evaluate((el) => el.contains(document.activeElement));
-    if (!inside) await sleep(100);
-  }
-  assert.ok(inside, `focus did not come inside the dialog "${name}"`);
+  await dialog.waitFor({ state: "visible", timeout: patienceMs() });
+  await untilStepLimit(
+    `focus comes inside the dialog "${name}"`,
+    () => dialog.evaluate((el) => el.contains(document.activeElement)),
+    (inside) => inside,
+  );
 });
 
 // What the page does on its own while the dialog is open, such as hearing a
@@ -486,7 +474,7 @@ Then("the dialog {string} says {string}", async function (this: BrowserWorld, na
 // the elements its aria-describedby names, without bidi isolation marks.
 Then("the dialog {string} is described as saying {string}", async function (this: BrowserWorld, name: string, text: string) {
   const dialog = dialogOf(this, name);
-  await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await dialog.waitFor({ state: "visible", timeout: patienceMs() });
   const described = await dialog.evaluate((el) =>
     (el.getAttribute("aria-describedby") ?? "")
       .split(/\s+/)
@@ -503,19 +491,20 @@ Then("the dialog {string} is described as saying {string}", async function (this
 Then("the dialog {string} offers the button {string}", async function (this: BrowserWorld, name: string, button: string) {
   await dialogOf(this, name)
     .getByRole("button", { name: namePattern(button) })
-    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 Then("the dialog {string} offers only the button {string}", async function (this: BrowserWorld, name: string, button: string) {
   const dialog = dialogOf(this, name);
-  await dialog.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await dialog.waitFor({ state: "visible", timeout: patienceMs() });
   const texts = await dialog.getByRole("button").evaluateAll((buttons) => buttons.map((b) => b.textContent ?? ""));
   const names = texts.map((text) => text.replace(ISOLATION_MARKS, "").trim());
   assert.deepEqual(names, [button], `the buttons of the dialog "${name}"`);
 });
 
+// The step before closed it, so it goes as soon as the page has handled that.
 Then("the dialog {string} is closed", async function (this: BrowserWorld, name: string) {
-  await dialogOf(this, name).waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
+  await dialogOf(this, name).waitFor({ state: "hidden", timeout: patienceMs() });
 });
 
 // What the page does on its own after the dialog closed, such as hearing a
@@ -535,7 +524,7 @@ Then("the dialog {string} stays closed", async function (this: BrowserWorld, nam
 // find it.
 Then("the dialog {string} has its button {string} unavailable", async function (this: BrowserWorld, name: string, button: string) {
   const found = dialogOf(this, name).getByRole("button", { name: namePattern(button) });
-  await found.waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await found.waitFor({ state: "visible", timeout: patienceMs() });
   assert.equal(await found.getAttribute("aria-disabled"), "true", `the button "${button}" of the dialog "${name}" can be used`);
 });
 
@@ -558,7 +547,7 @@ Then("the page shows the button {string}", async function (this: BrowserWorld, n
   await this.page
     .getByRole("button", { name: namePattern(name) })
     .first()
-    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // Any level: the groups' headings are not the page's main heading.
@@ -566,28 +555,27 @@ Then("the page shows the section heading {string}", async function (this: Browse
   await this.page
     .getByRole("heading", { name: namePattern(name) })
     .first()
-    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
+// A heading that goes because the step before changed the history (an
+// adoption): the page drops it as soon as it has read the history again.
 Then("the page shows no section heading {string}", async function (this: BrowserWorld, name: string) {
   await this.page
     .getByRole("heading", { name: namePattern(name) })
     .first()
-    .waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
+    .waitFor({ state: "hidden", timeout: patienceMs() });
 });
 
 // The plan's table is named after the plan; what the page fills in carries
 // bidi isolation marks, which the name pattern allows for.
 async function waitForRows(world: BrowserWorld, plan: string, count: number): Promise<void> {
   const rows = world.page.getByRole("table", { name: namePattern(`Snapshots of plan ${plan}`) }).locator("tbody tr");
-  const end = Date.now() + ROWS_PATIENCE_MS;
-  let found = -1;
-  while (Date.now() < end) {
-    found = await rows.count();
-    if (found === count) return;
-    await sleep(250);
-  }
-  assert.equal(found, count, `the snapshot rows of plan ${plan}`);
+  await untilStepLimit(
+    `the plan ${plan} shows ${count} snapshot rows`,
+    () => rows.count(),
+    (found) => found === count,
+  );
 }
 
 // What the page drew is not what the repository holds: once the table shows
@@ -601,17 +589,19 @@ Then("the plan {string} shows {int} snapshot rows", async function (this: Browse
 // The live regions repeat what the page says, so a line of the page is looked
 // for in its main content.
 Then("the main content shows the line {string}", async function (this: BrowserWorld, text: string) {
-  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
+// Reopening the dialog clears the line, so this waits for it to go until the
+// step's limit, as for anything the step caused.
 Then("the main content shows no line {string}", async function (this: BrowserWorld, text: string) {
-  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "hidden", timeout: PAGE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(text, { exact: true }).first().waitFor({ state: "hidden", timeout: patienceMs() });
 });
 
 // A warning is a line of the main content, its data set apart by bidi
 // isolation marks.
 Then("the main content warns {string}", async function (this: BrowserWorld, text: string) {
-  await this.page.getByRole("main").getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(namePattern(text)).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // Asked once the page has drawn what it waits for, such as a plan's rows: a
@@ -632,12 +622,12 @@ Then("the page offers the button {string}", async function (this: BrowserWorld, 
   await this.page
     .getByRole("button", { name: namePattern(name) })
     .first()
-    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // A line of the page that says more than the words a scenario names.
 Then("the main content shows a line containing {string}", async function (this: BrowserWorld, text: string) {
-  await this.page.getByRole("main").getByText(text).first().waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+  await this.page.getByRole("main").getByText(text).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // What the check found is in rustic's words, which name the pack; they are
@@ -648,7 +638,7 @@ Then("the main content names the pack no index lists in the engine's words, mark
     .locator('[lang="en"]')
     .filter({ hasText: STRAY_PACK_NAMED })
     .first()
-    .waitFor({ state: "visible", timeout: LINE_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // What the sender of a refusal says in its own words, the engine's or the
@@ -657,7 +647,7 @@ Then("the main content names the pack no index lists in the engine's words, mark
 // an Error alert, which has no role; the others still in a `role="alert"`.
 Then("the alert marks the sender's words as English", async function (this: BrowserWorld) {
   const words = this.page.locator("[role~='alert'], .alert.tone-error").locator('[lang="en"]');
-  await words.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await words.first().waitFor({ state: "visible", timeout: patienceMs() });
   assert.notEqual((await words.first().innerText()).trim(), "", "the sender's words in the alert");
 });
 
@@ -692,7 +682,7 @@ Then("the page shows an alert containing {string}", async function (this: Browse
     .getByRole("alert")
     .filter({ hasText: new RegExp(heard) })
     .first()
-    .waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // Nothing the page says now: an alert drawn with the page is there at once.

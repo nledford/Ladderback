@@ -10,9 +10,9 @@
 import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import { journey, namePattern, scrollKey } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 

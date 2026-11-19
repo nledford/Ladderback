@@ -7,15 +7,16 @@ import assert from "node:assert/strict";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { ISOLATION, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { latestSnapshotOf } from "./maintenance.ts";
 
 // A folder the daemon reads from a real repository, or a page that reads the
-// snapshot list first: generous, as the other journeys that wait for a read.
-const READ_PATIENCE_MS = 10_000;
+// snapshot list first: the steps wait for what it shows until the step's
+// limit (#1104).
 
 // Past the tree's type-ahead window (500 ms), so what a step types starts a
 // name afresh rather than continuing the last one.
@@ -36,9 +37,7 @@ function treeItem(world: BrowserWorld, name: string): Locator {
 
 /** Waits until no tree item is waiting for its folder to be read. */
 async function settled(world: BrowserWorld): Promise<void> {
-  await expect(world.page.locator('[role="treeitem"][aria-busy="true"]')).toHaveCount(0, {
-    timeout: READ_PATIENCE_MS,
-  });
+  await expect(world.page.locator('[role="treeitem"][aria-busy="true"]')).toHaveCount(0);
 }
 
 /** Presses `key` until focus is on `target`, giving each folder a press
@@ -60,7 +59,7 @@ When("I open the component gallery asking for the locale {string}", async functi
 // The tree is drawn once its first folder is read: Tab waits for it.
 When("I press Tab until focus is on a tree item", async function (this: BrowserWorld) {
   const items = journey(this.page).byRole("treeitem");
-  await items.first().waitFor({ state: "visible", timeout: READ_PATIENCE_MS });
+  await items.first().waitFor({ state: "visible", timeout: patienceMs() });
   await pressUntilFocused(this.page, "Tab", items, "a tree item", {
     reached: () => this.page.evaluate(() => document.activeElement?.getAttribute("role") === "treeitem"),
   });
@@ -82,7 +81,7 @@ When(
   async function (this: BrowserWorld, plan: string) {
     const short = (await latestSnapshotOf(this, plan)).slice(0, 8);
     const link = journey(this.page).byRole("link", { name: namePattern(short) });
-    await link.waitFor({ state: "visible", timeout: READ_PATIENCE_MS });
+    await link.waitFor({ state: "visible", timeout: patienceMs() });
     await pressUntilFolderFocused(this, "Tab", link, `the link to the snapshot ${short}`);
   },
 );
@@ -124,14 +123,14 @@ Then("focus has left the tree {string}", async function (this: BrowserWorld, nam
 
 // Focus moves to a row once it is drawn, a moment after the key.
 Then("focus is on the tree item {string}", async function (this: BrowserWorld, name: string) {
-  await expect(treeItem(this, name)).toBeFocused({ timeout: READ_PATIENCE_MS });
+  await expect(treeItem(this, name)).toBeFocused();
 });
 
 Then(
   "the tree item {string} is item {int} of {int} at level {int}",
   async function (this: BrowserWorld, name: string, position: number, size: number, level: number) {
     const item = treeItem(this, name);
-    await expect(item).toHaveAttribute("aria-posinset", String(position), { timeout: READ_PATIENCE_MS });
+    await expect(item).toHaveAttribute("aria-posinset", String(position));
     await expect(item).toHaveAttribute("aria-setsize", String(size));
     await expect(item).toHaveAttribute("aria-level", String(level));
   },
@@ -141,16 +140,14 @@ Then(
   "the tree item {string} is item {int} of {int}",
   async function (this: BrowserWorld, name: string, position: number, size: number) {
     const item = treeItem(this, name);
-    await expect(item).toHaveAttribute("aria-posinset", String(position), { timeout: READ_PATIENCE_MS });
+    await expect(item).toHaveAttribute("aria-posinset", String(position));
     await expect(item).toHaveAttribute("aria-setsize", String(size));
   },
 );
 
 // What a screen reader reads after the row's name: what the entry is.
 Then("the tree item {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
-  await expect(treeItem(this, name)).toHaveAccessibleDescription(new RegExp(`^${ISOLATION}${heard(description)}${ISOLATION}$`), {
-    timeout: READ_PATIENCE_MS,
-  });
+  await expect(treeItem(this, name)).toHaveAccessibleDescription(new RegExp(`^${ISOLATION}${heard(description)}${ISOLATION}$`));
 });
 
 // A file of a real snapshot: its size and when it was modified are the
@@ -158,20 +155,19 @@ Then("the tree item {string} is described by {string}", async function (this: Br
 Then("the tree item {string} is described as a file modified at some time", async function (this: BrowserWorld, name: string) {
   await expect(treeItem(this, name)).toHaveAccessibleDescription(
     new RegExp(`^${ISOLATION}${heard("File, ")}.+${heard(", modified ")}.+$`),
-    { timeout: READ_PATIENCE_MS },
   );
 });
 
 Then("the tree item {string} is expanded", async function (this: BrowserWorld, name: string) {
-  await expect(treeItem(this, name)).toHaveAttribute("aria-expanded", "true", { timeout: READ_PATIENCE_MS });
+  await expect(treeItem(this, name)).toHaveAttribute("aria-expanded", "true");
 });
 
 Then("the tree item {string} is collapsed", async function (this: BrowserWorld, name: string) {
-  await expect(treeItem(this, name)).toHaveAttribute("aria-expanded", "false", { timeout: READ_PATIENCE_MS });
+  await expect(treeItem(this, name)).toHaveAttribute("aria-expanded", "false");
 });
 
 Then("the tree item {string} is busy", async function (this: BrowserWorld, name: string) {
-  await expect(treeItem(this, name)).toHaveAttribute("aria-busy", "true", { timeout: READ_PATIENCE_MS });
+  await expect(treeItem(this, name)).toHaveAttribute("aria-busy", "true");
 });
 
 // The row focus is on, whichever it is: several rows may be open or closed.
@@ -181,24 +177,23 @@ for (const [state, expanded] of [
 ] as const) {
   Then(`the focused tree item is ${state}`, async function (this: BrowserWorld) {
     await expect
-      .poll(
-        () =>
-          this.page.evaluate(() => {
-            const el = document.activeElement;
-            return el?.getAttribute("role") === "treeitem" ? el.getAttribute("aria-expanded") : "no tree item";
-          }),
-        { timeout: READ_PATIENCE_MS },
+      .poll(() =>
+        this.page.evaluate(() => {
+          const el = document.activeElement;
+          return el?.getAttribute("role") === "treeitem" ? el.getAttribute("aria-expanded") : "no tree item";
+        }),
       )
       .toBe(expanded);
   });
 }
 
+// The step before closed the folder that held it.
 Then("the tree shows no tree item {string}", async function (this: BrowserWorld, name: string) {
-  await expect(treeItem(this, name)).toHaveCount(0, { timeout: READ_PATIENCE_MS });
+  await expect(treeItem(this, name)).toHaveCount(0);
 });
 
 Then("the tree has the tree item {string}", async function (this: BrowserWorld, name: string) {
-  await expect(treeItem(this, name)).toHaveCount(1, { timeout: READ_PATIENCE_MS });
+  await expect(treeItem(this, name)).toHaveCount(1);
 });
 
 // A name keeps its own direction, whatever the page's (§4.5): one written
@@ -206,7 +201,7 @@ Then("the tree has the tree item {string}", async function (this: BrowserWorld, 
 // and the text beside it can't reorder it.
 Then("the tree item {string} shows its name right to left", async function (this: BrowserWorld, name: string) {
   const item = treeItem(this, name);
-  await expect(item).toHaveCount(1, { timeout: READ_PATIENCE_MS });
+  await expect(item).toHaveCount(1);
   const direction = await item.evaluate((row, shown) => {
     const holder = [...row.querySelectorAll("*")].find((el) => (el.textContent ?? "").replace(/[\u2066-\u2069]/g, "") === shown);
     if (holder === undefined) return "in no element of its own";
@@ -222,7 +217,7 @@ Then("the page alerts {string}", async function (this: BrowserWorld, text: strin
     .byRole("alert")
     .filter({ hasText: new RegExp(`^\\s*${ISOLATION}${heard(text)}${ISOLATION}\\s*$`) })
     .first()
-    .waitFor({ state: "visible", timeout: READ_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 Then("the page shows no tree", async function (this: BrowserWorld) {

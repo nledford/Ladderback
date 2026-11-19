@@ -9,10 +9,11 @@ import assert from "node:assert/strict";
 
 import AxeBuilder from "@axe-core/playwright";
 import { type DataTable, Then, When } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import { pointer } from "../support/pointer.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
@@ -96,7 +97,7 @@ Then("the dialog {string} politely says {string}", async function (this: Browser
             (region.textContent ?? "").replace(marks, "").includes(said),
           );
         }, text),
-      { message: `the dialog "${name}" never said "${text}" in its polite region`, timeout: 5_000 },
+      { message: `the dialog "${name}" never said "${text}" in its polite region` },
     )
     .toBe(true);
 });
@@ -368,7 +369,7 @@ Then(
   "each of the {int} badges of the {string} demo has an icon of its own, in its text's color, which a screen reader skips",
   async function (this: BrowserWorld, count: number, component: string) {
     const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
+    await section.waitFor({ timeout: patienceMs() });
     const badges = await section.evaluate((element) =>
       Array.from(element.querySelectorAll(".badge"), (badge) => {
         const icon = badge.querySelector("svg");
@@ -632,7 +633,7 @@ Then(
 // so the check can't pass on a badge with nothing in it to move.
 Then("none of the {int} badges of the {string} demo moves", async function (this: BrowserWorld, count: number, component: string) {
   const section = demoSection(this.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   const badges = await section.evaluate((element) =>
     Array.from(element.querySelectorAll(".badge"), (badge) => ({
       text: badge.textContent?.trim() ?? "",
@@ -653,7 +654,7 @@ Then("none of the {int} badges of the {string} demo moves", async function (this
 // mark beside large words. Half a pixel of rounding is allowed.
 Then("the icon of each badge of the {string} demo is as tall as its text", async function (this: BrowserWorld, component: string) {
   const section = demoSection(this.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   const badges = await section.evaluate((element) =>
     Array.from(element.querySelectorAll(".badge"), (badge) => ({
       text: badge.textContent?.trim() ?? "",
@@ -685,17 +686,15 @@ Then("the progress bar {string} shows no percentage", async function (this: Brow
   await expect.poll(shown).not.toMatch(/%/);
 });
 
-// A toast is transient; ten seconds is generous for however long it shows.
+// A toast is transient: the step waits until it has gone.
 // Scoped to main: the polite live region carries the same text.
 When("the toast {string} is gone", async function (this: BrowserWorld, text: string) {
-  await expect(this.page.locator("main").getByText(text)).toBeHidden({
-    timeout: 10_000,
-  });
+  await expect(this.page.locator("main").getByText(text)).toBeHidden();
 });
 
 Then("the {string} demo has no accessibility violations", async function (this: BrowserWorld, component: string) {
   const section = demoSection(this.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   // `analyze` takes no argument: this scans the whole gallery page, the demo
   // among it, as it always has.
   const { violations } = await new AxeBuilder({ page: this.page }).withTags(WCAG_TAGS).analyze();
@@ -787,7 +786,7 @@ Then("the {string} demo has the image {string}", async function (this: BrowserWo
 
 Then("the {string} demo shows no text {string}", async function (this: BrowserWorld, component: string, text: string) {
   const section = demoSection(this.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   await expect(section.getByText(text, { exact: true })).toHaveCount(0);
 });
 
@@ -796,7 +795,7 @@ Then("the {string} demo shows no text {string}", async function (this: BrowserWo
 // announcer, and a wait that nobody asked for says nothing.
 Then("the {string} demo has spinners but no live region", async function (this: BrowserWorld, component: string) {
   const section = demoSection(this.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   const found = await section.evaluate(
     (element, live) => ({
       spinners: element.querySelectorAll(".spinner").length,
@@ -834,7 +833,7 @@ Then(
   "every spinner of the {string} demo turns steadily, once in 0.8 to 1 second",
   async function (this: BrowserWorld, component: string) {
     const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
+    await section.waitFor({ timeout: patienceMs() });
     const spinners = await spinnerMotions(section);
     assert.ok(spinners.length > 0, `the ${component} demo has no spinner`);
     for (const spinner of spinners) {
@@ -853,7 +852,7 @@ Then(
 // meaning (WCAG 2.3.3); a spinner whose drawing went missing fails first.
 Then("no spinner of the {string} demo moves", async function (this: BrowserWorld, component: string) {
   const section = demoSection(this.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   await expect
     .poll(async () => {
       const spinners = await spinnerMotions(section);
@@ -892,7 +891,7 @@ Then(
 // and the box of each line its label takes. A label's line is the span of
 // the label's text on one line, its pieces on that line joined.
 const linesOfTheirOwn = async (page: Page) => {
-  await page.locator(".spinner").first().waitFor({ timeout: 5_000 });
+  await page.locator(".spinner").first().waitFor({ timeout: patienceMs() });
   return page.evaluate(() => ({
     rtl: getComputedStyle(document.documentElement).direction === "rtl",
     lines: Array.from(document.querySelectorAll<HTMLElement>(".spinner"))
@@ -1020,7 +1019,7 @@ Then(
   "no spinner of the {string} demo reaches out of its drawing's box as it turns",
   async function (this: BrowserWorld, component: string) {
     const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
+    await section.waitFor({ timeout: patienceMs() });
     const drawings = await section.evaluate((element) =>
       Array.from(element.querySelectorAll(".spinner"), (spinner) => {
         const animations = spinner.getAnimations({ subtree: true });
@@ -1111,7 +1110,7 @@ Then(
   "the label of every spinner of the {string} demo is in the color of the text around it",
   async function (this: BrowserWorld, component: string) {
     const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
+    await section.waitFor({ timeout: patienceMs() });
     const labels = await section.evaluate((element) =>
       Array.from(element.querySelectorAll(".spinner"), (spinner) => {
         const label = Array.from(spinner.children).find((child) => child.localName !== "svg");
@@ -1137,7 +1136,7 @@ Then(
   "every spinner of the {string} demo draws its arc in the color of the text around it and its track in GrayText",
   async function (this: BrowserWorld, component: string) {
     const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
+    await section.waitFor({ timeout: patienceMs() });
     const drawn = await section.evaluate((element) => {
       const probe = document.createElement("span");
       probe.style.setProperty("forced-color-adjust", "none");
@@ -1313,7 +1312,7 @@ Then(
   "every icon of the {string} demo is drawn in the color of the text around it",
   async function (this: BrowserWorld, component: string) {
     const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
+    await section.waitFor({ timeout: patienceMs() });
     const icons = await section.evaluate((element) =>
       Array.from(element.querySelectorAll("svg"), (svg) => ({
         name:
@@ -1338,7 +1337,7 @@ Then(
 // page's handler shows in it.
 Then("the {string} demo shows the sentence {string}", async function (this: BrowserWorld, component: string, sentence: string) {
   const section = demoSection(this.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   await expect
     .poll(
       () =>
@@ -1347,7 +1346,7 @@ Then("the {string} demo shows the sentence {string}", async function (this: Brow
             (line.textContent ?? "").replace(/[\u2066-\u2069]/g, "").trim(),
           ),
         ),
-      { message: `the ${component} demo never showed "${sentence}"`, timeout: 5_000 },
+      { message: `the ${component} demo never showed "${sentence}"` },
     )
     .toContain(sentence);
 });
@@ -1441,7 +1440,7 @@ Then(
   /^every button with an icon and words shows its icon before its words, as tall as them, in a page that runs (left to right|right to left)$/,
   async function (this: BrowserWorld, direction: string) {
     // A visible one: a step-up field's Show password waits in a closed dialog.
-    await this.page.locator(".button:visible").first().waitFor({ timeout: 5_000 });
+    await this.page.locator(".button:visible").first().waitFor({ timeout: patienceMs() });
     const found = await this.page.evaluate(() => ({
       rtl: getComputedStyle(document.documentElement).direction === "rtl",
       buttons: Array.from(document.querySelectorAll(".button")).flatMap((button) => {
@@ -1591,7 +1590,7 @@ Then("the button {string} is drawn bolder, with an inset edge", async function (
 // probe.
 async function buttonColors(world: BrowserWorld, component: string) {
   const section = demoSection(world.page, component);
-  await section.waitFor({ timeout: 5_000 });
+  await section.waitFor({ timeout: patienceMs() });
   const found = await section.evaluate((element) => {
     const probe = document.createElement("span");
     document.body.append(probe);
@@ -1829,7 +1828,7 @@ Then(
   "every field of the {string} demo is drawn in the reader's field colors, a disabled one in the color of unavailable text",
   async function (this: BrowserWorld, component: string) {
     const section = demoSection(this.page, component);
-    await section.waitFor({ timeout: 5_000 });
+    await section.waitFor({ timeout: patienceMs() });
     const found = await section.evaluate((element) => {
       const probe = document.createElement("span");
       document.body.append(probe);

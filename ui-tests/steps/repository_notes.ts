@@ -8,12 +8,15 @@
 import assert from "node:assert/strict";
 
 import { Given, Then } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
+import { patienceMs, untilSettled } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
-// How long the page takes to show what the daemon answered, with room.
-const PAGE_PATIENCE_MS = 10_000;
+// How long a check that the page notes nothing gives a note on its way out:
+// a check that something isn't there keeps a window of its own rather than
+// the step's limit (#1104).
+const GONE_MS = 10_000;
 
 // What the note says, in English.
 const KEYRING_NOTE = /nothing can start it when a program asks for it/;
@@ -52,7 +55,7 @@ Given("the agent finds the keyring startable on demand", function (this: Browser
 });
 
 Then("the page notes that the keyring can't be started on demand", async function (this: BrowserWorld) {
-  await keyringNote(this).waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await keyringNote(this).waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // Only once the page has read its notes: a page that never asked would show
@@ -60,10 +63,6 @@ Then("the page notes that the keyring can't be started on demand", async functio
 Then("the page notes nothing of the keyring", async function (this: BrowserWorld) {
   const answers = scripted.get(this);
   assert.ok(answers, "no Given set how the agent finds the keyring");
-  const { promise: late, resolve: tooLate } = Promise.withResolvers<"late">();
-  const timer = setTimeout(() => tooLate("late"), PAGE_PATIENCE_MS);
-  const outcome = await Promise.race([answers.read.then(() => "read" as const), late]);
-  clearTimeout(timer);
-  assert.equal(outcome, "read", "the page never asked for its notes");
-  await expect(this.page.getByText(KEYRING_NOTE)).toHaveCount(0, { timeout: PAGE_PATIENCE_MS });
+  await untilSettled(answers.read, "the page never asked for its notes");
+  await expect(this.page.getByText(KEYRING_NOTE)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
 });

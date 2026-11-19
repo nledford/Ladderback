@@ -9,10 +9,11 @@ import assert from "node:assert/strict";
 
 import type { DataTable } from "@cucumber/cucumber";
 import { Then } from "@cucumber/cucumber";
-import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 
+import { expect } from "../support/expect.ts";
 import { ISOLATION } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import { besideIconProblems, wordsBesideIcon, wordsBrokenInside } from "../support/parts.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection, eachOf, LIVE_REGION } from "./components.ts";
@@ -373,10 +374,6 @@ Then(
   },
 );
 
-// A page waits for the daemon's answer before it shows a refusal; ten
-// seconds is generous.
-const PAGE_PATIENCE_MS = 10_000;
-
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // A page's own message (§4.5, #929): an Error alert, found by its class, as
@@ -389,7 +386,7 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&
 Then("the page shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
   const heard = [...needle].map(escapeRegExp).join(ISOLATION);
   const alert = this.page.locator(".alert.tone-error").filter({ hasText: new RegExp(heard) });
-  await alert.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
+  await alert.first().waitFor({ state: "visible", timeout: patienceMs() });
   const found = await alert.first().evaluate((element, live) => {
     const dialog = element.closest("dialog");
     const around = element.parentElement?.closest(live) ?? null;

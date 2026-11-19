@@ -5,10 +5,11 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { BrowserContextOptions } from "playwright";
-import { expect } from "playwright/test";
 
 import { checkoutBuild, shown } from "../../scripts/build-identity.ts";
+import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
+import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import { DOUBLE_FONT_CSS, TEXT_SPACING_CSS } from "../support/reader-styles.ts";
 import { type BrowserWorld, repoRoot } from "../support/world.ts";
 
@@ -72,7 +73,7 @@ Then("the page is titled {string}", async function (this: BrowserWorld, title: s
 Then("the main heading reads {string}", async function (this: BrowserWorld, name: string) {
   const keys = journey(this.page);
   assert.equal(await keys.byRole("heading", { level: 1 }).count(), 1, "exactly one h1");
-  await keys.byRole("heading", { level: 1, name }).waitFor();
+  await keys.byRole("heading", { level: 1, name }).waitFor({ timeout: patienceMs() });
 });
 
 Then("focus is on the link {string}", async function (this: BrowserWorld, name: string) {
@@ -352,9 +353,9 @@ When("a script the page doesn't carry is added to it", async function (this: Bro
 
 Then("the script didn't run and the browser said it blocked it", async function (this: BrowserWorld) {
   assert.equal(this.injectedScriptRan, false, "an inline script the page doesn't carry ran");
-  const deadline = Date.now() + 5_000;
-  while (this.policyBlocks.length === 0 && Date.now() < deadline) {
-    await new Promise((done) => setTimeout(done, 50));
-  }
-  assert.ok(this.policyBlocks.length > 0, "the browser reported nothing blocked");
+  await untilStepLimit(
+    "the browser reports the script blocked",
+    async () => this.policyBlocks.length,
+    (blocks) => blocks > 0,
+  );
 });

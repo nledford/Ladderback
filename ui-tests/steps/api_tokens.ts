@@ -8,13 +8,15 @@ import assert from "node:assert/strict";
 
 import { Given, Then } from "@cucumber/cucumber";
 import type { BrowserContext } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { namePattern } from "../support/keyboard.ts";
 import { type BrowserWorld, type Engine, engine } from "../support/world.ts";
 
-// How long a dialog or a value the page sets takes to show, with room.
-const PAGE_PATIENCE_MS = 10_000;
+// How long the page may still hold the token once the dialog is left: a
+// check that it doesn't stay, so a window of its own rather than the step's
+// limit (#1104).
+const TOKEN_GONE_MS = 10_000;
 
 /** The secret of each token a Given created, by its label, per scenario. */
 const secrets = new WeakMap<BrowserWorld, Map<string, string>>();
@@ -158,14 +160,14 @@ Given("the browser refuses the page the clipboard", function (this: BrowserWorld
 
 Then("the dialog {string} shows a token that starts with {string}", async function (this: BrowserWorld, name: string, prefix: string) {
   const field = this.page.getByRole("dialog", { name: namePattern(name) }).getByRole("textbox");
-  await expect(field).toHaveValue(new RegExp(`^${prefix}`), { timeout: PAGE_PATIENCE_MS });
+  await expect(field).toHaveValue(new RegExp(`^${prefix}`));
   shown.set(this, await field.inputValue());
 });
 
 Then("the clipboard holds the token the dialog showed", async function (this: BrowserWorld) {
   const token = shown.get(this);
   assert.ok(token, "no step read the token the dialog showed");
-  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText()), { timeout: PAGE_PATIENCE_MS }).toBe(token);
+  await expect.poll(() => this.page.evaluate(() => navigator.clipboard.readText())).toBe(token);
 });
 
 // I4, and the secret is shown once: once the dialog is left, no text, no
@@ -186,7 +188,7 @@ Then("nothing on the page holds the token the dialog showed", async function (th
             ].some((text) => text.includes(secret)),
           token,
         ),
-      { timeout: PAGE_PATIENCE_MS, message: "the page still holds the token the dialog showed" },
+      { timeout: TOKEN_GONE_MS, message: "the page still holds the token the dialog showed" },
     )
     .toBe(false);
 });

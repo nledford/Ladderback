@@ -12,10 +12,11 @@ import path from "node:path";
 
 import { After, type DataTable, Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { clockStandsStill, ISOLATION, namePattern } from "../support/keyboard.ts";
 import { besideIconProblems, partsBrokenInside, wordsBesideIcon } from "../support/parts.ts";
+import { patienceMs, stepLimit, untilStepLimit } from "../support/patience.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
@@ -26,16 +27,11 @@ import { drawnOnItsFill } from "./components.ts";
 export const PASSWORD = "demo-password";
 
 // A real backup takes real time, and the steps that wait for one are patient:
-// enough for a big scratch source to finish, in a debug build. A step that
-// waits this long takes ROW_STEP_MS as its own limit: cucumber's default
-// (`world.ts`) would end it at 30 s, long before this wait does, and a
-// 10,000-file backup takes 10 to 33 s on CI.
-const ROW_PATIENCE_MS = 120_000;
-const ROW_STEP_MS = ROW_PATIENCE_MS + 10_000;
-
-// A page's answer to a key press, or to an event a step sent it, takes a
-// moment at most: this long, not as long as a real backup.
-const UPDATE_PATIENCE_MS = 5_000;
+// enough for a big scratch source to finish, in a debug build. Such a step
+// takes ROW_STEP_MS as its own limit, which its waits run until: cucumber's
+// default (`world.ts`) would end it at 30 s, and a 10,000-file backup takes
+// 10 to 33 s on CI.
+const ROW_STEP_MS = 130_000;
 
 // How long a page that holds still is watched: past the moment an update the
 // page heard would have shown, as long as a live region's silence is.
@@ -61,18 +57,6 @@ const FILE_BYTES = 2048;
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** Polls `read` until it returns a value, or fails with what it last saw. */
-export async function until<T>(read: () => Promise<T | null>, ms: number, what: string): Promise<T> {
-  const end = Date.now() + ms;
-  let last: T | null = null;
-  while (Date.now() < end) {
-    last = await read();
-    if (last !== null) return last;
-    await sleep(250);
-  }
-  assert.fail(`${what} (last saw ${last === null ? "nothing" : JSON.stringify(last)})`);
-}
 
 /** The table a page shows, by its whole caption. A value in the caption is
  *  wrapped in bidi isolation marks, which a reader never hears (§4.5). */
@@ -190,7 +174,11 @@ Given(
   "a demo plan {string} on the schedule {string} and a demo plan {string} without one",
   async function (this: BrowserWorld, scheduled: string, cron: string, unscheduled: string) {
     await serveDemoPlans(this, [scheduled, unscheduled], "tiny", {}, { [scheduled]: cron });
-    await until(() => plannedRun(this, scheduled), UPDATE_PATIENCE_MS, `the daemon planned no run of ${scheduled}`);
+    await untilStepLimit(
+      `the daemon planned a run of ${scheduled}`,
+      () => plannedRun(this, scheduled),
+      (run) => run !== null,
+    );
   },
 );
 
@@ -412,21 +400,26 @@ When("the page's clock moves on {int} seconds", async function (this: BrowserWor
 // second until the run ends, 480 times (two minutes of its clock,
 // `ws::settle`), then answers in a toast. The page's clock moves on a
 // quarter of a second at each read, so the rounds pass at the speed of the
-// reads rather than in real time. A jump that lands before the page has set
-// its next pause, or a slow read, moves the clock on again after a second,
-// so the step ends only on the page's answer, never on a lull.
+// reads rather than in real time: the scripted daemon tells the step of each
+// read. A jump that lands before the page has set its next pause, or a slow
+// read, moves the clock on again after a second, so the step ends only on the
+// page's answer, never on a lull, or at its limit, saying how far it got.
 When(
   "the page's clock moves on until the page stops waiting for the run's end",
-  { timeout: SETTLE_STEP_MS },
+  stepLimit(SETTLE_STEP_MS),
   async function (this: BrowserWorld) {
     assert.ok(this.fakeClock, "the page's clock can't be moved on: no Given installed it");
     const daemon = scripted(this);
     const answer = this.page.locator("main .toast");
+    const ends = Date.now() + patienceMs();
     while ((await answer.count()) === 0) {
+      assert.ok(
+        Date.now() < ends,
+        `the page never stopped waiting for the run's end: it read the history ${daemon.historyReads} times`,
+      );
       const reads = daemon.historyReads;
       await this.page.clock.fastForward(SETTLE_POLL_MS);
-      const lull = Date.now() + SETTLE_READ_MS;
-      while (daemon.historyReads === reads && Date.now() < lull) await sleep(5);
+      await daemon.untilReadPast(reads, SETTLE_READ_MS);
     }
   },
 );
@@ -553,7 +546,7 @@ When("the daemon's answers to the UI are delayed by {int} seconds", function (th
 
 When("I reload the page", async function (this: BrowserWorld) {
   await this.page.reload();
-  await this.page.getByRole("heading", { level: 1 }).waitFor();
+  await this.page.getByRole("heading", { level: 1 }).waitFor({ timeout: patienceMs() });
 });
 
 // A row is named by its plan, or a maintenance run by what ran and its
@@ -562,41 +555,36 @@ When("I reload the page", async function (this: BrowserWorld) {
 // row to say it.
 Then(
   "the table {string} has a row {string} that shows {string}",
-  { timeout: ROW_STEP_MS },
+  stepLimit(ROW_STEP_MS),
   async function (this: BrowserWorld, name: string, row: string, status: string) {
     const rows = table(this, name).getByRole("row", { name: new RegExp([...row].map(escapeRegExp).join(ISOLATION)) });
-    await until(
-      async () => {
-        const found = await rows
+    await untilStepLimit(
+      `the row ${row} of the table ${name} shows ${status}`,
+      () =>
+        rows
           .first()
           .textContent()
-          .catch(() => null);
-        return found?.includes(status) ? found : null;
-      },
-      ROW_PATIENCE_MS,
-      `the row ${row} of the table ${name} never showed ${status}`,
+          .catch(() => null),
+      (found) => found?.includes(status) === true,
     );
   },
 );
 
-Then("the table {string} has {int} rows", { timeout: ROW_STEP_MS }, async function (this: BrowserWorld, name: string, count: number) {
+Then("the table {string} has {int} rows", stepLimit(ROW_STEP_MS), async function (this: BrowserWorld, name: string, count: number) {
   await hasRows(table(this, name), count, `the table ${name}`);
 });
 
 // The same, on a page with one table, whose name a pseudolocale transformed.
-Then("the page's one table has {int} row(s)", { timeout: ROW_STEP_MS }, async function (this: BrowserWorld, count: number) {
+Then("the page's one table has {int} row(s)", stepLimit(ROW_STEP_MS), async function (this: BrowserWorld, count: number) {
   await hasRows(this.page.getByRole("table"), count, "the table");
 });
 
 async function hasRows(grid: Locator, count: number, what: string): Promise<void> {
   const rows = grid.locator("tbody tr");
-  await until(
-    async () => {
-      const found = await rows.count();
-      return found === count ? found : null;
-    },
-    ROW_PATIENCE_MS,
-    `${what} never had ${count} rows`,
+  await untilStepLimit(
+    `${what} has ${count} rows`,
+    () => rows.count(),
+    (found) => found === count,
   );
 }
 
@@ -684,7 +672,7 @@ Then(
           const icon = await badgeIcon(this, name, row);
           return icon !== "" && icon !== noted;
         },
-        { message: `the status badge of the row ${row} of the table ${name} kept its icon`, timeout: UPDATE_PATIENCE_MS },
+        { message: `the status badge of the row ${row} of the table ${name} kept its icon` },
       )
       .toBe(true);
   },
@@ -868,29 +856,29 @@ export function rowNamed(world: BrowserWorld, name: string, row: string): Locato
 
 Then(
   "the table {string} has the row {string}",
-  { timeout: ROW_STEP_MS },
+  stepLimit(ROW_STEP_MS),
   async function (this: BrowserWorld, name: string, row: string) {
-    await rowNamed(this, name, row).first().waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+    await rowNamed(this, name, row).first().waitFor({ state: "visible", timeout: patienceMs() });
   },
 );
 
 // For a page in a pseudolocale, whose tables' names the catalog transformed:
 // the row is found by its header alone, which is data and stays as it is.
-Then("the page shows the row {string}", { timeout: ROW_STEP_MS }, async function (this: BrowserWorld, row: string) {
+Then("the page shows the row {string}", stepLimit(ROW_STEP_MS), async function (this: BrowserWorld, row: string) {
   await this.page
     .getByRole("row")
     .filter({ has: this.page.getByRole("rowheader", { name: namePattern(row) }) })
     .first()
-    .waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+    .waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 /** What a reader hears of the cell of `row` under the column header `column`,
  *  once the row is there: its words, as `said` reads them. */
 export async function cellText(world: BrowserWorld, name: string, row: string, column: string): Promise<string> {
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
-  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+  const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex, undefined, { timeout: patienceMs() });
   const found = rowNamed(world, name, row).first();
-  await found.waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+  await found.waitFor({ state: "visible", timeout: patienceMs() });
   // The row's cells in order, as `cellIndex` counts them.
   const cells = found.locator(":scope > :is(td, th)");
   assert.ok((await cells.count()) > index, `the row ${row} of the table ${name} has no cell under ${column}`);
@@ -900,19 +888,16 @@ export async function cellText(world: BrowserWorld, name: string, row: string, c
 /** Waits until the cell of `row` under `column` holds `expected`: a row that
  *  is still running says what it did only once it has ended. */
 export async function untilCellShows(world: BrowserWorld, name: string, row: string, column: string, expected: string): Promise<void> {
-  const end = Date.now() + ROW_PATIENCE_MS;
-  let seen = "";
-  while (Date.now() < end) {
-    seen = await cellText(world, name, row, column);
-    if (seen.includes(expected)) return;
-    await sleep(250);
-  }
-  assert.fail(`the row ${row} of the table ${name} never showed "${expected}" in its ${column} column; it showed "${seen}"`);
+  await untilStepLimit(
+    `the row ${row} of the table ${name} shows "${expected}" in its ${column} column`,
+    () => cellText(world, name, row, column),
+    (seen) => seen.includes(expected),
+  );
 }
 
 Then(
   "the row {string} of the table {string} shows {string} in its {string} column",
-  { timeout: ROW_STEP_MS },
+  stepLimit(ROW_STEP_MS),
   async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
     await untilCellShows(this, name, row, column, expected);
   },
@@ -949,19 +934,15 @@ Then(
   },
 );
 
+// A running row stops saying what it said only once the run has ended.
 Then(
   "the row {string} of the table {string} doesn't show {string} in its {string} column",
-  { timeout: ROW_STEP_MS },
+  stepLimit(ROW_STEP_MS),
   async function (this: BrowserWorld, row: string, name: string, unexpected: string, column: string) {
-    const end = Date.now() + ROW_PATIENCE_MS;
-    let seen = await cellText(this, name, row, column);
-    while (seen.includes(unexpected) && Date.now() < end) {
-      await sleep(250);
-      seen = await cellText(this, name, row, column);
-    }
-    assert.ok(
-      !seen.includes(unexpected),
-      `the row ${row} of the table ${name} kept showing "${unexpected}" in its ${column} column: "${seen}"`,
+    await untilStepLimit(
+      `the row ${row} of the table ${name} stops showing "${unexpected}" in its ${column} column`,
+      () => cellText(this, name, row, column),
+      (seen) => !seen.includes(unexpected),
     );
   },
 );
@@ -972,7 +953,7 @@ async function cellOf(world: BrowserWorld, name: string, row: string, column: st
   const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   const found = rowNamed(world, name, row).first();
-  await found.waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
+  await found.waitFor({ state: "visible", timeout: patienceMs() });
   // A cell's role leaves the row header out, so the cells count from after it.
   const headerAt = await found.getByRole("rowheader").evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   assert.equal(headerAt, 0, `the row ${row} of the table ${name} is not named by its first cell`);
@@ -986,12 +967,12 @@ export async function untilCellLists(world: BrowserWorld, name: string, row: str
   const spoken = new RegExp([...expected].map(escapeRegExp).join(ISOLATION));
   const cell = await cellOf(world, name, row, column);
   const item = cell.getByRole("list").getByRole("listitem").filter({ hasText: spoken });
-  await expect(item, `the ${column} of the row ${row} lists "${expected}"`).toHaveCount(1, { timeout: ROW_PATIENCE_MS });
+  await expect(item, `the ${column} of the row ${row} lists "${expected}"`).toHaveCount(1);
 }
 
 Then(
   "the row {string} of the table {string} lists {string} in its {string} column",
-  { timeout: ROW_STEP_MS },
+  stepLimit(ROW_STEP_MS),
   async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
     await untilCellLists(this, name, row, column, expected);
   },
@@ -1001,7 +982,7 @@ Then(
 // draws a marker that sets nothing apart (#430).
 Then(
   "the row {string} of the table {string} says {string} in its {string} column, not as a list",
-  { timeout: ROW_STEP_MS },
+  stepLimit(ROW_STEP_MS),
   async function (this: BrowserWorld, row: string, name: string, expected: string, column: string) {
     await untilCellShows(this, name, row, column, expected);
     const cell = await cellOf(this, name, row, column);
@@ -1014,11 +995,11 @@ Then(
 // character's box says which line it is on; a mark of no width is on none.
 Then(
   "the row {string} of the table {string} lists each item on one line in its {string} column",
-  { timeout: ROW_STEP_MS },
+  stepLimit(ROW_STEP_MS),
   async function (this: BrowserWorld, row: string, name: string, column: string) {
     const cell = await cellOf(this, name, row, column);
     const items = cell.getByRole("list").getByRole("listitem");
-    await expect(items.first(), `the ${column} of the row ${row} lists nothing`).toBeVisible({ timeout: ROW_PATIENCE_MS });
+    await expect(items.first(), `the ${column} of the row ${row} lists nothing`).toBeVisible();
     const split = await items.evaluateAll((elements) =>
       elements.flatMap((item) => {
         const tops = new Set<number>();
@@ -1279,7 +1260,7 @@ Then(
     const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
     const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
     const found = rowNamed(this, name, row).first();
-    await found.waitFor({ state: "visible", timeout: UPDATE_PATIENCE_MS });
+    await found.waitFor({ state: "visible", timeout: patienceMs() });
     const [given, shown] = await found.evaluate((tr: HTMLTableRowElement, at) => {
       const cell = tr.cells[at];
       if (cell === undefined) throw new Error(`the row has no cell ${at}`);
@@ -1294,14 +1275,11 @@ Then(
 // step waits for the order as it waits for any update.
 Then("the table {string} shows its {string} column oldest first", async function (this: BrowserWorld, name: string, column: string) {
   const oldestFirst = (values: string[]) => [...values].sort((a, b) => a.localeCompare(b));
-  const end = Date.now() + UPDATE_PATIENCE_MS;
-  let values = await instants(this, name, column);
-  while (Date.now() < end && values.join() !== oldestFirst(values).join()) {
-    await sleep(100);
-    values = await instants(this, name, column);
-  }
-  assert.ok(values.length > 0, `the table ${name} has no rows to be oldest first`);
-  assert.deepEqual(values, oldestFirst(values), `the ${column} column of ${name} is not oldest first`);
+  await untilStepLimit(
+    `the ${column} column of ${name} has rows, oldest first`,
+    () => instants(this, name, column),
+    (values) => values.length > 0 && values.join() === oldestFirst(values).join(),
+  );
 });
 
 // What the header says of the sort is what a screen reader tells (WCAG 1.3.1).
@@ -1313,11 +1291,11 @@ Then(
   },
 );
 Then("the page shows the paragraph {string}", async function (this: BrowserWorld, text: string) {
-  await this.page.getByText(text, { exact: true }).first().waitFor({ state: "visible" });
+  await this.page.getByText(text, { exact: true }).first().waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 Then("the page shows the heading {string}", async function (this: BrowserWorld, name: string) {
-  await this.page.getByRole("heading", { level: 1, name, exact: true }).waitFor({ state: "visible", timeout: 25_000 });
+  await this.page.getByRole("heading", { level: 1, name, exact: true }).waitFor({ state: "visible", timeout: patienceMs() });
 });
 
 // The page's heading names what the page shows, and a table takes its name

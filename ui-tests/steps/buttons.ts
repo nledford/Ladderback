@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { Request } from "playwright";
-import { expect } from "playwright/test";
 
+import { expect } from "../support/expect.ts";
 import { namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
