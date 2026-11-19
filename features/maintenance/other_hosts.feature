@@ -139,7 +139,7 @@ Feature: A repository maintained here warns of snapshots from other hosts
     And the repository holds 1 snapshot plain rustic made on the host "demo-desktop"
     When the owner previews pruning the repository
     Then the preview warns of snapshots from the other hosts "demo-desktop"
-    And the preview says the prune would mark 2 packs, delete 1 and bring back 3, freeing 4096 bytes
+    And the preview says the prune would mark 2 packs, delete 1, and mark for recovery or bring back 3, freeing 4096 bytes
 
   Scenario: The review of a check reads nothing and warns of nothing
     Given a plan "home" keeping the last 1 snapshot

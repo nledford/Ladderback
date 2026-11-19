@@ -1973,8 +1973,8 @@ ui-review-adopts =
 # What an adoption says when no snapshot is left to adopt into the plan $into.
 ui-review-adopts-none = No snapshots are left to adopt into plan { $into }.
 
-# What a prune's dry run found: packs marked as unused now, packs deleted now, packs recovered, and the bytes the deleted ones free.
-ui-review-prunes = Packs marked as unused now: { $marked }. Packs deleted now, which were marked earlier: { $deleted }, freeing { $bytes }. Packs recovered: { $recovered }.
+# What a prune's dry run found: packs marked as unused now, packs deleted now, marked packs a snapshot uses again (which the prune marks for recovery, or brings back once marked for recovery long enough), and the bytes the deleted ones free.
+ui-review-prunes = Packs marked as unused now: { $marked }. Packs deleted now, which were marked earlier: { $deleted }, freeing { $bytes }. Marked packs a snapshot uses again, marked for recovery now or brought back now: { $recovered }.
 
 # How long a pack that is marked now waits for a later prune to delete it, in whole days.
 ui-review-prune-wait-days =
