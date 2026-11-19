@@ -221,13 +221,6 @@ pub enum Name {
     /// A visible caption, its words.
     Caption(String),
     /// The page's heading, by its `id`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no page names a table by its heading until pages move onto it"
-        )
-    )]
     Heading(String),
 }
 
