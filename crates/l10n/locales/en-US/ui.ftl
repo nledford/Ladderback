@@ -63,7 +63,13 @@ ui-start-on-demand = When started from Operations
 # is started by hand.
 ui-start-operations-link = Start a backup from the Operations page
 
-# The heading of the start page's warning, shown on macOS while Ladderback hasn't been given Full Disk Access. It names the warning's region.
+# The warning banner every page shows on macOS while Ladderback hasn't been given Full Disk Access: what that costs, in one sentence. The banner's link to the steps follows it.
+ui-full-disk-access-banner = macOS hasn't given { -brand-name } { -full-disk-access }, so backups leave out Mail, Messages, Safari and other programs' data.
+
+# The banner's link to the start page, where the steps to turn Full Disk Access on are.
+ui-full-disk-access-banner-link = How to fix this
+
+# The heading of the start page's steps, shown on macOS while Ladderback hasn't been given Full Disk Access, under the banner that warns of it. It names the steps' region.
 ui-full-disk-access-heading = { -full-disk-access } is missing
 
 # What the warning says under its heading, before its steps.
