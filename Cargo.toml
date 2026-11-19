@@ -68,10 +68,10 @@ notify-adapter = { path = "crates/adapters/notify" }
 releases-adapter = { path = "crates/adapters/releases" }
 interop = { path = "crates/adapters/interop" }
 mcp = { path = "crates/adapters/mcp" }
-# `hub` is on by default for the crate's own tests; `ladderback` turns it on
+# `hub` is on by default for each crate's own tests; `ladderback` turns it on
 # for its default build, and a release build leaves it out (§16, decision 122).
 http-adapter = { path = "crates/adapters/http", default-features = false }
-platform = { path = "crates/adapters/platform" }
+platform = { path = "crates/adapters/platform", default-features = false }
 secrets = { path = "crates/adapters/secrets" }
 store = { path = "crates/adapters/store" }
 spawn-gate = { path = "crates/spawn-gate" }
@@ -351,11 +351,11 @@ harness = false
 # `just architecture` checks that this leaves `fluent-pseudo` out of it.
 default = ["pseudo", "hub"]
 pseudo = ["l10n/pseudo"]
-# The hub (§16, decision 122): `serve --hub`, the agent routes under `/sync/`
-# and every other way in to the hub's code. On in every development and test
-# build; a release build's `--no-default-features` leaves it out until M8, and
-# `just architecture` checks that it does.
-hub = ["http-adapter/hub"]
+# The hub (§16, decision 122): `serve --hub`, the agent routes under `/sync/`,
+# the key files and every other way in to the hub's code. On in every
+# development and test build; a release build's `--no-default-features` leaves
+# it out until M8, and `just architecture` checks that it does.
+hub = ["http-adapter/hub", "platform/hub"]
 
 [dependencies]
 api.workspace = true

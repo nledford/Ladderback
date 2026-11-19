@@ -24,9 +24,9 @@ impl InMemoryTree {
     }
 }
 
-/// The names a `!name` glob leaves out, or none for a filter the fake
-/// can't apply.
-fn left_out(filter: &SourceFilter) -> Option<Vec<&str>> {
+/// The names a `!name` glob of `filter` or of `then` leaves out, or none
+/// for a filter the fake can't apply.
+fn left_out<'a>(filter: &'a SourceFilter, then: &'a [String]) -> Option<Vec<&'a str>> {
     let only_globs = SourceFilter {
         globs: filter.globs.clone(),
         ..SourceFilter::default()
@@ -37,6 +37,7 @@ fn left_out(filter: &SourceFilter) -> Option<Vec<&str>> {
     filter
         .globs
         .iter()
+        .chain(then)
         .map(|glob| {
             glob.strip_prefix('!')
                 .filter(|name| !name.contains(['/', '*']))
@@ -50,10 +51,11 @@ impl WalkSources for InMemoryTree {
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        then: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError> {
-        let names = left_out(filter).ok_or(WalkError::Filter)?;
+        let names = left_out(filter, then).ok_or(WalkError::Filter)?;
         let mut walked = Walked::default();
         let mut read: u64 = 0;
         let below = self.entries.iter().filter(|(path, _)| {

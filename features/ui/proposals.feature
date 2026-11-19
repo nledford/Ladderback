@@ -33,7 +33,9 @@ Feature: Pending changes page
     And I type the proposal's short ID
     And I press Tab until focus is on the button "Approve the proposal"
     And I press Enter
-    Then the polite region comes to contain "is applied, and the configuration file is saved."
+    Then the toast names the proposal, then reads "is applied, and the configuration file is saved." after its icon "Success"
+    And the toast is no live region, nor holds one
+    And the polite region comes to contain "is applied, and the configuration file is saved."
     And focus is on the main heading "Pending changes"
     And the page says "No proposal is pending."
     And the daemon lists the plan "demo-docs"
@@ -59,6 +61,20 @@ Feature: Pending changes page
     And focus is on the main heading "Pending changes"
     And the page says "No proposal is pending."
     And the daemon lists the plan "demo-home"
+
+  Scenario: A rejected proposal is answered in a toast, and focus goes to the page's heading as it leaves the list
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to remove it
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the button "Reject the proposal"
+    And I press Enter
+    Then the toast names the proposal, then reads "is rejected. The AI agent can read your reasons." after its icon "Success"
+    And the toast is no live region, nor holds one
+    And focus is on the main heading "Pending changes"
+    And the polite region comes to contain "is rejected. The AI agent can read your reasons."
+    And the page has no accessibility violations
 
   Scenario: A proposal that could delete snapshots is approved from its forget preview
     Given a demo plan "demo-home" with a tiny scratch repository
@@ -147,6 +163,7 @@ Feature: Pending changes page
     And the page shows an error alert containing "The proposal was withdrawn, so nothing more was done to it."
     And the assertive region comes to contain "The proposal was withdrawn, so nothing more was done to it."
     And focus stays on the button "Reject the proposal"
+    And the page shows no toast
     And the page has no accessibility violations
 
   Scenario: A forget preview the daemon refuses is an error alert in the open proposal, said assertively, and focus stays on its button

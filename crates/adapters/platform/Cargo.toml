@@ -7,6 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# The key files of an agent and its hub (`identity`; §16, decisions 120 and
+# 122). On by default for this crate's own tests; the workspace dependency
+# turns it off, `ladderback`'s `hub` on, and a release build leaves it out.
+default = ["hub"]
+hub = []
+
 [dependencies]
 hostname = "0.4"
 app.workspace = true
@@ -19,10 +26,14 @@ sha2.workspace = true
 shell-words.workspace = true
 # The Wi-Fi report of `system_profiler -json` on macOS (decision 80).
 serde_json.workspace = true
+# The hub's TLS key file is PEM: base64 of its PKCS#8 encoding (decision 120).
+base64.workspace = true
 spawn-gate.workspace = true
 # `macros`: `tokio::join!` reads a child's stdout and stderr at once.
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 uuid = { workspace = true, features = ["v7"] }
+# Key files are read into buffers wiped when dropped (I4).
+zeroize.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 # `term`: the password prompt turns echo off. `user`: the user's ID, as a

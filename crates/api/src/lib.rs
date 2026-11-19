@@ -234,6 +234,11 @@ pub enum ErrorCode {
     /// configuration file would no longer load. The argument `plan` names
     /// the plan, and `rule` the rule.
     PlanInUse,
+    /// A backup was not started because its sources hold the data folder,
+    /// which holds a secret key file, and the folder's path isn't UTF-8, so
+    /// no glob can leave the key files out (§16, decision 120, "A copied
+    /// data folder"). No arguments: the path can't be shown as written.
+    KeyFilesNotLeftOut,
     /// A proposal holds no configuration change (decision 89).
     ProposalEmpty,
     /// A proposal's change is not one the configuration takes, so nothing
@@ -1232,6 +1237,7 @@ impl ErrorCode {
                     optional: false,
                 },
             ],
+            Self::KeyFilesNotLeftOut => &[],
             Self::ProposalEmpty => &[],
             Self::ProposalInvalid => &[
                 ArgSpec {

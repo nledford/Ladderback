@@ -77,7 +77,8 @@ ladderback/
 │     ├─ releases/            # Ladderback's newest release from GitHub Releases (`ReleaseFeed` port, §10.7)
 │     ├─ signing/             # Ed25519 over aws-lc-rs (`Signing` port; §16, decision 120)
 │     ├─ mcp/                 # `ladderback mcp`: JSON-RPC 2.0 over stdio; in-process and /api/v1 backends (§4.6)
-│     └─ platform/            # clock, power, network, identity key, service install (systemd/launchd)
+│     └─ platform/            # clock, power, network, service install (systemd/launchd); key files (`Identity`
+│                             # port, feature `hub` only; §16, decisions 120 and 122)
 ├─ features/                  # Gherkin scenarios, one folder per bounded context (§13.2)
 ├─ tests/e2e.rs               # cucumber-rs runner for @e2e scenarios against the real binary
 ├─ ui-tests/                  # Node: @cucumber/cucumber + Playwright + axe-core for @ui scenarios and the

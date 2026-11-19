@@ -429,6 +429,7 @@ async fn only_an_operations_job_tells_the_pages_its_progress_and_warnings() {
             label: None,
             host: None,
             filter: Default::default(),
+            left_out: Vec::new(),
             deadline_budget: domain::SignedDuration::from_hours(1),
         }),
         Job::Forget(app::ports::ForgetJob {

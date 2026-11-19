@@ -95,11 +95,23 @@ pub enum DryRunError {
     ReadsAbove { setting: &'static str },
     /// The engine can't apply the plan's source filter.
     Filter,
+    /// The walks would take secret key files in the data folder that no
+    /// glob can name: refused as a backup of the plan is (§16, decision
+    /// 120), as a dry run predicts what the backup does.
+    KeyFilesNotLeftOut,
     /// The configuration couldn't be read.
     Config(Box<ConfigError>),
     /// The walk failed; `detail` is the engine's own message.
     Walk { detail: String },
 }
+
+/// The globs every walk of the plan's `sources` leaves out after the
+/// plan's own, as each backup leaves out the secret key files in the data
+/// folder (§16, decision 120): after every glob of the plan's own, its
+/// glob files' included, and never tallied as one of its excludes. `None`
+/// when the walks would take key files no glob can name, which refuses
+/// the dry run as it refuses the backup.
+pub type LeftOut = Arc<dyn Fn(&[Source]) -> Option<Vec<String>> + Send + Sync>;
 
 /// The dry runs of the daemon.
 pub struct PlanDryRuns {
@@ -111,6 +123,9 @@ pub struct PlanDryRuns {
     backups: GiveWay,
     limits: DryRunLimits,
     running: Arc<AtomicBool>,
+    /// What every walk leaves out after the plan's own globs: the secret
+    /// key files in the data folder (§16, decision 120).
+    left_out: LeftOut,
     records: Mutex<Vec<(Proposer, DryRunRecord)>>,
 }
 
@@ -142,6 +157,7 @@ impl PlanDryRuns {
         clock: Arc<dyn Clock>,
         backups: GiveWay,
         limits: DryRunLimits,
+        left_out: LeftOut,
     ) -> Self {
         Self {
             config,
@@ -151,6 +167,7 @@ impl PlanDryRuns {
             backups,
             limits,
             running: Arc::new(AtomicBool::new(false)),
+            left_out,
             records: Mutex::new(Vec::new()),
         }
     }
@@ -172,6 +189,7 @@ impl PlanDryRuns {
             .await
             .map_err(|error| DryRunError::Config(Box::new(error)))?;
         let sources = self.allowed(&config, plan).await?;
+        let left_out = (self.left_out)(&sources).ok_or(DryRunError::KeyFilesNotLeftOut)?;
         let dropped = Arc::new(AtomicBool::new(false));
         let _stop = StopWhenDropped(Arc::clone(&dropped));
         let backups = Arc::clone(&self.backups);
@@ -179,7 +197,13 @@ impl PlanDryRuns {
             let _turn = &turn;
             dropped.load(Ordering::Acquire) || backups()
         });
-        self.count(&sources, &plan.filter, started, &give_way).await
+        let walks = Walks {
+            sources: &sources,
+            left_out: &left_out,
+            started,
+            give_way: &give_way,
+        };
+        self.count(&walks, &plan.filter).await
     }
 
     /// Records a dry run of `asker`'s, unless it must wait.
@@ -270,17 +294,15 @@ impl PlanDryRuns {
             .and_then(|mut one| one.pop())
     }
 
-    /// Walks `sources` through `filter`, then with no exclude and with
+    /// Walks the sources through `filter`, then with no exclude and with
     /// each exclude alone, until a walk stops early, all in the time
-    /// left since `started`.
+    /// left since the dry run started.
     async fn count(
         &self,
-        sources: &[Source],
+        walks: &Walks<'_>,
         filter: &SourceFilter,
-        started: SignedDuration,
-        give_way: &GiveWay,
     ) -> Result<PlanDryRun, DryRunError> {
-        let planned = self.walked(sources, filter, started, give_way).await?;
+        let planned = self.walked(walks, filter).await?;
         let mut dry_run = PlanDryRun {
             files: planned.files,
             bytes: planned.bytes,
@@ -293,16 +315,14 @@ impl PlanDryRuns {
         if dry_run.stopped.is_some() || excludes.is_empty() {
             return Ok(dry_run);
         }
-        let all = self
-            .walked(sources, &SourceFilter::default(), started, give_way)
-            .await?;
+        let all = self.walked(walks, &SourceFilter::default()).await?;
         dry_run.warnings = dry_run.warnings.saturating_add(all.warnings);
         if all.stopped.is_some() {
             dry_run.stopped = all.stopped;
             return Ok(dry_run);
         }
         for (exclude, alone) in excludes {
-            let with = self.walked(sources, &alone, started, give_way).await?;
+            let with = self.walked(walks, &alone).await?;
             dry_run.warnings = dry_run.warnings.saturating_add(with.warnings);
             if with.stopped.is_some() {
                 dry_run.stopped = with.stopped;
@@ -317,16 +337,15 @@ impl PlanDryRuns {
         Ok(dry_run)
     }
 
-    /// One walk, in the time left since `started`; none left stops it
+    /// One walk, in the time left since the dry run started, leaving out
+    /// what every backup leaves out besides `filter`; none left stops it
     /// before it starts.
     async fn walked(
         &self,
-        sources: &[Source],
+        walks: &Walks<'_>,
         filter: &SourceFilter,
-        started: SignedDuration,
-        give_way: &GiveWay,
     ) -> Result<Walked, DryRunError> {
-        let spent = self.clock.monotonic().saturating_sub(started);
+        let spent = self.clock.monotonic().saturating_sub(walks.started);
         let time = self.limits.time.saturating_sub(spent);
         if !time.is_positive() {
             return Ok(Walked {
@@ -339,13 +358,29 @@ impl PlanDryRuns {
             time,
         };
         self.walk
-            .walk(sources, filter, limits, Arc::clone(give_way))
+            .walk(
+                walks.sources,
+                filter,
+                walks.left_out,
+                limits,
+                Arc::clone(walks.give_way),
+            )
             .await
             .map_err(|error| match error {
                 WalkError::Filter => DryRunError::Filter,
                 WalkError::Engine { detail } => DryRunError::Walk { detail },
             })
     }
+}
+
+/// What each walk of one dry run shares: the plan's sources, resolved,
+/// the globs left out after the plan's own, when the dry run started and
+/// when to give way.
+struct Walks<'a> {
+    sources: &'a [Source],
+    left_out: &'a [String],
+    started: SignedDuration,
+    give_way: &'a GiveWay,
 }
 
 /// Reads and sets the dry-run allowlist, a person's setting.

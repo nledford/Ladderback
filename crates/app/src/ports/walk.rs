@@ -59,13 +59,18 @@ pub enum WalkError {
 /// Walks sources as a backup would, counting and naming nothing.
 #[async_trait]
 pub trait WalkSources: Send + Sync {
-    /// Walks `sources`, each resolved already, through `filter`, within
-    /// `limits`, asking `give_way` before each entry. An entry it can't
-    /// read is counted, not a failure.
+    /// Walks `sources`, each resolved already, through `filter` and then
+    /// `left_out`, within `limits`, asking `give_way` before each entry. An
+    /// entry it can't read is counted, not a failure. `left_out` are
+    /// iglobs matched after every glob of `filter`, its glob files' lines
+    /// included, as a backup's job has them ([`BackupJob::left_out`]).
+    ///
+    /// [`BackupJob::left_out`]: crate::ports::BackupJob::left_out
     async fn walk(
         &self,
         sources: &[Source],
         filter: &SourceFilter,
+        left_out: &[String],
         limits: WalkLimits,
         give_way: GiveWay,
     ) -> Result<Walked, WalkError>;

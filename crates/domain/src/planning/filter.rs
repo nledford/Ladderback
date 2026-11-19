@@ -280,6 +280,20 @@ fn same(part: &str, name: &str, case_insensitive: bool) -> bool {
     }
 }
 
+/// `text` as a glob that matches only itself: each of rustic's pattern
+/// characters (`*`, `?`, `[`, `]`, `{`, `}` and the escape `\`) behind a
+/// backslash, which gitignore's rules read as that character.
+pub fn escape_glob(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '*' | '?' | '[' | ']' | '{' | '}' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +312,15 @@ mod tests {
         plan.filter.globs = globs.iter().map(|glob| (*glob).to_owned()).collect();
         plan.filter.iglobs = iglobs.iter().map(|glob| (*glob).to_owned()).collect();
         plan
+    }
+
+    #[test]
+    fn an_escaped_glob_holds_no_pattern_character() {
+        assert_eq!(
+            escape_glob("/srv/a*b?c[d]e{f,g}h\\i !#é"),
+            "/srv/a\\*b\\?c\\[d\\]e\\{f,g\\}h\\\\i !#é"
+        );
+        assert_eq!(escape_glob(""), "");
     }
 
     /// The globs of `plan` said to match nothing, as written, with its

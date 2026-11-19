@@ -423,6 +423,10 @@ pub struct BackupJob {
     pub host: Option<Hostname>,
     /// What the backup leaves out of `sources`: the plan's source filter.
     pub filter: SourceFilter,
+    /// Globs of files no backup takes (§16, decisions 120 and 122): iglobs
+    /// matched after every glob of `filter`, its glob files' lines
+    /// included, so none of the plan's own brings one back.
+    pub left_out: Vec<String>,
     /// See [`Job::deadline_budget`].
     pub deadline_budget: SignedDuration,
 }
@@ -986,6 +990,7 @@ mod tests {
             label: None,
             host: None,
             filter: SourceFilter::default(),
+            left_out: Vec::new(),
             deadline_budget: SignedDuration::from_hours(6),
         });
         assert_eq!(backup.kind(), OperationKind::Backup);

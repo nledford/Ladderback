@@ -1,7 +1,7 @@
 //! Platform adapter: the operating system's clocks, what powers the machine
-//! and whether it is online, the agent ID file, and the user's service
-//! manager. The identity key arrives with a later milestone (technical design
-//! §3.2).
+//! and whether it is online, the agent ID file, the key files of an agent
+//! and its hub (with the `hub` feature, §16, decision 122), and the user's
+//! service manager (technical design §3.2).
 
 #![deny(
     clippy::unwrap_used,
@@ -18,6 +18,8 @@ pub mod data_dir_lock;
 pub mod dirs;
 pub mod dumps;
 pub mod full_disk_access;
+#[cfg(feature = "hub")]
+pub mod identity;
 pub mod network;
 pub mod network_link;
 pub mod power;

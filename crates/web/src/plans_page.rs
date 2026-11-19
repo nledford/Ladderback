@@ -20,9 +20,9 @@ use crate::components::button::{self, Appearance, Content};
 use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
-    dialog_refusal_alert, focus_element, hand_focus_when_gone, recover_focus, refusal_alert,
-    say_refusals, text_field,
+    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Toast,
+    ToastTone, Toasts, Working, dialog_refusal_alert, focus_element, hand_focus_when_gone,
+    recover_focus, refusal_alert, say_refusals, text_field,
 };
 use crate::live::reply;
 use crate::plans::{
@@ -138,14 +138,17 @@ struct Open {
 }
 
 /// The Plans page: the heading, which says when the daemon can't be reached,
-/// the table of plans, the button that adds one, the plan form while one is
-/// open, and the dialog that asks before a plan is deleted.
+/// the toast that answers a plan saved or deleted, which nothing else on the
+/// page confirms, the table of plans, the button that adds one, the plan
+/// form while one is open, and the dialog that asks before a plan is
+/// deleted.
 #[component]
 pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
     let list = List::new();
     say_refusals(list.refused);
     let read_localizer = Arc::clone(&localizer);
     spawn_local(async move { list.read(&read_localizer).await });
+    let toasts = Toasts::new();
 
     // The form, and why it could not open, said in its place.
     let editing = RwSignal::<Option<Open>>::new(None);
@@ -227,7 +230,7 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
             match answer {
                 Some(Posted::Done(_)) => {
                     delete_open.set(false);
-                    reply(Politeness::Polite, &say(&localizer, deleted(&id)));
+                    toasts.show(ToastTone::Success, say(&localizer, deleted(&id)));
                     list.read(&localizer).await;
                     let on_it = editing
                         .try_with_untracked(|open| {
@@ -280,6 +283,8 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
             }}
         </PageHeading>
         <p>{body}</p>
+        // Dismissed, a toast hands focus to the heading just before it.
+        <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=PAGE_HEADING_ID />
         {move || match shape.get() {
             (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::table(4)).into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
@@ -316,6 +321,7 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
                             list=list
                             open=open
                             close=close
+                            toasts=toasts
                         />
                     }
                 })
@@ -518,12 +524,14 @@ impl Inputs {
 /// list that couldn't be read again took that button away, and focus the
 /// reader moved out of it meanwhile stays (A1). The row of a plan on a
 /// schedule then shows its next run as soon as the scheduler has planned one.
+/// A plan saved is answered in the page's `toasts`.
 #[component]
 fn PlanEditor(
     localizer: Arc<Localizer>,
     list: List,
     open: Open,
     close: Callback<()>,
+    toasts: Toasts,
 ) -> impl IntoView {
     let Open { id, base, opener } = open;
     let inputs = Inputs::of(&PlanForm::of(&base));
@@ -572,9 +580,9 @@ fn PlanEditor(
                         list.phase.set(Phase::Unreachable);
                         return;
                     };
-                    reply(
-                        Politeness::Polite,
-                        &say(&localizer, saved(&saved_as, &base, &sent)),
+                    toasts.show(
+                        ToastTone::Success,
+                        say(&localizer, saved(&saved_as, &base, &sent)),
                     );
                     list.read(&localizer).await;
                     // The form is gone when the reader has left the page, or

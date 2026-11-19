@@ -29,8 +29,9 @@ fn repository_spec(access: RepositoryAccess) -> RepositorySpec {
     }
 }
 
-/// A plan's source filter as the worker takes it, field for field.
-pub(crate) fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
+/// A plan's source filter as the worker takes it, field for field, and
+/// `left_out` to match after it.
+pub(crate) fn filter_spec(filter: SourceFilter, left_out: Vec<String>) -> SourceFilterSpec {
     let SourceFilter {
         globs,
         iglobs,
@@ -54,6 +55,7 @@ pub(crate) fn filter_spec(filter: SourceFilter) -> SourceFilterSpec {
         exclude_if_present,
         exclude_if_xattr,
         one_file_system,
+        left_out,
     }
 }
 
@@ -187,7 +189,7 @@ pub(super) fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                 .collect(),
             label: job.label,
             host: job.host.map(|host| host.as_str().to_owned()),
-            filter: filter_spec(job.filter),
+            filter: filter_spec(job.filter, job.left_out),
             deadline_budget: job.deadline_budget,
         }),
         Job::Forget(job) => JobKind::Forget(ForgetJobSpec {

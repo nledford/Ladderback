@@ -253,6 +253,27 @@ Feature: Downloading files from a snapshot
     And the page has no accessibility violations
 
   @ui
+  Scenario: A download handed to the browser is answered in a toast, said once, and focus returns to its button
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 1 times
+    When I open the newest snapshot of the plan "home"
+    And I skip to the content
+    And I press Tab until focus is on a tree item
+    And I press ArrowRight until focus is on the tree item "demo-1.txt"
+    And I press Tab until focus is on the button "Download demo-1.txt"
+    And I press Enter
+    And I press Tab until focus is on the textbox "Snapshot ID"
+    And I type the newest snapshot's short ID of the plan "home"
+    And I press Tab until focus is on the button "Download"
+    And I press Enter
+    Then the toast reads "Download of demo-1.txt started. The browser saves it with its other downloads." after its icon "Information"
+    And the toast is no live region, nor holds one
+    And focus is on the button "Download demo-1.txt"
+    And the polite region reads "Download of demo-1.txt started. The browser saves it with its other downloads."
+    And the polite region keeps reading "Download of demo-1.txt started. The browser saves it with its other downloads."
+    And the page has no accessibility violations
+
+  @ui
   Scenario: A download the daemon refuses is said in an error alert of the dialog's own, which stays open
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
@@ -270,6 +291,7 @@ Feature: Downloading files from a snapshot
     Then the dialog "Download demo-1.txt" alerts "No repository was found at this location"
     And the page shows an error alert containing "No repository was found at this location"
     And the dialog "Download demo-1.txt" stays open
+    And the page shows no toast
     And the page has no accessibility violations
     When I press Escape
     Then focus is on the button "Download demo-1.txt"

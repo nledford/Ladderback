@@ -106,6 +106,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
     PlanInvalid => msg::ERROR_PLAN_INVALID,
     PlanInUse => msg::ERROR_PLAN_IN_USE,
+    KeyFilesNotLeftOut => msg::ERROR_KEY_FILES_NOT_LEFT_OUT,
     ProposalEmpty => msg::ERROR_PROPOSAL_EMPTY,
     ProposalInvalid => msg::ERROR_PROPOSAL_INVALID,
     ProposalTooLarge => msg::ERROR_PROPOSAL_TOO_LARGE,
