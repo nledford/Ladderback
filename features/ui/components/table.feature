@@ -55,6 +55,7 @@ Feature: The table
     And I press Shift+Tab until focus is on the radio "Demo rows"
     And I press the down arrow until focus is on the radio "<choice>"
     Then the "Table" demo says "<sentence>" in the place of the table "Demo folders"
+    And the page doesn't show "Loading the demo folders…"
 
     Examples:
       | choice           | sentence                                              |
