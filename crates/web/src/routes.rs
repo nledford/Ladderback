@@ -20,7 +20,9 @@ use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::first_load;
 use crate::components::link::rules::{Destination, Matching};
+use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Banner, Button, Checkbox, ErrorSummary, Link, PauseUpdates, Progress, RadioGroup, StatusBadge,
@@ -166,7 +168,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
         <FullDiskAccessWarning localizer=full_disk_access />
         <p>{body}</p>
         {move || match phase.get() {
-            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(2)).into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match (refused.get(), plans.get()) {
@@ -614,7 +616,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             let rows_connection = connection.clone();
             let rows_zone = viewer.clone();
             match showing.get() {
-                Shown::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+                Shown::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
                 Shown::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
                 Shown::Refused => {
                     history_refused
@@ -1517,7 +1519,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 .collect_view()
         }}
         {move || match phase.get() {
-            Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(4)).into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match (refused.get(), rows.get()) {

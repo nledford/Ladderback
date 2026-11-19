@@ -49,6 +49,8 @@ use crate::api_tokens::{
     revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
 };
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
     Banner, Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, Tab, Tabs,
@@ -433,7 +435,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
             </h2>
             <p>{body}</p>
             {move || match phase.get() {
-                Phase::Loading => view! { <p>{loading.clone()}</p> }.into_any(),
+                Phase::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
                 Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
                 Phase::Ready => {
                     match (refused.get(), tokens.get()) {
@@ -1005,7 +1007,9 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
             {move || {
                 let localizer = &stage_localizer;
                 match section.stage.get() {
-                    Stage::Loading => view! { <p>{text(localizer, msg::UI_LOADING)}</p> }.into_any(),
+                    Stage::Loading => {
+                        first_load(text(localizer, msg::UI_LOADING), Awaited::Text).into_any()
+                    }
                     Stage::Unreachable => {
                         view! { <p>{text(localizer, msg::UI_UNREACHABLE_BODY)}</p> }.into_any()
                     }

@@ -48,3 +48,12 @@ Feature: The badge
     When I open the component gallery
     Then every badge of the "Badge" demo keeps within the room it is given
     And the page doesn't scroll sideways
+
+  # The words wrap between words beside the icon (#1070): a badge too long
+  # for its room takes more lines after its icon, which keeps to the start of
+  # the first, never a line of its own above the words.
+  Scenario: On a small screen, a long badge's words wrap beside its icon
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 100 percent
+    When I open the component gallery
+    Then the badge "Kept by the demo plan's retention rules" of the "Badge" demo wraps its words beside its icon, which stands at the start of its first line
