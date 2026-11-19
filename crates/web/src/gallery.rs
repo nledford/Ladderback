@@ -42,6 +42,7 @@ use crate::routes::{PageHeading, text_with};
 use crate::text;
 use crate::variants::{Placement, Rem, Side, Size, StatusTone, Tone};
 
+mod steps;
 mod table;
 mod tooltip;
 
@@ -51,9 +52,6 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
     let t = move |id| text(&localizer_t, id);
     // The tab the manual demo's set tells it is chosen.
     let manual_chosen = RwSignal::new(0_usize);
-    // Where the steps demo's hub move stands: at its third step, its long
-    // one, until its button moves it on.
-    let hub_move = RwSignal::new(Reached::At(2));
     // The badge demo's count, a number in its words.
     let pending_changes = text_with(
         &localizer,
@@ -2025,49 +2023,7 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         // the page's top, and before the table's, which journeys reach by
         // Shift+Tab from the page's end, so its one stop lengthens none of
         // those walks; its scenarios start at its anchor.
-        <section id="steps-demo">
-            <DemoHeading text=t(msg::UI_GALLERY_STEPS_HEADING) />
-            // Two done, the current one's long name wrapping, two to do;
-            // the button moves it on, each change said.
-            <Steps
-                localizer=Arc::clone(&localizer)
-                name=StepsName::Label(t(msg::UI_GALLERY_STEPS_MOVE))
-                steps=vec![
-                    t(msg::UI_GALLERY_STEPS_CHECK),
-                    t(msg::UI_GALLERY_STEPS_COPY),
-                    t(msg::UI_GALLERY_STEPS_COMMIT),
-                    t(msg::UI_GALLERY_STEPS_SWITCH),
-                    t(msg::UI_GALLERY_STEPS_CLEAN_UP),
-                ]
-                reached=hub_move
-            />
-            <p>
-                <Button
-                    content=Content::Text(t(msg::UI_GALLERY_STEPS_ADVANCE).into())
-                    on_press=Callback::new(move |()| {
-                        hub_move
-                            .update(|reached| {
-                                *reached = match *reached {
-                                    Reached::At(place) if place < 4 => Reached::At(place + 1),
-                                    Reached::At(_) => Reached::Finished,
-                                    Reached::FailedAt(_) | Reached::Finished => Reached::At(0),
-                                };
-                            });
-                    })
-                />
-            </p>
-            // One done, one failed, one to do.
-            <Steps
-                localizer=Arc::clone(&localizer)
-                name=StepsName::Label(t(msg::UI_GALLERY_STEPS_PAIRING))
-                steps=vec![
-                    t(msg::UI_GALLERY_STEPS_TOKEN),
-                    t(msg::UI_GALLERY_STEPS_CONNECT),
-                    t(msg::UI_GALLERY_STEPS_APPROVAL),
-                ]
-                reached=Reached::FailedAt(1)
-            />
-        </section>
+        <steps::StepsDemo localizer=Arc::clone(&localizer) />
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <table::TableDemo localizer=Arc::clone(&localizer) />
