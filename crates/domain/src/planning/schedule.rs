@@ -353,7 +353,9 @@ impl Schedule {
     /// successful backup, which started at `last_success`, is a whole run of
     /// the schedule behind, the schedule's first moment after it and the
     /// moment after that both past. The first moment alone may be the run
-    /// still going; a run that never succeeded (`None`) is overdue, and a
+    /// still going; and as jitter may start that run as late as just before
+    /// the second moment, the second counts only once as much time again
+    /// has passed. A run that never succeeded (`None`) is overdue, and a
     /// schedule with no moment left never is. A cron expression is read on
     /// the wall clock of the schedule's zone, or else of `machine`.
     pub fn is_overdue(
@@ -362,8 +364,22 @@ impl Schedule {
         last_success: Option<Timestamp>,
         now: Timestamp,
     ) -> bool {
-        let _ = (machine, last_success, now);
-        todo!()
+        let Some(success) = last_success else {
+            return true;
+        };
+        let zone = self.zone.as_ref().map_or(machine, ScheduleZone::zone);
+        let Ok(first) = self.cadence.moment_after(success, zone) else {
+            return false;
+        };
+        let Ok(second) = self.cadence.moment_after(first, zone) else {
+            return false;
+        };
+        // The delay the scheduler may draw for the first moment's run: the
+        // jitter, cut short of the second moment (`next_run`'s stretch).
+        let delay = self.jitter.map_or(SignedDuration::ZERO, |jitter| {
+            jitter.min(first.duration_until(second) - SignedDuration::from_millis(1))
+        });
+        second.checked_add(delay).is_ok_and(|due| due <= now)
     }
 }
 

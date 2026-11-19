@@ -75,7 +75,35 @@ impl OperationStatus {
     /// [`Read`]: RepositoryReading::Read
     /// [`Unreadable`]: RepositoryReading::Unreadable
     pub fn repository_reading(&self) -> Option<RepositoryReading> {
-        todo!()
+        use FailureReason as Why;
+        match self {
+            Self::Succeeded | Self::SucceededWithWarnings => Some(RepositoryReading::Read),
+            Self::Failed { reason } => match reason {
+                Why::RepositoryReplaced
+                | Why::RepositoryNotFound
+                | Why::RepositoryConfigNotFound { .. }
+                | Why::CredentialsRefused { .. }
+                | Why::NoLocationUsable
+                | Why::NoLocationRuleHolds
+                | Why::PasswordNotAccepted
+                | Why::SecretRefused { .. } => Some(RepositoryReading::Unreadable),
+                Why::EngineUnavailable { .. }
+                | Why::JobRejected { .. }
+                | Why::EngineExited { .. }
+                | Why::EngineFailed { .. }
+                | Why::ProtocolViolated { .. }
+                | Why::DeadlinePassed
+                | Why::RepositoryExists
+                | Why::EngineStartTimedOut
+                | Why::EngineExitTimedOut
+                | Why::HookFailed { .. }
+                | Why::SecretsTooLargeToMask { .. }
+                | Why::DaemonStopped
+                | Why::DaemonShutDown
+                | Why::RestoreTargetUnwritable => None,
+            },
+            Self::Queued | Self::Running | Self::Cancelled => None,
+        }
     }
 }
 
