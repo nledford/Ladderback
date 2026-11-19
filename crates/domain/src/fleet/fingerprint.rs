@@ -112,6 +112,31 @@ impl TokenId {
     pub fn of_pairing_key(key: &PublicKey) -> Self {
         Self(KeyId::of_key(key))
     }
+
+    /// The token ID a person typed, as `--revoke` takes it: 8 hex digits in
+    /// either case, with no space; `None` for anything else.
+    pub fn parse(text: &str) -> Option<Self> {
+        let digits = text.as_bytes();
+        if digits.len() != 8 {
+            return None;
+        }
+        let mut bytes = [0_u8; 4];
+        let (pairs, _) = digits.as_chunks::<2>();
+        for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {
+            *byte = (hex_digit(*high)? << 4) | hex_digit(*low)?;
+        }
+        Some(Self(KeyId(bytes)))
+    }
+}
+
+/// The value of one hex digit in either case.
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 impl fmt::Display for TokenId {
@@ -234,5 +259,23 @@ mod tests {
             format!("{:?}", TokenId::of_pairing_key(&key)),
             "TokenId(02D449A3)"
         );
+    }
+
+    #[test]
+    fn a_token_id_is_read_back_in_either_case() {
+        let id = TokenId::of_pairing_key(&PublicKey::from_bytes([0x11; KEY_BYTES]).unwrap());
+        assert_eq!(TokenId::parse("02D449A3"), Some(id));
+        assert_eq!(TokenId::parse("02d449a3"), Some(id));
+        for text in [
+            "",
+            "02D449A",
+            "02D449A31",
+            " 02D449A3",
+            "02D4-49A3",
+            "02D449AG",
+            "+2D449A3",
+        ] {
+            assert_eq!(TokenId::parse(text), None, "{text:?}");
+        }
     }
 }

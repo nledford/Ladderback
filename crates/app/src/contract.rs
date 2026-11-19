@@ -12,6 +12,7 @@ pub mod engine;
 pub mod event_bus;
 pub mod full_disk_access;
 pub mod hooks;
+pub mod hub_connector;
 pub mod identity;
 pub mod network;
 pub mod network_link;

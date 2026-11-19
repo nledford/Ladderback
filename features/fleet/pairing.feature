@@ -92,3 +92,23 @@ Feature: Pairing an agent with its hub
     When a second agent named "one-more" pairs with the token
     Then the pairing is refused because too many agents wait for approval
     And the token is still unused
+
+  Scenario: An agent pairs over its connection with a token pasted between quotes
+    Given a hub with a pairing token
+    When an agent pairs over its connection with the token pasted between quotes
+    Then the hub lists the agent under its hostname as waiting for approval
+    And the agent pins the hub's key, its certificate and its recovery key
+
+  Scenario: A token for a plain http address on another machine is refused before connecting
+    Given a hub with a pairing token for the address "http://hub.example:9898"
+    When an agent pairs over its connection with the token
+    Then the agent stops because the address would show the token to the network
+    And the agent connected to nothing
+    And the hub lists no agent
+
+  Scenario: An agent whose hub doesn't answer pins nothing
+    Given a hub with a pairing token
+    When an agent pairs over its connection with the token and nothing answers
+    Then the agent stops because the hub can't be reached
+    And the agent pins no hub
+    And the token is still unused

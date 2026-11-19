@@ -20,7 +20,7 @@ import { patienceMs, stepLimit, untilStepLimit } from "../support/patience.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
-import { drawnOnItsFill } from "./components.ts";
+import { drawnOnItsFill } from "../support/gallery.ts";
 
 // The scratch repositories' password: the one the `demo-repo` fixture was
 // initialized with. Not a real secret.

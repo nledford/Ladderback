@@ -209,6 +209,46 @@ impl PairingToken {
             .ok_or(TokenRefused::Malformed)?;
         Ok(Self::new(hub_key, tls, pairing_seed, address))
     }
+
+    /// Reads a token as a person pasted it (§16, decision 121, "`ladderback
+    /// pair`"): whitespace and line breaks anywhere, zero-width characters,
+    /// and quotes or angle brackets around it are dropped, and the prefix is
+    /// read in any case with `-` for `_`. The rest must be the token as
+    /// [`parse`](Self::parse) reads it: base64 is case-sensitive, so a
+    /// letter whose case was changed fails the checksum. Text longer than a
+    /// token could be with all of that around it is malformed unread.
+    pub fn parse_pasted(text: &str) -> Result<Self, TokenRefused> {
+        if text.len() > MAX_PASTED_TEXT {
+            return Err(TokenRefused::Malformed);
+        }
+        let mut kept = Zeroizing::new(String::with_capacity(text.len()));
+        kept.extend(
+            text.chars()
+                .filter(|&c| !c.is_whitespace() && !ZERO_WIDTH.contains(&c)),
+        );
+        let mut inner = kept.as_str();
+        while let Some(unwrapped) = unquoted(inner) {
+            inner = unwrapped;
+        }
+        let mut token = Zeroizing::new(String::with_capacity(inner.len()));
+        match inner.get(..TOKEN_PREFIX.len()) {
+            Some(prefix) if is_prefix_as_pasted(prefix) => {
+                token.push_str(TOKEN_PREFIX);
+                token.push_str(inner.get(TOKEN_PREFIX.len()..).unwrap_or_default());
+            }
+            _ => token.push_str(inner),
+        }
+        Self::parse(&token)
+    }
+
+    /// The same token for an agent that reaches the hub at `address`
+    /// rather than the token's (decision 121, `ladderback pair <address>`).
+    /// The hub key and the certificate stay the token's: the address
+    /// carries no trust.
+    #[must_use]
+    pub fn with_address(self, address: HubAddress) -> Self {
+        Self { address, ..self }
+    }
 }
 
 /// The first 4 bytes of the SHA-256 of `bytes`.
@@ -217,6 +257,38 @@ fn checksum(bytes: &[u8]) -> [u8; CHECKSUM_BYTES] {
     *digest
         .first_chunk::<CHECKSUM_BYTES>()
         .unwrap_or(&[0; CHECKSUM_BYTES])
+}
+
+/// The longest pasted text read: room for a token wrapped on every
+/// character with a line break and a zero-width character.
+const MAX_PASTED_TEXT: usize = MAX_TOKEN_TEXT * 8;
+
+/// The zero-width characters a chat app or a web page may put in a paste.
+const ZERO_WIDTH: [char; 5] = ['\u{200b}', '\u{200c}', '\u{200d}', '\u{2060}', '\u{feff}'];
+
+/// `text` without one pair of quotes or angle brackets around it, or `None`
+/// when it has none.
+fn unquoted(text: &str) -> Option<&str> {
+    const PAIRS: [(char, char); 6] = [
+        ('"', '"'),
+        ('\'', '\''),
+        ('`', '`'),
+        ('<', '>'),
+        ('\u{201c}', '\u{201d}'),
+        ('\u{2018}', '\u{2019}'),
+    ];
+    PAIRS.iter().find_map(|&(open, close)| {
+        text.strip_prefix(open)
+            .and_then(|rest| rest.strip_suffix(close))
+    })
+}
+
+/// Whether `text` is the token's prefix in any case, with `-` for `_`.
+fn is_prefix_as_pasted(text: &str) -> bool {
+    text.len() == TOKEN_PREFIX.len()
+        && text.bytes().zip(TOKEN_PREFIX.bytes()).all(|(pasted, own)| {
+            pasted.eq_ignore_ascii_case(&own) || (pasted == b'-' && own == b'_')
+        })
 }
 
 /// The token's bytes not read yet; a field past the end is a malformed token.

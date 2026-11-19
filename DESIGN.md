@@ -364,7 +364,7 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 
 ### Alerts
 
-- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. The Log, Plans, Pending changes and Snapshots pages, and a snapshot's Restore and Download dialogs, show their refusals with it, as Error alerts; the other pages and the tree's own message move onto it in #929.
+- **The component:** `Alert`, an inline message about a page's state: an icon, then its words. Every page and dialog shows its messages with it (#929): refusals as Error alerts, a saved choice or a done task as a Success alert, a note of the page's state as an information alert. Not a field's own error, the tree's own message, or the copy result a dialog says in its own live region.
 - **Look:** Ledger Gray with the small corner, the words and any link in them in Graphite Ink, the tone in the icon and in a 0.25rem edge at the start of the line; never a colored fill, so a failure is not a red banner.
 - **Tone:** Primary (information, the default), Success, Warning and Error, each with its own icon: Info, CircleCheck, TriangleAlert and CircleX, the icon named by its tone in words for a screen reader. No Secondary and no Inherit: an alert always says its tone.
 - **Dismiss:** optional, a Ghost Small X button at the line's end, its name shown by a tooltip; the page takes the alert away and names where focus goes.

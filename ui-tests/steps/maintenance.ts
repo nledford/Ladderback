@@ -681,8 +681,8 @@ Then("the main content names the pack no index lists in the engine's words, mark
 
 // What the sender of a refusal says in its own words, the engine's or the
 // daemon's, is English whatever the language of the page, and the page marks
-// it so (§4.5, §8.4). The pages #929 moved onto the shared Alert draw it as
-// an Error alert, which has no role; the others still in a `role="alert"`.
+// it so (§4.5, §8.4). A page draws it as an Error alert, which has no role;
+// a dialog's stands inside the dialog's own `role="alert"`.
 Then("the alert marks the sender's words as English", async function (this: BrowserWorld) {
   const words = this.page.locator("[role~='alert'], .alert.tone-error").locator('[lang="en"]');
   await words.first().waitFor({ state: "visible", timeout: patienceMs() });
@@ -710,22 +710,10 @@ Given("the daemon refuses each change of who maintains a repository", function (
   });
 });
 
-// A refusal on a page #929 hasn't moved onto the shared Alert yet, told
-// where a reader is looking in a `role="alert"`. What the catalog filled in
-// is set apart by bidi isolation marks, which a reader never hears (§4.5):
-// they may stand between any two characters.
-Then("the page shows an alert containing {string}", async function (this: BrowserWorld, needle: string) {
-  const heard = [...needle].map(escapeRegExp).join(ISOLATION);
-  await this.page
-    .getByRole("alert")
-    .filter({ hasText: new RegExp(heard) })
-    .first()
-    .waitFor({ state: "visible", timeout: patienceMs() });
-});
-
-// Nothing the page says now: an alert drawn with the page is there at once.
-Then("the page shows no alert containing {string}", async function (this: BrowserWorld, needle: string) {
+// Nothing on the page says it as a live alert now: an alert drawn with the
+// page is there at once. A shared Error alert, no live region, may show it.
+Then("no live alert on the page contains {string}", async function (this: BrowserWorld, needle: string) {
   const heard = [...needle].map(escapeRegExp).join(ISOLATION);
   const alerts = this.page.getByRole("alert").filter({ hasText: new RegExp(heard) });
-  assert.equal(await alerts.count(), 0, `the page shows an alert containing "${needle}"`);
+  assert.equal(await alerts.count(), 0, `a live alert on the page contains "${needle}"`);
 });

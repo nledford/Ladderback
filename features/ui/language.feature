@@ -123,7 +123,7 @@ Feature: Choosing the language of the web UI
       | fr    |
       | EN-xa |
 
-  Scenario: A browser that keeps nothing says so, and the page stays as it was
+  Scenario: A browser that keeps nothing says so in an error alert, said assertively, and the page stays as it was
     Given this browser keeps nothing a page stores
     When I open the address "/settings"
     And I skip to the content
@@ -131,6 +131,7 @@ Feature: Choosing the language of the web UI
     And I press the down arrow until focus is on the radio "Ǝuƃʅısɥ"
     And I press Tab until focus is on the button "Save the language"
     And I press Enter
-    Then the page shows a message containing "This browser didn't keep the language."
+    Then the page shows an error alert containing "This browser didn't keep the language."
+    And the assertive region comes to contain "This browser didn't keep the language."
     And the page language is "en-US"
     And the page has no accessibility violations

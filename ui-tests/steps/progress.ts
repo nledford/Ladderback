@@ -14,7 +14,7 @@ import type { Locator, Page } from "playwright";
 import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { eachOf } from "./components.ts";
+import { eachOf } from "../support/gallery.ts";
 
 // The gallery's progress bars (`gallery.rs`): the one the reader advances,
 // one of unknown size and one of a step, then one at each size and one in
@@ -248,3 +248,68 @@ Then(
     assert.equal(fills, BARS - 2, "the progress bars of the gallery that draw a fill");
   },
 );
+
+// What a screen reader is told of the bar's value: `aria-valuenow`, which
+// changes at most every 30 s while the step stays the same (§4.5).
+Then("the progress bar {string} shows {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
+  await expect(this.page.getByRole("progressbar", { name: namePattern(name) })).toHaveAttribute("aria-valuenow", String(percent));
+});
+
+// What a screen reader reads as the bar's value, `aria-valuetext`, without
+// the isolation marks around the values the page put in it, which a reader
+// never hears.
+Then("the progress bar {string} reads {string}", async function (this: BrowserWorld, name: string, text: string) {
+  const bar = this.page.getByRole("progressbar", { name: namePattern(name) });
+  const heard = async () => ((await bar.getAttribute("aria-valuetext")) ?? "").replace(/[\u2066-\u2069]/g, "");
+  await expect.poll(heard).toBe(text);
+});
+
+// The fill a sighted reader sees, drawn to the percentage at every report,
+// whatever the bar has told a screen reader so far.
+const filled = (bar: Locator) =>
+  bar.evaluate((element) => (element.querySelector(".progress-fill") as HTMLElement | null)?.style.inlineSize ?? "");
+
+Then("the progress bar {string} is filled to {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
+  await expect.poll(() => filled(this.page.getByRole("progressbar", { name: namePattern(name) }))).toBe(`${percent}%`);
+});
+
+// What a sighted reader sees: the fill drawn to the percentage, and the
+// percentage written inside the bar beside it. Both follow every report.
+Then("the progress bar {string} is drawn at {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
+  const bar = this.page.getByRole("progressbar", { name: namePattern(name) });
+  await expect.poll(() => filled(bar)).toBe(`${percent}%`);
+  await expect.poll(() => bar.evaluate((element) => (element as HTMLElement).innerText)).toContain(`${percent}%`);
+});
+
+// How long the fill takes to move to a new report, as the browser computes it
+// under the reader's settings: "0s" is a jump.
+const moves = (bar: Locator) =>
+  bar.evaluate((element) => {
+    const fill = element.querySelector(".progress-fill");
+    return fill === null ? "" : getComputedStyle(fill).transitionDuration;
+  });
+
+Then("the fill of the progress bar {string} moves smoothly to each report", async function (this: BrowserWorld, name: string) {
+  const bar = this.page.getByRole("progressbar", { name: namePattern(name) });
+  await expect.poll(() => moves(bar)).toMatch(/^(?!0s$)\d/);
+});
+
+Then("the fill of the progress bar {string} jumps to each report", async function (this: BrowserWorld, name: string) {
+  const bar = this.page.getByRole("progressbar", { name: namePattern(name) });
+  await expect.poll(() => moves(bar)).toBe("0s");
+});
+
+// A bar whose size isn't known is indeterminate (WAI-ARIA `progressbar`): it
+// has no value to give, so it gives no `aria-valuenow`, rather than a value
+// of nothing, and its value text says what the operation is doing, never a
+// percentage. What it shows, where a known bar's percentage stands, says the
+// same, so a sighted reader sees no "0%" either.
+Then("the progress bar {string} shows no percentage", async function (this: BrowserWorld, name: string) {
+  const bar = this.page.getByRole("progressbar", { name: namePattern(name) });
+  await expect(bar).toHaveCount(1);
+  await expect(bar).not.toHaveAttribute("aria-valuenow");
+  await expect(bar).toHaveAttribute("aria-valuetext", /^[^%]+$/);
+  const shown = () => bar.evaluate((element) => (element as HTMLElement).innerText.trim());
+  await expect.poll(shown).not.toBe("");
+  await expect.poll(shown).not.toMatch(/%/);
+});

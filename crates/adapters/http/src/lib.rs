@@ -68,6 +68,7 @@ pub use request_checks::{
 pub use restart::{Restart, RestartAsker, Work, asked_by};
 pub use restores::{RestoreRefusal, RestoreStart, Restores};
 pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
+pub use sync::SyncHub;
 
 use api::UiEvent;
 use app::ports::EventBus;
@@ -124,6 +125,9 @@ pub struct AppState {
     /// What the Full Disk Access probe found, and what opens System
     /// Settings' pane for it: neither off macOS (§16, decision 115).
     pub full_disk_access: FullDiskAccessRoute,
+    /// What `/sync/` serves: the hub's handshake under `serve --hub`, and
+    /// nothing otherwise (§16, decision 122).
+    pub sync: SyncHub,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {
@@ -674,7 +678,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
                 .post(restart::ask)
                 .delete(restart::cancel),
         )
-        .merge(sync::routes())
+        .merge(sync::routes(&state.sync))
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
             let assets = Arc::clone(&assets);
@@ -1671,6 +1675,7 @@ mod tests {
             updates: Arc::default(),
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
             full_disk_access: FullDiskAccessRoute::default(),
+            sync: SyncHub::default(),
         }
     }
 
@@ -1719,6 +1724,7 @@ mod tests {
             updates: Arc::default(),
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
             full_disk_access: FullDiskAccessRoute::default(),
+            sync: SyncHub::default(),
         };
         let app = router(ui(), RequestChecks::default(), state);
         tokio::spawn(async move {
@@ -3267,6 +3273,7 @@ mod tests {
             updates: Arc::default(),
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
             full_disk_access: FullDiskAccessRoute::default(),
+            sync: SyncHub::default(),
         };
         let response = router(ui(), RequestChecks::default(), state)
             .oneshot(
