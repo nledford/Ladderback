@@ -15,7 +15,7 @@ One recommended channel for each case keeps the README and the install guide sho
 3. **An agent on macOS:** the install script, which builds the release from source.
    - The recommended path includes signing that build with a self-signed certificate named in `LADDERBACK_SIGN_IDENTITY` (decision 71; the install guide's "Signing your build"), so that Full Disk Access carries over to the next update.
    - An ad-hoc-signed build loses its Full Disk Access grant at every update, and a backup tool that quietly stops reading protected folders is worse than one that is harder to install.
-4. **A hub:** the Docker image (#358), on a server or a NAS, with the Linux packages as the alternative on a machine without containers. The image is for the hub only: in a container, an agent sees only the folders mounted into it, runs as the container's user, and on macOS gets no Full Disk Access.
+4. **A hub:** the Docker image (#358), published as `ghcr.io/nledford/ladderback` and `docker.io/nledford/ladderback` (the maintainer's choice: Docker Hub is where a NAS's container app searches), on a server or a NAS, with the Linux packages as the alternative on a machine without containers. The image is for the hub only: in a container, an agent sees only the folders mounted into it, runs as the container's user, and on macOS gets no Full Disk Access.
 5. **The Homebrew tap (#359) waits for #344.**
    - A formula that builds from source is signed ad hoc on every upgrade: Homebrew filters the build's environment, so `LADDERBACK_SIGN_IDENTITY` doesn't reach it, and every upgrade loses Full Disk Access.
    - A prebuilt binary that isn't notarized is blocked by Gatekeeper.
