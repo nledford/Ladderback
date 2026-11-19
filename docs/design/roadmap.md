@@ -205,6 +205,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [121](decisions/121-pairing-a-machine-with-its-hub.md) | How a person pairs a machine with its hub |
 | [122](decisions/122-hub-out-of-releases-until-m8.md) | How the hub stays out of releases until M8 |
 | [123](decisions/123-deb-and-rpm-packages.md) | .deb and .rpm packages with each release, built by nfpm |
+| [124](decisions/124-mvp-ci-mode.md) | How CI runs on pull requests until the MVP |
 
 ## 17. Open questions
 

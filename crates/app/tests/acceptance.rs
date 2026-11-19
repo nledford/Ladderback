@@ -55,6 +55,8 @@ mod api_tokens_steps;
 mod download_steps;
 #[path = "steps/hooks.rs"]
 mod hooks_steps;
+#[path = "steps/hub_tls_key.rs"]
+mod hub_tls_key_steps;
 #[path = "steps/interop.rs"]
 mod interop_steps;
 #[path = "steps/notifications.rs"]
@@ -91,6 +93,7 @@ struct Agent {
     job: FakeJob,
     finished: Option<Finished>,
     hooks: hooks_steps::HooksWorld,
+    hub_tls_key: hub_tls_key_steps::HubTlsKeyWorld,
     secrets: secrets_steps::SecretsWorld,
     config: config_steps::ConfigWorld,
     conditions: conditions_steps::ConditionsWorld,
@@ -153,6 +156,7 @@ impl Agent {
             api_tokens: Default::default(),
             maintenance: Default::default(),
             hooks: hooks_steps::HooksWorld::new(),
+            hub_tls_key: Default::default(),
             repositories: Default::default(),
             forget: Default::default(),
             interop: Default::default(),
