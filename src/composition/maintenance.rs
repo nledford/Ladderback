@@ -161,7 +161,7 @@ pub(super) async fn start(
         let _ = started.send(Ok(()));
         let finished = use_case.execute(prepared, cancel).await;
         registry.finish(&operation);
-        super::log_ended(&finished);
+        super::plan_runner::log_ended(&finished);
     }));
     // A task that ended without answering has not started anything the route
     // could name.

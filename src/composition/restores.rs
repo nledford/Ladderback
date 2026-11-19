@@ -191,7 +191,7 @@ impl http_adapter::Restores for RestoreService {
             let _ = started.send(Ok(prepared.folder().map(str::to_owned)));
             let finished = restores.run(prepared, cancel).await;
             registry.finish(&operation);
-            super::log_ended(&finished);
+            super::plan_runner::log_ended(&finished);
         }));
         match wait_for_start.await {
             Ok(answer) => answer.map(|folder| api::RestoreStartedDto {

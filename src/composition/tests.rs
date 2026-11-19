@@ -2,16 +2,22 @@
 //! `service_support` hold what more than one of them shares.
 
 use app::browse::BrowseError;
-use app::ports::{Keyring, KeyringError, SnapshotSummary};
+use app::execution::Finished;
+use app::history::GetOperation;
+use app::ports::{BackupJob, HookRunner, Keyring, KeyringError, SnapshotSummary};
 use app::secrets::Field;
 use app::snapshots::SnapshotError;
 use domain::browse::FolderPath;
+use domain::execution::plan_tags::PlanTags;
+use domain::execution::{Target, Trigger};
 use domain::planning::{InterfaceKind, Link, Location, LocationRule, Maintenance, NameFilter};
 use domain::secrets::FileRead;
-use domain::{RepositoryAlias, SnapshotId};
-use http_adapter::{CatalogError, FolderError, SnapshotsError};
+use domain::{AgentId, PlanId, RepositoryAlias, SnapshotId};
+use http_adapter::{CatalogError, FolderError, MaintenanceRefusal, SnapshotsError, StartError};
+use uuid::Uuid;
 
 use super::*;
+use crate::composition::plan_runner::{BuiltBackup, Unbuilt, log_ended, operation_of, run_named};
 
 mod announcements;
 mod cancels;
