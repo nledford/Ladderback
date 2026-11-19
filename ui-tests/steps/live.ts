@@ -56,7 +56,7 @@ const FILE_BYTES = 2048;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Polls `read` until it returns a value, or fails with what it last saw. */
 export async function until<T>(read: () => Promise<T | null>, ms: number, what: string): Promise<T> {
@@ -550,7 +550,7 @@ When("I reload the page", async function (this: BrowserWorld) {
 Then(
   "the table {string} has a row {string} that shows {string}",
   async function (this: BrowserWorld, name: string, row: string, status: string) {
-    const rows = table(this, name).getByRole("row", { name: new RegExp([...row].map(escape).join(ISOLATION)) });
+    const rows = table(this, name).getByRole("row", { name: new RegExp([...row].map(escapeRegExp).join(ISOLATION)) });
     await until(
       async () => {
         const found = await rows
@@ -741,7 +741,7 @@ Then(
     // The header holding the button: a page may show other tables with a
     // column of the same name.
     const cell = this.page
-      .getByRole("columnheader", { name: new RegExp(`^${ISOLATION}${escape(header)}\\b`) })
+      .getByRole("columnheader", { name: new RegExp(`^${ISOLATION}${escapeRegExp(header)}\\b`) })
       .filter({ has: this.page.getByRole("button", { name: namePattern(button) }) });
     assert.equal(await cell.count(), 1, `the column header "${header}" is not on the page once`);
     const control = cell.getByRole("button", { name: namePattern(button) });
@@ -871,7 +871,7 @@ Then("the page shows the row {string}", async function (this: BrowserWorld, row:
 /** What a reader hears of the cell of `row` under the column header `column`,
  *  once the row is there: its words, as `said` reads them. */
 export async function cellText(world: BrowserWorld, name: string, row: string, column: string): Promise<string> {
-  const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   const found = rowNamed(world, name, row).first();
   await found.waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
@@ -951,7 +951,7 @@ Then(
 /** The cell of `row` under the column header `column`, once the row is
  *  there, found by its role. */
 async function cellOf(world: BrowserWorld, name: string, row: string, column: string): Promise<Locator> {
-  const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   const found = rowNamed(world, name, row).first();
   await found.waitFor({ state: "visible", timeout: ROW_PATIENCE_MS });
@@ -965,7 +965,7 @@ async function cellOf(world: BrowserWorld, name: string, row: string, column: st
  *  that says `expected`: a reader hears what a run did as a list, one fact an
  *  item. */
 export async function untilCellLists(world: BrowserWorld, name: string, row: string, column: string, expected: string): Promise<void> {
-  const spoken = new RegExp([...expected].map(escape).join(ISOLATION));
+  const spoken = new RegExp([...expected].map(escapeRegExp).join(ISOLATION));
   const cell = await cellOf(world, name, row, column);
   const item = cell.getByRole("list").getByRole("listitem").filter({ hasText: spoken });
   await expect(item, `the ${column} of the row ${row} lists "${expected}"`).toHaveCount(1, { timeout: ROW_PATIENCE_MS });
@@ -1079,7 +1079,7 @@ Then(
 Then(
   "the header {string} of the table {string} keeps its words whole",
   async function (this: BrowserWorld, column: string, name: string) {
-    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
     for (const word of column.split(" ")) {
       const found = await header.evaluate(partsBrokenInside, { text: word, whole: true });
       assert.ok(found !== null, `the header ${column} of the table ${name} doesn't show "${word}"`);
@@ -1093,7 +1093,7 @@ Then(
 Then(
   "the column {string} of the table {string} is wider than each of the others",
   async function (this: BrowserWorld, column: string, name: string) {
-    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
     const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
     const widths = await columnWidths(this, name);
     const own = widths[index] ?? 0;
@@ -1108,7 +1108,7 @@ Then(
 Then(
   "the column {string} of the table {string} takes at least a quarter of the table's width",
   async function (this: BrowserWorld, column: string, name: string) {
-    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
     const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
     const widths = await columnWidths(this, name);
     const own = widths[index] ?? 0;
@@ -1120,7 +1120,7 @@ Then(
 // The cells of the named column each carry the instant they show, so the
 // order is read from those, not from localized text.
 async function instants(world: BrowserWorld, name: string, column: string): Promise<string[]> {
-  const header = table(world, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(escapeRegExp(column)) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   return evaluateAll(
     table(world, name).locator("tbody tr"),
@@ -1149,7 +1149,7 @@ Given("the browser is in the time zone {string}", function (this: BrowserWorld, 
  *  UTC) and what a reader hears of it: its text, without bidi isolation marks
  *  and with the narrow and no-break spaces V8 and CLDR differ on folded. */
 async function timeCells(world: BrowserWorld, name: string, column: string): Promise<Array<readonly [string, string]>> {
-  const header = table(world, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
+  const header = table(world, name).getByRole("columnheader", { name: new RegExp(escapeRegExp(column)) });
   const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
   const cells = await evaluateAll(
     table(world, name).locator("tbody tr"),
@@ -1253,7 +1253,7 @@ Then(
   async function (this: BrowserWorld, row: string, name: string, column: string, zone: string) {
     const planned = await plannedRun(this, row);
     assert.ok(planned, `the daemon lists no planned run of ${row}`);
-    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
     const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
     const found = rowNamed(this, name, row).first();
     await found.waitFor({ state: "visible", timeout: UPDATE_PATIENCE_MS });
@@ -1285,7 +1285,7 @@ Then("the table {string} shows its {string} column oldest first", async function
 Then(
   "the table {string} announces its {string} column as sorted {word}",
   async function (this: BrowserWorld, name: string, column: string, direction: string) {
-    const header = table(this, name).getByRole("columnheader", { name: new RegExp(escape(column)) });
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(escapeRegExp(column)) });
     await expect(header).toHaveAttribute("aria-sort", direction);
   },
 );

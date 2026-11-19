@@ -377,7 +377,7 @@ Then(
 // seconds is generous.
 const PAGE_PATIENCE_MS = 10_000;
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // A page's own message (§4.5, #929): an Error alert, found by its class, as
 // it has no role. What the catalog filled in is set apart by bidi isolation
@@ -387,7 +387,7 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // the announcer, it stands inside the dialog's own `role="alert"` (the
 // Dialog contract).
 Then("the page shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
-  const heard = [...needle].map(escape).join(ISOLATION);
+  const heard = [...needle].map(escapeRegExp).join(ISOLATION);
   const alert = this.page.locator(".alert.tone-error").filter({ hasText: new RegExp(heard) });
   await alert.first().waitFor({ state: "visible", timeout: PAGE_PATIENCE_MS });
   const found = await alert.first().evaluate((element, live) => {

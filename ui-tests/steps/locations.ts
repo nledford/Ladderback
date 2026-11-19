@@ -24,7 +24,7 @@ const PASSWORD = "demo-password";
 // A Test probes each location, and a backup opens the repository: each takes
 // the engine a moment, in a debug build more than one.
 const PATIENCE_MS = 25_000;
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** What the scenario knows of its repository's locations. */
 interface Locations {
@@ -175,7 +175,7 @@ When("I open the Operations page", async function (this: BrowserWorld) {
 });
 
 function locationList(world: BrowserWorld, alias: string) {
-  return world.page.getByRole("list", { name: new RegExp(`^Locations of \\W?${escape(alias)}\\W?$`) });
+  return world.page.getByRole("list", { name: new RegExp(`^Locations of \\W?${escapeRegExp(alias)}\\W?$`) });
 }
 
 // A daemon whose only repository is reached at two addresses that need no
@@ -265,7 +265,7 @@ Then(
 
 When("I press {string} for the repository {string}", async function (this: BrowserWorld, label: string, alias: string) {
   const keys = journey(this.page);
-  const button = keys.byRole("button", { name: new RegExp(`^${escape(label)}\\b.*${escape(alias)}\\W?$`) });
+  const button = keys.byRole("button", { name: new RegExp(`^${escapeRegExp(label)}\\b.*${escapeRegExp(alias)}\\W?$`) });
   await pressUntilFocused(this.page, "Tab", button, `the button "${label}" of ${alias}`);
   await keys.press("Enter");
 });

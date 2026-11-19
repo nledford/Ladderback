@@ -44,7 +44,7 @@ const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** What these steps read of the daemon's answers: a started operation's id,
  *  or an operation with its status and, when it failed, its code. */
@@ -213,7 +213,7 @@ Given("a backup of the plan {string} has failed", async function (this: BrowserW
 Then(
   "the row {string} of the table {string} gives the engine's own words in English in its {string} column",
   async function (this: BrowserWorld, row: string, name: string, column: string) {
-    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escape(column)}`) });
+    const header = table(this, name).getByRole("columnheader", { name: new RegExp(`^${escapeRegExp(column)}`) });
     const index = await header.evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
     const found = rowNamed(this, name, row).first();
     await found.waitFor({ state: "visible", timeout: ROWS_PATIENCE_MS });
@@ -390,7 +390,7 @@ async function readAgain(world: BrowserWorld): Promise<void> {
 // An adoption button names the agent too, which a journey cannot know.
 function adoptionButton(world: BrowserWorld, plan: string): Locator {
   return journey(world.page).byRole("button", {
-    name: new RegExp(`^Adopt history of plan .+ from agent .+ into plan ${ISOLATION}${escape(plan)}${ISOLATION}$`),
+    name: new RegExp(`^Adopt history of plan .+ from agent .+ into plan ${ISOLATION}${escapeRegExp(plan)}${ISOLATION}$`),
   });
 }
 
@@ -402,7 +402,7 @@ When("I press Tab until focus is on the adoption button into the plan {string}",
 // sentence of the catalog around the alias, so in a pseudolocale the alias is
 // what is left to find it by.
 When("I press Tab until focus is on the button of the repository {string}", async function (this: BrowserWorld, alias: string) {
-  const target = journey(this.page).byRole("button", { name: new RegExp(escape(alias)) });
+  const target = journey(this.page).byRole("button", { name: new RegExp(escapeRegExp(alias)) });
   await tabUntilFocused(this, target, `the button of the repository "${alias}"`);
 });
 
@@ -687,7 +687,7 @@ Given("the daemon refuses each change of who maintains a repository", function (
 // is set apart by bidi isolation marks, which a reader never hears (§4.5):
 // they may stand between any two characters.
 Then("the page shows an alert containing {string}", async function (this: BrowserWorld, needle: string) {
-  const heard = [...needle].map(escape).join(ISOLATION);
+  const heard = [...needle].map(escapeRegExp).join(ISOLATION);
   await this.page
     .getByRole("alert")
     .filter({ hasText: new RegExp(heard) })
@@ -697,7 +697,7 @@ Then("the page shows an alert containing {string}", async function (this: Browse
 
 // Nothing the page says now: an alert drawn with the page is there at once.
 Then("the page shows no alert containing {string}", async function (this: BrowserWorld, needle: string) {
-  const heard = [...needle].map(escape).join(ISOLATION);
+  const heard = [...needle].map(escapeRegExp).join(ISOLATION);
   const alerts = this.page.getByRole("alert").filter({ hasText: new RegExp(heard) });
   assert.equal(await alerts.count(), 0, `the page shows an alert containing "${needle}"`);
 });

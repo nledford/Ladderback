@@ -27,7 +27,7 @@ const ANSWER_SETTLES_MS = 6_000;
 
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // A daemon of the scenario's own, its config naming no repository, and a
 // scratch copy of the `demo-repo` fixture beside it. The After hook of
@@ -188,7 +188,7 @@ function mainTextMatches(world: BrowserWorld, pattern: string) {
 }
 
 Then("the page shows a message containing {string}", async function (this: BrowserWorld, needle: string) {
-  await mainTextMatches(this, escape(needle));
+  await mainTextMatches(this, escapeRegExp(needle));
 });
 
 Then("the page shows a repository ID", async function (this: BrowserWorld) {

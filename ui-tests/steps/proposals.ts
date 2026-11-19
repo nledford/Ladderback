@@ -159,7 +159,7 @@ Then("the open proposal shows no alert", async function (this: BrowserWorld) {
 });
 
 // Escapes what a regular expression would read as its own syntax.
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // A refusal shown inside the open proposal, not elsewhere on the page: an
 // Error alert (#929), found by its class, as it has no role. What the
@@ -167,7 +167,7 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 Then("the open proposal shows an error alert containing {string}", async function (this: BrowserWorld, needle: string) {
   await openProposal(this)
     .locator(".alert.tone-error")
-    .filter({ hasText: new RegExp([...needle].map(escape).join(ISOLATION)) })
+    .filter({ hasText: new RegExp([...needle].map(escapeRegExp).join(ISOLATION)) })
     .first()
     .waitFor({ state: "visible", timeout: ANSWER_PATIENCE_MS });
 });
