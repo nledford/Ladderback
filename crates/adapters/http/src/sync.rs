@@ -221,14 +221,19 @@ mod served {
         }
 
         async fn converse(&self, socket: &mut WebSocket) -> End {
-            let mut session = match self.pairing.session(None).await {
-                Ok(session) => session,
-                Err(error) => {
-                    log::warn!("/sync/v1: the hub's keys couldn't be read: {error:?}");
-                    return End::Dropped;
-                }
-            };
-            let first = tokio::time::timeout(self.bounds.connect_within, next(socket)).await;
+            // The first bound counts from the connection's admission, so
+            // reading the hub's keys is within it.
+            let first_by = tokio::time::Instant::now() + self.bounds.connect_within;
+            let mut session =
+                match tokio::time::timeout_at(first_by, self.pairing.session(None)).await {
+                    Ok(Ok(session)) => session,
+                    Ok(Err(error)) => {
+                        log::warn!("/sync/v1: the hub's keys couldn't be read: {error:?}");
+                        return End::Dropped;
+                    }
+                    Err(_) => return End::Dropped,
+                };
+            let first = tokio::time::timeout_at(first_by, next(socket)).await;
             let mut read = first.unwrap_or(Next::Gone);
             loop {
                 let frame = match read {
