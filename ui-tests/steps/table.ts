@@ -5,11 +5,7 @@
 // start. Keyboard only, role-and-name locators, as everywhere in steps/.
 //
 // The table is named by its caption, and its frame, a region, by the same
-// caption through aria-labelledby, so what these steps read of the frame
-// they read with `evaluate`, in Playwright's utility world, and never with
-// `evaluateAll`, in the page's main world: Firefox crashes the page when a
-// name read through aria-labelledby is computed in both (microsoft/playwright
-// #43967, issue #774).
+// caption through aria-labelledby.
 
 import assert from "node:assert/strict";
 
