@@ -508,11 +508,13 @@ fn when(seconds: u64) -> String {
 
 /// The token as pasted, read until it reads as a token, a blank line comes
 /// or it grows past what a token takes, so a token wrapped across lines
-/// reads whole and none of it is left for the shell (decision 121).
+/// reads whole and none of it is left for the shell (decision 121). Echo
+/// stays off, and what the terminal queued stays queued, across the lines.
 fn read_pasted() -> io::Result<String> {
+    let mut input = terminal::SecretInput::stdin()?;
     let mut pasted = String::new();
     loop {
-        let line = terminal::read_secret_line(PASTE_MAX_BYTES)?;
+        let line = input.read_line(PASTE_MAX_BYTES)?;
         let line = line.trim();
         if line.is_empty() {
             return Ok(pasted);

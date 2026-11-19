@@ -23,23 +23,26 @@ pub fn read_secret_line(max: usize) -> io::Result<String> {
 }
 
 /// Standard input held for secrets, a line at a time. At a terminal, what is
-/// typed is not shown.
+/// typed is not shown from the moment this is made until it is dropped, and
+/// the terminal's settings are changed once: changing them discards the
+/// input the terminal has queued, so a person who pastes several lines at
+/// once would lose all but the first if each read changed them.
 pub struct SecretInput<R> {
     reader: R,
-    tty: Option<Tty>,
+    _quiet: Option<EchoOff>,
 }
 
 impl SecretInput<io::StdinLock<'static>> {
     /// Standard input, at a terminal or a pipe.
     pub fn stdin() -> io::Result<Self> {
-        let tty = if stdin_is_terminal() {
-            Some(stdin_tty()?)
+        let quiet = if stdin_is_terminal() {
+            Some(EchoOff::start(&stdin_tty()?)?)
         } else {
             None
         };
         Ok(Self {
             reader: io::stdin().lock(),
-            tty,
+            _quiet: quiet,
         })
     }
 }
@@ -50,14 +53,13 @@ impl<R: BufRead> SecretInput<R> {
     fn over(tty: Tty, reader: R) -> io::Result<Self> {
         Ok(Self {
             reader,
-            tty: Some(tty),
+            _quiet: Some(EchoOff::start(&tty)?),
         })
     }
 
     /// One line of at most `max` bytes, without its line ending: an
     /// `InvalidData` error when it is longer, and when it is not UTF-8.
     pub fn read_line(&mut self, max: usize) -> io::Result<String> {
-        let _quiet = self.tty.as_ref().map(EchoOff::start).transpose()?;
         read_line_from(&mut self.reader, max)
     }
 }
