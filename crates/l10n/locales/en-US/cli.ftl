@@ -441,12 +441,6 @@ cli-pairing-token-too-many = there are too many unused tokens. Use one, wait for
 # $detail (text): the system's message. It is shown as it came.
 cli-hub-command-failed = the command failed: { $detail }
 
-# A key file in the data folder was refused because other users of this machine can read or change it. It was not used and was left as it is.
-# $file (text): the file's name in the data folder, such as agent-key.
-# $mode (text): the file's permissions in octal, such as 0644.
-# The command is typed as it is: keep it a string literal.
-cli-key-file-exposed = the key file { $file } in the data folder was not used, because other users of this machine can read or change it (permissions { $mode }). If you copied or restored it yourself, run { "chmod 600" } on it and try again; if you didn't, someone else may hold this key.
-
 # `ladderback pair` asks for the token at a terminal; what is pasted is not shown. Printed without the program's name, and the paste follows on the same line.
 cli-pair-prompt = Paste the pairing token:
 

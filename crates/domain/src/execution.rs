@@ -334,10 +334,6 @@ pub enum WarningKind {
     /// `secret` and `detail` the file's mode in octal (`0644`); never the
     /// secret (I4).
     SecretFileReadable,
-    /// A secret the operation read came from a file other users of the
-    /// machine can change, so they can choose the secret (#1137). `item`,
-    /// `during` and `detail` as for [`Self::SecretFileReadable`].
-    SecretFileWritable,
     /// On macOS, a source item the system refused (`EPERM`) during a backup
     /// whose Full Disk Access probe, run before it, found the grant missing
     /// (§16, decision 115): a [`Self::SourceUnreadable`] the grant explains.
@@ -361,7 +357,6 @@ impl WarningKind {
             Self::OtherHosts => "maintenance-other-hosts",
             Self::LocationSkipped => "location-skipped",
             Self::SecretFileReadable => "secret-file-readable",
-            Self::SecretFileWritable => "secret-file-writable",
             Self::FullDiskAccessMissing => "full-disk-access-missing",
             Self::Other => "unknown",
         }
@@ -729,19 +724,16 @@ impl Operation {
     }
 
     /// Counts `warning` and keeps a cut copy of it while there is room
-    /// ([`Self::record_warning`]). An operation names a secret file others
-    /// can read or change once, however many of its reads met it (#386):
-    /// such a warning for a path already kept is neither kept nor counted
-    /// again.
+    /// ([`Self::record_warning`]). An operation names a readable secret file
+    /// once, however many of its reads met it (#386): such a warning for a
+    /// path already kept is neither kept nor counted again.
     fn keep(&mut self, warning: Warning) {
         let item = warning.item.map(cut_warning_text);
-        if matches!(
-            warning.kind,
-            WarningKind::SecretFileReadable | WarningKind::SecretFileWritable
-        ) && self
-            .warnings
-            .iter()
-            .any(|kept| kept.kind == warning.kind && kept.item == item)
+        if warning.kind == WarningKind::SecretFileReadable
+            && self
+                .warnings
+                .iter()
+                .any(|kept| kept.kind == warning.kind && kept.item == item)
         {
             return;
         }
@@ -910,7 +902,6 @@ mod tests {
             WarningKind::OtherHosts,
             WarningKind::LocationSkipped,
             WarningKind::SecretFileReadable,
-            WarningKind::SecretFileWritable,
             WarningKind::FullDiskAccessMissing,
             WarningKind::Other,
         ]
@@ -928,7 +919,6 @@ mod tests {
                 "maintenance-other-hosts",
                 "location-skipped",
                 "secret-file-readable",
-                "secret-file-writable",
                 "full-disk-access-missing",
                 "unknown",
             ]
@@ -966,34 +956,6 @@ mod tests {
             ]
         );
         assert_eq!(op.warning_count(), 3);
-    }
-
-    /// An operation names a secret file others can change once too, however
-    /// many of its reads met it (#1137).
-    #[test]
-    fn an_operation_names_a_changeable_secret_file_once() {
-        let changeable = |path: &str| Warning {
-            kind: WarningKind::SecretFileWritable,
-            item: Some(path.to_owned()),
-            during: "secret".to_owned(),
-            detail: "0620".to_owned(),
-        };
-        let mut op = queued();
-        op.attach_warning(changeable("/home/demo/nas-password"))
-            .unwrap();
-        op.start(t(10)).unwrap();
-        op.record_warning(changeable("/home/demo/nas-password"))
-            .unwrap();
-        op.record_warning(changeable("/home/demo/lan-key")).unwrap();
-        op.record_warning(changeable("/home/demo/lan-key")).unwrap();
-        assert_eq!(
-            op.warnings(),
-            [
-                changeable("/home/demo/nas-password"),
-                changeable("/home/demo/lan-key"),
-            ]
-        );
-        assert_eq!(op.warning_count(), 2);
     }
 
     fn failed() -> OperationStatus {

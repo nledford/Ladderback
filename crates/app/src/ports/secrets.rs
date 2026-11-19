@@ -26,10 +26,9 @@ use domain::secrets::{SecretError, SecretRef, SecretValue, SecretWarning};
 ///   reached is `Unreachable`.
 /// - Whatever a source gives is limited to `MAX_SECRET_BYTES`, the whole of
 ///   it and not only the secret in it: more is `TooLarge`.
-/// - A file that group or others can change comes with a
-///   `SecretWarning::FileWritableByOthers`, and one they can only read with
-///   a `SecretWarning::FileReadableByOthers`, unless it is under a
-///   directory where a container runtime or systemd sets permissions
+/// - A file that group or others can read comes with a
+///   `SecretWarning::FileReadableByOthers`, unless it is under a directory
+///   where a container runtime or systemd sets permissions
 ///   (`domain::secrets::file_warning`).
 /// - An error names its source and never holds a secret's value.
 #[async_trait]

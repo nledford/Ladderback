@@ -100,7 +100,6 @@ async fn variables_and_files(harness: &dyn SecretsHarness) {
     a_secret_has_to_be_text(harness).await;
     a_secret_may_be_as_large_as_the_limit_and_no_larger(harness).await;
     a_file_others_can_read_comes_with_a_warning(harness).await;
-    a_file_others_can_change_comes_with_its_own_warning(harness).await;
     the_credentials_directory_is_trusted(harness).await;
     a_link_out_of_the_credentials_directory_is_not_trusted(harness).await;
 }
@@ -343,22 +342,6 @@ async fn a_file_others_can_read_comes_with_a_warning(harness: &dyn SecretsHarnes
         assert_eq!(
             resolve(harness, &file(&path, FileRead::FirstLine)).await,
             gives("hunter2"),
-            "mode {mode:o}"
-        );
-    }
-}
-
-/// Whoever can change the file chooses the secret (#1137): its own warning,
-/// in place of the readable one when both hold.
-async fn a_file_others_can_change_comes_with_its_own_warning(harness: &dyn SecretsHarness) {
-    for mode in [0o602, 0o620, 0o666] {
-        let path = harness.write_file(&format!("changeable-{mode:o}"), b"hunter2\n", mode);
-        assert_eq!(
-            resolve(harness, &file(&path, FileRead::FirstLine)).await,
-            Ok(Resolved {
-                value: SecretValue::new("hunter2"),
-                warnings: vec![SecretWarning::FileWritableByOthers { path, mode }],
-            }),
             "mode {mode:o}"
         );
     }

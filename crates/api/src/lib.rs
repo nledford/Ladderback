@@ -623,10 +623,6 @@ pub enum WarningCode {
     /// (#386). The arguments are `path`, the file's path, and `mode`, its
     /// permission bits in octal (`0644`). Never the secret (I4).
     SecretFileReadable,
-    /// A secret was read from a file other users of the machine can change,
-    /// so they can choose the secret (#1137). The arguments are `path` and
-    /// `mode`, as for [`Self::SecretFileReadable`]. Never the secret (I4).
-    SecretFileWritable,
     /// A location of a repository sends its credentials where whoever
     /// answers at its address can read them (decision 80, §10.6). The
     /// arguments are `position`, the location's, from 1; `cause`:
@@ -1636,7 +1632,7 @@ impl WarningCode {
                     optional: false,
                 },
             ],
-            Self::SecretFileReadable | Self::SecretFileWritable => &[
+            Self::SecretFileReadable => &[
                 ArgSpec {
                     name: "path",
                     kind: ArgKind::Text,

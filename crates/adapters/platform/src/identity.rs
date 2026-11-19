@@ -261,10 +261,7 @@ const fn cap(file: KeyFile) -> usize {
 }
 
 /// What `file` at `path` holds, or `None` when there is none. More than its
-/// cap, text that isn't UTF-8, or text `parse` refuses is damage. On Unix a
-/// file other users can read or change is refused before any of it is read
-/// (#1137): every key file is written `0600`, so another mode means it was
-/// changed after.
+/// cap, text that isn't UTF-8, or text `parse` refuses is damage.
 fn read_parsed<T>(
     path: &Path,
     file: KeyFile,
@@ -276,17 +273,6 @@ fn read_parsed<T>(
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(unavailable(file, &error)),
     };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let metadata = opened
-            .metadata()
-            .map_err(|error| unavailable(file, &error))?;
-        let mode = metadata.permissions().mode() & 0o777;
-        if mode & 0o077 != 0 {
-            return Err(IdentityError::Exposed { file, mode });
-        }
-    }
     // One byte past the cap tells a file at the cap from a longer one; the
     // buffer is made at that size, so it never grows and leaves a copy.
     let mut bytes = Zeroizing::new(Vec::with_capacity(cap + 1));

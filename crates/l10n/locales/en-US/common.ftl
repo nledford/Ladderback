@@ -657,12 +657,6 @@ warning-keyring-not-activatable = Your keyring service is running, but nothing c
 # The command is typed as it is: keep it a string literal.
 warning-secret-file-readable = Other users of this machine can read the secret file { $path } (permissions { $mode }). Run { "chmod 600" } on it so that only its owner can read it.
 
-# A secret was read from a file other users of this machine can change, so they can choose the secret it holds.
-# $path (text): the file's path.
-# $mode (text): the file's permissions in octal, such as 0620.
-# The command is typed as it is: keep it a string literal.
-warning-secret-file-writable = Other users of this machine can change the secret file { $path } (permissions { $mode }), so they can choose the secret { -brand-name } reads from it. Run { "chmod 600" } on it so that only its owner can read or change it.
-
 # A hook command around the operation failed where its `on-failure` said to go on.
 # $phase (text): which hook list it ran from: before, after, failed or finally.
 # $exit_code (text): the hook's exit status, or `none` when it timed out or could not be started.

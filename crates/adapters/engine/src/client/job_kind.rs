@@ -137,7 +137,6 @@ pub(super) fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
                         WarningKind::LocationSkipped => WarningCode::LocationSkipped,
                         WarningKind::SecretFileReadable => WarningCode::SecretFileReadable,
-                        WarningKind::SecretFileWritable => WarningCode::SecretFileWritable,
                         WarningKind::FullDiskAccessMissing => WarningCode::FullDiskAccessMissing,
                         WarningKind::Other => WarningCode::Unknown,
                     },

@@ -2498,18 +2498,17 @@ fn warning_code(kind: WarningKind) -> WarningCode {
         WarningKind::OtherHosts => WarningCode::MaintenanceOtherHosts,
         WarningKind::LocationSkipped => WarningCode::LocationSkipped,
         WarningKind::SecretFileReadable => WarningCode::SecretFileReadable,
-        WarningKind::SecretFileWritable => WarningCode::SecretFileWritable,
         WarningKind::FullDiskAccessMissing => WarningCode::FullDiskAccessMissing,
         WarningKind::Other => WarningCode::Unknown,
     }
 }
 
-/// The arguments a warning's message takes, as the page gets them: the
-/// path and mode of a secret file others can read or change (#386, #1137),
-/// otherwise the item the warning names, if any.
+/// The arguments a warning's message takes, as the page gets them: a
+/// readable secret file's path and mode (#386), otherwise the item the
+/// warning names, if any.
 fn warning_args(warning: &domain::execution::Warning) -> Vec<MsgArg> {
     match warning.kind {
-        WarningKind::SecretFileReadable | WarningKind::SecretFileWritable => warning
+        WarningKind::SecretFileReadable => warning
             .item
             .iter()
             .cloned()
@@ -3809,10 +3808,10 @@ fn exists(settings: &RepositorySettings) -> RepositoriesError {
 }
 
 /// Says in the daemon's log what reading a set of secrets warned of: a file
-/// other users can read or change, by its path, masked of the secrets read
-/// with it, and its mode, never the secret (#386, #1137, I4). Each job,
-/// snapshot listing and notification that reads secrets tells it; a re-read
-/// that only masks a refusal doesn't (§10.2).
+/// other users can read, by its path, masked of the secrets read with it,
+/// and its mode, never the secret (#386, I4). Each job, snapshot listing
+/// and notification that reads secrets tells it; a re-read that only masks
+/// a refusal doesn't (§10.2).
 fn log_secret_warning(warning: &SecretWarning) {
     match warning {
         SecretWarning::FileReadableByOthers { path, mode } => log::warn!(
@@ -3820,12 +3819,6 @@ fn log_secret_warning(warning: &SecretWarning) {
              (permissions {mode:04o}); run `chmod 600` on it so that only its \
              owner can read it",
             WarningCode::SecretFileReadable
-        ),
-        SecretWarning::FileWritableByOthers { path, mode } => log::warn!(
-            "{:?}: other users of this machine can change the secret file {path} \
-             (permissions {mode:04o}), so they can choose the secret read from \
-             it; run `chmod 600` on it so that only its owner can read or change it",
-            WarningCode::SecretFileWritable
         ),
     }
 }

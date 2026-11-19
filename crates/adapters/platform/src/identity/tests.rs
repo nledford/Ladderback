@@ -22,16 +22,6 @@ fn path(data: &tempfile::TempDir, file: KeyFile) -> PathBuf {
     data.path().join(file.file_name())
 }
 
-/// Writes `text` as `file`, its owner's alone, as Ladderback writes it.
-fn write(data: &tempfile::TempDir, file: KeyFile, text: impl AsRef<[u8]>) {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut written = options.open(path(data, file)).unwrap();
-    std::io::Write::write_all(&mut written, text.as_ref()).unwrap();
-}
-
 fn pin() -> HubPin {
     HubPin::new(
         PublicKey::from_hex(KEY).unwrap(),
@@ -128,19 +118,18 @@ async fn every_file_is_its_owners_alone() {
     }
 }
 
-/// A file a person restored by hand, without its line break and its
-/// owner's alone, is read.
+/// A file a person restored by hand, without its line break, is read.
 #[tokio::test]
 async fn files_written_by_hand_are_read() {
     let (data, identity) = identity();
-    write(&data, KeyFile::AgentKey, "cd".repeat(32));
-    write(&data, KeyFile::RecoveryKey, KEY);
-    write(&data, KeyFile::ConnectionCounter, "41");
-    write(
-        &data,
-        KeyFile::HubTlsKey,
+    fs::write(path(&data, KeyFile::AgentKey), "cd".repeat(32)).unwrap();
+    fs::write(path(&data, KeyFile::RecoveryKey), KEY).unwrap();
+    fs::write(path(&data, KeyFile::ConnectionCounter), "41").unwrap();
+    fs::write(
+        path(&data, KeyFile::HubTlsKey),
         "-----BEGIN PRIVATE KEY-----\nMDEy\n-----END PRIVATE KEY-----",
-    );
+    )
+    .unwrap();
     let seed = identity.seed(SeedFile::AgentKey).await.unwrap().unwrap();
     assert_eq!(seed.expose(), &[0xcd; 32]);
     assert_eq!(
@@ -176,7 +165,7 @@ async fn a_damaged_file_is_an_error_and_left_alone() {
         (KeyFile::ConnectionCounter, "-1\n".to_owned()),
     ];
     for (file, text) in &damaged {
-        write(&data, *file, text);
+        fs::write(path(&data, *file), text).unwrap();
     }
     fn error<T>(file: KeyFile) -> Result<T, IdentityError> {
         Err(IdentityError::Damaged { file })
@@ -222,106 +211,14 @@ async fn a_damaged_file_is_an_error_and_left_alone() {
     }
 }
 
-/// A key file other users can read or change is refused, never used, and
-/// left as it is: Ladderback writes each one `0600`, so another mode means
-/// it was changed after, and a key others can read or replace is no longer
-/// this machine's alone (#1137).
-#[cfg(unix)]
-#[tokio::test]
-async fn a_key_file_others_can_read_or_change_is_refused_and_left_alone() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let pem = "-----BEGIN PRIVATE KEY-----\nMDEy\n-----END PRIVATE KEY-----\n";
-    for mode in [0o640, 0o604, 0o620, 0o602, 0o610, 0o601, 0o666] {
-        let (data, identity) = identity();
-        let files = [
-            (KeyFile::AgentKey, "cd".repeat(32)),
-            (KeyFile::HubKey, "ef".repeat(32)),
-            (KeyFile::RecoverySeed, "12".repeat(32)),
-            (KeyFile::RecoveryKey, KEY.to_owned()),
-            (KeyFile::HubTlsKey, pem.to_owned()),
-            (KeyFile::HubPin, pin().to_text()),
-            (KeyFile::ConnectionCounter, "41\n".to_owned()),
-        ];
-        for (file, text) in &files {
-            write(&data, *file, text);
-            fs::set_permissions(path(&data, *file), fs::Permissions::from_mode(mode)).unwrap();
-        }
-        let exposed = |file| Err(IdentityError::Exposed { file, mode });
-        for seed_file in SeedFile::ALL {
-            assert_eq!(
-                identity.seed(seed_file).await.map(|_| ()),
-                exposed(seed_file.key_file()),
-                "{mode:o}"
-            );
-        }
-        assert_eq!(
-            identity
-                .keep_seed(SeedFile::AgentKey, SigningSeed::from_bytes([1; 32]))
-                .await
-                .map(|_| ()),
-            exposed(KeyFile::AgentKey),
-            "{mode:o}"
-        );
-        assert_eq!(
-            identity.recovery_key().await.map(|_| ()),
-            exposed(KeyFile::RecoveryKey),
-            "{mode:o}"
-        );
-        assert_eq!(
-            identity.tls_key().await.map(|_| ()),
-            exposed(KeyFile::HubTlsKey),
-            "{mode:o}"
-        );
-        assert_eq!(
-            identity.pin().await.map(|_| ()),
-            exposed(KeyFile::HubPin),
-            "{mode:o}"
-        );
-        assert_eq!(
-            identity.begin_attempt().await.map(|_| ()),
-            exposed(KeyFile::ConnectionCounter),
-            "{mode:o}"
-        );
-        for (file, text) in &files {
-            let at = path(&data, *file);
-            assert_eq!(&fs::read_to_string(&at).unwrap(), text, "{file}");
-            let left = fs::metadata(&at).unwrap().permissions().mode() & 0o777;
-            assert_eq!(left, mode, "{file}");
-        }
-    }
-}
-
-/// A key file only its owner can read or change is read whatever else its
-/// mode says: no group or world bit is what counts (#1137).
-#[cfg(unix)]
-#[tokio::test]
-async fn a_key_file_only_its_owner_can_use_is_read_whatever_its_owner_bits() {
-    use std::os::unix::fs::PermissionsExt;
-
-    for mode in [0o400, 0o600, 0o700] {
-        let (data, identity) = identity();
-        write(&data, KeyFile::AgentKey, "cd".repeat(32));
-        fs::set_permissions(
-            path(&data, KeyFile::AgentKey),
-            fs::Permissions::from_mode(mode),
-        )
-        .unwrap();
-        assert!(
-            identity.seed(SeedFile::AgentKey).await.unwrap().is_some(),
-            "{mode:o}"
-        );
-    }
-}
-
 /// A file far past what it can hold isn't read whole.
 #[tokio::test]
 async fn an_oversized_file_is_damaged() {
     let (data, identity) = identity();
     let long = "ab".repeat(1 << 20);
-    write(&data, KeyFile::HubKey, &long);
-    write(&data, KeyFile::HubPin, &long);
-    write(&data, KeyFile::HubTlsKey, &long);
+    fs::write(path(&data, KeyFile::HubKey), &long).unwrap();
+    fs::write(path(&data, KeyFile::HubPin), &long).unwrap();
+    fs::write(path(&data, KeyFile::HubTlsKey), &long).unwrap();
     assert_eq!(
         identity.seed(SeedFile::HubKey).await.map(|_| ()),
         Err(IdentityError::Damaged {
@@ -347,7 +244,7 @@ async fn an_oversized_file_is_damaged() {
 async fn an_error_never_shows_the_files_text() {
     let (data, identity) = identity();
     let canary = String::from_utf8(CANARY_SEED.to_vec()).unwrap();
-    write(&data, KeyFile::HubKey, format!("{canary}\n"));
+    fs::write(path(&data, KeyFile::HubKey), format!("{canary}\n")).unwrap();
     let error = identity.seed(SeedFile::HubKey).await.unwrap_err();
     assert!(!format!("{error:?}").contains("canary"), "{error:?}");
 }
@@ -393,7 +290,7 @@ async fn an_attempt_holds_the_counter_against_another_process() {
 async fn a_counter_at_the_most_it_holds_starts_no_attempt() {
     let (data, identity) = identity();
     let most = format!("{}\n", u64::MAX);
-    write(&data, KeyFile::ConnectionCounter, &most);
+    fs::write(path(&data, KeyFile::ConnectionCounter), &most).unwrap();
     assert_eq!(
         identity.begin_attempt().await.map(|_| ()),
         Err(IdentityError::CounterExhausted)

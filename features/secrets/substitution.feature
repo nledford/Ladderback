@@ -812,21 +812,3 @@ Feature: Secret references in a repository's settings
       When the repository is resolved
       Then the resolved option "token" is "demo-token"
       And the resolution warns about nothing
-
-  Rule: A file that others can change comes with a warning of its own
-
-    Whoever can change a secret file chooses the secret: for a repository
-    initialised with it, the key it is made with (#1137). The warning says
-    so, in place of the one for a file others can read.
-
-    Scenario Outline: A file other users can change
-      Given the file "/home/demo/password" with mode <mode> holds "demo-password"
-      And the repository's password is in the file "/home/demo/password"
-      When the repository is resolved
-      Then the resolution warns once that others can change the file "/home/demo/password"
-
-      Examples:
-        | mode |
-        | 602  |
-        | 620  |
-        | 666  |

@@ -11,7 +11,7 @@ use api::{ErrorCode, MsgArg};
 use app::pairing::{
     AgentPairing, AgentPairingError, HubPairing, HubPairingError, PairFailure, PairWithHub,
 };
-use app::ports::{AgentRegistry as _, IdentityError, LinkError, Signing as _};
+use app::ports::{AgentRegistry as _, LinkError, Signing as _};
 use domain::fleet::{
     Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused, TokenId, TokenTls,
     is_loopback,
@@ -256,12 +256,6 @@ async fn revoke(localizer: &Localizer, pairing: &HubPairing, id: &str) -> io::Re
 }
 
 fn hub_refused(localizer: &Localizer, error: &HubPairingError) -> io::Result<ExitCode> {
-    if let HubPairingError::Identity(identity) = error
-        && let Some(args) = exposed(identity)
-    {
-        say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
-        return Ok(ExitCode::FAILURE);
-    }
     let id = match error {
         HubPairingError::TokenLife => msg::CLI_PAIRING_TOKEN_BAD_TTL,
         HubPairingError::TooManyUnusedTokens => msg::CLI_PAIRING_TOKEN_TOO_MANY,
@@ -269,19 +263,6 @@ fn hub_refused(localizer: &Localizer, error: &HubPairingError) -> io::Result<Exi
     };
     say(localizer, id, &[])?;
     Ok(ExitCode::FAILURE)
-}
-
-/// The arguments of `cli-key-file-exposed` when `error` refused a key file
-/// other users can read or change: its name and its mode in octal, as
-/// `chmod` takes it (#1137).
-fn exposed(error: &IdentityError) -> Option<Vec<(&'static str, MsgArg)>> {
-    match error {
-        IdentityError::Exposed { file, mode } => Some(vec![
-            ("file", text(file)),
-            ("mode", text(format!("{mode:04o}"))),
-        ]),
-        _ => None,
-    }
 }
 
 fn refused(localizer: &Localizer, detail: &str) -> io::Result<ExitCode> {
@@ -440,12 +421,6 @@ async fn on_the_agent(
             Ok(ExitCode::SUCCESS)
         }
         Err(failure) => {
-            if let PairFailure::Pairing(AgentPairingError::Identity(identity)) = &failure
-                && let Some(args) = exposed(identity)
-            {
-                say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
-                return Ok(ExitCode::FAILURE);
-            }
             let (code, args, detail) = failed(&failure, &address);
             to_stderr(&format!(
                 "ladderback: {}\n",
@@ -559,29 +534,6 @@ mod tests {
     #[test]
     fn a_moment_shows_as_its_date_and_minute_in_utc() {
         assert_eq!(when(1_795_000_000), "2026-11-18 11:06 UTC");
-    }
-
-    /// A key file refused for its mode is named by its file and its mode as
-    /// `chmod` takes it, never in decimal (#1137).
-    #[test]
-    fn an_exposed_key_file_is_said_by_its_name_and_octal_mode() {
-        let said = exposed(&IdentityError::Exposed {
-            file: domain::fleet::KeyFile::AgentKey,
-            mode: 0o644,
-        });
-        assert_eq!(
-            said,
-            Some(vec![
-                ("file", MsgArg::Text("agent-key".to_owned())),
-                ("mode", MsgArg::Text("0644".to_owned())),
-            ])
-        );
-        assert_eq!(
-            exposed(&IdentityError::Damaged {
-                file: domain::fleet::KeyFile::AgentKey
-            }),
-            None
-        );
     }
 
     #[test]
