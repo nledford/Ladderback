@@ -2,8 +2,10 @@
 //! live, a Start for each plan and a Cancel for each run still going. What a
 //! row says is `operations.rs`'s, the live state `backend.rs`'s and a paused
 //! page's `pause.rs`'s; this is the DOM glue, which the `@ui` scenarios of
-//! `features/ui/operations.feature` run, with what the page shows in its
-//! table's place and how a status is badged, tested on the host below.
+//! `features/ui/` run, with the decisions not yet moved out of it (#739): the
+//! order of its rows, what it shows in its table's place, how a status is
+//! badged, and which runs can be cancelled or announce their end, tested on
+//! the host below.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

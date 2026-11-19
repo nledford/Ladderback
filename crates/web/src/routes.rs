@@ -1,6 +1,6 @@
 //! What the app's pages share (technical design §4.5, "Route changes"): the
 //! title of the page a path shows, the page a path nothing serves shows, and
-//! the helpers several pages use. Each page has its own `<h1>`, the heading
+//! the helpers pages use. Each page has its own `<h1>`, the heading
 //! focus moves to when a reader navigates to it, so it carries
 //! `tabindex="-1"`. A page itself is a module of its own (technical design
 //! §8.3); the route table is `main.rs`'s.

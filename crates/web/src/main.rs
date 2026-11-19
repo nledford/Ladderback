@@ -82,15 +82,17 @@ mod backend;
 mod maintenance;
 // What a row of the Operations page says, decided on the host.
 mod operations;
-// The Operations page's DOM glue; `operations.rs`, `backend.rs` and
-// `pause.rs` decide for it.
+// The Operations page: its DOM glue, and the decisions not yet moved out of
+// it (#739), host-tested there; `operations.rs`, `backend.rs` and `pause.rs`
+// decide the rest.
 mod operations_page;
 mod page;
 // What Settings' Page width section offers, keeps and lays the page out
 // with, decided on the host; `settings/page_width.rs` is its glue.
 mod page_width;
 mod repositories;
-// The Repositories page's DOM glue; `repositories.rs` decides for it.
+// The Repositories page: its DOM glue, and its form's state, host-tested
+// there; `repositories.rs` decides the rest.
 mod repositories_page;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
@@ -136,7 +138,7 @@ mod time_zones;
 // A snapshot's page's DOM glue; `components/tree/rules.rs` decides for its
 // tree.
 mod snapshot_page;
-// The start page's DOM glue.
+// The start page's DOM glue; `routes::next_run_cell` words a plan's next run.
 mod start_page;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
