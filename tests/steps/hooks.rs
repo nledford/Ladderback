@@ -113,7 +113,7 @@ fn failed_by_timeout(agent: &mut Agent) {
 }
 
 /// The variables a hook may be given on top of its `LADDERBACK_*` context:
-/// the worker's allow-list (components.md §4.1, also pinned by the
+/// the worker's allow-list (components/worker.md §4.1, also pinned by the
 /// `HookRunner` contract).
 const ALLOWED: &[&str] = &[
     "PATH",

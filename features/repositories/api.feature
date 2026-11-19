@@ -2,7 +2,7 @@
 Feature: Repositories over HTTP
   The Repositories page tests a location, connects it by saving it into the
   configuration, and initialises a repository where nothing is yet, all through
-  the daemon's API (components.md §4.4). A request carries the password a
+  the daemon's API (components/web-ui.md §4.4). A request carries the password a
   person typed: no answer carries it back, and what the configuration keeps is
   the settings as written, a secret reference included (I4). A repository's
   location is answered with any password in it masked.
