@@ -43,7 +43,7 @@ fn main() {
         answers.as_ref().map(Answers::checkout).as_ref(),
     );
     if let (Some(canonical), Some(_)) = (&canonical, &answers) {
-        watch(canonical);
+        watch(canonical, found.release);
     }
     for line in probe::instructions(&found) {
         println!("{line}");
@@ -94,37 +94,46 @@ impl Answers {
 }
 
 /// Has Cargo run the script again when the answers may have changed: a
-/// commit, a checkout, a tag, the index, or a change to a tracked file (so
-/// `.dirty` is right; an untracked file doesn't count). Only paths that
-/// exist: Cargo reruns a script whose watched path is missing every build.
-/// HEAD's log covers a branch whose ref is packed, which `git reset --soft`
-/// or `git update-ref` moves without touching any other file watched here.
-fn watch(package: &Path) {
-    let mut paths = vec![
-        "HEAD".to_owned(),
-        "logs/HEAD".to_owned(),
-        "index".to_owned(),
-        "packed-refs".to_owned(),
-        "refs/tags".to_owned(),
-    ];
-    if let Some(branch) = git(package, &["symbolic-ref", "-q", "HEAD"]) {
-        paths.push(branch.trim().to_owned());
+/// commit, a checkout, the release tag, the index, or a change to a tracked
+/// file (so `.dirty` is right; an untracked file doesn't count). Which files
+/// in the git folder, and why no other ref's, is `probe::watched`; of each
+/// of its groups the first path that exists is watched, since Cargo reruns a
+/// script whose watched path is missing every build.
+fn watch(package: &Path, is_release: bool) {
+    let version = env!("CARGO_PKG_VERSION");
+    let branch = git(package, &["symbolic-ref", "-q", "HEAD"]);
+    let tag = git(
+        package,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &probe::release_ref(version),
+        ],
+    );
+    let groups = probe::watched(
+        version,
+        branch.as_deref().map(str::trim),
+        probe::ReleaseTag::of(is_release, tag.is_some()),
+    );
+    let mut asked = vec!["rev-parse"];
+    for path in groups.iter().flatten() {
+        asked.push("--git-path");
+        asked.push(path);
     }
-    let mut asked = vec!["rev-parse".to_owned()];
-    for path in &paths {
-        asked.push("--git-path".to_owned());
-        asked.push(path.clone());
-    }
-    let asked: Vec<&str> = asked.iter().map(String::as_str).collect();
     let in_git = git(package, &asked).unwrap_or_default();
+    let mut in_git = in_git.lines().map(|path| package.join(path));
+    let chosen = groups.iter().filter_map(|group| {
+        let paths: Vec<_> = in_git.by_ref().take(group.len()).collect();
+        paths.into_iter().find(|path| path.exists())
+    });
     let tracked = git(package, &["ls-files", "-z"]).unwrap_or_default();
-    let watched = in_git
-        .lines()
-        .chain(tracked.split('\0'))
+    let tracked = tracked
+        .split('\0')
         .filter(|path| !path.is_empty())
         .map(|path| package.join(path))
         .filter(|path| path.exists());
-    for path in watched {
+    for path in chosen.chain(tracked) {
         // A path Cargo's instructions can't carry (not UTF-8, or a line break
         // in its name) is left unwatched.
         if let Some(path) = path.to_str().filter(|path| !path.contains('\n')) {

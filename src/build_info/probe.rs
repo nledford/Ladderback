@@ -106,15 +106,19 @@ impl ReleaseTag {
     /// Where the tag stands, from whether the build `is_release` and whether
     /// `git` found the tag at all.
     pub fn of(is_release: bool, exists: bool) -> Self {
-        let _ = (is_release, exists);
-        todo!()
+        if is_release {
+            Self::AtHead
+        } else if exists {
+            Self::Elsewhere
+        } else {
+            Self::Missing
+        }
     }
 }
 
 /// The full name of the tag that makes a build of `version` the release.
 pub fn release_ref(version: &str) -> String {
-    let _ = version;
-    todo!()
+    format!("refs/tags/v{version}")
 }
 
 /// The files in the git folder whose change may change `git`'s answers about
@@ -123,9 +127,32 @@ pub fn release_ref(version: &str) -> String {
 /// whose release tag stands at `tag`. Of each group, the build script watches
 /// the first path that exists: Cargo reruns a script on every build while a
 /// path it watches is missing.
+///
+/// The work tree's own files come first: HEAD (a checkout), HEAD's log (a
+/// commit, `git reset --soft`) and the index. The branch is watched by its
+/// log, which a move of the branch from any work tree appends to, and by its
+/// own file only when it keeps no log: packing refs deletes that file and
+/// leaves the log alone. Of the files every work tree shares, only the
+/// release tag's are watched, and only while the tag can change the answer
+/// (#1103): the tags folder while there is no tag to make the build the
+/// release, the tag where it lives (its own file, or `packed-refs` once
+/// packed) while it names HEAD, and nothing while it names another commit,
+/// since a release tag isn't moved and HEAD moving onto it is watched anyway.
 pub fn watched(version: &str, branch: Option<&str>, tag: ReleaseTag) -> Vec<Vec<String>> {
-    let _ = (version, branch, tag);
-    todo!()
+    let mut groups = vec![
+        vec!["HEAD".to_owned()],
+        vec!["logs/HEAD".to_owned()],
+        vec!["index".to_owned()],
+    ];
+    if let Some(branch) = branch {
+        groups.push(vec![format!("logs/{branch}"), branch.to_owned()]);
+    }
+    match tag {
+        ReleaseTag::Missing => groups.push(vec!["refs/tags".to_owned()]),
+        ReleaseTag::AtHead => groups.push(vec![release_ref(version), "packed-refs".to_owned()]),
+        ReleaseTag::Elsewhere => {}
+    }
+    groups
 }
 
 #[cfg(test)]
