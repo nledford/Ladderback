@@ -3040,6 +3040,97 @@ ui-api-token-copied = Copied.
 # Said in the dialog when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
 ui-api-token-copy-failed = The browser would not let the page copy it. Select the token in the field and copy it yourself.
 
+## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
+## run an AI agent asks for may read, which only a person sets.
+
+# The tab and the heading of the section of Settings that lists the dry-run allowlist. It names the table of folders too. The same words as the term -dry-run-allowlist, written out because a heading starts with a capital letter.
+ui-dry-run-allowlist-heading = Dry-run allowlist
+
+# What that section says above the list.
+ui-dry-run-allowlist-body = An AI agent can ask for a plan dry run: { -brand-name } counts the files and bytes a draft plan would back up and tells the AI agent only counts and sizes, never a file's name. It reads only within these folders and the folders inside them.
+
+# Shown in place of the list when it holds no folder.
+ui-dry-run-allowlist-none = No folders yet, so a plan dry run an AI agent asks for refuses every source. Add a folder to let it count what a draft plan would back up there.
+
+# The header of the table's column of folders, each row's header.
+ui-dry-run-allowlist-column-folder = Folder
+
+# The button of a folder's row that asks before removing it from the list, named for the folder.
+# $folder (text): the folder's full path.
+ui-dry-run-folder-remove = Remove { $folder }
+
+# The title of the dialog that asks before a folder is removed from the list.
+# $folder (text): the folder's full path.
+ui-dry-run-folder-remove-title = Remove { $folder } from the { -dry-run-allowlist }
+
+# What that dialog says.
+ui-dry-run-folder-remove-body = A plan dry run an AI agent asks for can no longer read this folder, unless another folder in the list holds it. The folder itself, the plans and their backups don't change.
+
+# The dialog's button that removes the folder. Cancel comes first.
+ui-dry-run-folder-remove-confirm = Remove the folder
+
+# Said in the dialog while the daemon saves the list without the folder.
+ui-dry-run-folder-removing = Removing the folder…
+
+# Announced once the folder is removed from the list.
+# $folder (text): the folder's full path.
+ui-dry-run-folder-removed = Folder { $folder } removed from the { -dry-run-allowlist }.
+
+# The heading of the form that adds a folder to the list.
+ui-dry-run-folder-form-heading = Add a folder
+
+# The label of the field that takes the folder's path.
+ui-dry-run-folder-label = Folder
+
+# The hint under that field.
+ui-dry-run-folder-hint = The folder's full path. A plan dry run may then read it and every folder inside it.
+
+# The button that adds the folder typed.
+ui-dry-run-folder-add = Add the folder
+
+# Said while the daemon saves the list with the folder.
+ui-dry-run-folder-adding = Adding the folder…
+
+# Announced once the folder is added to the list.
+# $folder (text): the folder's full path.
+ui-dry-run-folder-added = Folder { $folder } added to the { -dry-run-allowlist }.
+
+# The field's error when nothing was typed in it.
+ui-dry-run-folder-empty = Give the folder's full path.
+
+# The field's error when the list holds the folder typed already.
+ui-dry-run-folder-listed = The list holds this folder already.
+
+# The field's error when the daemon refused the folder typed because it is not a full path, with a full path as an example.
+# $folder (text): the folder as it was typed.
+# $example (text): a full path, the home folder's Documents folder, such as /home/demo/Documents.
+ui-dry-run-folder-not-full = { $folder } is not a full path. Give the folder's whole path, such as { $example }.
+
+# The same error where the daemon names no home folder to build an example from.
+# $folder (text): the folder as it was typed.
+ui-dry-run-folder-not-full-plain = { $folder } is not a full path. Give the folder's whole path, starting at the top of its drive.
+
+# An error alert after the form or in a dialog: the list would hold more folders than it may, so the change was not saved.
+# $limit (count): how many folders it may hold.
+ui-dry-run-allowlist-too-long = The { -dry-run-allowlist } may hold at most { $limit } folders, so the change was not saved. Remove a folder you no longer need first.
+
+# The button that asks before the home folder of the computer Ladderback runs on is added to the list.
+ui-dry-run-home-add = Add home folder
+
+# The title of the dialog that asks before the home folder is added.
+ui-dry-run-home-title = Add your home folder to the { -dry-run-allowlist }?
+
+# What that dialog warns of.
+# $home (text): the home folder's full path.
+# $keys (text): "~/.ssh", the folder of a person's SSH keys, the same in every language.
+ui-dry-run-home-body = This lets an AI agent count the files under your whole home folder, { $home }, including { $keys } and browser profiles. It learns only counts and sizes, never a file's name, but a count still tells it whether files are there.
+
+# What that dialog suggests instead, after the warning.
+ui-dry-run-home-narrower = A narrower folder is safer, such as the one a draft plan backs up. Cancel, then add it with the Folder field.
+
+# The dialog's button that adds the home folder. Cancel comes first.
+ui-dry-run-home-confirm = Add the home folder
+
 ## The "Pending changes" page (decision 89): the proposals an AI agent made
 ## through the API, each approved or rejected as a whole by a person.
 
