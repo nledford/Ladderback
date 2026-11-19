@@ -14,7 +14,7 @@ import type { Locator, Page } from "playwright";
 
 import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { pointer } from "../support/pointer.ts";
-import { type BrowserWorld, evaluateAll } from "../support/world.ts";
+import { type BrowserWorld } from "../support/world.ts";
 
 // WCAG 2.2 A and AA, as in steps/start_page.ts.
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
