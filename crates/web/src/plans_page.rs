@@ -17,6 +17,8 @@ use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::button::{self, Appearance, Content};
+use crate::components::first_load;
+use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Working,
     dialog_refusal_alert, focus_element, hand_focus_when_gone, recover_focus, refusal_alert,
@@ -279,7 +281,7 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
         </PageHeading>
         <p>{body}</p>
         {move || match shape.get() {
-            (Phase::Loading, _, _) => view! { <p>{loading.clone()}</p> }.into_any(),
+            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::table(4)).into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
                 refusal_alert(&refusal_localizer, sentence).into_any()

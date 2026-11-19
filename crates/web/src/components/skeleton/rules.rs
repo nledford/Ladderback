@@ -86,6 +86,92 @@ impl Shape {
     }
 }
 
+/// What a region's first load waits for (§4.5), which sets the skeletons
+/// standing in its place until it comes: the shape of what is coming, as
+/// far as the page knows it before the daemon answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Awaited {
+    /// A table: its header, then a few rows, each a line of text per column.
+    Table { columns: NonZeroU8 },
+    /// A form: each field a label above its box, then the button that sends
+    /// it.
+    Form { fields: NonZeroU8 },
+    /// Words, a list or a few buttons, whose shape is known only once they
+    /// come: lines of text.
+    Text,
+}
+
+/// The share of its room each name of a table's header takes, shorter than
+/// every cell below it, as a column's name usually is.
+const HEADER_SHARE: u8 = 40;
+
+/// The share of its room each cell of a table's rows takes, row by row: a
+/// few rows, since how many the table holds is known only once it comes,
+/// each a little different, as rows of content are.
+const ROW_SHARES: [u8; 3] = [90, 70, 80];
+
+/// The share of its room a form's label takes.
+const LABEL_SHARE: u8 = 30;
+
+/// A form's field: as wide and as tall as the gallery's field.
+const FIELD: Shape = Shape::Block {
+    inline: Rem::tenths(200),
+    block: Rem::tenths(25),
+};
+
+/// A form's button: as tall as a field, and narrower.
+const BUTTON: Shape = Shape::Block {
+    inline: Rem::tenths(80),
+    block: Rem::tenths(25),
+};
+
+/// Words: two lines, the last one this share of its room.
+const WORDS_LAST_SHARE: u8 = 60;
+
+impl Awaited {
+    /// A table of `columns` columns; none is one, since a table has one at
+    /// least.
+    pub fn table(columns: u8) -> Self {
+        Self::Table {
+            columns: NonZeroU8::new(columns).unwrap_or(NonZeroU8::MIN),
+        }
+    }
+
+    /// A form of `fields` fields; none is one, since a form has one at
+    /// least.
+    pub fn form(fields: u8) -> Self {
+        Self::Form {
+            fields: NonZeroU8::new(fields).unwrap_or(NonZeroU8::MIN),
+        }
+    }
+
+    /// The skeletons that stand for it, row by row: a row's skeletons stand
+    /// side by side, each in an equal share of the row.
+    pub fn rows(self) -> Vec<Vec<Shape>> {
+        let line = |percent| Shape::Lines {
+            count: NonZeroU8::MIN,
+            last: Share::percent(percent),
+        };
+        match self {
+            Self::Table { columns } => {
+                let columns = usize::from(columns.get());
+                std::iter::once(HEADER_SHARE)
+                    .chain(ROW_SHARES)
+                    .map(|share| vec![line(share); columns])
+                    .collect()
+            }
+            Self::Form { fields } => (0..fields.get())
+                .flat_map(|_| [vec![line(LABEL_SHARE)], vec![FIELD]])
+                .chain([vec![BUTTON]])
+                .collect(),
+            Self::Text => vec![vec![Shape::Lines {
+                count: NonZeroU8::MIN.saturating_add(1),
+                last: Share::percent(WORDS_LAST_SHARE),
+            }]],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +249,95 @@ mod tests {
             .class(),
             "skeleton skeleton-block"
         );
+    }
+
+    /// The share of its room a one-line skeleton takes, in percent.
+    fn share(shape: Shape) -> u8 {
+        match shape {
+            Shape::Lines { count, last } if count == NonZeroU8::MIN => last.0,
+            other => panic!("{other:?} is not one line"),
+        }
+    }
+
+    fn field() -> Shape {
+        Shape::Block {
+            inline: Rem::tenths(200),
+            block: Rem::tenths(25),
+        }
+    }
+
+    #[test]
+    fn a_table_stands_as_its_header_then_three_rows_each_a_line_per_column() {
+        let rows = Awaited::table(3).rows();
+        assert_eq!(rows.len(), 4, "{rows:?}");
+        for row in &rows {
+            assert_eq!(row.len(), 3, "{rows:?}");
+            row.iter().for_each(|&cell| {
+                share(cell);
+            });
+        }
+    }
+
+    #[test]
+    fn a_table_s_rows_differ_as_rows_of_content_do() {
+        let rows = Awaited::table(1).rows();
+        let shares: Vec<u8> = rows[1..].iter().map(|row| share(row[0])).collect();
+        assert!(shares.windows(2).all(|pair| pair[0] != pair[1]), "{rows:?}");
+    }
+
+    #[test]
+    fn a_table_s_header_is_shorter_than_each_of_its_rows() {
+        let rows = Awaited::table(2).rows();
+        let header = rows[0].iter().map(|&cell| share(cell)).max().unwrap();
+        for row in &rows[1..] {
+            assert!(row.iter().all(|&cell| share(cell) > header), "{rows:?}");
+        }
+    }
+
+    #[test]
+    fn a_table_of_no_columns_has_one() {
+        assert_eq!(Awaited::table(0), Awaited::table(1));
+        assert!(Awaited::table(0).rows().iter().all(|row| row.len() == 1));
+    }
+
+    #[test]
+    fn a_form_stands_as_each_field_s_label_above_its_box_then_its_button() {
+        let rows = Awaited::form(2).rows();
+        assert_eq!(rows.len(), 5, "{rows:?}");
+        assert!(rows.iter().all(|row| row.len() == 1), "{rows:?}");
+        let parts: Vec<Shape> = rows.into_iter().flatten().collect();
+        share(parts[0]);
+        share(parts[2]);
+        assert_eq!([parts[1], parts[3]], [field(), field()]);
+        // The button, as tall as a field and narrower.
+        let [button] = parts[4].bars().try_into().unwrap();
+        let [field] = field().bars().try_into().unwrap();
+        assert_eq!(button.block, field.block);
+        assert!(
+            button
+                .inline
+                .trim_end_matches("rem")
+                .parse::<f32>()
+                .unwrap()
+                < field.inline.trim_end_matches("rem").parse::<f32>().unwrap(),
+            "{button:?}"
+        );
+    }
+
+    #[test]
+    fn a_form_of_no_fields_has_one() {
+        assert_eq!(Awaited::form(0), Awaited::form(1));
+        assert_eq!(Awaited::form(0).rows().len(), 3);
+    }
+
+    #[test]
+    fn words_stand_as_lines_of_text_the_last_one_shorter() {
+        let rows = Awaited::Text.rows();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        let [Shape::Lines { count, last }] = rows[0][..] else {
+            panic!("{rows:?}");
+        };
+        assert!(count.get() > 1, "{rows:?}");
+        assert!(last.0 < 100, "{rows:?}");
     }
 }
