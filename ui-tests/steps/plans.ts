@@ -147,19 +147,19 @@ Then("the table {string} has no row {string}", async function (this: BrowserWorl
   await until(async () => ((await rows.count()) === 0 ? true : null), SAVE_PATIENCE_MS, `the table ${name} still has the row ${row}`);
 });
 
-// The cell of a plan's next run carries in its `title` the run the daemon
-// planned, as the plans list sends it.
+// The cell of a plan's next run gives in its `<time datetime>` the run the
+// daemon planned, as the plans list sends it.
 Then("the row {string} of the table {string} shows a next run", async function (this: BrowserWorld, row: string, name: string) {
   const found = rowNamed(this, name, row).first();
   await until(
     async () => {
       const planned = await plannedRun(this, row);
       if (planned === null) return null;
-      const titles = await found
+      const given = await found
         .getByRole("cell")
-        .evaluateAll((cells) => cells.map((cell) => cell.getAttribute("title")))
+        .evaluateAll((cells) => cells.map((cell) => cell.querySelector("time")?.getAttribute("datetime") ?? null))
         .catch((): (string | null)[] => []);
-      return titles.includes(planned) ? planned : null;
+      return given.includes(planned) ? planned : null;
     },
     SAVE_PATIENCE_MS,
     `the row ${row} of the table ${name} never showed the run the daemon planned`,

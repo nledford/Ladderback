@@ -22,7 +22,7 @@ use crate::variants::{Rem, Size};
 pub(crate) mod rules;
 
 pub use rules::{Align, Name, SortKey, State};
-use rules::{Shown, Sorted};
+use rules::{Direction, Shown, Sorted};
 
 thread_local! {
     /// The number the next table's caption `id` takes, so no two on a page
@@ -81,15 +81,18 @@ impl<R: Send + Sync + 'static> Column<R> {
 /// How a column sorts the table: the name of its button, which says what it
 /// does ("Sort by size"), the two sentences a sort is said with ("Sorted by
 /// size, smallest first.", "Sorted by size, largest first."), complete
-/// sentences from the catalog, and the key each row is sorted by.
+/// sentences from the catalog, the key each row is sorted by, and which way
+/// its first press sorts.
 pub struct Sort<R> {
     label: String,
     ascending: String,
     descending: String,
     key: Arc<dyn Fn(&R) -> SortKey + Send + Sync>,
+    first: Direction,
 }
 
 impl<R> Sort<R> {
+    /// A sort whose first press sorts ascending.
     pub fn new(
         label: impl Into<String>,
         ascending: impl Into<String>,
@@ -101,6 +104,17 @@ impl<R> Sort<R> {
             ascending: ascending.into(),
             descending: descending.into(),
             key: Arc::new(key),
+            first: Direction::Ascending,
+        }
+    }
+
+    /// The sort, its first press descending: for a column read newest first,
+    /// such as a history's start times, whose rows already come newest
+    /// first.
+    pub fn descending_first(self) -> Self {
+        Self {
+            first: Direction::Descending,
+            ..self
         }
     }
 }
@@ -130,6 +144,9 @@ pub struct Footer {
 /// A table (§4.5): a real `<table>`, named by its `name`, a caption or the
 /// page's heading, with `columns` after the `row_header` column, whose cell
 /// is each row's header (`<th scope="row">`), and an optional `footer`.
+/// `row_header_id`, where given, gives each row's header an `id` and lets a
+/// script focus it (`tabindex="-1"`, no stop for Tab), so a control that
+/// leaves the row can hand focus to the header that names it.
 ///
 /// It sits in a frame that scrolls sideways where its columns are wider than
 /// the page (a small screen, larger text): a region named as the table is,
@@ -173,6 +190,7 @@ pub fn Table<R, K, KF>(
     #[prop(into)] state: Signal<State>,
     sentences: Sentences,
     #[prop(optional)] footer: Option<Footer>,
+    #[prop(optional)] row_header_id: Option<fn(&R) -> String>,
 ) -> impl IntoView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -259,7 +277,7 @@ where
                             // The frame is the size container the table's width
                             // is measured against, and what scrolls.
                             <div
-                                class="table-frame data-table-frame"
+                                class="data-table-frame"
                                 role="region"
                                 aria-labelledby=frame_name.clone()
                                 tabindex="0"
@@ -298,7 +316,9 @@ where
                                         <For
                                             each=move || placed.get()
                                             key=|key| key.clone()
-                                            children=move |key| { row_view(&columns, rows, index, key) }
+                                            children=move |key| {
+                                                row_view(&columns, rows, index, key, row_header_id)
+                                            }
                                         />
                                     </tbody>
                                     {footer_row}
@@ -335,8 +355,9 @@ fn header_row<R: Send + Sync + 'static>(
                 .into_any(),
                 Some(sort) => {
                     let (ascending, descending) = (sort.ascending.clone(), sort.descending.clone());
+                    let first = sort.first;
                     let press = Callback::new(move |()| {
-                        let next = rules::press(sorted.get_untracked(), at);
+                        let next = rules::press(sorted.get_untracked(), at, first);
                         sorted.set(Some(next));
                         reply(
                             Politeness::Polite,
@@ -413,6 +434,7 @@ fn row_view<R, K>(
     rows: Signal<Vec<R>>,
     index: Memo<HashMap<K, usize>>,
     key: K,
+    header_id: Option<fn(&R) -> String>,
 ) -> AnyView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -436,6 +458,7 @@ where
             .unwrap_or_else(|| first.clone())
     });
     let row = Signal::from(row);
+    let id = header_id.map(|id_of| row.with_untracked(id_of));
     let cells = columns
         .iter()
         .enumerate()
@@ -443,8 +466,9 @@ where
             let class = column.align.class();
             let cell = (column.draw)(row);
             if at == 0 {
+                let tabindex = id.is_some().then_some("-1");
                 view! {
-                    <th scope="row" class=class>
+                    <th scope="row" class=class id=id.clone() tabindex=tabindex>
                         {cell}
                     </th>
                 }

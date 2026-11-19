@@ -220,3 +220,130 @@ Then(
     }
   },
 );
+
+// A table the shared table draws sits in a frame of its own: a region named
+// as the table is, which Tab stops on, so a keyboard scrolls it sideways
+// (§4.5, #876). The frame is the table's own parent: a section named by the
+// same heading may hold it, a region of that name too. A value in the name is
+// wrapped in bidi isolation marks, which a reader never hears.
+Then(
+  "the table {string} sits in a frame of its own that Tab stops on, named as the table is",
+  async function (this: BrowserWorld, name: string) {
+    const found = this.page.getByRole("table", { name: namePattern(name) });
+    await expect(found).toBeVisible();
+    const frame = found.locator("xpath=..");
+    await expect(frame).toHaveRole("region");
+    await expect(frame).toHaveAccessibleName(namePattern(name));
+    await expect(frame).toHaveAttribute("tabindex", "0");
+  },
+);
+
+// An instant in a cell is the cell's own words, in a `<time datetime>` that
+// gives it to a program (§4.5, "Time"), so a keyboard or a screen reader meets
+// it where a sighted reader does. A `title`, which only a pointer resting on
+// the cell shows, carries none of it (#851).
+Then(
+  "the table {string} gives each instant of its {string} column in its words, in a time element, with no title",
+  async function (this: BrowserWorld, name: string, column: string) {
+    const found = this.page.getByRole("table", { name: namePattern(name) });
+    await expect(found.locator("tbody tr").first()).toBeVisible();
+    const headers = (await found.locator("thead th").allInnerTexts()).map(headerWords);
+    const index = headers.indexOf(column);
+    assert.ok(index >= 0, `the table "${name}" has no column "${column}": ${headers.join(", ")}`);
+    const problems = await found.evaluate((el: HTMLTableElement, at) => {
+      const said: string[] = [];
+      for (const titled of el.querySelectorAll("[title]")) {
+        said.push(`<${titled.localName}> carries the title "${titled.getAttribute("title")}"`);
+      }
+      let times = 0;
+      for (const row of el.tBodies[0]?.rows ?? []) {
+        const cell = row.cells[at];
+        const time = cell?.querySelector("time");
+        if (cell === undefined || time === null || time === undefined) continue;
+        times += 1;
+        const instant = time.getAttribute("datetime") ?? "";
+        if (Number.isNaN(Date.parse(instant))) said.push(`the time "${time.textContent}" gives no instant: "${instant}"`);
+        if (!time.textContent?.trim()) said.push(`the time of "${instant}" has no words`);
+        if (time.textContent?.trim() !== cell.textContent?.trim()) {
+          said.push(`the cell "${cell.textContent}" says more than its time "${time.textContent}"`);
+        }
+      }
+      if (times === 0) said.push("no cell of the column holds a time");
+      return said;
+    }, index);
+    assert.deepEqual(problems, [], `the "${column}" column of the table "${name}"`);
+  },
+);
+
+// A table's frame scrolls rather than break a word (#524): no word of a cell
+// or a header breaks inside, wherever its line ends. An address or a path
+// still breaks between its parts, after a slash, a dot, an at sign or a colon
+// that a letter follows (#482), and a word after its hyphen or at a soft
+// hyphen. Each character's box says which line it is on; a bidi isolation
+// mark isn't text a reader sees, and a character of no width is on no line.
+// A word ends where its box does: text in another block or flex item, such as
+// the next line of a cell or a header's sort button, starts a word of its own.
+// A column keeps its width in rem however narrow the frame (the frame
+// scrolls), but a pinned header is at most 40 % of the frame: a word wider
+// than its cell's room breaks rather than run over the cells beside it, and
+// only such a word.
+Then("no word of a table breaks inside, an address only between its parts", async function (this: BrowserWorld) {
+  const broken = await this.page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    // The box a text node's line is laid out in: its nearest ancestor that is
+    // not inline, the cell at the furthest.
+    const boxOf = (node: Node, cell: Element): Element => {
+      let element = node.parentElement ?? cell;
+      while (element !== cell) {
+        const display = getComputedStyle(element).display;
+        if (!display.startsWith("inline") && display !== "contents") return element;
+        element = element.parentElement ?? cell;
+      }
+      return cell;
+    };
+    const found: string[] = [];
+    for (const cell of document.querySelectorAll("main table th, main table td")) {
+      if (!cell.checkVisibility()) continue;
+      const style = getComputedStyle(cell);
+      const room = cell.clientWidth - parseFloat(style.paddingInlineStart) - parseFloat(style.paddingInlineEnd);
+      const words: { char: string; top: number; width: number }[][] = [[]];
+      let box: Element | null = null;
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const holder = boxOf(node, cell);
+        if (holder !== box) {
+          words.push([]);
+          box = holder;
+        }
+        const content = node.textContent ?? "";
+        for (let at = 0; at < content.length; at += 1) {
+          const char = content.charAt(at);
+          if (/[\u2066-\u2069]/.test(char)) continue;
+          if (/[\s\u200B]/.test(char)) {
+            words.push([]);
+            continue;
+          }
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + 1);
+          const rect = [...range.getClientRects()].find((rect) => rect.width > 0);
+          if (rect !== undefined) words[words.length - 1]?.push({ char, top: Math.round(rect.top), width: rect.width });
+        }
+      }
+      for (const letters of words) {
+        const wide = letters.reduce((sum, letter) => sum + letter.width, 0);
+        if (wide > room) continue;
+        letters.forEach(({ char, top }, at) => {
+          const before = letters[at - 1];
+          if (before === undefined || top <= before.top) return;
+          if (/[-\u2010\u00AD]/.test(before.char)) return;
+          if (/[/.@:]/.test(before.char) && /\p{L}/u.test(char)) return;
+          found.push(`"${letters.map((letter) => letter.char).join("")}" in <${cell.localName}> breaks at ${at}`);
+        });
+      }
+    }
+    return found;
+  });
+  assert.deepEqual(broken, [], "words of tables broken inside");
+});

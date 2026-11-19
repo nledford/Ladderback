@@ -2267,6 +2267,12 @@ ui-stats-heading = Stats of { $alias }
 # What the stats section shows of a repository whose stats have never been read.
 ui-stats-none = No stats have been read yet.
 
+# The stats table's header of the column of row headers, each naming a figure.
+ui-stats-column-figure = Figure
+
+# The stats table's header of the column of the figures as read.
+ui-stats-column-value = Value
+
 # The stats table's row header of how many snapshots the repository holds.
 ui-stats-snapshots = Snapshots
 

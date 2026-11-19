@@ -55,9 +55,9 @@ use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
-    Banner, Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, Tab, Tabs,
-    TextField, Toast, ToastTone, Toasts, Working, copy_text, hand_focus_when_gone, sentence_view,
-    text_field,
+    Banner, Button, Checkbox, Column, Confirmation, ErrorSummary, Name, ReviewDialog, Sentences,
+    State, SummaryItem, Tab, Table, Tabs, TextField, Toast, ToastTone, Toasts, Working, copy_text,
+    hand_focus_when_gone, sentence_view, text_field,
 };
 use crate::live::reply;
 use crate::page_width::PageWidth;
@@ -69,7 +69,7 @@ use crate::restart::{
 use crate::routes::{PAGE_HEADING_ID, PageHeading, instant, refused_sentence, text_with};
 use crate::session::{Standing, waiting_password, waiting_tone};
 use crate::settings_tabs::{Section, tab_named};
-use crate::variants::{Size, Tone};
+use crate::variants::{Rem, Size, Tone};
 use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
 
@@ -509,70 +509,68 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
-/// The table of the tokens kept, named by the section's heading.
+/// The table of the tokens kept, named by the section's heading: each
+/// token's label as its row's header, its scopes (one said as it is,
+/// several as a list, #430), when it was created and last used, and its
+/// Revoke button, named for it. The button hands focus to the section's
+/// heading when its row goes while it holds focus, as after a revoke.
 fn tokens_table(
-    localizer: &Localizer,
+    localizer: &Arc<Localizer>,
     tokens: Vec<ApiTokenDto>,
     ask_revoke: Callback<ApiTokenDto>,
     viewer: Option<&IanaZone>,
 ) -> impl IntoView + use<> {
     let now_ms = ws::now_ms();
-    let rows = tokens
-        .into_iter()
-        .map(|token| token_row(localizer, token, ask_revoke, now_ms, viewer))
-        .collect_view();
-    view! {
-        <table class="api-tokens" aria-labelledby=HEADING_ID>
-            <thead>
-                <tr>
-                    <th scope="col">{text(localizer, msg::UI_API_TOKENS_COLUMN_LABEL)}</th>
-                    <th scope="col">{text(localizer, msg::UI_API_TOKENS_COLUMN_SCOPES)}</th>
-                    <th scope="col">{text(localizer, msg::UI_API_TOKENS_COLUMN_CREATED)}</th>
-                    <th scope="col">{text(localizer, msg::UI_API_TOKENS_COLUMN_LAST_USED)}</th>
-                    <th scope="col">{text(localizer, msg::UI_COLUMN_ACTIONS)}</th>
-                </tr>
-            </thead>
-            <tbody>{rows}</tbody>
-        </table>
-    }
-}
-
-/// A token's row: its label as the row's header, its scopes (one said as
-/// it is, several as a list, #430), when it was created and last used, and
-/// its Revoke button, named for it. The button hands focus to the section's
-/// heading when its row goes while it holds focus, as after a revoke.
-fn token_row(
-    localizer: &Localizer,
-    token: ApiTokenDto,
-    ask_revoke: Callback<ApiTokenDto>,
-    now_ms: i64,
-    viewer: Option<&IanaZone>,
-) -> impl IntoView + use<> {
-    let scopes = scopes_view(localizer, &token.scopes);
-    let created_at = instant(localizer, &token.created_at, viewer);
-    let last_used = match LastUsed::of(token.last_used_at.as_deref(), now_ms).said() {
-        Ok(said) => say(localizer, said),
-        Err(raw) => raw,
-    };
-    let last_used = match token.last_used_at.clone() {
-        Some(raw) => view! { <time datetime=raw>{last_used}</time> }.into_any(),
-        None => last_used.into_any(),
-    };
-    let label = say(localizer, revoke_label(&token.label));
-    let button = NodeRef::<leptos::html::Button>::new();
-    hand_focus_when_gone(button, HEADING_ID.to_owned());
-    let id = revoke_id(&token.id);
-    let header = token.label.clone();
-    let created_raw = token.created_at.clone();
-    view! {
-        <tr>
-            <th scope="row">{header}</th>
-            <td>{scopes}</td>
-            <td>
-                <time datetime=created_raw>{created_at}</time>
-            </td>
-            <td>{last_used}</td>
-            <td>
+    let label = Column::new(
+        text(localizer, msg::UI_API_TOKENS_COLUMN_LABEL),
+        Rem::tenths(100),
+        |row: Signal<ApiTokenDto>| (move || row.with(|token| token.label.clone())).into_any(),
+    );
+    let scopes_localizer = Arc::clone(localizer);
+    let scopes = Column::new(
+        text(localizer, msg::UI_API_TOKENS_COLUMN_SCOPES),
+        Rem::tenths(80),
+        move |row: Signal<ApiTokenDto>| {
+            row.with_untracked(|token| scopes_view(&scopes_localizer, &token.scopes))
+        },
+    );
+    let created_localizer = Arc::clone(localizer);
+    let zone = viewer.cloned();
+    let created = Column::new(
+        text(localizer, msg::UI_API_TOKENS_COLUMN_CREATED),
+        Rem::tenths(90),
+        move |row: Signal<ApiTokenDto>| {
+            let raw = row.with_untracked(|token| token.created_at.clone());
+            let said = instant(&created_localizer, &raw, zone.as_ref());
+            view! { <time datetime=raw>{said}</time> }.into_any()
+        },
+    );
+    let used_localizer = Arc::clone(localizer);
+    let last_used = Column::new(
+        text(localizer, msg::UI_API_TOKENS_COLUMN_LAST_USED),
+        Rem::tenths(80),
+        move |row: Signal<ApiTokenDto>| {
+            let raw = row.with_untracked(|token| token.last_used_at.clone());
+            let said = match LastUsed::of(raw.as_deref(), now_ms).said() {
+                Ok(said) => say(&used_localizer, said),
+                Err(raw) => raw,
+            };
+            match raw {
+                Some(raw) => view! { <time datetime=raw>{said}</time> }.into_any(),
+                None => said.into_any(),
+            }
+        },
+    );
+    let actions_localizer = Arc::clone(localizer);
+    let actions = Column::new(
+        text(localizer, msg::UI_COLUMN_ACTIONS),
+        Rem::tenths(90),
+        move |row: Signal<ApiTokenDto>| {
+            let token = row.get_untracked();
+            let label = say(&actions_localizer, revoke_label(&token.label));
+            let button = NodeRef::<leptos::html::Button>::new();
+            hand_focus_when_gone(button, HEADING_ID.to_owned());
+            view! {
                 <Button
                     content=Content::IconAndText {
                         glyph: LucideGlyph::Trash.into(),
@@ -580,12 +578,29 @@ fn token_row(
                     }
                     tone=Tone::Error
                     size=Size::Small
-                    id=id
+                    id=revoke_id(&token.id)
                     node_ref=button
                     on_press=Callback::new(move |()| ask_revoke.run(token.clone()))
                 />
-            </td>
-        </tr>
+            }
+            .into_any()
+        },
+    );
+    let sentences = Sentences {
+        loading: text(localizer, msg::UI_LOADING),
+        empty: text(localizer, msg::UI_API_TOKENS_NONE),
+        unreachable: text(localizer, msg::UI_UNREACHABLE_BODY),
+    };
+    view! {
+        <Table
+            name=Name::Heading(HEADING_ID.to_owned())
+            row_header=label
+            columns=vec![scopes, created, last_used, actions]
+            rows=Signal::stored(tokens)
+            key=|token: &ApiTokenDto| token.id.clone()
+            state=State::Ready
+            sentences=sentences
+        />
     }
 }
 

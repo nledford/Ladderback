@@ -19,15 +19,16 @@ use std::str::FromStr;
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::banner::rules::BannerTone;
-use crate::components::button::{Appearance, Content, Kind};
+use crate::components::button::{Content, Kind};
 use crate::components::first_load;
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Banner, Button, Checkbox, ErrorSummary, Link, PauseUpdates, Progress, RadioGroup, StatusBadge,
-    SummaryItem, TextField, Toast, ToastTone, Toasts, address_view, cell_sentence_view,
-    hand_focus_when_gone, runs_view, sentence_view, text_field,
+    Banner, Button, Checkbox, Column, ErrorSummary, Link, Name as TableName, PauseUpdates,
+    Progress, RadioGroup, Sentences, Sort, SortKey, State, StatusBadge, SummaryItem, Table,
+    TextField, Toast, ToastTone, Toasts, address_view, cell_sentence_view, hand_focus_when_gone,
+    runs_view, sentence_view, text_field,
 };
 use crate::full_disk_access::describing_the_heading;
 use crate::full_disk_access_warning::{FullDiskAccessFound, FullDiskAccessSteps};
@@ -43,7 +44,7 @@ use crate::repositories::{
 };
 use crate::session::SignInOffNotice;
 use crate::sign_in::SignInOff;
-use crate::variants::{Size, Tone};
+use crate::variants::{Rem, Size, Tone};
 use crate::visit::Visit;
 use crate::ws::{self, Got, Phase, Posted};
 use crate::{page, text};
@@ -110,12 +111,6 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let empty = text(&localizer, msg::UI_START_NO_PLANS);
-    let caption = text(&localizer, msg::UI_START_CAPTION);
-    let (plan_column, next_run_column, notes_column) = (
-        text(&localizer, msg::UI_COLUMN_PLAN),
-        text(&localizer, msg::UI_COLUMN_NEXT_RUN),
-        text(&localizer, msg::UI_COLUMN_NOTES),
-    );
     let operations_link = text(&localizer, msg::UI_START_OPERATIONS_LINK);
     let repositories_link = text(&localizer, msg::UI_START_REPOSITORIES_LINK);
     let plan_format_link = text(&localizer, msg::UI_START_PLAN_FORMAT_LINK);
@@ -181,60 +176,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                         view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
                     }
                     (None, Some(plans)) if !plans.is_empty() => {
-                        let noted = plans.iter().any(|plan| !plan.warnings.is_empty());
-                        let notes_column = notes_column.clone();
-                        // A plan's notes, such as a glob that can never
-                        // match (#510), have a column only when a plan has
-                        // one.
-                        view! {
-                            <table class="plans">
-                                <caption class="text-muted">{caption.clone()}</caption>
-                                <thead>
-                                    <tr>
-                                        <th scope="col">{plan_column.clone()}</th>
-                                        <th scope="col">{next_run_column.clone()}</th>
-                                        {noted
-                                            .then(|| {
-                                                view! { <th scope="col">{notes_column}</th> }
-                                            })}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {plans
-                                        .into_iter()
-                                        .map(|plan| {
-                                            let (shown, title) = next_run_cell(
-                                                &localizer,
-                                                &plan,
-                                                viewer.as_ref(),
-                                            );
-                                            let notes = noted
-                                                .then(|| {
-                                                    let notes = repository_notes(&localizer, &plan.warnings);
-                                                    view! {
-                                                        <td>
-                                                            {notes
-                                                                .into_iter()
-                                                                .map(|note| {
-                                                                    view! { <div class="text-muted">{note}</div> }
-                                                                })
-                                                                .collect_view()}
-                                                        </td>
-                                                    }
-                                                });
-                                            view! {
-                                                <tr>
-                                                    <th scope="row">{plan.id}</th>
-                                                    <td title=title>{shown}</td>
-                                                    {notes}
-                                                </tr>
-                                            }
-                                        })
-                                        .collect_view()}
-                                </tbody>
-                            </table>
-                        }
-                            .into_any()
+                        start_plans_table(&localizer, plans, viewer.clone()).into_any()
                     }
                     _ => {
                         let repositories_link = repositories_link.clone();
@@ -281,10 +223,10 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
-/// What the "Next run" cell of a plan on the start page says, and the instant
-/// it carries in its `title`, as the daemon sent it (UTC), when it shows one.
-/// A plan without a schedule runs only when it is started; a scheduled one
-/// the scheduler has planned no run for says so, never a blank cell.
+/// What the "Next run" cell of a plan says, and the instant it shows, as the
+/// daemon sent it (UTC), when it shows one. A plan without a schedule runs
+/// only when it is started; a scheduled one the scheduler has planned no run
+/// for says so, never a blank cell.
 pub(crate) fn next_run_cell(
     localizer: &Localizer,
     plan: &PlanSummaryDto,
@@ -299,15 +241,71 @@ pub(crate) fn next_run_cell(
     }
 }
 
-/// How the operations table is ordered (§4.4). `History` is the order the
-/// daemon's own history page came in, newest first; the other two are the
-/// sort button's, announced on each change.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum SortOrder {
-    #[default]
-    History,
-    NewestFirst,
-    OldestFirst,
+/// A cell's instant, such as a plan's next run from [`next_run_cell`]: its
+/// words in a `<time>` that gives the instant, `raw`, to a program, so the
+/// cell's words are the instant and nothing hides it in a `title` (#851);
+/// words alone where there is no instant.
+pub(crate) fn time_view(shown: String, raw: Option<String>) -> AnyView {
+    match raw {
+        Some(raw) => view! { <time datetime=raw>{shown}</time> }.into_any(),
+        None => shown.into_any(),
+    }
+}
+
+/// The start page's table of plans, named by its caption: each plan's ID as
+/// its row's header and its next run, and, only when a plan has some, its
+/// notes, such as a glob that can never match (#510).
+fn start_plans_table(
+    localizer: &Arc<Localizer>,
+    plans: Vec<PlanSummaryDto>,
+    viewer: Option<api::IanaZone>,
+) -> impl IntoView + use<> {
+    let noted = plans.iter().any(|plan| !plan.warnings.is_empty());
+    let plan = Column::new(
+        text(localizer, msg::UI_COLUMN_PLAN),
+        Rem::tenths(120),
+        |row: Signal<PlanSummaryDto>| (move || row.with(|plan| plan.id.clone())).into_any(),
+    );
+    let next_localizer = Arc::clone(localizer);
+    let mut columns = vec![Column::new(
+        text(localizer, msg::UI_COLUMN_NEXT_RUN),
+        Rem::tenths(120),
+        move |row: Signal<PlanSummaryDto>| {
+            let (shown, raw) =
+                row.with_untracked(|plan| next_run_cell(&next_localizer, plan, viewer.as_ref()));
+            time_view(shown, raw)
+        },
+    )];
+    if noted {
+        let notes_localizer = Arc::clone(localizer);
+        columns.push(Column::new(
+            text(localizer, msg::UI_COLUMN_NOTES),
+            Rem::tenths(240),
+            move |row: Signal<PlanSummaryDto>| {
+                row.with_untracked(|plan| repository_notes(&notes_localizer, &plan.warnings))
+                    .into_iter()
+                    .map(|note| view! { <div class="text-muted">{note}</div> })
+                    .collect_view()
+                    .into_any()
+            },
+        ));
+    }
+    let sentences = Sentences {
+        loading: text(localizer, msg::UI_LOADING),
+        empty: text(localizer, msg::UI_START_NO_PLANS),
+        unreachable: text(localizer, msg::UI_UNREACHABLE_BODY),
+    };
+    view! {
+        <Table
+            name=TableName::Caption(text(localizer, msg::UI_START_CAPTION))
+            row_header=plan
+            columns=columns
+            rows=Signal::stored(plans)
+            key=|plan: &PlanSummaryDto| plan.id.clone()
+            state=State::Ready
+            sentences=sentences
+        />
+    }
 }
 
 /// The body a start request carries: the plan to back up.
@@ -363,16 +361,6 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let start_localizer = Arc::clone(&localizer);
-    let (operation_column, status_column, started_column, result_column, actions_column) = (
-        text(&localizer, msg::UI_COLUMN_OPERATION),
-        text(&localizer, msg::UI_COLUMN_STATUS),
-        text(&localizer, msg::UI_COLUMN_STARTED),
-        text(&localizer, msg::UI_COLUMN_RESULT),
-        text(&localizer, msg::UI_COLUMN_ACTIONS),
-    );
-    let sort_label = text(&localizer, msg::UI_SORT_BY_STARTED);
-    let sorted_newest = text(&localizer, msg::UI_SORTED_NEWEST);
-    let sorted_oldest = text(&localizer, msg::UI_SORTED_OLDEST);
     let empty = text(&localizer, msg::UI_NO_OPERATIONS);
     let (started_text, still_waiting) = (
         text(&localizer, msg::UI_BACKUP_STARTED),
@@ -392,7 +380,6 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // A start or a cancel the daemon refused, its own words marked (§8.4).
     let error = RwSignal::<Option<Sentence>>::new(None);
     let toasts = Toasts::new();
-    let sort = RwSignal::new(SortOrder::History);
     let base = ws::origin();
     // The reader's visit to the page: the connection and the settle-polls of
     // the page's presses last as long as it, and end as the page goes (#300).
@@ -482,18 +469,15 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         ends.set_value(Ends::default());
         text_with(&resumed_localizer, words.id, &words.args)
     });
-    // What the page shows, and the ids of the rows in the order it shows them.
-    // Each is a memo, so an update that leaves it as it was rebuilds nothing:
-    // a progress report or a status change is an update to a row, which the
-    // row follows by itself, and the table and the controls in it stay where
-    // they are. History is the daemon's own order; a sort order is the sort
-    // button's, and follows it as the reader presses it.
+    // What the page shows: a memo, so an update that leaves it as it was
+    // rebuilds nothing. A progress report or a status change is an update to
+    // a row, which the row follows by itself, and the table and the controls
+    // in it stay where they are.
     let showing = Memo::new(move |_| {
         let phase = page.phase();
         let refused = history_refused.with(Option::is_some);
         page.with(|state| shown(phase, refused, &state.rows))
     });
-    let order = Memo::new(move |_| page.with(|state| ordered(&state.rows, sort.get())));
     let table_localizer = Arc::clone(&localizer);
     // The zone the browser reads its clock in, asked once: every instant the
     // page shows is written in it (§8.4).
@@ -626,15 +610,9 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         // it hands focus to the page's heading: the button whose press it
         // answers may be a row's Cancel, gone with its run.
         <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=PAGE_HEADING_ID />
-        // Per render: the sort button's and rows' closures own what they
-        // say and show. A render is a change of what the page shows, never
-        // an update to a row.
+        // Per render: the table's columns own what they say and show. A
+        // render is a change of what the page shows, never an update to a row.
         {move || {
-            let newest = sorted_newest.clone();
-            let oldest = sorted_oldest.clone();
-            let rows_localizer = table_localizer.clone();
-            let rows_connection = connection.clone();
-            let rows_zone = viewer.clone();
             match showing.get() {
                 Shown::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
                 Shown::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
@@ -646,93 +624,28 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 }
                 Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
                 Shown::Table => {
-                    view! {
-                        // The frame is what the columns' widths are measured
-                        // against: a table can't be its own container.
-                        <div class="table-frame">
-                            <table class="operations" aria-labelledby=PAGE_HEADING_ID>
-                                <thead>
-                                    <tr>
-                                        <th scope="col">{operation_column.clone()}</th>
-                                        <th scope="col">{status_column.clone()}</th>
-                                        <th
-                                            scope="col"
-                                            aria-sort=move || match sort.get() {
-                                                SortOrder::OldestFirst => "ascending",
-                                                _ => "descending",
-                                            }
-                                        >
-                                            // Its sort button's first press is the newest
-                                            // first: the history is already the daemon's
-                                            // newest first, so the sort's own orders follow.
-                                            <span class="sort-header">
-                                                {started_column.clone()}
-                                                <Button
-                                                    content=Content::IconAndText {
-                                                        glyph: Signal::derive(move || match sort.get() {
-                                                            SortOrder::OldestFirst => LucideGlyph::ArrowUp,
-                                                            _ => LucideGlyph::ArrowDown,
-                                                        }),
-                                                        label: sort_label.clone().into(),
-                                                    }
-                                                    appearance=Appearance::Ghost
-                                                    size=Size::Small
-                                                    on_press=Callback::new(move |()| {
-                                                        let next = match sort.get_untracked() {
-                                                            SortOrder::History | SortOrder::OldestFirst => {
-                                                                SortOrder::NewestFirst
-                                                            }
-                                                            SortOrder::NewestFirst => SortOrder::OldestFirst,
-                                                        };
-                                                        sort.set(next);
-                                                        reply(
-                                                            Politeness::Polite,
-                                                            match next {
-                                                                SortOrder::OldestFirst => &oldest,
-                                                                _ => &newest,
-                                                            },
-                                                        );
-                                                    })
-                                                />
-                                            </span>
-                                        </th>
-                                        <th scope="col">{result_column.clone()}</th>
-                                        <th scope="col">{actions_column.clone()}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <For
-                                        each=move || order.get()
-                                        key=|id| id.clone()
-                                        children=move |id| {
-                                            row_view(
-                                                rows_localizer.clone(),
-                                                rows_connection.clone(),
-                                                page,
-                                                cancelled,
-                                                id,
-                                                Answers { refused: error, toasts },
-                                                rows_zone.clone(),
-                                            )
-                                        }
-                                    />
-                                </tbody>
-                            </table>
-                        </div>
-                    }
-                        .into_any()
+                    operations_table(
+                        &table_localizer,
+                        &connection,
+                        page,
+                        cancelled,
+                        Answers { refused: error, toasts },
+                        viewer.clone(),
+                    )
                 }
             }
         }}
     }
 }
 
-/// One row of the operations table: its header, which names the operation (a
-/// backup by its plan, a maintenance run by what ran and its repository), its
-/// status (with a running backup's progress), the instant it started — the
-/// raw instant in the cell's `title`, so an order can be read without the
-/// locale's text — what a run that succeeded produced, and what can be done
-/// with it: a running or queued run can be cancelled.
+/// The operations table, named by the page's heading: each operation's name
+/// as its row's header (a backup by its plan, a maintenance run by what ran
+/// and its repository), its status (with a running backup's progress), the
+/// instant it started, in its words in a `<time>` that gives it to a program
+/// (#851), what a run that succeeded produced, and what can be done with it:
+/// a running or queued run can be cancelled. Its rows come in the daemon's
+/// order, newest first, and sort by Started, newest first on the first press
+/// of its button, as that order already is.
 ///
 /// A row is built once, when its operation first shows, and follows the state
 /// from then on. Each fact it shows is a memo of its own, and each cell binds
@@ -749,246 +662,286 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
 /// Its row header takes focus from a script, not from Tab: a control in the
 /// row that goes while it holds focus, as the progress bar does when its run
 /// ends, hands focus to it rather than to the page (WCAG 2.4.3).
-fn row_view(
-    localizer: Arc<Localizer>,
-    connection: Connection,
+fn operations_table(
+    localizer: &Arc<Localizer>,
+    connection: &Connection,
     page: Pausable,
     cancelled: StoredValue<HashSet<String>>,
-    id: String,
     answers: Answers,
     zone: Option<api::IanaZone>,
-) -> impl IntoView {
-    // Its refusals are worded in the same language as the rest of it.
-    let error_localizer = Arc::clone(&localizer);
-    // A Cancel button shows "Cancel" and is named for its run: the Actions
-    // column has room for one word, and the name begins with what the button
-    // shows (WCAG 2.5.3) (#430).
-    let cancel_shown = text(&localizer, msg::UI_CANCEL);
-    // What an operation is and where it ran do not change, so its name, its
-    // Cancel button's label and its progress bar's name are worded once.
-    let (name, cancel_label, progress_label) = untrack(|| {
-        page.with(|state| {
-            state.row(&id).map(|row| {
-                let name = match operations::name(&row.summary) {
-                    Name::Plan(plan) => plan,
-                    Name::Words(words) => text_with(&localizer, words.id, &words.args),
-                };
-                let cancel = operations::cancel_label(&row.summary);
-                let bar = operations::progress_label(&row.summary);
-                (
-                    name,
-                    text_with(&localizer, cancel.id, &cancel.args),
-                    text_with(&localizer, bar.id, &bar.args),
-                )
+) -> AnyView {
+    let name_localizer = Arc::clone(localizer);
+    let operation = Column::new(
+        text(localizer, msg::UI_COLUMN_OPERATION),
+        Rem::tenths(80),
+        move |row: Signal<OperationRow>| {
+            // What an operation is and where it ran do not change, so its
+            // name is worded once.
+            row.with_untracked(|row| match operations::name(&row.summary) {
+                Name::Plan(plan) => plan,
+                Name::Words(words) => text_with(&name_localizer, words.id, &words.args),
             })
-        })
-    })
-    .unwrap_or_default();
-    // A row that has left the state, in the moment before its view is dropped,
-    // reads as empty: never a panic, never a stale fact.
-    let status = Memo::new({
-        let id = id.clone();
-        move |_| {
-            page.with(|state| {
-                state
-                    .row(&id)
-                    .map_or_default(|row| row.summary.status.clone())
-            })
-        }
+            .into_any()
+        },
+    );
+    let status_localizer = Arc::clone(localizer);
+    let status = Column::new(
+        text(localizer, msg::UI_COLUMN_STATUS),
+        Rem::tenths(95),
+        move |row: Signal<OperationRow>| status_view(&status_localizer, row),
+    );
+    let started_localizer = Arc::clone(localizer);
+    let started = Column::new(
+        text(localizer, msg::UI_COLUMN_STARTED),
+        // Room for the sort button's label, "Sort by started", and a whole
+        // start time on one line each in the widest common sans-serif
+        // (DejaVu Sans, Linux's default); 11 rem fit only narrower fonts.
+        Rem::tenths(130),
+        move |row: Signal<OperationRow>| {
+            let localizer = Arc::clone(&started_localizer);
+            let zone = zone.clone();
+            let at = Memo::new(move |_| row.with(|row| key(row).to_owned()));
+            view! {
+                <time datetime=move || {
+                    at.get()
+                }>{move || at.with(|at| instant(&localizer, at, zone.as_ref()))}</time>
+            }
+            .into_any()
+        },
+    )
+    .sorted_by(
+        Sort::new(
+            text(localizer, msg::UI_SORT_BY_STARTED),
+            text(localizer, msg::UI_SORTED_OLDEST),
+            text(localizer, msg::UI_SORTED_NEWEST),
+            |row: &OperationRow| SortKey::Text(key(row).to_owned()),
+        )
+        .descending_first(),
+    );
+    let result_localizer = Arc::clone(localizer);
+    let result = Column::new(
+        text(localizer, msg::UI_COLUMN_RESULT),
+        // The rest of the page's 58 rem: room for a long path such as
+        // "/srv/backups/home-laptop.password" (18.1 rem in DejaVu Sans,
+        // Linux's default) on one line, beside its 1 rem of padding.
+        Rem::tenths(195),
+        move |row: Signal<OperationRow>| result_view(&result_localizer, row),
+    );
+    let cancel_localizer = Arc::clone(localizer);
+    let cancel_connection = connection.clone();
+    let actions = Column::new(
+        text(localizer, msg::UI_COLUMN_ACTIONS),
+        Rem::tenths(80),
+        move |row: Signal<OperationRow>| {
+            cancel_view(
+                &cancel_localizer,
+                &cancel_connection,
+                page,
+                cancelled,
+                answers,
+                row,
+            )
+        },
+    );
+    let sentences = Sentences {
+        loading: text(localizer, msg::UI_LOADING),
+        empty: text(localizer, msg::UI_NO_OPERATIONS),
+        unreachable: text(localizer, msg::UI_UNREACHABLE_BODY),
+    };
+    view! {
+        <Table
+            name=TableName::Heading(PAGE_HEADING_ID.to_owned())
+            row_header=operation
+            columns=vec![status, started, result, actions]
+            rows=Memo::new(move |_| page.with(|state| state.rows.clone()))
+            key=|row: &OperationRow| row.summary.id.clone()
+            state=State::Ready
+            sentences=sentences
+            row_header_id=header_id
+        />
+    }
+    .into_any()
+}
+
+/// The `id` of an operation's row header, which a control that leaves the
+/// row hands focus to.
+fn header_id(row: &OperationRow) -> String {
+    format!("operation-{}", row.summary.id)
+}
+
+/// An operation's status: its badge, and a running backup's progress bar once
+/// it has reported, whose name is worded once.
+fn status_view(localizer: &Arc<Localizer>, row: Signal<OperationRow>) -> AnyView {
+    let (progress_label, header) = row.with_untracked(|row| {
+        let bar = operations::progress_label(&row.summary);
+        (text_with(localizer, bar.id, &bar.args), header_id(row))
     });
-    let started = Memo::new({
-        let id = id.clone();
-        move |_| page.with(|state| state.row(&id).map_or_default(|row| key(row).to_owned()))
-    });
+    let status = Memo::new(move |_| row.with(|row| row.summary.status.clone()));
     // The run's latest report: none until it has reported, so a row that has
     // not begun has no bar.
-    let reading = Memo::new({
-        let id = id.clone();
-        move |_| page.with(|state| state.row(&id).and_then(|row| row.progress))
-    });
-    let result = Memo::new({
-        let id = id.clone();
-        move |_| {
-            page.with(|state| {
-                state
-                    .row(&id)
-                    .map_or_default(|row| operations::result(&row.summary))
-            })
-        }
-    });
-    let failure = Memo::new({
-        let id = id.clone();
-        let localizer = Arc::clone(&localizer);
-        move |_| {
-            page.with(|state| {
-                state
-                    .row(&id)
-                    .and_then(|row| operations::failure(&localizer, &row.summary))
-            })
-        }
-    });
+    let reading = Memo::new(move |_| row.with(|row| row.progress));
+    let has_progress = Memo::new(move |_| reading.with(Option::is_some));
     let badge = Memo::new({
-        let localizer = Arc::clone(&localizer);
+        let localizer = Arc::clone(localizer);
         move |_| status.with(|status| badge_of(&localizer, status))
     });
-    let can_cancel = Memo::new(move |_| status.with(|status| cancellable(status)));
-    let has_progress = Memo::new(move |_| reading.get().is_some());
-    let result_localizer = Arc::clone(&localizer);
-    let bar_localizer = Arc::clone(&localizer);
-    let still_waiting = text(&localizer, msg::UI_STILL_WAITING);
-    let url = format!("{}/api/v1/operations/{id}/cancel", connection.base);
-    // The row header's ID, which a control that leaves the row hands focus to.
-    let header = format!("operation-{id}");
-    let operation = id;
-    let cancel_header = header.clone();
+    let bar_localizer = Arc::clone(localizer);
     view! {
-        <tr>
-            <th scope="row" id=header.clone() tabindex="-1">
-                {name}
-            </th>
-            <td>
-                <StatusBadge
-                    state=Signal::derive(move || badge.with(|badge| badge.0))
-                    label=Signal::derive(move || badge.with(|badge| badge.1.clone()))
-                />
-                {move || {
-                    has_progress
-                        .get()
-                        .then(|| {
-                            view! {
-                                <Progress
-                                    localizer=Arc::clone(&bar_localizer)
-                                    label=progress_label.clone()
-                                    then_focus=header.clone()
-                                    reading=Signal::derive(move || {
-                                        reading.get().unwrap_or_default()
-                                    })
-                                />
-                            }
-                        })
-                }}
-            </td>
-            <td title=move || {
-                started.get()
-            }>{move || instant(&localizer, &started.get(), zone.as_ref())}</td>
-            <td>
-                // Why it failed, then what it did; one item alone as it is,
-                // two or more as a list (#430).
-                {move || {
-                    let reason = failure
-                        .get()
-                        .map(|sentence| cell_sentence_view(sentence).into_any());
-                    let facts = result
-                        .with(|facts| {
-                            facts
-                                .iter()
-                                .map(|fact| {
-                                    runs_view(&text_with(&result_localizer, fact.id, &fact.args))
-                                        .into_any()
-                                })
-                                .collect::<Vec<_>>()
-                        });
-                    match Said::of(reason.into_iter().chain(facts).collect()) {
-                        Said::Nothing => ().into_any(),
-                        Said::One(item) => item,
-                        Said::List(items) => {
-                            view! {
-                                <ul>
-                                    {items
-                                        .into_iter()
-                                        .map(|item| view! { <li>{item}</li> })
-                                        .collect_view()}
-                                </ul>
-                            }
-                                .into_any()
-                        }
+        <StatusBadge
+            state=Signal::derive(move || badge.with(|badge| badge.0))
+            label=Signal::derive(move || badge.with(|badge| badge.1.clone()))
+        />
+        {move || {
+            has_progress
+                .get()
+                .then(|| {
+                    view! {
+                        <Progress
+                            localizer=Arc::clone(&bar_localizer)
+                            label=progress_label.clone()
+                            then_focus=header.clone()
+                            reading=Signal::derive(move || { reading.get().unwrap_or_default() })
+                        />
                     }
-                }}
-            </td>
-            <td>
-                {move || {
-                    can_cancel
-                        .get()
-                        .then(|| {
-                            let button = NodeRef::<leptos::html::Button>::new();
-                            hand_focus_when_gone(button, cancel_header.clone());
-                            let url = url.clone();
-                            let connection = connection.clone();
-                            let operation = operation.clone();
-                            let still_waiting = still_waiting.clone();
-                            let error_localizer = Arc::clone(&error_localizer);
-                            let cancel_name = cancel_label.clone();
-                            let cancelling = RwSignal::new(false);
-                            // `cancelling` keeps the button busy while the
-                            // daemon answers the cancel; the run's end then
-                            // takes the button away.
-                            view! {
-                                // A run that ends takes its Cancel button away;
-                                // a button that held focus hands it to the row's
-                                // header, which names the run (#438).
-                                <Button
-                                    content=Content::Text(cancel_shown.clone().into())
-                                    size=Size::Small
-                                    node_ref=button
-                                    fuller_name=Signal::derive(move || cancel_name.clone())
-                                    busy=cancelling
-                                    on_press=Callback::new(move |()| {
-                                        let error_localizer = Arc::clone(&error_localizer);
-                                        let Connection { base, visit } = connection.clone();
-                                        let still_waiting = still_waiting.clone();
-                                        let operation = operation.clone();
-                                        let url = url.clone();
-                                        let ops = page.live();
-                                        cancelled
-                                            .update_value(|cancelled| {
-                                                cancelled.insert(operation.clone());
-                                            });
-                                        cancelling.set(true);
-                                        spawn_local(async move {
-                                            let answer = ws::post(&url, &Empty {}).await;
-                                            cancelling.try_set(false);
-                                            match answer {
-                                                Some(Posted::Done(_)) => {
-                                                    if visit.during(ws::settle(&base, ops, &operation)).await
-                                                        == Some(false)
-                                                    {
-                                                        answers.toasts.show(ToastTone::Primary, still_waiting);
-                                                    }
-                                                }
-                                                Some(Posted::Refused(code, args, detail)) => {
-                                                    cancelled
-                                                        .update_value(|cancelled| {
-                                                            cancelled.remove(&operation);
-                                                        });
-                                                    answers
-                                                        .refused
-                                                        .set(
-                                                            Some(
-                                                                refused_sentence(
-                                                                    &error_localizer,
-                                                                    code,
-                                                                    &args,
-                                                                    detail.as_deref(),
-                                                                ),
-                                                            ),
-                                                        );
-                                                }
-                                                None => {
-                                                    cancelled
-                                                        .update_value(|cancelled| {
-                                                            cancelled.remove(&operation);
-                                                        });
-                                                }
-                                            }
-                                        });
-                                    })
-                                />
-                            }
-                        })
-                }}
-            </td>
-        </tr>
+                })
+        }}
     }
+    .into_any()
+}
+
+/// What a run did, after why it failed: one item alone as it is, two or more
+/// as a list (#430).
+fn result_view(localizer: &Arc<Localizer>, row: Signal<OperationRow>) -> AnyView {
+    let result = Memo::new(move |_| row.with(|row| operations::result(&row.summary)));
+    let failure = Memo::new({
+        let localizer = Arc::clone(localizer);
+        move |_| row.with(|row| operations::failure(&localizer, &row.summary))
+    });
+    let localizer = Arc::clone(localizer);
+    (move || {
+        let reason = failure
+            .get()
+            .map(|sentence| cell_sentence_view(sentence).into_any());
+        let facts = result.with(|facts| {
+            facts
+                .iter()
+                .map(|fact| runs_view(&text_with(&localizer, fact.id, &fact.args)).into_any())
+                .collect::<Vec<_>>()
+        });
+        match Said::of(reason.into_iter().chain(facts).collect()) {
+            Said::Nothing => ().into_any(),
+            Said::One(item) => item,
+            Said::List(items) => {
+                view! { <ul>{items.into_iter().map(|item| view! { <li>{item}</li> }).collect_view()}</ul> }
+                .into_any()
+            }
+        }
+    })
+    .into_any()
+}
+
+/// A running or queued run's Cancel button, which shows "Cancel" and is
+/// named for its run: the Actions column has room for one word, and the name
+/// begins with what the button shows (WCAG 2.5.3) (#430). A run that ends
+/// takes it away; a button that held focus hands it to the row's header,
+/// which names the run (#438). Its refusals are worded in the row's language.
+fn cancel_view(
+    localizer: &Arc<Localizer>,
+    connection: &Connection,
+    page: Pausable,
+    cancelled: StoredValue<HashSet<String>>,
+    answers: Answers,
+    row: Signal<OperationRow>,
+) -> AnyView {
+    let cancel_shown = text(localizer, msg::UI_CANCEL);
+    let still_waiting = text(localizer, msg::UI_STILL_WAITING);
+    let (operation, cancel_label, header) = row.with_untracked(|row| {
+        let cancel = operations::cancel_label(&row.summary);
+        (
+            row.summary.id.clone(),
+            text_with(localizer, cancel.id, &cancel.args),
+            header_id(row),
+        )
+    });
+    let can_cancel = Memo::new(move |_| row.with(|row| cancellable(&row.summary.status)));
+    let url = format!("{}/api/v1/operations/{operation}/cancel", connection.base);
+    let error_localizer = Arc::clone(localizer);
+    let connection = connection.clone();
+    (move || {
+        can_cancel.get().then(|| {
+            let button = NodeRef::<leptos::html::Button>::new();
+            hand_focus_when_gone(button, header.clone());
+            let url = url.clone();
+            let connection = connection.clone();
+            let operation = operation.clone();
+            let still_waiting = still_waiting.clone();
+            let error_localizer = Arc::clone(&error_localizer);
+            let cancel_name = cancel_label.clone();
+            // `cancelling` keeps the button busy while the daemon answers
+            // the cancel; the run's end then takes the button away.
+            let cancelling = RwSignal::new(false);
+            view! {
+                <Button
+                    content=Content::Text(cancel_shown.clone().into())
+                    size=Size::Small
+                    node_ref=button
+                    fuller_name=Signal::derive(move || cancel_name.clone())
+                    busy=cancelling
+                    on_press=Callback::new(move |()| {
+                        let error_localizer = Arc::clone(&error_localizer);
+                        let Connection { base, visit } = connection.clone();
+                        let still_waiting = still_waiting.clone();
+                        let operation = operation.clone();
+                        let url = url.clone();
+                        let ops = page.live();
+                        cancelled
+                            .update_value(|cancelled| {
+                                cancelled.insert(operation.clone());
+                            });
+                        cancelling.set(true);
+                        spawn_local(async move {
+                            let answer = ws::post(&url, &Empty {}).await;
+                            cancelling.try_set(false);
+                            match answer {
+                                Some(Posted::Done(_)) => {
+                                    if visit.during(ws::settle(&base, ops, &operation)).await
+                                        == Some(false)
+                                    {
+                                        answers.toasts.show(ToastTone::Primary, still_waiting);
+                                    }
+                                }
+                                Some(Posted::Refused(code, args, detail)) => {
+                                    cancelled
+                                        .update_value(|cancelled| {
+                                            cancelled.remove(&operation);
+                                        });
+                                    answers
+                                        .refused
+                                        .set(
+                                            Some(
+                                                refused_sentence(
+                                                    &error_localizer,
+                                                    code,
+                                                    &args,
+                                                    detail.as_deref(),
+                                                ),
+                                            ),
+                                        );
+                                }
+                                None => {
+                                    cancelled
+                                        .update_value(|cancelled| {
+                                            cancelled.remove(&operation);
+                                        });
+                                }
+                            }
+                        });
+                    })
+                />
+            }
+        })
+    })
+    .into_any()
 }
 
 /// What the operations page shows in the place of its table, or the table.
@@ -1022,20 +975,6 @@ fn shown(phase: Phase, refused: bool, rows: &[OperationRow]) -> Shown {
     }
 }
 
-/// The ids of `rows` in the order `sort` shows them. History is the daemon's
-/// own order, newest first; a sort order compares the instant of the Started
-/// cell, which as RFC 3339 in UTC orders as its bytes do, and keeps the
-/// daemon's order between rows that tie.
-fn ordered(rows: &[OperationRow], sort: SortOrder) -> Vec<String> {
-    let mut rows: Vec<&OperationRow> = rows.iter().collect();
-    match sort {
-        SortOrder::History => {}
-        SortOrder::NewestFirst => rows.sort_by(|a, b| key(b).cmp(key(a))),
-        SortOrder::OldestFirst => rows.sort_by(|a, b| key(a).cmp(key(b))),
-    }
-    rows.into_iter().map(|row| row.summary.id.clone()).collect()
-}
-
 /// A status as its badge shows it: its state, and its text. A status this
 /// build doesn't know is the empty state with the status as it came, never a
 /// blank cell.
@@ -1047,7 +986,8 @@ fn badge_of(localizer: &Localizer, status: &str) -> (BadgeState, String) {
 }
 
 /// The order a row's life is told by: the instant its `Started` cell shows,
-/// which for a queued run is the instant it was queued.
+/// which for a queued run is the instant it was queued. As RFC 3339 in UTC it
+/// orders as its bytes do.
 fn key(row: &OperationRow) -> &str {
     row.summary
         .started_at
@@ -1368,12 +1308,6 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     let body = text(&localizer, msg::UI_REPOSITORIES_BODY);
     let loading = text(&localizer, msg::UI_LOADING);
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
-    let (name_column, location_column, password_column, actions_column) = (
-        text(&localizer, msg::UI_COLUMN_NAME),
-        text(&localizer, msg::UI_COLUMN_LOCATION),
-        text(&localizer, msg::UI_COLUMN_PASSWORD),
-        text(&localizer, msg::UI_COLUMN_ACTIONS),
-    );
     let empty = text(&localizer, msg::UI_NO_REPOSITORIES);
     let form_heading = text(&localizer, msg::UI_REPOSITORIES_FORM_HEADING);
     let working = text(&localizer, msg::UI_REPOSITORIES_WORKING);
@@ -1386,6 +1320,9 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     let phase = RwSignal::new(Phase::Loading);
     // The configured repositories; `None` until the first read answers.
     let rows = RwSignal::<Option<Vec<RepositoryDto>>>::new(None);
+    // What each row's last Test found at each of its locations, by the row's
+    // name; a read of the list forgets it, as the rows may have changed.
+    let tested = RwSignal::<HashMap<String, Vec<LocationTriedDto>>>::new(HashMap::new());
     // A list the daemon refused, as a configuration with a mistake in it is:
     // said in the list's place, naming where the mistake is (#347).
     let refused = RwSignal::<Option<Sentence>>::new(None);
@@ -1408,6 +1345,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             match ws::get::<RepositoriesDto>(&url).await {
                 Some(Got::Read(read)) => {
                     refused.set(None);
+                    tested.set(HashMap::new());
                     rows.set(Some(read.repositories));
                     phase.set(Phase::Ready);
                 }
@@ -1511,7 +1449,16 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
         });
     });
 
-    let list_localizer = Arc::clone(&localizer);
+    let table_localizer = Arc::clone(&localizer);
+    // What the list's place shows; a memo, so a read again that changes only
+    // the rows keeps the table, and the rows follow in place.
+    let shape = Memo::new(move |_| {
+        (
+            phase.get(),
+            refused.get(),
+            rows.with(|rows| rows.as_ref().is_some_and(|rows| !rows.is_empty())),
+        )
+    });
     let summary_localizer = Arc::clone(&localizer);
     let note_localizer = Arc::clone(&localizer);
     let field_text = |id| text(&localizer, id);
@@ -1539,44 +1486,16 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 })
                 .collect_view()
         }}
-        {move || match phase.get() {
-            Phase::Loading => first_load(loading.clone(), Awaited::table(4)).into_any(),
-            Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
-            Phase::Ready => {
-                match (refused.get(), rows.get()) {
-                    (Some(sentence), _) => {
-                        view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
-                    }
-                    (None, Some(rows)) if !rows.is_empty() => {
-                        let localizer = Arc::clone(&list_localizer);
-                        let base = base.get_value();
-                        view! {
-                            // The frame is what the Location column's widest
-                            // address is measured against.
-                            <div class="table-frame">
-                                <table class="repositories" aria-labelledby=PAGE_HEADING_ID>
-                                    <thead>
-                                        <tr>
-                                            <th scope="col">{name_column.clone()}</th>
-                                            <th scope="col">{location_column.clone()}</th>
-                                            <th scope="col">{password_column.clone()}</th>
-                                            <th scope="col">{actions_column.clone()}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {rows
-                                            .into_iter()
-                                            .map(|row| repository_row(&localizer, &base, creates, row))
-                                            .collect_view()}
-                                    </tbody>
-                                </table>
-                            </div>
-                        }
-                            .into_any()
-                    }
-                    _ => view! { <p>{empty.clone()}</p> }.into_any(),
-                }
+        {move || match shape.get() {
+            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::table(4)).into_any(),
+            (Phase::Unreachable, _, _) => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
+            (Phase::Ready, Some(sentence), _) => {
+                view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
             }
+            (Phase::Ready, None, true) => {
+                repositories_table(&table_localizer, base.get_value(), creates, rows, tested)
+            }
+            (Phase::Ready, None, false) => view! { <p>{empty.clone()}</p> }.into_any(),
         }}
         {move || {
             creates
@@ -1707,57 +1626,133 @@ struct RowCreates {
     load: Callback<()>,
 }
 
-/// One row of the repositories table: the name as the row's header, where the
-/// repository is (the hot half on a line of its own), or, for a repository
-/// reached at several locations, the list of them in order with its Test
-/// (decision 80), where its password comes from, and its Create, when the
-/// row offers it (decision 53). Never the password itself (I4).
-fn repository_row(
+/// The repositories table (§4.5), named by the page's heading: each
+/// repository's name as its row's header, where it is (the hot half on a line
+/// of its own), or, for a repository reached at several locations, the list
+/// of them in order with its Test (decision 80), where its password comes
+/// from, and its Create, when the row offers it (decision 53). Never the
+/// password itself (I4). A row follows a read of the list in place; its
+/// buttons are built again only when what the row offers changes, as a
+/// created repository's Create goes.
+fn repositories_table(
     localizer: &Arc<Localizer>,
-    base: &str,
+    base: String,
     creates: RowCreates,
-    row: RepositoryDto,
-) -> impl IntoView {
-    let (id, args) = password_source(&row.password);
-    let password = text_with(localizer, id, &args);
-    let notes = repository_notes(localizer, &row.warnings);
-    let hot = row.repo_hot.map(|location| {
+    rows: RwSignal<Option<Vec<RepositoryDto>>>,
+    tested: RwSignal<HashMap<String, Vec<LocationTriedDto>>>,
+) -> AnyView {
+    let name = Column::new(
+        text(localizer, msg::UI_COLUMN_NAME),
+        Rem::tenths(70),
+        |row: Signal<RepositoryDto>| row.with_untracked(|row| row.alias.clone()).into_any(),
+    );
+    let place_localizer = Arc::clone(localizer);
+    let location = Column::new(
+        text(localizer, msg::UI_COLUMN_LOCATION),
+        // An address such as `sftp:me@nas.home.lan:/srv/data/repo/pc/main`
+        // on one line in DejaVu Sans, Linux's default sans-serif, the widest
+        // common one. The four columns add up to the page's 58 rem.
+        Rem::tenths(265),
+        move |row: Signal<RepositoryDto>| {
+            let localizer = Arc::clone(&place_localizer);
+            (move || row.with(|row| place_view(&localizer, row, tested))).into_any()
+        },
+    );
+    let password_localizer = Arc::clone(localizer);
+    let password = Column::new(
+        text(localizer, msg::UI_COLUMN_PASSWORD),
+        Rem::tenths(150),
+        move |row: Signal<RepositoryDto>| {
+            let localizer = Arc::clone(&password_localizer);
+            (move || row.with(|row| password_view(&localizer, row))).into_any()
+        },
+    );
+    let actions_localizer = Arc::clone(localizer);
+    let actions = Column::new(
+        text(localizer, msg::UI_COLUMN_ACTIONS),
+        // A row's Create button ("Create demo") on one line in DejaVu Sans.
+        Rem::tenths(95),
+        move |row: Signal<RepositoryDto>| {
+            let localizer = Arc::clone(&actions_localizer);
+            let base = base.clone();
+            let offers = Memo::new(move |_| {
+                row.with(|row| {
+                    (
+                        row.alias.clone(),
+                        lists_locations(&row.locations),
+                        row.create_offered,
+                    )
+                })
+            });
+            (move || {
+                let (alias, several, create_offered) = offers.get();
+                let test = several.then(|| test_in_row(&localizer, &base, creates, &alias, tested));
+                let create =
+                    create_offered.then(|| create_in_row(&localizer, &base, creates, &alias));
+                view! {
+                    {test}
+                    {create}
+                }
+            })
+            .into_any()
+        },
+    );
+    let sentences = Sentences {
+        loading: text(localizer, msg::UI_LOADING),
+        empty: text(localizer, msg::UI_NO_REPOSITORIES),
+        unreachable: text(localizer, msg::UI_UNREACHABLE_BODY),
+    };
+    view! {
+        <Table
+            name=TableName::Heading(PAGE_HEADING_ID.to_owned())
+            row_header=name
+            columns=vec![location, password, actions]
+            rows=Memo::new(move |_| rows.get().unwrap_or_default())
+            key=|row: &RepositoryDto| row.alias.clone()
+            state=State::Ready
+            sentences=sentences
+        />
+    }
+    .into_any()
+}
+
+/// Where a repository is: its address, its hot half on a line of its own, or
+/// the list of its locations.
+fn place_view(
+    localizer: &Arc<Localizer>,
+    row: &RepositoryDto,
+    tested: RwSignal<HashMap<String, Vec<LocationTriedDto>>>,
+) -> AnyView {
+    if lists_locations(&row.locations) {
+        return locations_list(localizer, &row.alias, row.locations.clone(), tested).into_any();
+    }
+    let hot = row.repo_hot.clone().map(|location| {
         text_with(
             localizer,
             msg::UI_REPOSITORY_HOT,
             &[("location", MsgArg::Text(location))],
         )
     });
-    let create = row
-        .create_offered
-        .then(|| create_in_row(localizer, base, creates, &row.alias));
-    // What the row's last Test found at each location, by position.
-    let tested = RwSignal::<Option<Vec<LocationTriedDto>>>::new(None);
-    let several = lists_locations(&row.locations);
-    let test = several.then(|| test_in_row(localizer, base, creates, &row.alias, tested));
-    let place = if several {
-        locations_list(localizer, &row.alias, row.locations, tested).into_any()
-    } else {
-        view! {
-            <div class="address">{address_view(&row.repository)}</div>
-            {hot.map(|hot| view! { <div>{runs_view(&hot)}</div> })}
-        }
-        .into_any()
-    };
     view! {
-        <tr>
-            <th scope="row">{row.alias}</th>
-            <td class="location">{place}</td>
-            <td class="password">
-                <div>{runs_view(&password)}</div>
-                {notes
-                    .into_iter()
-                    .map(|note| view! { <div class="text-muted">{runs_view(&note)}</div> })
-                    .collect_view()}
-            </td>
-            <td>{test} {create}</td>
-        </tr>
+        <div>{address_view(&row.repository)}</div>
+        {hot.map(|hot| view! { <div>{runs_view(&hot)}</div> })}
     }
+    .into_any()
+}
+
+/// Where a repository's password comes from, and what the page notes of it.
+fn password_view(localizer: &Localizer, row: &RepositoryDto) -> AnyView {
+    let (id, args) = password_source(&row.password);
+    let password = text_with(localizer, id, &args);
+    let notes = repository_notes(localizer, &row.warnings);
+    view! {
+        <div>{runs_view(&password)}</div>
+        {notes
+            .into_iter()
+            .map(|note| view! { <div class="text-muted">{runs_view(&note)}</div> })
+            .collect_view()}
+    }
+    .into_any()
 }
 
 /// A row's locations, in the order a job tries them: each headed by its
@@ -1768,7 +1763,7 @@ fn locations_list(
     localizer: &Arc<Localizer>,
     alias: &str,
     locations: Vec<LocationDto>,
-    tested: RwSignal<Option<Vec<LocationTriedDto>>>,
+    tested: RwSignal<HashMap<String, Vec<LocationTriedDto>>>,
 ) -> impl IntoView + use<> {
     let (id, args) = locations_label(alias);
     let label = text_with(localizer, id, &args);
@@ -1798,9 +1793,10 @@ fn locations_list(
                 .collect();
             let position = location.position;
             let localizer = Arc::clone(localizer);
+            let alias = alias.to_owned();
             let found = move || {
                 tested.with(|tested| {
-                    found_at(tested.as_deref().unwrap_or_default(), position).map(|tried| {
+                    found_at(tested.get(&alias).map_or(&[], Vec::as_slice), position).map(|tried| {
                         location_tested(tried)
                             .into_iter()
                             .map(|(id, args)| text_with(&localizer, id, &args))
@@ -1812,7 +1808,7 @@ fn locations_list(
             view! {
                 <li>
                     <div>{heading}</div>
-                    <div class="address">{address_view(&location.repository)}</div>
+                    <div>{address_view(&location.repository)}</div>
                     {hot.map(|hot| view! { <div>{runs_view(&hot)}</div> })}
                     {options
                         .into_iter()
@@ -1839,7 +1835,7 @@ fn test_in_row(
     base: &str,
     creates: RowCreates,
     alias: &str,
-    tested: RwSignal<Option<Vec<LocationTriedDto>>>,
+    tested: RwSignal<HashMap<String, Vec<LocationTriedDto>>>,
 ) -> impl IntoView + use<> {
     // It shows "Test" and is named for its row: the column beside the
     // addresses has room for one word, and the name begins with what the
@@ -1858,7 +1854,9 @@ fn test_in_row(
         }
         busy.set(true);
         refused.set(None);
-        tested.set(None);
+        tested.update(|tested| {
+            tested.remove(&alias);
+        });
         reply(
             Politeness::Polite,
             &text(&localizer, msg::UI_REPOSITORIES_WORKING),
@@ -1879,7 +1877,7 @@ fn test_in_row(
                     Some(found) => {
                         let (id, args) = tested_announcement(&alias, &found);
                         reply(Politeness::Polite, &text_with(&localizer, id, &args));
-                        tested.try_set(Some(found));
+                        tested.try_update(|tested| tested.insert(alias, found));
                     }
                     // An answer that is not the one the route gives is a
                     // daemon the page cannot talk to.
@@ -1894,17 +1892,13 @@ fn test_in_row(
         });
     };
     view! {
-        // The span keeps the label's word whole: the column beside the
-        // addresses has room for one (#482).
-        <span class="whole-words">
-            <Button
-                content=Content::Text(shown.into())
-                size=Size::Small
-                fuller_name=Signal::stored(label)
-                busy=busy
-                on_press=Callback::new(test)
-            />
-        </span>
+        <Button
+            content=Content::Text(shown.into())
+            size=Size::Small
+            fuller_name=Signal::stored(label)
+            busy=busy
+            on_press=Callback::new(test)
+        />
         {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
     }
 }
@@ -2371,66 +2365,6 @@ mod tests {
         assert_eq!(shown(Phase::Ready, true, &held), Shown::Refused);
         assert_eq!(shown(Phase::Loading, true, &held), Shown::Loading);
         assert_eq!(shown(Phase::Unreachable, true, &held), Shown::Unreachable);
-    }
-
-    #[test]
-    fn the_history_is_shown_in_the_order_the_daemon_sent_it() {
-        let rows = [
-            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
-            row(2, Some("2026-11-09T10:00:03Z"), "2026-11-09T10:00:00Z"),
-            row(3, Some("2026-11-09T10:00:01Z"), "2026-11-09T10:00:00Z"),
-        ];
-        assert_eq!(
-            ordered(&rows, SortOrder::History),
-            [id_of(1), id_of(2), id_of(3)]
-        );
-    }
-
-    #[test]
-    fn newest_first_puts_the_latest_start_on_top() {
-        let rows = [
-            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
-            row(2, Some("2026-11-09T10:00:03Z"), "2026-11-09T10:00:00Z"),
-            row(3, Some("2026-11-09T10:00:01Z"), "2026-11-09T10:00:00Z"),
-        ];
-        assert_eq!(
-            ordered(&rows, SortOrder::NewestFirst),
-            [id_of(2), id_of(1), id_of(3)]
-        );
-    }
-
-    #[test]
-    fn oldest_first_puts_the_earliest_start_on_top() {
-        let rows = [
-            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
-            row(2, Some("2026-11-09T10:00:03Z"), "2026-11-09T10:00:00Z"),
-            row(3, Some("2026-11-09T10:00:01Z"), "2026-11-09T10:00:00Z"),
-        ];
-        assert_eq!(
-            ordered(&rows, SortOrder::OldestFirst),
-            [id_of(3), id_of(1), id_of(2)]
-        );
-    }
-
-    #[test]
-    fn a_run_that_has_not_begun_is_ordered_by_when_it_was_queued() {
-        let rows = [
-            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
-            row(2, None, "2026-11-09T10:00:03Z"),
-        ];
-        assert_eq!(ordered(&rows, SortOrder::NewestFirst), [id_of(2), id_of(1)]);
-        assert_eq!(ordered(&rows, SortOrder::OldestFirst), [id_of(1), id_of(2)]);
-    }
-
-    #[test]
-    fn runs_that_started_together_keep_the_order_the_daemon_sent_them_in() {
-        let rows = [
-            row(1, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
-            row(2, Some("2026-11-09T10:00:02Z"), "2026-11-09T10:00:00Z"),
-        ];
-        for sort in [SortOrder::NewestFirst, SortOrder::OldestFirst] {
-            assert_eq!(ordered(&rows, sort), [id_of(1), id_of(2)], "{sort:?}");
-        }
     }
 
     #[test]
