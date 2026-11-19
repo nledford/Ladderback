@@ -56,7 +56,7 @@ Feature: Settings lists the folders an AI agent's plan dry run may read
     And the field "Folder" shows the error "is not a full path. Give the folder's whole path, such as"
     And focus is on the textbox "Folder"
     And the textbox "Folder" still holds "Documents"
-    And the page shows no alert containing "absolute path"
+    And no live alert on the page contains "absolute path"
     And the daemon's dry-run allowlist holds no folder
     And the page has no accessibility violations
 
@@ -98,8 +98,8 @@ Feature: Settings lists the folders an AI agent's plan dry run may read
     Given a daemon with sign-in off
     And the daemon can't read its dry-run allowlist
     When I open the address "/settings#dry-run-allowlist"
-    Then the page shows a message containing "could not read or write its configuration file"
-    And the page shows no alert containing "could not read or write its configuration file"
+    Then the page shows an error alert containing "could not read or write its configuration file"
+    And no live alert on the page contains "could not read or write its configuration file"
     And the page offers no button "Add the folder"
     When I skip to the content
     And I press Tab until focus is on the tab "Dry-run allowlist"

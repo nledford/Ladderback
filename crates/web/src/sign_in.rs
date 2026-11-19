@@ -14,10 +14,13 @@ use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::announcer::Politeness;
+use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
-    Banner, Button, Checkbox, ErrorSummary, ModalDialog, SummaryItem, TextField, text_field,
+    Alert, Banner, Button, Checkbox, ErrorSummary, ModalDialog, SummaryItem, TextField, text_field,
 };
+use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, refusal, text_with};
 use crate::session::{
@@ -138,6 +141,7 @@ fn SignInForm(
             }
         })
     };
+    let alert_localizer = Arc::clone(&localizer);
     view! {
         {move || {
             let items = summary.get();
@@ -171,7 +175,31 @@ fn SignInForm(
                 required=true
             />
             {keep_box}
-            {(place == Place::Dialog).then(|| view! { <p role="alert">{move || alert.get()}</p> })}
+            // The dialog's own `role="alert"`, in the dialog from the start so
+            // a screen reader says the error alert the moment it is drawn in
+            // it: the modal makes the announcer's regions inert (the Dialog
+            // contract, §4.5).
+            {(place == Place::Dialog)
+                .then(|| {
+                    view! {
+                        <div role="alert">
+                            {move || {
+                                alert
+                                    .get()
+                                    .map(|sentence| {
+                                        view! {
+                                            <Alert
+                                                localizer=Arc::clone(&alert_localizer)
+                                                tone=AlertTone::Error
+                                            >
+                                                {sentence}
+                                            </Alert>
+                                        }
+                                    })
+                            }}
+                        </div>
+                    }
+                })}
             <p class="actions">
                 <Button
                     content=Content::Text(text(&localizer, msg::UI_SIGN_IN_SUBMIT).into())
@@ -212,9 +240,14 @@ pub(crate) fn SignInPage(localizer: Arc<Localizer>, standing: RwSignal<Standing>
         standing.set(Standing::SignedIn);
     });
     let heading = text(&localizer, msg::UI_SIGN_IN_HEADING);
+    // The page's state, not a failure: an information alert under the
+    // heading, which the reader meets before the form.
     let said = changed
         .is_some_and(|changed| changed.get_untracked())
-        .then(|| view! { <p>{text(&localizer, msg::UI_ADMIN_PASSWORD_CHANGED)}</p> });
+        .then(|| {
+            let words = text(&localizer, msg::UI_ADMIN_PASSWORD_CHANGED);
+            view! { <Alert localizer=Arc::clone(&localizer)>{words}</Alert> }
+        });
     view! {
         <PageHeading>{heading}</PageHeading>
         {said}
@@ -300,6 +333,7 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
         }
     });
     let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
+    let alert_localizer = Arc::clone(&localizer);
     view! {
         // Escape keeps the session too; the warning closes once the daemon
         // has counted the use.
@@ -313,7 +347,22 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
             fallback="main".to_owned()
         >
             <p id="idle-warning-body">{text(&localizer, msg::UI_IDLE_WARNING_BODY)}</p>
-            <p role="alert">{move || unanswered.get().then(|| unreachable.clone())}</p>
+            // The dialog's own `role="alert"`, there from the start, as the
+            // sign-in dialog's is.
+            <div role="alert">
+                {move || {
+                    unanswered
+                        .get()
+                        .then(|| {
+                            let words = unreachable.clone();
+                            view! {
+                                <Alert localizer=Arc::clone(&alert_localizer) tone=AlertTone::Error>
+                                    {words}
+                                </Alert>
+                            }
+                        })
+                }}
+            </div>
             <p class="actions">
                 <Button
                     content=Content::Text(text(&localizer, msg::UI_IDLE_WARNING_STAY).into())
@@ -332,7 +381,8 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
 /// the daemon has ended the session, the sign-in page takes the place of the
 /// page, and focus moves to its heading, as on a route change (§4.5). A
 /// sign-out that reaches no daemon sets `failed`, which [`SignOutFailure`]
-/// says, and the page stays signed in.
+/// shows, and is said assertively, as the press's answer; the page stays
+/// signed in.
 #[component]
 pub(crate) fn SignOut(
     localizer: Arc<Localizer>,
@@ -340,18 +390,22 @@ pub(crate) fn SignOut(
     failed: RwSignal<bool>,
 ) -> impl IntoView {
     let busy = RwSignal::new(false);
+    let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
     let sign_out = move |()| {
         if busy.get_untracked() {
             return;
         }
         busy.set(true);
         failed.set(false);
+        let unreachable = unreachable.clone();
         spawn_local(async move {
             let answered = ws::sign_out().await;
             busy.try_set(false);
             failed.try_set(!answered);
             if answered {
                 standing.set(Standing::SignedOut);
+            } else {
+                reply(Politeness::Assertive, &unreachable);
             }
         });
     };
@@ -368,18 +422,22 @@ pub(crate) fn SignOut(
     }
 }
 
-/// Says, at the top of the page's main content, that a sign-out reached no
-/// daemon. Not beside Sign out: a line in the header would grow it, and one
-/// laid over the page would hide what is under it. The alert is in the page
-/// from the sign-in on, empty, so a screen reader reads out the failure the
-/// moment it is written; empty, it takes no room.
+/// Shows, at the top of the page's main content, that a sign-out reached no
+/// daemon: an error alert, which [`SignOut`] says assertively, since it is
+/// no live region. Not beside Sign out: a line in the header would grow it,
+/// and one laid over the page would hide what is under it.
 #[component]
 pub(crate) fn SignOutFailure(localizer: Arc<Localizer>, failed: RwSignal<bool>) -> impl IntoView {
     let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
-    view! {
-        <p role="alert" class="sign-out-failure">
-            {move || failed.get().then(|| unreachable.clone())}
-        </p>
+    move || {
+        failed.get().then(|| {
+            let words = unreachable.clone();
+            view! {
+                <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
+                    {words}
+                </Alert>
+            }
+        })
     }
 }
 

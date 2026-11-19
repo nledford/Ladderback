@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
+use crate::components::alert::rules::AlertTone;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Content, Kind};
 use crate::components::first_load;
@@ -25,10 +26,10 @@ use crate::components::link::rules::{Destination, Matching};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Banner, Button, Checkbox, Column, ErrorSummary, Link, Name as TableName, PauseUpdates,
+    Alert, Banner, Button, Checkbox, Column, ErrorSummary, Link, Name as TableName, PauseUpdates,
     Progress, RadioGroup, Sentences, Sort, SortKey, State, StatusBadge, SummaryItem, Table,
     TextField, Toast, ToastTone, Toasts, address_view, cell_sentence_view, hand_focus_when_gone,
-    runs_view, sentence_view, text_field,
+    refusal_alert, runs_view, say_refusals, text_field,
 };
 use crate::full_disk_access::describing_the_heading;
 use crate::full_disk_access_warning::{FullDiskAccessFound, FullDiskAccessSteps};
@@ -121,6 +122,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     // again among the reasons: said in the list's place, as the daemon said
     // it. Only no answer at all is a daemon that can't be reached.
     let refused = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(refused);
     let url = format!("{}/api/v1/plans", ws::origin());
     let read_localizer = Arc::clone(&localizer);
     spawn_local(async move {
@@ -172,9 +174,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match (refused.get(), plans.get()) {
-                    (Some(sentence), _) => {
-                        view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
-                    }
+                    (Some(sentence), _) => refusal_alert(&localizer, sentence).into_any(),
                     (None, Some(plans)) if !plans.is_empty() => {
                         start_plans_table(&localizer, plans, viewer.clone()).into_any()
                     }
@@ -379,6 +379,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let plans = RwSignal::<Option<Vec<PlanSummaryDto>>>::new(None);
     // A start or a cancel the daemon refused, its own words marked (§8.4).
     let error = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(error);
     let toasts = Toasts::new();
     let base = ws::origin();
     // The reader's visit to the page: the connection and the settle-polls of
@@ -388,6 +389,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // A history read the daemon refused, said where the table would be, as a
     // read refused after the reader closed Sign in again is (§4.5).
     let history_refused = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(history_refused);
     let history_localizer = Arc::clone(&localizer);
     ws::watch(
         &base,
@@ -406,6 +408,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // A list of plans the daemon refused, as a configuration with a mistake
     // in it is: said where the plans' buttons would be (#347).
     let plans_refused = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(plans_refused);
     let plans_localizer = Arc::clone(&localizer);
     spawn_local(async move {
         match ws::get::<PlansDto>(&plans_url).await {
@@ -479,6 +482,9 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         page.with(|state| shown(phase, refused, &state.rows))
     });
     let table_localizer = Arc::clone(&localizer);
+    let error_alert_localizer = Arc::clone(&localizer);
+    let plans_alert_localizer = Arc::clone(&localizer);
+    let history_alert_localizer = Arc::clone(&localizer);
     // The zone the browser reads its clock in, asked once: every instant the
     // page shows is written in it (§8.4).
     let viewer = l10n::viewer_zone();
@@ -509,13 +515,9 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
             on_pause=on_pause
             on_resume=on_resume
         />
+        {move || error.get().map(|sentence| refusal_alert(&error_alert_localizer, sentence))}
         {move || {
-            error.get().map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
-        }}
-        {move || {
-            plans_refused
-                .get()
-                .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+            plans_refused.get().map(|sentence| refusal_alert(&plans_alert_localizer, sentence))
         }}
         // The plans sit outside the connection's phases: a reader can start a
         // backup while the history is still on its way. Their buttons are a
@@ -568,6 +570,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                                         let still_waiting = still_waiting.clone();
                                         let error_localizer = Arc::clone(&error_localizer);
                                         let ops = ops;
+                                        error.set(None);
                                         starting.set(true);
                                         spawn_local(async move {
                                             let answer = ws::post(&url, &request).await;
@@ -604,7 +607,12 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                         })
                         .collect::<Vec<_>>()
                 });
-            (!buttons.is_empty()).then(|| view! { <p class="actions">{buttons}</p> })
+            (!buttons.is_empty())
+                .then(|| {
+                    // A press that is refused again in the
+                    // same words is said again (§4.5).
+                    view! { <p class="actions">{buttons}</p> }
+                })
         }}
         // After the start buttons, whose press it mostly answers. Dismissed,
         // it hands focus to the page's heading: the button whose press it
@@ -619,7 +627,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 Shown::Refused => {
                     history_refused
                         .get()
-                        .map(|sentence| view! { <p role="alert">{sentence_view(sentence)}</p> })
+                        .map(|sentence| refusal_alert(&history_alert_localizer, sentence))
                         .into_any()
                 }
                 Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
@@ -898,6 +906,7 @@ fn cancel_view(
                             .update_value(|cancelled| {
                                 cancelled.insert(operation.clone());
                             });
+                        answers.refused.set(None);
                         cancelling.set(true);
                         spawn_local(async move {
                             let answer = ws::post(&url, &Empty {}).await;
@@ -1326,6 +1335,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     // A list the daemon refused, as a configuration with a mistake in it is:
     // said in the list's place, naming where the mistake is (#347).
     let refused = RwSignal::<Option<Sentence>>::new(None);
+    say_refusals(refused);
     // What the page notes of the machine above its list, as the catalog
     // writes each code (#923). Read once; an answer that never came notes
     // nothing.
@@ -1376,6 +1386,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
     // What the last answer said, and which request is still on its way: its
     // button shows it is busy, the form's others take no press meanwhile.
     let result = RwSignal::<Option<String>>::new(None);
+    let result_localizer = Arc::clone(&localizer);
     let running = RwSignal::<Option<Action>>::new(None);
     let submit_localizer = Arc::clone(&localizer);
     let submit = Callback::new(move |action: Action| {
@@ -1490,7 +1501,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::table(4)).into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
-                view! { <p role="alert">{sentence_view(sentence)}</p> }.into_any()
+                refusal_alert(&table_localizer, sentence).into_any()
             }
             (Phase::Ready, None, true) => {
                 repositories_table(&table_localizer, base.get_value(), creates, rows, tested)
@@ -1609,7 +1620,17 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 </p>
             </form>
             {move || running.get().is_some().then(|| view! { <p>{working.clone()}</p> })}
-            {move || result.get().map(|text| view! { <p>{text}</p> })}
+            {move || {
+                result
+                    .get()
+                    .map(|text| {
+                        view! {
+                            <Alert localizer=Arc::clone(&result_localizer) tone=AlertTone::Success>
+                                {text}
+                            </Alert>
+                        }
+                    })
+            }}
         </section>
     }
 }
@@ -1848,6 +1869,7 @@ fn test_in_row(
     let localizer = Arc::clone(localizer);
     let refused = RwSignal::<Option<String>>::new(None);
     let busy = RwSignal::new(false);
+    let alert_localizer = Arc::clone(&localizer);
     let test = move |_| {
         if busy.get_untracked() {
             return;
@@ -1884,7 +1906,11 @@ fn test_in_row(
                     None => creates.phase.set(Phase::Unreachable),
                 },
                 Some(Posted::Refused(code, args, detail)) => {
-                    refused.try_set(Some(refusal(&localizer, code, &args, detail.as_deref())));
+                    // The row's alert is no live region: the refusal, the
+                    // press's answer, is said assertively too (§4.5).
+                    let shown = refusal(&localizer, code, &args, detail.as_deref());
+                    reply(Politeness::Assertive, &shown);
+                    refused.try_set(Some(shown));
                 }
                 // No answer at all: the page's phase says that its own way.
                 None => creates.phase.set(Phase::Unreachable),
@@ -1899,7 +1925,17 @@ fn test_in_row(
             busy=busy
             on_press=Callback::new(test)
         />
-        {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
+        {move || {
+            refused
+                .get()
+                .map(|text| {
+                    view! {
+                        <Alert localizer=Arc::clone(&alert_localizer) tone=AlertTone::Error>
+                            {text}
+                        </Alert>
+                    }
+                })
+        }}
     }
 }
 
@@ -1924,6 +1960,7 @@ fn create_in_row(
     // repository is created, until the list is read again and the row goes.
     let refused = RwSignal::<Option<String>>::new(None);
     let busy = RwSignal::new(false);
+    let alert_localizer = Arc::clone(&localizer);
     let create = move |_| {
         if busy.get_untracked() {
             return;
@@ -1967,6 +2004,9 @@ fn create_in_row(
                         Some((id, args)) => text_with(&localizer, id, &args),
                         None => refusal(&localizer, code, &args, detail.as_deref()),
                     };
+                    // The row's alert is no live region: the refusal, the
+                    // press's answer, is said assertively too (§4.5).
+                    reply(Politeness::Assertive, &shown);
                     refused.try_set(Some(shown));
                 }
                 // No answer at all: the page's phase says that its own way.
@@ -1981,7 +2021,17 @@ fn create_in_row(
             busy=busy
             on_press=Callback::new(create)
         />
-        {move || refused.get().map(|text| view! { <p role="alert">{text}</p> })}
+        {move || {
+            refused
+                .get()
+                .map(|text| {
+                    view! {
+                        <Alert localizer=Arc::clone(&alert_localizer) tone=AlertTone::Error>
+                            {text}
+                        </Alert>
+                    }
+                })
+        }}
     }
 }
 

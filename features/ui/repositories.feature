@@ -390,7 +390,7 @@ Feature: Repositories page
     Then the button "Create demo" leaves the page
     And the page asked to create "demo" once
 
-  Scenario: Creating a repository that is already there from its row says so, and changes nothing
+  Scenario: Creating a repository that is already there from its row says so in an error alert, said assertively, and changes nothing
     Given a daemon with a profile imported as "demo" whose repository folder is empty
     When a backup of "demo-home" fails because no repository is there
     And the demo repository is copied into the profile's repository folder
@@ -398,11 +398,12 @@ Feature: Repositories page
     And I skip to the content
     And I press Tab until focus is on the button "Create demo"
     And I press Enter
-    Then the page shows an alert containing "There is already a repository at the location of"
+    Then the page shows an error alert containing "There is already a repository at the location of"
+    And the assertive region comes to contain "There is already a repository at the location of"
     And focus stays on the button "Create demo"
     And the page has no accessibility violations
 
-  Scenario: A row's Create where the repository's folder isn't there is refused, and makes no folder
+  Scenario: A row's Create where the repository's folder isn't there is refused in an error alert, and makes no folder
     Given a daemon with a profile imported as "demo" whose repository folder is empty
     When a backup of "demo-home" fails because no repository is there
     And the profile's repository is moved to a folder that isn't there
@@ -410,7 +411,7 @@ Feature: Repositories page
     And I skip to the content
     And I press Tab until focus is on the button "Create demo"
     And I press Enter
-    Then the page shows an alert containing "This repository wasn't created"
+    Then the page shows an error alert containing "This repository wasn't created"
     And focus stays on the button "Create demo"
     And no folder is where the profile's repository was moved to
 
@@ -514,15 +515,16 @@ Feature: Repositories page
     And no text is clipped
     And the page has no accessibility violations
 
-  Scenario: A mistake in the configuration file is shown where it is, by keyboard alone
+  Scenario: A mistake in the configuration file is shown where it is as an error alert, said assertively, by keyboard alone
     Given a daemon with a scratch demo repository and no repositories
     And someone has written a setting the daemon does not know on line 6 of its configuration file
     When I open the web UI
     And I press Tab until focus is on the link "Repositories"
     And I press Enter
     Then focus is on the main heading "Repositories"
-    And the page shows an alert containing "did not accept its configuration file"
-    And the page shows an alert containing "line 6: repositories.demo.colour"
+    And the page shows an error alert containing "did not accept its configuration file"
+    And the page shows an error alert containing "line 6: repositories.demo.colour"
+    And the assertive region comes to contain "did not accept its configuration file"
     And the alert marks the sender's words as English
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
