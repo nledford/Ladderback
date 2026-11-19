@@ -14,13 +14,15 @@ use crate::components::button::Content;
 use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Button, RadioGroup, Toast, ToastTone, Toasts, refusal_alert, say_refusals, write_clipboard,
+    Button, Column, Name, RadioGroup, Sentences, State, Table, Toast, ToastTone, Toasts,
+    refusal_alert, say_refusals, write_clipboard,
 };
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
 use crate::repositories::Sentence;
 use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence};
 use crate::session::Told;
 use crate::text;
+use crate::variants::Rem;
 use crate::ws::{self, Got, Phase};
 
 /// The id of the button that copies, which a dismissed toast hands focus
@@ -133,15 +135,57 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
         .into_iter()
         .map(|levels| (levels.value(), text(&localizer, levels.label())))
         .collect();
-    let none_shown = text(&localizer, msg::UI_LOG_NONE_SHOWN);
-    let headers = [
+    let sentences = Sentences {
+        loading: text(&localizer, msg::UI_LOADING),
+        empty: text(&localizer, msg::UI_LOG_NONE_SHOWN),
+        unreachable: text(&localizer, msg::UI_UNREACHABLE_BODY),
+    };
+    let [at, level, source, message] = [
         msg::UI_LOG_AT,
         msg::UI_LOG_LEVEL,
         msg::UI_LOG_SOURCE,
         msg::UI_LOG_MESSAGE,
     ]
     .map(|id| text(&localizer, id));
-    let rows_localizer = Arc::clone(&localizer);
+    // A line is its place in the list: two lines of the log can say the
+    // same thing at the same instant.
+    let row_header = Column::new(at, Rem::tenths(140), |row: Signal<(usize, LogLineDto)>| {
+        let at = move || row.with(|(_, line)| line.at.clone());
+        view! { <time datetime=at>{at}</time> }.into_any()
+    });
+    let level_localizer = Arc::clone(&localizer);
+    let columns = vec![
+        Column::new(
+            level,
+            Rem::tenths(70),
+            move |row: Signal<(usize, LogLineDto)>| {
+                let localizer = Arc::clone(&level_localizer);
+                (move || text(&localizer, level_name(row.with(|(_, line)| line.level)))).into_any()
+            },
+        ),
+        Column::new(
+            source,
+            Rem::tenths(120),
+            |row: Signal<(usize, LogLineDto)>| {
+                view! { <span lang="en">{move || row.with(|(_, line)| line.source.clone())}</span> }
+                    .into_any()
+            },
+        ),
+        // A message keeps the line breaks the log wrote.
+        Column::new(
+            message,
+            Rem::tenths(240),
+            |row: Signal<(usize, LogLineDto)>| {
+                view! {
+                    <span class="whitespace-pre-wrap" lang="en">
+                        {move || row.with(|(_, line)| line.message.clone())}
+                    </span>
+                }
+                .into_any()
+            },
+        ),
+    ];
+    let rows = Signal::derive(move || listed.get().into_iter().enumerate().collect::<Vec<_>>());
     view! {
         <RadioGroup
             name="log-levels"
@@ -157,46 +201,14 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
             />
         </p>
         <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=COPY_ID />
-        {move || {
-            let listed = listed.get();
-            if listed.is_empty() {
-                return view! { <p>{none_shown.clone()}</p> }.into_any();
-            }
-            let rows = listed
-                .into_iter()
-                .map(|line| {
-                    let level = text(&rows_localizer, level_name(line.level));
-                    let at = line.at.clone();
-                    view! {
-                        <tr>
-                            <td>
-                                <time datetime=at>{line.at}</time>
-                            </td>
-                            <td>{level}</td>
-                            <td lang="en">{line.source}</td>
-                            <td class="message" lang="en">
-                                {line.message}
-                            </td>
-                        </tr>
-                    }
-                })
-                .collect_view();
-            view! {
-                <div class="table-frame">
-                    <table class="log" aria-labelledby=PAGE_HEADING_ID>
-                        <thead>
-                            <tr>
-                                {headers
-                                    .clone()
-                                    .map(|header| view! { <th scope="col">{header}</th> })
-                                    .to_vec()}
-                            </tr>
-                        </thead>
-                        <tbody>{rows}</tbody>
-                    </table>
-                </div>
-            }
-                .into_any()
-        }}
+        <Table
+            name=Name::Heading(PAGE_HEADING_ID.to_owned())
+            row_header=row_header
+            columns=columns
+            rows=rows
+            key=|row: &(usize, LogLineDto)| row.0
+            state=State::Ready
+            sentences=sentences
+        />
     }
 }

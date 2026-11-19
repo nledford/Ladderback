@@ -227,8 +227,8 @@ impl OperationsState {
             .filter(|row| rank(&row.summary.status) < TERMINAL)
     }
 
-    /// The row of `operation`, when the state holds it: how a row's view reads
-    /// what it shows, so that an update to another row does not reach it.
+    /// The row of `operation`, when the state holds it.
+    #[cfg(test)]
     pub(crate) fn row(&self, operation: &str) -> Option<&OperationRow> {
         self.rows.iter().find(|row| row.summary.id == operation)
     }

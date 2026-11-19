@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use api::{IanaZone, MsgArg, PlanDto, PlanSummaryDto, PlansDto, RepositoriesDto};
+use api::{MsgArg, PlanDto, PlanSummaryDto, PlansDto, RepositoriesDto};
 use l10n::{Localizer, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
@@ -20,9 +20,9 @@ use crate::components::button::{self, Appearance, Content};
 use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Button, Checkbox, Confirmation, ErrorSummary, ReviewDialog, SummaryItem, TextField, Toast,
-    ToastTone, Toasts, Working, dialog_refusal_alert, focus_element, hand_focus_when_gone,
-    recover_focus, refusal_alert, say_refusals, text_field,
+    Button, Checkbox, Column, Confirmation, ErrorSummary, Name, ReviewDialog, Sentences, State,
+    SummaryItem, Table, TextField, Toast, ToastTone, Toasts, Working, dialog_refusal_alert,
+    focus_element, hand_focus_when_gone, recover_focus, refusal_alert, say_refusals, text_field,
 };
 use crate::live::reply;
 use crate::plans::{
@@ -32,9 +32,11 @@ use crate::plans::{
     form_change_heading, new_plan, plan_path, refusal_of, saved, saved_id,
 };
 use crate::repositories::Sentence;
-use crate::routes::{PAGE_HEADING_ID, PageHeading, next_run_cell, refused_sentence, text_with};
+use crate::routes::{
+    PAGE_HEADING_ID, PageHeading, next_run_cell, refused_sentence, text_with, time_view,
+};
 use crate::text;
-use crate::variants::{Size, Tone};
+use crate::variants::{Rem, Size, Tone};
 use crate::ws::{self, Got, Phase, Posted};
 
 /// The text of `said` in the page's language.
@@ -345,9 +347,12 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
-/// The table of plans, named by the page's heading. Its rows are keyed by
-/// the plan's ID, so a read again changes a row's cells in place and never
-/// replaces a button a reader has focused.
+/// The table of plans, named by the page's heading: each plan's ID as its
+/// row's header, its repository, its next run and its Change and Delete
+/// buttons, named for it. Its rows are keyed by the plan's ID, so a read
+/// again changes a row's cells in place and never replaces a button a reader
+/// has focused. Each button hands focus to the page's heading when its row
+/// goes while it holds focus, as after a delete.
 fn plans_table(
     localizer: Arc<Localizer>,
     list: List,
@@ -357,111 +362,105 @@ fn plans_table(
     // Each next run is written in the viewer's own zone, as every instant
     // the page shows is (§8.4).
     let viewer = l10n::viewer_zone();
-    let head = (
+    let plan = Column::new(
         text(&localizer, msg::UI_COLUMN_PLAN),
-        text(&localizer, msg::UI_PLANS_COLUMN_REPOSITORY),
-        text(&localizer, msg::UI_COLUMN_NEXT_RUN),
-        text(&localizer, msg::UI_COLUMN_ACTIONS),
+        Rem::tenths(120),
+        |row: Signal<PlanSummaryDto>| (move || row.with(|plan| plan.id.clone())).into_any(),
     );
+    let repository = Column::new(
+        text(&localizer, msg::UI_PLANS_COLUMN_REPOSITORY),
+        Rem::tenths(120),
+        |row: Signal<PlanSummaryDto>| (move || row.with(|plan| plan.repository.clone())).into_any(),
+    );
+    let next_localizer = Arc::clone(&localizer);
+    let next_run = Column::new(
+        text(&localizer, msg::UI_COLUMN_NEXT_RUN),
+        Rem::tenths(120),
+        move |row: Signal<PlanSummaryDto>| {
+            let localizer = Arc::clone(&next_localizer);
+            let viewer = viewer.clone();
+            (move || {
+                let (shown, raw) =
+                    row.with(|plan| next_run_cell(&localizer, plan, viewer.as_ref()));
+                time_view(shown, raw)
+            })
+            .into_any()
+        },
+    );
+    let actions_localizer = Arc::clone(&localizer);
+    let actions = Column::new(
+        text(&localizer, msg::UI_COLUMN_ACTIONS),
+        Rem::tenths(200),
+        move |row: Signal<PlanSummaryDto>| {
+            plan_actions(
+                &actions_localizer,
+                row.with_untracked(|plan| plan.id.clone()),
+                change,
+                ask_delete,
+            )
+        },
+    );
+    let sentences = Sentences {
+        loading: text(&localizer, msg::UI_LOADING),
+        empty: text(&localizer, msg::UI_PLANS_NONE),
+        unreachable: text(&localizer, msg::UI_UNREACHABLE_BODY),
+    };
     view! {
-        <table class="plans" aria-labelledby=PAGE_HEADING_ID>
-            <thead>
-                <tr>
-                    <th scope="col">{head.0}</th>
-                    <th scope="col">{head.1}</th>
-                    <th scope="col">{head.2}</th>
-                    <th scope="col">{head.3}</th>
-                </tr>
-            </thead>
-            <tbody>
-                <For
-                    each=move || list.plans.get().unwrap_or_default()
-                    key=|plan: &PlanSummaryDto| plan.id.clone()
-                    children=move |plan: PlanSummaryDto| {
-                        plan_row(
-                            Arc::clone(&localizer),
-                            list,
-                            plan.id,
-                            viewer.clone(),
-                            change,
-                            ask_delete,
-                        )
-                    }
-                />
-            </tbody>
-        </table>
+        <Table
+            name=Name::Heading(PAGE_HEADING_ID.to_owned())
+            row_header=plan
+            columns=vec![repository, next_run, actions]
+            rows=Memo::new(move |_| list.plans.get().unwrap_or_default())
+            key=|plan: &PlanSummaryDto| plan.id.clone()
+            state=State::Ready
+            sentences=sentences
+        />
     }
 }
 
-/// A plan's row: its ID as the row's header, its repository, its next run
-/// (the instant in the cell's `title`), and its Change and Delete buttons,
-/// named for it. Each button hands focus to the page's heading when its row
-/// goes while it holds focus, as after a delete.
-fn plan_row(
-    localizer: Arc<Localizer>,
-    list: List,
+/// A plan's Change and Delete buttons, named for it. Each hands focus to the
+/// page's heading when its row goes while it holds focus, as after a delete.
+fn plan_actions(
+    localizer: &Localizer,
     id: String,
-    viewer: Option<IanaZone>,
     change: Callback<String>,
     ask_delete: Callback<String>,
-) -> impl IntoView {
+) -> AnyView {
     let (change_text, delete_text) = (
-        say(&localizer, change_label(&id)),
-        say(&localizer, delete_label(&id)),
+        say(localizer, change_label(&id)),
+        say(localizer, delete_label(&id)),
     );
-    let row_id = id.clone();
-    let summary = Memo::new(move |_| {
-        list.plans.with(|plans| {
-            plans
-                .iter()
-                .flatten()
-                .find(|plan| plan.id == row_id)
-                .map(|plan| {
-                    let (shown, title) = next_run_cell(&localizer, plan, viewer.as_ref());
-                    (plan.repository.clone(), shown, title)
-                })
-                .unwrap_or_default()
-        })
-    });
     let change_button = NodeRef::<leptos::html::Button>::new();
     let delete_button = NodeRef::<leptos::html::Button>::new();
     hand_focus_when_gone(change_button, PAGE_HEADING_ID.to_owned());
     hand_focus_when_gone(delete_button, PAGE_HEADING_ID.to_owned());
     let (change_for, delete_for) = (id.clone(), id.clone());
     view! {
-        <tr>
-            <th scope="row">{id.clone()}</th>
-            <td>{move || summary.with(|(repository, _, _)| repository.clone())}</td>
-            <td title=move || {
-                summary.with(|(_, _, title)| title.clone())
-            }>{move || summary.with(|(_, shown, _)| shown.clone())}</td>
-            <td>
-                <div class="actions">
-                    <Button
-                        content=Content::IconAndText {
-                            glyph: LucideGlyph::Pencil.into(),
-                            label: change_text.into(),
-                        }
-                        size=Size::Small
-                        id=change_id(&id)
-                        node_ref=change_button
-                        on_press=Callback::new(move |()| change.run(change_for.clone()))
-                    />
-                    <Button
-                        content=Content::IconAndText {
-                            glyph: LucideGlyph::Trash.into(),
-                            label: delete_text.into(),
-                        }
-                        tone=Tone::Error
-                        size=Size::Small
-                        id=delete_id(&id)
-                        node_ref=delete_button
-                        on_press=Callback::new(move |()| ask_delete.run(delete_for.clone()))
-                    />
-                </div>
-            </td>
-        </tr>
+        <div class="actions">
+            <Button
+                content=Content::IconAndText {
+                    glyph: LucideGlyph::Pencil.into(),
+                    label: change_text.into(),
+                }
+                size=Size::Small
+                id=change_id(&id)
+                node_ref=change_button
+                on_press=Callback::new(move |()| change.run(change_for.clone()))
+            />
+            <Button
+                content=Content::IconAndText {
+                    glyph: LucideGlyph::Trash.into(),
+                    label: delete_text.into(),
+                }
+                tone=Tone::Error
+                size=Size::Small
+                id=delete_id(&id)
+                node_ref=delete_button
+                on_press=Callback::new(move |()| ask_delete.run(delete_for.clone()))
+            />
+        </div>
     }
+    .into_any()
 }
 
 /// What a person has typed and chosen in the form, one signal per field,

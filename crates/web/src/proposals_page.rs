@@ -37,11 +37,9 @@ use crate::proposals::{
 };
 use crate::repositories::Sentence;
 use crate::restore::Asks;
-use crate::routes::{
-    PAGE_HEADING_ID, PageHeading, refused_sentence, short_id, snapshot_time, text_with,
-};
+use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence, text_with};
 use crate::session::Standing;
-use crate::snapshots::viewer_offset;
+use crate::snapshots::snapshots_table;
 use crate::text;
 use crate::variants::Tone;
 use crate::ws::{self, Got, Phase, Posted};
@@ -798,46 +796,21 @@ fn repository_view(localizer: &Arc<Localizer>, repository: RepositoryShown) -> A
     }
 }
 
-/// The snapshots one difference names, newest first, captioned, and what is
-/// said of those the daemon left out.
-fn listing_view(localizer: &Localizer, listing: ForgetListing) -> impl IntoView + use<> {
-    let zone = l10n::viewer_zone();
-    // Whether the host writes this locale's instants, asked once per table.
-    let writes_instants = localizer.writes_instants();
-    let rows = listing
-        .snapshots
-        .into_iter()
-        .map(|snapshot| {
-            let shown = snapshot_time(
-                localizer,
-                &snapshot.time,
-                snapshot.offset,
-                zone.as_ref(),
-                viewer_offset,
-                writes_instants,
-            );
-            view! {
-                <tr>
-                    <td>{short_id(&snapshot.id)}</td>
-                    <td title=snapshot.time>{shown}</td>
-                </tr>
-            }
-        })
-        .collect_view();
+/// The snapshots one difference names, newest first, in a table named by its
+/// caption, and what is said of those the daemon left out.
+fn listing_view(localizer: &Arc<Localizer>, listing: ForgetListing) -> impl IntoView + use<> {
+    let table = snapshots_table(
+        localizer,
+        say(localizer, listing.caption),
+        listing.snapshots,
+        l10n::viewer_zone(),
+        None,
+    );
     let more = listing
         .more
         .map(|said| view! { <p>{say(localizer, said)}</p> });
     view! {
-        <table class="snapshots">
-            <caption class="text-muted">{say(localizer, listing.caption)}</caption>
-            <thead>
-                <tr>
-                    <th scope="col">{text(localizer, msg::UI_COLUMN_SNAPSHOT)}</th>
-                    <th scope="col">{text(localizer, msg::UI_COLUMN_TIME)}</th>
-                </tr>
-            </thead>
-            <tbody>{rows}</tbody>
-        </table>
+        {table}
         {more}
     }
 }

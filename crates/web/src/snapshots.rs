@@ -30,18 +30,20 @@ use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tree::rules::snapshot_link;
 use crate::components::{
-    Button, Confirmation, Link, ReviewDialog, Working, dialog_refusal_alert, recover_focus,
-    refusal_alert, say_refusals, sentence_view,
+    Button, Column, Confirmation, Link, Name as TableName, ReviewDialog, Sentences, State, Table,
+    Working, dialog_refusal_alert, recover_focus, refusal_alert, say_refusals, sentence_view,
 };
 use crate::live::{reply, say};
 use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
 };
 use crate::repositories::{Sentence, repository_notes};
-use crate::routes::{Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with};
+use crate::routes::{
+    Empty, PageHeading, refused_sentence, short_id, snapshot_time, text_with, time_view,
+};
 use crate::stats::{self, StatsPanel};
 use crate::text;
-use crate::variants::Tone;
+use crate::variants::{Rem, Tone};
 use crate::wording::{self, Adoption, Words};
 use crate::ws::{self, Got, Posted};
 
@@ -859,26 +861,37 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
     }
 }
 
-/// The table of a reading, a row for each figure with its header, and when
-/// the reading was taken.
+/// The table of a reading, named by the section's heading: a row for each
+/// figure, headed by what it is, and, after it, when the reading was taken.
 fn stats_table(page: Page, reading: StatsReadingDto) -> impl IntoView {
-    let body = stats::rows(&reading)
-        .into_iter()
-        .map(|row| {
-            view! {
-                <tr>
-                    <th scope="row">{page.plain(row.header)}</th>
-                    <td>{page.words(&row.figure)}</td>
-                </tr>
-            }
-        })
-        .collect_view();
+    let localizer = page.localizer.get_value();
+    let figure = Column::new(
+        page.plain(msg::UI_STATS_COLUMN_FIGURE),
+        Rem::tenths(120),
+        move |row: Signal<stats::Row>| row.with_untracked(|row| page.plain(row.header)).into_any(),
+    );
+    let value = Column::new(
+        page.plain(msg::UI_STATS_COLUMN_VALUE),
+        Rem::tenths(200),
+        move |row: Signal<stats::Row>| row.with_untracked(|row| page.words(&row.figure)).into_any(),
+    );
+    let sentences = Sentences {
+        loading: text(&localizer, msg::UI_LOADING),
+        empty: text(&localizer, msg::UI_STATS_NONE),
+        unreachable: text(&localizer, msg::UI_UNREACHABLE_BODY),
+    };
     let taken = stats::taken(&reading, page.viewer.get_value().as_ref())
         .map(|words| view! { <p>{page.words(&words)}</p> });
     view! {
-        <table class="snapshots" aria-labelledby=STATS_HEADING>
-            <tbody>{body}</tbody>
-        </table>
+        <Table
+            name=TableName::Heading(STATS_HEADING.to_owned())
+            row_header=figure
+            columns=vec![value]
+            rows=Signal::stored(stats::rows(&reading))
+            key=|row: &stats::Row| row.header
+            state=State::Ready
+            sentences=sentences
+        />
         {taken}
     }
 }
@@ -941,54 +954,92 @@ fn snapshots_view(page: Page, caption: String, snapshots: Vec<SnapshotDto>, rows
     if rows.is_empty() {
         return view! { <p>{page.plain(msg::UI_NO_SNAPSHOTS)}</p> }.into_any();
     }
-    let localizer = page.localizer.get_value();
-    let zone = page.viewer.get_value();
-    // Whether the host writes this locale's instants, asked once per table.
-    let writes_instants = localizer.writes_instants();
-    let body = snapshots
-        .into_iter()
-        .map(|snapshot| {
-            let shown = snapshot_time(
-                &localizer,
-                &snapshot.time,
-                snapshot.offset,
-                zone.as_ref(),
-                viewer_offset,
-                writes_instants,
-            );
+    let table = snapshots_table(
+        &page.localizer.get_value(),
+        caption,
+        snapshots,
+        page.viewer.get_value(),
+        Some(page.alias.get_value()),
+    );
+    let more = wording::more(rows.more).map(|words| view! { <p>{page.words(&words)}</p> });
+    view! {
+        {table}
+        {more}
+    }
+    .into_any()
+}
+
+/// A table of snapshots (§4.5), named by its `caption`: each snapshot's short
+/// ID as its row's header, a link to the snapshot where its repository is
+/// `alias`, and the time it was taken, written as [`snapshot_time`] writes it
+/// in the viewer's `zone`, in a `<time>` that gives the instant to a program.
+pub(crate) fn snapshots_table(
+    localizer: &Arc<Localizer>,
+    caption: String,
+    snapshots: Vec<SnapshotDto>,
+    zone: Option<api::IanaZone>,
+    alias: Option<String>,
+) -> AnyView {
+    let id_localizer = Arc::clone(localizer);
+    let snapshot = Column::new(
+        text(localizer, msg::UI_COLUMN_SNAPSHOT),
+        Rem::tenths(100),
+        move |row: Signal<SnapshotDto>| {
+            let id = row.with_untracked(|snapshot| snapshot.id.clone());
+            let short = short_id(&id);
             // An ID the link's rules refuse as a path of this site shows as
             // text, never a link that could leave it.
-            let short = short_id(&snapshot.id);
-            let id = match snapshot_link(&page.alias.get_value(), &snapshot.id) {
+            match alias.as_deref().and_then(|alias| snapshot_link(alias, &id)) {
                 Some(to) => view! {
-                    <Link to=to localizer=Arc::clone(&localizer)>
+                    <Link to=to localizer=Arc::clone(&id_localizer)>
                         {short}
                     </Link>
                 }
                 .into_any(),
                 None => short.into_any(),
-            };
-            view! {
-                <tr>
-                    <td>{id}</td>
-                    <td title=snapshot.time>{shown}</td>
-                </tr>
             }
-        })
-        .collect_view();
-    let more = wording::more(rows.more).map(|words| view! { <p>{page.words(&words)}</p> });
+        },
+    );
+    // Whether the host writes this locale's instants, asked once per table.
+    let writes_instants = localizer.writes_instants();
+    let time_localizer = Arc::clone(localizer);
+    let time = Column::new(
+        text(localizer, msg::UI_COLUMN_TIME),
+        Rem::tenths(200),
+        move |row: Signal<SnapshotDto>| {
+            row.with_untracked(|snapshot| {
+                let shown = snapshot_time(
+                    &time_localizer,
+                    &snapshot.time,
+                    snapshot.offset,
+                    zone.as_ref(),
+                    viewer_offset,
+                    writes_instants,
+                );
+                let raw = snapshot
+                    .time
+                    .parse::<jiff::Timestamp>()
+                    .is_ok()
+                    .then(|| snapshot.time.clone());
+                time_view(shown, raw)
+            })
+        },
+    );
+    let sentences = Sentences {
+        loading: text(localizer, msg::UI_LOADING),
+        empty: text(localizer, msg::UI_NO_SNAPSHOTS),
+        unreachable: text(localizer, msg::UI_UNREACHABLE_BODY),
+    };
     view! {
-        <table class="snapshots">
-            <caption class="text-muted">{caption}</caption>
-            <thead>
-                <tr>
-                    <th scope="col">{page.plain(msg::UI_COLUMN_SNAPSHOT)}</th>
-                    <th scope="col">{page.plain(msg::UI_COLUMN_TIME)}</th>
-                </tr>
-            </thead>
-            <tbody>{body}</tbody>
-        </table>
-        {more}
+        <Table
+            name=TableName::Caption(caption)
+            row_header=snapshot
+            columns=vec![time]
+            rows=Signal::stored(snapshots)
+            key=|snapshot: &SnapshotDto| snapshot.id.clone()
+            state=State::Ready
+            sentences=sentences
+        />
     }
     .into_any()
 }
