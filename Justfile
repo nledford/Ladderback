@@ -79,6 +79,14 @@ fmt-check: _leptosfmt-pinned
 _leptosfmt-pinned:
     @[ "$(leptosfmt --version)" = 'leptosfmt {{ leptosfmt_version }}' ] || { echo "needs leptosfmt {{ leptosfmt_version }}, found $(leptosfmt --version 2>&1 || true); run just setup" >&2; exit 1; }
 
+# Fails unless the shellcheck on the PATH is the release
+# scripts/install-shellcheck.sh pins (its `version=` line, the one place the
+# version lives, beside the hashes that go with it): another release finds
+# other things, and on CI a copy the runner ships could stand ahead of it.
+[private]
+_shellcheck-pinned:
+    @want=$(sed -n 's/^version=//p' scripts/install-shellcheck.sh); have=$({ shellcheck --version 2>/dev/null || true; } | sed -n 's/^version: //p'); [ -n "$want" ] && [ "$have" = "$want" ] || { echo "needs shellcheck $want, found ${have:-none}; run just setup" >&2; exit 1; }
+
 # Clippy on the host crates: the part of `lint` that can differ by OS
 # (`cfg(target_os)` code), and so the only part CI runs on macOS too.
 [doc('Clippy on the host crates only, the part of `lint` that can differ by OS.')]
@@ -107,7 +115,7 @@ clippy:
 # runs `clippy` (see `clippy`).
 [doc('Clippy on the host and the web UI, each also as a release is built, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index check, and rustdoc with warnings as errors.')]
 [group('quality')]
-lint: _ui-deps clippy
+lint: _ui-deps _shellcheck-pinned clippy
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
     cargo clippy --workspace --all-targets {{ release_flags }} -- -D warnings
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown {{ release_flags }} -- -D warnings
