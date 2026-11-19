@@ -2507,6 +2507,13 @@ const SNAPSHOTS: Record<string, string> = {
   - tab "Third column tab"
 - tabpanel "First column tab":
   - paragraph: The first column panel.`,
+  "Tabs starting on a marked tab": `- heading "Tabs starting on a marked tab" [level=2]
+- tablist "Demo snapshot":
+  - tab "Demo summary"
+  - tab "Demo files" [selected]
+  - tab "Demo tags"
+- tabpanel "Demo files":
+  - paragraph: These demo tabs start on this one, which the gallery marks.`,
   "Shared vocabulary": `- heading "Shared vocabulary" [level=2]
 - heading "Tones" [level=3]
 - list "Tones":

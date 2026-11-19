@@ -1980,6 +1980,40 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
                 })
                 .collect_view()}
         </section>
+        // After the progress demo, past every demo a journey walks to from
+        // the page's top, so its two stops lengthen none of those walks; its
+        // scenarios start at its anchor.
+        <section id="tabs-starting-on-a-marked-tab-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_TABS_MARKED_HEADING) />
+            // A set started on its middle tab, which the gallery marks as
+            // Settings marks the tab its address names: that tab is
+            // selected and is the one Tab stop into the set, and the arrow
+            // keys, Home and End move on from it.
+            <Tabs
+                id="gallery-tabs-marked"
+                name=TabsName::Label(t(msg::UI_GALLERY_TABS_MARKED))
+                tabs=TabSet::new(
+                    Tab::new(
+                        t(msg::UI_GALLERY_TABS_MARKED_SUMMARY),
+                        Holds::Text,
+                        view! { <p>{t(msg::UI_GALLERY_TABS_MARKED_SUMMARY_TEXT)}</p> },
+                    ),
+                    vec![
+                        Tab::new(
+                                t(msg::UI_GALLERY_TABS_MARKED_FILES),
+                                Holds::Text,
+                                view! { <p>{t(msg::UI_GALLERY_TABS_MARKED_FILES_TEXT)}</p> },
+                            )
+                            .selected_at_start(true),
+                        Tab::new(
+                            t(msg::UI_GALLERY_TABS_MARKED_TAGS),
+                            Holds::Text,
+                            view! { <p>{t(msg::UI_GALLERY_TABS_MARKED_TAGS_TEXT)}</p> },
+                        ),
+                    ],
+                )
+            />
+        </section>
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <section id="table-demo">
