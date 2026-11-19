@@ -34,9 +34,10 @@ use l10n::Localizer;
 use rmcp::handler::server::tool::{schema_for_input, schema_for_output};
 use rmcp::model::{
     CallToolRequestMethod, CallToolRequestParams, CallToolResponse, CallToolResult, ConstString,
-    ContentBlock, CustomRequest, CustomResult, Implementation, JsonObject, ListToolsResult,
-    PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion, ServerCapabilities,
-    ServerConfig, Tool, ToolAnnotations,
+    ContentBlock, CustomRequest, CustomResult, Implementation, JsonObject, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
 };
 use rmcp::schemars::transform::transform_subschemas;
 use rmcp::schemars::{JsonSchema, Schema};
@@ -1052,7 +1053,12 @@ fn tools() -> Vec<Tool> {
 
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
-        let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build());
+        let mut info = ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_resources()
+                .enable_tools()
+                .build(),
+        );
         info.server_info = Implementation::new("ladderback", self.build.display());
         info
     }
@@ -1072,6 +1078,49 @@ impl ServerHandler for Server {
             .filter(|tool| ToolName::named(&tool.name).is_some_and(|named| named.offered_in(offer)))
             .collect();
         Ok(ListToolsResult::with_all_items(offered))
+    }
+
+    /// The one resource: the status summary (§4.6).
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(ListResourcesResult::with_all_items(vec![
+            Resource::new(STATUS_RESOURCE, "status")
+                .with_title("Status summary")
+                .with_description(STATUS_RESOURCE_DESCRIPTION)
+                .with_mime_type("application/json"),
+        ]))
+    }
+
+    /// Reads the status summary as the `status` tool answers it, as JSON
+    /// text. A refusal is an internal error whose data is its `{code, args}`
+    /// and whose message is its [`Server::sentence`]; any other URI names no
+    /// resource.
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        if request.uri != STATUS_RESOURCE {
+            return Err(McpError::resource_not_found(
+                format!("no resource is named {:?}", request.uri),
+                None,
+            ));
+        }
+        match self.status().await {
+            Answer::Done(value) => Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(value.to_string(), request.uri)
+                    .with_mime_type("application/json"),
+            ])
+            .into()),
+            Answer::Refused(error) => Err(McpError::internal_error(
+                self.sentence(&error),
+                serde_json::to_value(&error).ok(),
+            )),
+            Answer::Unwritten(why) => Err(McpError::internal_error(why, None)),
+        }
     }
 
     /// Calls the tool `request` names. An argument it can't take is its

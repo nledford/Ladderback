@@ -18,7 +18,9 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
-use crate::{Access, Backend, BackendStatus, CANCELLABLE_KIND, Proposals, not_cancellable};
+use crate::{
+    Access, Backend, BackendStatus, CANCELLABLE_KIND, DaemonStatus, Proposals, not_cancellable,
+};
 
 /// The daemon `--connect` reaches when it names none: `serve`'s default
 /// address.
@@ -399,8 +401,15 @@ impl Backend for Connect {
             // Sign-in is on and no token was sent: every other route refuses.
             (_, None) => return Err(ErrorDto::new(ErrorCode::SignInRequired, [], None)),
         };
-        let _ = (access, session);
-        todo!()
+        let summary = self.get("api/v1/status", &[], &[]).await?;
+        Ok(BackendStatus {
+            access,
+            daemon: Some(DaemonStatus {
+                build: session.build,
+                exposure: session.exposure,
+            }),
+            summary,
+        })
     }
 
     async fn plans(&self) -> Result<PlansDto, ErrorDto> {
