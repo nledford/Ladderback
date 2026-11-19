@@ -90,10 +90,14 @@ fn said(agent: &Agent) -> &Said {
 
 async fn pair(agent: &mut Agent, hostname: &str, address: &str) {
     let token = agent.pairing_terminal.token.clone().expect("a token");
+    pair_pasting(agent, hostname, address, format!("{token}\n")).await;
+}
+
+async fn pair_pasting(agent: &mut Agent, hostname: &str, address: &str, pasted: String) {
     let said = ladderback(
         machine_root(agent),
         &["pair", address, "--hostname", hostname, "--yes"],
-        Some(format!("{token}\n")),
+        Some(pasted),
     )
     .await;
     agent.pairing_terminal.said = Some(said);
@@ -154,14 +158,41 @@ async fn machine_pairs_at(agent: &mut Agent, address: String) {
     pair(agent, "e2e-laptop", &address).await;
 }
 
+#[when(
+    expr = "a machine named {string} pairs with the token pasted across two lines from its terminal"
+)]
+async fn machine_pairs_wrapped(agent: &mut Agent, hostname: String) {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    let token = agent.pairing_terminal.token.clone().expect("a token");
+    let (first, second) = token.split_at(token.len() / 2);
+    let pasted = format!("{first}\n{second}\n");
+    pair_pasting(agent, &hostname, &format!("http://{address}"), pasted).await;
+}
+
 #[when("the person asks the hub's terminal for a pairing token")]
 async fn token_asked(agent: &mut Agent) {
-    let said = ladderback(
-        hub_root(agent),
-        &["pairing-token", "--address", TOKEN_ADDRESS],
-        None,
-    )
-    .await;
+    ask_for_token(agent, &["pairing-token", "--address", TOKEN_ADDRESS]).await;
+}
+
+#[when(expr = "the person asks the hub's terminal for a pairing token for {string}")]
+async fn token_asked_for(agent: &mut Agent, address: String) {
+    ask_for_token(agent, &["pairing-token", "--address", &address]).await;
+}
+
+#[when(expr = "the person asks the hub's terminal for a pairing token lasting {word} minutes")]
+async fn token_asked_lasting(agent: &mut Agent, minutes: String) {
+    let args = [
+        "pairing-token",
+        "--address",
+        TOKEN_ADDRESS,
+        "--ttl",
+        &minutes,
+    ];
+    ask_for_token(agent, &args).await;
+}
+
+async fn ask_for_token(agent: &mut Agent, args: &[&str]) {
+    let said = ladderback(hub_root(agent), args, None).await;
     agent.pairing_terminal.said = Some(said);
 }
 
@@ -221,6 +252,23 @@ fn refused_while_running(agent: &mut Agent) {
     assert!(
         said.stderr
             .contains("the daemon is running on the data folder"),
+        "{said:?}"
+    );
+}
+
+#[then("the terminal refuses because the address isn't a hub address")]
+fn refused_address(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(said.stderr.contains("isn't a hub address"), "{said:?}");
+}
+
+#[then("the terminal refuses because a token lives 5 to 1440 minutes")]
+fn refused_life(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(
+        said.stderr.contains("a token lives 5 to 1440 minutes"),
         "{said:?}"
     );
 }

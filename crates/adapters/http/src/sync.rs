@@ -4,8 +4,9 @@
 //! shows the UI's page, or anything of the hub, at the hub's address.
 //!
 //! `/sync/v1` carries the handshake (decision 120, "The handshake") to
-//! [`HubPairing`]'s steps, under its bounds before the proofs: a frame over
-//! [`MAX_FRAME_BYTES`] closes the connection, as does a first frame that
+//! [`HubPairing`](app::pairing::HubPairing)'s steps, under its bounds before
+//! the proofs: a frame over [`MAX_FRAME_BYTES`](api::sync::MAX_FRAME_BYTES)
+//! closes the connection, as does a first frame that
 //! isn't there within 2 s or a handshake not over within 15 s, and at most
 //! 32 connections are unauthenticated at once, the oldest evicted for a
 //! newcomer. This listener has no TLS of the hub's own, so each session's
@@ -33,17 +34,19 @@ pub(crate) fn routes<S>(hub: &SyncHub) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    let not_found = any(|| async { StatusCode::NOT_FOUND });
+    let nothing = Router::new()
+        .route("/sync", not_found.clone())
+        .route("/sync/", not_found.clone())
+        .route("/sync/{*rest}", not_found);
+    // Every other path under `/sync/` answers 404 beside the handshake's.
     #[cfg(feature = "hub")]
     if let Some(router) = served::routes(hub) {
-        return router;
+        return nothing.merge(router);
     }
     #[cfg(not(feature = "hub"))]
     let _ = hub;
-    let not_found = any(|| async { StatusCode::NOT_FOUND });
-    Router::new()
-        .route("/sync", not_found.clone())
-        .route("/sync/", not_found.clone())
-        .route("/sync/{*rest}", not_found)
+    nothing
 }
 
 #[cfg(feature = "hub")]
@@ -58,6 +61,10 @@ mod served {
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::routing::get;
     use tokio::sync::Notify;
+
+    /// How long the hub waits to send its close frame to a peer that doesn't
+    /// read, once the handshake is over or abandoned.
+    const CLOSE_WITHIN: Duration = Duration::from_secs(1);
 
     /// The handshake's bounds before the proofs (decision 120).
     #[derive(Clone, Copy, Debug)]
@@ -113,6 +120,10 @@ mod served {
                 upgrade
                     .max_message_size(MAX_FRAME_BYTES)
                     .max_frame_size(MAX_FRAME_BYTES)
+                    // Writes go out at once, and what a peer that doesn't
+                    // read leaves queued, its pongs among it, stays bounded.
+                    .write_buffer_size(0)
+                    .max_write_buffer_size(2 * MAX_FRAME_BYTES)
                     .on_upgrade(move |socket| served.run(socket))
             }),
         ))
@@ -178,7 +189,10 @@ mod served {
                 code,
                 reason: reason.into(),
             };
-            let _ = socket.send(Message::Close(Some(close))).await;
+            // A peer that doesn't read can't hold the connection open past
+            // its place in the table.
+            let _ =
+                tokio::time::timeout(CLOSE_WITHIN, socket.send(Message::Close(Some(close)))).await;
         }
 
         /// A place among the unauthenticated, evicting the oldest when the

@@ -13,7 +13,8 @@ use app::pairing::{
 };
 use app::ports::{AgentRegistry as _, LinkError, Signing as _};
 use domain::fleet::{
-    Fingerprint, Hostname, HubAddress, PairingToken, RouteRefused, TokenId, TokenTls,
+    Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused, TokenId, TokenTls,
+    is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
 use l10n::{Localizer, PosixEnv, msg};
@@ -142,11 +143,32 @@ async fn make(
         )?;
         return Ok(ExitCode::from(2));
     };
+    // The route `pair` will take: a token it would refuse isn't made, and a
+    // plain address off loopback is warned about, as `pair` refuses it.
+    let route = match HubRoute::of(&address, TokenTls::Ca) {
+        Ok(route) => Some(route),
+        Err(RouteRefused::PlainOffLoopback) => None,
+        Err(RouteRefused::Malformed) => {
+            say(
+                localizer,
+                msg::CLI_PAIRING_TOKEN_BAD_ADDRESS,
+                &[("address", text(address.as_str()))],
+            )?;
+            return Ok(ExitCode::from(2));
+        }
+    };
+    let life = match ttl_minutes.map(|minutes| minutes.checked_mul(60)) {
+        None => None,
+        Some(Some(seconds)) => Some(SignedDuration::from_secs(seconds)),
+        Some(None) => {
+            say(localizer, msg::CLI_PAIRING_TOKEN_BAD_TTL, &[])?;
+            return Ok(ExitCode::from(2));
+        }
+    };
     let keys = match pairing.keys().await {
         Ok(keys) => keys,
         Err(error) => return hub_refused(localizer, &error),
     };
-    let life = ttl_minutes.map(SignedDuration::from_mins);
     // Built-in TLS isn't served yet, so every token is of a CA-checked
     // address: `https://` behind a proxy, or plain `http://` on loopback.
     let token = match pairing
@@ -156,8 +178,12 @@ async fn make(
         Ok(token) => token,
         Err(error) => return hub_refused(localizer, &error),
     };
-    if is_loopback(&address) {
-        say(localizer, msg::CLI_PAIRING_TOKEN_LOOPBACK, &[])?;
+    match route {
+        None => say(localizer, msg::CLI_PAIRING_TOKEN_PLAIN, &[])?,
+        Some(route) if is_loopback(&route.host) => {
+            say(localizer, msg::CLI_PAIRING_TOKEN_LOOPBACK, &[])?;
+        }
+        Some(_) => {}
     }
     say(
         localizer,
@@ -229,16 +255,6 @@ async fn revoke(localizer: &Localizer, pairing: &HubPairing, id: &str) -> io::Re
     }
 }
 
-fn is_loopback(address: &HubAddress) -> bool {
-    let rest = address
-        .as_str()
-        .split_once("://")
-        .map_or(address.as_str(), |(_, rest)| rest);
-    ["localhost", "127.", "[::1]"]
-        .iter()
-        .any(|loopback| rest.starts_with(loopback))
-}
-
 fn hub_refused(localizer: &Localizer, error: &HubPairingError) -> io::Result<ExitCode> {
     let id = match error {
         HubPairingError::TokenLife => msg::CLI_PAIRING_TOKEN_BAD_TTL,
@@ -287,7 +303,7 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
             localizer.message(msg::CLI_PAIR_PROMPT, &[])
         ))?;
     }
-    let pasted = terminal::read_secret_line(PASTE_MAX_BYTES);
+    let pasted = read_pasted();
     if at_terminal {
         to_stderr("\n")?;
     }
@@ -442,7 +458,13 @@ fn failed(failure: &PairFailure, address: &str) -> Said {
         }
         PairFailure::Link(LinkError::Closed {
             reason: Some(reason),
-        }) => wire_code(reason).map_or_else(lost, |code| (code, vec![], None)),
+        }) => {
+            // Before its proof, a peer names only what it can't serve: any
+            // other reason would show advice nothing backs.
+            wire_code(reason)
+                .filter(|code| *code == ErrorCode::BindingUnavailable)
+                .map_or_else(lost, |code| (code, vec![], None))
+        }
         PairFailure::Link(LinkError::Closed { reason: None } | LinkError::Unreadable)
         | PairFailure::OutOfTurn
         | PairFailure::Pairing(AgentPairingError::Unsigned) => lost(),
@@ -456,11 +478,11 @@ fn failed(failure: &PairFailure, address: &str) -> Said {
             (ErrorCode::BindingUnavailable, vec![], None)
         }
         PairFailure::Pairing(AgentPairingError::Refused(refusal)) => {
-            let code = wire_code(refusal.code.as_str()).unwrap_or(ErrorCode::Unknown);
+            let code = api::sync::refusal_code(refusal.code.as_str());
             let args = refusal.holder.as_ref().map_or_else(Vec::new, |holder| {
                 vec![
                     ("hostname", text(holder.hostname.as_str())),
-                    ("last_seen", text(holder.last_seen.seconds())),
+                    ("last_seen", text(when(holder.last_seen.seconds()))),
                 ]
             });
             (code, args, None)
@@ -474,4 +496,58 @@ fn wire_code(name: &str) -> Option<ErrorCode> {
     serde_json::from_value(serde_json::Value::String(name.to_owned()))
         .ok()
         .filter(|code| *code != ErrorCode::Unknown)
+}
+
+/// A moment as `pair` shows it: the date and minute in UTC.
+fn when(seconds: u64) -> String {
+    i64::try_from(seconds)
+        .ok()
+        .and_then(|seconds| Timestamp::from_second(seconds).ok())
+        .map_or_else(
+            || seconds.to_string(),
+            |moment| moment.strftime("%Y-%m-%d %H:%M UTC").to_string(),
+        )
+}
+
+/// The token as pasted, read until it reads as a token, a blank line comes
+/// or it grows past what a token takes, so a token wrapped across lines
+/// reads whole and none of it is left for the shell (decision 121).
+fn read_pasted() -> io::Result<String> {
+    let mut pasted = String::new();
+    loop {
+        let line = terminal::read_secret_line(PASTE_MAX_BYTES)?;
+        let line = line.trim();
+        if line.is_empty() {
+            return Ok(pasted);
+        }
+        pasted.push_str(line);
+        if pasted.len() > PASTE_MAX_BYTES || PairingToken::parse_pasted(&pasted).is_ok() {
+            return Ok(pasted);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_moment_shows_as_its_date_and_minute_in_utc() {
+        assert_eq!(when(1_795_000_000), "2026-11-18 11:06 UTC");
+    }
+
+    #[test]
+    fn a_peer_closing_before_its_proof_names_only_what_it_cannot_serve() {
+        let closed = |reason: &str| {
+            PairFailure::Link(LinkError::Closed {
+                reason: Some(reason.to_owned()),
+            })
+        };
+        let (code, _, _) = failed(&closed("binding-unavailable"), "https://hub.example");
+        assert_eq!(code, ErrorCode::BindingUnavailable);
+        for reason in ["token-used", "hub-key-mismatch", "nonsense"] {
+            let (code, _, _) = failed(&closed(reason), "https://hub.example");
+            assert_eq!(code, ErrorCode::HubConnectionLost, "{reason}");
+        }
+    }
 }

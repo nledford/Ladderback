@@ -164,9 +164,13 @@ where
         route.host.clone()
     };
     let url = format!("{scheme}://{host}:{}{PATH}", route.port);
+    // Writes go out at once, and what a hub that doesn't read leaves queued,
+    // its pings' pongs among it, stays bounded.
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_FRAME_BYTES))
-        .max_frame_size(Some(MAX_FRAME_BYTES));
+        .max_frame_size(Some(MAX_FRAME_BYTES))
+        .write_buffer_size(0)
+        .max_write_buffer_size(2 * MAX_FRAME_BYTES);
     let (socket, _) = client_async_with_config(url, stream, Some(config))
         .await
         .map_err(|error| match error {
@@ -202,8 +206,10 @@ where
     }
 
     async fn receive(&mut self) -> Result<HubFrame, LinkError> {
+        // One deadline for the answer, however many pings come before it.
+        let deadline = tokio::time::Instant::now() + ANSWER_WITHIN;
         loop {
-            let next = tokio::time::timeout(ANSWER_WITHIN, self.socket.next())
+            let next = tokio::time::timeout_at(deadline, self.socket.next())
                 .await
                 .map_err(|_| no_answer())?;
             return match next {

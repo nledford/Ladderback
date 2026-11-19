@@ -36,3 +36,22 @@ Feature: Pairing a machine from a terminal
     Given a hub with a pairing token made at its terminal
     When a machine pairs with the token at the address "http://hub.invalid:9898" from its terminal
     Then the machine is refused because the address would show the token to the network
+
+  @e2e
+  Scenario: A machine reads a token pasted across two lines
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    When a machine named "e2e-laptop" pairs with the token pasted across two lines from its terminal
+    Then the machine is paired and waits for approval
+
+  @e2e
+  Scenario: The hub's terminal makes no token for an address a machine would refuse
+    When the person asks the hub's terminal for a pairing token for "https://hub.example/ladderback"
+    Then the terminal refuses because the address isn't a hub address
+    And the terminal shows no token
+
+  @e2e
+  Scenario: The hub's terminal refuses a token life past what it counts
+    When the person asks the hub's terminal for a pairing token lasting 153722867280912931 minutes
+    Then the terminal refuses because a token lives 5 to 1440 minutes
+    And the terminal shows no token

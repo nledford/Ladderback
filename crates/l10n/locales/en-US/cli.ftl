@@ -402,6 +402,10 @@ cli-pairing-token-bad-address = { $address } isn't a hub address: give it as htt
 # `--address` is typed as it is: keep it a string literal.
 cli-pairing-token-loopback = The address is loopback: another machine can't reach it. Use { "--address" } with the address agents will use.
 
+# The token's address is plain http:// on another machine, which `ladderback pair` refuses because it would show the token to the network.
+# `http://`, `https://` and `--address` are typed as they are: keep them string literals.
+cli-pairing-token-plain = The address starts with { "http://" } and isn't this machine: an agent won't pair over it, as it would show the token to the network. Use { "--address" } with the hub's { "https://" } address.
+
 # The hub key's fingerprint, printed before the token so the person has something to compare with the agent's screen.
 # $fingerprint (text): the fingerprint, in groups of four characters.
 cli-pairing-token-hub-key = Hub key: { $fingerprint }
