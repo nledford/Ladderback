@@ -112,6 +112,8 @@ A headless machine reached over SSH has no browser. The token still goes from th
 
 **What is built so far (#567).** `pairing-token` writes the hub's store from its own process, so it runs only while the daemon is stopped, and refuses while the daemon holds the data folder (§9: one process per data folder); a control channel to the running daemon, or the web dialog, lifts that later. It always behaves as `--no-wait`, prints the expiry in UTC, and makes only tokens of a CA-checked address until `serve` serves the hub's built-in TLS. `pair` reads the token at the prompt or as standard input and, once the hub accepts it, says the hub holds the machine pending and returns. Waiting for approval in the terminal, the QR code, `--token-file`, `--replace-pin`, a local-time expiry and the refusal of a token on argv are not built yet.
 
+Until `serve` serves the hub's built-in TLS, the messages for `hub-untrusted`, `plain-address`, `binding-unavailable` and `hub-tls-refused` offer only the CA-checked way: a proxy that serves https with a certificate an authority signed. The table's built-in-TLS alternatives are for when it does.
+
 ### `ladderback pairing-token` (on the hub)
 
 - **It makes one token,** as the dialog does, with `--ttl` (5 minutes to 24 hours; 15 by default) and `--address`. With no address configured and none given, it asks for one.

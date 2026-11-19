@@ -396,19 +396,20 @@ cli-pairing-token-daemon-running = the daemon is running on the data folder { $p
 
 # The address given for the hub isn't an http:// or https:// address of at most 200 bytes.
 # $address (text): the address as given. It is shown as it came.
-cli-pairing-token-bad-address = { $address } isn't a hub address: give it as https://name or https://name:port, as agents reach the hub.
+# `https://name` and `https://name:port` are examples of what a person types, with `name` standing for the hub's name: keep them string literals.
+cli-pairing-token-bad-address = { $address } isn't a { -hub } address: give it as { "https://name" } or { "https://name:port" }, as { -agent(form: "other") } reach the { -hub }.
 
 # The token's address is loopback, which another machine can't reach.
 # `--address` is typed as it is: keep it a string literal.
-cli-pairing-token-loopback = The address is loopback: another machine can't reach it. Use { "--address" } with the address agents will use.
+cli-pairing-token-loopback = The address is loopback: another machine can't reach it. Use { "--address" } with the address { -agent(form: "other") } will use.
 
 # The token's address is plain http:// on another machine, which `ladderback pair` refuses because it would show the token to the network.
 # `http://`, `https://` and `--address` are typed as they are: keep them string literals.
-cli-pairing-token-plain = The address starts with { "http://" } and isn't this machine: an agent won't pair over it, as it would show the token to the network. Use { "--address" } with the hub's { "https://" } address.
+cli-pairing-token-plain = The address starts with { "http://" } and isn't this machine: an { -agent } won't pair over it, as it would show the token to the network. Use { "--address" } with the { -hub }'s { "https://" } address.
 
 # The hub key's fingerprint, printed before the token so the person has something to compare with the agent's screen.
 # $fingerprint (text): the fingerprint, in groups of four characters.
-cli-pairing-token-hub-key = Hub key: { $fingerprint }
+cli-pairing-token-hub-key = The { -hub } key: { $fingerprint }
 
 # Printed after the token: it is one-time, its token ID, and when it lapses.
 # $id (text): the token ID, 8 hex digits.
@@ -449,29 +450,37 @@ cli-pair-unreadable-token = this isn't a pairing token, or it was changed on the
 # The hostname to pair under isn't one the hub takes.
 # $name (text): the hostname. It is shown as it came.
 # `--hostname` is typed as it is: keep it a string literal.
-cli-pair-bad-hostname = { $name } can't name this machine to the hub. Give another with { "--hostname" }.
+cli-pair-bad-hostname = { $name } can't name this machine to the { -hub }. Give another with { "--hostname" }.
 
-# The kind of the token's address, said in cli-pair-read.
-cli-pair-kind-ca = certificate checked by this machine's trust store
-cli-pair-kind-pinned = pinned certificate
-
-# What `pair` read from the token, before it asks; nothing is sent yet.
+# What `pair` read from a token whose address is checked against this machine's trust store, before it asks; nothing is sent yet.
 # $count (count): how many characters were read.
 # $address (text): the hub's address.
 # $fingerprint (text): the hub key's fingerprint.
-# $kind (text): cli-pair-kind-ca or cli-pair-kind-pinned.
-cli-pair-read = Read { $count } characters. Hub { $address }, key { $fingerprint }, { $kind }. Compare the fingerprint with the hub's.
+cli-pair-read-ca = { $count ->
+    [one] Read { $count } character.
+   *[other] Read { $count } characters.
+} The { -hub } is at { $address }, its key is { $fingerprint }, and its certificate is checked by this machine's trust store. Compare the fingerprint with the one the { -hub } shows.
+
+# What `pair` read from a token that pins the hub's own certificate, before it asks; nothing is sent yet.
+# $count (count): how many characters were read.
+# $address (text): the hub's address.
+# $fingerprint (text): the hub key's fingerprint.
+cli-pair-read-pinned = { $count ->
+    [one] Read { $count } character.
+   *[other] Read { $count } characters.
+} The { -hub } is at { $address }, its key is { $fingerprint }, and its certificate is pinned by the token. Compare the fingerprint with the one the { -hub } shows.
 
 # `pair` asks before it sends anything. Printed without the program's name, and the answer follows on the same line.
-cli-pair-confirm = Pair? [y/N]
+# `[y/N]` is what the person types to answer, and only `y` or `Y` says yes: keep it a string literal.
+cli-pair-confirm = Pair? { "[y/N]" }
 
 # The person didn't answer y.
 cli-pair-not-confirmed = Not paired: nothing was sent.
 
 # Standard input is the token, so nobody can answer the question.
 # `--yes` is typed as it is: keep it a string literal.
-cli-pair-no-terminal = No terminal to ask on. Compare the hub key above with the hub's own screen, then run again with { "--yes" }.
+cli-pair-no-terminal = No terminal to ask on. Compare the { -hub } key above with the { -hub }'s own screen, then run again with { "--yes" }.
 
 # The hub took the pairing and holds the agent pending until a person approves it there.
 # $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
-cli-pair-pending = Paired. The hub holds this machine pending until someone approves it there. This machine's key: { $fingerprint }. Compare it with the hub's screen.
+cli-pair-pending = Paired. The { -hub } holds this machine pending until someone approves it there. This machine's key: { $fingerprint }. Compare it with the { -hub }'s screen.

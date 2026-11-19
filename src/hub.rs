@@ -340,13 +340,15 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
         )?;
         return Ok(ExitCode::from(2));
     };
-    let kind = match token.tls() {
-        TokenTls::Ca => localizer.message(msg::CLI_PAIR_KIND_CA, &[]),
-        TokenTls::Pinned(_) => localizer.message(msg::CLI_PAIR_KIND_PINNED, &[]),
+    // Each kind of address has its own whole sentence, not a phrase put into
+    // one.
+    let read = match token.tls() {
+        TokenTls::Ca => msg::CLI_PAIR_READ_CA,
+        TokenTls::Pinned(_) => msg::CLI_PAIR_READ_PINNED,
     };
     say(
         localizer,
-        msg::CLI_PAIR_READ,
+        read,
         &[
             (
                 "count",
@@ -354,7 +356,6 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
             ),
             ("address", text(token.address().as_str())),
             ("fingerprint", text(Fingerprint::of_key(token.hub_key()))),
-            ("kind", text(kind)),
         ],
     )?;
     if !confirmed(localizer, at_terminal, ask.yes)? {
