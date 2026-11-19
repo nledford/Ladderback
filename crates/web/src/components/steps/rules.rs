@@ -37,26 +37,9 @@ impl Reached {
     }
 }
 
-/// What names the list (4.1.2): words of its own, or an element on the page
-/// that already shows them, such as a heading above the list.
+/// What names the list (4.1.2): words of its own, its `aria-label`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StepsName {
-    /// The list's `aria-label`.
-    Label(String),
-    /// The `id` of the element that names the list (`aria-labelledby`).
-    LabelledBy(String),
-}
-
-impl StepsName {
-    /// The list's `aria-label` and `aria-labelledby`: one of them, never
-    /// both.
-    pub fn attributes(&self) -> (Option<String>, Option<String>) {
-        match self {
-            Self::Label(label) => (Some(label.clone()), None),
-            Self::LabelledBy(id) => (None, Some(id.clone())),
-        }
-    }
-}
+pub struct StepsName(pub String);
 
 /// The state of one step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -286,18 +269,6 @@ mod tests {
         for state in [StepState::Current, StepState::ToDo, StepState::Failed] {
             assert_eq!(state.connector_class(), "border-muted", "{state:?}");
         }
-    }
-
-    #[test]
-    fn a_list_is_named_by_its_own_words_or_by_an_element_never_both() {
-        assert_eq!(
-            StepsName::Label("Demo hub move".to_owned()).attributes(),
-            (Some("Demo hub move".to_owned()), None)
-        );
-        assert_eq!(
-            StepsName::LabelledBy("demo-heading".to_owned()).attributes(),
-            (None, Some("demo-heading".to_owned()))
-        );
     }
 
     fn said(id: MessageId, args: Vec<(&'static str, MsgArg)>) -> Option<Words> {
