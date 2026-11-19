@@ -1298,3 +1298,27 @@ impl contract::retention::RetentionHarness for FakeRetentionHarness {
 async fn the_fake_retention_meets_the_retention_contract() {
     contract::retention::run(&FakeRetentionHarness).await;
 }
+
+/// Builds each case's disk in memory, under `/srv/demo`: the fake reads no
+/// disk, so it has no folders to make.
+struct FakeDisks;
+
+impl contract::sources::SourcesHarness for FakeDisks {
+    fn disk(
+        &self,
+        _folders: &[&str],
+    ) -> (
+        Arc<dyn app::ports::NormalizeSources>,
+        domain::planning::Source,
+    ) {
+        (
+            Arc::new(app::fakes::FakeSources),
+            domain::planning::Source::parse("/srv/demo").unwrap(),
+        )
+    }
+}
+
+#[tokio::test]
+async fn the_fake_sources_meet_the_sources_contract() {
+    contract::sources::run(&FakeDisks).await;
+}
