@@ -1104,6 +1104,8 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 
   - *Still.* It never moves, in any motion setting: no shimmer, no pulse, no transition. A skeleton starts by itself beside content the reader can use and may stay past 5 s on a slow daemon, and nothing on the page could pause it, the spinner's reason (2.2.2, Pause, Stop, Hide; the spinner's notes above).
 
+  Its look is Tailwind utilities (decision 117), logical ones only (#931): `rules::Shape::class` returns its classes and its bars' column (`flex flex-col items-start`), and `rules::BAR` each bar's, Pencil Gray through `tailwind.css`'s `bg-skeleton`. `style.css` keeps one rule, a line's margins, half the difference between `1lh` and `1em`, which no named utility sets and an arbitrary value would hide in a class name.
+
   The caller's duties, which the skeleton can't meet for it:
 
   - **Words.** It is never a stand-in for words: the page says the wait in words ("Loading…"), visible, as it does without one, on a line just before the region and outside it, since a screen reader may leave a busy region unread. Where the content's size is known before it comes, the region keeps its height, and the content may take the words' line when it comes (the gallery's plan name does). A page's first load can't know how many rows are coming, so there the content takes the place of the words and the region both, and what follows it may move.
