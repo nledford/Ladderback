@@ -163,7 +163,9 @@ async fn shows_token(agent: &mut Agent) {
     );
 }
 
-#[then("the token trusts a certificate authority's certificate, as the hub serves none of its own yet")]
+#[then(
+    "the token trusts a certificate authority's certificate, as the hub serves none of its own yet"
+)]
 fn trusts_a_ca(agent: &mut Agent) {
     let Some(Ok(made)) = &agent.pairing.asked else {
         panic!("no token was made: {:?}", agent.pairing.asked);

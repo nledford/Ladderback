@@ -61,7 +61,9 @@ Then(
   async function (this: BrowserWorld, name: string) {
     const characters = fingerprint(this, name).getByRole("img");
     await expect(characters).toHaveCount(20);
-    const tops = await characters.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)));
+    const tops = await characters.evaluateAll((elements) =>
+      elements.map((element) => Math.round(element.getBoundingClientRect().top)),
+    );
     const groups = [0, 4, 8, 12, 16].map((start) => tops.slice(start, start + 4));
     for (const [place, group] of groups.entries()) {
       assert.equal(new Set(group).size, 1, `group ${place + 1} is split over lines at ${group.join(", ")}`);

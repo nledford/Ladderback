@@ -16,7 +16,8 @@ publish.workspace = true
 # leaves them out.
 default = ["pseudo", "hub"]
 pseudo = ["l10n/pseudo"]
-# The hub's pages and the agent's pairing pages (§16, decision 122), none yet.
+# The hub's pages and the agent's pairing pages (§16, decision 122): so far
+# Settings' Agents tab and its pairing-token dialog.
 # On by default; a release build leaves it out, as `just architecture` checks.
 hub = []
 # The component gallery, the dev-only route `/_gallery` where Playwright drives

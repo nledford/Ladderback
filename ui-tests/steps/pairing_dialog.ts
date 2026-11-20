@@ -278,3 +278,8 @@ Then("the page warns {string}", async function (this: BrowserWorld, words: strin
 Then("the page warns of no address", async function (this: BrowserWorld) {
   await expect(this.page.getByRole("main").getByText("This address is")).toHaveCount(0);
 });
+
+Then("Settings has no tab {string}", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("tab", { name: namePattern("Language") })).toBeVisible();
+  await expect(this.page.getByRole("tab", { name: namePattern(name) })).toHaveCount(0);
+});

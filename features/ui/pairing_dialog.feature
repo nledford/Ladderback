@@ -99,3 +99,8 @@ Feature: Making a pairing token on the hub's page
     When I make a pairing token on the Agents tab
     And the page is printed
     Then the dialog "Copy the pairing token" shows no pairing token
+
+  Scenario: A daemon that isn't a hub has no Agents tab
+    Given a daemon with sign-in off
+    When I open the address "/settings"
+    Then Settings has no tab "Agents"

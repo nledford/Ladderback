@@ -26,7 +26,7 @@
 //   - `serve` starts in scratch folders (LADDERBACK_CONFIG_DIR,
 //     LADDERBACK_DATA_DIR, LADDERBACK_CACHE_DIR) with no D-Bus session, and
 //     `GET /` answers 200 with the embedded web UI, whose wasm has neither the
-//     pseudolocales nor the component gallery (§4.5);
+//     pseudolocales, nor the component gallery (§4.5), nor the hub's pages;
 //   - a scratch local repository initialised through `/api/v1`, and one backup
 //     of a folder of demo files into it, which succeeds and leaves one snapshot.
 // With `--package <file>` (a .deb, a .rpm or both; §16 decision 123), each
@@ -105,6 +105,9 @@ const PSEUDO_MARKER = Buffer.concat(
 );
 // An element ID only the component gallery's page has (crates/web/src/gallery/review_dialog.rs).
 const GALLERY_MARKER = "gallery-review-body";
+// An element ID only the hub's pages have: the pairing token's field
+// (crates/web/src/settings/agents.rs), which the web UI's `hub` feature builds.
+const HUB_MARKER = "pairing-token-text";
 
 // The libraries every glibc system has, by soname: glibc's own and the
 // loader, and libgcc_s, which glibc itself needs to unwind.
@@ -609,6 +612,11 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
           "no gallery in the web UI",
           !wasm.body.includes(GALLERY_MARKER),
           wasm.body.includes(GALLERY_MARKER) ? `${GALLERY_MARKER} is in the wasm` : `${GALLERY_MARKER} is absent`,
+        );
+        report.add(
+          "no hub pages in the web UI",
+          !wasm.body.includes(HUB_MARKER),
+          wasm.body.includes(HUB_MARKER) ? `${HUB_MARKER} is in the wasm` : `${HUB_MARKER} is absent`,
         );
       }
     }

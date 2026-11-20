@@ -10,8 +10,11 @@ const GROUP: usize = 4;
 /// without them is grouped alike, and a last group short of four holds what
 /// is left.
 pub(crate) fn groups(fingerprint: &str) -> Vec<String> {
-    let _ = (fingerprint, GROUP);
-    todo!()
+    let characters: Vec<char> = fingerprint.chars().filter(|&c| c != '-').collect();
+    characters
+        .chunks(GROUP)
+        .map(|group| group.iter().collect())
+        .collect()
 }
 
 #[cfg(test)]

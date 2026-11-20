@@ -55,6 +55,7 @@ pub use banner::{Banner, BannerDismissal};
 pub use button::Button;
 pub use checkbox::Checkbox;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};
+pub use fingerprint::Fingerprint;
 pub use icon::Icon;
 pub use link::Link;
 pub use modal_dialog::{ModalDialog, TitleLevel};
@@ -467,7 +468,7 @@ pub(crate) fn recover_focus(id: &str) {
 }
 
 /// Whether `element` holds focus now.
-fn holds_focus(element: &web_sys::Element) -> bool {
+pub(crate) fn holds_focus(element: &web_sys::Element) -> bool {
     let node: &web_sys::Node = element;
     web_sys::window()
         .and_then(|window| window.document())
