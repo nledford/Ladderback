@@ -277,12 +277,39 @@ main:focus {
   outline: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
+/* Reduced motion (decision 127): fewer motions, and none spatial. For a
+   reader who asks for less motion nothing moves, resizes, rotates, scales or
+   loops: every keyframe animation stops (the spinner's turn), no scroll is
+   smooth, and a transition runs only on a color or the opacity, so the
+   progress fill jumps to each report rather than growing to it. A short
+   fade stays, as feedback that moves nothing (a tooltip's, a live row's
+   change cue), with `display`, `overlay` and `visibility`, which hold a
+   fading element until its fade ends (`allow-discrete`). A fade that stays
+   lasts 600 ms at most, the change cue's length, which the journeys check
+   over a live page and the component gallery.
+   A kept transition gives all its properties one duration: the rule lists
+   properties of its own, which the browser pairs with a component's
+   durations by position.
+   The rule's layer is the first the page names (this file loads before
+   Tailwind's layers), and an important declaration in the first layer beats
+   one in any later layer or in none: no component's rule or utility,
+   `!`-marked or not, can turn the stopping half back on. Out of its reach:
+   an inline `!important` style, and motion a script runs (the Web
+   Animations API), which the app has none of. */
+@layer reduced-motion {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after,
+    *::backdrop,
+    *::marker {
+      animation: none !important;
+      transition-property:
+        opacity, color, background-color, border-color, outline-color, text-decoration-color, fill,
+        stroke, display, overlay, visibility !important;
+      transition-behavior: allow-discrete !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -715,11 +742,11 @@ main:focus {
    scroll bar, less an edge at each end), never cut. It fades in over
    100 ms and out over 60 ms, sooner, since what the reader turned from
    should not linger (a transition takes the duration of the state it goes
-   to: the hidden one's here, the open one's below); at once for a reader
-   who asks for less motion (the reduced-motion rule), and it never takes
-   the pointer while hidden. Under forced colors it is the page's own
-   colors, edged in its text color, so it stands apart from what it lies
-   over. */
+   to: the hidden one's here, the open one's below), for a reader who asks
+   for less motion too (a fade, which the reduced-motion rule keeps), and
+   it never takes the pointer while hidden. Under forced colors it is the
+   page's own colors, edged in its text color, so it stands apart from what
+   it lies over. */
 .tooltip {
   position: fixed;
   inset: auto;
