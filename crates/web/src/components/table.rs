@@ -433,9 +433,14 @@ where
                         let footer_row = footer.clone().map(|footer| footer_row(&columns, footer));
                         view! {
                             // The frame is the size container the table's width
-                            // is measured against, and what scrolls.
+                            // is measured against, and what scrolls. It is the
+                            // containing block (`relative`) of every box a cell
+                            // places absolutely, as the words a cell keeps out
+                            // of sight are: such a box escapes the clip of each
+                            // box that isn't positioned, so it would lie past
+                            // the page's edge and widen the page (1.4.10).
                             <div
-                                class="data-table-frame"
+                                class="data-table-frame relative"
                                 role="region"
                                 aria-labelledby=frame_name.clone()
                                 tabindex="0"
@@ -652,13 +657,12 @@ where
                 watch.as_ref().filter(|(watched, _, _)| *watched == at)
             {
                 // The mark's words after the cell's own, out of sight, while
-                // the row is marked: its name then says it (1.3.1). The cell
-                // is their containing block (`relative`), so the out-of-sight
-                // box stays inside the frame that scrolls, never past the
-                // page's edge.
+                // the row is marked: its name then says it (1.3.1). The frame
+                // that scrolls holds their box, as it does every out-of-sight
+                // box in a cell.
                 let words = Arc::clone(words);
                 view! {
-                    <td class=class class:relative=true data-cued="">
+                    <td class=class data-cued="">
                         {cell}
                         {move || {
                             unseen
