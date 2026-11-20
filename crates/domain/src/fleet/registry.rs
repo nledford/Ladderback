@@ -334,8 +334,20 @@ pub fn decide_proof(
     request: &ProofRequest,
     now: Timestamp,
 ) -> Result<AgentRecord, ProofRefusal> {
-    let _ = (view, request, now);
-    todo!("decide_proof")
+    let Some(record) = view.record else {
+        return Err(ProofRefusal::ProofRefused);
+    };
+    if record.agent_id != request.agent_id
+        || record.key != request.agent_key
+        || !view.kinds.contains(&request.kind)
+    {
+        return Err(ProofRefusal::ProofRefused);
+    }
+    Ok(AgentRecord {
+        counter: record.counter.max(request.counter),
+        last_seen: now,
+        ..record.clone()
+    })
 }
 
 #[cfg(test)]

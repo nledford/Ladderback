@@ -10,9 +10,9 @@ use api::sync::{
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
-    AgentEnvelope, BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Hello, Holder,
-    Hostname, HubEnvelope, KEY_BYTES, Nonce, Pair, PairAnswer, Paired, Proof, PublicKey, Refused,
-    SIGNATURE_BYTES, Signature, Welcome, WireName,
+    AgentEnvelope, Approval, BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Hello,
+    Holder, Hostname, HubEnvelope, KEY_BYTES, Nonce, Pair, PairAnswer, Paired, Proof, Protocols,
+    PublicKey, Refused, SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
 use domain::{AgentId, Uuid};
 
@@ -85,42 +85,87 @@ pub fn answer_frame(answer: &PairAnswer) -> HubFrame {
 }
 
 pub fn proof_frame(proof: &Proof) -> AgentFrame {
-    let _ = proof;
-    todo!("proof_frame")
+    AgentFrame::Proof {
+        counter: proof.counter,
+        agent_proof: encoded(proof.agent_proof.as_bytes()),
+    }
 }
 
 pub fn agent_envelope_frame(envelope: &AgentEnvelope) -> AgentFrame {
-    let _ = envelope;
-    todo!("agent_envelope_frame")
+    AgentFrame::Signed {
+        kind: envelope.kind.as_str().to_owned(),
+        seq: envelope.seq,
+        payload: encoded(&envelope.payload),
+        signature: encoded(envelope.signature.as_bytes()),
+    }
 }
 
 pub fn hub_envelope_frame(envelope: &HubEnvelope) -> HubFrame {
-    let _ = envelope;
-    todo!("hub_envelope_frame")
+    HubFrame::Signed {
+        kind: envelope.kind.as_str().to_owned(),
+        seq: envelope.seq,
+        expires_at: envelope.expires_at.seconds(),
+        payload: encoded(&envelope.payload),
+        signature: encoded(envelope.signature.as_bytes()),
+    }
 }
 
 /// The bytes of `hello`'s payload, which the agent signs.
 pub fn hello_payload(hello: &Hello) -> Vec<u8> {
-    let _ = (hello, HelloPayload::from_bytes);
-    todo!("hello_payload")
+    HelloPayload {
+        agent_version: hello.agent_version.clone(),
+        hostname: hello.hostname.as_str().to_owned(),
+        protocols: range(hello.protocols),
+        clock: hello.clock.seconds(),
+    }
+    .to_bytes()
 }
 
 /// The `Hello` a payload's bytes hold.
 pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
-    let _ = bytes;
-    todo!("read_hello")
+    let payload = HelloPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    Ok(Hello {
+        agent_version: payload.agent_version,
+        hostname: Hostname::parse(&payload.hostname).map_err(|_| WireRefused)?,
+        protocols: protocols(payload.protocols)?,
+        clock: EpochSeconds::from_seconds(payload.clock),
+    })
 }
 
 /// The bytes of `welcome`'s payload, which the hub signs.
 pub fn welcome_payload(welcome: &Welcome) -> Vec<u8> {
-    let _ = (welcome, WelcomePayload::from_bytes, AgentApproval::Pending);
-    todo!("welcome_payload")
+    WelcomePayload {
+        protocol: welcome.protocol,
+        hub_protocols: range(welcome.hub_protocols),
+        agent_protocols: range(welcome.agent_protocols),
+        generation: welcome.generation,
+        hub_handshakes: welcome.hub_handshakes.bits(),
+        hub_version: welcome.hub_version.clone(),
+        signed_at: welcome.signed_at.seconds(),
+        status: match welcome.approval {
+            Approval::Pending => AgentApproval::Pending,
+            Approval::Approved => AgentApproval::Approved,
+        },
+    }
+    .to_bytes()
 }
 
 /// The `Welcome` a payload's bytes hold.
 pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
-    let _ = bytes;
-    todo!("read_welcome")
+    let payload = WelcomePayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    Ok(Welcome {
+        protocol: payload.protocol,
+        hub_protocols: protocols(payload.hub_protocols)?,
+        agent_protocols: protocols(payload.agent_protocols)?,
+        generation: payload.generation,
+        hub_handshakes: Handshakes::from_bits(payload.hub_handshakes),
+        hub_version: payload.hub_version,
+        signed_at: EpochSeconds::from_seconds(payload.signed_at),
+        approval: match payload.status {
+            AgentApproval::Pending => Approval::Pending,
+            AgentApproval::Approved => Approval::Approved,
+        },
+    })
 }
 
 /// The message an agent's frame holds.
@@ -150,7 +195,24 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
             pairing_signature: signature(pairing_signature)?,
             agent_signature: signature(agent_signature)?,
         })),
-        AgentFrame::Proof { .. } | AgentFrame::Signed { .. } => todo!("agent_message"),
+        AgentFrame::Proof {
+            counter,
+            agent_proof,
+        } => Ok(AgentMessage::Proof(Proof {
+            counter: *counter,
+            agent_proof: signature(agent_proof)?,
+        })),
+        AgentFrame::Signed {
+            kind,
+            seq,
+            payload,
+            signature: signed,
+        } => Ok(AgentMessage::Signed(AgentEnvelope {
+            kind: WireName::parse(kind).map_err(|_| WireRefused)?,
+            seq: *seq,
+            payload: payload_bytes(payload)?,
+            signature: signature(signed)?,
+        })),
     }
 }
 
@@ -190,15 +252,41 @@ pub fn hub_message(frame: &HubFrame) -> Result<HubMessage, WireRefused> {
             },
             signature: signature(signed)?,
         }))),
-        HubFrame::Signed { .. } => {
-            let _ = MAX_FRAME_BYTES;
-            todo!("hub_message")
-        }
+        HubFrame::Signed {
+            kind,
+            seq,
+            expires_at,
+            payload,
+            signature: signed,
+        } => Ok(HubMessage::Signed(HubEnvelope {
+            kind: WireName::parse(kind).map_err(|_| WireRefused)?,
+            seq: *seq,
+            expires_at: EpochSeconds::from_seconds(*expires_at),
+            payload: payload_bytes(payload)?,
+            signature: signature(signed)?,
+        })),
     }
 }
 
 fn encoded(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// The bytes a signed message's payload encodes, strictly, as [`decoded`]
+/// reads a field. A payload longer than a frame may be is refused unread.
+fn payload_bytes(text: &str) -> Result<Vec<u8>, WireRefused> {
+    if text.len() > MAX_FRAME_BYTES {
+        return Err(WireRefused);
+    }
+    URL_SAFE_NO_PAD.decode(text).map_err(|_| WireRefused)
+}
+
+const fn range(protocols: Protocols) -> [u64; 2] {
+    [protocols.lowest(), protocols.highest()]
+}
+
+fn protocols([lowest, highest]: [u64; 2]) -> Result<Protocols, WireRefused> {
+    Protocols::new(lowest, highest).ok_or(WireRefused)
 }
 
 /// The `N` bytes `text` encodes, strictly: no padding, no other alphabet,

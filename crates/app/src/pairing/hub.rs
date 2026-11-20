@@ -2,13 +2,15 @@ use std::fmt;
 use std::sync::Arc;
 
 use domain::fleet::{
-    AgentEnvelope, AgentRecord, Binding, BindingKind, Challenge, Connect, EpochSeconds, HANDSHAKES,
-    Holder, HubAddress, HubEnvelope, KEY_BYTES, KeyFile, Nonce, Pair, PairAnswer, PairRefusal,
-    PairRequest, Paired, PairingToken, Proof, PublicKey, Refused, SeedFile, SignedMessage,
-    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, token_life,
+    AgentEnvelope, AgentRecord, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
+    FIRST_SEQUENCE, HANDSHAKES, Holder, HubAddress, HubEnvelope, KEY_BYTES, KeyFile, Nonce, Pair,
+    PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal,
+    ProofRequest, PublicKey, Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord,
+    TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, hello_kind, token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
+use super::wire::{read_hello, welcome_payload};
 use crate::ports::{
     Added, AgentRegistry, Clock, Identity, IdentityError, Random, RandomUnavailable, Signing,
     SigningError, StoreError,
@@ -323,7 +325,9 @@ impl HubPairing {
             .signing
             .verify(&pair.agent_key, &message, &pair.agent_signature);
         if !(authorized && holds_its_key) {
-            return self.refuse(keys, handshake, &PairRefusal::ProofRefused);
+            return self
+                .refuse(keys, handshake, &PairRefusal::ProofRefused)
+                .map(PairAnswer::Refused);
         }
         let request = PairRequest {
             pairing_key: pair.pairing_key,
@@ -350,7 +354,9 @@ impl HubPairing {
                     signature: self.signing.sign(&keys.seed, &paired.to_bytes())?,
                 }))
             }
-            Err(refusal) => self.refuse(keys, handshake, &refusal),
+            Err(refusal) => self
+                .refuse(keys, handshake, &refusal)
+                .map(PairAnswer::Refused),
         }
     }
 
@@ -365,8 +371,38 @@ impl HubPairing {
         handshake: &HubHandshake,
         proof: &Proof,
     ) -> Result<ProofAnswer, HubPairingError> {
-        let _ = (keys, handshake, proof);
-        todo!("prove")
+        let refused = || {
+            self.refuse(keys, handshake, &PairRefusal::ProofRefused)
+                .map(ProofAnswer::Refused)
+        };
+        let Some(agent) = self.registry.agent(handshake.agent_id).await? else {
+            return refused();
+        };
+        let message = SignedMessage::AgentProof {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_key: agent.key,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding: handshake.binding,
+            counter: proof.counter,
+        };
+        if !self
+            .signing
+            .verify(&agent.key, &message.to_bytes(), &proof.agent_proof)
+        {
+            return refused();
+        }
+        let request = ProofRequest {
+            agent_id: handshake.agent_id,
+            agent_key: agent.key,
+            kind: handshake.kind,
+            counter: proof.counter,
+        };
+        match self.registry.take_proof(&request, self.clock.now()).await? {
+            Ok(agent) => Ok(ProofAnswer::Proved(agent)),
+            Err(ProofRefusal::ProofRefused) => refused(),
+        }
     }
 
     /// The hub's signed `Welcome` to `hello`, the first message of the
@@ -379,8 +415,61 @@ impl HubPairing {
         agent: &AgentRecord,
         hello: &AgentEnvelope,
     ) -> Result<Result<HubEnvelope, MessageRefused>, HubPairingError> {
-        let _ = (keys, handshake, agent, hello, &self.version);
-        todo!("welcome")
+        let signed = SignedMessage::AgentMessage {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding: handshake.binding,
+            sequence: hello.seq,
+            kind: &hello.kind,
+            payload: PayloadDigest::of(&hello.payload),
+        };
+        if !self
+            .signing
+            .verify(&agent.key, &signed.to_bytes(), &hello.signature)
+        {
+            return Ok(Err(MessageRefused::Unsigned));
+        }
+        if hello.seq != FIRST_SEQUENCE {
+            return Ok(Err(MessageRefused::OutOfSequence));
+        }
+        if hello.kind != hello_kind() {
+            return Ok(Err(MessageRefused::Unexpected));
+        }
+        let Ok(read) = read_hello(&hello.payload) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        let signed_at =
+            EpochSeconds::from_timestamp(self.clock.now()).unwrap_or(EpochSeconds::from_seconds(0));
+        let welcome = Welcome::answering(
+            &read,
+            Approval::of(agent.status),
+            self.version.clone(),
+            signed_at,
+        );
+        let payload = welcome_payload(&welcome);
+        let kind = welcome_kind();
+        let expires_at = welcome.expires_at();
+        let answer = SignedMessage::HubMessage {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding: handshake.binding,
+            sequence: FIRST_SEQUENCE,
+            expires_at,
+            kind: &kind,
+            payload: PayloadDigest::of(&payload),
+        };
+        let signature = self.signing.sign(&keys.seed, &answer.to_bytes())?;
+        Ok(Ok(HubEnvelope {
+            kind,
+            seq: FIRST_SEQUENCE,
+            expires_at,
+            payload,
+            signature,
+        }))
     }
 
     /// `refusal`, signed over its code and the connection. A taken
@@ -390,7 +479,7 @@ impl HubPairing {
         keys: &HubKeys,
         handshake: &HubHandshake,
         refusal: &PairRefusal,
-    ) -> Result<PairAnswer, HubPairingError> {
+    ) -> Result<Refused, HubPairingError> {
         let code = refusal.code();
         let signed = SignedMessage::Refusal {
             hub_key: keys.key,
@@ -409,10 +498,10 @@ impl HubPairing {
             }),
             _ => None,
         };
-        Ok(PairAnswer::Refused(Refused {
+        Ok(Refused {
             code,
             holder,
             signature,
-        }))
+        })
     }
 }

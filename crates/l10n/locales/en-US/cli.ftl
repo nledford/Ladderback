@@ -494,3 +494,16 @@ cli-pair-no-terminal = No terminal to ask on. Compare the { -hub } key above wit
 # The hub took the pairing and holds the agent pending until a person approves it there.
 # $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
 cli-pair-pending = Paired. The { -hub } holds this machine pending until someone approves it there. This machine's key: { $fingerprint }. Compare it with the { -hub }'s screen.
+
+# `ladderback hub-status` on a machine with no hub pin or no agent key.
+# `ladderback pair` is a command: keep it a string literal.
+cli-hub-status-not-paired = This machine isn't paired with a { -hub }. Pair it with { "ladderback pair" } and a token made on the { -hub }.
+
+# `ladderback hub-status`: the hub proved itself and holds this machine
+# waiting until a person approves it there.
+# $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
+cli-hub-status-pending = Connected. The { -hub } holds this machine waiting for approval: someone has to approve it there. This machine's key: { $fingerprint }. Compare it with the { -hub }'s screen.
+
+# `ladderback hub-status`: the hub proved itself and a person approved this
+# machine there.
+cli-hub-status-approved = Connected. The { -hub } approved this machine.

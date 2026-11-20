@@ -21,8 +21,11 @@ impl Protocols {
     /// The protocols `lowest` to `highest`, or `None` when that holds none:
     /// protocols count from 1.
     pub const fn new(lowest: u64, highest: u64) -> Option<Self> {
-        let _ = (lowest, highest);
-        todo!()
+        if lowest >= 1 && lowest <= highest {
+            Some(Self { lowest, highest })
+        } else {
+            None
+        }
     }
 
     pub const fn lowest(self) -> u64 {
@@ -36,8 +39,8 @@ impl Protocols {
     /// The highest protocol both sides speak, or `None` when they share
     /// none.
     pub fn highest_shared(self, other: Self) -> Option<u64> {
-        let _ = other;
-        todo!("highest_shared")
+        let highest = self.highest.min(other.highest);
+        (self.lowest.max(other.lowest) <= highest).then_some(highest)
     }
 }
 
@@ -64,12 +67,12 @@ pub const MAX_EXPIRY_AHEAD: u64 = 900;
 
 /// The kind of the agent's first signed message.
 pub fn hello_kind() -> WireName {
-    todo!("hello_kind")
+    WireName::known("Hello")
 }
 
 /// The kind of the hub's answer to `Hello`.
 pub fn welcome_kind() -> WireName {
-    todo!("welcome_kind")
+    WireName::known("Welcome")
 }
 
 /// A signed message from an agent: its kind, sequence number and payload
@@ -164,8 +167,16 @@ impl Welcome {
         hub_version: String,
         signed_at: EpochSeconds,
     ) -> Self {
-        let _ = (hello, approval, hub_version, signed_at, HANDSHAKES);
-        todo!("answering")
+        Self {
+            protocol: PROTOCOLS.highest_shared(hello.protocols),
+            hub_protocols: PROTOCOLS,
+            agent_protocols: hello.protocols,
+            generation: GENERATION,
+            hub_handshakes: HANDSHAKES,
+            hub_version,
+            signed_at,
+            approval,
+        }
     }
 
     /// When the hub's message carrying this `Welcome` expires.
@@ -182,8 +193,22 @@ impl Welcome {
         sent: Protocols,
         generation: u64,
     ) -> Result<(), WelcomeRefused> {
-        let _ = (expires_at, sent, generation);
-        todo!("check")
+        let signed_at = self.signed_at.seconds();
+        let expires = expires_at.seconds();
+        if expires <= signed_at || expires > signed_at.saturating_add(MAX_EXPIRY_AHEAD) {
+            return Err(WelcomeRefused::Expiry);
+        }
+        if self.agent_protocols != sent || self.protocol != sent.highest_shared(self.hub_protocols)
+        {
+            return Err(WelcomeRefused::Protocols);
+        }
+        if self.generation < generation {
+            return Err(WelcomeRefused::GenerationLower);
+        }
+        if self.protocol.is_none() {
+            return Err(WelcomeRefused::NoCommonProtocol);
+        }
+        Ok(())
     }
 }
 

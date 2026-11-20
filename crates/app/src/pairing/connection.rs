@@ -1,9 +1,17 @@
 use std::sync::Arc;
 
 use domain::AgentId;
-use domain::fleet::{Approval, Hostname, HubPin, PublicKey, Refused, RouteRefused, WelcomeRefused};
+use domain::fleet::{
+    AgentEnvelope, Approval, BindingKind, Connect, EpochSeconds, FIRST_SEQUENCE, Hello, Hostname,
+    HubEnvelope, HubPin, HubRoute, Nonce, PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey,
+    Refused, RouteRefused, SeedFile, SignedMessage, WelcomeRefused, hello_kind, welcome_kind,
+};
 
-use super::agent::ChallengeRefused;
+use super::agent::{ChallengeRefused, check_challenge, refusal_holds};
+use super::wire::{
+    HubMessage, agent_envelope_frame, connect_frame, hello_payload, hub_message, proof_frame,
+    read_welcome,
+};
 use crate::ports::{
     Clock, HubConnector, Identity, IdentityError, LinkError, Random, RandomUnavailable, Signing,
     SigningError,
@@ -58,11 +66,35 @@ pub enum ConnectFailure {
     Unsigned,
     /// The hub refused the agent's proof, signed.
     Refused(Refused),
-    /// The hub's `Welcome` held, and the agent acts on none of it.
+    /// The hub's `Welcome` doesn't hold, and the agent acts on none of it.
     Welcome(WelcomeRefused),
     Identity(IdentityError),
     Signing(SigningError),
     Random(RandomUnavailable),
+}
+
+impl From<LinkError> for ConnectFailure {
+    fn from(error: LinkError) -> Self {
+        Self::Link(error)
+    }
+}
+
+impl From<IdentityError> for ConnectFailure {
+    fn from(error: IdentityError) -> Self {
+        Self::Identity(error)
+    }
+}
+
+impl From<SigningError> for ConnectFailure {
+    fn from(error: SigningError) -> Self {
+        Self::Signing(error)
+    }
+}
+
+impl From<RandomUnavailable> for ConnectFailure {
+    fn from(error: RandomUnavailable) -> Self {
+        Self::Random(error)
+    }
 }
 
 impl ConnectToHub {
@@ -91,18 +123,156 @@ impl ConnectToHub {
         agent_id: AgentId,
         hostname: Hostname,
     ) -> Result<Connected, ConnectFailure> {
-        let _ = (
+        let (Some(pin), Some(seed)) = (
+            self.identity.pin().await?,
+            self.identity.seed(SeedFile::AgentKey).await?,
+        ) else {
+            return Err(ConnectFailure::NotPaired);
+        };
+        let route = HubRoute::of(&pin.address, pin.tls).map_err(ConnectFailure::Route)?;
+        let agent_key = self.signing.public_key(&seed)?;
+        let connect = Connect {
             agent_id,
+            agent_nonce: Nonce::from_bytes(self.random.token()?),
+            binding_kind: BindingKind::of_token(pin.tls),
+        };
+        let mut link = self.connector.connect(&route).await?;
+        link.send(&connect_frame(&connect)).await?;
+        let HubMessage::Challenge(challenge) = read(link.receive().await?)? else {
+            return Err(ConnectFailure::OutOfTurn);
+        };
+        let binding = check_challenge(
+            self.signing.as_ref(),
+            pin.hub_key,
+            &connect,
+            &challenge,
+            link.exporter(),
+        )
+        .map_err(ConnectFailure::Challenge)?;
+        // The counter is held until the hub has answered the proof.
+        let attempt = self.identity.begin_attempt().await?;
+        let counter = attempt.counter().get();
+        let proved = SignedMessage::AgentProof {
+            hub_key: pin.hub_key,
+            agent_id,
+            agent_key,
+            agent_nonce: connect.agent_nonce,
+            hub_nonce: challenge.hub_nonce,
+            binding,
+            counter,
+        };
+        let agent_proof = self.signing.sign(&seed, &proved.to_bytes())?;
+        link.send(&proof_frame(&Proof {
+            counter,
+            agent_proof,
+        }))
+        .await?;
+        let hello = Hello {
+            agent_version: self.version.clone(),
             hostname,
-            &self.identity,
-            &self.signing,
-            &self.random,
-            &self.clock,
-            &self.connector,
-            &self.version,
-        );
-        todo!("connect")
+            protocols: PROTOCOLS,
+            clock: EpochSeconds::from_timestamp(self.clock.now())
+                .unwrap_or(EpochSeconds::from_seconds(0)),
+        };
+        let payload = hello_payload(&hello);
+        let kind = hello_kind();
+        let said = SignedMessage::AgentMessage {
+            hub_key: pin.hub_key,
+            agent_id,
+            agent_nonce: connect.agent_nonce,
+            hub_nonce: challenge.hub_nonce,
+            binding,
+            sequence: FIRST_SEQUENCE,
+            kind: &kind,
+            payload: PayloadDigest::of(&payload),
+        };
+        let signature = self.signing.sign(&seed, &said.to_bytes())?;
+        // A refused proof is answered before `Hello` reaches the hub, which
+        // may have closed the connection: its refusal is still read.
+        let sent = link
+            .send(&agent_envelope_frame(&AgentEnvelope {
+                kind,
+                seq: FIRST_SEQUENCE,
+                payload,
+                signature,
+            }))
+            .await;
+        let answer = match link.receive().await {
+            Ok(frame) => read(frame)?,
+            Err(error) => return Err(sent.err().unwrap_or(error).into()),
+        };
+        drop(attempt);
+        let welcome = match answer {
+            HubMessage::Signed(envelope) => envelope,
+            HubMessage::Answer(PairAnswer::Refused(refused)) => {
+                return Err(
+                    if refusal_holds(
+                        self.signing.as_ref(),
+                        pin.hub_key,
+                        &connect,
+                        challenge.hub_nonce,
+                        binding,
+                        &refused,
+                    ) {
+                        ConnectFailure::Refused(refused)
+                    } else {
+                        ConnectFailure::Unsigned
+                    },
+                );
+            }
+            HubMessage::Challenge(_) | HubMessage::Answer(PairAnswer::Paired(_)) => {
+                return Err(ConnectFailure::OutOfTurn);
+            }
+        };
+        let signed = SignedMessage::HubMessage {
+            hub_key: pin.hub_key,
+            agent_id,
+            agent_nonce: connect.agent_nonce,
+            hub_nonce: challenge.hub_nonce,
+            binding,
+            sequence: welcome.seq,
+            expires_at: welcome.expires_at,
+            kind: &welcome.kind,
+            payload: PayloadDigest::of(&welcome.payload),
+        };
+        if welcome.seq != FIRST_SEQUENCE
+            || !self
+                .signing
+                .verify(&pin.hub_key, &signed.to_bytes(), &welcome.signature)
+        {
+            return Err(ConnectFailure::Unsigned);
+        }
+        self.take_welcome(pin, agent_key, &welcome).await
     }
+
+    /// The agent's pin and approval after the hub's signed `welcome`,
+    /// which it acts on only once the welcome holds.
+    async fn take_welcome(
+        &self,
+        mut pin: HubPin,
+        agent_key: PublicKey,
+        welcome: &HubEnvelope,
+    ) -> Result<Connected, ConnectFailure> {
+        if welcome.kind != welcome_kind() {
+            return Err(ConnectFailure::OutOfTurn);
+        }
+        let read = read_welcome(&welcome.payload).map_err(|_| ConnectFailure::Unsigned)?;
+        read.check(welcome.expires_at, PROTOCOLS, pin.generation)
+            .map_err(ConnectFailure::Welcome)?;
+        if read.generation > pin.generation {
+            pin.generation = read.generation;
+            self.identity.write_pin(&pin).await?;
+        }
+        Ok(Connected {
+            approval: read.approval,
+            pin,
+            agent_key,
+        })
+    }
+}
+
+fn read(frame: api::sync::HubFrame) -> Result<HubMessage, ConnectFailure> {
+    hub_message(&frame).map_err(|_| ConnectFailure::OutOfTurn)
 }
 
 #[cfg(test)]
