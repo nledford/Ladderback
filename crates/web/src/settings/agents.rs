@@ -40,8 +40,11 @@ const HEADING_ID: &str = "agents-heading";
 const ADDRESS_ID: &str = "pairing-address";
 /// The field of the token's life.
 const LIFE_ID: &str = "pairing-life";
-/// The step-up field, where focus returns once the dialog closes.
+/// The step-up field, where focus goes when the step-up is refused.
 const STEP_UP_ID: &str = "pairing-confirmation";
+/// The button that makes a token, which opens the dialog: focus returns to
+/// it once the dialog closes (§4.5, "Dialog").
+const MAKE_ID: &str = "pairing-make";
 /// What the dialog says first, its description.
 const BODY_ID: &str = "pairing-dialog-body";
 /// The read-only field that holds the token's text, which a keyboard can
@@ -124,6 +127,12 @@ struct Token {
     canceling: RwSignal<Option<String>>,
     /// What the section says once a closed dialog's token is canceled.
     page_said: RwSignal<Option<String>>,
+    /// What the dialog says of Copy or of Cancel this token, for the token
+    /// it shows only.
+    said: RwSignal<Option<String>>,
+    /// The ID of the last token the dialog showed: the section says only
+    /// its cancel's answer, never an older token's that comes after it.
+    last_shown: StoredValue<Option<String>>,
 }
 
 impl Token {
@@ -136,7 +145,16 @@ impl Token {
             open: RwSignal::new(false),
             canceling: RwSignal::new(None),
             page_said: RwSignal::new(None),
+            said: RwSignal::new(None),
+            last_shown: StoredValue::new(None),
         }
+    }
+
+    /// Whether `id` is the last token the dialog showed.
+    fn last_shown(self, id: &str) -> bool {
+        self.last_shown
+            .try_with_value(|last| last.as_deref() == Some(id))
+            .unwrap_or(false)
     }
 
     /// Whether a cancel of the token `id` is on its way.
@@ -168,9 +186,11 @@ impl Token {
     fn show(self, made: PairingTokenDto) {
         let countdown = Countdown::new(made.seconds_left, PageClock.now());
         let id = made.token_id.clone();
+        self.last_shown.set_value(Some(id.clone()));
         self.secret.set(made.token);
         self.left.set(made.seconds_left);
         self.ended.set(None);
+        self.said.set(None);
         self.shown.set(Some(Shown {
             id: made.token_id,
             fingerprint: made.fingerprint,
@@ -204,9 +224,10 @@ impl Token {
     }
 
     /// Ends the live token: its text and buttons give way to a status and
-    /// Make a new token, which takes focus if a button that went had it.
+    /// Make a new token, which takes focus if the token's field or a button
+    /// that went had it.
     fn end(self, how: Ended) {
-        let had_focus = [COPY_ID, CANCEL_ID].into_iter().any(|id| {
+        let had_focus = [TOKEN_ID, COPY_ID, CANCEL_ID].into_iter().any(|id| {
             web_sys::window()
                 .and_then(|window| window.document())
                 .and_then(|document| document.get_element_by_id(id))
@@ -305,6 +326,15 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         spawn_local(async move {
             let answer = ws::post(&format!("{}{PAIRING_TOKENS_PATH}", ws::origin()), &ask).await;
             if busy.try_get_untracked().is_none() {
+                // Settings was left while the token was made: nobody saw it,
+                // so no machine can be given it, and it is canceled.
+                let made = match &answer {
+                    Some(Posted::Done(body)) => serde_json::from_str::<PairingTokenDto>(body).ok(),
+                    _ => None,
+                };
+                if let Some(made) = made {
+                    ws::delete(&cancel_url(&made.token_id)).await;
+                }
                 return;
             }
             busy.set(false);
@@ -344,13 +374,16 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             token.secret.set(String::new());
             token.shown.set(None);
             token.ended.set(None);
+            token.said.set(None);
             if let Some(live) = live {
                 let localizer = Arc::clone(&close_localizer);
                 spawn_local(async move {
                     let answer = ws::delete(&cancel_url(&live.id)).await;
-                    token
-                        .page_said
-                        .try_set(said_once_closed(&localizer, answer.as_ref()));
+                    if token.last_shown(&live.id) {
+                        token
+                            .page_said
+                            .try_set(said_once_closed(&localizer, answer.as_ref()));
+                    }
                 });
             }
         }
@@ -410,6 +443,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             />
             <p class="actions">
                 <Button
+                    id=MAKE_ID
                     content=Content::Text(t(msg::UI_PAIRING_MAKE).into())
                     busy=busy
                     on_press=make
@@ -432,14 +466,13 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
         move |id| text(&localizer, id)
     };
     let copy_button = NodeRef::<leptos::html::Button>::new();
-    let said = RwSignal::new(None::<String>);
     let fingerprint_name = t(msg::UI_PAIRING_FINGERPRINT);
     let copied = t(msg::UI_PAIRING_COPIED);
     let copy_refused = t(msg::UI_PAIRING_COPY_FAILED);
     let copy = Callback::new(move |()| {
         let secret = token.secret.get_untracked();
         if !secret.is_empty() {
-            crate::components::copy_text(&secret, said, copied.clone(), copy_refused.clone());
+            crate::components::copy_text(&secret, token.said, copied.clone(), copy_refused.clone());
         }
     });
     let cancel_localizer = Arc::clone(&localizer);
@@ -464,21 +497,26 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                 token.canceling.set(None);
             }
             // Left while the cancel was on its way: the section says its
-            // answer, as it does a cancel sent on leaving.
+            // answer, as it does a cancel sent on leaving, unless the dialog
+            // has shown a later token since.
             if !token.shows(&id) {
-                token
-                    .page_said
-                    .set(said_once_closed(&localizer, answer.as_ref()));
+                if token.last_shown(&id) {
+                    token
+                        .page_said
+                        .set(said_once_closed(&localizer, answer.as_ref()));
+                }
                 return;
             }
             match answer {
                 Some(Posted::Done(_)) => token.end(Ended::Canceled),
                 Some(Posted::Refused(code, args, detail)) => {
-                    said.set(Some(
+                    token.said.set(Some(
                         refused_sentence(&localizer, code, &args, detail.as_deref()).plain(),
                     ));
                 }
-                None => said.set(Some(text(&localizer, msg::UI_PAIRING_UNANSWERED))),
+                None => token
+                    .said
+                    .set(Some(text(&localizer, msg::UI_PAIRING_UNANSWERED))),
             }
         });
     });
@@ -493,7 +531,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
             title=t(msg::UI_PAIRING_DIALOG_TITLE)
             dismiss_label=t(msg::UI_REVIEW_CLOSE)
             confirm=None
-            returns_to=STEP_UP_ID.to_owned()
+            returns_to=MAKE_ID.to_owned()
             described_by=BODY_ID.to_owned()
             fallback=HEADING_ID.to_owned()
             starts_on=copy_button
@@ -606,7 +644,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                     })
             }}
             <p aria-live="polite" aria-atomic="true">
-                {move || said.get()}
+                {move || token.said.get()}
             </p>
             <p>{t(msg::UI_PAIRING_CLOSE_NOTE)}</p>
         </ReviewDialog>
