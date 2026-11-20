@@ -228,10 +228,13 @@ pub(crate) fn required_permission(method: &Method, path: &str) -> Needs {
     let permission = match segments.as_slice() {
         ["permissions"] if reads => return Needs::AnyToken,
         ["log"] if reads => Permission::DaemonLog,
-        ["repositories", _, "snapshots", _, "folder"] if reads => Permission::SnapshotContents,
+        // A search names what a folder's page names (decision 132).
+        ["repositories", _, "snapshots", _, "folder"] | ["repositories", _, "find"] if reads => {
+            Permission::SnapshotContents
+        }
         ["events" | "operations" | "plans" | "repositories" | "session" | "status"]
         | ["operations", _]
-        | ["repositories", _, "snapshots" | "groups" | "stats" | "find"]
+        | ["repositories", _, "snapshots" | "groups" | "stats"]
         | ["plans", _, "profile"]
             if reads =>
         {
