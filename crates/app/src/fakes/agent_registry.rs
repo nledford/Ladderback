@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, BindingKind, HostnameKey, PairRefusal, PairRequest, Pairing,
     PairingView, ProofRefusal, ProofRequest, ProofView, TokenId, TokenRecord, TokenUse,
-    decide_pairing, decide_proof,
+    admits_unused_token, decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 
@@ -86,7 +86,7 @@ impl AgentRegistry for InMemoryAgentRegistry {
     ) -> Result<Added, StoreError> {
         let mut kept = self.kept();
         let unused = kept.tokens.iter().filter(|t| t.is_unused_at(now)).count();
-        if unused >= at_most {
+        if admits_unused_token(unused, at_most).is_err() {
             return Ok(Added::Full);
         }
         if kept
@@ -131,7 +131,7 @@ impl AgentRegistry for InMemoryAgentRegistry {
 
     async fn void_tokens_for_new_key(&self) -> Result<bool, StoreError> {
         let mut kept = self.kept();
-        if !kept.agents.is_empty() {
+        if !voids_tokens_for_new_key(kept.agents.len()) {
             return Ok(false);
         }
         for token in &mut kept.tokens {

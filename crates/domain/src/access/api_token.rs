@@ -19,6 +19,21 @@ pub const PREFIX: &str = "ladderback_";
 /// The most tokens kept at once.
 pub const MAX_API_TOKENS: usize = 100;
 
+/// A new token refused: `limit` tokens are kept already.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiTokensFull;
+
+/// Whether one more token may be kept while `kept` are: fewer than
+/// `limit`. The store counts and asks this in the step that keeps the
+/// token, so of adds racing for the last place one is kept.
+pub fn admits_api_token(kept: usize, limit: usize) -> Result<(), ApiTokensFull> {
+    if kept < limit {
+        Ok(())
+    } else {
+        Err(ApiTokensFull)
+    }
+}
+
 /// The longest label, in characters.
 pub const LABEL_MAX_CHARS: usize = 64;
 

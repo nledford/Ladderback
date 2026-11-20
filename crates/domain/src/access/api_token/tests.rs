@@ -331,3 +331,13 @@ fn a_token_cancels_backups_and_no_other_operation() {
         assert!(!cancels(kind), "{kind:?}");
     }
 }
+
+#[test]
+fn a_token_is_kept_while_fewer_than_the_limit_are_kept() {
+    let limit = MAX_API_TOKENS;
+    assert_eq!(admits_api_token(0, limit), Ok(()));
+    assert_eq!(admits_api_token(limit - 1, limit), Ok(()));
+    assert_eq!(admits_api_token(limit, limit), Err(ApiTokensFull));
+    assert_eq!(admits_api_token(limit + 1, limit), Err(ApiTokensFull));
+    assert_eq!(admits_api_token(0, 0), Err(ApiTokensFull));
+}

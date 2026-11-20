@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, BindingKind, HostnameKey, PairRefusal, PairRequest, Pairing,
     PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId, TokenRecord, TokenUse,
-    decide_pairing, decide_proof,
+    admits_unused_token, decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -150,7 +150,7 @@ impl AgentRegistry for SqliteStore {
             .fetch_one(&mut *tx)
             .await
             .map_err(unavailable)?;
-        if usize::try_from(unused).unwrap_or(usize::MAX) >= at_most {
+        if admits_unused_token(usize::try_from(unused).unwrap_or(usize::MAX), at_most).is_err() {
             tx.rollback().await.map_err(unavailable)?;
             return Ok(Added::Full);
         }
@@ -210,7 +210,7 @@ impl AgentRegistry for SqliteStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(unavailable)?;
-        if count(&mut tx, sql::COUNT_AGENTS).await? > 0 {
+        if !voids_tokens_for_new_key(count(&mut tx, sql::COUNT_AGENTS).await?) {
             tx.rollback().await.map_err(unavailable)?;
             return Ok(false);
         }

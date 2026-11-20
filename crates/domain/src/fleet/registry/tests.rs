@@ -433,3 +433,20 @@ fn a_proof_without_a_record_its_key_or_its_kind_is_refused() {
         WireName::parse("proof-refused").unwrap()
     );
 }
+
+#[test]
+fn a_token_is_kept_while_fewer_than_the_limit_are_unused() {
+    let limit = UNUSED_TOKEN_LIMIT;
+    assert_eq!(admits_unused_token(0, limit), Ok(()));
+    assert_eq!(admits_unused_token(limit - 1, limit), Ok(()));
+    assert_eq!(admits_unused_token(limit, limit), Err(UnusedTokensFull));
+    assert_eq!(admits_unused_token(limit + 1, limit), Err(UnusedTokensFull));
+    assert_eq!(admits_unused_token(0, 0), Err(UnusedTokensFull));
+}
+
+#[test]
+fn a_new_hub_key_voids_the_unused_tokens_only_while_no_agent_is_registered() {
+    assert!(voids_tokens_for_new_key(0));
+    assert!(!voids_tokens_for_new_key(1));
+    assert!(!voids_tokens_for_new_key(2));
+}
