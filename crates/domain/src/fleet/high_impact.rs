@@ -9,8 +9,7 @@
 /// sign-in off the typed key ID is the step-up; with sign-in on, the admin
 /// password is, wherever the request came from.
 pub fn needs_sign_in(password_sign_in: bool, beyond_loopback: bool) -> bool {
-    let _ = (password_sign_in, beyond_loopback);
-    todo!()
+    !password_sign_in && beyond_loopback
 }
 
 #[cfg(test)]

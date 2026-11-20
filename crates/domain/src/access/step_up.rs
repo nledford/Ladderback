@@ -76,7 +76,8 @@ impl StepUpConfirmation {
         let (short, whole) = match what {
             StepUpFor::Snapshot(snapshot) => (short_id(snapshot), snapshot.as_str()),
             StepUpFor::Proposal(id) => (short_proposal_id(id), id.as_str()),
-            StepUpFor::HubKey(_) => todo!(),
+            // A key ID is short and whole at once: its 8 hex digits.
+            StepUpFor::HubKey(key) => return typed.eq_ignore_ascii_case(&key.to_string()),
         };
         typed.eq_ignore_ascii_case(short) || typed.eq_ignore_ascii_case(whole)
     }

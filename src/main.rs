@@ -637,12 +637,18 @@ fn run_daemon(
         }
     };
     // `serve --hub` carries the pairing handshake at `/sync/v1` on this
-    // listener, whose sessions have no TLS of the hub's own (decision 120).
+    // listener, whose sessions have no TLS of the hub's own (decision 120),
+    // and the page's pairing tokens under `/api/v1/hub`, confirmed by the
+    // admin password when sign-in is on (decision 121).
     #[cfg(feature = "hub")]
     let mut state = state;
     #[cfg(feature = "hub")]
     if hub && let Some(data_dir) = platform::dirs::data_dir() {
         let pairing = hub::hub_pairing(&data_dir, Arc::clone(&operation_log.store));
+        let pairing = match &state.sign_in {
+            http_adapter::SignIn::On(access) => pairing.with_access(Arc::clone(access)),
+            http_adapter::SignIn::Off { .. } => pairing,
+        };
         state.sync = http_adapter::SyncHub::serving(Arc::new(pairing));
         log::info!("serving the hub's pairing at {}", api::sync::PATH);
     }

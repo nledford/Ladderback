@@ -6,11 +6,12 @@
 use std::fmt;
 use std::net::IpAddr;
 
-use domain::access::step_up::StepUpConfirmation;
-use domain::fleet::{HubAddress, PairingToken, PublicKey, TokenId};
+use domain::access::step_up::{StepUpConfirmation, StepUpFor};
+use domain::fleet::{HubAddress, KeyId, PairingToken, PublicKey, TokenId, TokenTls, needs_sign_in};
 use domain::{SignedDuration, Timestamp};
 
 use super::{HubPairing, HubPairingError};
+use crate::access::{StepUpRefused, confirm_step_up};
 
 /// What the page asks for: a token for `address`, living `life` or 15
 /// minutes, confirmed by `confirmation`.
@@ -84,7 +85,34 @@ impl HubPairing {
     /// off, the hub key's key ID, and only on loopback. Of the token the hub
     /// keeps only its pairing key's public half.
     pub async fn make_token_asked(&self, ask: TokenAsk) -> Result<MadeToken, TokenAskRefused> {
-        let _ = ask;
-        todo!()
+        if needs_sign_in(self.access.is_some(), ask.beyond_loopback) {
+            return Err(TokenAskRefused::NeedsSignIn);
+        }
+        let keys = self.keys().await?;
+        let key_id = KeyId::of_key(keys.key());
+        confirm_step_up(
+            self.access.as_deref(),
+            ask.peer,
+            &ask.confirmation,
+            StepUpFor::HubKey(&key_id),
+        )
+        .await
+        .map_err(|refused| match refused {
+            StepUpRefused::Failed => TokenAskRefused::StepUpFailed,
+            StepUpRefused::Wait { seconds } => TokenAskRefused::StepUpWait { seconds },
+            StepUpRefused::Unavailable(text) => TokenAskRefused::StepUpUnavailable(text),
+        })?;
+        // Built-in TLS isn't served yet, so every token is of an address a
+        // certificate authority's chain vouches for, or of loopback.
+        let (token, record) = self
+            .mint(&keys, ask.address, TokenTls::Ca, ask.life)
+            .await?;
+        Ok(MadeToken {
+            token,
+            id: TokenId::of_pairing_key(&record.pairing_key),
+            hub_key: record.hub_key,
+            made_at: record.made_at,
+            expires_at: record.expires_at,
+        })
     }
 }
