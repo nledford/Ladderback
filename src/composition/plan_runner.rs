@@ -17,7 +17,7 @@ use app::ports::{
 use app::queue::{Place, RunQueue};
 use app::repositories::ConfigWrites;
 use app::schedule::{PlanRuns, ScheduleReport};
-use app::secrets::ResolveRepository;
+use app::secrets::{KeyringWaitsFor, ResolveRepository, UnlockWait};
 use async_trait::async_trait;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
@@ -40,6 +40,7 @@ use app::ports::config_unusable;
 /// Starts the operations the API asks for: a backup of a named plan, run to
 /// its end on a task of its own. What happens to the run arrives over the
 /// events WebSocket, so the route answers with the operation's ID alone.
+#[derive(Clone)]
 pub(super) struct PlanRunner {
     pub(super) config: Arc<dyn ConfigStore>,
     /// The one lock of every write of the configuration, which a
@@ -94,6 +95,7 @@ impl PlanRunner {
         config: &domain::planning::AgentConfig,
         id: &PlanId,
         trigger: &Trigger,
+        unlock: Option<UnlockWait>,
     ) -> Result<BuiltBackup, Unbuilt> {
         let plan = config
             .plan(id)
@@ -115,12 +117,26 @@ impl PlanRunner {
         // refused with its own code, masked of every secret of the
         // repository, as the repository routes refuse it (I4, #309).
         let resolving = if trigger.is_unattended() {
-            let waiting = |source: &domain::secrets::SourceName| {
-                log_keyring_wait(trigger, id, source);
+            let waiting = |source: &domain::secrets::SourceName, why: KeyringWaitsFor| {
+                log_keyring_wait(trigger, id, source, why);
             };
-            self.resolve
-                .resolve_saved_unattended(&plan.repository, repository, &waiting)
-                .await
+            // A run that waits for its keyring to be unlocked waits by the
+            // plan's next due run, which the caller arms for that run
+            // alone (#1221).
+            match unlock {
+                Some(wait) => {
+                    (*self.resolve)
+                        .clone()
+                        .waiting_for_unlock(wait)
+                        .resolve_saved_unattended(&plan.repository, repository, &waiting)
+                        .await
+                }
+                None => {
+                    self.resolve
+                        .resolve_saved_unattended(&plan.repository, repository, &waiting)
+                        .await
+                }
+            }
         } else {
             self.resolve
                 .resolve_saved(&plan.repository, repository)
@@ -205,41 +221,38 @@ impl PlanRunner {
         }
     }
 
-    /// Starts a backup of plan `id`, started by `trigger`, on a task of its
-    /// own, and returns its operation's ID once the log has it queued. It
-    /// runs in `place` when the scheduler gave it one, else in a place it
-    /// takes in the queue now, as any run started by hand does (§5): before
-    /// its job is built, so a start refused for a run of the plan waiting
-    /// already reads no secret and runs no command (decision 75, point 4).
-    async fn start_plan(
-        &self,
-        id: &PlanId,
-        trigger: Trigger,
-        place: Option<Place>,
-    ) -> Result<OperationId, Unbuilt> {
+    /// Starts a backup of `plan` a person or another program asked for,
+    /// taking its own place in the queue: it never waits for the keyring,
+    /// so its answer is the caller's at once.
+    async fn start_plan(&self, id: &PlanId, trigger: Trigger) -> Result<OperationId, Unbuilt> {
         let config = self.config.load().await.map_err(|error| {
             Unbuilt::Refused(config_unusable(error, |code, args, detail| {
                 StartError::Unavailable { code, args, detail }
             }))
         })?;
-        let place = match place {
-            Some(place) => place,
-            None => self
-                .queue
-                .by_hand(id, config.agent().concurrency)
-                .map_err(|RunWaiting| Unbuilt::Refused(StartError::RunWaiting))?,
-        };
+        let place = self
+            .queue
+            .by_hand(id, config.agent().concurrency)
+            .map_err(|RunWaiting| Unbuilt::Refused(StartError::RunWaiting))?;
+        let built = self.backup_of(&config, id, &trigger, None).await?;
+        Ok(self.run_built(built, trigger, place).await)
+    }
+
+    /// Records the run of `built` as a new operation, on a task of its own
+    /// under the freeze of the daemon's stop, and returns once the
+    /// operation log holds it queued (decision 73).
+    async fn run_built(&self, built: BuiltBackup, trigger: Trigger, place: Place) -> OperationId {
         let BuiltBackup {
             job,
             setup,
             warnings,
-        } = self.backup_of(&config, id, &trigger).await?;
+        } = built;
         // A UUIDv7: the log orders by ID, so the newest run is the highest.
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let cancel = self.cancel_switch(operation);
         let use_case = self.backup_use_case(setup);
-        // Recorded as queued before the route answers, so a cancel that
-        // arrives the instant it does finds the operation in the log. The
+        // Recorded as queued before the answer is spent, so a cancel that
+        // arrives the instant it is finds the operation in the log. The
         // task does the recording and the run, so a handler that is dropped
         // meanwhile (the client went away) strands neither.
         let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
@@ -266,7 +279,88 @@ impl PlanRunner {
         });
         // A task that ended without recording has nothing to wait for.
         let _ = wait_for_log.await;
-        Ok(operation)
+        operation
+    }
+
+    /// The configuration a run of `plan` starts under, or `None`, with the
+    /// refusal said in the daemon's log, when it can't be read.
+    async fn config_for_a_run(
+        &self,
+        plan: &PlanId,
+        trigger: &Trigger,
+    ) -> Option<domain::planning::AgentConfig> {
+        match self.config.load().await {
+            Ok(config) => Some(config),
+            Err(error) => {
+                log_not_started(
+                    plan,
+                    trigger,
+                    &config_unusable(error, |code, args, detail| StartError::Unavailable {
+                        code,
+                        args,
+                        detail,
+                    }),
+                );
+                None
+            }
+        }
+    }
+
+    /// A run parked waiting for its keyring to be unlocked, on a task of
+    /// its own so the schedule and the queue went on: it resolves again
+    /// with that wait armed, runs in a place it takes once the keyring is
+    /// unlocked, or is refused as any run of the schedule is (#1221).
+    async fn start_parked(&self, plan: PlanId, trigger: Trigger, unlock: UnlockWait) {
+        let Some(config) = self.config_for_a_run(&plan, &trigger).await else {
+            return;
+        };
+        // The place it waited in was given up, and nothing is taken while
+        // it waits: one of its own may have run meanwhile.
+        match self.backup_of(&config, &plan, &trigger, Some(unlock)).await {
+            Ok(built) => match self.queue.by_hand(&plan, config.agent().concurrency) {
+                Ok(place) => {
+                    self.run_built(built, trigger, place).await;
+                }
+                // A newer run of the plan holds its turn: this run gives
+                // way to it.
+                Err(RunWaiting) => log_not_started(&plan, &trigger, &StartError::RunWaiting),
+            },
+            Err(Unbuilt::Secret(secret)) => {
+                self.refused_for_secret(&plan, &trigger, *secret).await;
+            }
+            Err(Unbuilt::Refused(error)) => log_not_started(&plan, &trigger, &error),
+        }
+    }
+
+    /// Records a run refused for a secret of its repository as a failed
+    /// backup that never started, and says how it ended, so the history and
+    /// the page say why the schedule's backups stopped (§5, decision 76);
+    /// the log keeps its own words, never the refusal's, which only the
+    /// history shows, masked (I4, #483). Its place is given up already.
+    async fn refused_for_secret(&self, plan: &PlanId, trigger: &Trigger, secret: SecretUnbuilt) {
+        let SecretUnbuilt {
+            refusal,
+            failure,
+            target,
+        } = secret;
+        let operation = OperationId::from_uuid(Uuid::now_v7());
+        log::warn!(
+            "{} of plan {} didn't start, and ends as failed operation {}: {}",
+            run_named(trigger),
+            plan.as_str(),
+            operation.as_uuid().hyphenated(),
+            start_refused(&StartError::SecretRefused(refusal))
+        );
+        let finished = RunOperation::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            Arc::clone(&self.store),
+        )
+        .with_events(Arc::clone(&self.events))
+        .refused(operation, trigger.clone(), target, failure)
+        .await;
+        log_recording_errors(&finished);
+        say_how_it_ended(&self.ends, &finished);
     }
 }
 
@@ -294,6 +388,15 @@ pub(super) struct SecretUnbuilt {
     refusal: SecretRefusal,
     failure: FailureReason,
     target: Target,
+}
+
+impl SecretUnbuilt {
+    /// Whether the repository's password is in a keyring the service
+    /// answered is locked: a run the schedule starts waits for it to be
+    /// unlocked, past this refusal (#1221).
+    fn refused_as_locked(&self) -> bool {
+        self.refusal.code == ErrorCode::SecretKeyringLocked
+    }
 }
 
 impl Unbuilt {
@@ -389,40 +492,41 @@ fn start_refused(error: &StartError) -> String {
 
 #[async_trait]
 impl PlanRuns for PlanRunner {
-    async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
-        match self.start_plan(plan, trigger.clone(), Some(place)).await {
-            Ok(_) => {}
-            // Refused for a secret of its repository, it ends failed with the
-            // refusal, so the history and the page say why the schedule's
-            // backups stopped (§5), and it is retried as any failed backup the
-            // schedule started (decision 76). Its place is given up already.
-            Err(Unbuilt::Secret(secret)) => {
-                let SecretUnbuilt {
-                    refusal,
-                    failure,
-                    target,
-                } = *secret;
-                let operation = OperationId::from_uuid(Uuid::now_v7());
-                // As a refusal by hand is logged (#483), never the refusal's
-                // words, which only the history shows, masked (I4).
-                log::warn!(
-                    "{} of plan {} didn't start, and ends as failed operation {}: {}",
-                    run_named(&trigger),
-                    plan.as_str(),
-                    operation.as_uuid().hyphenated(),
-                    start_refused(&StartError::SecretRefused(refusal))
-                );
-                let finished = RunOperation::new(
-                    Arc::clone(&self.engine),
-                    Arc::new(SystemClock),
-                    Arc::clone(&self.store),
-                )
-                .with_events(Arc::clone(&self.events))
-                .refused(operation, trigger, target, failure)
-                .await;
-                log_recording_errors(&finished);
-                say_how_it_ended(&self.ends, &finished);
+    async fn start(
+        &self,
+        plan: &PlanId,
+        trigger: Trigger,
+        place: Place,
+        unlock: Option<UnlockWait>,
+    ) {
+        let Some(config) = self.config_for_a_run(plan, &trigger).await else {
+            return;
+        };
+        // A first resolution without the unlock wait answers at once, so
+        // the schedule goes on with the other plans' runs; only a locked
+        // keyring with the plan's next run to wait within parks the run on
+        // a task (#1221).
+        match self.backup_of(&config, plan, &trigger, None).await {
+            Ok(built) => {
+                self.run_built(built, trigger, place).await;
             }
+            Err(Unbuilt::Secret(secret)) => match (unlock, secret.refused_as_locked()) {
+                (Some(unlock), true) if trigger.is_unattended() => {
+                    // The wait can outlast the scheduler's turn and the
+                    // run's place in the queue: both go on without it, and
+                    // the run takes a new place once the keyring is
+                    // unlocked. The daemon's stop ends the wait with the
+                    // run, never started.
+                    drop(place);
+                    let runner = self.clone();
+                    let plan = plan.clone();
+                    let frozen = self.runs.clone();
+                    tokio::spawn(frozen.until_frozen(async move {
+                        runner.start_parked(plan, trigger, unlock).await;
+                    }));
+                }
+                _ => self.refused_for_secret(plan, &trigger, *secret).await,
+            },
             Err(Unbuilt::Refused(error)) => log_not_started(plan, &trigger, &error),
         }
     }
@@ -432,7 +536,7 @@ impl PlanRuns for PlanRunner {
         let built = match operation.target().plan.clone() {
             Some(plan) => match self.config.load().await {
                 Ok(config) => self
-                    .backup_of(&config, &plan, operation.trigger())
+                    .backup_of(&config, &plan, operation.trigger(), None)
                     .await
                     .map(|built| (built, plan, config.agent().concurrency)),
                 Err(error) => Err(Unbuilt::Refused(config_unusable(
@@ -622,7 +726,7 @@ impl Operations for PlanRunner {
         // client that retries in a loop can't fill the log (decision 75,
         // point 4), as a cancel of an operation that isn't running can't.
         let operation = self
-            .start_plan(&id, trigger.clone(), None)
+            .start_plan(&id, trigger.clone())
             .await
             .map_err(Unbuilt::into_start_error)
             .inspect_err(|error| {
@@ -841,9 +945,15 @@ pub(super) fn operation_of(text: &str) -> Option<OperationId> {
 }
 
 /// Says once that the run `trigger` started of plan `plan` waits for the
-/// session's keyring service to read the entry `source` names: the entry,
-/// never a secret (I4).
-fn log_keyring_wait(trigger: &Trigger, plan: &PlanId, source: &domain::secrets::SourceName) {
+/// keyring to read the entry `source` names — for the session's service to
+/// come, or for the keyring to be unlocked — and how long it may: the
+/// entry, never a secret (I4).
+fn log_keyring_wait(
+    trigger: &Trigger,
+    plan: &PlanId,
+    source: &domain::secrets::SourceName,
+    why: KeyringWaitsFor,
+) {
     use domain::secrets::SourceName;
     let name = match source {
         SourceName::Keyring { entry } => entry,
@@ -851,11 +961,19 @@ fn log_keyring_wait(trigger: &Trigger, plan: &PlanId, source: &domain::secrets::
         SourceName::File { path } => path,
         SourceName::Env { name } => name,
     };
-    log::info!(
-        "{} of plan {} waits for the session's keyring service to read {name}, \
-         until it answers or the daemon has been up for {:#}",
-        run_named(trigger),
-        plan.as_str(),
-        app::secrets::KEYRING_WAIT
-    );
+    match why {
+        KeyringWaitsFor::Service => log::info!(
+            "{} of plan {} waits for the session's keyring service to read {name}, \
+             until it answers or the daemon has been up for {:#}",
+            run_named(trigger),
+            plan.as_str(),
+            app::secrets::KEYRING_WAIT
+        ),
+        KeyringWaitsFor::Unlock => log::info!(
+            "{} of plan {} waits for the keyring to be unlocked to read {name}, \
+             until it is or the plan's next run is due",
+            run_named(trigger),
+            plan.as_str()
+        ),
+    }
 }

@@ -77,11 +77,15 @@ async fn a_backup_that_would_take_key_files_no_glob_can_name_is_refused() {
         Err(error) => panic!("refused: {:?}", error.into_start_error()),
     };
 
-    let built = runner.backup_of(&config, &home, &Trigger::Manual).await;
+    let built = runner
+        .backup_of(&config, &home, &Trigger::Manual, None)
+        .await;
     assert_eq!(iglobs(built), Vec::<String>::new(), "no secret key file");
 
     std::fs::write(data.join("hub-tls-key.0123.tmp"), "staged").expect("a staged key file");
-    let refused = runner.backup_of(&config, &home, &Trigger::Manual).await;
+    let refused = runner
+        .backup_of(&config, &home, &Trigger::Manual, None)
+        .await;
     assert!(
         matches!(
             refused,
@@ -92,7 +96,7 @@ async fn a_backup_that_would_take_key_files_no_glob_can_name_is_refused() {
     let place = runner
         .queue
         .push(&home, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &home, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, None).await;
     let said = captured_log::lines();
     assert!(
         said.iter().any(|(level, line)| *level == log::Level::Warn
@@ -105,7 +109,9 @@ async fn a_backup_that_would_take_key_files_no_glob_can_name_is_refused() {
     let outside = scratch.path().join("data");
     std::fs::write(outside.join("hub-key"), "secret").expect("a key file");
     runner.left_out = KeyFilesLeftOut::Unnamed(vec![outside]);
-    let built = runner.backup_of(&config, &home, &Trigger::Manual).await;
+    let built = runner
+        .backup_of(&config, &home, &Trigger::Manual, None)
+        .await;
     assert_eq!(iglobs(built), Vec::<String>::new(), "a folder elsewhere");
 }
 

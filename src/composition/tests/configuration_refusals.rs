@@ -164,7 +164,7 @@ async fn a_scheduled_run_over_a_configuration_that_cannot_be_used_queues_nothing
         let place = runner
             .queue
             .push(&plan, domain::planning::Concurrency::default());
-        PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+        PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
         assert_eq!(jobs(&scripted), 0, "{error:?}");
         let history = store

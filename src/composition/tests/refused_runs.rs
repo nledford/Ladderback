@@ -117,7 +117,7 @@ async fn a_scheduled_run_refused_for_a_secret_ends_as_one_failed_operation_that_
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     assert_eq!(jobs(&scripted), 0, "the engine was asked");
     let history = store
@@ -239,7 +239,7 @@ async fn a_scheduled_run_while_the_daemon_starts_waits_for_the_keyring_service_a
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
         .await
@@ -403,14 +403,25 @@ async fn another_plan_runs_while_a_run_waits_for_the_keyring_to_be_unlocked() {
     let waiting = runner
         .queue
         .push(&home, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &home, Trigger::Schedule, waiting).await;
+    // The plan's next run is due 10 minutes in: the waiting run never
+    // waits past it (#1221).
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, waiting, Some(unlock)).await;
 
     // While the first run waits for the keyring, the other plan's run
-    // starts and reaches the engine, and nothing is refused.
+    // starts, reaches the engine and ends, and nothing is refused.
     let place = runner
         .queue
         .push(&other, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &other, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &other, Trigger::Schedule, place, None).await;
+    let other_end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the other run ends")
+        .expect("an end");
+    assert_eq!(other_end.plan, other, "{other_end:?}");
     assert_eq!(jobs(&scripted), 1, "only the plan that isn't waiting ran");
     let history = store
         .list(&app::ports::HistoryQuery::default())
@@ -435,16 +446,11 @@ async fn another_plan_runs_while_a_run_waits_for_the_keyring_to_be_unlocked() {
 
     // The keyring unlocks, and the waiting run backs up.
     clock.advance(domain::SignedDuration::from_secs(60));
-    let mut ended: Vec<domain::PlanId> = Vec::new();
-    for _ in 0..2 {
-        let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
-            .await
-            .expect("the run ends")
-            .expect("a run ended");
-        ended.push(end.plan);
-    }
-    assert!(ended.contains(&home), "the waiting run ended: {ended:?}");
-    assert!(ended.contains(&other), "the other run ended: {ended:?}");
+    let home_end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the waiting run ends")
+        .expect("an end");
+    assert_eq!(home_end.plan, home, "{home_end:?}");
     let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
     let passwords: Vec<&str> = seen
         .iter()
@@ -565,7 +571,7 @@ async fn a_refused_runs_history_row_says_what_the_command_said_masked_as_its_ref
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     let page = Operations::history(&runner, None, None, None)
         .await
@@ -664,7 +670,7 @@ async fn a_refused_retry_is_heard_as_a_failed_retry() {
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Retry, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Retry, place, None).await;
 
     let history = store
         .list(&app::ports::HistoryQuery::default())
@@ -711,7 +717,7 @@ async fn a_refused_run_the_log_cannot_keep_still_ends_and_is_announced() {
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     assert_eq!(jobs(&scripted), 0, "the engine was asked");
     assert_eq!(refused.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -937,7 +943,7 @@ async fn started_and_resumed_backups_carry_the_warnings_their_secrets_gave() {
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
     let started = next_end().await.operation;
     let queued = queued_home_backup(0x0539, None);
     store

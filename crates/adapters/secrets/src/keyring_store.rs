@@ -88,6 +88,18 @@ pub(crate) fn os_activation() -> KeyringActivation {
     return KeyringActivation::Absent;
 }
 
+/// Whether the keyring is locked: the Secret Service says it of the
+/// collection under the alias `default`, where `keyring` keeps and looks
+/// for entries, by a property that reads no entry — so asking raises no
+/// unlock prompt (#1221). The macOS keychain is never asked, as nothing
+/// classifies it as locked.
+pub(crate) fn os_lock() -> Lock {
+    #[cfg(target_os = "linux")]
+    return default_collection_lock();
+    #[cfg(not(target_os = "linux"))]
+    return Lock::Unlocked;
+}
+
 /// The name the Secret Service owns on the session bus.
 #[cfg(target_os = "linux")]
 const SECRET_SERVICE: &str = "org.freedesktop.secrets";

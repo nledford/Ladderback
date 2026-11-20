@@ -50,6 +50,9 @@ pub struct SystemSecrets {
     keyring: Arc<dyn KeyringStore>,
     file_reader: FileReader,
     activation: ActivationProbe,
+    /// Whether the keyring is locked, as a run waiting for it to be
+    /// unlocked asks (#1221).
+    lock_probe: LockProbe,
 }
 
 impl SystemSecrets {
@@ -62,7 +65,19 @@ impl SystemSecrets {
             keyring: keyring_store::os_store(),
             file_reader: Arc::new(file::read),
             activation: Arc::new(keyring_store::os_activation),
+            lock_probe: Arc::new(keyring_store::os_lock),
         }
+    }
+
+    /// Asks `probe` whether the keyring is locked, which a test makes
+    /// answer as it likes.
+    #[cfg(test)]
+    pub(crate) fn with_lock_probe(
+        mut self,
+        probe: impl Fn() -> keyring_store::Lock + Send + Sync + 'static,
+    ) -> Self {
+        self.lock_probe = Arc::new(probe);
+        self
     }
 
     /// Reads `vars` instead of the process environment, for `Env` secrets and
@@ -119,6 +134,10 @@ pub(crate) type FileReader =
 /// Asks the platform how the keyring service is started. It may block, on
 /// D-Bus.
 pub(crate) type ActivationProbe = Arc<dyn Fn() -> KeyringActivation + Send + Sync>;
+
+/// Whether the keyring is locked, asked of the platform without reading an
+/// entry, so it raises no unlock prompt (#1221).
+pub(crate) type LockProbe = Arc<dyn Fn() -> keyring_store::Lock + Send + Sync>;
 
 impl Default for SystemSecrets {
     fn default() -> Self {
@@ -284,10 +303,19 @@ impl SecretResolver for SystemSecrets {
         }
     }
 
+    /// Asks the platform within `ACTIVATION_LIMIT`, as `activation` does;
+    /// an answer that comes later, or a question that was lost, is unknown.
     async fn keyring_lock(&self) -> KeyringLock {
-        // #1221: the green commit asks the store whether its collection is
-        // locked, which reads no entry and so raises no unlock prompt.
-        todo!("ask the collection's lock, without reading an entry (#1221)")
+        let probe = Arc::clone(&self.lock_probe);
+        let asking = tokio::task::spawn_blocking(move || probe());
+        match tokio::time::timeout(ACTIVATION_LIMIT, asking).await {
+            Ok(Ok(keyring_store::Lock::Unlocked)) => KeyringLock::Unlocked,
+            Ok(Ok(keyring_store::Lock::Locked(_))) => KeyringLock::Locked,
+            // It can't be said — there is no service to ask — or the
+            // question was lost or late: the blocked call is left to end on
+            // its own, as `activation`'s is.
+            _ => KeyringLock::Unknown,
+        }
     }
 }
 

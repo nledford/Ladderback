@@ -10,7 +10,9 @@ use app::keyring_check::{KeyringCheck, KeyringRead, KeyringUser, check_keyring_e
 use app::ports::Clock;
 use app::retry::{RunEnd, RunOutcome};
 use app::secrets::ResolvedRepository;
-use app::secrets::{Cause, Field, KeyringWait, ResolveError, ResolveRepository, UnlockWait};
+use app::secrets::{
+    Cause, Field, KeyringWait, KeyringWaitsFor, ResolveError, ResolveRepository, UnlockWait,
+};
 use cucumber::{given, then, when};
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{FailureReason, OperationStatus, Target, Trigger};
@@ -988,7 +990,7 @@ fn asked_whether_locked(agent: &mut Agent, times: usize) {
 async fn schedule_starts_after_start(agent: &mut Agent, seconds: i64) {
     agent.clock.advance(SignedDuration::from_secs(seconds));
     let waited = Arc::clone(&agent.secrets.waited);
-    let waiting = move |source: &SourceName| {
+    let waiting = move |source: &SourceName, _why: KeyringWaitsFor| {
         waited
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1008,7 +1010,8 @@ async fn schedule_starts_after_start(agent: &mut Agent, seconds: i64) {
 async fn schedule_starts_and_clock_set_back(agent: &mut Agent, seconds: i64) {
     agent.clock.advance(SignedDuration::from_secs(seconds));
     let clock = agent.clock.clone();
-    let waiting = move |_: &SourceName| clock.set_back(SignedDuration::from_hours(1));
+    let waiting =
+        move |_: &SourceName, _: KeyringWaitsFor| clock.set_back(SignedDuration::from_hours(1));
     let outcome = agent
         .secrets
         .waits(agent.clock.clone(), agent.secrets.up_from())
@@ -1043,7 +1046,9 @@ async fn schedule_starts_and_daemon_stops(agent: &mut Agent, seconds: i64) {
     let told = Arc::new(Mutex::new(false));
     let waiting = {
         let told = Arc::clone(&told);
-        move |_: &SourceName| *told.lock().unwrap_or_else(PoisonError::into_inner) = true
+        move |_: &SourceName, _: KeyringWaitsFor| {
+            *told.lock().unwrap_or_else(PoisonError::into_inner) = true
+        }
     };
     // This clock's monotonic time starts at zero, `seconds` after the
     // daemon started.

@@ -26,7 +26,7 @@ use nix::unistd::Pid;
 use tempfile::TempDir;
 
 use crate::command::{Stop, run_with};
-use crate::keyring_store::{Failure, KeyringStore, Memory};
+use crate::keyring_store::{Failure, KeyringStore, Lock, Memory};
 use crate::{FileReader, SystemSecrets};
 
 // ---------------------------------------------------------------- helpers
@@ -78,7 +78,9 @@ impl RealHarness {
 
 impl SecretsHarness for RealHarness {
     fn resolver(&self) -> Arc<dyn SecretResolver> {
-        Arc::new(self.system())
+        // The collection's lock stands in, as the activation probe does:
+        // the machine's own keyring can't be asked what a check needs.
+        Arc::new(self.system().with_lock_probe(|| Lock::Unlocked))
     }
 
     fn keyring(&self) -> Arc<dyn app::ports::Keyring> {
@@ -86,7 +88,11 @@ impl SecretsHarness for RealHarness {
     }
 
     fn without_keyring_service(&self) -> Arc<dyn SecretResolver> {
-        Arc::new(self.system().with_keyring(Arc::new(NoService)))
+        Arc::new(
+            self.system()
+                .with_keyring(Arc::new(NoService))
+                .with_lock_probe(|| Lock::Unknown("no session bus".to_owned())),
+        )
     }
 
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
@@ -94,7 +100,11 @@ impl SecretsHarness for RealHarness {
     }
 
     fn with_locked_keyring(&self) -> Arc<dyn SecretResolver> {
-        Arc::new(self.system().with_keyring(Arc::new(LockedSecretService)))
+        Arc::new(
+            self.system()
+                .with_keyring(Arc::new(LockedSecretService))
+                .with_lock_probe(|| Lock::Locked("the keyring is locked".to_owned())),
+        )
     }
 
     fn keyring_that_cannot_be_asked(&self, cause: KeyringCause) -> Arc<dyn Keyring> {
