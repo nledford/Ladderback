@@ -1,5 +1,5 @@
 // Journey steps for the change cue (technical design §4.5, "Live updates";
-// decisions 127 and 129): a row whose status a live update changed arrives
+// decisions 129 and 130): a row whose status a live update changed arrives
 // with one fade, from the cue's fill (`--cue-fill`) into the still mark it
 // keeps until it is seen (`table.ts` checks the mark); and the
 // reduced-motion rule, which keeps a fade and stops anything that moves.
@@ -124,7 +124,7 @@ Then(
   },
 );
 
-// The reduced-motion rule (decision 127): no animation runs, and a transition
+// The reduced-motion rule (decision 130): no animation runs, and a transition
 // runs, or is set to run, only on a color or the opacity (with `display`,
 // `overlay` and `visibility`, which hold a fade's element until it ends),
 // over no longer than the change cue's 600 ms, short enough to be feedback.

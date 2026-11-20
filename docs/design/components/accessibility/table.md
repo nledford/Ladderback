@@ -10,7 +10,7 @@
 
   A row that moves (a sort, or a change to the sorted column) is taken out and put back, and a moved node loses focus in every engine. So the table notes the element focused in its body before it applies a new order and gives focus back after the move: in the same turn, and again at the next frame.
 
-  A column given `Column::cued` (a `Cue`: what a live update can change in a row, and the words that say a row is marked; the Operations page cues its status, and the first cued column counts) lights a row whose value changed while it showed, once, and marks it "changed, not yet seen" until it is seen (decisions 127 and 129). `features/ui/change_cue.feature` checks it on the Operations page and `features/ui/components/table.feature` on the gallery's Live table.
+  A column given `Column::cued` (a `Cue`: what a live update can change in a row, and the words that say a row is marked; the Operations page cues its status, and the first cued column counts) lights a row whose value changed while it showed, once, and marks it "changed, not yet seen" until it is seen (decisions 129 and 130). `features/ui/change_cue.feature` checks it on the Operations page and `features/ui/components/table.feature` on the gallery's Live table.
 
   `rules::cues` decides a change on the host: a row's first sight (the first rows, a row that arrives, the table built again) only seeds the value, and a value left as it was changes nothing, so a re-sort, a progress report and a paused page light and mark nothing. `rules::Marks` keeps which rows are unseen: focus entering a row sees it, a change while focus is in the row is seen as it comes, and a row that leaves takes its mark with it.
 

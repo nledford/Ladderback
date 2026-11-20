@@ -12,7 +12,7 @@ Feature: A row whose status changes stays marked until it is seen
   whose status stayed as it was: not the page's first rows, not a progress
   report, not a re-sort, not a paused page; a resume marks each changed row
   once. A mark, its fade and its button move nothing, so all stay for a
-  reader who asks for less motion (decisions 127 and 129). The journeys
+  reader who asks for less motion (decisions 129 and 130). The journeys
   play the daemon, so each update reaches the page when a step sends it,
   after the page is listening.
 

@@ -443,4 +443,4 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 - **Don't** restyle a native control with custom fills, radii or borders outside its shared component: a button's look is `Button`'s.
 - **Don't** introduce a second accent color, a fourth status hue, or a color without a contrast-checked pair.
 - **Don't** set text or control sizes in pixels, or use physical properties (`left`, `width`, `margin-top`).
-- **Don't** animate anything that the reduced-motion rule can't turn off: under reduced motion nothing moves, resizes, rotates, scales or loops, and only a fade of a color or the opacity, 600 ms at most, stays (decision 127).
+- **Don't** animate anything that the reduced-motion rule can't turn off: under reduced motion nothing moves, resizes, rotates, scales or loops, and only a fade of a color or the opacity, 600 ms at most, stays (decision 130).

@@ -1,4 +1,4 @@
-# Decision 127: What reduced motion stops, and what it keeps
+# Decision 130: What reduced motion stops, and what it keeps
 
 **Under `prefers-reduced-motion: reduce`, anything that moves, resizes, rotates, scales or loops stops: every keyframe animation (the spinner's turn), and every transition of anything but a color or the opacity (the progress fill's growth, any change of size or position). A short fade of a color or the opacity stays, as feedback that moves nothing: the tooltip's 100 ms fade, and the change cue of a live row, which settles over 600 ms. One rule in `style.css` does it, and no component can turn its stopping half back on** (recorded 2026-11-20, §4.5; the maintainer's decision).
 

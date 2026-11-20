@@ -355,7 +355,7 @@ Then("the progress bar {string} is drawn at {int} percent", async function (this
 // How long the fill takes to slide to a new report, as the browser computes
 // it under the reader's settings: the duration paired with its slide
 // (`transform`, or `all`) in its transition list, "0s" where no transition
-// names it, as under the reduced-motion rule (decision 127), which keeps
+// names it, as under the reduced-motion rule (decision 130), which keeps
 // only fades.
 const moves = (bar: Locator) =>
   bar.evaluate((element) => {

@@ -286,7 +286,7 @@ main:focus {
   outline: none;
 }
 
-/* Reduced motion (decision 127): fewer motions, and none spatial. For a
+/* Reduced motion (decision 130): fewer motions, and none spatial. For a
    reader who asks for less motion nothing moves, resizes, rotates, scales or
    loops: every keyframe animation stops (the spinner's turn), no scroll is
    smooth, and a transition runs only on a color or the opacity, so the
@@ -1125,7 +1125,7 @@ table.data-table :is(th[scope="row"], thead th:first-child) {
   }
 }
 
-/* The change mark (decisions 127 and 129; `Column::cued`): a row whose
+/* The change mark (decisions 129 and 130; `Column::cued`): a row whose
    status a live update changed is marked until it is seen (`data-unseen`):
    its watched cell (`data-cued`) reads in bold and an edge 3px wide stands
    at its start, on the row header, which is pinned there and the edge's

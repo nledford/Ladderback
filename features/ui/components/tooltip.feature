@@ -104,7 +104,7 @@ Feature: The tooltip
     And I press Shift+Tab until focus is on the button "Prune the demo repository"
     Then the tooltip of the button "Prune the demo repository" is drawn in the page's own colors, edged in its text color
 
-  # A contract change (decision 127): the fade is a change of opacity, which
+  # A contract change (decision 130): the fade is a change of opacity, which
   # the reduced-motion rule keeps; until then the tooltip appeared at once.
   Scenario: A tooltip fades in quickly, and still fades for a reader who asks for less motion
     When I open the component gallery
