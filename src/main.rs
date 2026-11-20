@@ -258,6 +258,14 @@ fn with_catalog_help(command: clap::Command) -> clap::Command {
     })
 }
 
+/// `command` with the description of itself, each command below it and each
+/// argument of every one of them, from the catalog in `localizer`'s
+/// language.
+fn described(command: clap::Command, localizer: &Localizer) -> clap::Command {
+    let _ = (command, localizer);
+    todo!()
+}
+
 fn main() -> ExitCode {
     let Cli { plain, command } = match parse(std::env::args_os().collect()) {
         Ok(cli) => cli,
@@ -913,6 +921,110 @@ mod tests {
     fn parsed(args: &[&str]) -> Result<Cli, clap::error::ErrorKind> {
         Cli::try_parse_from(std::iter::once("ladderback").chain(args.iter().copied()))
             .map_err(|error| error.kind())
+    }
+
+    /// What `--help` could say a command or an argument does, named by its
+    /// path from the program: its short and long description, and whether
+    /// `--help` hides it.
+    struct Description {
+        name: String,
+        hidden: bool,
+        short: Option<String>,
+        long: Option<String>,
+    }
+
+    /// Adds to `found` each command and argument at or below `command`,
+    /// named `path`, but for `clap`'s own: its `--help` and `--version`
+    /// options and its `help` command, whose words stay English (§8.4).
+    fn descriptions(command: &clap::Command, path: &str, found: &mut Vec<Description>) {
+        let text = |styled: Option<&clap::builder::StyledStr>| styled.map(ToString::to_string);
+        found.push(Description {
+            name: path.to_owned(),
+            hidden: command.is_hide_set(),
+            short: text(command.get_about()),
+            long: text(command.get_long_about()),
+        });
+        let arguments = command.get_arguments().filter(|argument| {
+            !matches!(
+                argument.get_action(),
+                clap::ArgAction::Help
+                    | clap::ArgAction::HelpShort
+                    | clap::ArgAction::HelpLong
+                    | clap::ArgAction::Version
+            )
+        });
+        for argument in arguments {
+            found.push(Description {
+                name: format!("{path} {}", argument.get_id()),
+                hidden: argument.is_hide_set(),
+                short: text(argument.get_help()),
+                long: text(argument.get_long_help()),
+            });
+        }
+        let subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.get_name() != "help");
+        for subcommand in subcommands {
+            let path = format!("{path} {}", subcommand.get_name());
+            descriptions(subcommand, &path, found);
+        }
+    }
+
+    /// The command tree built, as `clap` builds it to parse and so as
+    /// `parse` describes it: a global argument, as `--plain`, is in every
+    /// command.
+    fn built() -> clap::Command {
+        let mut command = Cli::command();
+        command.build();
+        command
+    }
+
+    /// No description is written in the code, not even as a doc comment
+    /// `clap` would take for one (technical design §8.4): each is the
+    /// catalog's, set only when help is said.
+    #[test]
+    fn no_description_is_written_in_the_code() {
+        let mut found = Vec::new();
+        descriptions(&built(), "ladderback", &mut found);
+        let written: Vec<String> = found
+            .into_iter()
+            .filter_map(|description| {
+                let shown = if description.hidden {
+                    "hidden"
+                } else {
+                    "shown"
+                };
+                let text = description.short.or(description.long)?;
+                Some(format!("{} ({shown}): {text}", description.name))
+            })
+            .collect();
+        assert_eq!(written, Vec::<String>::new());
+    }
+
+    /// Every command and argument `--help` shows is described from the
+    /// catalog (technical design §8.4): under `en-XA` none is left without a
+    /// description or in English.
+    #[cfg(feature = "pseudo")]
+    #[test]
+    fn every_command_and_argument_is_described_from_the_catalog() {
+        let en_xa = PosixEnv {
+            language: Some("en-XA".to_owned()),
+            ..PosixEnv::default()
+        };
+        let localizer = Localizer::new(&en_xa.preferences());
+        let mut found = Vec::new();
+        descriptions(&described(built(), &localizer), "ladderback", &mut found);
+        let transformed = |text: &String| !text.is_ascii();
+        let english: Vec<String> = found
+            .into_iter()
+            .filter(|description| {
+                !description.hidden
+                    && !(description.short.as_ref().is_some_and(transformed)
+                        && description.long.as_ref().is_none_or(transformed))
+            })
+            .map(|description| format!("{}: {:?}", description.name, description.short))
+            .collect();
+        assert_eq!(english, Vec::<String>::new());
     }
 
     #[test]
