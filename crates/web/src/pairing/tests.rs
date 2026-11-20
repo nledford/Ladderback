@@ -76,9 +76,11 @@ fn a_life_is_read_in_whole_minutes() {
 
 /// The same table as `crates/domain/src/fleet/route/tests.rs`, so the page
 /// warns of the hosts an agent takes for this computer: keep the two
-/// identical.
+/// identical. A part with a leading `0` or `0x` is read apart by resolvers
+/// (octal by glibc, decimal by macOS in four parts), so it is never
+/// loopback.
 #[test]
-fn loopback_is_localhost_or_a_loopback_address_in_any_form_the_resolver_reads() {
+fn loopback_is_localhost_or_a_loopback_address_in_a_form_every_resolver_reads_alike() {
     for host in [
         "localhost",
         "LOCALHOST",
@@ -87,8 +89,6 @@ fn loopback_is_localhost_or_a_loopback_address_in_any_form_the_resolver_reads() 
         "::1",
         "127.1",
         "127.0.1",
-        "0x7f.1",
-        "0177.0.0.1",
         "2130706433",
     ] {
         assert!(is_loopback(host), "{host}");
@@ -108,6 +108,11 @@ fn loopback_is_localhost_or_a_loopback_address_in_any_form_the_resolver_reads() 
         "127.",
         "0x",
         "08.1",
+        "0x7f.1",
+        "0177.0.0.1",
+        "0177.0.1",
+        "127.0.0.01",
+        "0x7f.0.0.1",
         "+127.1",
     ] {
         assert!(!is_loopback(host), "{host}");

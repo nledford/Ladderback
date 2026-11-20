@@ -13,7 +13,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { BrowserContext, Locator, Request } from "playwright";
 
 import { expect } from "../support/expect.ts";
-import { journey, namePattern } from "../support/keyboard.ts";
+import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { patienceMs, untilSettled } from "../support/patience.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
@@ -177,14 +177,14 @@ When("I make another pairing token", async function (this: BrowserWorld) {
 });
 
 // Settings is left within the page, so its work on the way still answers;
-// once the hub holds a making, only after the page has sent it.
+// once the hub holds a making, only after the page has sent it. The link is
+// reached back from where focus is, by keyboard.
 When("I leave Settings by the link {string}", async function (this: BrowserWorld, name: string) {
   const held = heldMakes.get(this);
   if (held) await untilSettled(held.request, "the page sent no making for the hub to hold");
-  await this.page
-    .getByRole("navigation", { name: namePattern("Pages") })
-    .getByRole("link", { name: namePattern(name) })
-    .click();
+  const link = this.page.getByRole("navigation", { name: namePattern("Pages") }).getByRole("link", { name: namePattern(name) });
+  await pressUntilFocused(this.page, "Shift+Tab", link, `the link "${name}"`);
+  await journey(this.page).press("Enter");
   await expect(this.page.getByRole("heading", { level: 1, name: namePattern(name) })).toBeVisible();
 });
 

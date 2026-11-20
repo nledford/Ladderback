@@ -82,7 +82,7 @@ Feature: Making a pairing token on the hub's page
     And the page sent the hub one cancel of the token the dialog showed, which it agreed to
     And nothing on the page holds the pairing token the dialog showed
 
-  Scenario: A cancel answered after a later token's isn't said of the later token
+  Scenario: A cancel answered after a later token's is said of an earlier token
     Given a hub with sign-in off
     And the hub holds the page's first cancel of a pairing token, then fails it
     When I make a pairing token on the Machines tab
@@ -91,7 +91,8 @@ Feature: Making a pairing token on the hub's page
     And I press Escape
     Then the page says "The unused pairing token was canceled."
     When the hub answers the cancel it held
-    Then the page says "The unused pairing token was canceled."
+    Then the page says "The hub couldn't cancel an earlier unused pairing token, so it still works until it lapses."
+    And the page says "The unused pairing token was canceled."
 
   Scenario: A token the hub makes once Settings is left is canceled, unseen
     Given a hub with sign-in off
