@@ -122,7 +122,7 @@ For contributors, for installing the release's archive by hand, and for people w
 
 Ladderback isn't published to crates.io, and has no Homebrew tap until a macOS build can be signed and notarized ([#344](https://github.com/nledford/Ladderback/issues/344)).
 
-From 0.5.x each release also publishes a Docker image, `ghcr.io/nledford/ladderback`, to try Ladderback in a container. It isn't yet a supported way to install and run Ladderback: the [install guide](docs/guide/install.md#docker-image-not-supported-yet) says how to run it and what an agent in a container can't do.
+Releases are to publish a Docker image too, `ghcr.io/nledford/ladderback`, to try Ladderback in a container; none has yet (#358). It isn't yet a supported way to install and run Ladderback: the [install guide](docs/guide/install.md#docker-image-not-supported-yet) says how to build and run it and what an agent in a container can't do.
 
 ## Quick start
 
