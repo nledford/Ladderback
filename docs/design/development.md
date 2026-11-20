@@ -277,6 +277,8 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
 
 **The Docker image's base.** The `Containerfile`'s `debian:13-slim` is pinned by digest (operations.md §12), so it never moves on its own. `.github/dependabot.yml` proposes a new digest of that tag once a week, after a 7-day cooldown, so the image takes in Debian's security fixes, with the `build` prefix as for npm. A new Debian release, `14-slim`, is never proposed: moving to one is a pull request of its own, like a runner image bump.
 
+**The BuildKit image the release builds with.** `release-image.yml` builds and pushes the image with a BuildKit container, `moby/buildkit` pinned by the digest of its multi-platform index. Dependabot doesn't read a workflow's command lines, so nothing proposes a new one: it moves by hand, in a pull request of its own like a runner image bump, which `image.yml` builds and smoke-tests on both platforms.
+
 ### 13.7 Changes that touch several places
 
 Each list is one change, unless a step says it lands later (§13.7.6, step 3): leave out a step and something breaks later, often far from the edit.
@@ -385,7 +387,7 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 **Pinned Node and runner images.** CI doesn't take whatever `lts/*`, `ubuntu-latest` and `macos-latest` point at on the day it runs.
 
 - **Node.** Node's major version is in `ui-tests/.nvmrc`, which every `setup-node` step reads.
-- **Runner images.** Every job names its runner image: `ubuntu-26.04` and `macos-26`, and for the Linux release builds `ubuntu-22.04` and `ubuntu-22.04-arm`, chosen for their glibc (§12.1).
+- **Runner images.** Every job names its runner image: `ubuntu-26.04` and `macos-26`, for the Linux release builds `ubuntu-22.04` and `ubuntu-22.04-arm`, chosen for their glibc (§12.1), and for the Docker image's arm64 build `ubuntu-26.04-arm`, where that platform's image is built and tested without emulation.
 - **Bumps.** Each is bumped by a pull request of its own, as the Rust toolchain is (decision 78), so what a new Node or image breaks shows up there and is fixed there, not in an unrelated change. Dependabot bumps neither.
 - **Check names stay.** The `Check` jobs keep their required names, `Check (ubuntu-latest)` and `Check (macos-latest)`: the matrix gives each leg a `name`, which the ruleset requires, apart from its `os`, the pinned image, so bumping an image renames no check.
 

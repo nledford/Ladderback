@@ -1,0 +1,71 @@
+# Ladderback's agent in Docker Compose: the `docker run` of the install guide
+# (docs/guide/install.md, "Docker image (not supported yet)"), written as a
+# Compose file. The image isn't yet a supported way to install and run
+# Ladderback: the package or the install script is.
+#
+# Before the first start, make the repository's folder, which user 10001 may
+# write, and, beside this file, the repository's password file, which user
+# 10001 may read:
+#
+#   sudo install -d -o 10001 -g 10001 /srv/backups
+#   sudo chown 10001:10001 repository-password && sudo chmod 0600 repository-password
+#
+# Then turn sign-in on. `set-password` asks twice for an admin password of at
+# least 8 characters and keeps it in the data volume, which this file mounts:
+#
+#   docker compose run --rm ladderback set-password
+#
+# Then start the agent with `docker compose up --detach`.
+
+services:
+  ladderback:
+    image: ghcr.io/nledford/ladderback
+    # Ladderback names the machine, and its snapshots' host, by this name.
+    hostname: nas
+    # Hands on `docker stop`'s signal and reaps what hooks leave behind.
+    init: true
+    # The 65 seconds Ladderback may take to stop cleanly, and some to spare.
+    stop_grace_period: 75s
+    # In place of `install-service`; with `--service-managed`, Restart
+    # Ladderback in Settings restarts it.
+    restart: unless-stopped
+    # The time zone the schedules run in; without it, UTC.
+    environment:
+      TZ: Europe/Berlin
+    # On the host's loopback only, for a reverse proxy on the same machine that
+    # adds TLS. To publish it beyond the machine, write "9898:9898": then the
+    # password crosses the network unencrypted unless a proxy adds TLS, and
+    # Docker's own firewall rules pass by ufw and firewalld.
+    ports:
+      - "127.0.0.1:9898:9898"
+    # --allowed-host: the host name browsers reach Ladderback by.
+    command: serve --listen 0.0.0.0:9898 --allowed-host nas.example.com --service-managed
+    volumes:
+      - ladderback-config:/var/lib/ladderback/config
+      - ladderback-data:/var/lib/ladderback/data
+      - ladderback-cache:/var/cache/ladderback
+      # Each folder to back up, read-only, at the path it has on the host.
+      - /srv/photos:/srv/photos:ro
+      # A repository on a local path must be on a mount like this one: one
+      # written anywhere else lives in the container and goes with it. Docker
+      # makes a missing folder owned by root, which Ladderback can't write.
+      - /srv/backups:/srv/backups
+    # The repository's password, read from /run/secrets/repository-password
+    # (give the repository that file as its password's source). Compose
+    # mounts the file as it is, so on the host it must be one user 10001 may
+    # read (above).
+    secrets:
+      - repository-password
+
+# The names the guide's `docker run` uses, so either one finds the same data.
+volumes:
+  ladderback-config:
+    name: ladderback-config
+  ladderback-data:
+    name: ladderback-data
+  ladderback-cache:
+    name: ladderback-cache
+
+secrets:
+  repository-password:
+    file: ./repository-password

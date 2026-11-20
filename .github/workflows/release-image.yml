@@ -1,0 +1,130 @@
+# Builds the Docker image of one platform from a Linux release archive, never
+# from source, and smoke-tests it (Containerfile, `just image`, `just
+# smoke-image`; technical design §12, §16 decision 126). Native on each
+# platform's own runner, so no emulation: amd64 on `ubuntu-26.04`, arm64 on
+# `ubuntu-26.04-arm`.
+#
+# Called by release.yml once per platform with the tag it released and
+# `push: true`, once its `publish` job has attached the archives: once the
+# smoke test has passed the image goes to ghcr.io/nledford/ladderback by its
+# digest only, with no tag, and release.yml's `image` job then tags the two
+# digests together, in both registries. Called by image.yml on a pull request
+# with no tag, for the latest release, and nothing is pushed. Both take the
+# archive from the release, the file `publish` checked and attached, so the
+# pull request runs the release's own path, and a release's failed jobs can
+# be rerun after the run's artifacts have expired.
+#
+# No `permissions:` here: the job takes its caller's, which is how only
+# release.yml's call can push (packages: write) and a pull request's can't.
+# GITHUB_TOKEN reaches only the steps that name it. None of its jobs is a
+# required check, and their names must not match one (development.md §13.8).
+name: Release image
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: "`amd64` or `arm64`: the Linux platform to build"
+        type: string
+        required: true
+      tag:
+        description: The release whose archive to build, as `vX.Y.Z`; empty for the latest release
+        type: string
+        default: ""
+      push:
+        description: Push the smoke-tested image to GHCR by its digest; needs `tag`
+        type: boolean
+        default: false
+    outputs:
+      digest:
+        description: The digest of the image pushed, when `push`
+        value: ${{ jobs.image.outputs.digest }}
+
+jobs:
+  image:
+    name: Build and smoke-test the image
+    runs-on: ${{ inputs.platform == 'arm64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    env:
+      PLATFORM: ${{ inputs.platform }}
+      TAG: ${{ inputs.tag }}
+      PUSH: ${{ inputs.push }}
+      # The builder the step below makes, for every `docker buildx` here.
+      BUILDX_BUILDER: ladderback-image
+      # GHCR wants the name in lower case.
+      GHCR_IMAGE: ghcr.io/nledford/ladderback
+    steps:
+      # A release's image is built from its tag's Containerfile; a pull
+      # request's from its own, which is what it tests.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui-tests/.nvmrc
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just
+      # The archive and the version its binary must say, from the release,
+      # checked against the SHA256SUMS `publish` wrote there from the
+      # builds' own checksums. Right after a release is created, and for the
+      # hour until its archives are attached, the latest release has none, so
+      # a pull request's run fails here until they are.
+      - name: Get the release archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          case $PLATFORM in
+            amd64) target=x86_64-unknown-linux-gnu ;;
+            arm64) target=aarch64-unknown-linux-gnu ;;
+            *) echo "::error::platform $PLATFORM: amd64 or arm64"; exit 1 ;;
+          esac
+          if [ "$PUSH" = true ] && [ -z "$TAG" ]; then echo "::error::push needs the tag of this run's release"; exit 1; fi
+          release=${TAG:-$(gh release view --json tagName --jq .tagName)}
+          archive="ladderback-$target.tar.xz"
+          dir="$RUNNER_TEMP/archive"
+          mkdir "$dir"
+          cd "$dir"
+          gh release download "$release" --pattern "$archive" --pattern SHA256SUMS
+          awk -v file="$archive" '$2 == file' SHA256SUMS > "$archive.sha256"
+          [ "$(wc -l < "$archive.sha256")" -eq 1 ] || { echo "::error::SHA256SUMS of $release doesn't list $archive once"; exit 1; }
+          sha256sum --check "$archive.sha256"
+          echo "ARCHIVE=$dir/$archive" >> "$GITHUB_ENV"
+          echo "VERSION=${release#v}" >> "$GITHUB_ENV"
+      # A BuildKit container of its own, because the runner's built-in
+      # builder (the docker driver) can't push by digest alone. Its image is
+      # pinned by the digest of its multi-platform index; to move it, take the
+      # digest from `docker buildx imagetools inspect moby/buildkit:<version>`.
+      - name: Start the builder
+        run: docker buildx create --name "$BUILDX_BUILDER" --driver docker-container --driver-opt image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c --bootstrap
+      - name: Build the image
+        run: just image "$VERSION" "$ARCHIVE" --tag ladderback:smoke --load
+      - name: Smoke-test the image
+        run: just smoke-image ladderback:smoke --version "$VERSION"
+      # The same build again, from the builder's cache, pushed by digest only:
+      # nothing is tagged until release.yml has both platforms' images. Then a
+      # check that the image pushed holds the layers of the one tested, so a
+      # cache miss can't push an image the smoke test never ran.
+      - name: Push the image by its digest
+        id: push
+        if: inputs.push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          metadata="$RUNNER_TEMP/metadata.json"
+          just image "$VERSION" "$ARCHIVE" --output "type=image,name=$GHCR_IMAGE,push-by-digest=true,name-canonical=true,push=true" --metadata-file "$metadata"
+          digest=$(jq -r '."containerimage.digest"' "$metadata")
+          [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest in the build's metadata: $digest"; exit 1; }
+          pushed=$(docker buildx imagetools inspect "$GHCR_IMAGE@$digest" --format '{{json .Image.RootFS.DiffIDs}}' | jq -c .)
+          tested=$(docker image inspect ladderback:smoke --format '{{json .RootFS.Layers}}' | jq -c .)
+          [ "$pushed" = "$tested" ] || { echo "::error::the image pushed, $GHCR_IMAGE@$digest, has other layers than the one tested: $pushed, not $tested"; exit 1; }
+          echo "Pushed $GHCR_IMAGE@$digest (linux/$PLATFORM)" >> "$GITHUB_STEP_SUMMARY"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Sign out of GHCR
+        if: always() && inputs.push
+        run: docker logout ghcr.io

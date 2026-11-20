@@ -5,7 +5,11 @@
 # - Merging that PR to main makes the next push run tag `vX.Y.Z` and create
 #   the GitHub release, then build the Linux archives and packages of that
 #   commit (release-builds.yml) and attach them with a SHA256SUMS file (§16,
-#   decisions 54 and 123). Pushes without a release PR merge release nothing.
+#   decisions 54 and 123). Once they are attached, it builds the Docker
+#   image of each Linux archive, smoke-tests it (release-image.yml) and
+#   publishes the two as one image, `ghcr.io/nledford/ladderback` and
+#   `docker.io/nledford/ladderback`, tagged with the version and `latest`
+#   (§12, decision 126). Pushes without a release PR merge release nothing.
 name: Release
 
 on:
@@ -166,3 +170,130 @@ jobs:
       - name: Attach them to the release
         working-directory: assets
         run: gh release upload "$TAG" --clobber ./*
+
+  # The Docker image of each Linux archive `publish` checked and attached:
+  # built on that platform's runner from the release's archive, smoke-tested,
+  # and pushed to GHCR by its digest only (release-image.yml). After
+  # `publish`, so a failed image never holds back the archives. Two jobs, not
+  # a matrix, so each digest is an output of its own.
+  image-amd64:
+    name: Docker image (linux/amd64)
+    needs: [release, builds, publish]
+    permissions:
+      contents: read # to check out the tag and download its archive
+      packages: write # to push the image to GHCR by its digest
+    uses: $/.github/workflows/release-image.yml
+    with:
+      platform: amd64
+      tag: ${{ needs.release.outputs.tag }}
+      push: true
+
+  image-arm64:
+    name: Docker image (linux/arm64)
+    needs: [release, builds, publish]
+    permissions:
+      contents: read # to check out the tag and download its archive
+      packages: write # to push the image to GHCR by its digest
+    uses: $/.github/workflows/release-image.yml
+    with:
+      platform: arm64
+      tag: ${{ needs.release.outputs.tag }}
+      push: true
+
+  # Only once both platforms' images passed their smoke test: one
+  # multi-platform image of the two digests, tagged with the version, in each
+  # registry, and `latest` too when this release is GitHub's latest one (not a
+  # pre-release, nor an older release's run run again). `imagetools create`
+  # copies the images from GHCR to Docker Hub, so both registries hold the
+  # same digests, and gives the index the image's OCI labels as annotations,
+  # which is where both registries read a multi-platform image's description
+  # from. A job of its own, so the Docker Hub token reaches only it, which
+  # runs none of the repository's code. Run again, it tags the same digests
+  # again.
+  image:
+    name: Publish the Docker image
+    needs: [release, image-amd64, image-arm64]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    # DOCKERHUB_TOKEN is a secret of the `release` environment, as
+    # RELEASE_PLZ_TOKEN is (above): only a job from main can read it.
+    environment: release
+    permissions:
+      contents: read # to ask which release is the latest; no checkout
+      packages: write # to tag the image in GHCR
+    env:
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.release.outputs.tag }}
+      AMD64: ${{ needs.image-amd64.outputs.digest }}
+      ARM64: ${{ needs.image-arm64.outputs.digest }}
+      GHCR_IMAGE: ghcr.io/nledford/ladderback
+      DOCKERHUB_IMAGE: docker.io/nledford/ladderback
+    steps:
+      - name: Sign in to both registries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+      - name: Tag the image in both registries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for digest in "$AMD64" "$ARM64"; do
+            [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no image digest: '$digest'"; exit 1; }
+          done
+          version=${TAG#v}
+          tags=("$version")
+          latest=$(gh release view --json tagName --jq .tagName)
+          if [ "$latest" = "$TAG" ]; then
+            tags+=(latest)
+          else
+            echo "::notice::$TAG isn't the latest release ($latest), so \`latest\` stays where it is"
+          fi
+          # The image's own labels (Containerfile), so they aren't written twice.
+          labels=$(docker buildx imagetools inspect "$GHCR_IMAGE@$AMD64" --format '{{json .Image.Config.Labels}}')
+          annotations=()
+          for key in title description source documentation licenses version; do
+            value=$(jq -r --arg key "org.opencontainers.image.$key" '.[$key] // empty' <<<"$labels")
+            if [ -n "$value" ]; then annotations+=(--annotation "index:org.opencontainers.image.$key=$value"); fi
+          done
+          for image in "$GHCR_IMAGE" "$DOCKERHUB_IMAGE"; do
+            args=()
+            for tag in "${tags[@]}"; do args+=(--tag "$image:$tag"); done
+            docker buildx imagetools create "${args[@]}" "${annotations[@]}" "$GHCR_IMAGE@$AMD64" "$GHCR_IMAGE@$ARM64"
+          done
+          # Every tag in both registries names one index, and it holds the
+          # manifests of the two images pushed (each platform's image and its
+          # attestation), nothing else.
+          manifests() { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -c '[.manifests[].digest] | sort'; }
+          expected=$(jq -cn --argjson a "$(manifests "$GHCR_IMAGE@$AMD64")" --argjson b "$(manifests "$GHCR_IMAGE@$ARM64")" '$a + $b | sort')
+          index=""
+          for image in "$GHCR_IMAGE" "$DOCKERHUB_IMAGE"; do
+            for tag in "${tags[@]}"; do
+              digest=$(docker buildx imagetools inspect "$image:$tag" --format '{{json .Manifest}}' | jq -r .digest)
+              [ -z "$index" ] || [ "$digest" = "$index" ] || { echo "::error::$image:$tag is $digest, not $index"; exit 1; }
+              index=$digest
+              [ "$(manifests "$image@$digest")" = "$expected" ] || { echo "::error::$image:$tag doesn't hold the two images pushed, $AMD64 and $ARM64"; exit 1; }
+              echo "$image:$tag is $digest" >> "$GITHUB_STEP_SUMMARY"
+            done
+          done
+          echo "INDEX=$index" >> "$GITHUB_ENV"
+          echo "TAGS=${tags[*]}" >> "$GITHUB_ENV"
+      - name: Sign out of both registries
+        if: always()
+        run: |
+          docker logout ghcr.io
+          docker logout docker.io
+      # What everyone else sees, signed out: a GHCR package starts private,
+      # so until the maintainer makes it public once, after the first
+      # release's push, this fails, and rerunning this job checks again.
+      - name: Check that anyone can pull it
+        run: |
+          for image in "$GHCR_IMAGE" "$DOCKERHUB_IMAGE"; do
+            for tag in $TAGS; do
+              digest=$(docker buildx imagetools inspect "$image:$tag" --format '{{json .Manifest}}' | jq -r .digest)
+              [ "$digest" = "$INDEX" ] || { echo "::error::signed out, $image:$tag is '$digest', not $INDEX: is the package public?"; exit 1; }
+            done
+          done
