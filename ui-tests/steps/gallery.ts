@@ -260,7 +260,9 @@ const SNAPSHOTS: Record<string, string> = {
 - progressbar "Demo backup progress": Backing up… 40%
 - paragraph:
   - button "Advance the demo progress"
-- progressbar "Demo progress of unknown size": Working…
+- progressbar "Demo progress of unknown size":
+  - text: Working…
+  - time: Last report at ⁨11/9/26, 10:01:00 AM⁩
 - progressbar "Demo progress of a step": Reading the index…
 - progressbar "Demo progress at the Small size": Backing up… 60%
 - progressbar "Demo progress at the Medium size": Backing up… 60%

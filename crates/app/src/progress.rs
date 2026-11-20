@@ -6,6 +6,7 @@
 //! once it is the newest open bar and moves.
 
 use api::UiEvent;
+use domain::Timestamp;
 
 use crate::ports::{OperationStep, ProgressEvent, ProgressKind};
 
@@ -26,9 +27,10 @@ pub struct ProgressShown {
 }
 
 impl ProgressShown {
-    /// The live update that tells a page of `operation`'s progress.
+    /// The live update that tells a page of `operation`'s progress, which
+    /// the daemon heard `at`.
     #[must_use]
-    pub fn ui(self, operation: String) -> UiEvent {
+    pub fn ui(self, operation: String, at: Timestamp) -> UiEvent {
         UiEvent::OperationProgress {
             operation,
             step: self.step.map(wire_step),
@@ -38,6 +40,7 @@ impl ProgressShown {
             },
             current: self.current,
             total: self.total,
+            at: Some(at.to_string()),
         }
     }
 }
@@ -325,27 +328,41 @@ mod tests {
         assert_eq!(live.apply(&ProgressEvent::Advance { key: 0, by: 1 }), None);
     }
 
+    fn heard() -> Timestamp {
+        Timestamp::from_second(1_800_000_000).expect("the demo time is valid")
+    }
+
     #[test]
     fn what_is_shown_goes_to_the_page_with_its_step_on_the_wire() {
         let operation = "018f0000-0000-7000-8000-000000000001";
         assert_eq!(
-            shown(Some(OperationStep::ReadingIndex), 3, Some(10)).ui(operation.to_owned()),
+            shown(Some(OperationStep::ReadingIndex), 3, Some(10)).ui(operation.to_owned(), heard()),
             UiEvent::OperationProgress {
                 operation: operation.to_owned(),
                 step: Some(api::OperationStep::ReadingIndex),
                 unit: api::ProgressUnit::Count,
                 current: 3,
                 total: Some(10),
+                at: Some("2027-01-15T08:00:00Z".to_owned()),
             }
         );
+    }
+
+    /// Every report goes to the page with the instant the daemon heard it,
+    /// in RFC 3339, so a page can say when a run without a total last
+    /// reported (§4.5).
+    #[test]
+    fn a_report_goes_to_the_page_with_the_instant_it_was_heard() {
+        let operation = "018f0000-0000-7000-8000-000000000001";
         assert_eq!(
-            shown(None, 0, None).ui(operation.to_owned()),
+            shown(None, 0, None).ui(operation.to_owned(), heard()),
             UiEvent::OperationProgress {
                 operation: operation.to_owned(),
                 step: None,
                 unit: api::ProgressUnit::Count,
                 current: 0,
                 total: None,
+                at: Some("2027-01-15T08:00:00Z".to_owned()),
             }
         );
     }
@@ -368,7 +385,8 @@ mod tests {
                     step: Some(OperationStep::BackingUp),
                 })
                 .unwrap();
-            let UiEvent::OperationProgress { unit: on_wire, .. } = shown.ui(String::new()) else {
+            let UiEvent::OperationProgress { unit: on_wire, .. } = shown.ui(String::new(), heard())
+            else {
                 panic!("not a progress event");
             };
             assert_eq!(on_wire, unit, "{kind:?}");
@@ -398,7 +416,7 @@ mod tests {
             (S::SavingSnapshots, W::SavingSnapshots),
         ] {
             let UiEvent::OperationProgress { step: on_wire, .. } =
-                shown(Some(step), 0, None).ui(String::new())
+                shown(Some(step), 0, None).ui(String::new(), heard())
             else {
                 panic!("not a progress event");
             };

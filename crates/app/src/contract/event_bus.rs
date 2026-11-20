@@ -49,6 +49,7 @@ fn progress(operation: &str, current: u64) -> UiEvent {
         unit: api::ProgressUnit::Count,
         current,
         total: Some(current + 1),
+        at: None,
     }
 }
 

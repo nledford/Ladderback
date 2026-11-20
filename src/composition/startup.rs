@@ -593,6 +593,7 @@ async fn state_over(
             Arc::new(EventEngine {
                 inner: Arc::new(workers),
                 bus: Arc::clone(&bus),
+                clock: Arc::new(SystemClock),
             }),
             Arc::clone(&config),
             Arc::clone(&writes),

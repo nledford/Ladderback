@@ -100,6 +100,47 @@ Feature: A running operation's progress bar can be reached by keyboard and never
     Then the progress bar "Backup progress of demo-home" shows 5 percent
     And the progress bar "Backup progress of demo-home" reads "Backing up… 5%, 1 GiB of 20 GiB"
 
+  # A bar with no total says when its run last reported, beside the step or
+  # "Working…", as soon as the report comes; its value text says it too,
+  # held like every other value: at most every 30 seconds while the step
+  # stays the same.
+  Scenario: A bar with no total says when its run last reported, and tells a screen reader at most every 30 seconds
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:01:00Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:00Z"
+    When the page's clock moves on 10 seconds
+    And the daemon reports 16 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:10Z"
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:01:10Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:00Z"
+    When the page's clock moves on 20 seconds
+    Then the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:10Z"
+    And the live regions stay silent
+
+  # A step that counts nothing, such as rustic's listing of packs, reports
+  # only as it begins and ends, so its last report would make a busy run
+  # look stopped. Until it counts, the bar says since when the run has been
+  # in that step, which another report of the same step doesn't change.
+  Scenario: A bar whose step has counted nothing says since when the step began, and its last report once it counts
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its step running since "2026-11-09T10:01:00Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and since "2026-11-09T10:01:00Z"
+    When the page's clock moves on 120 seconds
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:03:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its step running since "2026-11-09T10:01:00Z"
+    When the page's clock moves on 60 seconds
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:04:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:04:00Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:04:00Z"
+    And the live regions stay silent
+
   Scenario Outline: A running backup's progress bar reads in a pseudolocale and fits a small screen with larger text
     Given the daemon reports a running backup of "demo-home"
     And a viewport of 320 by 256 pixels
@@ -111,6 +152,39 @@ Feature: A running operation's progress bar can be reached by keyboard and never
     And I press Tab until focus is on the page's one progress bar
     Then the page's one progress bar shows 10 percent
     And the value text of the page's one progress bar is transformed
+    And the page doesn't scroll sideways
+    And nothing in the page's one table runs outside its cell
+    And no text is clipped
+    And the page has no accessibility violations
+
+    Examples:
+      | locale |
+      | en-XA  |
+      | ar-XB  |
+
+  # A bar with no total says since when its step began, then when its run
+  # last reported, on a line of its own below the step: in a pseudolocale's
+  # longer words, in the Status column of a small screen with larger text,
+  # that line wraps inside the cell rather than run out of it. A step that
+  # reports again without counting keeps the instant it began; the one that
+  # counts shows its own.
+  Scenario Outline: A running backup's progress bar with no total says since when and its last report in a pseudolocale, wrapped on a small screen with larger text
+    Given the daemon reports a running backup of "demo-home"
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the address "/operations?locale=<locale>"
+    And the page's one table has 1 row
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:00Z"
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:03:00Z"
+    Then the page's one progress bar shows no percentage
+    And the page's one progress bar shows the instant "2026-11-09T10:01:00Z", in words the pseudolocale transformed
+    And the time of the page's one progress bar wraps onto more than one line
+    And the page doesn't scroll sideways
+    And nothing in the page's one table runs outside its cell
+    And no text is clipped
+    When the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:04:00Z"
+    Then the page's one progress bar shows the instant "2026-11-09T10:04:00Z", in words the pseudolocale transformed
+    And the time of the page's one progress bar wraps onto more than one line
     And the page doesn't scroll sideways
     And nothing in the page's one table runs outside its cell
     And no text is clipped

@@ -18,8 +18,10 @@ use api::{
 };
 
 /// The live progress of a running operation: the step it is in, when the
-/// daemon names one, and how far that step has come. Transient: never part
-/// of the stored history, and gone the moment the operation ends.
+/// daemon names one, how far that step has come, when the daemon heard the
+/// report, which a daemon older than the field doesn't say, and when it
+/// heard the first report of this measure. Transient: never part of the
+/// stored history, and gone the moment the operation ends.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Progress {
     pub(crate) step: Option<OperationStep>,
@@ -27,6 +29,21 @@ pub(crate) struct Progress {
     pub(crate) unit: ProgressUnit,
     pub(crate) current: u64,
     pub(crate) total: Option<u64>,
+    pub(crate) reported_at: Option<jiff::Timestamp>,
+    /// When the daemon heard the first report of this measure the page
+    /// saw: a new step, a new total or a count that went back starts a new
+    /// one. A step that counts nothing reports only as it begins and ends
+    /// (a rustic spinner), so this, not `reported_at`, is what is true of it.
+    pub(crate) since: Option<jiff::Timestamp>,
+}
+
+impl Progress {
+    /// Whether `next` goes on with the measure `self` is of: the same step
+    /// and total, and a count that hasn't gone back, as a bar's pace reads
+    /// it (`components::progress::rules::Pace`).
+    fn goes_on_to(&self, next: &Self) -> bool {
+        self.step == next.step && self.total == next.total && self.current <= next.current
+    }
 }
 
 /// One row of the operations table: what the daemon's history says about an
@@ -89,13 +106,26 @@ impl OperationsState {
                 unit,
                 current,
                 total,
+                at,
             } => {
                 if let Some(row) = self.live_row_mut(operation) {
-                    row.progress = Some(Progress {
+                    // An instant that isn't RFC 3339 says nothing, never a
+                    // guess.
+                    let heard = at.as_deref().and_then(|at| at.parse().ok());
+                    let next = Progress {
                         step: *step,
                         unit: *unit,
                         current: *current,
                         total: *total,
+                        reported_at: heard,
+                        since: heard,
+                    };
+                    row.progress = Some(match row.progress {
+                        Some(last) if last.goes_on_to(&next) => Progress {
+                            since: last.since.or(heard),
+                            ..next
+                        },
+                        _ => next,
                     });
                 }
             }
@@ -486,6 +516,7 @@ mod tests {
                 unit: ProgressUnit::Count,
                 current,
                 total: Some(5),
+                at: None,
             });
         }
         assert_eq!(live.changes_since(&shown), 1);
@@ -607,6 +638,7 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
+            at: None,
         });
         state.apply(&UiEvent::OperationWarning {
             operation: id(FIRST),
@@ -626,6 +658,7 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
+            at: None,
         });
         assert_eq!(
             state.rows[0].progress,
@@ -633,7 +666,9 @@ mod tests {
                 step: None,
                 unit: ProgressUnit::Count,
                 current: 3,
-                total: Some(10)
+                total: Some(10),
+                reported_at: None,
+                since: None,
             })
         );
         assert_eq!(state.rows[0].summary.status, "running");
@@ -651,6 +686,7 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
+            at: None,
         });
         assert_eq!(
             state.rows[0].progress,
@@ -658,7 +694,9 @@ mod tests {
                 step: Some(api::OperationStep::ReadingIndex),
                 unit: ProgressUnit::Count,
                 current: 3,
-                total: Some(10)
+                total: Some(10),
+                reported_at: None,
+                since: None,
             })
         );
         state.apply(&UiEvent::OperationProgress {
@@ -667,6 +705,7 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 1,
             total: None,
+            at: None,
         });
         assert_eq!(
             state.rows[0].progress,
@@ -674,7 +713,9 @@ mod tests {
                 step: None,
                 unit: ProgressUnit::Count,
                 current: 1,
-                total: None
+                total: None,
+                reported_at: None,
+                since: None,
             })
         );
     }
@@ -692,10 +733,89 @@ mod tests {
                 unit,
                 current: 3,
                 total: Some(10),
+                at: None,
             });
             assert_eq!(
                 state.rows[0].progress.map(|progress| progress.unit),
                 Some(unit)
+            );
+        }
+    }
+
+    /// Each report says when the daemon heard it, so the row can say when
+    /// a run without a total last reported (§4.5); a daemon older than the
+    /// field, or an instant that isn't RFC 3339, says nothing of it, never
+    /// a guess.
+    #[test]
+    fn a_progress_event_brings_the_row_the_instant_the_daemon_heard_it() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        let report = |at: Option<&str>| UiEvent::OperationProgress {
+            operation: id(FIRST),
+            step: None,
+            unit: ProgressUnit::Bytes,
+            current: 8,
+            total: None,
+            at: at.map(str::to_owned),
+        };
+        state.apply(&report(Some("2026-11-09T10:01:00Z")));
+        assert_eq!(
+            state.rows[0]
+                .progress
+                .and_then(|progress| progress.reported_at),
+            Some("2026-11-09T10:01:00Z".parse::<jiff::Timestamp>().unwrap())
+        );
+        for unread in [None, Some("a minute ago")] {
+            state.apply(&report(unread));
+            assert_eq!(
+                state.rows[0]
+                    .progress
+                    .and_then(|progress| progress.reported_at),
+                None,
+                "{unread:?}"
+            );
+        }
+    }
+
+    /// A step that has counted nothing keeps the instant the daemon heard
+    /// it begin, however often it reports again: a rustic spinner reports
+    /// only as it begins and ends, so its last report says nothing of
+    /// whether it is still busy. A new step, a new total or a count that
+    /// goes back is a new measure, which begins at its own report.
+    #[test]
+    fn a_step_keeps_the_instant_the_daemon_heard_it_begin() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        let report = |step, current, total, at: &str| UiEvent::OperationProgress {
+            operation: id(FIRST),
+            step,
+            unit: ProgressUnit::Count,
+            current,
+            total,
+            at: Some(at.to_owned()),
+        };
+        let since = |state: &OperationsState| {
+            state.rows[0]
+                .progress
+                .and_then(|progress| progress.since)
+                .map(|at| at.to_string())
+        };
+        let listing = Some(api::OperationStep::ListingPacks);
+        let repacking = Some(api::OperationStep::Repacking);
+        state.apply(&report(listing, 0, None, "2026-11-09T10:01:00Z"));
+        state.apply(&report(listing, 0, None, "2026-11-09T10:03:00Z"));
+        state.apply(&report(listing, 4, None, "2026-11-09T10:04:00Z"));
+        assert_eq!(since(&state).as_deref(), Some("2026-11-09T10:01:00Z"));
+        for (step, current, total, at) in [
+            (repacking, 4, None, "2026-11-09T10:05:00Z"),
+            (repacking, 4, Some(10), "2026-11-09T10:06:00Z"),
+            (repacking, 1, Some(10), "2026-11-09T10:07:00Z"),
+        ] {
+            state.apply(&report(step, current, total, at));
+            assert_eq!(
+                since(&state).as_deref(),
+                Some(at),
+                "{step:?} {current} of {total:?}"
             );
         }
     }
@@ -709,6 +829,8 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 9,
             total: Some(10),
+            reported_at: None,
+            since: None,
         });
         state.apply(&UiEvent::OperationSucceeded {
             operation: id(FIRST),
@@ -740,6 +862,7 @@ mod tests {
                 unit: ProgressUnit::Count,
                 current: 1,
                 total: None,
+                at: None,
             },
         ] {
             state.apply(&event);
@@ -826,6 +949,7 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
+            at: None,
         });
         // The store's write of the start can lag the event: the re-read still
         // says queued.
@@ -842,7 +966,9 @@ mod tests {
                 step: None,
                 unit: ProgressUnit::Count,
                 current: 3,
-                total: Some(10)
+                total: Some(10),
+                reported_at: None,
+                since: None,
             }),
             "the live part of the row survives the merge"
         );
@@ -948,6 +1074,7 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 4,
             total: Some(9),
+            at: None,
         });
         let mut failed = summary(FIRST, "failed", true, true);
         failed.failure_code = Some(ErrorCode::RepositoryUnknown);
@@ -972,7 +1099,9 @@ mod tests {
                 step: None,
                 unit: ProgressUnit::Count,
                 current: 4,
-                total: Some(9)
+                total: Some(9),
+                reported_at: None,
+                since: None,
             })
         );
     }
@@ -1034,6 +1163,7 @@ mod tests {
             unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
+            at: None,
         });
         state.merge(page(
             vec![warned(
@@ -1056,7 +1186,9 @@ mod tests {
                 step: None,
                 unit: ProgressUnit::Count,
                 current: 3,
-                total: Some(10)
+                total: Some(10),
+                reported_at: None,
+                since: None,
             }),
             "the live part of the row survives the merge"
         );
@@ -1269,6 +1401,7 @@ mod tests {
                 unit: ProgressUnit::Count,
                 current: 1,
                 total: Some(3),
+                at: None,
             },
             UiEvent::OperationWarning {
                 operation,

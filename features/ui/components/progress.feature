@@ -2,8 +2,8 @@
 Feature: The progress bar
   A progress bar a keyboard user can reach, whose changes are never announced
   and are told at most every 30 seconds, which shows no percentage while its
-  size isn't known, and whose fill takes its tone and whose track its thickness
-  from the shared vocabulary.
+  size isn't known but says when its run last reported, and whose fill takes
+  its tone and whose track its thickness from the shared vocabulary.
 
   Scenario: The progress bar is reached by keyboard and its value changes without any announcement
     Given the page's clock can be moved on
@@ -28,10 +28,11 @@ Feature: The progress bar
     And the progress bar "Demo backup progress" reads "Backing up… 80%, 8 GiB of 10 GiB"
     And the live regions stay silent
 
-  Scenario: A progress bar whose size isn't known yet shows no percentage
+  Scenario: A progress bar whose size isn't known yet shows no percentage, and says when its run last reported
     When I open the component gallery
     Then the progress bar "Demo progress of unknown size" shows no percentage
-    And the progress bar "Demo progress of unknown size" reads "Working…"
+    And the progress bar "Demo progress of unknown size" shows its last report at "2026-11-09T10:01:00Z"
+    And the progress bar "Demo progress of unknown size" reads "Working…" and its last report at "2026-11-09T10:01:00Z"
     And the progress bar "Demo progress of a step" reads "Reading the index…"
     And the "Progress" demo has no accessibility violations
 

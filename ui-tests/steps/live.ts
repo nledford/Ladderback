@@ -445,6 +445,15 @@ When(
   },
 );
 
+// As above, from a daemon that says when it heard the report: `at`, an RFC
+// 3339 instant.
+When(
+  "the daemon reports {int} bytes processed of the backup of {string} and not yet its total, at {string}",
+  async function (this: BrowserWorld, bytes: number, plan: string, at: string) {
+    await scripted(this).progressesWithoutTotal(plan, bytes, at);
+  },
+);
+
 When(
   "the daemon reports that the backup of {string} has succeeded with {int} files",
   async function (this: BrowserWorld, plan: string, files: number) {

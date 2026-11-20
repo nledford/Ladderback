@@ -16,6 +16,13 @@ Feature: Live updates
     And the connected page learns the operation's progress
     And the connected page learns the operation finished
 
+  # A page shows when a run without a total last reported (§4.5), in the
+  # daemon's time, the clock its start time is in too, not the browser's.
+  Scenario: A run's progress says when the daemon heard it
+    Given a live-updates connection from the UI's own origin
+    When the daemon runs a backup of the plan "home"
+    Then the connected page learns the operation's progress, with the instant the daemon heard it
+
   Scenario: Two connected pages each learn the same events
     Given a live-updates connection from the UI's own origin
     And a second live-updates connection from the UI's own origin

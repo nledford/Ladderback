@@ -165,6 +165,86 @@ Then("no spinner of the {string} demo moves", async function (this: BrowserWorld
   await expect(section.locator(".spinner svg").first()).toBeVisible();
 });
 
+// What each spinner of a demo draws, read where the browser lays it out: its
+// still dots (`.spinner-still circle`) that are drawn, with their centers and
+// fill, whether its arc and its track are drawn, its drawing's color and the
+// color of the text around the spinner.
+const stillForms = (section: Locator) =>
+  section.evaluate((element) =>
+    Array.from(element.querySelectorAll(".spinner"), (spinner) => {
+      const graphic = spinner.querySelector("svg") as SVGSVGElement;
+      const drawn = (part: Element | null) => {
+        if (part === null) return false;
+        const box = part.getBoundingClientRect();
+        return getComputedStyle(part).display !== "none" && box.width > 0 && box.height > 0;
+      };
+      const dots = Array.from(spinner.querySelectorAll(".spinner-still circle"))
+        .filter(drawn)
+        .map((dot) => {
+          const box = dot.getBoundingClientRect();
+          return { x: box.x + box.width / 2, y: box.y + box.height / 2, fill: getComputedStyle(dot).fill };
+        });
+      return {
+        name: spinner.textContent?.trim() || graphic.getAttribute("aria-label") || "",
+        dots,
+        arc: drawn(spinner.querySelector(".spinner-arc")),
+        track: drawn(spinner.querySelector(".spinner-track")),
+        color: getComputedStyle(graphic).color,
+        text: spinner.parentElement ? getComputedStyle(spinner.parentElement).color : "",
+      };
+    }),
+  );
+
+Then("no spinner of the {string} demo draws its still dots", async function (this: BrowserWorld, component: string) {
+  const section = demoSection(this.page, component);
+  await section.waitFor({ timeout: patienceMs() });
+  const spinners = await stillForms(section);
+  assert.ok(spinners.length > 0, `the ${component} demo has no spinner`);
+  for (const spinner of spinners) {
+    assert.deepEqual(
+      { dots: spinner.dots.length, arc: spinner.arc, track: spinner.track },
+      { dots: 0, arc: true, track: true },
+      spinner.name,
+    );
+  }
+});
+
+// Under reduced motion a spinner is three dots in a row across its drawing's
+// middle, evenly spaced, and nothing of a circle, which still would read as a
+// gauge (technical design §4.5). The dots are filled in the drawing's color,
+// its tone, or under forced colors the text's own.
+Then(
+  /^every spinner of the "([^"]+)" demo stands still as a row of three dots in (its drawing's color|the color of the text around it), with no arc or track$/,
+  async function (this: BrowserWorld, component: string, color: string) {
+    const section = demoSection(this.page, component);
+    await section.waitFor({ timeout: patienceMs() });
+    await expect
+      .poll(async () => (await stillForms(section)).filter((spinner) => spinner.dots.length !== 3).map((spinner) => spinner.name))
+      .toEqual([]);
+    const spinners = await stillForms(section);
+    assert.ok(spinners.length > 0, `the ${component} demo has no spinner`);
+    for (const { name, dots, arc, track, color: drawing, text } of spinners) {
+      assert.deepEqual({ arc, track }, { arc: false, track: false }, `the arc and track of "${name}"`);
+      const [first, middle, last] = dots;
+      assert.ok(first && middle && last, name);
+      assert.ok(
+        dots.every((dot) => Math.abs(dot.y - first.y) < 0.5),
+        `the dots of "${name}" stand in a row: ${JSON.stringify(dots)}`,
+      );
+      assert.ok(
+        Math.abs(middle.x - first.x - (last.x - middle.x)) < 0.5 && last.x !== first.x,
+        `the dots of "${name}" are evenly spaced: ${JSON.stringify(dots)}`,
+      );
+      const expected = color === "its drawing's color" ? drawing : text;
+      assert.deepEqual(
+        dots.map((dot) => dot.fill),
+        [expected, expected, expected],
+        `the dots of "${name}" in ${color}`,
+      );
+    }
+  },
+);
+
 // A spinner's size is set in `em` (technical design §4.5), so it grows with
 // the reader's text (1.4.4): compared with the body's text, the size every
 // page's text starts from. Its laid-out height, as the stylesheet sets it.

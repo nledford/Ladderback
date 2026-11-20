@@ -29,7 +29,10 @@ pub enum UiEvent {
     /// numbers are that step's. `step` is `null` when the engine names no
     /// step this build knows, and is left out by a daemon older than the
     /// field; `unit` is left out by a daemon older than its field, and then
-    /// reads as a count. Progress is transient: it is never stored, and a
+    /// reads as a count. `at` is when the daemon heard the report, in its
+    /// own clock, the one `started_at` is in, so a page can say when a run
+    /// without a total last reported (§4.5); a daemon older than the field
+    /// leaves it out. Progress is transient: it is never stored, and a
     /// subscriber whose buffer fills loses the oldest of these first.
     OperationProgress {
         operation: String,
@@ -39,6 +42,8 @@ pub enum UiEvent {
         unit: ProgressUnit,
         current: u64,
         total: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<String>,
     },
     /// A problem with one item that doesn't fail the operation. `args`, the
     /// item and the engine's own words, are empty for a program without the

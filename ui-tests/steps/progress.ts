@@ -26,6 +26,63 @@ const ROUNDING_PX = 0.5;
 
 const bar = (page: Page, name: string): Locator => page.getByRole("progressbar", { name: namePattern(name) });
 
+// What each bar showed of when its run was heard of, by the instant: the
+// words a sighted reader saw, which its value text, held at most 30 s, says
+// later.
+const shownInstants = new WeakMap<BrowserWorld, Map<string, string>>();
+
+const withoutMarks = (text: string) => text.replace(/[\u2066-\u2069]/g, "").trim();
+
+// A bar with no total shows when its run was heard of (§4.5): one `<time>`
+// inside it that gives the instant to a program and words to a reader,
+// which change only when the run reports again. `kind` is how the words
+// begin: its last report once its step counts, or since when its step began
+// while it has counted nothing.
+async function showsInstant(world: BrowserWorld, name: string, at: string, kind: RegExp): Promise<void> {
+  const time = bar(world.page, name).locator("time");
+  await expect(time).toHaveCount(1);
+  await expect(time).toHaveAttribute("datetime", at);
+  await expect(time).toBeVisible();
+  const words = withoutMarks(await time.innerText());
+  assert.match(words, kind, `the progress bar ${name} shows "${words}"`);
+  assert.match(words, /\d/, `the progress bar ${name} shows no time`);
+  const seen = shownInstants.get(world) ?? new Map<string, string>();
+  seen.set(at, words);
+  shownInstants.set(world, seen);
+}
+
+Then("the progress bar {string} shows its last report at {string}", async function (this: BrowserWorld, name: string, at: string) {
+  await showsInstant(this, name, at, /^Last report at /);
+});
+
+Then("the progress bar {string} shows its step running since {string}", async function (this: BrowserWorld, name: string, at: string) {
+  await showsInstant(this, name, at, /^Since /);
+});
+
+// The value text of a bar with no total: its step, or "Working…", then the
+// words the bar showed for the instant `at`, so a screen reader hears the
+// same instant a sighted reader saw.
+async function readsInstant(world: BrowserWorld, name: string, step: string, at: string): Promise<void> {
+  const words = shownInstants.get(world)?.get(at);
+  assert.ok(words, `no step saw the progress bar ${name} show the instant ${at}`);
+  const heard = async () => withoutMarks((await bar(world.page, name).getAttribute("aria-valuetext")) ?? "");
+  await expect.poll(heard).toBe(`${step} ${words}`);
+}
+
+Then(
+  "the progress bar {string} reads {string} and its last report at {string}",
+  async function (this: BrowserWorld, name: string, step: string, at: string) {
+    await readsInstant(this, name, step, at);
+  },
+);
+
+Then(
+  "the progress bar {string} reads {string} and since {string}",
+  async function (this: BrowserWorld, name: string, step: string, at: string) {
+    await readsInstant(this, name, step, at);
+  },
+);
+
 // A bar is a stop for Tab at every size and tone (A1), and its focus ring,
 // an outline around the bar, surrounds everything it draws, so a sighted
 // keyboard user sees which bar a screen reader is reading.

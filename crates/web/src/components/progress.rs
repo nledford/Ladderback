@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::announcer::Clock;
-use l10n::Localizer;
+use api::MsgArg;
+use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
 use super::hand_focus_when_gone;
@@ -10,8 +11,8 @@ use crate::routes::text_with;
 use crate::text;
 use crate::variants::{Size, Tone};
 use rules::{
-    Clear, FILL, Next, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class, default_size, fill_shift,
-    percent, progress_text, value_text, wait_for,
+    Clear, FILL, Heard, Next, REPORTED, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class,
+    datetime, default_size, fill_shift, heard_of, percent, progress_text, value_text, wait_for,
 };
 
 // What a progress bar tells a screen reader, and when, decided on the host;
@@ -35,8 +36,14 @@ mod rules;
 /// hears the value text alone. A reading without a total is indeterminate
 /// (WAI-ARIA `progressbar`): no `aria-valuenow` and no track, and the step,
 /// or that the operation is working, where the percentage stands; never 0%,
-/// which would say that nothing has been done (#422). The one timer that
-/// tells a held value is cleared when the bar goes.
+/// which would say that nothing has been done (#422). Below those words it
+/// says when the daemon heard the run (`rules::heard_of`): since when its
+/// step began while the step has counted nothing, else its last report,
+/// read in `zone` (UTC without one): an exact instant, which changes only
+/// when a report arrives and is told like the rest of the value, so a
+/// stalled run is told from a busy one without anything that ticks (WCAG
+/// 2.2.2). The one timer that tells a held value is cleared when the bar
+/// goes.
 ///
 /// A bar that goes while it holds focus, as one does when its run ends,
 /// hands focus to the element with the ID `then_focus` (a row's header), so
@@ -55,6 +62,7 @@ pub fn Progress(
     #[prop(optional, into)] then_focus: Option<String>,
     #[prop(optional)] tone: Tone,
     #[prop(optional)] size: Option<Size>,
+    #[prop(default = None)] zone: Option<api::IanaZone>,
 ) -> impl IntoView {
     let teller = StoredValue::new(Teller::default());
     let wake = StoredValue::new(Wake::<TimeoutHandle>::default());
@@ -88,8 +96,13 @@ pub fn Progress(
         Memo::new(move |_| reading.with(|progress| percent(progress.current, progress.total)));
     let known = Memo::new(move |_| percent.get().is_some());
     let said = Memo::new(move |_| reading.with(progress_text));
+    // Apart from the step's words, so a report that only moves the time
+    // rebuilds the time alone.
+    let heard = Memo::new(move |_| reading.with(heard_of));
     let value_localizer = Arc::clone(&localizer);
     let step_localizer = Arc::clone(&localizer);
+    let reported_localizer = Arc::clone(&localizer);
+    let value_zone = zone.clone();
     view! {
         <div
             node_ref=bar
@@ -104,7 +117,13 @@ pub fn Progress(
             }
             aria-valuetext=move || {
                 told.get()
-                    .map(|told| value_text(&told, |id, args| text_with(&value_localizer, id, args)))
+                    .map(|told| {
+                        value_text(
+                            &told,
+                            value_zone.as_ref(),
+                            |id, args| text_with(&value_localizer, id, args),
+                        )
+                    })
             }
         >
             {move || {
@@ -138,6 +157,34 @@ pub fn Progress(
                     None => text(&localizer, said.get().unknown),
                 }}
             </span>
+            {move || {
+                heard
+                    .get()
+                    .map(|heard| {
+                        let (id, at) = match heard {
+                            Heard::Since(at) => (msg::UI_PROGRESS_SINCE, at),
+                            Heard::Last(at) => (msg::UI_PROGRESS_REPORTED, at),
+                        };
+                        let shown = text_with(
+                            &reported_localizer,
+                            id,
+                            &[
+                                (
+                                    "when",
+                                    MsgArg::Timestamp {
+                                        utc_ms: at.as_millisecond(),
+                                        zone: zone.clone(),
+                                    },
+                                ),
+                            ],
+                        );
+                        view! {
+                            <span class=REPORTED>
+                                <time datetime=datetime(at)>{shown}</time>
+                            </span>
+                        }
+                    })
+            }}
         </div>
     }
 }

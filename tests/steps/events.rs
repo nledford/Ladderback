@@ -742,6 +742,27 @@ async fn learns_progress(agent: &mut Agent) {
     agent.events.learn(0, &["operation-progress"]).await;
 }
 
+/// The daemon stamps each progress report with the instant it heard it, in
+/// RFC 3339, so a page can say when a run without a total last reported in
+/// the daemon's clock (§4.5): an instant of this scenario, within the last
+/// five minutes and not after now.
+#[then("the connected page learns the operation's progress, with the instant the daemon heard it")]
+async fn learns_progress_with_its_instant(agent: &mut Agent) {
+    let event = agent.events.learn(0, &["operation-progress"]).await;
+    let at = event
+        .get("at")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| panic!("the progress event says when the daemon heard it: {event}"));
+    let at: domain::Timestamp = at
+        .parse()
+        .unwrap_or_else(|error| panic!("{at} is no RFC 3339 instant: {error}"));
+    let now = domain::Timestamp::now();
+    assert!(
+        at <= now && now.duration_since(at) < domain::SignedDuration::from_mins(5),
+        "the daemon heard the report at {at}, and it is now {now}"
+    );
+}
+
 #[then("the connected page learns the operation finished")]
 async fn learns_finished(agent: &mut Agent) {
     agent

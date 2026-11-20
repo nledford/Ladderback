@@ -78,19 +78,31 @@ pub const GRAPHIC: &str = "spinner-graphic flex-none inline-(--size) block-(--si
 /// What turns: the circle inside the drawing, about the drawing's middle,
 /// not the drawing, so its box keeps its length at every angle and a spinner
 /// at the edge of a part that scrolls never changes how far it scrolls. It
-/// turns once in 0.9 s, steadily, by `style.css`'s keyframes, which the
-/// reduced-motion rule there stops.
-pub const TURN: &str =
-    "spinner-turn transform-view origin-center animate-[spinner-turn_0.9s_linear_infinite]";
+/// turns once in 0.9 s, steadily, by `style.css`'s keyframes. When the
+/// reader asks for less motion it is not drawn at all: stopped, a quarter
+/// arc over a track reads as a gauge a quarter full, an amount the page
+/// doesn't know, so [`STILL`] stands in its place.
+pub const TURN: &str = "spinner-turn transform-view origin-center \
+    animate-[spinner-turn_0.9s_linear_infinite] motion-reduce:hidden";
 
 /// The track: the arc's color at a quarter of its strength (the drawing
 /// sets that strength). Under forced colors it takes the color of
 /// unavailable text, the arc the text's own, the reader's own two; only the
 /// track opts out of the mode's colors, to keep `GrayText`: when the whole
 /// drawing opted out, Chromium drew its arc in the author's text color, not
-/// the reader's.
+/// the reader's. Like the arc, it is not drawn when the reader asks for
+/// less motion.
 pub const TRACK: &str = "spinner-track forced-colors:forced-color-adjust-none \
-    forced-colors:stroke-[color:GrayText] forced-colors:[stroke-opacity:1]";
+    forced-colors:stroke-[color:GrayText] forced-colors:[stroke-opacity:1] motion-reduce:hidden";
+
+/// The still form, drawn only when the reader asks for less motion: three
+/// dots in a row across the drawing's middle, filled in its color (the
+/// text's own under forced colors), which say "waiting" without moving and
+/// without reading as an amount. The drawing's box, name and baseline are
+/// the turning form's, so nothing around it moves when the form changes.
+/// The reduced-motion rule in `style.css` takes away animations only; this
+/// is a display, which it leaves alone.
+pub const STILL: &str = "spinner-still hidden motion-reduce:inline";
 
 #[cfg(test)]
 mod tests {

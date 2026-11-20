@@ -422,6 +422,7 @@ fn a_checks_findings_reach_the_page_under_the_codes_of_their_levels() {
         let mut publish = Publish {
             operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
             progress: LiveProgress::new(),
+            clock: Arc::new(SystemClock),
         };
         let found = EngineEvent::Warning(domain::execution::Warning {
             kind,
@@ -447,6 +448,7 @@ fn a_readable_secret_file_reaches_the_page_by_its_path_and_mode() {
     let mut publish = Publish {
         operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
         progress: LiveProgress::new(),
+        clock: Arc::new(SystemClock),
     };
     let found = EngineEvent::Warning(domain::execution::Warning {
         kind: WarningKind::SecretFileReadable,
@@ -474,6 +476,7 @@ fn a_changeable_secret_file_reaches_the_page_by_its_path_and_mode() {
     let mut publish = Publish {
         operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
         progress: LiveProgress::new(),
+        clock: Arc::new(SystemClock),
     };
     let found = EngineEvent::Warning(domain::execution::Warning {
         kind: WarningKind::SecretFileWritable,

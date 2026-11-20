@@ -1,8 +1,9 @@
 @ui
 Feature: The spinner
   A spinner, which a label names, which never speaks for itself, which takes
-  its tone, size and placement from the shared vocabulary and which stands
-  still for a reader who asks for less motion.
+  its tone, size and placement from the shared vocabulary and which, for a
+  reader who asks for less motion, stands still as three dots, never as a
+  part of a circle that could read as an amount done.
 
   Scenario: A spinner with a visible label is read as its label, and a screen reader skips its drawing
     When I open the component gallery
@@ -27,6 +28,27 @@ Feature: The spinner
     Then every spinner of the "Spinner" demo turns steadily, once in 0.8 to 1 second
     When the reader asks for less motion
     Then no spinner of the "Spinner" demo moves
+
+  # A still arc over a faint track reads as a gauge a quarter full. The still
+  # form is a row of three dots, as an ellipsis says that more is coming, in
+  # the same box, so the drawing keeps its size, its place on the line and
+  # its name.
+  Scenario: For a reader who asks for less motion, a spinner stands still as three dots, which never read as an amount
+    When I open the component gallery
+    Then no spinner of the "Spinner" demo draws its still dots
+    When the reader asks for less motion
+    Then every spinner of the "Spinner" demo stands still as a row of three dots in its drawing's color, with no arc or track
+    And no spinner of the "Spinner" demo moves
+    And the spinner labelled "Loading the demo snapshots…" stands in its line of text, its label on the line's baseline and its drawing centered on the text
+    And the "Spinner" demo shows the text "Loading the demo snapshots…" beside a spinner a screen reader skips
+    And the "Spinner" demo has the image "Demo spinner at the Medium size"
+    And the button "Save the demo notes" holds a spinner a screen reader skips
+
+  Scenario: Under forced colors and less motion, a spinner's still dots take the text's color
+    Given the browser asks for "forced colors"
+    When I open the component gallery
+    And the reader asks for less motion
+    Then every spinner of the "Spinner" demo stands still as a row of three dots in the color of the text around it, with no arc or track
 
   Scenario: A spinner turns its drawing inside the drawing's box, which keeps its length as it turns
     When I open the component gallery
