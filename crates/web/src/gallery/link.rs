@@ -77,4 +77,4 @@ pub(super) fn LinkDemo(localizer: Arc<Localizer>) -> impl IntoView {
 }
 
 /// rustic's documentation, the demo's other site.
-const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";
+pub(super) const RUSTIC_DOCS: &str = "https://rustic.cli.rs/";

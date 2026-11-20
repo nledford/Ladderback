@@ -210,6 +210,8 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [126](decisions/126-primary-install-channels.md) | Which ways to install Ladderback the project recommends |
 | [127](decisions/127-per-token-permissions.md) | What each API token, and an AI agent without one, may do |
 | [128](decisions/128-the-user-docs-site.md) | What builds the user docs site, and from where |
+| [129](decisions/129-a-changed-row-stays-marked-until-seen.md) | A changed live row stays marked until it is seen |
+| [130](decisions/130-reduced-motion-keeps-fades.md) | What reduced motion stops, and what it keeps |
 
 ## 17. Open questions
 

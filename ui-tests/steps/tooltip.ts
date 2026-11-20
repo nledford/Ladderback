@@ -335,12 +335,6 @@ Then("the tooltip of the button {string} fades out over 60 ms", async function (
   assert.equal(durationOf(now.style, "opacity"), 0.06, `${now.style.properties}: ${now.style.durations}`);
 });
 
-Then("the tooltip of the button {string} appears without fading", async function (this: BrowserWorld, name: string) {
-  const now = await shown(this.page, name);
-  const fade = durationOf(now.style, "opacity") ?? 0;
-  assert.equal(fade, 0, `${now.style.properties}: ${now.style.durations}`);
-});
-
 // The page scrolls a few lines up, focus staying on the button. Not by keys:
 // WebKit as Playwright drives it doesn't scroll on the arrow keys, and a
 // Page Up carries the button out of the window. Not a pointer action either:

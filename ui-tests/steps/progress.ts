@@ -352,12 +352,20 @@ Then("the progress bar {string} is drawn at {int} percent", async function (this
   await expect.poll(() => bar.evaluate((element) => (element as HTMLElement).innerText)).toContain(`${percent}%`);
 });
 
-// How long the fill takes to move to a new report, as the browser computes it
-// under the reader's settings: "0s" is a jump.
+// How long the fill takes to slide to a new report, as the browser computes
+// it under the reader's settings: the duration paired with its slide
+// (`transform`, or `all`) in its transition list, "0s" where no transition
+// names it, as under the reduced-motion rule (decision 130), which keeps
+// only fades.
 const moves = (bar: Locator) =>
   bar.evaluate((element) => {
     const fill = element.querySelector(".progress-fill");
-    return fill === null ? "" : getComputedStyle(fill).transitionDuration;
+    if (fill === null) return "";
+    const style = getComputedStyle(fill);
+    const properties = style.transitionProperty.split(",").map((property) => property.trim());
+    const durations = style.transitionDuration.split(",").map((duration) => duration.trim());
+    const at = properties.findIndex((property) => ["transform", "all"].includes(property));
+    return at < 0 ? "0s" : (durations[at % durations.length] ?? "0s");
   });
 
 Then("the fill of the progress bar {string} moves smoothly to each report", async function (this: BrowserWorld, name: string) {
