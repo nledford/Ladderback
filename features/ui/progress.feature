@@ -161,3 +161,36 @@ Feature: A running operation's progress bar can be reached by keyboard and never
       | locale |
       | en-XA  |
       | ar-XB  |
+
+  # A bar with no total says since when its step began, then when its run
+  # last reported, on a line of its own below the step: in a pseudolocale's
+  # longer words, in the Status column of a small screen with larger text,
+  # that line wraps inside the cell rather than run out of it. A step that
+  # reports again without counting keeps the instant it began; the one that
+  # counts shows its own.
+  Scenario Outline: A running backup's progress bar with no total says since when and its last report in a pseudolocale, wrapped on a small screen with larger text
+    Given the daemon reports a running backup of "demo-home"
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the address "/operations?locale=<locale>"
+    And the page's one table has 1 row
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:00Z"
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:03:00Z"
+    Then the page's one progress bar shows no percentage
+    And the page's one progress bar shows the instant "2026-11-09T10:01:00Z", in words the pseudolocale transformed
+    And the time of the page's one progress bar wraps onto more than one line
+    And the page doesn't scroll sideways
+    And nothing in the page's one table runs outside its cell
+    And no text is clipped
+    When the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:04:00Z"
+    Then the page's one progress bar shows the instant "2026-11-09T10:04:00Z", in words the pseudolocale transformed
+    And the time of the page's one progress bar wraps onto more than one line
+    And the page doesn't scroll sideways
+    And nothing in the page's one table runs outside its cell
+    And no text is clipped
+    And the page has no accessibility violations
+
+    Examples:
+      | locale |
+      | en-XA  |
+      | ar-XB  |

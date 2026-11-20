@@ -130,6 +130,36 @@ Then("the value text of the page's one progress bar is transformed", async funct
   assert.deepEqual(plain, [], `words of the value text "${text}" the pseudolocale did not transform`);
 });
 
+// A bar with no total shows when its run was heard of in one `<time>`
+// (§4.5), whose words, "Since" or "Last report at", came out of the catalog
+// around a formatted instant: so the pseudolocale transformed a word of
+// them, and the instant has digits. The `datetime` says which instant it is.
+Then(
+  "the page's one progress bar shows the instant {string}, in words the pseudolocale transformed",
+  async function (this: BrowserWorld, at: string) {
+    const time = this.page.getByRole("progressbar").locator("time");
+    await expect(time).toHaveCount(1);
+    await expect(time).toHaveAttribute("datetime", at);
+    await expect(time).toBeVisible();
+    const words = await time.innerText();
+    assert.match(words, /\p{Nd}/u, `the bar shows "${words}", which has no time`);
+    assert.match(words, NON_ASCII, `the bar shows "${words}", which the pseudolocale did not transform`);
+  },
+);
+
+// The 320 Rule: in a narrow cell the instant's line wraps, each of its
+// lines at a top of its own, rather than run out of the cell.
+Then("the time of the page's one progress bar wraps onto more than one line", async function (this: BrowserWorld) {
+  const lines = await this.page
+    .getByRole("progressbar")
+    .locator("time")
+    .evaluate((time) => {
+      const tops = [...time.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top));
+      return new Set(tops).size;
+    });
+  assert.ok(lines > 1, `the bar's time stands on ${lines} line`);
+});
+
 // The cell of a running operation's bar says two things in words, its status
 // and the step it is in (a percentage has no letters), and the catalog wrote
 // both, so the pseudolocale transformed both.
