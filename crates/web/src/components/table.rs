@@ -150,36 +150,97 @@ impl<R> Sort<R> {
 }
 
 /// The change mark a column carries (decisions 127 and 129): `on`, what
-/// a live update changes in a row, such as its status; the words of the
-/// button that marks every row as seen ("Mark all as seen"), and the
-/// sentence its press is said with, for how many rows it marked seen,
-/// complete sentences from the catalog.
+/// a live update changes in a row, such as its status, and `changed`, the
+/// words a screen reader hears in the column's cell while its row is
+/// marked, a complete message from the catalog that reads on its own
+/// ("Changed, not yet seen").
 pub struct Cue<R> {
     on: fn(&R) -> String,
-    mark_all_seen: String,
-    marked_seen: Said,
+    changed: String,
 }
 
-/// A sentence for a number of rows, worded by the caller's catalog.
-type Said = Arc<dyn Fn(usize) -> String + Send + Sync>;
-
-/// The column a table watches for the change mark: its place, and what of
-/// a row it reads there. `None` where no column carries a [`Cue`].
-type Watch<R> = Option<(usize, fn(&R) -> String)>;
+/// The column a table watches for the change mark: its place, what of a
+/// row it reads there, and the words its marked cell says. `None` where no
+/// column carries a [`Cue`].
+type Watch<R> = Option<(usize, fn(&R) -> String, Arc<str>)>;
 
 impl<R> Cue<R> {
-    /// A mark on a change of `on`, its button named `mark_all_seen`, its
-    /// press said by `marked_seen` of how many rows it marked seen.
-    pub fn new(
-        on: fn(&R) -> String,
-        mark_all_seen: impl Into<String>,
-        marked_seen: impl Fn(usize) -> String + Send + Sync + 'static,
-    ) -> Self {
+    /// A mark on a change of `on`, said `changed` to a screen reader.
+    pub fn new(on: fn(&R) -> String, changed: impl Into<String>) -> Self {
         Self {
             on,
-            mark_all_seen: mark_all_seen.into(),
-            marked_seen: Arc::new(marked_seen),
+            changed: changed.into(),
         }
+    }
+}
+
+/// The change marks of a live table (decision 129): the rows a change has
+/// marked that the reader hasn't seen yet. The page makes them and hands
+/// them to its [`Table`], which marks its rows and sees one as focus enters
+/// it, and to the [`MarkAllSeen`] it places in its own row of actions.
+pub struct ChangeMarks<K: Send + Sync + 'static> {
+    marks: RwSignal<Marks<K>>,
+}
+
+impl<K: Send + Sync + 'static> Clone for ChangeMarks<K> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<K: Send + Sync + 'static> Copy for ChangeMarks<K> {}
+
+impl<K: Eq + Hash + Send + Sync + 'static> ChangeMarks<K> {
+    /// No row marked.
+    pub fn new() -> Self {
+        Self {
+            marks: RwSignal::new(Marks::default()),
+        }
+    }
+}
+
+impl<K: Eq + Hash + Send + Sync + 'static> Default for ChangeMarks<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The button that marks every row of a live table as seen ("Mark all as
+/// seen", its `label`), which the page places in its row of actions, before
+/// the table (decision 129). It is always there and hidden while no row is
+/// marked, its room kept (`invisible`, and `inert`: no Tab stop, out of the
+/// accessibility tree), so its coming and going moves nothing on the page,
+/// however the row wraps. Its press clears `marks`, says how many it
+/// cleared in the caller's `said` sentence, politely, and, as the button
+/// hides, hands focus to `then_focus`, the `id` of something that stays,
+/// such as the page's heading (2.4.3).
+#[component]
+pub fn MarkAllSeen<K>(
+    marks: ChangeMarks<K>,
+    label: String,
+    said: Callback<usize, String>,
+    then_focus: String,
+) -> impl IntoView
+where
+    K: Clone + Eq + Hash + Send + Sync + 'static,
+{
+    let marks = marks.marks;
+    let hidden = Memo::new(move |_| !marks.with(Marks::any));
+    let press = Callback::new(move |()| {
+        let seen = marks.try_update(Marks::see_all).unwrap_or_default();
+        reply(Politeness::Polite, &said.run(seen));
+        focus_element(&then_focus);
+    });
+    // Its own flex box, centred in the row's line, as `.actions > .button`
+    // stands a button that is the row's own item.
+    view! {
+        <span
+            class="flex items-center"
+            class:invisible=hidden
+            inert=move || hidden.get().then_some("")
+        >
+            <Button content=Content::Text(Signal::stored(label)) on_press=press />
+        </span>
     }
 }
 
@@ -214,19 +275,20 @@ pub struct Footer {
 ///
 /// A column given a [`Cue`] ([`Column::cued`]) is what a live update can
 /// change in a row, such as its status. A row whose value there changes
-/// while it shows is marked "changed, not yet seen" (decision 129): that
-/// cell reads in bold and an edge stands at the row's start, in the
-/// `--cue` color (`style.css`). The mark arrives once with a fade, its
-/// cells lit in the cue's fill and settling back to their own over 600 ms
-/// (decision 127), and stays until it is seen: focus enters the row, the
-/// reader presses Mark all as seen, a button before the table while any row
-/// is marked, or the row or the page goes. A change while focus is in the
-/// row is seen as it comes. Its first sight, and an update that leaves it
-/// as it was, mark nothing ([`rules::Marks`]); a page whose rows a pause
+/// while it shows is marked "changed, not yet seen" in `marks` (decision
+/// 129): that cell reads in bold, an edge stands at the row's start, in the
+/// `--cue` color (`style.css`), and the cell says the cue's words to a
+/// screen reader after its own, so the mark is never drawn alone (1.3.1).
+/// The mark arrives once with a fade, its cells lit in the cue's fill and
+/// settling back to their own over 600 ms (decision 127), and stays until
+/// it is seen: focus enters the row, the reader presses the page's
+/// [`MarkAllSeen`], or the row or the page goes. A change while focus is in
+/// the row is seen as it comes. Its first sight, and an update that leaves
+/// it as it was, mark nothing ([`rules::Marks`]); a page whose rows a pause
 /// holds still marks nothing meanwhile, and its resume marks each changed
-/// row once. The press is said politely, in the cue's sentence, and hands
-/// focus to the table's frame as the button hides. A screen reader hears the
-/// page's announcer for the change itself, so the mark says nothing to it.
+/// row once. Nothing is announced: the page's announcer says what it says
+/// of the change itself. A table given no `marks` keeps its own, which only
+/// focus sees.
 ///
 /// It sits in a frame that scrolls sideways where its columns are wider than
 /// the page (a small screen, larger text): a region named as the table is,
@@ -271,6 +333,7 @@ pub fn Table<R, K, KF>(
     sentences: Sentences,
     #[prop(optional)] footer: Option<Footer>,
     #[prop(optional)] row_header_id: Option<fn(&R) -> String>,
+    #[prop(optional)] marks: Option<ChangeMarks<K>>,
 ) -> impl IntoView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -342,17 +405,15 @@ where
     let caption = name.caption().map(str::to_owned);
     let labelled_by = name.table_labelled_by().map(str::to_owned);
     let row_columns = Arc::clone(&columns);
-    // The column a live update changes, and what of a row it watches there.
-    let watch = columns
-        .iter()
-        .enumerate()
-        .find_map(|(at, column)| column.cue.as_ref().map(|cue| (at, cue.on)));
-    let mark_all = columns
-        .iter()
-        .find_map(|column| column.cue.as_ref())
-        .map(|cue| (cue.mark_all_seen.clone(), Arc::clone(&cue.marked_seen)));
-    let marks = RwSignal::new(Marks::<K>::default());
-    let frame_id = format!("table-{id}-frame");
+    // The column a live update changes, what of a row it watches there, and
+    // what its marked cell says to a screen reader.
+    let watch: Watch<R> = columns.iter().enumerate().find_map(|(at, column)| {
+        column
+            .cue
+            .as_ref()
+            .map(|cue| (at, cue.on, Arc::from(cue.changed.as_str())))
+    });
+    let marks = marks.unwrap_or_default().marks;
     view! {
         <div>
             {move || {
@@ -367,24 +428,13 @@ where
                     Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
                     Shown::Table => {
                         let columns = Arc::clone(&row_columns);
+                        let watch = watch.clone();
                         let header_row = header_row(&columns, sorted);
                         let footer_row = footer.clone().map(|footer| footer_row(&columns, footer));
                         view! {
-                            // Before the table, so a keyboard reaches it before
-                            // the rows whose focus would see their marks one by
-                            // one; its line is always there, so it moves nothing.
-                            {mark_all
-                                .clone()
-                                .map(|(label, said)| mark_all_view(
-                                    marks,
-                                    label,
-                                    said,
-                                    frame_id.clone(),
-                                ))}
                             // The frame is the size container the table's width
                             // is measured against, and what scrolls.
                             <div
-                                id=frame_id.clone()
                                 class="data-table-frame"
                                 role="region"
                                 aria-labelledby=frame_name.clone()
@@ -431,7 +481,7 @@ where
                                                     index,
                                                     key,
                                                     row_header_id,
-                                                    watch,
+                                                    watch.clone(),
                                                     marks,
                                                 )
                                             }
@@ -545,8 +595,9 @@ fn footer_row<R: Send + Sync + 'static>(columns: &[Column<R>], footer: Footer) -
 
 /// One row, built once as it first shows: its cells bind to the row as it
 /// stands in `rows` now, or as it last stood while it is on its way out.
-/// Where the table watches a column (`watch`, its place and what it reads),
-/// a change there marks the row in `marks` and lights its arrival.
+/// Where the table watches a column (`watch`, its place, what it reads and
+/// what its marked cell says), a change there marks the row in `marks` and
+/// lights its arrival.
 fn row_view<R, K>(
     columns: &[Column<R>],
     rows: Signal<Vec<R>>,
@@ -579,6 +630,10 @@ where
     });
     let row = Signal::from(row);
     let id = header_id.map(|id_of| row.with_untracked(id_of));
+    let unseen = Memo::new({
+        let key = key.clone();
+        move |_| marks.with(|marks| marks.is_unseen(&key))
+    });
     let cells = columns
         .iter()
         .enumerate()
@@ -593,26 +648,40 @@ where
                     </th>
                 }
                 .into_any()
-            } else {
-                let cued = watch
-                    .is_some_and(|(watched, _)| watched == at)
-                    .then_some("");
+            } else if let Some((_, _, words)) =
+                watch.as_ref().filter(|(watched, _, _)| *watched == at)
+            {
+                // The mark's words after the cell's own, out of sight, while
+                // the row is marked: its name then says it (1.3.1). The cell
+                // is their containing block (`relative`), so the out-of-sight
+                // box stays inside the frame that scrolls, never past the
+                // page's edge.
+                let words = Arc::clone(words);
                 view! {
-                    <td class=class data-cued=cued>
+                    <td class=class class:relative=true data-cued="">
                         {cell}
+                        {move || {
+                            unseen
+                                .get()
+                                .then(|| {
+                                    view! {
+                                        {" "}
+                                        <span class="sr-only">{words.to_string()}</span>
+                                    }
+                                })
+                        }}
                     </td>
                 }
                 .into_any()
+            } else {
+                view! { <td class=class>{cell}</td> }.into_any()
             }
         })
         .collect_view();
     let arrival = RwSignal::new(Arrival::Settled);
     let line = NodeRef::<leptos::html::Tr>::new();
-    let unseen = Memo::new({
-        let key = key.clone();
-        move |_| marks.with(|marks| marks.is_unseen(&key))
-    });
-    if let Some((_, on)) = watch {
+    let cued = watch.is_some();
+    if let Some(on) = watch.map(|(_, on, _)| on) {
         let watched = Memo::new(move |_| row.with(on));
         let changed = key.clone();
         Effect::new(move |shown: Option<String>| {
@@ -633,7 +702,7 @@ where
             marks.try_update(|marks| marks.gone(&gone));
         });
     }
-    let state = move || watch.map(|_| arrival.get().name());
+    let state = move || cued.then(|| arrival.get().name());
     // The cells' fade ends, or a move of the row or a second change cuts it
     // short; a transition inside a cell (a progress bar's) isn't the cue's.
     let settle = move |event: web_sys::TransitionEvent| {
@@ -660,35 +729,6 @@ where
         >
             {cells}
         </tr>
-    }
-    .into_any()
-}
-
-/// The button that marks every row as seen, before the table. Its line is
-/// always there and the button in it hidden (`invisible`: no Tab stop, out
-/// of the accessibility tree) while no row is marked, so its coming and
-/// going moves nothing on the page. Its press clears the marks, says how
-/// many it cleared in the caller's sentence, and, as the button hides,
-/// hands focus to the table's frame (`frame_id`), which stays (2.4.3).
-fn mark_all_view<K>(
-    marks: RwSignal<Marks<K>>,
-    label: String,
-    said: Said,
-    frame_id: String,
-) -> AnyView
-where
-    K: Clone + Eq + Hash + Send + Sync + 'static,
-{
-    let any = Memo::new(move |_| marks.with(Marks::any));
-    let press = Callback::new(move |()| {
-        let seen = marks.try_update(Marks::see_all).unwrap_or_default();
-        reply(Politeness::Polite, &said(seen));
-        focus_element(&frame_id);
-    });
-    view! {
-        <p class="actions" class:invisible=move || !any.get()>
-            <Button content=Content::Text(Signal::stored(label)) on_press=press />
-        </p>
     }
     .into_any()
 }

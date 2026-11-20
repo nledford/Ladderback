@@ -2375,9 +2375,14 @@ ui-live-paused-banner =
        *[other] Live updates are paused. { $count } changes are waiting.
     }
 
-# The button after a live table that marks every row a live update changed
-# as seen, shown while any row is marked.
+# The button in a page's row of actions that marks every row of its live
+# table that a live update changed as seen, shown while any row is marked.
 ui-mark-all-seen = Mark all as seen
+
+# Read by a screen reader after the status of a row a live update changed
+# and the reader hasn't seen yet, as a mark it carries; never shown. It
+# reads on its own, after the cell's own words ("Failed").
+ui-table-cue-unseen = Changed, not yet seen
 
 # Said politely, once, when "Mark all as seen" is pressed.
 # $count (number): how many rows it marked as seen.

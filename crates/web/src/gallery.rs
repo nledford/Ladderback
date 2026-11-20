@@ -113,9 +113,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
 /// `/_gallery#<id>` puts focus on the heading as the page loads
 /// ([`page::focus_when_named`]), so a scenario can start at its own demo and
 /// a demo added above it lengthens no walk (technical design §13.7.5). Only
-/// a script focuses it (`tabindex="-1"`), so it is no stop for Tab.
+/// a script focuses it (`tabindex="-1"`), so it is no stop for Tab. An `id`,
+/// where given, lets a control in the demo hand focus to it.
 #[component]
-fn DemoHeading(text: String) -> impl IntoView {
+fn DemoHeading(text: String, #[prop(optional)] id: Option<&'static str>) -> impl IntoView {
     let heading = NodeRef::<leptos::html::H2>::new();
     Effect::new(move |_| {
         if let Some(heading) = heading.get()
@@ -125,7 +126,7 @@ fn DemoHeading(text: String) -> impl IntoView {
         }
     });
     view! {
-        <h2 node_ref=heading tabindex="-1">
+        <h2 node_ref=heading id=id tabindex="-1">
             {text}
         </h2>
     }

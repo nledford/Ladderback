@@ -9,7 +9,8 @@ use leptos::prelude::*;
 use super::DemoHeading;
 use crate::components::button::Content;
 use crate::components::{
-    Align, Button, Column, Cue, Footer, Name, RadioGroup, Sentences, Sort, SortKey, State, Table,
+    Align, Button, ChangeMarks, Column, Cue, Footer, MarkAllSeen, Name, RadioGroup, Sentences,
+    Sort, SortKey, State, Table,
 };
 use crate::routes::text_with;
 use crate::text;
@@ -390,9 +391,11 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
             (move || row.with(|row| statuses.get(row.step).cloned().unwrap_or_default())).into_any()
         },
     )
-    .cued(Cue::new(status_of, t(msg::UI_MARK_ALL_SEEN), {
+    .cued(Cue::new(status_of, t(msg::UI_TABLE_CUE_UNSEEN)));
+    let marks = ChangeMarks::<String>::new();
+    let marked_seen = Callback::new({
         let localizer = Arc::clone(&localizer);
-        move |count| {
+        move |count: usize| {
             let count = u64::try_from(count).unwrap_or(u64::MAX);
             text_with(
                 &localizer,
@@ -400,7 +403,7 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 &[("count", MsgArg::Count(count))],
             )
         }
-    }));
+    });
     let star_localizer = Arc::clone(&localizer);
     let star = Column::new(
         t(msg::UI_GALLERY_TABLE_ACTIONS),
@@ -421,11 +424,19 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
     );
     view! {
         <section id="live-table-demo">
-            <DemoHeading text=t(msg::UI_GALLERY_LIVE_TABLE_HEADING) />
-            <p>
+            <DemoHeading text=t(msg::UI_GALLERY_LIVE_TABLE_HEADING) id=LIVE_TABLE_HEADING_ID />
+            // Its row of actions, as a page's: the stand-in for a live update,
+            // then Mark all as seen, whose press hands focus to the heading.
+            <p class="actions">
                 <Button
                     content=Content::Text(t(msg::UI_GALLERY_LIVE_TABLE_CHANGE).into())
                     on_press=change
+                />
+                <MarkAllSeen
+                    marks=marks
+                    label=t(msg::UI_MARK_ALL_SEEN)
+                    said=marked_seen
+                    then_focus=LIVE_TABLE_HEADING_ID.to_owned()
                 />
             </p>
             <Table
@@ -440,7 +451,12 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
                     empty: t(msg::UI_GALLERY_TABLE_EMPTY),
                     unreachable: t(msg::UI_GALLERY_TABLE_UNREACHABLE),
                 }
+                marks=marks
             />
         </section>
     }
 }
+
+/// The `id` of the live table demo's heading, where Mark all as seen hands
+/// focus as it goes.
+const LIVE_TABLE_HEADING_ID: &str = "live-table-demo-heading";
