@@ -84,6 +84,10 @@ impl Backend for Told {
         Err(untold())
     }
 
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        Err(untold())
+    }
+
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
         Err(untold())
     }
@@ -1074,6 +1078,10 @@ impl Backend for Lists {
     async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto> {
         self.ask(format!("summary of {id}"));
         self.told(&self.detail.as_ref().expect("a detail to tell").operation)
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        self.told(&api::RecentLogDto { lines: Vec::new() })
     }
 
     async fn run(&self, plan: String) -> Result<String, ErrorDto> {
@@ -2217,6 +2225,10 @@ impl Backend for Running {
         let running = *reads < self.running;
         *reads += 1;
         Ok(Running::state(running))
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        Err(untold())
     }
 
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {

@@ -5,9 +5,15 @@
 //! `GET /api/v1/log` does; the server narrows and pages it with the domain's
 //! rules, so both modes read alike (§16, decision 134).
 
-use api::{ErrorDto, LogLevelDto, LogLineDto, RecentLogDto};
+use api::{ErrorCode, ErrorDto, LogLevelDto, LogLineDto, RecentLogDto};
+use domain::daemon_log::{self, LogFilter, LogLevel, LogLine, ReadCut};
+use domain::{OperationId, PlanId, Timestamp};
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::arguments::invalid;
+use crate::pages::page_length;
 
 /// The arguments of `read_log`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -69,8 +75,93 @@ pub enum LogCap {
 /// `daemon-unreachable`: a line of `log` whose time isn't one, which the
 /// API never answers.
 pub fn read_page(log: RecentLogDto, arguments: LogArguments) -> Result<LogPage, ErrorDto> {
-    let _ = (log, arguments);
-    todo!()
+    let filter = LogFilter {
+        level: arguments
+            .level
+            .map(|name| level_named(&name).ok_or_else(|| invalid("level")))
+            .transpose()?
+            .unwrap_or(LogLevel::Trace),
+        since: instant(arguments.since, "since")?,
+        until: instant(arguments.until, "until")?,
+        operation: arguments
+            .operation
+            .map(|id| {
+                Uuid::parse_str(&id)
+                    .map(OperationId::from_uuid)
+                    .map_err(|_| invalid("operation"))
+            })
+            .transpose()?,
+        plan: arguments
+            .plan
+            .map(|id| PlanId::parse(&id).map_err(|_| invalid("plan")))
+            .transpose()?,
+    };
+    let lines = log
+        .lines
+        .into_iter()
+        .map(line)
+        .collect::<Result<Vec<_>, _>>()?;
+    // A page is at most 200 lines long, which any target's `usize` holds.
+    let limit = usize::try_from(page_length(arguments.limit)).unwrap_or(usize::MAX);
+    let read = daemon_log::read(&lines, &filter, arguments.before, limit);
+    Ok(LogPage {
+        next: read
+            .cut
+            .and_then(|_| read.lines.last().map(|line| line.number())),
+        stopped: read.cut.map(|cut| match cut {
+            ReadCut::Lines => LogCap::Lines,
+            ReadCut::Bytes => LogCap::Bytes,
+        }),
+        lines: read
+            .lines
+            .into_iter()
+            .map(app::recent_log::line_dto)
+            .collect(),
+    })
+}
+
+/// The level a line of the API is at.
+fn level(level: LogLevelDto) -> LogLevel {
+    match level {
+        LogLevelDto::Error => LogLevel::Error,
+        LogLevelDto::Warn => LogLevel::Warn,
+        LogLevelDto::Info => LogLevel::Info,
+        LogLevelDto::Debug => LogLevel::Debug,
+        LogLevelDto::Trace => LogLevel::Trace,
+    }
+}
+
+/// The level `name` names, as a line of the API spells it.
+fn level_named(name: &str) -> Option<LogLevel> {
+    match name {
+        "error" => Some(LogLevel::Error),
+        "warn" => Some(LogLevel::Warn),
+        "info" => Some(LogLevel::Info),
+        "debug" => Some(LogLevel::Debug),
+        "trace" => Some(LogLevel::Trace),
+        _ => None,
+    }
+}
+
+/// The instant `given` names, when it was given, as the argument `field`.
+fn instant(given: Option<String>, field: &str) -> Result<Option<Timestamp>, ErrorDto> {
+    given
+        .map(|text| text.parse::<Timestamp>().map_err(|_| invalid(field)))
+        .transpose()
+}
+
+/// A line of the API's answer as the log kept it.
+fn line(line: LogLineDto) -> Result<LogLine, ErrorDto> {
+    let Ok(at) = line.at.parse::<Timestamp>() else {
+        return Err(ErrorDto::new(ErrorCode::DaemonUnreachable, [], None));
+    };
+    Ok(LogLine::new(
+        at,
+        level(line.level),
+        &line.source,
+        format_args!("{}", line.message),
+    )
+    .numbered(line.number))
 }
 
 #[cfg(test)]

@@ -409,6 +409,7 @@ pub(crate) struct InProcess {
     repositories: Arc<dyn http_adapter::Repositories>,
     profiles: Arc<dyn http_adapter::Profiles>,
     full_disk_access: http_adapter::FullDiskAccessRoute,
+    recent_log: Arc<dyn app::ports::RecentLogStore>,
 }
 
 impl InProcess {
@@ -420,6 +421,7 @@ impl InProcess {
             repositories: Arc::clone(&state.repositories),
             profiles: Arc::clone(&state.profiles),
             full_disk_access: state.full_disk_access.clone(),
+            recent_log: Arc::clone(&state.recent_log),
         }
     }
 }
@@ -531,6 +533,10 @@ impl ::mcp::Backend for InProcess {
     /// on what it reads.
     async fn summary(&self, id: String) -> Result<api::OperationSummaryDto, api::ErrorDto> {
         Ok(self.operation(id).await?.operation)
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, api::ErrorDto> {
+        Ok(app::recent_log::answer(self.recent_log.as_ref()))
     }
 
     async fn run(&self, plan: String) -> Result<String, api::ErrorDto> {

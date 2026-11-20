@@ -10,6 +10,9 @@ publish.workspace = true
 [dependencies]
 # The wire types, with their JSON schemas for the tools' output schemas.
 api = { workspace = true, features = ["schemars"] }
+# A line of the recent log as the API writes it, so `read_log` answers each
+# line as the Log page reads it.
+app.workspace = true
 async-trait.workspace = true
 # The tag that names a snapshot's plan, which `list_snapshots` filters by.
 domain.workspace = true
