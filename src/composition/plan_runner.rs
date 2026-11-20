@@ -388,7 +388,7 @@ impl PlanRunner {
     /// the plan's next kept run, ends it as the queued run it is (#1221).
     /// `cancel` is its cancel switch, parked before it waits: a cancel
     /// while it waits ends it cancelled at once, as a queued backup
-    /// waiting for its turn is (§4.2).
+    /// waiting for its turn is (§5, decision 75).
     async fn resume_parked(
         &self,
         operation: domain::execution::Operation,
