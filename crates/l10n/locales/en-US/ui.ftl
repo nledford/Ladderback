@@ -3204,11 +3204,11 @@ ui-api-token-copied = Copied.
 # Said in the dialog when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
 ui-api-token-copy-failed = The browser would not let the page copy it. Select the token in the field and copy it yourself.
 
-## Settings' "Agents" tab, only on a hub (decision 121): the pairing token a
+## Settings' "Machines" tab, only on a hub (decision 121): the pairing token a
 ## person makes for another machine, confirmed by a step-up, shown once.
 
-# The tab and the heading of the section of Settings that makes pairing tokens. The same word as the term -agent in its plural, written out because a heading starts with a capital letter.
-ui-agents-heading = Agents
+# The tab and the heading of the section of Settings that makes pairing tokens. The same word as the term -machine in its plural, written out because a heading starts with a capital letter.
+ui-agents-heading = Machines
 
 # What that section says above its form.
 ui-agents-intro = To pair another machine with this { -hub }, make a pairing token here and give it to { "ladderback pair" } on that machine. A token works once, for a few minutes, and only for the address it names.
@@ -3217,7 +3217,7 @@ ui-agents-intro = To pair another machine with this { -hub }, make a pairing tok
 ui-pairing-new-heading = Make a pairing token
 
 # The label of the field of the address the other machine will reach this hub at.
-ui-pairing-address-label = Address { -agent(form: "other") } will use
+ui-pairing-address-label = Address { -machine(form: "other") } will use
 
 # The hint under that field.
 ui-pairing-address-hint = The address another machine reaches this { -hub } at, as https://hub.example:9443. It goes into the token.
@@ -3226,7 +3226,7 @@ ui-pairing-address-hint = The address another machine reaches this { -hub } at, 
 ui-pairing-warning-loopback = This address is loopback: only this computer can reach it, so another machine can't use the token. Type the address other machines reach this { -hub } at.
 
 # Said under the address when it starts with http:// and isn't loopback.
-ui-pairing-warning-plain = This address is plain http://, which an { -agent } refuses: its key would cross the network unprotected. Use the https:// address.
+ui-pairing-warning-plain = This address is plain http://, which a { -machine } refuses: its key would cross the network unprotected. Use the https:// address.
 
 # Says which certificate a token tells the other machine to trust. Only one is offered while the hub serves no certificate of its own.
 ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other machine does. This { -hub } serves no certificate of its own yet, so no token can pin one.
@@ -3235,7 +3235,7 @@ ui-pairing-certificate = The token trusts a certificate authority's certificate 
 ui-pairing-life-label = Life in minutes
 
 # The hint under that field.
-ui-pairing-life-hint = From 5 to 1440 minutes. A token no { -agent } has used by then lapses.
+ui-pairing-life-hint = From 5 to 1440 minutes. A token no { -machine } has used by then lapses.
 
 # Said under the life field when what is typed isn't a whole number of minutes.
 ui-pairing-life-invalid = Type the life as a whole number of minutes, from 5 to 1440.
@@ -3294,14 +3294,14 @@ ui-pairing-copied = Copied.
 # Said in the dialog when the browser would not let the page write to the clipboard.
 ui-pairing-copy-failed = The browser would not let the page copy it. Select the token and copy it yourself.
 
-# The button that cancels the token before any agent uses it.
+# The button that cancels the token before any machine uses it.
 ui-pairing-cancel = Cancel this token
 
 # Said beside the dialog's Close button.
-ui-pairing-close-note = Closing this dialog cancels the token if no { -agent } has used it.
+ui-pairing-close-note = Closing this dialog cancels the token if no { -machine } has used it.
 
 # Said in the dialog in place of the token once it is canceled.
-ui-pairing-canceled = The token is canceled. No { -agent } can use it.
+ui-pairing-canceled = The token is canceled. No { -machine } can use it.
 
 # Said in the dialog in place of the token once it lapses.
 # $when (text): the time it lapsed, in this computer's zone.
@@ -3310,10 +3310,10 @@ ui-pairing-lapsed = Lapsed at { $when }. Make a new token to pair a machine.
 # The button that closes the dialog once its token is canceled or lapsed, back to the form.
 ui-pairing-make-new = Make a new token
 
-# Said on the page once the dialog is closed and the hub canceled the token no agent had used.
+# Said on the page once the dialog is closed and the hub canceled the token no machine had used.
 ui-pairing-closed-canceled = The unused pairing token was canceled.
 
-# Said on the page once the dialog is closed and the hub refused or didn't answer the cancel of the token no agent had used.
+# Said on the page once the dialog is closed and the hub refused or didn't answer the cancel of the token no machine had used.
 ui-pairing-closed-not-canceled = The { -hub } couldn't cancel the unused pairing token, so it still works until it lapses.
 
 # Said when the hub didn't answer the page's request about a pairing token, or answered with what isn't one.

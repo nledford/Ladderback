@@ -144,7 +144,7 @@ When("I type the hub's key ID", async function (this: BrowserWorld) {
 
 // The steps a keyboard walk takes in the first scenario, in short: the key
 // ID typed in its field, then the form sent from its button.
-When("I make a pairing token on the Agents tab", async function (this: BrowserWorld) {
+When("I make a pairing token on the Machines tab", async function (this: BrowserWorld) {
   await this.open("/settings#agents");
   const { keyId } = await hubKey(this);
   await tabTo(this, "textbox", "Hub key ID");
@@ -154,8 +154,8 @@ When("I make a pairing token on the Agents tab", async function (this: BrowserWo
   await dialog(this).waitFor({ state: "visible", timeout: patienceMs() });
 });
 
-When("I set the address agents will use to {string}", async function (this: BrowserWorld, address: string) {
-  await tabTo(this, "textbox", "Address agents will use");
+When("I set the address machines will use to {string}", async function (this: BrowserWorld, address: string) {
+  await tabTo(this, "textbox", "Address machines will use");
   await this.page.keyboard.press("ControlOrMeta+A");
   await this.page.keyboard.type(address);
 });
