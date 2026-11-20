@@ -132,9 +132,13 @@ struct Token {
     /// What the dialog says of Copy or of Cancel this token, for the token
     /// it shows only.
     said: RwSignal<Option<String>>,
-    /// The ID of the last token the dialog showed: the section says only
-    /// its cancel's answer, never an older token's that comes after it.
+    /// The ID of the last token the dialog showed: the section says its
+    /// cancel's answer in full, and of an older token's that comes after
+    /// it only that the older token still works.
     last_shown: StoredValue<Option<String>>,
+    /// What the section says of an earlier token whose cancel failed once
+    /// a later token was shown.
+    earlier_said: RwSignal<Option<String>>,
 }
 
 impl Token {
@@ -149,6 +153,19 @@ impl Token {
             page_said: RwSignal::new(None),
             said: RwSignal::new(None),
             last_shown: StoredValue::new(None),
+            earlier_said: RwSignal::new(None),
+        }
+    }
+
+    /// Says what the cancel of the closed token `id` came to: in full for
+    /// the last token the dialog showed; for an earlier one, only that it
+    /// still works, so its answer is never read as the later token's.
+    fn say_closed(self, localizer: &Localizer, id: &str, answer: Option<&Posted>) {
+        if self.last_shown(id) {
+            self.page_said.try_set(said_once_closed(localizer, answer));
+        } else if still_works(answer) {
+            self.earlier_said
+                .try_set(Some(text(localizer, msg::UI_PAIRING_EARLIER_NOT_CANCELED)));
         }
     }
 
@@ -253,6 +270,16 @@ fn cancel_url(id: &str) -> String {
 /// A request the hub didn't answer, or answered with what isn't a token.
 fn unanswered(localizer: &Localizer) -> Sentence {
     Sentence::new(&text(localizer, msg::UI_PAIRING_UNANSWERED), None)
+}
+
+/// Whether a token still works once its cancel is answered: the hub
+/// refused the cancel, other than as a token it no longer holds, or didn't
+/// answer.
+fn still_works(answer: Option<&Posted>) -> bool {
+    !matches!(
+        answer,
+        Some(Posted::Done(_) | Posted::Refused(ErrorCode::PairingTokenUnknown, ..))
+    )
 }
 
 /// What the section says of a cancel answered once its dialog is closed:
@@ -381,11 +408,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                 let localizer = Arc::clone(&close_localizer);
                 spawn_local(async move {
                     let answer = ws::delete(&cancel_url(&live.id)).await;
-                    if token.last_shown(&live.id) {
-                        token
-                            .page_said
-                            .try_set(said_once_closed(&localizer, answer.as_ref()));
-                    }
+                    token.say_closed(&localizer, &live.id, answer.as_ref());
                 });
             }
         }
@@ -402,6 +425,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             </h2>
             <p>{t(msg::UI_AGENTS_INTRO)}</p>
             <p role="status">{move || token.page_said.get()}</p>
+            <p role="status">{move || token.earlier_said.get()}</p>
             <h3>{t(msg::UI_PAIRING_NEW_HEADING)}</h3>
             {move || problem.get().map(|sentence| refusal_alert(&problem_localizer, sentence))}
             <TextField
@@ -509,14 +533,9 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                 token.canceling.set(None);
             }
             // Left while the cancel was on its way: the section says its
-            // answer, as it does a cancel sent on leaving, unless the dialog
-            // has shown a later token since.
+            // answer, as it does a cancel sent on leaving.
             if !token.shows(&id) {
-                if token.last_shown(&id) {
-                    token
-                        .page_said
-                        .set(said_once_closed(&localizer, answer.as_ref()));
-                }
+                token.say_closed(&localizer, &id, answer.as_ref());
                 return;
             }
             match answer {

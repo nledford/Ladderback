@@ -3316,6 +3316,9 @@ ui-pairing-closed-canceled = The unused pairing token was canceled.
 # Said on the page once the dialog is closed and the hub refused or didn't answer the cancel of the token no machine had used.
 ui-pairing-closed-not-canceled = The { -hub } couldn't cancel the unused pairing token, so it still works until it lapses.
 
+# Said on the page when the hub refused or didn't answer the cancel of a closed dialog's token after the dialog showed a later one.
+ui-pairing-earlier-not-canceled = The { -hub } couldn't cancel an earlier unused pairing token, so it still works until it lapses.
+
 # Said when the hub didn't answer the page's request about a pairing token, or answered with what isn't one.
 ui-pairing-unanswered = The { -hub } didn't answer. Try again.
 
