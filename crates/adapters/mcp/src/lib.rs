@@ -813,7 +813,8 @@ fn acting() -> ToolAnnotations {
 
 /// A tool that keeps nothing, yet opens a repository at each of its
 /// locations as a backup would: testing a repository, which the daemon
-/// grants only to the `run` scope, so it isn't offered as a read.
+/// grants only to the permission Backup runs, so it isn't offered as a
+/// read.
 fn trying() -> ToolAnnotations {
     ToolAnnotations::new()
         .read_only(false)

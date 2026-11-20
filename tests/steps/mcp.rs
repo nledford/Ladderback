@@ -754,12 +754,12 @@ fn error_is_said(agent: &mut Agent, language: String) {
     }
 }
 
-#[then(expr = "the error names the scope {string}")]
-fn error_names_the_scope(agent: &mut Agent, scope: String) {
+#[then(expr = "the error names the permission {string}")]
+fn error_names_the_permission(agent: &mut Agent, permission: String) {
     let refusal = refusal_of(result(agent));
     assert_eq!(
-        refusal["args"]["scope"],
-        json!({"type": "text", "value": scope}),
+        refusal["args"]["permission"],
+        json!({"type": "text", "value": permission}),
         "{refusal}"
     );
 }

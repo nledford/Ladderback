@@ -10,12 +10,13 @@ use axum::extract::{ConnectInfo, Request};
 use axum::http::header::{HOST, RETRY_AFTER, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use domain::Timestamp;
-use domain::access::api_token::{ApiTokenLabel, Scope, Scopes};
+use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
+use domain::access::permissions::{Permission, Permissions};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use super::*;
-use crate::api_tokens::required_scope;
+use crate::api_tokens::{Needs, required_permission};
 use crate::request_checks::tests::{NoUi, test_state};
 use crate::{CSRF_HEADER, RequestChecks, SignIn, router};
 
@@ -139,13 +140,16 @@ impl Daemon {
             .unwrap()
     }
 
-    /// A token with `scopes`, as a program sends it, and who it is.
-    async fn token(&self, scopes: &[Scope]) -> (String, Proposer) {
+    /// A token with `permissions`, as a program sends it, and who it is.
+    async fn token(&self, permissions: &[Permission]) -> (String, Proposer) {
         let created = self
             .access
             .create_api_token(
                 ApiTokenLabel::new("assistant".to_owned()).unwrap(),
-                Scopes::new(scopes.iter().copied()).unwrap(),
+                TokenPermissions::new(permissions.iter().fold(Permissions::NONE, |all, row| {
+                    all.with(*row, Some(row.level())).unwrap()
+                }))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -198,23 +202,39 @@ async fn json(response: Response) -> serde_json::Value {
 }
 
 #[test]
-fn the_dry_run_needs_the_propose_scope_and_the_allowlist_a_session() {
-    for (method, path, scope) in [
-        (Method::POST, "/api/v1/dry-runs", Some(Scope::Propose)),
-        (Method::GET, "/api/v1/dry-runs", None),
-        (Method::POST, "/api/v1/plans/dry-run", None),
-        (Method::GET, "/api/v1/settings/dry-run-allowlist", None),
-        (Method::PUT, "/api/v1/settings/dry-run-allowlist", None),
-        (Method::POST, "/api/v1/settings/dry-run-allowlist", None),
+fn the_dry_run_needs_the_configuration_permission_and_the_allowlist_a_session() {
+    for (method, path, needs) in [
+        (
+            Method::POST,
+            "/api/v1/dry-runs",
+            Needs::Permission(Permission::Configuration),
+        ),
+        (Method::GET, "/api/v1/dry-runs", Needs::Session),
+        (Method::POST, "/api/v1/plans/dry-run", Needs::Session),
+        (
+            Method::GET,
+            "/api/v1/settings/dry-run-allowlist",
+            Needs::Session,
+        ),
+        (
+            Method::PUT,
+            "/api/v1/settings/dry-run-allowlist",
+            Needs::Session,
+        ),
+        (
+            Method::POST,
+            "/api/v1/settings/dry-run-allowlist",
+            Needs::Session,
+        ),
     ] {
-        assert_eq!(required_scope(&method, path), scope, "{method} {path}");
+        assert_eq!(required_permission(&method, path), needs, "{method} {path}");
     }
 }
 
 #[tokio::test]
 async fn a_token_with_the_propose_scope_dry_runs_as_itself_and_is_told_counts() {
     let daemon = Daemon::new();
-    let (bearer, itself) = daemon.token(&[Scope::Propose]).await;
+    let (bearer, itself) = daemon.token(&[Permission::Configuration]).await;
     let response = daemon
         .send(build(
             Method::POST,
@@ -237,11 +257,13 @@ async fn a_token_with_the_propose_scope_dry_runs_as_itself_and_is_told_counts() 
 }
 
 #[tokio::test]
-async fn a_token_never_reads_or_sets_the_allowlist_nor_dry_runs_without_the_scope() {
+async fn a_token_never_reads_or_sets_the_allowlist_nor_dry_runs_without_the_permission() {
     let daemon = Daemon::new();
-    let (proposer, _) = daemon.token(&[Scope::Propose]).await;
-    let (reader, _) = daemon.token(&[Scope::Read, Scope::Run]).await;
-    for (request, scope) in [
+    let (proposer, _) = daemon.token(&[Permission::Configuration]).await;
+    let (reader, _) = daemon
+        .token(&[Permission::Backups, Permission::BackupRuns])
+        .await;
+    for (request, needs) in [
         (
             build(
                 Method::PUT,
@@ -267,15 +289,15 @@ async fn a_token_never_reads_or_sets_the_allowlist_nor_dry_runs_without_the_scop
                 &[("authorization", reader.as_str())],
                 DRAFT,
             ),
-            "propose",
+            "configuration",
         ),
     ] {
         let what = format!("{} {}", request.method(), request.uri());
         let response = daemon.send(request).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN, "{what}");
         assert_eq!(
-            json(response).await["args"]["scope"]["value"],
-            scope,
+            json(response).await["args"]["permission"]["value"],
+            needs,
             "{what}"
         );
     }
@@ -328,7 +350,7 @@ async fn a_session_reads_and_sets_the_allowlist_and_dry_runs_with_no_token() {
 #[tokio::test]
 async fn a_body_that_is_not_the_request_is_refused_unread() {
     let daemon = Daemon::new();
-    let (bearer, _) = daemon.token(&[Scope::Propose]).await;
+    let (bearer, _) = daemon.token(&[Permission::Configuration]).await;
     for body in [
         "not json",
         r#"{"plan":{"id":"home"},"colour":"red"}"#,

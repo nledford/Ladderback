@@ -739,7 +739,7 @@ async fn both_backends_refuse_to_cancel_what_isnt_a_queued_or_running_backup_ali
         // A check, queued: maintenance runs to its end (decision 93).
         (
             Uuid::from_u128(3).hyphenated().to_string(),
-            "api-token-scope",
+            "api-token-permission",
         ),
     ] {
         let refused = in_process
@@ -1157,7 +1157,8 @@ async fn every_tool(session: &mut Session) -> serde_json::Value {
 /// `RUST_LOG=debug`, at which the MCP SDK would log every request whole.
 #[tokio::test]
 async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
-    use domain::access::api_token::{ApiTokenLabel, Scope, Scopes};
+    use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
+    use domain::access::permissions::{Permission, Permissions};
     crate::composition::captured_log::capture_at(log::LevelFilter::Debug);
     let scratch = tempfile::tempdir().expect("a scratch dir");
     let daemon = a_daemon_over(scratch.path(), &canary_config(scratch.path()), &[]).await;
@@ -1179,7 +1180,23 @@ async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
         access
             .create_api_token(
                 ApiTokenLabel::new("nightly-mcp".to_owned()).expect("a label"),
-                Scopes::new([Scope::Read, Scope::Run, Scope::Preview]).expect("scopes"),
+                // What a token of the scopes `read`, `run` and `preview`
+                // was migrated to (decision 127).
+                TokenPermissions::new(
+                    [
+                        Permission::Backups,
+                        Permission::BackupRuns,
+                        Permission::Previews,
+                        Permission::SnapshotContents,
+                        Permission::DaemonLog,
+                    ]
+                    .into_iter()
+                    .try_fold(Permissions::NONE, |rows, row| {
+                        rows.with(row, Some(row.level()))
+                    })
+                    .expect("each row at its own level"),
+                )
+                .expect("permissions"),
             )
             .await
             .expect("a token")

@@ -1,6 +1,7 @@
 //! Steps for the `@e2e` rules of `features/security/api_tokens.feature`: API
-//! tokens the admin creates and revokes in a session over HTTP, presented to
-//! the real daemon as `Authorization: Bearer <token>` (§10.1, decision 93).
+//! tokens the admin creates, changes and revokes in a session over HTTP,
+//! presented to the real daemon as `Authorization: Bearer <token>` (§10.1,
+//! decisions 93 and 127).
 
 use cucumber::{given, then, when};
 
@@ -71,12 +72,49 @@ pub(crate) fn in_session(agent: &Agent, method: &str, path: &str, body: String) 
     }
 }
 
+/// Every permission, as the wire names it.
+const PERMISSIONS: [&str; 7] = [
+    "backups",
+    "backup-runs",
+    "previews",
+    "configuration",
+    "snapshot-contents",
+    "daemon-log",
+    "repository-check",
+];
+
+/// Permissions as a scenario names them, `backups: read, daemon-log: read`,
+/// as the wire writes them: each one named at its level, every other at
+/// `none`.
+pub(crate) fn permissions_body(named: &str) -> serde_json::Value {
+    let mut body: serde_json::Map<String, serde_json::Value> = PERMISSIONS
+        .into_iter()
+        .map(|permission| (permission.to_owned(), "none".into()))
+        .collect();
+    for pair in named
+        .split(',')
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+    {
+        let (permission, level) = pair
+            .split_once(':')
+            .unwrap_or_else(|| panic!("a permission as `name: level`: {pair:?}"));
+        let permission = permission.trim();
+        assert!(
+            PERMISSIONS.contains(&permission),
+            "no permission {permission:?}"
+        );
+        body.insert(permission.to_owned(), level.trim().into());
+    }
+    serde_json::Value::Object(body)
+}
+
 #[given(
-    expr = "the admin has created an API token over HTTP with the scopes {string} and the label {string}"
+    expr = "the admin has created an API token over HTTP with the permissions {string} and the label {string}"
 )]
-async fn has_created(agent: &mut Agent, scopes: String, label: String) {
-    let scopes: Vec<&str> = scopes.split(',').map(str::trim).collect();
-    let body = serde_json::json!({ "label": label, "scopes": scopes }).to_string();
+async fn has_created(agent: &mut Agent, permissions: String, label: String) {
+    let body = serde_json::json!({ "label": label, "permissions": permissions_body(&permissions) })
+        .to_string();
     let request = in_session(agent, "POST", "/api/v1/tokens", body);
     let response = exchange(agent, request).await;
     assert_eq!(response.status, 201, "body {:?}", response.body);
@@ -141,15 +179,94 @@ fn changes_with_the_token(agent: &mut Agent, current: String, new: String) {
     web::send(agent);
 }
 
-#[then(expr = "the refusal names the scope {string}")]
-fn names_the_scope(agent: &mut Agent, scope: String) {
+/// The body of a change of the created token's permissions, in a request
+/// that has no credentials yet.
+fn change_request(agent: &mut Agent, permissions: &str, password: &str) {
+    let path = format!(
+        "/api/v1/tokens/{}/permissions",
+        agent.api_tokens.created().id
+    );
+    web::request_for(agent, "PUT".to_owned(), path);
+    let request = agent.web.request();
+    request
+        .headers
+        .push("Content-Type: application/json".to_owned());
+    request.body = serde_json::json!({
+        "permissions": permissions_body(permissions),
+        "current-password": password,
+    })
+    .to_string();
+}
+
+#[given(
+    expr = "a request in the admin's session that changes the API token's permissions to {string} with the admin password {string}"
+)]
+fn change_in_session(agent: &mut Agent, permissions: String, password: String) {
+    change_request(agent, &permissions, &password);
+    let headers = [
+        sign_in_steps::session_cookie(agent),
+        sign_in_steps::csrf_header(agent),
+    ];
+    agent.web.request().headers.extend(headers);
+}
+
+#[given(
+    expr = "a request with the API token that changes its own permissions to {string} with the admin password {string}"
+)]
+fn change_with_the_token(agent: &mut Agent, permissions: String, password: String) {
+    change_request(agent, &permissions, &password);
+    let text = agent.api_tokens.created().text.clone();
+    agent
+        .web
+        .request()
+        .headers
+        .push(format!("Authorization: Bearer {text}"));
+}
+
+#[then(expr = "the refusal names the permission {string}")]
+fn names_the_permission(agent: &mut Agent, permission: String) {
     let response = agent.web.response();
     let body: serde_json::Value = serde_json::from_str(&response.body).expect("JSON");
     assert_eq!(
-        body["args"]["scope"],
-        serde_json::json!({ "type": "text", "value": scope }),
+        body["args"]["permission"],
+        serde_json::json!({ "type": "text", "value": permission }),
         "body {:?}",
         response.body
+    );
+}
+
+/// The answer is permissions on the wire: every one, those named at their
+/// level and the others `none`.
+#[then(expr = "the answer lists the permissions {string}")]
+fn lists_the_permissions(agent: &mut Agent, permissions: String) {
+    let response = agent.web.response();
+    let body: serde_json::Value = serde_json::from_str(&response.body).expect("JSON");
+    assert_eq!(
+        body,
+        permissions_body(&permissions),
+        "body {:?}",
+        response.body
+    );
+}
+
+/// The session's list of tokens, which a wrong password's wait doesn't hold
+/// up as it holds up the token itself.
+#[then(expr = "the admin's session lists the API token with the permissions {string}")]
+async fn session_lists_the_permissions(agent: &mut Agent, permissions: String) {
+    let request = in_session(agent, "GET", "/api/v1/tokens", String::new());
+    let response = exchange(agent, request).await;
+    assert_eq!(response.status, 200, "body {:?}", response.body);
+    let body: serde_json::Value = serde_json::from_str(&response.body).expect("JSON");
+    let tokens = body.get("tokens").unwrap_or(&body);
+    let id = &agent.api_tokens.created().id;
+    let token = tokens
+        .as_array()
+        .and_then(|tokens| tokens.iter().find(|token| token["id"] == id.as_str()))
+        .unwrap_or_else(|| panic!("the list holds the token {id}: {body}"));
+    assert_eq!(
+        token["permissions"],
+        permissions_body(&permissions),
+        "{token}"
     );
 }
 

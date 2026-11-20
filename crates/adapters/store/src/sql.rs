@@ -171,7 +171,7 @@ pub(crate) const EVER_SUCCEEDED: &str = concat!(
 macro_rules! select_api_tokens {
     ($($clause:literal),+ $(,)?) => {
         concat!(
-            "SELECT id, label, digest, scopes, password, created_at, last_used_at ",
+            "SELECT id, label, digest, permissions, password, created_at, last_used_at ",
             "FROM api_tokens",
             $($clause),+
         )
@@ -181,12 +181,17 @@ macro_rules! select_api_tokens {
 /// How many API tokens are kept.
 pub(crate) const COUNT_API_TOKENS: &str = "SELECT COUNT(*) FROM api_tokens";
 
-/// Keeps a new API token. Parameters: `id`, `label`, `digest`, `scopes`,
-/// `password`, `created_at`, `last_used_at`.
+/// Keeps a new API token. Parameters: `id`, `label`, `digest`,
+/// `permissions`, `password`, `created_at`, `last_used_at`.
 pub(crate) const INSERT_API_TOKEN: &str = concat!(
-    "INSERT INTO api_tokens (id, label, digest, scopes, password, created_at, last_used_at) ",
+    "INSERT INTO api_tokens (id, label, digest, permissions, password, created_at, last_used_at) ",
     "VALUES (?, ?, ?, ?, ?, ?, ?)"
 );
+
+/// Gives a kept API token other permissions. Parameters: the permissions,
+/// the token's ID.
+pub(crate) const SET_API_TOKEN_PERMISSIONS: &str =
+    "UPDATE api_tokens SET permissions = ? WHERE id = ?";
 
 /// Parameter: the token's ID.
 pub(crate) const GET_API_TOKEN: &str = select_api_tokens!(" WHERE id = ?");

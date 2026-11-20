@@ -389,8 +389,8 @@ async fn the_tools_listed_are_the_golden_files() {
     for tool in tools.as_array().expect("a list of tools") {
         // Starting and stopping a backup changes what Ladderback does, never
         // what it keeps; testing a repository keeps nothing but needs the
-        // `run` scope; proposing and withdrawing change a proposal, never
-        // the configuration; everything else only reads.
+        // permission Backup runs; proposing and withdrawing change a
+        // proposal, never the configuration; everything else only reads.
         let reads = !matches!(
             tool["name"].as_str(),
             Some(
@@ -685,14 +685,14 @@ fn catalog(
 /// after it, in the catalog's words, what the agent can do next (§4.6).
 #[tokio::test(start_paused = true)]
 async fn a_refusal_says_the_catalogs_sentence_after_its_code() {
-    let scope = [("scope", api::MsgArg::Text("run".to_owned()))];
-    let refused = ErrorDto::new(ErrorCode::ApiTokenScope, scope.clone(), None);
+    let permission = [("permission", api::MsgArg::Text("backup-runs".to_owned()))];
+    let refused = ErrorDto::new(ErrorCode::ApiTokenPermission, permission.clone(), None);
     let mut client = connect(Told(Err(refused.clone())));
     let answer = client.call_status(json!({})).await;
     assert_eq!(refusal(&answer), serde_json::to_value(&refused).unwrap());
     assert_eq!(
         said(&answer),
-        catalog(&english(), ErrorCode::ApiTokenScope, &scope, None)
+        catalog(&english(), ErrorCode::ApiTokenPermission, &permission, None)
     );
 }
 
@@ -1735,7 +1735,7 @@ async fn a_cancel_the_backend_refuses_is_its_refusal_marked_as_an_error() {
         .await;
     assert_eq!(
         refusal(&answer),
-        json!({"code": "api-token-scope", "args": {"scope": {"type": "text", "value": "session"}}}),
+        json!({"code": "api-token-permission", "args": {"permission": {"type": "text", "value": "session"}}}),
     );
 }
 

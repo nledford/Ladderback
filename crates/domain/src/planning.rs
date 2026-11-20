@@ -130,6 +130,9 @@ pub enum ValueKind {
     /// A channel's Basic `username`: empty, too long, or holding a `:` or a
     /// control character.
     ChannelUsername,
+    /// A key of `[without-token]` set to neither its permission's level nor
+    /// `none`.
+    PermissionLevel,
 }
 
 /// A value the model refuses. `value` is the text as it was written, except

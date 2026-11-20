@@ -19,8 +19,8 @@ use domain::execution::locations::LocationsRecord;
 
 use app::ports::SecretResolver;
 use app::ports::{
-    AdminPasswordError, Clock, ConfigError, Engine, EngineError, EngineEvent, EngineResult,
-    EventBus, Job, NormalizeSources, OperationRecord, RunningJob,
+    AdminPasswordError, Clock, Engine, EngineError, EngineEvent, EngineResult, EventBus, Job,
+    NormalizeSources, OperationRecord, RunningJob,
 };
 use app::progress::LiveProgress;
 use app::secrets::{Cause, ResolveError};
@@ -860,66 +860,6 @@ async fn failure_redactor(
         options_cold: &settings.options_cold,
         resolved: &resolved,
     })
-}
-
-/// A configuration that couldn't be read or written, as the code and the
-/// arguments its message declares, which `unavailable` makes a route's
-/// refusal of: every route that reads the file says the same of it (#347).
-/// The store never puts a value in what it reports (`ConfigError`), so its
-/// words can be shown.
-fn config_unusable<R>(
-    error: ConfigError,
-    unavailable: impl FnOnce(ErrorCode, Vec<(&'static str, MsgArg)>, Option<String>) -> R,
-) -> R {
-    match error {
-        ConfigError::Unavailable { file, detail } => unavailable(
-            ErrorCode::ConfigUnavailable,
-            vec![("file", text(file))],
-            Some(detail),
-        ),
-        ConfigError::TooLarge { file, limit } => unavailable(
-            ErrorCode::ConfigTooLarge,
-            vec![("file", text(file)), ("limit", MsgArg::Bytes(limit))],
-            None,
-        ),
-        ConfigError::SchemaMissing { file } => unavailable(
-            ErrorCode::ConfigSchemaMissing,
-            vec![("file", text(file))],
-            None,
-        ),
-        ConfigError::SchemaNewer {
-            file,
-            found,
-            supported,
-        } => unavailable(
-            ErrorCode::ConfigSchemaNewer,
-            vec![
-                ("file", text(file)),
-                ("found", text(found)),
-                ("supported", text(supported)),
-            ],
-            None,
-        ),
-        ConfigError::Invalid {
-            file,
-            key,
-            at,
-            detail,
-            ..
-        } => {
-            let mut args = vec![("file", text(file))];
-            if let Some(at) = at {
-                args.push(("line", text(at.line)));
-            }
-            let detail = match (key, detail.is_empty()) {
-                (Some(key), false) => Some(format!("{key}: {detail}")),
-                (Some(key), true) => Some(key),
-                (None, false) => Some(detail),
-                (None, true) => None,
-            };
-            unavailable(ErrorCode::ConfigInvalid, args, detail)
-        }
-    }
 }
 
 /// A location of `settings`, as it may be shown: with the password a URL

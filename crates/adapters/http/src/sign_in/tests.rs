@@ -1629,8 +1629,10 @@ async fn signing_out_everywhere_ends_every_session_this_one_too_and_leaves_api_t
     let created = access_of(&on)
         .create_api_token(
             domain::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
-            domain::access::api_token::Scopes::new([domain::access::api_token::Scope::Read])
-                .unwrap(),
+            domain::access::api_token::TokenPermissions::new(
+                domain::access::permissions::Permissions::default(),
+            )
+            .unwrap(),
         )
         .await
         .unwrap();

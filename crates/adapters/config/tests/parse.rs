@@ -659,6 +659,18 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
             "\"sometimes\"",
         ),
         refused(
+            "schema = 1\n\n[without-token]\nbackups = \"start-and-cancel\"\n".to_owned(),
+            "without-token.backups",
+            ValueKind::PermissionLevel,
+            "\"start-and-cancel\"",
+        ),
+        refused(
+            "schema = 1\n\n[without-token]\ndaemon-log = \"off\"\n".to_owned(),
+            "without-token.daemon-log",
+            ValueKind::PermissionLevel,
+            "\"off\"",
+        ),
+        refused(
             base_with("retry = { attempts = 0, backoff = \"10m\" }\n"),
             "plans[0].retry.attempts",
             ValueKind::Attempts,
@@ -1430,4 +1442,19 @@ fn a_secret_written_in_a_file_that_is_refused_is_not_repeated() {
     let shown = format!("{result:?}");
     assert!(shown.contains("colour"), "{shown}");
     assert!(!shown.contains("CANARY"), "{shown}");
+}
+
+#[test]
+fn the_without_token_table_is_read_and_a_permission_it_leaves_out_keeps_its_default() {
+    use domain::access::permissions::{Level, Permission, Permissions};
+    let parsed =
+        parsed("schema = 1\n\n[without-token]\nbackup-runs = \"none\"\ndaemon-log = \"read\"\n")
+            .expect("a valid file");
+    assert_eq!(
+        parsed.config.without_token(),
+        Permissions::default()
+            .with(Permission::BackupRuns, None)
+            .and_then(|p| p.with(Permission::DaemonLog, Some(Level::Read)))
+            .unwrap()
+    );
 }

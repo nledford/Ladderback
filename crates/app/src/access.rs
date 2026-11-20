@@ -24,7 +24,10 @@ pub use admin_password::{
     PasswordChangeRefused, PasswordSet, SetPasswordRefused, set_admin_password,
     set_admin_password_leaving_sessions,
 };
-pub use api_tokens::{ApiTokenGrant, ApiTokenRefused, ApiTokensRefused, CreatedApiToken};
+pub use api_tokens::{
+    ApiTokenChangeRefused, ApiTokenGrant, ApiTokenRefused, ApiTokensRefused, CreatedApiToken,
+    logged, permissions_dto, permissions_of,
+};
 pub(crate) use step_up::{StepUpRefused, confirm_step_up};
 
 /// The admin's sessions and the waits after failed sign-ins. The sessions

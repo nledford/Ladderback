@@ -17,7 +17,7 @@ Feature: An AI agent dry-runs a draft plan through MCP
     And the admin has signed in over HTTP with "demo-admin-pass"
     And a demo folder holding the files "canary-alpha-notes.txt" of 100 bytes and "canary-beta-trace.log" of 40 bytes
     And the admin has set the dry-run allowlist to the demo folder over HTTP
-    And the admin has created an API token over HTTP with the scopes "propose" and the label "assistant"
+    And the admin has created an API token over HTTP with the permissions "configuration: propose" and the label "assistant"
     And an MCP server connected to it with that API token in a file
 
   Scenario: A dry run counts what a plan would back up and never shows a path
@@ -45,7 +45,7 @@ Feature: An AI agent dry-runs a draft plan through MCP
       | git-ignore         |
       | no-require-git     |
 
-  Scenario: An API token can't change the dry-run allowlist, even with the propose scope
+  Scenario: An API token can't change the dry-run allowlist, even with the permission Configuration
     When the API token sets the dry-run allowlist to "/" over HTTP
     Then the daemon refuses it with the status 403
     And the admin's session reads the dry-run allowlist as only the demo folder

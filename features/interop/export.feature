@@ -506,7 +506,7 @@ Feature: Export a plan as a rustic profile
       And Ladderback removed exactly the snapshots rustic would have removed
 
   # Only a person signed in with the admin password gets the commands: an API
-  # token, whatever its scopes, is a program's, perhaps an AI agent's.
+  # token, whatever its permissions, is a program's, perhaps an AI agent's.
   @e2e
   Rule: Over the API, only a signed-in session gets the commands a profile runs
 
@@ -529,8 +529,8 @@ Feature: Export a plan as a rustic profile
       And Ladderback is serving on loopback with that config file, sign-in on and the admin password "demo-admin-pass"
       And the admin has signed in over HTTP with "demo-admin-pass"
 
-    Scenario: An API token that may read gets the profile without its commands
-      Given the admin has created an API token over HTTP with the scopes "read" and the label "reader"
+    Scenario: An API token with Backups gets the profile without its commands
+      Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
       And a "GET" request for "/api/v1/plans/home/profile" with the API token
       When the request is sent
       Then the request is answered with status 200

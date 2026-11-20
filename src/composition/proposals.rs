@@ -30,8 +30,8 @@ use platform::SystemClock;
 use platform::random::OsRandom;
 use uuid::Uuid;
 
-use super::config_unusable;
 use super::plans::{problem_of, violated};
+use app::ports::config_unusable;
 
 /// What the proposals are kept and applied over, kept apart from the
 /// service so the daemon builds the service again once sign-in is

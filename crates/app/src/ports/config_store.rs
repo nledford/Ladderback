@@ -1,3 +1,4 @@
+use api::{ErrorCode, MsgArg};
 use async_trait::async_trait;
 use domain::planning::{AgentConfig, NotRecorded, RepositoryConfig, ValueKind, Violation};
 use domain::{IdKind, RepositoryAlias, RepositoryId};
@@ -197,3 +198,67 @@ impl std::fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+/// A configuration that couldn't be read or written, as the code and the
+/// arguments its message declares, which `unavailable` makes a route's
+/// refusal of: every route that reads the file says the same of it (#347).
+/// The store never puts a value in what it reports (`ConfigError`), so its
+/// words can be shown.
+pub fn config_unusable<R>(
+    error: ConfigError,
+    unavailable: impl FnOnce(ErrorCode, Vec<(&'static str, MsgArg)>, Option<String>) -> R,
+) -> R {
+    let text = |value: &dyn std::fmt::Display| MsgArg::Text(value.to_string());
+    match error {
+        ConfigError::Unavailable { file, detail } => unavailable(
+            ErrorCode::ConfigUnavailable,
+            vec![("file", MsgArg::Text(file))],
+            Some(detail),
+        ),
+        ConfigError::TooLarge { file, limit } => unavailable(
+            ErrorCode::ConfigTooLarge,
+            vec![
+                ("file", MsgArg::Text(file)),
+                ("limit", MsgArg::Bytes(limit)),
+            ],
+            None,
+        ),
+        ConfigError::SchemaMissing { file } => unavailable(
+            ErrorCode::ConfigSchemaMissing,
+            vec![("file", MsgArg::Text(file))],
+            None,
+        ),
+        ConfigError::SchemaNewer {
+            file,
+            found,
+            supported,
+        } => unavailable(
+            ErrorCode::ConfigSchemaNewer,
+            vec![
+                ("file", MsgArg::Text(file)),
+                ("found", text(&found)),
+                ("supported", text(&supported)),
+            ],
+            None,
+        ),
+        ConfigError::Invalid {
+            file,
+            key,
+            at,
+            detail,
+            ..
+        } => {
+            let mut args = vec![("file", MsgArg::Text(file))];
+            if let Some(at) = at {
+                args.push(("line", text(&at.line)));
+            }
+            let detail = match (key, detail.is_empty()) {
+                (Some(key), false) => Some(format!("{key}: {detail}")),
+                (Some(key), true) => Some(key),
+                (None, false) => Some(detail),
+                (None, true) => None,
+            };
+            unavailable(ErrorCode::ConfigInvalid, args, detail)
+        }
+    }
+}

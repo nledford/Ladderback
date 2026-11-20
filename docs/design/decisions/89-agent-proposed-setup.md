@@ -199,3 +199,5 @@ The feature guards against a confused or prompt-injected AI agent using its MCP 
 - **A: the AI agent submits `config.toml` text or a patch.** The AI agent would write TOML, checks would come late, the plain-words summary would have to be worked out backwards from text, and it fights decision 69's keeping of the person's layout.
 - **C: the AI agent writes directly with a scoped token, plus an undo window.** It breaks the decided web-UI confirmation, and a forget (I6) or a maintenance claim (I1) can't be undone.
 - **D: the AI agent fills a wizard through MCP elicitation.** The AI agent's host draws the form and may approve it automatically, so it is no human confirmation (decision 20).
+
+**Amended by decision 127** (2026-11-20, #962): the `propose` scope is the permission Configuration, and a token without it is refused `api-token-permission` naming `configuration`. With sign-in off, an AI agent's request without Configuration in the `[without-token]` table is refused `without-token-permission`.

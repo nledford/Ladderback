@@ -599,6 +599,17 @@ fn log_warns(agent: &mut Agent, words: String) {
     );
 }
 
+/// A log record at any level holds these words.
+#[then(expr = "its log says {string}")]
+fn log_says(agent: &mut Agent, words: String) {
+    let path = agent.web.log.as_ref().expect("Ladderback was started");
+    let log = std::fs::read_to_string(path).expect("the daemon's log");
+    assert!(
+        log.lines().any(|line| line.contains(&words)),
+        "no line saying {words:?} in: {log}"
+    );
+}
+
 /// A line the daemon says itself, after its name, rather than a log record:
 /// no `RUST_LOG` can hide it (§10.1).
 #[then(expr = "Ladderback warns {string}")]

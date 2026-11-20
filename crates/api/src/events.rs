@@ -40,7 +40,9 @@ pub enum UiEvent {
         current: u64,
         total: Option<u64>,
     },
-    /// A problem with one item that doesn't fail the operation.
+    /// A problem with one item that doesn't fail the operation. `args`, the
+    /// item and the engine's own words, are empty for a program without the
+    /// permission Snapshot contents: either can name a file.
     OperationWarning {
         operation: String,
         code: WarningCode,
@@ -57,7 +59,9 @@ pub enum UiEvent {
     /// The operation ended badly: announced like [`Self::OperationSucceeded`],
     /// for a failure the run found out itself as well as the engine's own.
     /// `args` are the failure's arguments by position, then the engine's own
-    /// words ([`ErrorDto::positional`](crate::ErrorDto::positional)).
+    /// words ([`ErrorDto::positional`](crate::ErrorDto::positional)): empty
+    /// for a program without the permission Snapshot contents, as either can
+    /// name a file.
     OperationFailed {
         operation: String,
         code: ErrorCode,

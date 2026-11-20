@@ -315,7 +315,7 @@ fn a_code_declares_the_arguments_its_producers_send() {
         ErrorCode::SignInOff,
         ErrorCode::RestartUnavailable,
         ErrorCode::RestartPending,
-        ErrorCode::ApiTokenNoScope,
+        ErrorCode::ApiTokenNoPermission,
         ErrorCode::ApiTokensUnavailable,
         ErrorCode::ProposalsUnavailable,
         ErrorCode::DryRunBusy,

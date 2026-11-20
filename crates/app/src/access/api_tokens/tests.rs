@@ -3,13 +3,46 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::Timestamp;
-use domain::access::api_token::{ApiTokenId, ApiTokenLabel, Scope, Scopes};
+use domain::access::api_token::{ApiTokenId, ApiTokenLabel, TokenPermissions};
+use domain::access::permissions::{Level, Permission, Permissions};
 use domain::access::{Password, PasswordFingerprint};
 
 use super::*;
-use crate::access::tests::{capture_the_log, logged};
+use crate::access::tests::{capture_the_log, logged as everything_logged};
 use crate::fakes::{FakeClock, InMemoryAdminPassword, InMemoryApiTokenStore, SeededRandom};
 use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore};
+
+/// The warnings logged since the capture began: what a failed write of a
+/// use says, without the lines that log each token created or revoked.
+fn logged() -> Vec<(log::Level, String)> {
+    everything_logged()
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .collect()
+}
+
+#[test]
+fn every_permission_reads_back_from_the_wire_and_a_level_its_permission_lacks_is_refused() {
+    for permission in Permission::ALL {
+        let one = Permissions::NONE
+            .with(permission, Some(permission.level()))
+            .unwrap();
+        assert_eq!(
+            permissions_of(permissions_dto(one)),
+            Ok(one),
+            "{permission:?}"
+        );
+    }
+    assert_eq!(
+        permissions_of(permissions_dto(Permissions::default())),
+        Ok(Permissions::default())
+    );
+    let wrong = api::PermissionsDto {
+        backups: api::PermissionLevelDto::Propose,
+        ..api::PermissionsDto::default()
+    };
+    assert!(permissions_of(wrong).is_err());
+}
 
 const HOME: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
 
@@ -33,10 +66,10 @@ fn access_over(
     )
 }
 
-fn read() -> (ApiTokenLabel, Scopes) {
+fn read() -> (ApiTokenLabel, TokenPermissions) {
     (
         ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
-        Scopes::new([Scope::Read]).unwrap(),
+        TokenPermissions::new(Permissions::default()).unwrap(),
     )
 }
 
@@ -67,6 +100,13 @@ impl ApiTokenStore for Meeting {
     }
     async fn all(&self) -> Result<Vec<ApiToken>, StoreError> {
         self.inner.all().await
+    }
+    async fn set_permissions(
+        &self,
+        id: &ApiTokenId,
+        permissions: TokenPermissions,
+    ) -> Result<bool, StoreError> {
+        self.inner.set_permissions(id, permissions).await
     }
     async fn revoke(&self, id: &ApiTokenId) -> Result<bool, StoreError> {
         self.inner.revoke(id).await
@@ -171,7 +211,7 @@ async fn a_password_that_cannot_be_read_accepts_no_token_and_counts_nothing() {
             Err(ApiTokenRefused::Unavailable(text)) if text.contains("Permission denied")
         ));
     }
-    assert!(!access.api_token_live(&token.token.id).await);
+    assert_eq!(access.api_token_permissions(&token.token.id).await, None);
     let (label, scopes) = read();
     assert!(matches!(
         access.create_api_token(label, scopes).await,
@@ -201,6 +241,13 @@ impl ApiTokenStore for Broken {
         Err(broken())
     }
     async fn all(&self) -> Result<Vec<ApiToken>, StoreError> {
+        Err(broken())
+    }
+    async fn set_permissions(
+        &self,
+        _: &ApiTokenId,
+        _: TokenPermissions,
+    ) -> Result<bool, StoreError> {
         Err(broken())
     }
     async fn revoke(&self, _: &ApiTokenId) -> Result<bool, StoreError> {
@@ -287,6 +334,13 @@ impl ApiTokenStore for NoUses {
     }
     async fn all(&self) -> Result<Vec<ApiToken>, StoreError> {
         self.kept.all().await
+    }
+    async fn set_permissions(
+        &self,
+        id: &ApiTokenId,
+        permissions: TokenPermissions,
+    ) -> Result<bool, StoreError> {
+        self.kept.set_permissions(id, permissions).await
     }
     async fn revoke(&self, id: &ApiTokenId) -> Result<bool, StoreError> {
         if self.working.load(std::sync::atomic::Ordering::SeqCst) {
@@ -437,15 +491,40 @@ async fn a_token_is_live_until_it_is_revoked_or_the_password_is_set_anew() {
     let access = access_over(kept.clone(), Arc::new(InMemoryApiTokenStore::new()), &clock);
     let revoked = created(&access).await;
     let reset = created(&access).await;
-    assert!(access.api_token_live(&revoked.token.id).await);
+    let held = Some(Permissions::default());
+    assert_eq!(access.api_token_permissions(&revoked.token.id).await, held);
     assert_eq!(access.revoke_api_token(&revoked.token.id).await, Ok(true));
     assert_eq!(access.revoke_api_token(&revoked.token.id).await, Ok(false));
-    assert!(!access.api_token_live(&revoked.token.id).await);
-    assert!(access.api_token_live(&reset.token.id).await);
+    assert_eq!(access.api_token_permissions(&revoked.token.id).await, None);
+    assert_eq!(access.api_token_permissions(&reset.token.id).await, held);
     kept.set(&Password::parse("demo-admin-pass".to_owned()).unwrap())
         .await
         .unwrap();
-    assert!(!access.api_token_live(&reset.token.id).await);
+    assert_eq!(access.api_token_permissions(&reset.token.id).await, None);
+}
+
+/// An events stream asks again what its token may do: the answer is the
+/// permissions the token holds now, not the ones it was presented with.
+#[tokio::test]
+async fn a_live_tokens_permissions_are_the_ones_it_holds_now() {
+    let clock = clock();
+    let access = access_over(
+        Arc::new(InMemoryAdminPassword::with("demo-admin-pass")),
+        Arc::new(InMemoryApiTokenStore::new()),
+        &clock,
+    );
+    let token = created(&access).await;
+    let current = Password::parse("demo-admin-pass".to_owned()).unwrap();
+    assert_eq!(
+        access
+            .change_api_token_permissions(HOME, &current, &token.token.id, with_the_log())
+            .await,
+        Ok(true)
+    );
+    assert_eq!(
+        access.api_token_permissions(&token.token.id).await,
+        Some(with_the_log().get())
+    );
 }
 
 #[tokio::test]
@@ -471,4 +550,98 @@ fn a_wait_is_said_in_whole_seconds_rounded_up() {
     assert_eq!(seconds_left(SignedDuration::from_millis(1000)), 1);
     assert_eq!(seconds_left(SignedDuration::from_millis(1001)), 2);
     assert_eq!(seconds_left(SignedDuration::ZERO), 0);
+}
+
+fn with_the_log() -> TokenPermissions {
+    TokenPermissions::new(
+        Permissions::default()
+            .with(Permission::DaemonLog, Some(Level::Read))
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_tokens_permissions_change_only_with_the_current_admin_password() {
+    let clock = clock();
+    let tokens = Arc::new(InMemoryApiTokenStore::new());
+    let access = access_over(
+        Arc::new(InMemoryAdminPassword::with("demo-admin-pass")),
+        tokens.clone(),
+        &clock,
+    );
+    let created = created(&access).await;
+    let wrong = Password::parse("not-the-password".to_owned()).unwrap();
+    assert_eq!(
+        access
+            .change_api_token_permissions(HOME, &wrong, &created.token.id, with_the_log())
+            .await,
+        Err(ApiTokenChangeRefused::Password(
+            PasswordRefused::WrongPassword
+        ))
+    );
+    let kept = tokens.get(&created.token.id).await.unwrap().unwrap();
+    assert_eq!(kept.permissions, created.token.permissions);
+    let current = Password::parse("demo-admin-pass".to_owned()).unwrap();
+    clock.advance(domain::SignedDuration::from_secs(1));
+    assert_eq!(
+        access
+            .change_api_token_permissions(HOME, &current, &created.token.id, with_the_log())
+            .await,
+        Ok(true)
+    );
+    let kept = tokens.get(&created.token.id).await.unwrap().unwrap();
+    assert_eq!(kept.permissions, with_the_log());
+    let missing = ApiTokenId::parse("zzzzzzzzzzzz").unwrap();
+    assert_eq!(
+        access
+            .change_api_token_permissions(HOME, &current, &missing, with_the_log())
+            .await,
+        Ok(false)
+    );
+}
+
+#[tokio::test]
+async fn creating_changing_and_revoking_a_token_are_logged_without_its_secret() {
+    capture_the_log();
+    let clock = clock();
+    let access = access_over(
+        Arc::new(InMemoryAdminPassword::with("demo-admin-pass")),
+        Arc::new(InMemoryApiTokenStore::new()),
+        &clock,
+    );
+    let created = created(&access).await;
+    let current = Password::parse("demo-admin-pass".to_owned()).unwrap();
+    access
+        .change_api_token_permissions(HOME, &current, &created.token.id, with_the_log())
+        .await
+        .unwrap();
+    assert!(access.revoke_api_token(&created.token.id).await.unwrap());
+    let id = created.token.id.as_str();
+    let lines: Vec<String> = everything_logged()
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Info)
+        .map(|(_, line)| line)
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            format!(
+                "API token {id} (nightly-mcp) created, with backups: read, \
+                 backup-runs: start-and-cancel, previews: preview, configuration: propose"
+            ),
+            format!(
+                "API token {id} now has backups: read, backup-runs: start-and-cancel, \
+                 previews: preview, configuration: propose, daemon-log: read"
+            ),
+            format!("API token {id} revoked"),
+        ]
+    );
+    let secret = created.text.expose();
+    assert!(
+        lines
+            .iter()
+            .all(|line| !line.contains(secret.get(secret.len() - 20..).expect("ASCII"))),
+        "{lines:?}"
+    );
 }

@@ -35,6 +35,16 @@ pub(crate) fn sign_in_off() -> crate::SignIn {
     }
 }
 
+/// What AI agents may do without a token, read from `config`.
+pub(crate) fn without_token_over(
+    config: Arc<dyn app::ports::ConfigStore>,
+) -> Arc<app::without_token::WithoutToken> {
+    Arc::new(app::without_token::WithoutToken::new(
+        config,
+        Arc::default(),
+    ))
+}
+
 /// A state with the in-memory event bus: these tests only check the checks.
 pub(crate) fn test_state() -> AppState {
     AppState {
@@ -54,6 +64,7 @@ pub(crate) fn test_state() -> AppState {
         restart: crate::Restart::default(),
         updates: Arc::default(),
         recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+        without_token: without_token_over(Arc::new(app::fakes::InMemoryConfigStore::new())),
         full_disk_access: crate::FullDiskAccessRoute::default(),
         sync: crate::SyncHub::default(),
     }

@@ -1,19 +1,97 @@
-//! API tokens (technical design §10.1, decision 93): creating, listing and
-//! revoking them in a session, and checking the one a program presents. A
-//! failed check counts as a failed sign-in for the client, in the same waits;
-//! a good one doesn't start them over.
+//! API tokens (technical design §10.1, decisions 93 and 127): creating,
+//! listing, changing the permissions of and revoking them in a session, and
+//! checking the one a program presents. A failed check counts as a failed
+//! sign-in for the client, in the same waits; a good one doesn't start them
+//! over. Every creation, change and revocation is logged, never a secret.
 
 use std::net::IpAddr;
 
-use domain::access::Client;
+use api::{PermissionLevelDto, PermissionsDto};
 use domain::access::api_token::{
     ApiToken, ApiTokenId, ApiTokenLabel, ApiTokenSecret, ApiTokenText, MAX_API_TOKENS,
-    PresentedApiToken, Scopes,
+    PresentedApiToken, TokenPermissions,
 };
+use domain::access::permissions::{Level, NoSuchLevel, Permission, Permissions};
+use domain::access::{Client, Password};
 use domain::{SignedDuration, Timestamp};
 
-use super::Access;
+use super::{Access, PasswordRefused};
 use crate::ports::{Added, StoreError};
+
+/// `permissions` as a log line names them: each row that is on, with its
+/// level, as `backups: read`, joined by commas; `no access` for none.
+pub fn logged(permissions: Permissions) -> String {
+    let rows: Vec<String> = permissions
+        .rows()
+        .map(|(row, level)| format!("{}: {}", row.as_str(), level.as_str()))
+        .collect();
+    if rows.is_empty() {
+        "no access".to_owned()
+    } else {
+        rows.join(", ")
+    }
+}
+
+/// `permissions` on the wire: each permission at its level or `none`.
+pub fn permissions_dto(permissions: Permissions) -> PermissionsDto {
+    let at = |permission: Permission| {
+        if permissions.grants(permission) {
+            match permission.level() {
+                Level::Read => PermissionLevelDto::Read,
+                Level::StartAndCancel => PermissionLevelDto::StartAndCancel,
+                Level::Preview => PermissionLevelDto::Preview,
+                Level::Propose => PermissionLevelDto::Propose,
+                Level::Run => PermissionLevelDto::Run,
+            }
+        } else {
+            PermissionLevelDto::None
+        }
+    };
+    PermissionsDto {
+        backups: at(Permission::Backups),
+        backup_runs: at(Permission::BackupRuns),
+        previews: at(Permission::Previews),
+        configuration: at(Permission::Configuration),
+        snapshot_contents: at(Permission::SnapshotContents),
+        daemon_log: at(Permission::DaemonLog),
+        repository_check: at(Permission::RepositoryCheck),
+    }
+}
+
+/// The permissions a request names; a level its permission doesn't have,
+/// as `"backups": "propose"`, is refused.
+pub fn permissions_of(dto: PermissionsDto) -> Result<Permissions, NoSuchLevel> {
+    let PermissionsDto {
+        backups,
+        backup_runs,
+        previews,
+        configuration,
+        snapshot_contents,
+        daemon_log,
+        repository_check,
+    } = dto;
+    [
+        (Permission::Backups, backups),
+        (Permission::BackupRuns, backup_runs),
+        (Permission::Previews, previews),
+        (Permission::Configuration, configuration),
+        (Permission::SnapshotContents, snapshot_contents),
+        (Permission::DaemonLog, daemon_log),
+        (Permission::RepositoryCheck, repository_check),
+    ]
+    .into_iter()
+    .try_fold(Permissions::NONE, |permissions, (permission, level)| {
+        let level = match level {
+            PermissionLevelDto::None => None,
+            PermissionLevelDto::Read => Some(Level::Read),
+            PermissionLevelDto::StartAndCancel => Some(Level::StartAndCancel),
+            PermissionLevelDto::Preview => Some(Level::Preview),
+            PermissionLevelDto::Propose => Some(Level::Propose),
+            PermissionLevelDto::Run => Some(Level::Run),
+        };
+        permissions.with(permission, level)
+    })
+}
 
 /// A token that has just been created, and its whole text, shown once.
 #[derive(Debug)]
@@ -37,7 +115,7 @@ pub enum ApiTokensRefused {
 pub struct ApiTokenGrant {
     pub id: ApiTokenId,
     pub label: ApiTokenLabel,
-    pub scopes: Scopes,
+    pub permissions: Permissions,
 }
 
 /// Why a presented token was not accepted.
@@ -54,6 +132,16 @@ pub enum ApiTokenRefused {
     Unavailable(String),
 }
 
+/// Why a token's permissions weren't changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiTokenChangeRefused {
+    /// The current admin password was wrong, or couldn't be checked; a
+    /// wrong one counted as a failed sign-in.
+    Password(PasswordRefused),
+    /// The store could not be read or written: its own message.
+    Unavailable(String),
+}
+
 /// What is left of a wait, in whole seconds, rounded up.
 pub(super) fn seconds_left(left: SignedDuration) -> u64 {
     let millis = u64::try_from(left.as_millis()).unwrap_or(u64::MAX);
@@ -65,13 +153,13 @@ fn unavailable(error: impl std::fmt::Debug) -> String {
 }
 
 impl Access {
-    /// Creates a token with `label` and `scopes` under the admin password
-    /// kept now. Tokens of an earlier password are revoked first, so they
-    /// never take a place of the [`MAX_API_TOKENS`].
+    /// Creates a token with `label` and `permissions` under the admin
+    /// password kept now. Tokens of an earlier password are revoked first,
+    /// so they never take a place of the [`MAX_API_TOKENS`].
     pub async fn create_api_token(
         &self,
         label: ApiTokenLabel,
-        scopes: Scopes,
+        permissions: TokenPermissions,
     ) -> Result<CreatedApiToken, ApiTokensRefused> {
         let under = self
             .password
@@ -89,7 +177,7 @@ impl Access {
         let (id, secret) = (draw()?, draw()?);
         let id = ApiTokenId::from_bytes(&id);
         let secret = ApiTokenSecret::from_bytes(secret);
-        let token = ApiToken::issue(id, label, scopes, &secret, under, self.clock.now());
+        let token = ApiToken::issue(id, label, permissions, &secret, under, self.clock.now());
         match self
             .tokens
             .add(&token, MAX_API_TOKENS)
@@ -98,6 +186,12 @@ impl Access {
         {
             Added::Kept => {
                 self.tokens_written();
+                log::info!(
+                    "API token {} ({}) created, with {}",
+                    token.id.as_str(),
+                    token.label.as_str(),
+                    logged(token.permissions.get())
+                );
                 Ok(CreatedApiToken {
                     text: ApiTokenText::new(&token.id, &secret),
                     token,
@@ -126,8 +220,40 @@ impl Access {
         let revoked = self.tokens.revoke(id).await.map_err(store_refused)?;
         if revoked {
             self.tokens_written();
+            log::info!("API token {} revoked", id.as_str());
         }
         Ok(revoked)
+    }
+
+    /// Gives the token `id` other `permissions`, only with the `current`
+    /// admin password, checked in the waits of the client at `address` as
+    /// a sign-in is, so that a stolen session alone can't widen a token;
+    /// whether there was one. The route lets only a session ask, never a
+    /// token (§10.1).
+    pub async fn change_api_token_permissions(
+        &self,
+        address: IpAddr,
+        current: &Password,
+        id: &ApiTokenId,
+        permissions: TokenPermissions,
+    ) -> Result<bool, ApiTokenChangeRefused> {
+        self.step_up(address, current)
+            .await
+            .map_err(ApiTokenChangeRefused::Password)?;
+        let changed = self
+            .tokens
+            .set_permissions(id, permissions)
+            .await
+            .map_err(|error| ApiTokenChangeRefused::Unavailable(error.to_string()))?;
+        if changed {
+            self.tokens_written();
+            log::info!(
+                "API token {} now has {}",
+                id.as_str(),
+                logged(permissions.get())
+            );
+        }
+        Ok(changed)
     }
 
     /// Checks the token a request from `address` presents: `None` when the
@@ -186,17 +312,20 @@ impl Access {
         Ok(ApiTokenGrant {
             id: token.id,
             label: token.label,
-            scopes: token.scopes,
+            permissions: token.permissions.get(),
         })
     }
 
-    /// Whether the token `id` is kept still under the admin password kept
-    /// now: an events stream opened with it ends once it isn't.
-    pub async fn api_token_live(&self, id: &ApiTokenId) -> bool {
-        let Ok(under) = self.password.fingerprint() else {
-            return false;
-        };
-        matches!(self.tokens.get(id).await, Ok(Some(token)) if token.password == under)
+    /// The permissions the token `id` holds now, while it is kept still
+    /// under the admin password kept now; `None` once it isn't. An events
+    /// stream opened with it ends once it is `None` or lacks what the stream
+    /// needs, and shows what the permissions it holds now allow.
+    pub async fn api_token_permissions(&self, id: &ApiTokenId) -> Option<Permissions> {
+        let under = self.password.fingerprint().ok()?;
+        match self.tokens.get(id).await {
+            Ok(Some(token)) if token.password == under => Some(token.permissions.get()),
+            _ => None,
+        }
     }
 
     fn not_waiting(&self, client: Client, now: Timestamp) -> Result<(), ApiTokenRefused> {
