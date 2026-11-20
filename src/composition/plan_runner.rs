@@ -531,7 +531,11 @@ impl PlanRuns for PlanRunner {
         }
     }
 
-    async fn resume(&self, mut operation: domain::execution::Operation) {
+    async fn resume(
+        &self,
+        mut operation: domain::execution::Operation,
+        _unlock: Option<UnlockWait>,
+    ) {
         let id = operation.id();
         let built = match operation.target().plan.clone() {
             Some(plan) => match self.config.load().await {

@@ -1,12 +1,12 @@
 //! Startup recovery: ending what an earlier run left running, and running
 //! again what it left queued (technical design §5, §9; decisions 40 and 73).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use domain::Timestamp;
 use domain::execution::{FailureReason, OperationKind, Target};
 use domain::planning::AgentConfig;
+use domain::{PlanId, Timestamp};
 
 use crate::announce::{self, announce_end};
 use crate::ports::{EventBus, OperationRecord, OperationStore, Recovered, StoreError};
@@ -98,6 +98,7 @@ impl RecoverOperations {
         &self,
         queued: Vec<OperationRecord>,
         config: Option<&AgentConfig>,
+        unlock_of: &BTreeMap<PlanId, crate::secrets::UnlockWait>,
         runs: &dyn PlanRuns,
         now: Timestamp,
     ) {
@@ -117,7 +118,13 @@ impl RecoverOperations {
                     // The oldest that can run is the one kept: a backup whose
                     // repository changed takes no later one with it.
                     None if resumed.insert(record.target.plan.clone()) => {
-                        runs.resume(operation).await;
+                        let unlock = record
+                            .target
+                            .plan
+                            .as_ref()
+                            .and_then(|plan| unlock_of.get(plan))
+                            .cloned();
+                        runs.resume(operation, unlock).await;
                         continue;
                     }
                     None => QueuedEnd::PlanRunsAgain,
@@ -273,7 +280,7 @@ mod tests {
         ) {
         }
 
-        async fn resume(&self, operation: Operation) {
+        async fn resume(&self, operation: Operation, _: Option<crate::secrets::UnlockWait>) {
             self.resumed
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -314,6 +321,7 @@ mod tests {
             .resume(
                 vec![OperationRecord::of(&running, None)],
                 Some(&AgentConfig::default()),
+                &std::collections::BTreeMap::new(),
                 &runs,
                 at(10),
             )
@@ -399,6 +407,7 @@ mod tests {
                     OperationRecord::of(&check, None),
                 ],
                 Some(&AgentConfig::default()),
+                &std::collections::BTreeMap::new(),
                 &runs,
                 at(10),
             )
@@ -437,6 +446,7 @@ mod tests {
                     OperationRecord::of(&prune, None),
                 ],
                 None,
+                &std::collections::BTreeMap::new(),
                 &runs,
                 at(10),
             )
@@ -525,6 +535,7 @@ mod tests {
             .resume(
                 vec![OperationRecord::of(&backup, None)],
                 Some(&AgentConfig::default()),
+                &std::collections::BTreeMap::new(),
                 &Recording::default(),
                 at(10),
             )
@@ -546,7 +557,13 @@ mod tests {
             let runs = &runs;
             async move {
                 recovery
-                    .resume(queued, Some(&AgentConfig::default()), runs, now)
+                    .resume(
+                        queued,
+                        Some(&AgentConfig::default()),
+                        &std::collections::BTreeMap::new(),
+                        runs,
+                        now,
+                    )
                     .await;
             }
         };

@@ -79,7 +79,12 @@ pub trait PlanRuns: Send + Sync {
 
     /// Runs `operation`, a backup the log holds as queued from before the
     /// daemon started, under its own ID, and returns once it is on its way.
-    async fn resume(&self, operation: domain::execution::Operation);
+    /// `unlock` is the plan's next due run, as the planner kept it: a
+    /// queued run nobody waited on whose repository password is in a locked
+    /// keyring waits for the keyring to be unlocked in a task of its own —
+    /// its operation shows as queued while it waits — never past that run,
+    /// and is refused at once at it, or with no bound (#1221).
+    async fn resume(&self, operation: domain::execution::Operation, unlock: Option<UnlockWait>);
 
     /// Says what the scheduler did that no operation records.
     fn report(&self, report: ScheduleReport);
@@ -901,7 +906,7 @@ mod tests {
                 .push(place);
         }
 
-        async fn resume(&self, _: Operation) {}
+        async fn resume(&self, _: Operation, _: Option<UnlockWait>) {}
 
         fn report(&self, report: ScheduleReport) {
             self.reports
@@ -1446,7 +1451,7 @@ mod tests {
             std::future::pending::<()>().await;
         }
 
-        async fn resume(&self, _: Operation) {}
+        async fn resume(&self, _: Operation, _: Option<UnlockWait>) {}
 
         fn report(&self, _: ScheduleReport) {}
     }

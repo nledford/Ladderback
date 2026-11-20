@@ -324,7 +324,7 @@ impl PlanRuns for RecordingRuns {
         self.run(plan, trigger, place, None);
     }
 
-    async fn resume(&self, operation: Operation) {
+    async fn resume(&self, operation: Operation, _unlock: Option<UnlockWait>) {
         self.resumed
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
