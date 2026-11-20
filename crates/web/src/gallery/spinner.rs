@@ -1,4 +1,13 @@
 //! The gallery's spinner demo (technical design §4.5, "Tests").
+//!
+//! Its spinners turn as long as the gallery is open, beside one another,
+//! with nothing to pause them, which 2.2.2 (Pause, Stop, Hide) would refuse
+//! on a page a reader uses. They stay: each is a case the spinner's
+//! scenarios measure (its sizes, tones and label placements), a still one
+//! would not show that it turns, the gallery is built only with the
+//! `gallery` feature, which `just architecture` keeps out of every release
+//! build, and the reduced-motion rule stops them all for a reader who asks
+//! for less motion.
 
 use std::sync::Arc;
 
