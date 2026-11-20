@@ -44,6 +44,24 @@ impl KeyringWait {
     }
 }
 
+/// When a run nobody waits on gives up waiting for its keyring to be
+/// unlocked: the plan's next due run, which a run never waits past. While
+/// it waits, the keyring is asked whether it is locked — never read, so
+/// waiting can raise no unlock prompt — and the entry is read again the
+/// moment it is unlocked (#1221, amending decision 116).
+#[derive(Clone)]
+pub struct UnlockWait {
+    clock: Arc<dyn Clock>,
+    until: domain::Timestamp,
+}
+
+impl UnlockWait {
+    /// `until` is when the plan's next run is due.
+    pub fn new(clock: Arc<dyn Clock>, until: domain::Timestamp) -> Self {
+        Self { clock, until }
+    }
+}
+
 /// A repository with every reference resolved, ready to hand to the engine.
 /// `access` masks its own secrets, so this one's `Debug` form is derived.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -275,6 +293,9 @@ pub struct ResolveRepository {
     told: Option<SecretWarnings>,
     /// The daemon's start, for runs nobody waits on; none, no run waits.
     wait: Option<KeyringWait>,
+    /// When a run nobody waits on gives up waiting for its locked keyring
+    /// to be unlocked; none, a locked keyring fails at once (decision 116).
+    unlock: Option<UnlockWait>,
 }
 
 /// Told, once, that a run nobody waits on holds for the session's keyring
@@ -293,6 +314,7 @@ impl ResolveRepository {
             resolver,
             told: None,
             wait: None,
+            unlock: None,
         }
     }
 
@@ -302,6 +324,17 @@ impl ResolveRepository {
     pub fn waiting_for_keyring(self, wait: KeyringWait) -> Self {
         Self {
             wait: Some(wait),
+            ..self
+        }
+    }
+
+    /// Lets a run nobody waits on wait for its locked keyring to be
+    /// unlocked until the plan's next run is due, by `wait`
+    /// ([`Self::resolve_saved_unattended`], #1221).
+    #[must_use]
+    pub fn waiting_for_unlock(self, wait: UnlockWait) -> Self {
+        Self {
+            unlock: Some(wait),
             ..self
         }
     }

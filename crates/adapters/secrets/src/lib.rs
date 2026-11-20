@@ -22,7 +22,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use app::ports::{Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver};
+use app::ports::{
+    Kept, Keyring, KeyringActivation, KeyringError, KeyringLock, Resolved, SecretResolver,
+};
 use async_trait::async_trait;
 use domain::secrets::{
     FileRead, KeyringCause, KeyringEntry, Problem, SecretError, SecretRef, SecretValue, SourceName,
@@ -280,6 +282,12 @@ impl SecretResolver for SystemSecrets {
                 .map(resolved),
             SecretRef::Keyring(entry) => self.keyring(entry).await,
         }
+    }
+
+    async fn keyring_lock(&self) -> KeyringLock {
+        // #1221: the green commit asks the store whether its collection is
+        // locked, which reads no entry and so raises no unlock prompt.
+        todo!("ask the collection's lock, without reading an entry (#1221)")
     }
 }
 

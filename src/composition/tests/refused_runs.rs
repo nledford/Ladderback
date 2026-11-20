@@ -4,7 +4,7 @@ use super::captured_log::{self, capture};
 use std::sync::PoisonError;
 
 use api::ErrorCode;
-use app::fakes::{FakeSecrets, InMemoryConfigStore};
+use app::fakes::{FakeClock, FakeSecrets, InMemoryConfigStore};
 use domain::RepositoryId;
 
 use super::service_support::*;
@@ -287,6 +287,176 @@ async fn a_run_by_hand_while_the_daemon_starts_never_waits_for_the_keyring_servi
         .filter(|line| line.contains("keyring service"))
         .collect();
     assert_eq!(waits, Vec::<String>::new());
+}
+
+/// A run that waits for the keyring to be unlocked doesn't hold the
+/// scheduler with it: another plan's run starts and reaches the engine
+/// while the first waits, no run is refused while the keyring is locked,
+/// and once the keyring is unlocked the waiting run backs up with the
+/// password the keyring holds (#1221).
+#[tokio::test]
+async fn another_plan_runs_while_a_run_waits_for_the_keyring_to_be_unlocked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    // A clock that moves only when told, so the run is still waiting when
+    // the other plan's run starts.
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
+    secrets.lock_keyring_until(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let demo = domain::RepositoryAlias::parse("demo").expect("a repository alias");
+    let plain = domain::RepositoryAlias::parse("plain").expect("a repository alias");
+    let config = domain::planning::AgentConfig::new(
+        domain::planning::AgentSettings::default(),
+        Default::default(),
+        std::collections::BTreeMap::from([
+            (
+                demo.clone(),
+                domain::planning::RepositoryConfig {
+                    locations: Default::default(),
+                    id: None,
+                    settings: RepositorySettings {
+                        repository: "/srv/demo-repo".to_owned(),
+                        repo_hot: None,
+                        password: SecretRef::Keyring(entry),
+                        options: Default::default(),
+                        options_hot: Default::default(),
+                        options_cold: Default::default(),
+                    },
+                    maintenance: domain::planning::Maintenance::Local,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            ),
+            (
+                plain.clone(),
+                domain::planning::RepositoryConfig {
+                    locations: Default::default(),
+                    id: None,
+                    settings: RepositorySettings {
+                        repository: "/srv/plain-repo".to_owned(),
+                        repo_hot: None,
+                        password: SecretRef::Inline(domain::secrets::SecretValue::new(
+                            "plain-password",
+                        )),
+                        options: Default::default(),
+                        options_hot: Default::default(),
+                        options_cold: Default::default(),
+                    },
+                    maintenance: domain::planning::Maintenance::Local,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            ),
+        ]),
+        vec![
+            domain::planning::Plan::new(
+                domain::PlanId::parse("home").expect("a plan ID"),
+                demo,
+                vec![domain::planning::Source::parse("/home/demo").expect("a source")],
+            ),
+            domain::planning::Plan::new(
+                domain::PlanId::parse("other").expect("a plan ID"),
+                plain,
+                vec![domain::planning::Source::parse("/home/other").expect("a source")],
+            ),
+        ],
+    )
+    .expect("a valid configuration");
+    let config_store = Arc::new(InMemoryConfigStore::new());
+    app::ports::ConfigStore::save(&*config_store, &config)
+        .await
+        .expect("the config saves");
+    let scripted = engine();
+    let (ends, heard) = app::retry::run_ends();
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let runner = PlanRunner {
+        config: config_store,
+        resolve: Arc::new(daemon_resolve(
+            secrets,
+            clock.clone(),
+            domain::SignedDuration::ZERO,
+        )),
+        agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
+        engine: scripted.clone(),
+        locations: None,
+        retention: Arc::new(engine::RusticRetention),
+        store: store.clone(),
+        registry: Arc::new(CancelRegistry::new()),
+        hooks: Arc::new(ProcessHookRunner::new()),
+        events: Arc::new(BroadcastEventBus::new()),
+        queue: Arc::new(RunQueue::new()),
+        ends,
+        runs: crate::composition::runs::Runs::default(),
+        readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+        full_disk_access: None,
+        left_out: KeyFilesLeftOut::default(),
+        writes: Arc::default(),
+    };
+    let home = domain::PlanId::parse("home").expect("a plan ID");
+    let other = domain::PlanId::parse("other").expect("a plan ID");
+
+    let waiting = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    PlanRuns::start(&runner, &home, Trigger::Schedule, waiting).await;
+
+    // While the first run waits for the keyring, the other plan's run
+    // starts and reaches the engine, and nothing is refused.
+    let place = runner
+        .queue
+        .push(&other, domain::planning::Concurrency::default());
+    PlanRuns::start(&runner, &other, Trigger::Schedule, place).await;
+    assert_eq!(jobs(&scripted), 1, "only the plan that isn't waiting ran");
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    let refused: Vec<_> = history
+        .operations
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.status,
+                domain::execution::OperationStatus::Failed {
+                    reason: domain::execution::FailureReason::SecretRefused { .. },
+                }
+            )
+        })
+        .collect();
+    assert!(
+        refused.is_empty(),
+        "no run is refused for its secret while the keyring is locked: {history:?}"
+    );
+
+    // The keyring unlocks, and the waiting run backs up.
+    clock.advance(domain::SignedDuration::from_secs(60));
+    let mut ended: Vec<domain::PlanId> = Vec::new();
+    for _ in 0..2 {
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+            .await
+            .expect("the run ends")
+            .expect("a run ended");
+        ended.push(end.plan);
+    }
+    assert!(ended.contains(&home), "the waiting run ended: {ended:?}");
+    assert!(ended.contains(&other), "the other run ended: {ended:?}");
+    let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
+    let passwords: Vec<&str> = seen
+        .iter()
+        .filter_map(|job| match job {
+            Job::Backup(backup) => Some(backup.repository.password.expose()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        passwords.contains(&KEYRING_PASSWORD),
+        "the waiting run backed up with the keyring's password: {passwords:?}"
+    );
 }
 
 /// The password the keyring holds for the repository `demo`.
