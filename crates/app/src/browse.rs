@@ -189,7 +189,7 @@ mod tests {
     use domain::execution::FailureReason;
     use domain::find::{NamePattern, SearchAnswer, SearchCaps, SearchStop, Searched};
     use domain::planning::{Maintenance, RepositoryConfig};
-    use domain::secrets::{SecretRef, SecretValue};
+    use domain::secrets::{SecretError, SecretRef, SecretValue};
     use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
     use futures::stream;
     use tokio::sync::watch;
@@ -199,7 +199,8 @@ mod tests {
     use crate::fakes::{FakeClock, FakeSecrets};
     use crate::maintenance::{MaintenanceError, READ_TIMEOUT};
     use crate::ports::{
-        Engine, EngineError, EngineEvent, EngineResult, FolderAnswer, Job, JobControl, RunningJob,
+        Engine, EngineError, EngineEvent, EngineResult, FolderAnswer, Job, JobControl, Resolved,
+        RunningJob, SecretResolver,
     };
     use crate::secrets::ResolveRepository;
 
@@ -550,6 +551,68 @@ mod tests {
         assert_eq!(
             found_now,
             Err(BrowseError::Read(MaintenanceError::TimedOut))
+        );
+    }
+
+    /// A secret source that never answers: a password command waiting on a
+    /// prompt nobody sees.
+    struct Unanswered;
+
+    #[async_trait]
+    impl SecretResolver for Unanswered {
+        async fn resolve(&self, _secret: &SecretRef) -> Result<Resolved, SecretError> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_search_whose_secrets_never_resolve_is_given_up_when_the_search_timeout_ends() {
+        let engine = scripted(Ok(FolderAnswer::FolderUnknown));
+        let clock = at_epoch();
+        let browse = Arc::new(BrowseSnapshot::new(
+            engine.clone(),
+            Arc::<FakeClock>::clone(&clock),
+            ResolveRepository::new(Arc::new(Unanswered)),
+            Arc::default(),
+        ));
+        let searching = {
+            let browse = Arc::clone(&browse);
+            tokio::spawn(async move {
+                browse
+                    .find(
+                        op(),
+                        &alias(),
+                        &entry(),
+                        pattern(),
+                        None,
+                        SearchCaps::clamped(None, None),
+                    )
+                    .await
+            })
+        };
+        settle().await;
+        clock.advance(SEARCH_TIMEOUT - domain::SignedDuration::from_secs(1));
+        settle().await;
+        assert!(
+            !searching.is_finished(),
+            "a second before the search's timeout"
+        );
+        clock.advance(domain::SignedDuration::from_secs(1));
+        let found_now = tokio::time::timeout(Duration::from_secs(5), searching)
+            .await
+            .expect("the search ends when its timeout does, its secrets unread")
+            .expect("the search task ran");
+        assert_eq!(
+            found_now,
+            Err(BrowseError::Read(MaintenanceError::TimedOut))
+        );
+        assert!(
+            engine
+                .seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "no worker was started"
         );
     }
 
