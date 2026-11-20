@@ -6,6 +6,7 @@
 //! seed and nonce comes from the `Random` port.
 
 mod fingerprint;
+mod greeting;
 mod handshake;
 mod hostname;
 mod key_files;
@@ -17,8 +18,12 @@ mod signed;
 mod token;
 
 pub use fingerprint::{Fingerprint, KeyId, TokenId};
+pub use greeting::{
+    AgentEnvelope, Approval, FIRST_SEQUENCE, GENERATION, Hello, HubEnvelope, MAX_EXPIRY_AHEAD,
+    MESSAGE_LIFE, PROTOCOLS, Protocols, Welcome, WelcomeRefused, hello_kind, welcome_kind,
+};
 pub use handshake::{
-    BindingKind, Challenge, Connect, HANDSHAKES, Holder, Pair, PairAnswer, Paired, Refused,
+    BindingKind, Challenge, Connect, HANDSHAKES, Holder, Pair, PairAnswer, Paired, Proof, Refused,
 };
 pub use hostname::{Hostname, InvalidHostname, MAX_HOSTNAME_BYTES};
 pub use key_files::{
@@ -32,8 +37,9 @@ pub use keys::{
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
 pub use registry::{
     AgentRecord, AgentStatus, HostnameKey, LONGEST_TOKEN_LIFE, PENDING_LIMIT, PairRefusal,
-    PairRequest, Pairing, PairingView, SHORTEST_TOKEN_LIFE, TOKEN_LIFE, TokenLifeRefused,
-    TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, decide_pairing, token_life,
+    PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, SHORTEST_TOKEN_LIFE,
+    TOKEN_LIFE, TokenLifeRefused, TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, decide_pairing,
+    decide_proof, token_life,
 };
 pub use route::{HubRoute, RouteRefused, RouteSession, is_loopback};
 pub use signed::{

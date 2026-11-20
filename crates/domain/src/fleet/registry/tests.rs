@@ -363,3 +363,73 @@ fn each_refusal_has_its_code() {
         assert_eq!(refusal.code(), WireName::parse(code).unwrap());
     }
 }
+
+fn proof(counter: u64, kind: BindingKind) -> ProofRequest {
+    ProofRequest {
+        agent_id: id(1),
+        agent_key: key(4),
+        kind,
+        counter,
+    }
+}
+
+#[test]
+fn a_proof_of_a_registered_agent_keeps_the_greater_counter_and_now() {
+    let agent = record(1, key(4), "laptop");
+    let kinds = [BindingKind::TlsExporter];
+    let view = ProofView {
+        record: Some(&agent),
+        kinds: &kinds,
+    };
+    let higher = decide_proof(&view, &proof(12, BindingKind::TlsExporter), at(10));
+    assert_eq!(
+        higher,
+        Ok(AgentRecord {
+            counter: 12,
+            last_seen: at(10),
+            ..agent.clone()
+        })
+    );
+    let lower = decide_proof(&view, &proof(3, BindingKind::TlsExporter), at(20));
+    assert_eq!(
+        lower.map(|kept| (kept.counter, kept.last_seen, kept.status)),
+        Ok((9, at(20), agent.status)),
+        "a lower counter is never kept, and the status stays"
+    );
+}
+
+#[test]
+fn a_proof_without_a_record_its_key_or_its_kind_is_refused() {
+    let agent = record(1, key(4), "laptop");
+    let other_key = record(1, key(5), "laptop");
+    let kinds = [BindingKind::None];
+    let request = proof(12, BindingKind::None);
+    for view in [
+        ProofView {
+            record: None,
+            kinds: &kinds,
+        },
+        ProofView {
+            record: Some(&other_key),
+            kinds: &kinds,
+        },
+        ProofView {
+            record: Some(&agent),
+            kinds: &[BindingKind::TlsExporter],
+        },
+        ProofView {
+            record: Some(&agent),
+            kinds: &[],
+        },
+    ] {
+        assert_eq!(
+            decide_proof(&view, &request, at(10)),
+            Err(ProofRefusal::ProofRefused),
+            "{view:?}"
+        );
+    }
+    assert_eq!(
+        ProofRefusal::ProofRefused.code(),
+        WireName::parse("proof-refused").unwrap()
+    );
+}

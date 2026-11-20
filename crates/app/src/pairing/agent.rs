@@ -90,6 +90,22 @@ pub enum AgentPairingError {
     Random(RandomUnavailable),
 }
 
+/// Why the agent stops at the hub's `Challenge`, having sent nothing after
+/// its `Connect`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChallengeRefused {
+    /// The hub that answered has another key than the one the agent
+    /// expects.
+    HubKeyMismatch,
+    /// The hub's proof isn't that key's signature over this connection.
+    HubProofInvalid,
+    /// The hub speaks no handshake this build speaks.
+    NoCommonHandshake,
+    /// The agent names the hub's own TLS, and this session has no exporter
+    /// to bind to.
+    BindingUnavailable,
+}
+
 impl From<IdentityError> for AgentPairingError {
     fn from(error: IdentityError) -> Self {
         Self::Identity(error)

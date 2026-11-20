@@ -71,6 +71,7 @@ impl HubLink for LoopLink {
         let read = AgentFrame::from_text(&text).unwrap();
         match self.hub.pairing.step(session, &read).await {
             HubStep::Reply(frame) | HubStep::Last(frame) => self.inbox.push_back(frame.to_text()),
+            HubStep::Wait => {}
             HubStep::Close(reason) => self.closed = Some(reason),
             HubStep::Fail(error) => panic!("the hub failed: {error:?}"),
         }

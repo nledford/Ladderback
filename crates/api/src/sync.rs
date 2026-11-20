@@ -1,11 +1,11 @@
 //! The `/sync/v1` handshake on the wire (§16, decision 120, "The handshake",
 //! and technical design §7.1): each message is one WebSocket text frame of
-//! JSON, at most [`MAX_FRAME_BYTES`], whose `type` names it. A key, a nonce
-//! and a signature are the unpadded base64url of their bytes, an agent ID
-//! its UUID's text, a time whole seconds since the Unix epoch. A field this
-//! build doesn't know is ignored, so a later hub can add one; what each
-//! field must hold is checked where the message is read into the core's
-//! types (`app::pairing::wire`).
+//! JSON, at most [`MAX_FRAME_BYTES`], whose `type` names it. A key, a nonce,
+//! a signature and a signed message's payload are the unpadded base64url of
+//! their bytes, an agent ID its UUID's text, a time whole seconds since the
+//! Unix epoch. A field this build doesn't know is ignored, so a later hub can
+//! add one; what each field must hold is checked where the message is read
+//! into the core's types (`app::pairing::wire`).
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +38,17 @@ pub enum AgentFrame {
         pairing_signature: String,
         agent_signature: String,
     },
+    /// A paired agent's proof: its connection counter and `agent-proof`
+    /// signed with its agent key.
+    Proof { counter: u64, agent_proof: String },
+    /// A signed message after the proofs (decision 120, "Signed messages
+    /// after the handshake"): `payload` is the message's JSON bytes.
+    Signed {
+        kind: String,
+        seq: u64,
+        payload: String,
+        signature: String,
+    },
 }
 
 /// What the hub sends.
@@ -57,14 +68,57 @@ pub enum HubFrame {
         recovery_key: String,
         signature: String,
     },
-    /// The pairing was refused, with the code signed; `holder` names the
-    /// agent that holds a taken hostname, and isn't signed.
+    /// The pairing or the proof was refused, with the code signed; `holder`
+    /// names the agent that holds a taken hostname, and isn't signed.
     Refused {
         code: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         holder: Option<HolderFrame>,
         signature: String,
     },
+    /// A signed message after the proofs, which the agent acts on only
+    /// until `expires_at`.
+    Signed {
+        kind: String,
+        seq: u64,
+        expires_at: u64,
+        payload: String,
+        signature: String,
+    },
+}
+
+/// The payload of the agent's `Hello`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HelloPayload {
+    pub agent_version: String,
+    pub hostname: String,
+    /// The lowest and the highest protocol the agent speaks.
+    pub protocols: [u64; 2],
+    /// The agent's clock, in seconds since the Unix epoch.
+    pub clock: u64,
+}
+
+/// The payload of the hub's `Welcome`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WelcomePayload {
+    /// The highest protocol both sides speak; absent when they share none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<u64>,
+    pub hub_protocols: [u64; 2],
+    pub agent_protocols: [u64; 2],
+    pub generation: u64,
+    pub hub_handshakes: u64,
+    pub hub_version: String,
+    pub signed_at: u64,
+    pub status: AgentApproval,
+}
+
+/// Whether a person has approved the agent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentApproval {
+    Pending,
+    Approved,
 }
 
 /// The agent that holds a hostname another asked for.
@@ -79,6 +133,30 @@ pub struct HolderFrame {
 /// a field missing or of another type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnreadableFrame;
+
+impl HelloPayload {
+    /// The payload `bytes` hold.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, UnreadableFrame> {
+        serde_json::from_slice(bytes).map_err(|_| UnreadableFrame)
+    }
+
+    /// The payload's bytes, which the agent signs.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        written(self).into_bytes()
+    }
+}
+
+impl WelcomePayload {
+    /// The payload `bytes` hold.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, UnreadableFrame> {
+        serde_json::from_slice(bytes).map_err(|_| UnreadableFrame)
+    }
+
+    /// The payload's bytes, which the hub signs.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        written(self).into_bytes()
+    }
+}
 
 impl AgentFrame {
     /// The frame `text` holds.
@@ -129,10 +207,10 @@ pub fn refusal_code(code: &str) -> ErrorCode {
     }
 }
 
-/// A frame's JSON text.
+/// A frame's or a payload's JSON text.
 #[expect(
     clippy::expect_used,
-    reason = "the frames hold only strings, integers and optional structs of them, which JSON always writes"
+    reason = "the frames and payloads hold only strings, integers, arrays and optional structs of them, which JSON always writes"
 )]
 fn written(frame: &impl Serialize) -> String {
     serde_json::to_string(frame).expect("a frame is always JSON")

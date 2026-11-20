@@ -4,12 +4,15 @@
 //! into the core's types here, once, as it arrives, and a field that doesn't
 //! hold what it must refuses the whole frame.
 
-use api::sync::{AgentFrame, HolderFrame, HubFrame};
+use api::sync::{
+    AgentApproval, AgentFrame, HelloPayload, HolderFrame, HubFrame, MAX_FRAME_BYTES, WelcomePayload,
+};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
-    BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Holder, Hostname, KEY_BYTES, Nonce,
-    Pair, PairAnswer, Paired, PublicKey, Refused, SIGNATURE_BYTES, Signature, WireName,
+    AgentEnvelope, BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Hello, Holder,
+    Hostname, HubEnvelope, KEY_BYTES, Nonce, Pair, PairAnswer, Paired, Proof, PublicKey, Refused,
+    SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
 use domain::{AgentId, Uuid};
 
@@ -18,6 +21,8 @@ use domain::{AgentId, Uuid};
 pub enum AgentMessage {
     Connect(Connect),
     Pair(Pair),
+    Proof(Proof),
+    Signed(AgentEnvelope),
 }
 
 /// What a hub's frame holds, read.
@@ -25,6 +30,7 @@ pub enum AgentMessage {
 pub enum HubMessage {
     Challenge(Challenge),
     Answer(PairAnswer),
+    Signed(HubEnvelope),
 }
 
 /// A frame whose field doesn't hold what it must: bytes of another length or
@@ -78,6 +84,45 @@ pub fn answer_frame(answer: &PairAnswer) -> HubFrame {
     }
 }
 
+pub fn proof_frame(proof: &Proof) -> AgentFrame {
+    let _ = proof;
+    todo!("proof_frame")
+}
+
+pub fn agent_envelope_frame(envelope: &AgentEnvelope) -> AgentFrame {
+    let _ = envelope;
+    todo!("agent_envelope_frame")
+}
+
+pub fn hub_envelope_frame(envelope: &HubEnvelope) -> HubFrame {
+    let _ = envelope;
+    todo!("hub_envelope_frame")
+}
+
+/// The bytes of `hello`'s payload, which the agent signs.
+pub fn hello_payload(hello: &Hello) -> Vec<u8> {
+    let _ = (hello, HelloPayload::from_bytes);
+    todo!("hello_payload")
+}
+
+/// The `Hello` a payload's bytes hold.
+pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
+    let _ = bytes;
+    todo!("read_hello")
+}
+
+/// The bytes of `welcome`'s payload, which the hub signs.
+pub fn welcome_payload(welcome: &Welcome) -> Vec<u8> {
+    let _ = (welcome, WelcomePayload::from_bytes, AgentApproval::Pending);
+    todo!("welcome_payload")
+}
+
+/// The `Welcome` a payload's bytes hold.
+pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
+    let _ = bytes;
+    todo!("read_welcome")
+}
+
 /// The message an agent's frame holds.
 pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
     match frame {
@@ -105,6 +150,7 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
             pairing_signature: signature(pairing_signature)?,
             agent_signature: signature(agent_signature)?,
         })),
+        AgentFrame::Proof { .. } | AgentFrame::Signed { .. } => todo!("agent_message"),
     }
 }
 
@@ -144,6 +190,10 @@ pub fn hub_message(frame: &HubFrame) -> Result<HubMessage, WireRefused> {
             },
             signature: signature(signed)?,
         }))),
+        HubFrame::Signed { .. } => {
+            let _ = MAX_FRAME_BYTES;
+            todo!("hub_message")
+        }
     }
 }
 

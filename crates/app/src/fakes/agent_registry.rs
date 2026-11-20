@@ -1,11 +1,12 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
-use domain::Timestamp;
 use domain::fleet::{
-    AgentRecord, AgentStatus, HostnameKey, PairRefusal, PairRequest, Pairing, PairingView, TokenId,
-    TokenRecord, TokenUse, decide_pairing,
+    AgentRecord, AgentStatus, BindingKind, HostnameKey, PairRefusal, PairRequest, Pairing,
+    PairingView, ProofRefusal, ProofRequest, ProofView, TokenId, TokenRecord, TokenUse,
+    decide_pairing, decide_proof,
 };
+use domain::{AgentId, Timestamp};
 
 use crate::ports::{Added, AgentRegistry, StoreError};
 
@@ -29,6 +30,18 @@ impl InMemoryAgentRegistry {
 
     fn kept(&self) -> MutexGuard<'_, Kept> {
         self.kept.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A person approves the agent under `agent_id` at `at`, as the hub's
+    /// web UI will (#567); nothing else changes.
+    pub fn approve(&self, agent_id: AgentId, at: Timestamp) {
+        for agent in &mut self.kept().agents {
+            if agent.agent_id == agent_id {
+                agent.status = AgentStatus::Approved {
+                    at: to_the_millisecond(at),
+                };
+            }
+        }
     }
 }
 
@@ -169,5 +182,51 @@ impl AgentRegistry for InMemoryAgentRegistry {
 
     async fn agents(&self) -> Result<Vec<AgentRecord>, StoreError> {
         Ok(self.kept().agents.clone())
+    }
+
+    async fn agent(&self, agent_id: AgentId) -> Result<Option<AgentRecord>, StoreError> {
+        Ok(self
+            .kept()
+            .agents
+            .iter()
+            .find(|agent| agent.agent_id == agent_id)
+            .cloned())
+    }
+
+    async fn take_proof(
+        &self,
+        request: &ProofRequest,
+        now: Timestamp,
+    ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError> {
+        let now = to_the_millisecond(now);
+        let mut kept = self.kept();
+        let kinds: Vec<BindingKind> = kept
+            .tokens
+            .iter()
+            .filter(|token| {
+                token.state
+                    == TokenUse::Used {
+                        agent_id: request.agent_id,
+                        agent_key: request.agent_key,
+                    }
+            })
+            .map(|token| token.kind)
+            .collect();
+        let decided = decide_proof(
+            &ProofView {
+                record: kept.agents.iter().find(|a| a.agent_id == request.agent_id),
+                kinds: &kinds,
+            },
+            request,
+            now,
+        );
+        if let Ok(agent) = &decided {
+            for kept_one in &mut kept.agents {
+                if kept_one.agent_id == agent.agent_id {
+                    *kept_one = kept_agent(agent.clone());
+                }
+            }
+        }
+        Ok(decided)
     }
 }

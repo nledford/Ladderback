@@ -2,10 +2,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use domain::fleet::{
-    Binding, BindingKind, Challenge, Connect, EpochSeconds, HANDSHAKES, Holder, HubAddress,
-    KEY_BYTES, KeyFile, Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken,
-    PublicKey, Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls,
-    TokenUse, UNUSED_TOKEN_LIMIT, token_life,
+    AgentEnvelope, AgentRecord, Binding, BindingKind, Challenge, Connect, EpochSeconds, HANDSHAKES,
+    Holder, HubAddress, HubEnvelope, KEY_BYTES, KeyFile, Nonce, Pair, PairAnswer, PairRefusal,
+    PairRequest, Paired, PairingToken, Proof, PublicKey, Refused, SeedFile, SignedMessage,
+    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, token_life,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -22,6 +22,30 @@ pub struct HubPairing {
     signing: Arc<dyn Signing>,
     random: Arc<dyn Random>,
     clock: Arc<dyn Clock>,
+    /// The hub's build, as `--version` names it, which `Welcome` carries.
+    version: String,
+}
+
+/// The hub's answer to an agent's proof.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProofAnswer {
+    /// The proof holds: the agent's record as the registry now keeps it.
+    Proved(AgentRecord),
+    /// The proof was refused, signed.
+    Refused(Refused),
+}
+
+/// Why the hub takes no message from a proved agent. Each closes the
+/// connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MessageRefused {
+    /// The signature doesn't hold under the agent's key on this connection.
+    Unsigned,
+    /// Not the sequence number the hub expects next.
+    OutOfSequence,
+    /// A kind the hub doesn't take here, or a payload that isn't the
+    /// kind's.
+    Unexpected,
 }
 
 /// The hub key, with its seed, and the recovery key's public half, read
@@ -117,6 +141,7 @@ impl HubPairing {
         signing: Arc<dyn Signing>,
         random: Arc<dyn Random>,
         clock: Arc<dyn Clock>,
+        version: String,
     ) -> Self {
         Self {
             registry,
@@ -124,6 +149,7 @@ impl HubPairing {
             signing,
             random,
             clock,
+            version,
         }
     }
 
@@ -326,6 +352,35 @@ impl HubPairing {
             }
             Err(refusal) => self.refuse(keys, handshake, &refusal),
         }
+    }
+
+    /// The hub's answer to a paired agent's `proof`: the agent's record,
+    /// seen now with the greater counter, when the proof holds under the
+    /// key it registered for a binding kind it paired with; one signed
+    /// `proof-refused` for every other cause (decision 120, "The
+    /// handshake").
+    pub async fn prove(
+        &self,
+        keys: &HubKeys,
+        handshake: &HubHandshake,
+        proof: &Proof,
+    ) -> Result<ProofAnswer, HubPairingError> {
+        let _ = (keys, handshake, proof);
+        todo!("prove")
+    }
+
+    /// The hub's signed `Welcome` to `hello`, the first message of the
+    /// proved `agent`, when it holds: signed by the agent's key on this
+    /// connection, sequence number 1, kind `Hello`.
+    pub fn welcome(
+        &self,
+        keys: &HubKeys,
+        handshake: &HubHandshake,
+        agent: &AgentRecord,
+        hello: &AgentEnvelope,
+    ) -> Result<Result<HubEnvelope, MessageRefused>, HubPairingError> {
+        let _ = (keys, handshake, agent, hello, &self.version);
+        todo!("welcome")
     }
 
     /// `refusal`, signed over its code and the connection. A taken

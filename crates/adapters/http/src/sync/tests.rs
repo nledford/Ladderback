@@ -34,6 +34,7 @@ fn pairing_on(identity: Arc<dyn Identity>) -> Arc<HubPairing> {
         Arc::new(FakeClock::new(
             Timestamp::from_second(1_800_000_000).unwrap(),
         )),
+        "0.0.0-test".to_owned(),
     ))
 }
 

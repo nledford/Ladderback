@@ -54,6 +54,7 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
         Arc::new(AwsLcSigning),
         Arc::new(OsRandom),
         Arc::new(SystemClock),
+        crate::build_info::SHOWN.as_str().to_owned(),
     )
 }
 
@@ -451,6 +452,13 @@ async fn on_the_agent(
             Ok(ExitCode::FAILURE)
         }
     }
+}
+
+/// `ladderback hub-status`: connects to the hub this machine pinned at
+/// pairing, proves who it is, and says whether the hub holds it waiting for
+/// approval or has approved it.
+pub(crate) fn hub_status() -> ExitCode {
+    todo!("hub_status")
 }
 
 /// An error code, its arguments, and the detail the system gave.

@@ -153,6 +153,7 @@ impl HubLink for LoopLink {
         };
         match self.hub.step(session, &read).await {
             HubStep::Reply(answer) => self.inbox.push_back(answer.to_text()),
+            HubStep::Wait => {}
             HubStep::Last(answer) => {
                 self.inbox.push_back(answer.to_text());
                 self.closed = true;
