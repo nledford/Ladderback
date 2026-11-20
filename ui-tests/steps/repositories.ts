@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 
-import { journey, namePattern } from "../support/keyboard.ts";
+import { focusComesTo, journey, namePattern } from "../support/keyboard.ts";
 import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "../support/world.ts";
 import { api, ended } from "./maintenance.ts";
@@ -211,23 +211,6 @@ Then("the page has {int} text boxes", async function (this: BrowserWorld, count:
   );
 });
 
-// Focus moves once the answer is in, a moment after the element exists.
-export async function focusComesTo(world: BrowserWorld, role: string, name: string, description: string): Promise<void> {
-  const keys = journey(world.page);
-  const target = keys.byRole(role, { name: namePattern(name) });
-  const deadline = Date.now() + patienceMs();
-  for (;;) {
-    try {
-      return await keys.assertFocused(target, description);
-    } catch (error) {
-      if (Date.now() > deadline) {
-        throw error;
-      }
-      await new Promise((done) => setTimeout(done, 100));
-    }
-  }
-}
-
 // A page that is left while a request is on its way gets the answer after it
 // is gone. The engine takes a moment, so the step watches long enough for it.
 Then("the page raises no script error while the daemon answers", async function (this: BrowserWorld) {
@@ -236,11 +219,11 @@ Then("the page raises no script error while the daemon answers", async function 
 });
 
 Then("focus is on the heading {string}", async function (this: BrowserWorld, name: string) {
-  await focusComesTo(this, "heading", name, `the heading "${name}"`);
+  await focusComesTo(this.page, journey(this.page).byRole("heading", { name: namePattern(name) }), `the heading "${name}"`);
 });
 
 Then("focus is on the textbox {string}", async function (this: BrowserWorld, name: string) {
-  await focusComesTo(this, "textbox", name, `the textbox "${name}"`);
+  await focusComesTo(this.page, journey(this.page).byRole("textbox", { name: namePattern(name) }), `the textbox "${name}"`);
 });
 
 // A sentence the page moved focus to, as it does once a row's button it
