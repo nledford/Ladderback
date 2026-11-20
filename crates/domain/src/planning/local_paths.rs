@@ -76,6 +76,28 @@ impl RepositorySettings {
     }
 }
 
+/// A program rclone runs for a repository location, which a setting of the
+/// location's connection string names: `ssh` of an sftp remote,
+/// `bearer_token_command` of a webdav one, `override.password_command`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LocationProgram {
+    /// The setting's value, as rclone reads it: the program and its
+    /// arguments.
+    pub command: String,
+    /// The program: the first of the words rclone splits the value into.
+    pub program: String,
+}
+
+impl RepositorySettings {
+    /// The programs rclone runs for `repository`, then for `repo-hot`, each
+    /// with the field whose location names it, in the order they are
+    /// written. Only what is known before a job resolves a reference is
+    /// read.
+    pub fn location_programs(&self) -> Vec<(RepositoryField, LocationProgram)> {
+        todo!()
+    }
+}
+
 /// Whether `location`, a repository location as a job resolved it (every
 /// reference replaced by what it held), names a folder on this machine by a
 /// relative path, read as [`RepositorySettings::relative_path`] reads a
@@ -901,6 +923,84 @@ mod tests {
             "rclone::local:/srv/demo-repo",
         ] {
             assert!(!is_relative_location(location), "{location:?}");
+        }
+    }
+
+    fn runs(
+        field: RepositoryField,
+        command: &str,
+        program: &str,
+    ) -> (RepositoryField, LocationProgram) {
+        (
+            field,
+            LocationProgram {
+                command: command.to_owned(),
+                program: program.to_owned(),
+            },
+        )
+    }
+
+    #[test]
+    fn a_program_a_connection_string_names_is_one_its_location_runs() {
+        for (location, command, program) in [
+            (
+                "rclone::sftp,host=nas,ssh='ssh -i /home/demo/.ssh/nas demo@nas':/srv/repo",
+                "ssh -i /home/demo/.ssh/nas demo@nas",
+                "ssh",
+            ),
+            (
+                "rclone:nas,type=webdav,bearer_token_command='/usr/bin/pass show webdav':repo",
+                "/usr/bin/pass show webdav",
+                "/usr/bin/pass",
+            ),
+            (
+                "rclone::s3,override.password_command=getpw:bucket/repo",
+                "getpw",
+                "getpw",
+            ),
+            // A location written in a setting, as deep as one is read.
+            (
+                "rclone::crypt,remote=':sftp,ssh=\"sh -c run\":/srv':repo",
+                "sh -c run",
+                "sh",
+            ),
+            (
+                "rclone::union,upstreams='/srv/a :sftp,ssh=sshx:/srv/b':",
+                "sshx",
+                "sshx",
+            ),
+        ] {
+            assert_eq!(
+                at(location).location_programs(),
+                vec![runs(RepositoryField::Repository, command, program)],
+                "{location:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hot_locations_programs_follow_the_cold_ones() {
+        let mut settings = at("rclone::sftp,ssh=cold-ssh:/srv/repo");
+        settings.repo_hot = Some("rclone::sftp,ssh=hot-ssh:/srv/hot".to_owned());
+        assert_eq!(
+            settings.location_programs(),
+            vec![
+                runs(RepositoryField::Repository, "cold-ssh", "cold-ssh"),
+                runs(RepositoryField::RepoHot, "hot-ssh", "hot-ssh"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_location_whose_settings_name_no_program_runs_none() {
+        for location in [
+            "/srv/repo",
+            "rest:https://nas.example/repo",
+            "opendal:s3",
+            "rclone:nas:repo",
+            "rclone::sftp,host=nas,key_file=/home/demo/.ssh/nas:/srv/repo",
+        ] {
+            assert_eq!(at(location).location_programs(), [], "{location:?}");
         }
     }
 }

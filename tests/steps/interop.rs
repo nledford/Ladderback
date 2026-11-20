@@ -484,6 +484,22 @@ fn lists_command(agent: &mut Agent, command: String, key: String) {
     );
 }
 
+/// Nothing on standard error but its line breaks acts on a terminal: no
+/// control character moves the cursor or erases a line, and no
+/// bidirectional format character reorders what follows it.
+#[then("standard error holds no control or bidirectional format character")]
+fn stderr_inert(agent: &mut Agent) {
+    let stderr = &ran(agent).stderr;
+    let acts = |c: char| {
+        (c.is_control() && c != '\n')
+            || matches!(
+                c,
+                '\u{61c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+            )
+    };
+    assert!(!stderr.chars().any(acts), "{stderr:?}");
+}
+
 #[then(expr = "the refusal points at line {int} of the profile")]
 fn refusal_line(agent: &mut Agent, line: usize) {
     let stderr = &ran(agent).stderr;

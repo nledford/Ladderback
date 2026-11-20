@@ -193,6 +193,20 @@ Feature: Import a rustic profile
       And the import lists the command "other-hook" at "hooks.run-before"
       And the configuration is unchanged
 
+    Scenario: A program the repository's rclone location runs is a command to confirm too
+      Given a profile holding the plan "home"
+      And the profile's repository is at "rclone::sftp,host=nas,ssh='ssh -i /home/demo/.ssh/nas demo@nas':/srv/repo" with the option "connections" set to "4"
+      When the owner imports the profile as the repository "nas"
+      Then the import is refused until its commands are confirmed
+      And the configuration is unchanged
+
+    Scenario: A confirmed program of an rclone location is noted with the location
+      Given a profile holding the plan "home"
+      And the profile's repository is at "rclone::sftp,host=nas,ssh='ssh -i /home/demo/.ssh/nas demo@nas':/srv/repo" with the option "connections" set to "4"
+      When the owner imports the profile as the repository "nas", confirming its commands
+      Then the import succeeds
+      And the import notes that it made "ssh" runnable at "repositories.nas.repository"
+
   Rule: The profile's global hooks join the agent's own only while the configuration has no plan or repository
 
     Scenario: Imported global hooks are appended
@@ -915,6 +929,25 @@ Feature: Import a rustic profile
       And the import lists the command "pass show demo/nas" at "repositories.nas.password-command"
       And the import lists the command "notify-send 'backup failed'" at "plans.home.hooks.run-failed"
       And no config file was written
+
+    Scenario: A command's control characters are listed as escapes, so the terminal shows them rather than acts on them
+      Given a rustic profile "nas.toml" holding:
+        """
+        [global.hooks]
+        run-before = ["echo \"start\r\u001b[2Kdone\u202e\""]
+
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused until its commands are confirmed
+      And the import lists the command "echo 'start\r\u{1b}[2Kdone\u{202e}'" at "hooks.run-before"
+      And standard error holds no control or bidirectional format character
 
     Scenario: Told not to ask, the import lists the commands it made runnable
       Given a rustic profile "nas.toml" holding:

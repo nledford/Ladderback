@@ -314,6 +314,7 @@ fn list_commands(localizer: &Localizer, commands: &[ImportedCommand]) -> io::Res
                 std::iter::once(line.program()).chain(line.args().iter().map(String::as_str)),
             ),
             Runs::Option(value) => value.clone(),
+            Runs::Location(found) => found.command.clone(),
         };
         say(
             localizer,

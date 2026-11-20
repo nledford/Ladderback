@@ -226,7 +226,7 @@ mod tests {
     use l10n::Localizer;
 
     use super::{
-        Report, asked_for_plain, clap_colour, escaped_error, refusal_said, status_after,
+        Report, asked_for_plain, clap_colour, escaped, escaped_error, refusal_said, status_after,
         status_of_parser, write_json, write_text,
     };
 
@@ -494,6 +494,16 @@ mod tests {
         assert!(
             said.contains(&format!("Too many {ESCAPED}files")),
             "{said:?}"
+        );
+    }
+
+    /// A bidirectional format character reorders the text after it on a
+    /// terminal, so outside text could show other words than it holds.
+    #[test]
+    fn each_bidirectional_format_character_is_written_as_its_escape() {
+        assert_eq!(
+            escaped("a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f"),
+            r"a\u{202e}b\u{2066}c\u{2069}d\u{200f}e\u{61c}f"
         );
     }
 

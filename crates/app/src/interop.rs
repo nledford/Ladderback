@@ -28,7 +28,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use domain::execution::plan_tags::PlanTags;
-use domain::planning::{AgentConfig, Hooks, Hostname, Plan, RepositoryConfig, Violation};
+use domain::planning::{
+    AgentConfig, Hooks, Hostname, LocationProgram, Plan, RepositoryConfig, Violation,
+};
 use domain::secrets::{CommandLine, SecretRef, is_command_option};
 use domain::{AgentId, PlanId, RepositoryAlias};
 
@@ -81,6 +83,9 @@ pub enum Runs {
     /// An option rustic runs as a command (`rclone-command`), its value as
     /// the configuration keeps it: rustic splits it when it runs it.
     Option(String),
+    /// A program rclone runs for the repository's location, named by a
+    /// setting of its connection string.
+    Location(LocationProgram),
 }
 
 /// Which commands the person agreed an import may make runnable (§6.2).
@@ -345,6 +350,7 @@ impl Runs {
             Self::Command(line) => line.program().to_owned(),
             Self::Option(value) => CommandLine::parse(value)
                 .map_or_else(|_| value.clone(), |line| line.program().to_owned()),
+            Self::Location(found) => found.program.clone(),
         }
     }
 }
@@ -1415,6 +1421,47 @@ mod tests {
             Err(ImportError::CommandsUnconfirmed(commands_listed()))
         );
         assert_eq!(saved(&config).await, before);
+    }
+
+    /// rclone runs a program a location's connection string names on every
+    /// job of the repository, as it would a command.
+    #[tokio::test]
+    async fn a_program_an_rclone_location_runs_is_listed_at_the_location() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let mut repository = repository();
+        repository.settings.repository =
+            "rclone::sftp,host=nas,ssh='ssh -i /home/demo/.ssh/nas demo@nas':/srv/repo".to_owned();
+        let profile = ImportedProfile {
+            repository,
+            plans: vec![plan("home", None)],
+            hooks: Hooks::default(),
+            notices: Vec::new(),
+        };
+        let imported = import_with(&config, profile, Consent::Any)
+            .await
+            .expect("imported");
+        assert_eq!(
+            imported.commands,
+            [ImportedCommand {
+                key: "repositories.nas.repository".to_owned(),
+                runs: Runs::Location(LocationProgram {
+                    command: "ssh -i /home/demo/.ssh/nas demo@nas".to_owned(),
+                    program: "ssh".to_owned(),
+                }),
+            }]
+        );
+        assert_eq!(
+            imported.notices,
+            [imported_notice("repositories.nas.repository", "ssh")]
+        );
+    }
+
+    /// An option that can't be split as a command line names only its first
+    /// word as the program, never what follows it (#856).
+    #[test]
+    fn an_option_that_cannot_be_split_names_only_its_first_word_as_the_program() {
+        let runs = Runs::Option("rclone serve restic --stdio --webdav-pass 'hunter2".to_owned());
+        assert_eq!(runs.program(), "rclone");
     }
 
     /// A configuration holding the repository `cloud`, at a location of
