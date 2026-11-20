@@ -1,5 +1,6 @@
 # Playwright's browser engines and the system packages they need, for the @ui
-# scenarios of ci.yml's `ui` job and of red-first.yml. Use it after `npm ci` in
+# scenarios of ci.yml's `ui` job and of red-first.yml, and for docs-site.yml's
+# axe-core run over the docs site. Use it after `npm ci` in
 # ui-tests, on a GitHub-hosted Linux runner, as
 # `uses: $/.github/actions/browser` with `engines: chromium` (or any of
 # `chromium`, `firefox` and `webkit`, space-separated, as red-first.yml's
@@ -32,12 +33,20 @@
 # that installs a set of engines for a pull request must have a job there that
 # installs the same set on main, and ci.yml's `cache-prune` job must list the
 # set's cache keys.
+#
+# A job that shares main's push with a ci.yml job that saves the same set sets
+# `save: "false"`, as docs-site.yml does beside `UI journeys`: it restores what
+# that job saved and saves nothing, so the two don't race for the browsers' key
+# and the packages' family gains no entry ci.yml's footprint doesn't count.
 name: Browsers for the UI journeys
 description: Installs the Playwright browser engines named and their system packages, from caches when it can.
 inputs:
   engines:
     description: "The Playwright engines to install, space-separated: one or more of chromium, firefox and webkit."
     required: true
+  save:
+    description: 'Whether a push to main saves the caches after a miss: "true" or "false".'
+    default: "true"
 runs:
   using: composite
   steps:
@@ -79,12 +88,12 @@ runs:
       run: '"$GITHUB_ACTION_PATH/../../../scripts/install-browser.sh" $ENGINES'
     # Saved straight away, not when the job ends, so a failing journey later
     # in the job still leaves the browsers and the packages for the next run.
-    - if: steps.browsers.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    - if: inputs.save == 'true' && steps.browsers.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/ms-playwright
         key: ${{ steps.keys.outputs.browsers }}
-    - if: steps.keys.outputs.debs != '' && steps.install.outputs.debs == 'saved' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    - if: inputs.save == 'true' && steps.keys.outputs.debs != '' && steps.install.outputs.debs == 'saved' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/playwright-debs

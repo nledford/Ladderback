@@ -1,4 +1,5 @@
-# `npm ci` in ui-tests with npm's download cache (~/.npm), for ci.yml's jobs.
+# `npm ci` in ui-tests with npm's download cache (~/.npm), for the jobs of
+# ci.yml and docs-site.yml.
 # Use it after setup-node, as `uses: $/.github/actions/npm-ci` (the action from
 # the commit the workflow runs, whatever the job checked out).
 #
