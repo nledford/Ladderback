@@ -51,21 +51,24 @@ fn host_of(authority: &str) -> &str {
 }
 
 /// Whether `host` names this computer: `localhost`, the IPv6 loopback, or
-/// an IPv4 address in `127.0.0.0/8` in any form the system's resolver reads
-/// (`ipv4_any_form`), as `127.1`, which the agent's connection resolves
+/// an IPv4 address in `127.0.0.0/8` in a form every resolver reads alike
+/// (`ipv4_read_alike`), as `127.1`, which the agent's connection resolves
 /// there. Its twin, `crates/domain/src/fleet/route.rs::is_loopback`, routes
 /// the agent by the same hosts; the two are tested with one table, so keep
 /// them alike.
 fn is_loopback(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
         || host.parse::<Ipv6Addr>().is_ok_and(|ip| ip.is_loopback())
-        || ipv4_any_form(host).is_some_and(|ip| ip.is_loopback())
+        || ipv4_read_alike(host).is_some_and(|ip| ip.is_loopback())
 }
 
-/// An IPv4 address in any form `inet_aton` reads: one to four parts split
-/// by dots, the last filling the bytes the others leave, as `127.1` is
-/// `127.0.0.1` and `2130706433` is too.
-fn ipv4_any_form(host: &str) -> Option<Ipv4Addr> {
+/// An IPv4 address in a form every resolver reads alike: one to four
+/// decimal parts split by dots, the last filling the bytes the others
+/// leave, as `127.1` is `127.0.0.1` and `2130706433` is too. A part with a
+/// leading `0` or `0x` is none: glibc reads it as octal or hex and macOS,
+/// in four parts, as decimal, so `0177.0.0.1` is `127.0.0.1` on one and
+/// `177.0.0.1` on the other.
+fn ipv4_read_alike(host: &str) -> Option<Ipv4Addr> {
     let parts = host.split('.').map(number).collect::<Option<Vec<u64>>>()?;
     let (&last, leading) = parts.split_last()?;
     let room = 4_u32.checked_sub(u32::try_from(leading.len()).ok()?)?;
@@ -84,21 +87,14 @@ fn ipv4_any_form(host: &str) -> Option<Ipv4Addr> {
     u32::try_from(address).ok().map(Ipv4Addr::from)
 }
 
-/// One part of an IPv4 address as `inet_aton` reads it: hex after `0x`,
-/// octal after a leading `0`, decimal otherwise, and digits only.
+/// One part of an IPv4 address in decimal digits, with no leading `0`
+/// unless it is `0` itself.
 fn number(part: &str) -> Option<u64> {
-    let (digits, radix) =
-        if let Some(hex) = part.strip_prefix("0x").or_else(|| part.strip_prefix("0X")) {
-            (hex, 16)
-        } else if part.len() > 1 && part.starts_with('0') {
-            (part.get(1..)?, 8)
-        } else {
-            (part, 10)
-        };
-    if digits.is_empty() || !digits.chars().all(|digit| digit.is_digit(radix)) {
+    let decimal = !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    if !decimal || (part.len() > 1 && part.starts_with('0')) {
         return None;
     }
-    u64::from_str_radix(digits, radix).ok()
+    part.parse().ok()
 }
 
 /// A token's life as the page counts it down: the seconds the hub said it
