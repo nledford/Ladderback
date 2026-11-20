@@ -3211,7 +3211,7 @@ ui-api-token-copy-failed = The browser would not let the page copy it. Select th
 ui-agents-heading = Machines
 
 # What that section says above its form.
-ui-agents-intro = To pair another machine with this { -hub }, make a pairing token here and give it to { "ladderback pair" } on that machine. A token works once, for a few minutes, and only for the address it names.
+ui-agents-intro = To pair another { -machine } with this { -hub }, make a pairing token here and give it to { "ladderback pair" } on that { -machine }. A token works once, for a few minutes, and only for the address it names.
 
 # The heading of the form that makes a pairing token.
 ui-pairing-new-heading = Make a pairing token
@@ -3220,16 +3220,16 @@ ui-pairing-new-heading = Make a pairing token
 ui-pairing-address-label = Address { -machine(form: "other") } will use
 
 # The hint under that field.
-ui-pairing-address-hint = The address another machine reaches this { -hub } at, as https://hub.example:9443. It goes into the token.
+ui-pairing-address-hint = The address another { -machine } reaches this { -hub } at, as { "https://hub.example:9443" }. It goes into the token.
 
 # Said under the address when it names this computer alone, as localhost or 127.0.0.1.
-ui-pairing-warning-loopback = This address is loopback: only this computer can reach it, so another machine can't use the token. Type the address other machines reach this { -hub } at.
+ui-pairing-warning-loopback = This address is loopback: only this computer can reach it, so another { -machine } can't use the token. Type the address other { -machine(form: "other") } reach this { -hub } at.
 
 # Said under the address when it starts with http:// and isn't loopback.
-ui-pairing-warning-plain = This address is plain http://, which a { -machine } refuses: its key would cross the network unprotected. Use the https:// address.
+ui-pairing-warning-plain = This address is plain { "http://" }, which a { -machine } refuses: its key would cross the network unprotected. Use the { "https://" } address.
 
 # Says which certificate a token tells the other machine to trust. Only one is offered while the hub serves no certificate of its own.
-ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other machine does. This { -hub } serves no certificate of its own yet, so no token can pin one.
+ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other { -machine } does. This { -hub } serves no certificate of its own yet, so no token can pin one.
 
 # The label of the field of how long the token works.
 ui-pairing-life-label = Life in minutes
@@ -3256,7 +3256,7 @@ ui-pairing-make = Make a pairing token
 ui-pairing-dialog-title = Copy the pairing token
 
 # What that dialog says above the token.
-ui-pairing-dialog-body = Give this token to { "ladderback pair" } on the other machine before it lapses. It is shown only this once. Check there that the { -hub } key's fingerprint is the one below.
+ui-pairing-dialog-body = Give this token to { "ladderback pair" } on the other { -machine } before it lapses. It is shown only this once. Check there that the { -hub } key's fingerprint is the one below.
 
 # The name of the fingerprint of the hub's key, as the dialog lists it.
 ui-pairing-fingerprint = Hub key fingerprint
@@ -3305,7 +3305,7 @@ ui-pairing-canceled = The token is canceled. No { -machine } can use it.
 
 # Said in the dialog in place of the token once it lapses.
 # $when (text): the time it lapsed, in this computer's zone.
-ui-pairing-lapsed = Lapsed at { $when }. Make a new token to pair a machine.
+ui-pairing-lapsed = Lapsed at { $when }. Make a new token to pair a { -machine }.
 
 # The button that closes the dialog once its token is canceled or lapsed, back to the form.
 ui-pairing-make-new = Make a new token
