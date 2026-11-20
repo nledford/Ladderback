@@ -21,9 +21,10 @@ use crate::ports::{
 use crate::reads::ReadTurns;
 use crate::secrets::{ResolveError, ResolveRepository};
 
-/// How long a search may take in all, its wait for a turn and the
-/// repository's open included: its walk's [`SEARCH_SECONDS`] and ten more,
-/// within the 30 s a client of a running daemon waits for an answer (§4.6).
+/// How long a search may take in all, the resolution of its repository's
+/// secrets, its wait for a turn and the repository's open included: its
+/// walk's [`SEARCH_SECONDS`] and ten more, within the 30 s a client of a
+/// running daemon waits for an answer (§4.6).
 pub const SEARCH_TIMEOUT: SignedDuration = SignedDuration::from_secs(25);
 
 // The walk fits in the search's time, with time left to open the repository.
@@ -116,7 +117,8 @@ impl BrowseSnapshot {
     /// The entries whose names match `pattern` in the newest snapshots, of
     /// `plan` when it names one, within `caps`, in the repository the
     /// configuration's `entry`, saved under `alias`, names. Given up once
-    /// [`SEARCH_TIMEOUT`] has passed, its wait for a turn included.
+    /// [`SEARCH_TIMEOUT`] has passed, the resolution of the repository's
+    /// secrets and the wait for a turn included.
     pub async fn find(
         &self,
         op: OperationId,
@@ -126,16 +128,21 @@ impl BrowseSnapshot {
         plan: Option<PlanId>,
         caps: SearchCaps,
     ) -> Result<SearchAnswer, BrowseError> {
-        let repository = self.access(alias, entry).await?;
-        let job = Job::Find(FindJob {
-            repository,
-            pattern,
-            plan,
-            caps,
-        });
-        match within(self.clock.as_ref(), SEARCH_TIMEOUT, self.run(op, job))
-            .await
-            .map_err(BrowseError::Read)?
+        let search = async {
+            let repository = self.access(alias, entry).await?;
+            let job = Job::Find(FindJob {
+                repository,
+                pattern,
+                plan,
+                caps,
+            });
+            self.run(op, job).await.map_err(BrowseError::Read)
+        };
+        match within(self.clock.as_ref(), SEARCH_TIMEOUT, async {
+            Ok(search.await)
+        })
+        .await
+        .map_err(BrowseError::Read)??
         {
             EngineResult::Found(answer) => Ok(answer),
             _ => Err(engine_exited()),
