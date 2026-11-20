@@ -168,6 +168,17 @@ pub fn shown(state: State, rows: usize) -> Shown {
     }
 }
 
+/// Whether a row takes the change cue (decision NN): the part of it the
+/// table watches (`Table`'s `cue_on`, a status) was `shown` as the row last
+/// showed it and is `now`. Only a change of a value the row already showed
+/// lights it: a row's first sight (the page's first rows, a row that
+/// arrives, the table built again) only seeds it, and an update that leaves
+/// the value as it was (a progress report, a re-sort) lights nothing.
+pub fn cues<T: PartialEq>(shown: Option<&T>, now: &T) -> bool {
+    let _ = (shown, now);
+    todo!()
+}
+
 /// How a column's cells are aligned: at the start of the line, or, for
 /// numbers, at its end in figures of one width, so the digits of a column
 /// line up.
@@ -571,5 +582,21 @@ mod tests {
         assert_eq!(name.caption(), None);
         assert_eq!(name.table_labelled_by(), Some("page-heading"));
         assert_eq!(name.frame_labelled_by("table-1-caption"), "page-heading");
+    }
+
+    #[test]
+    fn a_rows_first_sight_only_seeds_its_status_and_lights_nothing() {
+        assert!(!cues(None, &"running"));
+    }
+
+    #[test]
+    fn a_status_the_row_showed_lights_the_row_when_it_changes() {
+        assert!(cues(Some(&"running"), &"succeeded"));
+        assert!(cues(Some(&"queued"), &"running"));
+    }
+
+    #[test]
+    fn an_update_that_leaves_the_status_as_it_was_lights_nothing() {
+        assert!(!cues(Some(&"running"), &"running"));
     }
 }
