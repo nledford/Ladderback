@@ -38,6 +38,8 @@ use crate::ws::{self, Posted};
 const HEADING_ID: &str = "agents-heading";
 /// The field of the address agents will use.
 const ADDRESS_ID: &str = "pairing-address";
+/// The address's warning, which describes its field while it shows.
+const WARNING_ID: &str = "pairing-address-warning";
 /// The field of the token's life.
 const LIFE_ID: &str = "pairing-life";
 /// The step-up field, where focus goes when the step-up is refused.
@@ -391,6 +393,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     });
 
     let warning_localizer = Arc::clone(&localizer);
+    let warning = Memo::new(move |_| AddressWarning::of(&address.get()));
     let problem_localizer = Arc::clone(&localizer);
     view! {
         <section aria-labelledby=HEADING_ID>
@@ -406,10 +409,14 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                 localizer=Arc::clone(&localizer)
                 label=t(msg::UI_PAIRING_ADDRESS_LABEL)
                 description=t(msg::UI_PAIRING_ADDRESS_HINT)
+                also_described_by=Signal::derive(move || {
+                    warning.get().map(|_| WARNING_ID.to_owned())
+                })
                 value=address
             />
             {move || {
-                AddressWarning::of(&address.get())
+                warning
+                    .get()
                     .map(|warning| {
                         let words = text(
                             &warning_localizer,
@@ -419,9 +426,14 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                             },
                         );
                         view! {
-                            <Alert localizer=Arc::clone(&warning_localizer) tone=AlertTone::Warning>
-                                {words}
-                            </Alert>
+                            <div id=WARNING_ID>
+                                <Alert
+                                    localizer=Arc::clone(&warning_localizer)
+                                    tone=AlertTone::Warning
+                                >
+                                    {words}
+                                </Alert>
+                            </div>
                         }
                     })
             }}

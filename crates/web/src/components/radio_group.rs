@@ -94,7 +94,7 @@ pub fn RadioGroup(
             role="radiogroup"
             aria-invalid=move || invalid(has_error())
             aria-describedby=move || {
-                described_by(name, has_description, Access::Editable, has_error())
+                described_by(name, has_description, Access::Editable, has_error(), None)
             }
         >
             <legend>{legend}</legend>
