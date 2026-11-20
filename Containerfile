@@ -6,7 +6,7 @@
 #
 # The build context is a folder holding each platform's unpacked release
 # archive under Docker's name for its architecture: `amd64/ladderback` and
-# `arm64/ladderback`, with the licences beside each. `just image` makes it
+# `arm64/ladderback`, with the licenses beside each. `just image` makes it
 # from the archives and builds for their platforms, with the `VERSION` the
 # binary says for the version label; `just smoke-image` tests the result.
 # The install guide says how to run it (docs/guide/install.md).

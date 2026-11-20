@@ -6,7 +6,7 @@
 // removes them at the end, whether the checks passed or not.
 //
 // Checks:
-//   - the image's labels name its source, its licences and the version its
+//   - the image's labels name its source, its licenses and the version its
 //     binary says; it runs as the user 10001:10001, not root, and exposes 9898;
 //   - `--version` names the build of this checkout (scripts/build-identity.ts),
 //     or the version `--version <x.y.z>` names;
@@ -21,7 +21,7 @@
 //     `--init`, `--allowed-host localhost` and its port published on
 //     127.0.0.1, serves the web UI, says it is signed out and answers 401 to
 //     the operations without a session;
-//   - signed in, a scratch repository on a volume is initialised, its
+//   - signed in, a scratch repository on a volume is initialized, its
 //     password read from a file under /run/secrets, and one backup of demo
 //     files, mounted read-only at /srv/demo, succeeds and leaves one snapshot
 //     whose host is the container's `--hostname`, whose path is /srv/demo,
@@ -137,11 +137,14 @@ const mounts = (volumes: Volumes): string[] =>
  * network, `input` as its standard input: how the test puts files on the
  * volumes before the agent starts, as a person would on the host.
  */
-async function prepare(image: string, volumes: string[], script: string, input = ""): Promise<void> {
+async function prepare(image: string, scratch: Scratch, volumes: string[], script: string, input = ""): Promise<void> {
   const ran = await docker(
     [
       "run",
       "--rm",
+      // Named, so that the run's end removes it should the client be killed.
+      "--name",
+      scratch.container(`prepare-${scratch.containers.length}`),
       "--interactive",
       "--network",
       "none",
@@ -289,7 +292,7 @@ async function startAgent(image: string, name: string, volumes: Volumes, report:
     : undefined;
 }
 
-async function checkImage(image: string, version: string, report: Report): Promise<void> {
+async function checkImage(image: string, version: string, scratch: Scratch, report: Report): Promise<void> {
   const inspected = await docker(["image", "inspect", "--format", "{{json .Config}}", image]);
   if (!report.add("the image is there", inspected.status === 0, inspected.status === 0 ? image : said(inspected)))
     throw new Error(`no image ${image}`);
@@ -303,14 +306,14 @@ async function checkImage(image: string, version: string, report: Report): Promi
   const labels = config.Labels ?? {};
   const label = (key: string) => labels[`org.opencontainers.image.${key}`];
   report.add(
-    "its labels name the source, the licences and the version",
+    "its labels name the source, the licenses and the version",
     label("source") === "https://github.com/nledford/Ladderback" &&
       label("licenses") === "MIT OR Apache-2.0" &&
       label("version") === version,
     `source ${label("source")}, licenses ${label("licenses")}, version ${label("version")}`,
   );
 
-  const shownVersion = await docker(["run", "--rm", "--network", "none", image, "--version"]);
+  const shownVersion = await docker(["run", "--rm", "--name", scratch.container("version"), "--network", "none", image, "--version"]);
   const text = shownVersion.stdout.toString().trim();
   report.add(
     "--version",
@@ -321,13 +324,13 @@ async function checkImage(image: string, version: string, report: Report): Promi
   // A release has no hub (§16, decision 122): the argument parser refuses
   // its commands, exit 2, before anything starts.
   for (const args of [["serve", "--hub", "--listen", "127.0.0.1:0"], ["pairing-token"]]) {
-    const refused = await docker(["run", "--rm", "--network", "none", image, ...args]);
+    const refused = await docker(["run", "--rm", "--name", scratch.container(args[0] ?? "hub"), "--network", "none", image, ...args]);
     report.add(`no hub: ${args.slice(0, 2).join(" ")} is refused`, refused.status === 2, said(refused));
   }
 
   // The image's own command listens beyond loopback and names no host, so
   // the daemon refuses it rather than the image opening it for the person.
-  const bare = await docker(["run", "--rm", "--network", "none", image]);
+  const bare = await docker(["run", "--rm", "--name", scratch.container("bare"), "--network", "none", image]);
   const output = `${bare.stdout.toString()}${bare.stderr}`;
   report.add(
     "with no arguments it refuses to listen without --allowed-host",
@@ -350,17 +353,20 @@ async function checkAgent(image: string, scratch: Scratch, report: Report): Prom
   // and data volumes are new, so they take the image's folders' owner.
   await prepare(
     image,
+    scratch,
     [`${volumes.source}:${SOURCE}`, `${volumes.repository}:${REPOSITORY}`],
     `for n in 1 2 3; do echo "demo file $n" > ${SOURCE}/file-$n.txt; done; chmod 0644 ${SOURCE}/*; chown ${USER} ${REPOSITORY}`,
   );
   await prepare(
     image,
+    scratch,
     [`${volumes.secrets}:${SECRETS}`],
     `cat > ${PASSWORD_FILE}; chown ${USER} ${PASSWORD_FILE}; chmod 0400 ${PASSWORD_FILE}`,
     `${PASSWORD}\n`,
   );
   await prepare(
     image,
+    scratch,
     [`${volumes.config}:${CONFIG}`],
     `cat > ${CONFIG}/config.toml; chown ${USER} ${CONFIG}/config.toml; chmod 0600 ${CONFIG}/config.toml`,
     [
@@ -380,7 +386,19 @@ async function checkAgent(image: string, scratch: Scratch, report: Report): Prom
 
   // The admin password, read as one line of standard input, never an argument.
   const password = await docker(
-    ["run", "--rm", "--interactive", "--network", "none", "--volume", `${volumes.data}:${DATA}`, image, "set-password"],
+    [
+      "run",
+      "--rm",
+      "--name",
+      scratch.container("set-password"),
+      "--interactive",
+      "--network",
+      "none",
+      "--volume",
+      `${volumes.data}:${DATA}`,
+      image,
+      "set-password",
+    ],
     `${ADMIN_PASSWORD}\n`,
   );
   if (!report.add("set-password keeps an admin password on the data volume", password.status === 0, said(password))) return;
@@ -409,7 +427,7 @@ async function checkAgent(image: string, scratch: Scratch, report: Report): Prom
     session,
   );
   if (
-    !report.add("a scratch repository is initialised on its volume", init.status === 201, `${init.status} ${init.text.slice(0, 300)}`)
+    !report.add("a scratch repository is initialized on its volume", init.status === 201, `${init.status} ${init.text.slice(0, 300)}`)
   )
     return;
 
@@ -481,9 +499,11 @@ async function checkAgent(image: string, scratch: Scratch, report: Report): Prom
 
 // ---------------------------------------------------------------------------
 
+const USAGE = "usage: node scripts/smoke-image.ts <image> [--version <x.y.z>] [--summary <file>]";
+
 function usage(message: string): never {
   console.error(`error: ${message}`);
-  console.error("usage: node scripts/smoke-image.ts <image> [--version <x.y.z>] [--summary <file>]");
+  console.error(USAGE);
   process.exit(2);
 }
 
@@ -494,8 +514,10 @@ async function main(argv: string[]): Promise<number> {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] ?? "";
     const value = () => argv[++i] ?? usage(`${arg} needs a value`);
-    if (arg === "--help" || arg === "-h") usage("help");
-    else if (arg === "--version") version = value();
+    if (arg === "--help" || arg === "-h") {
+      console.log(USAGE);
+      return 0;
+    } else if (arg === "--version") version = value();
     else if (arg === "--summary") summary = value();
     else if (arg.startsWith("-")) usage(`unknown option ${arg}`);
     else if (image === undefined) image = arg;
@@ -507,8 +529,13 @@ async function main(argv: string[]): Promise<number> {
 
   const report = new Report();
   const scratch = new Scratch();
+  // Ctrl-C or a CI cancellation still removes what the run made.
+  for (const signal of ["SIGINT", "SIGTERM"] as const)
+    process.once(signal, () => {
+      void scratch.close(report).finally(() => process.exit(130));
+    });
   try {
-    await checkImage(image, expected, report);
+    await checkImage(image, expected, scratch, report);
     await checkAgent(image, scratch, report);
   } catch (error) {
     report.add("the run finishes", false, (error as Error).message);
