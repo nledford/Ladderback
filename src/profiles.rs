@@ -316,10 +316,15 @@ fn list_commands(localizer: &Localizer, commands: &[ImportedCommand]) -> io::Res
             Runs::Option(value) => value.clone(),
             Runs::Location(found) => found.command.clone(),
         };
+        // The profile is someone else's text: what a terminal would act on
+        // is shown as its escape, so it can't hide what runs (#809).
         say(
             localizer,
             msg::CLI_PROFILE_COMMAND,
-            &[("key", text(&command.key)), ("command", text(line))],
+            &[
+                ("key", text(output::escaped(&command.key))),
+                ("command", text(output::escaped(&line))),
+            ],
         )?;
     }
     Ok(())

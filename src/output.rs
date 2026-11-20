@@ -93,18 +93,30 @@ pub(crate) fn to_stderr(text: &str) -> io::Result<()> {
 
 /// `text` as the command line shows text from outside it (a daemon's, a
 /// profile's, the configuration's, the operating system's): each control
-/// character, C0, DEL and C1, as its escape (`\u{1b}`, `\r`, `\u{9b}`), so a
-/// terminal shows it rather than acting on it.
+/// character, C0, DEL and C1, and each bidirectional format character as its
+/// escape (`\u{1b}`, `\r`, `\u{9b}`, `\u{202e}`), so a terminal shows it
+/// rather than acting on it or reordering the text after it.
 pub(crate) fn escaped(text: &str) -> String {
     let mut shown = String::with_capacity(text.len());
     for c in text.chars() {
-        if c.is_control() {
+        if c.is_control() || is_bidi_format(c) {
             shown.extend(c.escape_default());
         } else {
             shown.push(c);
         }
     }
     shown
+}
+
+/// Whether `c` is one of Unicode's bidirectional format characters: the
+/// Arabic letter mark, the left-to-right and right-to-left marks, the
+/// embeddings, overrides and their end (U+202A to U+202E), and the isolates
+/// and their end (U+2066 to U+2069).
+fn is_bidi_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{61c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 /// `arg` with its text [`escaped`], if it has one.
