@@ -172,7 +172,7 @@ pub fn shown(state: State, rows: usize) -> Shown {
 }
 
 /// Whether a row takes the change cue (decision 127): the part of it the
-/// table watches (`Table`'s `cue_on`, a status) was `shown` as the row last
+/// table watches (the column given a `Cue`, a status) was `shown` as the row last
 /// showed it and is `now`. Only a change of a value the row already showed
 /// lights it: a row's first sight (the page's first rows, a row that
 /// arrives, the table built again) only seeds it, and an update that leaves
@@ -212,37 +212,39 @@ impl<K: Eq + Hash + Clone> Marks<K> {
         now: &T,
         focused: bool,
     ) -> bool {
-        let _ = (key, shown, now, focused);
-        todo!()
+        let lights = cues(shown, now);
+        if lights && !focused {
+            self.unseen.insert(key.clone());
+        }
+        lights
     }
 
     /// Focus entered the row `key`: its mark, if it had one, is seen.
     /// Whether it had one.
     pub fn see(&mut self, key: &K) -> bool {
-        let _ = key;
-        todo!()
+        self.unseen.remove(key)
     }
 
     /// The reader marked every row as seen: how many were marked.
     pub fn see_all(&mut self) -> usize {
-        todo!()
+        let marked = self.unseen.len();
+        self.unseen.clear();
+        marked
     }
 
     /// The row `key` left the table, and its mark with it.
     pub fn gone(&mut self, key: &K) {
-        let _ = key;
-        todo!()
+        self.unseen.remove(key);
     }
 
     /// Whether the row `key` is marked, changed and not yet seen.
     pub fn is_unseen(&self, key: &K) -> bool {
-        let _ = key;
-        todo!()
+        self.unseen.contains(key)
     }
 
     /// Whether any row is marked, which shows the Mark all as seen button.
     pub fn any(&self) -> bool {
-        todo!()
+        !self.unseen.is_empty()
     }
 }
 
@@ -676,7 +678,10 @@ mod tests {
         assert!(marks.see(&"docs"));
         assert!(!marks.is_unseen(&"docs"));
         assert!(!marks.any());
-        assert!(!marks.see(&"docs"), "a row seen once has no mark left to see");
+        assert!(
+            !marks.see(&"docs"),
+            "a row seen once has no mark left to see"
+        );
     }
 
     #[test]

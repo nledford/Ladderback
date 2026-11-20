@@ -51,6 +51,13 @@
      (1.69:1 and 1.46:1 in dark colors), so they show on either. A floor for
      visibility, not a WCAG minimum: a skeleton carries no information. */
   --skeleton: #c8ccd2;
+  /* The change mark (§4.5, decision 129): a live row's edge, 3:1 or more on
+     the page and on the cue's fill, and the fill its arrival fades from, a
+     floor of 1.3:1 on the page (not a WCAG minimum: the edge and the bold
+     carry the mark, the fill only its arrival), with the page's text, links
+     and focus ring at their own minimums on it. */
+  --cue: #475569;
+  --cue-fill: #dae0e7;
   color-scheme: light dark;
 }
 
@@ -62,6 +69,8 @@
     --accent: #8ab4f8;
     --focus: #8ab4f8;
     --surface: #1d2229;
+    --cue: #94a3b8;
+    --cue-fill: #282f38;
     --badge-loading-fg: #dbeafe;
     --badge-loading-bg: #172554;
     --badge-empty-fg: #e5e7eb;
@@ -1116,22 +1125,49 @@ table.data-table :is(th[scope="row"], thead th:first-child) {
   }
 }
 
-/* The change cue (decision 127; `Table`'s `cue_on`): a row whose status a
-   live update changed is lit in Ledger Gray at once, then settles back to
-   its cells' own fill over 600 ms, easing out, once. Only a settling row's
-   cells have the transition, so a change of the theme's colors reaches a
-   settled row at once. On the cells, not the row: a pinned row header's own
-   fill would cover the row's. Custom CSS rather than utilities, since it
-   must beat that fill, which is custom CSS in no layer. A change of color,
-   so the reduced-motion rule keeps it. Under forced colors the system's
-   colors are the cells' and nothing is lit. */
+/* The change mark (decisions 127 and 129; `Column::cued`): a row whose
+   status a live update changed is marked until it is seen (`data-unseen`):
+   its watched cell (`data-cued`) reads in bold and an edge 3px wide stands
+   at its start, on the row header, which is pinned there and the edge's
+   containing block (`position: sticky`). Weight, not color, so it reads in
+   every scheme; under forced colors the edge is the system's text color.
+   The mark arrives with one fade: lit in the cue's fill at once, then
+   settling back to its cells' own fill over 600 ms, easing out. Only a
+   settling row's cells have the transition, so a change of the theme's
+   colors reaches a settled row at once. On the cells, not the row: a
+   pinned row header's own fill would cover the row's. Custom CSS rather
+   than utilities, since it keys on the table's own attributes, draws a
+   pseudo-element and must beat the header's fill, which is custom CSS in
+   no layer. A change of color, so the reduced-motion rule keeps it. Under
+   forced colors the system's colors are the cells' and nothing is lit. */
 @media (forced-colors: none) {
   table.data-table tr[data-cue="lit"] > :is(th, td) {
-    background-color: var(--surface);
+    background-color: var(--cue-fill);
   }
 
   table.data-table tr[data-cue="settling"] > :is(th, td) {
     transition: background-color 600ms ease-out;
+  }
+}
+
+table.data-table tr[data-unseen] > [data-cued],
+table.data-table tr[data-unseen] > [data-cued] * {
+  font-weight: 700;
+}
+
+table.data-table tr[data-unseen] > th[scope="row"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  background-color: var(--cue);
+}
+
+@media (forced-colors: active) {
+  table.data-table tr[data-unseen] > th[scope="row"]::before {
+    forced-color-adjust: none;
+    background-color: CanvasText;
   }
 }
 

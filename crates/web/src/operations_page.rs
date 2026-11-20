@@ -23,8 +23,8 @@ use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, Column, Name as TableName, PauseUpdates, Progress, Sentences, Sort, SortKey, State,
-    StatusBadge, Table, Toast, ToastTone, Toasts, cell_sentence_view, hand_focus_when_gone,
+    Button, Column, Cue, Name as TableName, PauseUpdates, Progress, Sentences, Sort, SortKey,
+    State, StatusBadge, Table, Toast, ToastTone, Toasts, cell_sentence_view, hand_focus_when_gone,
     refusal_alert, runs_view, say_refusals,
 };
 use crate::components::{first_load, paced};
@@ -419,11 +419,24 @@ fn operations_table(
         },
     );
     let status_localizer = Arc::clone(localizer);
+    let seen_localizer = Arc::clone(localizer);
     let status = Column::new(
         text(localizer, msg::UI_COLUMN_STATUS),
         Rem::tenths(95),
         move |row: Signal<OperationRow>| status_view(&status_localizer, row),
-    );
+    )
+    .cued(Cue::new(
+        status_of,
+        text(localizer, msg::UI_MARK_ALL_SEEN),
+        move |count| {
+            let count = u64::try_from(count).unwrap_or(u64::MAX);
+            text_with(
+                &seen_localizer,
+                msg::UI_MARKED_SEEN,
+                &[("count", MsgArg::Count(count))],
+            )
+        },
+    ));
     let started_localizer = Arc::clone(localizer);
     let started = Column::new(
         text(localizer, msg::UI_COLUMN_STARTED),
@@ -492,7 +505,6 @@ fn operations_table(
             state=State::Ready
             sentences=sentences
             row_header_id=header_id
-            cue_on=status_of
         />
     }
     .into_any()
@@ -504,8 +516,8 @@ fn header_id(row: &OperationRow) -> String {
     format!("operation-{}", row.summary.id)
 }
 
-/// What a live update changes that lights an operation's row: its status
-/// (a start, an end), never a progress report (decision 127).
+/// What a live update changes that marks an operation's row: its status
+/// (a start, an end), never a progress report (decisions 127 and 129).
 fn status_of(row: &OperationRow) -> String {
     row.summary.status.clone()
 }

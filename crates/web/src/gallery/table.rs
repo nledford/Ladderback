@@ -9,7 +9,7 @@ use leptos::prelude::*;
 use super::DemoHeading;
 use crate::components::button::Content;
 use crate::components::{
-    Align, Button, Column, Footer, Name, RadioGroup, Sentences, Sort, SortKey, State, Table,
+    Align, Button, Column, Cue, Footer, Name, RadioGroup, Sentences, Sort, SortKey, State, Table,
 };
 use crate::routes::text_with;
 use crate::text;
@@ -328,4 +328,119 @@ fn folder_columns(
         ));
     }
     (name, columns)
+}
+
+/// A job of the live table demo: neutral demo data, and the step its status
+/// has reached: 0 waiting, 1 running, 2 done.
+#[derive(Clone, Debug, PartialEq)]
+struct DemoJob {
+    name: String,
+    step: usize,
+}
+
+/// The live table's demo (`#live-table-demo`): a button that moves the next
+/// demo job's status on, as a live update would (photos, then music, then
+/// documents, each waiting, running, done and round again), and a table
+/// whose status column carries the change mark (decision 129), each row
+/// with a toggle a keyboard moves focus into the row with.
+#[component]
+pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
+    let t = {
+        let localizer = Arc::clone(&localizer);
+        move |id| text(&localizer, id)
+    };
+    let jobs = RwSignal::new(
+        [
+            msg::UI_GALLERY_TABLE_PHOTOS,
+            msg::UI_GALLERY_TABLE_MUSIC,
+            msg::UI_GALLERY_TABLE_DOCUMENTS,
+        ]
+        .map(|name| DemoJob {
+            name: t(name),
+            step: 0,
+        })
+        .to_vec(),
+    );
+    let next = StoredValue::new(0_usize);
+    let change = Callback::new(move |()| {
+        let at = next.get_value();
+        jobs.update(|jobs| {
+            if let Some(job) = jobs.get_mut(at) {
+                job.step = (job.step + 1) % 3;
+            }
+            next.set_value((at + 1) % jobs.len().max(1));
+        });
+    });
+    let statuses: Arc<[String; 3]> = Arc::new([
+        t(msg::UI_GALLERY_LIVE_TABLE_WAITING),
+        t(msg::UI_GALLERY_LIVE_TABLE_RUNNING),
+        t(msg::UI_GALLERY_LIVE_TABLE_DONE),
+    ]);
+    let status_of = |job: &DemoJob| job.step.to_string();
+    let job = Column::new(
+        t(msg::UI_GALLERY_LIVE_TABLE_JOB),
+        Rem::tenths(100),
+        |row: Signal<DemoJob>| row.with_untracked(|row| row.name.clone()).into_any(),
+    );
+    let status = Column::new(
+        t(msg::UI_GALLERY_LIVE_TABLE_STATUS),
+        Rem::tenths(100),
+        move |row: Signal<DemoJob>| {
+            let statuses = Arc::clone(&statuses);
+            (move || row.with(|row| statuses.get(row.step).cloned().unwrap_or_default())).into_any()
+        },
+    )
+    .cued(Cue::new(status_of, t(msg::UI_MARK_ALL_SEEN), {
+        let localizer = Arc::clone(&localizer);
+        move |count| {
+            let count = u64::try_from(count).unwrap_or(u64::MAX);
+            text_with(
+                &localizer,
+                msg::UI_MARKED_SEEN,
+                &[("count", MsgArg::Count(count))],
+            )
+        }
+    }));
+    let star_localizer = Arc::clone(&localizer);
+    let star = Column::new(
+        t(msg::UI_GALLERY_TABLE_ACTIONS),
+        Rem::tenths(140),
+        move |row: Signal<DemoJob>| {
+            let label = row.with_untracked(|row| {
+                text_with(
+                    &star_localizer,
+                    msg::UI_GALLERY_LIVE_TABLE_STAR,
+                    &[("job", MsgArg::Text(row.name.clone()))],
+                )
+            });
+            let starred = RwSignal::new(false);
+            let press = Callback::new(move |()| starred.update(|starred| *starred = !*starred));
+            view! { <Button content=Content::Text(label.into()) pressed=starred on_press=press /> }
+                .into_any()
+        },
+    );
+    view! {
+        <section id="live-table-demo">
+            <DemoHeading text=t(msg::UI_GALLERY_LIVE_TABLE_HEADING) />
+            <p>
+                <Button
+                    content=Content::Text(t(msg::UI_GALLERY_LIVE_TABLE_CHANGE).into())
+                    on_press=change
+                />
+            </p>
+            <Table
+                name=Name::Caption(t(msg::UI_GALLERY_LIVE_TABLE_CAPTION))
+                row_header=job
+                columns=vec![status, star]
+                rows=jobs
+                key=|row: &DemoJob| row.name.clone()
+                state=State::Ready
+                sentences=Sentences {
+                    loading: t(msg::UI_GALLERY_TABLE_LOADING),
+                    empty: t(msg::UI_GALLERY_TABLE_EMPTY),
+                    unreachable: t(msg::UI_GALLERY_TABLE_UNREACHABLE),
+                }
+            />
+        </section>
+    }
 }

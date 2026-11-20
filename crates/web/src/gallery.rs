@@ -92,6 +92,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         // Shift+Tab from the page's end, so its one stop lengthens none of
         // those walks; its scenarios start at its anchor.
         <steps::StepsDemo localizer=Arc::clone(&localizer) />
+        // After the steps' demo, past every demo a journey walks to from the
+        // page's top, and before the table's, which journeys reach by
+        // Shift+Tab from the page's start, so its stops lengthen none of
+        // those walks; its scenarios start at its anchor.
+        <table::LiveTableDemo localizer=Arc::clone(&localizer) />
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <table::TableDemo localizer=Arc::clone(&localizer) />

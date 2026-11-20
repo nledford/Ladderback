@@ -13,8 +13,8 @@ use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos::wasm_bindgen::closure::Closure;
 
-use super::Spinner;
 use super::button::{Appearance, Button, Content};
+use super::{Spinner, focus_element};
 use crate::announcer::Politeness;
 use crate::live::reply;
 use crate::variants::{Rem, Size};
@@ -22,7 +22,7 @@ use crate::variants::{Rem, Size};
 pub(crate) mod rules;
 
 pub use rules::{Align, Name, SortKey, State};
-use rules::{Direction, Shown, Sorted};
+use rules::{Direction, Marks, Shown, Sorted};
 
 thread_local! {
     /// The number the next table's caption `id` takes, so no two on a page
@@ -37,13 +37,15 @@ type Draw<R> = Arc<dyn Fn(Signal<R>) -> AnyView + Send + Sync>;
 
 /// One column of a [`Table`]: its header's words, its width, how its cells
 /// are aligned, how each is drawn and, if it can be sorted by, how. A row
-/// header's column may keep the room its words need to read whole.
+/// header's column may keep the room its words need to read whole, and the
+/// column a live update changes may carry the change mark ([`Cue`]).
 pub struct Column<R: Send + Sync + 'static> {
     header: String,
     width: Rem,
     whole: Option<Rem>,
     align: Align,
     sort: Option<Sort<R>>,
+    cue: Option<Cue<R>>,
     draw: Draw<R>,
 }
 
@@ -62,6 +64,7 @@ impl<R: Send + Sync + 'static> Column<R> {
             whole: None,
             align: Align::Start,
             sort: None,
+            cue: None,
             draw: Arc::new(draw),
         }
     }
@@ -90,6 +93,16 @@ impl<R: Send + Sync + 'static> Column<R> {
     pub fn sorted_by(self, sort: Sort<R>) -> Self {
         Self {
             sort: Some(sort),
+            ..self
+        }
+    }
+
+    /// The column, as the one a live update changes, such as a status:
+    /// a change of its value marks its row (`cue`, decision 129). One
+    /// column of a table carries it; the table watches the first that does.
+    pub fn cued(self, cue: Cue<R>) -> Self {
+        Self {
+            cue: Some(cue),
             ..self
         }
     }
@@ -136,6 +149,40 @@ impl<R> Sort<R> {
     }
 }
 
+/// The change mark a column carries (decisions 127 and 129): `on`, what
+/// a live update changes in a row, such as its status; the words of the
+/// button that marks every row as seen ("Mark all as seen"), and the
+/// sentence its press is said with, for how many rows it marked seen,
+/// complete sentences from the catalog.
+pub struct Cue<R> {
+    on: fn(&R) -> String,
+    mark_all_seen: String,
+    marked_seen: Said,
+}
+
+/// A sentence for a number of rows, worded by the caller's catalog.
+type Said = Arc<dyn Fn(usize) -> String + Send + Sync>;
+
+/// The column a table watches for the change mark: its place, and what of
+/// a row it reads there. `None` where no column carries a [`Cue`].
+type Watch<R> = Option<(usize, fn(&R) -> String)>;
+
+impl<R> Cue<R> {
+    /// A mark on a change of `on`, its button named `mark_all_seen`, its
+    /// press said by `marked_seen` of how many rows it marked seen.
+    pub fn new(
+        on: fn(&R) -> String,
+        mark_all_seen: impl Into<String>,
+        marked_seen: impl Fn(usize) -> String + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            on,
+            mark_all_seen: mark_all_seen.into(),
+            marked_seen: Arc::new(marked_seen),
+        }
+    }
+}
+
 /// The sentences that take the table's place while it can't show its rows,
 /// the caller's, since only it knows what the rows are.
 pub struct Sentences {
@@ -165,14 +212,21 @@ pub struct Footer {
 /// script focus it (`tabindex="-1"`, no stop for Tab), so a control that
 /// leaves the row can hand focus to the header that names it.
 ///
-/// `cue_on`, where given, is what a live update can change in a row, such as
-/// its status. A row whose `cue_on` changes while it shows takes the change
-/// cue (decision 127): its cells are lit in Ledger Gray and settle back to
-/// their own fill over 600 ms (`style.css`), once. Its first sight, and an
-/// update that leaves it as it was, light nothing ([`rules::cues`]); a page
-/// whose rows a pause holds still lights nothing meanwhile, and its resume
-/// lights each changed row once. A screen reader hears the page's announcer
-/// instead, so the cue says nothing to it.
+/// A column given a [`Cue`] ([`Column::cued`]) is what a live update can
+/// change in a row, such as its status. A row whose value there changes
+/// while it shows is marked "changed, not yet seen" (decision 129): that
+/// cell reads in bold and an edge stands at the row's start, in the
+/// `--cue` color (`style.css`). The mark arrives once with a fade, its
+/// cells lit in the cue's fill and settling back to their own over 600 ms
+/// (decision 127), and stays until it is seen: focus enters the row, the
+/// reader presses Mark all as seen, a button before the table while any row
+/// is marked, or the row or the page goes. A change while focus is in the
+/// row is seen as it comes. Its first sight, and an update that leaves it
+/// as it was, mark nothing ([`rules::Marks`]); a page whose rows a pause
+/// holds still marks nothing meanwhile, and its resume marks each changed
+/// row once. The press is said politely, in the cue's sentence, and hands
+/// focus to the table's frame as the button hides. A screen reader hears the
+/// page's announcer for the change itself, so the mark says nothing to it.
 ///
 /// It sits in a frame that scrolls sideways where its columns are wider than
 /// the page (a small screen, larger text): a region named as the table is,
@@ -217,7 +271,6 @@ pub fn Table<R, K, KF>(
     sentences: Sentences,
     #[prop(optional)] footer: Option<Footer>,
     #[prop(optional)] row_header_id: Option<fn(&R) -> String>,
-    #[prop(optional)] cue_on: Option<fn(&R) -> String>,
 ) -> impl IntoView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -289,6 +342,17 @@ where
     let caption = name.caption().map(str::to_owned);
     let labelled_by = name.table_labelled_by().map(str::to_owned);
     let row_columns = Arc::clone(&columns);
+    // The column a live update changes, and what of a row it watches there.
+    let watch = columns
+        .iter()
+        .enumerate()
+        .find_map(|(at, column)| column.cue.as_ref().map(|cue| (at, cue.on)));
+    let mark_all = columns
+        .iter()
+        .find_map(|column| column.cue.as_ref())
+        .map(|cue| (cue.mark_all_seen.clone(), Arc::clone(&cue.marked_seen)));
+    let marks = RwSignal::new(Marks::<K>::default());
+    let frame_id = format!("table-{id}-frame");
     view! {
         <div>
             {move || {
@@ -306,9 +370,21 @@ where
                         let header_row = header_row(&columns, sorted);
                         let footer_row = footer.clone().map(|footer| footer_row(&columns, footer));
                         view! {
+                            // Before the table, so a keyboard reaches it before
+                            // the rows whose focus would see their marks one by
+                            // one; its line is always there, so it moves nothing.
+                            {mark_all
+                                .clone()
+                                .map(|(label, said)| mark_all_view(
+                                    marks,
+                                    label,
+                                    said,
+                                    frame_id.clone(),
+                                ))}
                             // The frame is the size container the table's width
                             // is measured against, and what scrolls.
                             <div
+                                id=frame_id.clone()
                                 class="data-table-frame"
                                 role="region"
                                 aria-labelledby=frame_name.clone()
@@ -349,7 +425,15 @@ where
                                             each=move || placed.get()
                                             key=|key| key.clone()
                                             children=move |key| {
-                                                row_view(&columns, rows, index, key, row_header_id, cue_on)
+                                                row_view(
+                                                    &columns,
+                                                    rows,
+                                                    index,
+                                                    key,
+                                                    row_header_id,
+                                                    watch,
+                                                    marks,
+                                                )
                                             }
                                         />
                                     </tbody>
@@ -461,13 +545,16 @@ fn footer_row<R: Send + Sync + 'static>(columns: &[Column<R>], footer: Footer) -
 
 /// One row, built once as it first shows: its cells bind to the row as it
 /// stands in `rows` now, or as it last stood while it is on its way out.
+/// Where the table watches a column (`watch`, its place and what it reads),
+/// a change there marks the row in `marks` and lights its arrival.
 fn row_view<R, K>(
     columns: &[Column<R>],
     rows: Signal<Vec<R>>,
     index: Memo<HashMap<K, usize>>,
     key: K,
     header_id: Option<fn(&R) -> String>,
-    cue_on: Option<fn(&R) -> String>,
+    watch: Watch<R>,
+    marks: RwSignal<Marks<K>>,
 ) -> AnyView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -507,49 +594,117 @@ where
                 }
                 .into_any()
             } else {
-                view! { <td class=class>{cell}</td> }.into_any()
+                let cued = watch
+                    .is_some_and(|(watched, _)| watched == at)
+                    .then_some("");
+                view! {
+                    <td class=class data-cued=cued>
+                        {cell}
+                    </td>
+                }
+                .into_any()
             }
         })
         .collect_view();
-    let cue = RwSignal::new(Cue::Settled);
-    if let Some(cue_on) = cue_on {
-        let watched = Memo::new(move |_| row.with(cue_on));
+    let arrival = RwSignal::new(Arrival::Settled);
+    let line = NodeRef::<leptos::html::Tr>::new();
+    let unseen = Memo::new({
+        let key = key.clone();
+        move |_| marks.with(|marks| marks.is_unseen(&key))
+    });
+    if let Some((_, on)) = watch {
+        let watched = Memo::new(move |_| row.with(on));
+        let changed = key.clone();
         Effect::new(move |shown: Option<String>| {
             let now = watched.get();
-            if rules::cues(shown.as_ref(), &now) {
-                light(cue);
+            let focused = line
+                .get_untracked()
+                .is_some_and(|line| holds_focus_within(&line));
+            let lights = marks
+                .try_update(|marks| marks.change(&changed, shown.as_ref(), &now, focused))
+                .unwrap_or_default();
+            if lights {
+                light(arrival);
             }
             now
         });
+        let gone = key.clone();
+        on_cleanup(move || {
+            marks.try_update(|marks| marks.gone(&gone));
+        });
     }
-    let state = move || cue_on.map(|_| cue.get().name());
+    let state = move || watch.map(|_| arrival.get().name());
     // The cells' fade ends, or a move of the row or a second change cuts it
     // short; a transition inside a cell (a progress bar's) isn't the cue's.
     let settle = move |event: web_sys::TransitionEvent| {
-        if cue.get_untracked() == Cue::Settling && ends_the_cue(&event) {
-            cue.set(Cue::Settled);
+        if arrival.get_untracked() == Arrival::Settling && ends_the_cue(&event) {
+            arrival.set(Arrival::Settled);
+        }
+    };
+    // Focus entering the row sees its mark.
+    let see = move |_: web_sys::FocusEvent| {
+        if unseen.get_untracked() {
+            marks.update(|marks| {
+                marks.see(&key);
+            });
         }
     };
     view! {
-        <tr data-cue=state on:transitionend=settle on:transitioncancel=settle>
+        <tr
+            node_ref=line
+            data-cue=state
+            data-unseen=move || unseen.get().then_some("")
+            on:transitionend=settle
+            on:transitioncancel=settle
+            on:focusin=see
+        >
             {cells}
         </tr>
     }
     .into_any()
 }
 
-/// Where a row's change cue is (`data-cue`, which `style.css` draws): lit in
-/// Ledger Gray, settling back to its own fill, or settled. Only a settling
-/// row's cells have a transition, so a change of the theme's colors reaches
-/// a settled row at once, as it does the rest of the page.
+/// The button that marks every row as seen, before the table. Its line is
+/// always there and the button in it hidden (`invisible`: no Tab stop, out
+/// of the accessibility tree) while no row is marked, so its coming and
+/// going moves nothing on the page. Its press clears the marks, says how
+/// many it cleared in the caller's sentence, and, as the button hides,
+/// hands focus to the table's frame (`frame_id`), which stays (2.4.3).
+fn mark_all_view<K>(
+    marks: RwSignal<Marks<K>>,
+    label: String,
+    said: Said,
+    frame_id: String,
+) -> AnyView
+where
+    K: Clone + Eq + Hash + Send + Sync + 'static,
+{
+    let any = Memo::new(move |_| marks.with(Marks::any));
+    let press = Callback::new(move |()| {
+        let seen = marks.try_update(Marks::see_all).unwrap_or_default();
+        reply(Politeness::Polite, &said(seen));
+        focus_element(&frame_id);
+    });
+    view! {
+        <p class="actions" class:invisible=move || !any.get()>
+            <Button content=Content::Text(Signal::stored(label)) on_press=press />
+        </p>
+    }
+    .into_any()
+}
+
+/// Where a row's arrival fade is (`data-cue`, which `style.css` draws): lit
+/// in the cue's fill, settling back to its own fill, or settled. Only a
+/// settling row's cells have a transition, so a change of the theme's
+/// colors reaches a settled row at once, as it does the rest of the page.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Cue {
+enum Arrival {
     Lit,
     Settling,
     Settled,
 }
 
-impl Cue {
+impl Arrival {
     fn name(self) -> &'static str {
         match self {
             Self::Lit => "lit",
@@ -559,20 +714,28 @@ impl Cue {
     }
 }
 
-/// Lights a row for the change cue, and lets it settle two frames on: the
+/// Lights a row for its arrival fade, and lets it settle two frames on: the
 /// first frame draws it lit, so at the second its cells' fill has a lit
 /// color to settle back from over the transition `style.css` gives them. In
 /// a tab the reader isn't looking at, the frames wait, and the row stays
 /// lit until the tab shows again.
-fn light(cue: RwSignal<Cue>) {
-    cue.set(Cue::Lit);
+fn light(arrival: RwSignal<Arrival>) {
+    arrival.set(Arrival::Lit);
     request_animation_frame(move || {
         request_animation_frame(move || {
-            if cue.try_get_untracked() == Some(Cue::Lit) {
-                cue.set(Cue::Settling);
+            if arrival.try_get_untracked() == Some(Arrival::Lit) {
+                arrival.set(Arrival::Settling);
             }
         });
     });
+}
+
+/// Whether focus is on `line` or inside it.
+fn holds_focus_within(line: &web_sys::HtmlTableRowElement) -> bool {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+        .is_some_and(|active| line.contains(Some(&active)))
 }
 
 /// Whether a transition's event is the change cue's: a cell's fill, the
