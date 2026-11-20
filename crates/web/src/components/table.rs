@@ -213,7 +213,9 @@ impl<K: Eq + Hash + Send + Sync + 'static> Default for ChangeMarks<K> {
 /// however the row wraps. Its press clears `marks`, says how many it
 /// cleared in the caller's `said` sentence, politely, and, as the button
 /// hides, hands focus to `then_focus`, the `id` of something that stays,
-/// such as the page's heading (2.4.3).
+/// such as the page's heading (2.4.3). When the last mark goes without its
+/// press (its rows leave, as when a refusal takes the table's place), focus
+/// on the button goes there too, before it hides, and nothing is said.
 #[component]
 pub fn MarkAllSeen<K>(
     marks: ChangeMarks<K>,
@@ -225,16 +227,32 @@ where
     K: Clone + Eq + Hash + Send + Sync + 'static,
 {
     let marks = marks.marks;
-    let hidden = Memo::new(move |_| !marks.with(Marks::any));
+    let hidden = RwSignal::new(true);
+    let holder = NodeRef::<leptos::html::Span>::new();
+    let after_press = then_focus.clone();
+    // `hidden` follows the marks here rather than in a memo, so focus leaves
+    // the button before `inert` would drop it to the page's body.
+    Effect::new(move |_| {
+        let none = !marks.with(Marks::any);
+        if none
+            && holder
+                .get_untracked()
+                .is_some_and(|holder| holds_focus_within(&holder))
+        {
+            focus_element(&then_focus);
+        }
+        hidden.set(none);
+    });
     let press = Callback::new(move |()| {
         let seen = marks.try_update(Marks::see_all).unwrap_or_default();
         reply(Politeness::Polite, &said.run(seen));
-        focus_element(&then_focus);
+        focus_element(&after_press);
     });
     // Its own flex box, centred in the row's line, as `.actions > .button`
     // stands a button that is the row's own item.
     view! {
         <span
+            node_ref=holder
             class="flex items-center"
             class:invisible=hidden
             inert=move || hidden.get().then_some("")
@@ -785,12 +803,12 @@ fn light(arrival: RwSignal<Arrival>) {
     });
 }
 
-/// Whether focus is on `line` or inside it.
-fn holds_focus_within(line: &web_sys::HtmlTableRowElement) -> bool {
+/// Whether focus is on `node` or inside it.
+fn holds_focus_within(node: &web_sys::Node) -> bool {
     web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.active_element())
-        .is_some_and(|active| line.contains(Some(&active)))
+        .is_some_and(|active| node.contains(Some(&active)))
 }
 
 /// Whether a transition's event is the change cue's: a cell's fill, the
